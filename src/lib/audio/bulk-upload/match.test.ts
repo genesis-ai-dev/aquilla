@@ -16,6 +16,7 @@ import {
   type TargetFile,
   type TargetLine,
 } from "./match"
+import { LAST_VERSES } from "./verse-counts"
 
 const MB = 1024 * 1024
 
@@ -512,6 +513,84 @@ describe("a number alone in a Bible book, decided by the count", () => {
     expect(assignments.map((a) => a.cellIds)).toEqual([["jud:1:5"], ["jud:1:6"]])
   })
 
+  // AQU-2487 (import sweep, Nov 2): "one chapter" was read from the project's
+  // lines, so a project holding only Jonah 1 treated Jonah as a book with no
+  // chapters, and "Jonah 1.wav" landed on verse 1:1.
+  it("a project holding only chapter 1 of a longer book still reads a chapter as a chapter", () => {
+    const jonah1 = book("jon", "JON", "Jonah", [17])
+    const jonScope: MatchScope = { kind: "file", fileId: "jon" }
+    const whole = run([audio("rec/Jonah 1.wav")], [jonah1], jonScope).assignments[0]
+    expect(whole).toMatchObject({ read: "Jonah 1" })
+    expect(whole.cellIds).toHaveLength(17)
+    // Chapter 2 is not in this project: it finds no line, not Jonah 1:2.
+    const second = run([audio("rec/Jonah 2.wav")], [jonah1], jonScope).assignments[0]
+    expect(second.cellIds).toBeUndefined()
+    expect(second.reason).toBeDefined()
+    // A name that says "verse" needs no chapter while only one is here.
+    const verse = run([audio("rec/Jonah verse 3.wav")], [jonah1], jonScope).assignments[0]
+    expect(verse.cellIds).toEqual(["jon:1:3"])
+    // Numbers alone: seventeen of them are the seventeen verses.
+    const files = Array.from({ length: 17 }, (_, i) => audio(`rec/${String(i + 1).padStart(2, "0")}.wav`))
+    expect(run(files, [jonah1], jonScope).assignments.map((a) => a.cellIds)).toEqual(
+      Array.from({ length: 17 }, (_, i) => [`jon:1:${i + 1}`]),
+    )
+  })
+
+  // AQU-2487 (review, Nov 9): the chapter-as-a-chapter fix is for names that
+  // say the book or the chapter. A number alone in a project holding one
+  // chapter is a verse, as it was before that fix: one file always "fits" one
+  // chapter, so the count is no evidence that it is the whole chapter.
+  it("a project holding only chapter 1 of a longer book reads a number alone as a verse", () => {
+    const jonah1 = book("jon", "JON", "Jonah", [17])
+    const jonScope: MatchScope = { kind: "file", fileId: "jon" }
+    const one = run([audio("rec/01.wav")], [jonah1], jonScope).assignments[0]
+    expect(one).toMatchObject({ read: "Jonah 1:1", cellIds: ["jon:1:1"] })
+    const seven = run([audio("rec/07.wav")], [jonah1], jonScope).assignments[0]
+    expect(seven).toMatchObject({ read: "Jonah 1:7", cellIds: ["jon:1:7"] })
+    // Two parts of verse 3.
+    const parts = run([audio("rec/03a.wav"), audio("rec/03b.wav")], [jonah1], jonScope).assignments
+    expect(parts.map((a) => a.cellIds)).toEqual([["jon:1:3"], ["jon:1:3"]])
+    // Five of them, whatever their length, never wait on "chapters or verses?".
+    const five = Array.from({ length: 5 }, (_, i) => audio(`rec/0${i + 1}.wav`))
+    const { assignments } = run(five, [jonah1], jonScope)
+    expect(needsLength(assignments)).toEqual([])
+    expect(assignments.map((a) => a.cellIds)).toEqual([1, 2, 3, 4, 5].map((v) => [`jon:1:${v}`]))
+  })
+
+  // AQU-2487 (review, Nov 9): a file with no book code (a sheet named "chapter
+  // one") whose lines all carry JON references is still Jonah, a book of four
+  // chapters: "Jonah 1.wav" is the chapter there too.
+  it("a file with no book code takes its book from its lines' references", () => {
+    const sheet: TargetFile = { ...book("sheet", "JON", "chapter one", [17]), bookCode: null }
+    const sheetScope: MatchScope = { kind: "file", fileId: "sheet" }
+    const whole = run([audio("rec/Jonah 1.wav")], [sheet], sheetScope).assignments[0]
+    expect(whole.cellIds).toHaveLength(17)
+    const second = run([audio("rec/Jonah 2.wav")], [sheet], sheetScope).assignments[0]
+    expect(second.cellIds).toBeUndefined()
+    expect(second.reason).toBeDefined()
+    // Jude's one chapter, the same way: every number is a verse.
+    const jude: TargetFile = { ...book("j", "JUD", "letter", [25]), bookCode: null }
+    const five = run([audio("rec/Jude 5.wav")], [jude], { kind: "file", fileId: "j" }).assignments[0]
+    expect(five.cellIds).toEqual(["j:1:5"])
+  })
+
+  // AQU-2487 (browser pass, Nov 12): that sheet read "chapter one 1" in the
+  // preview and "chapter one has no chapter 2 in this project.", as if
+  // "chapter one" were a book. A file that isn't a Bible book is named as a
+  // file, in quotes; a Bible book keeps its own name.
+  it("names a file with no book code as a file, in quotes, in its label and its reasons", () => {
+    const sheet: TargetFile = { ...book("sheet", "JON", "chapter one", [17]), bookCode: null }
+    const sheetScope: MatchScope = { kind: "file", fileId: "sheet" }
+    expect(run([audio("rec/Jonah 1.wav")], [sheet], sheetScope).assignments[0].read).toBe("“chapter one” 1")
+    expect(run([audio("rec/Jonah 2.wav")], [sheet], sheetScope).assignments[0].reason)
+      .toEqual({ code: "noSuchChapter", book: "“chapter one”", chapter: 2 })
+    const jonah = book("jon", "JON", "Jonah", [17])
+    const jonahScope: MatchScope = { kind: "file", fileId: "jon" }
+    expect(run([audio("rec/Jonah 1.wav")], [jonah], jonahScope).assignments[0].read).toBe("Jonah 1")
+    expect(run([audio("rec/Jonah 2.wav")], [jonah], jonahScope).assignments[0].reason)
+      .toEqual({ code: "noSuchChapter", book: "Jonah", chapter: 2 })
+  })
+
   it("when both counts fit, it can't tell", () => {
     // Three chapters of one verse each: three files fit both.
     const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])
@@ -829,6 +908,201 @@ describe("the review's cases (Oct 29)", () => {
   })
 })
 
+// AQU-2496 (review, Nov 9): Faith Comes By Hearing's Digital Bible Platform
+// names a chapter's recording "A01___03_Genesis_____ENGESVO2DA.mp3": the
+// testament's letter and the book's place in it, the chapter, the book's name
+// padded with underscores, then the fileset's id. Read word by word, the "2"
+// inside "ENGESVO2DA" was the only number after the book: every file of
+// Genesis read as chapter 2, the first landed on Genesis 2 and the other 49
+// were "duplicates".
+describe("Bible audio named the Digital Bible Platform's way", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25, 24])
+  const mat = book("mat", "MAT", "Matthew", [25, 23])
+  const chapterOf = (name: string) => {
+    const r = readName(name, new BookNameIndex())
+    return [r.book?.code ?? null, r.numbers.map((n) => n.value)]
+  }
+
+  it("reads the chapter after the underscores, never a digit of the fileset's id", () => {
+    expect(chapterOf("A01___03_Genesis_____ENGESVO2DA.mp3")).toEqual(["GEN", [3]])
+    expect(chapterOf("B01___01_Matthew_____ENGESVN1DA.mp3")).toEqual(["MAT", [1]])
+    expect(chapterOf("B01___12_Matthew_____ENGESVN2DA.mp3")).toEqual(["MAT", [12]])
+  })
+
+  it("reads a three-digit chapter, and a book whose name holds a digit, written either way", () => {
+    expect(chapterOf("A19__119_Psalms______ENGESVO2DA.mp3")).toEqual(["PSA", [119]])
+    expect(chapterOf("A09___01_1Samuel_____ENGESVO2DA.mp3")).toEqual(["1SA", [1]])
+    expect(chapterOf("A09___02_1_Samuel____ENGESVO2DA.mp3")).toEqual(["1SA", [2]])
+    expect(chapterOf("B23___05_1John_______ENGESVN2DA.mp3")).toEqual(["1JN", [5]])
+  })
+
+  it("a book's folder lands each file on its own whole chapter", () => {
+    const files = [1, 2, 3].map((c) => audio(`Genesis/A01___0${c}_Genesis_____ENGESVO2DA.mp3`))
+    const { assignments, jobs } = run(files, [gen], { kind: "file", fileId: "gen" })
+    expect(assignments.map((a) => a.read)).toEqual(["Genesis 1", "Genesis 2", "Genesis 3"])
+    expect(assignments.map((a) => a.cellIds?.length)).toEqual([31, 25, 24])
+    expect(jobs.map((j) => j.kind)).toEqual(["range", "range", "range"])
+  })
+
+  it("a whole project's Old and New Testament files find their books", () => {
+    const files = [audio("A01___02_Genesis_____ENGESVO2DA.mp3"), audio("B01___02_Matthew_____ENGESVN1DA.mp3")]
+    const { assignments } = run(files, [gen, mat], { kind: "project" })
+    expect(assignments.map((a) => a.read)).toEqual(["Genesis 2", "Matthew 2"])
+  })
+
+  it("a name that only half fits is not guessed at", () => {
+    const files = [
+      audio("A02___03_Genesis_____ENGESVO2DA.mp3"), // A02 is Exodus
+      audio("A01___02_Genesis_____ENGESVO2DA (1).mp3"), // a second download
+      audio("A01___01_Gnesis______ENGESVO2DA.mp3"), // a book no table knows
+    ]
+    for (const f of files) expect(chapterOf(f.name)).toEqual([null, []])
+    const { assignments } = run(files, [gen], { kind: "file", fileId: "gen" })
+    // Listed as unread, so the assistant is offered; never placed by folder order.
+    expect(assignments.map((a) => [a.cellIds, a.reason?.code])).toEqual([[undefined, "tooManyNumbers"], [undefined, "tooManyNumbers"], [undefined, "tooManyNumbers"]])
+  })
+
+  it("other names that start with a letter and a number read as before", () => {
+    expect(chapterOf("A01 Genesis 1-3.mp3")).toEqual(["GEN", [1, 3]])
+    expect(chapterOf("B2_Genesis_4.mp3")).toEqual(["GEN", [4]])
+  })
+})
+
+// AQU-2496 (review, Nov 9): the rule that lists "Ruthu sura 2 mstari 5" as
+// unread also refused whole-chapter names dev read right: one chapter of a
+// "Genesis 24 RVR60" folder (only Genesis 24 has a verse 60), and every take
+// or version of a chapter ("Génesis 1 toma 2", "Psalm 23 Version 2").
+describe("a whole chapter's name with a version code, a take or a version after it", () => {
+  const real = (fileId: string, code: string, name: string) => book(fileId, code, name, [...LAST_VERSES[code]])
+  const gen = real("gen", "GEN", "Genesis")
+  const inBook = (fileId: string): MatchScope => ({ kind: "file", fileId })
+
+  it("a version code run on to its number is never a verse: every chapter lands", () => {
+    const genesis = Array.from({ length: 50 }, (_, i) => audio(`Genesis/Genesis ${i + 1} RVR60.mp3`))
+    const g = run(genesis, [gen], inBook("gen")).assignments
+    expect(g.map((a) => a.read)).toEqual(genesis.map((_, i) => `Genesis ${i + 1}`))
+    expect(g[23].cellIds).toHaveLength(67)
+    const john = Array.from({ length: 21 }, (_, i) => audio(`John/John ${i + 1} RVR60.mp3`))
+    expect(run(john, [real("jhn", "JHN", "John")], inBook("jhn")).assignments[5].read).toBe("John 6")
+    const psalms = Array.from({ length: 150 }, (_, i) => audio(`Psalms/Psalms ${i + 1} NIV84.mp3`))
+    const p = run(psalms, [real("psa", "PSA", "Psalms")], inBook("psa")).assignments
+    expect(p.every((a) => a.cellIds)).toBe(true)
+    expect(p[118]).toMatchObject({ read: "Psalms 119" })
+  })
+
+  it("a word for a take or a version gives the take's number, never a verse", () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Génesis", "GEN")
+    const files = ["Génesis 1 toma 1", "Génesis 1 toma 2", "Génesis 2 toma 1", "Génesis 3 toma 1"].map((n) => audio(`Génesis/${n}.mp3`))
+    const a = run(files, [gen], inBook("gen"), index).assignments
+    // As on dev: each chapter's first take lands; a second take of a whole
+    // chapter can't share its lines.
+    expect(a.map((x) => x.read ?? x.reason?.code)).toEqual(["Genesis 1", "duplicate", "Genesis 2", "Genesis 3"])
+    expect(a[0].take).toBe(1)
+    const psalms = [audio("Psalm 23 Version 2.mp3"), audio("Psalm 24 Version 1.mp3")]
+    const p = run(psalms, [real("psa", "PSA", "Psalms")], inBook("psa")).assignments
+    expect(p.map((x) => [x.read, x.take])).toEqual([["Psalms 23", 2], ["Psalms 24", 1]])
+  })
+
+  it.each(["take", "toma", "prise", "version", "versión", "versão", "rev", "copy"])("%s, after the chapter, is followed by a take's number", (word) => {
+    const r = readName(`Ruth 2 ${word} 3.mp3`, new BookNameIndex())
+    expect(r.numbers.map((n) => [n.value, n.marker])).toEqual([[2, undefined], [3, "take"]])
+    expect(r.afterWord).toBeNull()
+  })
+
+  it("before any number such a word is an ordinary word, as it was", () => {
+    const letter = doc("d", "Letter", 20)
+    expect(run([audio("Letter version 4.mp3")], [letter], inBook("d")).assignments[0].cellIds).toEqual(["d#4"])
+  })
+
+  // The call (review, Nov 9): "Ruth 1 ESV 16" can be the whole chapter in the
+  // ESV's 2016 edition, or Ruth 1:16 in the ESV, and the two put the
+  // recording on 22 lines or on one. 16 is a verse of Ruth 1, so the name is
+  // listed with the word, the assistant offered and the line one click away,
+  // rather than one verse's recording silently sounding over the chapter.
+  // Written as one code ("ESV16"), or with a number no verse of the book
+  // has ("ESV 2016"), it is the chapter.
+  it("a code and a number a verse of the chapter could be is asked about; run together, or past every verse, it is the chapter", () => {
+    const ruth = real("rut", "RUT", "Ruth")
+    expect(run([audio("Ruth 1 ESV 16.mp3")], [ruth], inBook("rut")).assignments[0].reason).toEqual({ code: "wordBeforeNumber", word: "ESV" })
+    expect(run([audio("Ruth 1 ESV16.mp3")], [ruth], inBook("rut")).assignments[0].cellIds).toHaveLength(22)
+    expect(run([audio("Ruth 1 ESV 2016.mp3")], [ruth], inBook("rut")).assignments[0].cellIds).toHaveLength(22)
+  })
+})
+
+// AQU-2496 (review, Nov 9): two kinds of verse name still landed silently as
+// whole chapters: a folder holding only verse 1 of each chapter (every name
+// ended in the same number, which read as "tells no two files apart"), and a
+// verse past its chapter's end ("mstari 23" in Ruth 1, which has 22).
+describe("a verse's name after a word the app doesn't know never lands on the whole chapter", () => {
+  const ruth = book("rut", "RUT", "Ruth", [...LAST_VERSES.RUT])
+  const swahili = () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    return index
+  }
+  const inRuth: MatchScope = { kind: "file", fileId: "rut" }
+
+  it("a folder of each chapter's first verse is listed as unread", () => {
+    const files = [1, 2, 3, 4].map((c) => audio(`Ruthu/Ruthu sura ${c} mstari 1.mp3`))
+    const { assignments, jobs } = run(files, [ruth], inRuth, swahili())
+    expect(assignments.map((a) => a.reason)).toEqual(files.map(() => ({ code: "wordBeforeNumber", word: "mstari" })))
+    expect(jobs).toEqual([])
+  })
+
+  it("a verse past its chapter's end is no such verse, in a folder and alone", () => {
+    const files = [audio("Ruthu/Ruthu sura 1 mstari 22.mp3"), audio("Ruthu/Ruthu sura 1 mstari 23.mp3")]
+    const { assignments } = run(files, [ruth], inRuth, swahili())
+    expect(assignments.map((a) => a.reason)).toEqual([
+      { code: "wordBeforeNumber", word: "mstari" },
+      { code: "noSuchVerse", ref: "Ruth 1:23" },
+    ])
+    expect(run([audio("Ruthu sura 3 mstari 19.mp3")], [ruth], inRuth, swahili()).assignments[0].reason).toEqual({ code: "noSuchVerse", ref: "Ruth 3:19" })
+  })
+
+  it("a number no verse of the book has is still not a verse: the chapter lands", () => {
+    expect(run([audio("Ruth 3 ESV 2023.mp3")], [ruth], inRuth).assignments[0].cellIds).toHaveLength(18)
+    expect(run([audio("Ruth 3 rec 24.mp3")], [ruth], inRuth).assignments[0].cellIds).toHaveLength(18)
+  })
+})
+
+// AQU-2496 (review, Nov 9): Arabic vowel marks, Hebrew points and the Persian
+// zero-width non-joiner are often left out when typing. A project whose
+// Genesis is "التكوين" read no book in "التَّكْوِين 1-1.mp3", nor the reverse.
+describe("a book's name with or without the marks that are optional in writing", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25])
+  const mic = book("mic", "MIC", "Micah", [16, 13])
+  // Escaped, so each mark is plain to see: \u064E fatha, \u0651 shadda, \u0652
+  // sukun, \u0650 kasra; \u05BC dagesh, \u05B0 sheva, \u05B5 tsere, \u05C1 shin
+  // dot, \u05B4 hiriq, \u0596 tipeha; \u200C the zero-width non-joiner.
+  const PAIRS: [script: string, project: string, file: string, code: "GEN" | "MIC"][] = [
+    ["Arabic vowel marks", "\u0627\u0644\u062A\u0643\u0648\u064A\u0646", "\u0627\u0644\u062A\u064E\u0651\u0643\u0652\u0648\u0650\u064A\u0646", "GEN"],
+    ["Hebrew points", "\u05D1\u05E8\u05D0\u05E9\u05D9\u05EA", "\u05D1\u05BC\u05B0\u05E8\u05B5\u05D0\u05E9\u05C1\u05B4\u05D9\u05EA", "GEN"],
+    ["Hebrew cantillation", "\u05D1\u05E8\u05D0\u05E9\u05D9\u05EA", "\u05D1\u05BC\u05B0\u05E8\u05B5\u05D0\u05E9\u05C1\u05B4\u0596\u05D9\u05EA", "GEN"],
+    ["the Persian zero-width non-joiner", "\u0645\u06CC\u06A9\u0627\u0647", "\u0645\u06CC\u200C\u06A9\u0627\u0647", "MIC"],
+  ]
+  const indexWith = (name: string, code: string) => {
+    const index = new BookNameIndex()
+    index.addProjectName(name, code)
+    return index
+  }
+
+  it.each(PAIRS)("%s: either way round, in a file's name and a folder's", (_what, plain, marked, code) => {
+    for (const [project, file] of [[plain, marked], [marked, plain]]) {
+      expect(readName(`${file} 1-2.mp3`, indexWith(project, code)).book).toEqual({ code, fromProject: true })
+      const files = [audio(`${file} 2-3.mp3`), audio(`${file}/1-4.mp3`)]
+      const { assignments } = run(files, [gen, mic], { kind: "project" }, indexWith(project, code))
+      const id = code.toLowerCase()
+      expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual([`${id}:2:3`, `${id}:1:4`])
+    }
+  })
+
+  it("Hindi's vowel signs are part of the spelling and still count", () => {
+    expect(bookKey("उत्पत्ति")).not.toBe(bookKey("उतपतत"))
+    expect(bookKey(PAIRS[0][2])).toBe(bookKey(PAIRS[0][1]))
+  })
+})
+
 // AQU-2329: a team may name its files in its own script's digits. Every
 // Unicode decimal digit is read as its value, so a name written in Arabic-Indic,
 // Persian, Devanagari, Bengali, Burmese, Thai or any other script's digits
@@ -926,5 +1200,128 @@ describe("names written in another script's digits", () => {
     const other = doc("lesson4", "درس ٤", 5)
     const a = run([audio("درس 3/2.mp3")], [lesson, other], { kind: "project" }).assignments[0]
     expect(a.cellIds).toEqual(["lesson3#2"])
+  })
+})
+
+// AQU-2496 (review, Nov 9): a book's name in a script that writes vowels and
+// joined consonants as marks on a letter (Hindi, Bengali, Thai, vowelled
+// Arabic) was cut into pieces at every mark, so no name the project uses for
+// the book was ever found in a file's name.
+describe("a book named in a script that writes marks on its letters", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25])
+  const mat = book("mat", "MAT", "Matthew", [25, 23])
+  const NAMES: [script: string, name: string, code: "GEN" | "MAT"][] = [
+    ["Hindi", "उत्पत्ति", "GEN"],
+    ["Bengali", "আদিপুস্তক", "GEN"],
+    ["Thai", "มัทธิว", "MAT"],
+    ["vowelled Arabic", "تَكْوِين", "GEN"],
+    ["Persian, joined with a zero-width non-joiner", "پیدایش‌نامه", "GEN"],
+  ]
+  const indexWith = (name: string, code: string) => {
+    const index = new BookNameIndex()
+    index.addProjectName(name, code)
+    return index
+  }
+
+  it.each(NAMES)("%s: the name is read whole, as the project's book", (_script, name, code) => {
+    const r = readName(`${name} 1-2.mp3`, indexWith(name, code))
+    expect(r.book).toEqual({ code, fromProject: true })
+    expect(r.numbers.map((n) => n.value)).toEqual([1, 2])
+  })
+
+  it.each(NAMES)("%s: a whole-project upload finds the book and the verse", (_script, name, code) => {
+    const files = [audio(`${name} 1-1.mp3`), audio(`${name} 2-3.mp3`), audio(`${name}/1-4.mp3`)]
+    const { assignments } = run(files, [gen, mat], { kind: "project" }, indexWith(name, code))
+    const id = code.toLowerCase()
+    expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual([`${id}:1:1`, `${id}:2:3`, `${id}:1:4`])
+  })
+
+  it("two words of such a name are still two words", () => {
+    const r = readName("पहला शमूएल 3-4.mp3", indexWith("पहला शमूएल", "1SA"))
+    expect(r.book?.code).toBe("1SA")
+    expect(r.numbers.map((n) => n.value)).toEqual([3, 4])
+  })
+
+  it("names in Latin letters and plain Arabic read as before", () => {
+    const index = indexWith("Genèse", "GEN")
+    index.addProjectName("تكوين", "GEN")
+    expect(readName("Genèse 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("Genèse 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("تكوين 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("Genesis 1-1a.mp3", index).numbers.map((n) => [n.value, n.letter])).toEqual([[1, undefined], [1, "a"]])
+  })
+})
+
+// AQU-2496 (review, Nov 9): a word the app doesn't know between the chapter
+// and the verse ("Ruthu sura 2 mstari 5": Swahili for chapter and verse) ended
+// the reference at the chapter. A folder of Ruth's 85 verses landed as four
+// whole-chapter recordings and 81 "duplicates", and the assistant was never
+// offered, because nothing looked unread.
+describe("a word the app doesn't know between the chapter and the verse", () => {
+  const RUTH = [22, 23, 18, 22]
+  const ruth = book("rut", "RUT", "Ruth", RUTH)
+  const swahili = () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    return index
+  }
+  const everyVerse = RUTH.flatMap((count, ci) => Array.from({ length: count }, (_, v) => audio(`Ruthu sura ${ci + 1} mstari ${v + 1}.mp3`)))
+  const unread = { code: "wordBeforeNumber", word: "mstari" }
+
+  it("a folder of Ruth's 85 verses is listed as unread, none placed as a chapter or a duplicate", () => {
+    const { assignments, jobs } = run(everyVerse, [ruth], { kind: "project" }, swahili())
+    expect(assignments).toHaveLength(85)
+    expect(assignments.every((a) => !a.cellIds)).toBe(true)
+    expect(new Set(assignments.map((a) => JSON.stringify(a.reason)))).toEqual(new Set([JSON.stringify(unread)]))
+    expect(jobs).toEqual([])
+  })
+
+  it("one chapter's files uploaded into the book are unread too, not 23 takes of one verse", () => {
+    const files = Array.from({ length: 23 }, (_, v) => audio(`sura 2 mstari ${v + 1}.mp3`))
+    const read = readRecordings(files, { scope: { kind: "file", fileId: "rut" }, index: new BookNameIndex(), projectFiles: [{ fileId: "rut", name: "Ruth", bookCode: "RUT" }], maxBytes: 2048 * MB })
+    // The preview reads the lengths when the count can't tell: short, so verses.
+    const lengths = new Map(files.map((_, i) => [i, 8_000]))
+    const assignments = matchRecordings(read, new Map([["rut", ruth]]), { lengths })
+    expect(assignments.map((a) => a.reason)).toEqual(files.map(() => unread))
+  })
+
+  it("a single such file is unread, and so is one in a book of one chapter", () => {
+    expect(run([audio("Ruthu sura 2 mstari 5.mp3")], [ruth], { kind: "project" }, swahili()).assignments[0].reason).toEqual(unread)
+    const jude = book("jud", "JUD", "Jude", [25])
+    const a = run([audio("sura 1 mstari 5.mp3"), audio("sura 1 mstari 6.mp3")], [jude], { kind: "file", fileId: "jud" }).assignments
+    expect(a.map((x) => x.reason)).toEqual([unread, unread])
+  })
+
+  it("the well-named files beside them still land", () => {
+    const files = [audio("Ruth 1-1.mp3"), audio("Ruthu sura 2 mstari 5.mp3"), audio("Ruthu sura 2 mstari 6.mp3"), audio("Ruth 1-2.mp3")]
+    const { assignments } = run(files, [ruth], { kind: "project" }, swahili())
+    expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual(["rut:1:1", "wordBeforeNumber", "wordBeforeNumber", "rut:1:2"])
+  })
+
+  it("a whole chapter with a word and a number that is no verse of it is still the chapter", () => {
+    const one = run([audio("Ruth 3 ESV 2023.mp3")], [ruth], { kind: "file", fileId: "rut" }).assignments[0]
+    expect(one.cellIds).toHaveLength(18)
+    // A number every chapter's file ends with (a revision) is not a verse either.
+    const files = [audio("Ruth 1 rev 2.mp3"), audio("Ruth 2 rev 2.mp3"), audio("Ruth 3 rev 2.mp3")]
+    expect(run(files, [ruth], { kind: "file", fileId: "rut" }).assignments.map((a) => a.cellIds?.length)).toEqual([22, 23, 18])
+  })
+
+  it("a name that already gave its chapter and verse keeps them, whatever follows", () => {
+    const files = [audio("Ruth 1-5 ENGESV 2023.mp3"), audio("Ruth 1-6 final 2.mp3")]
+    expect(run(files, [ruth], { kind: "file", fileId: "rut" }).assignments.map((a) => a.cellIds)).toEqual([["rut:1:5"], ["rut:1:6"]])
+  })
+
+  it("a document's line numbers read as before", () => {
+    const letter = doc("d", "Letter", 20)
+    const files = [audio("Letter 3 final 2.mp3"), audio("Letter 4 final 5.mp3")]
+    expect(run(files, [letter], { kind: "file", fileId: "d" }).assignments.map((a) => a.cellIds)).toEqual([["d#3"], ["d#4"]])
+  })
+
+  it("readName says which word ended the reference and the numbers after it", () => {
+    const r = readName("Ruthu sura 2 mstari 5.mp3", swahili())
+    expect(r.numbers.map((n) => n.value)).toEqual([2])
+    expect(r.afterWord).toEqual({ word: "mstari", numbers: [5] })
+    expect(readName("Genesis 1-1.mp3", swahili()).afterWord).toBeNull()
+    expect(readName("Genesis 1-1 copy.mp3", swahili()).afterWord).toBeNull()
   })
 })

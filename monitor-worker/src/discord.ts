@@ -11,6 +11,7 @@
 
 import type { MonitorConfig, Target } from "./config"
 import type { AlertEvent } from "./state"
+import { stuckSessionsEmbed, type StuckSessionsAlert } from "./stuck-sessions"
 
 export interface DiscordEmbed {
   title: string
@@ -73,21 +74,21 @@ function embedFor(event: AlertEvent, target: Target | undefined): DiscordEmbed {
   return { title, color, url: target?.url, fields, timestamp: new Date(event.at).toISOString() }
 }
 
-export function buildMessage(events: AlertEvent[], config: MonitorConfig): DiscordMessage | null {
-  if (events.length === 0) return null
-  const targets = new Map(config.targets.map((t) => [t.id, t]))
-  const paging = events.some((e) => e.kind !== "recovered")
+/** Wraps embeds in the webhook envelope. Shared by every alert source so the
+ *  mention rules live in exactly one place: a paging alert puts the configured
+ *  roles/users in `content` (Discord never pings from an embed) and lists them
+ *  in `allowed_mentions`; a recovery pings no one. `parse: []` stops an
+ *  `@everyone` in any error or SQL text from pinging. */
+export function composeMessage(opts: {
+  config: Pick<MonitorConfig, "environment" | "mentionRoleIds" | "mentionUserIds">
+  summary: string
+  paging: boolean
+  embeds: DiscordEmbed[]
+}): DiscordMessage {
+  const { config, summary, paging, embeds } = opts
   const mentions = paging
     ? [...config.mentionRoleIds.map((id) => `<@&${id}>`), ...config.mentionUserIds.map((id) => `<@${id}>`)]
     : []
-
-  const down = events.filter((e) => e.kind !== "recovered").length
-  const up = events.length - down
-  const summary = [
-    down > 0 ? `${down} service${down === 1 ? "" : "s"} down` : "",
-    up > 0 ? `${up} recovered` : "",
-  ].filter(Boolean).join(", ")
-
   return {
     username: `Aquilla Monitor (${config.environment})`,
     content: [...mentions, `**${config.environment}**: ${summary}`].join(" "),
@@ -96,8 +97,46 @@ export function buildMessage(events: AlertEvent[], config: MonitorConfig): Disco
       roles: paging ? config.mentionRoleIds : [],
       users: paging ? config.mentionUserIds : [],
     },
-    embeds: events.slice(0, MAX_EMBEDS).map((e) => embedFor(e, targets.get(e.targetId))),
+    embeds: embeds.slice(0, MAX_EMBEDS),
   }
+}
+
+export function buildMessage(events: AlertEvent[], config: MonitorConfig): DiscordMessage | null {
+  if (events.length === 0) return null
+  const targets = new Map(config.targets.map((t) => [t.id, t]))
+  const paging = events.some((e) => e.kind !== "recovered")
+
+  const down = events.filter((e) => e.kind !== "recovered").length
+  const up = events.length - down
+  const summary = [
+    down > 0 ? `${down} service${down === 1 ? "" : "s"} down` : "",
+    up > 0 ? `${up} recovered` : "",
+  ].filter(Boolean).join(", ")
+
+  return composeMessage({
+    config,
+    summary,
+    paging,
+    embeds: events.map((e) => embedFor(e, targets.get(e.targetId))),
+  })
+}
+
+/** The AQU-2611 database check posts its own message: its embed carries a count
+ *  and a SQL statement rather than a target's up/down state. */
+export function buildStuckSessionsMessage(
+  alert: StuckSessionsAlert,
+  config: MonitorConfig,
+): DiscordMessage | null {
+  if (!config.stuckSessions) return null
+  const summary = alert.kind === "cleared"
+    ? "database sessions recovered"
+    : `${alert.count} database sessions stuck half-sent`
+  return composeMessage({
+    config,
+    summary,
+    paging: alert.kind !== "cleared",
+    embeds: [stuckSessionsEmbed(alert, config.stuckSessions)],
+  })
 }
 
 export async function sendDiscord(

@@ -72,6 +72,7 @@ function renderField(opts: {
   speakingRate?: number
   deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
   audioQuality?: "standard" | "highest"
+  fileId?: string | null
 } = {}) {
   const onPromptChange = opts.onPromptChange ?? vi.fn()
   const onSelectionChange = opts.onSelectionChange ?? vi.fn()
@@ -96,7 +97,7 @@ function renderField(opts: {
         language={language}
         onLanguageChange={setLanguage}
         projectId="p1"
-        fileId="f1"
+        fileId={opts.fileId === undefined ? "f1" : opts.fileId}
         session={session}
         speakingRate={opts.speakingRate}
         deliveryMode={opts.deliveryMode}
@@ -500,6 +501,49 @@ describe("InworldVoiceDesignField", () => {
     await user.click(screen.getByRole("button", { name: "Play saved voice" }))
     await waitFor(() => expect(play).toHaveBeenCalledTimes(2))
     expect(fetchVoiceReference).toHaveBeenCalledTimes(1)
+  })
+
+  // AQU-2487 (review, Nov 9): the Voices panel with no file open. The stored
+  // clip is the project's, so it plays; only reading the script aloud for a
+  // voice with no stored clip still needs a file, and says so.
+  it("plays a saved designed voice's stored clip when no file is open", async () => {
+    const play = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        play = play
+        pause = vi.fn()
+        onended: (() => void) | null = null
+        removeAttribute = vi.fn()
+        load = vi.fn()
+      },
+    )
+    vi.mocked(fetchVoiceReference).mockResolvedValue(new Uint8Array([1, 2, 3]))
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:design-preview")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    renderField({
+      existingVoiceId: "ws__design-voice-saved",
+      existingPreviewAudioId: "design-preview-1.wav",
+      fileId: null,
+    })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(fetchVoiceReference).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: "p1", fileId: "_voices", referenceAudioId: "design-preview-1.wav" }),
+      )
+    })
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText("Open a project file before designing a voice.")).toBeNull()
+  })
+
+  it("still asks for a file to read the script aloud for a saved voice with no stored clip", async () => {
+    const user = userEvent.setup()
+    renderField({ existingVoiceId: "ws__design-voice-legacy", fileId: null })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    expect(await screen.findByText("Open a project file before designing a voice.")).toBeTruthy()
+    expect(synthesizeCellTts).not.toHaveBeenCalled()
   })
 
   it("plays a legacy designed voice by synthesizing the preview script", async () => {

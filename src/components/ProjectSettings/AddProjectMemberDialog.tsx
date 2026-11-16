@@ -165,7 +165,16 @@ export function AddProjectMemberDialog({
           excludedUserIds: [...directGrantUserIds],
           suggestions:
             visibleOrgMembers.length > 0
-              ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
+              // AQU-2609: carry the roster's email into the picker row. It is
+              // the same payload the Members table already shows this viewer —
+              // GET /orgs/:id/members withholds it below rosterViewMinRole — so
+              // the picker identifies people at least as well as the list it
+              // feeds, with no extra request and no wider exposure.
+              ? eligibleOrgMembers.map((m) => ({
+                  id: m.userId,
+                  username: m.username,
+                  secondary: m.email ?? null,
+                }))
               : undefined,
           emptySuggestionsHint: t("org.membersPage.allOrgMembersAdded"),
           onAddStart: () => setAddForbidden(false),

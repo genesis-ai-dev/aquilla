@@ -1,5 +1,8 @@
 import type { ReactNode } from "react"
+import { useParams } from "react-router-dom"
 import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
+import { peekSessionJwt } from "@/lib/frontier/session-store"
+import { warmSyncToken } from "@/lib/sync/sync-token"
 
 /**
  * Route element for **every** `/project/:id/...` workspace surface.
@@ -23,5 +26,11 @@ import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
  * workspace once an admin step-up unblocks this project's sync-token mint.
  */
 export function ProjectWorkspaceRoute({ children }: { children: ReactNode }) {
+  const { id, fileId } = useParams<{ id: string; fileId?: string }>()
+  // The workspace module is lazy. The account provider has already rendered
+  // the session by the time this route renders, so the mint starts here,
+  // before that chunk's effects, and the file minter joins the same request.
+  const jwt = peekSessionJwt()
+  if (jwt && id && fileId) warmSyncToken(jwt, id, fileId)
   return <ProjectElevationBoundary>{children}</ProjectElevationBoundary>
 }

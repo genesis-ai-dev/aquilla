@@ -60,6 +60,9 @@ import { prepareSetBrief } from './commands-set-brief'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
+import { briefInertWarnings, plannedInstructionsOf } from './brief-inert-warning'
+import { deepEqualJson } from './canonical'
+import { BRIEF_SETTINGS_KEY } from '../../../db/shared/brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
@@ -1399,12 +1402,19 @@ async function prepareUpdateProjectSettings(
   for (const key of Object.keys(cmd.settings)) {
     settingsChanges[key] = previewSettingValue(cmd.settings[key])
   }
+  // AQU-2425: this blob IS the settings it leaves behind, so it answers the
+  // inert-brief question about itself — a blob that carries the instructions
+  // key strands the brief it also carries, and one that DROPS the key hands
+  // the job back to the brief and must not warn.
+  const blobWritesBrief = !deepEqualJson(cmd.settings[BRIEF_SETTINGS_KEY], current.settings[BRIEF_SETTINGS_KEY])
   const summary: ChangesetSummary = {
     command: 'UpdateProjectSettings',
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges,
-    warnings: [],
+    warnings: blobWritesBrief
+      ? briefInertWarnings(current.settings, plannedInstructionsOf(cmd.settings))
+      : [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, summary, env)
 }

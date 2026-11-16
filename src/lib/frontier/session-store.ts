@@ -396,6 +396,30 @@ export async function removeSession(key: string): Promise<void> {
   })
 }
 
+/** The active account's JWT once AccountsProvider has rendered it.
+ * A file route reads this during render so a sync-token mint can start
+ * before the lazy workspace's effects. */
+let renderedSessionJwt: string | null = null
+
+export function rememberSessionJwt(jwt: string | null): void {
+  renderedSessionJwt = jwt
+}
+
+export function peekSessionJwt(): string | null {
+  return renderedSessionJwt
+}
+
+/** Remove only the credential revoked by an email change, never a newer login. */
+export async function removeSessionByJwt(jwt: string): Promise<void> {
+  suspendAnalytics()
+  return mutateEnvelope((env) => {
+    const keys = Object.keys(env.sessions).filter(key => env.sessions[key].jwt === jwt)
+    if (!keys.length) return false
+    for (const key of keys) delete env.sessions[key]
+    if (env.active && keys.includes(env.active)) env.active = Object.keys(env.sessions)[0] ?? null
+  })
+}
+
 export async function loadActiveSession(): Promise<FrontierSession | null> {
   const env = await readEnvelope()
   if (!env.active) return null

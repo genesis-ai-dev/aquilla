@@ -20,7 +20,8 @@
 // stretch of source audio"; this row should look exactly like an mp3 import's,
 // not invent its own.
 
-import { memo } from "react"
+import { memo, useContext } from "react"
+import { TimelineScrollBusContext } from "./timeline-scroll-bus"
 import { TRACK_DASH_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -35,6 +36,7 @@ import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTimelineOriginPx } from "./timeline-origin"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
 // Silences shorter than MIN_ADDABLE_SPAN_SEC draw no chip. A real VTT carries
@@ -120,6 +122,11 @@ function SourceRegionLaneImpl({
   hideGaps = false,
 }: SourceRegionLaneProps) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
+  // The editor publishes horizontal scroll as `--tl-scroll-left` on the
+  // scrollport. Subscribing here re-rendered every cue on the wheel tick.
+  // Outside the editor (this lane's own tests) `scrollLeftPx` stands.
+  const scrollBus = useContext(TimelineScrollBusContext)
   const spanOf = (c: CellData): { start: number; end: number } => {
     const start = c.startTime ?? 0
     return { start, end: c.endTime ?? start }
@@ -196,12 +203,12 @@ function SourceRegionLaneImpl({
           // it (the old `bg-sky-50/30` was nearly nothing for the same reason).
           // No `dark:` pair anywhere: an alpha over the page is already right
           // in both themes.
-          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border ${TRACK_DASH_CLASS} transition-colors`}
+          className={`absolute ${TL_CHIP_BOX_CLASS} overflow-hidden border ${TRACK_DASH_CLASS}`}
           // The radius shrinks with the chip. A narrow silence flush against a
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.
           style={{
-            left: `${secToPx(g.startSec, pxPerSec)}px`,
+            left: `${secToPx(g.startSec, pxPerSec) - originPx}px`,
             width: `${widthPx}px`,
             borderRadius: `${chipRadiusPx(widthPx)}px`,
           }}
@@ -223,9 +230,15 @@ function SourceRegionLaneImpl({
               // Held at the visible left edge, so it stays readable on a chip
               // that runs the whole length of the film. (Not `sticky`: the
               // chip's overflow-hidden makes the chip its scroll container.)
+              // The scroll variable is inherited from the scrollport, so a
+              // wheel tick moves the label without rendering this lane.
               <span data-testid="tl-source-gap-label"
                 className="absolute inset-y-0 flex items-center whitespace-nowrap text-xs text-muted-foreground"
-                style={{ left: `${10 + Math.max(0, Math.min(scrollLeftPx - secToPx(g.startSec, pxPerSec), widthPx - 160))}px` }}>
+                style={{
+                  left: scrollBus
+                    ? `calc(10px + clamp(0px, var(--tl-scroll-left, 0px) - ${secToPx(g.startSec, pxPerSec)}px, ${Math.max(0, widthPx - 160)}px))`
+                    : `${10 + Math.max(0, Math.min(scrollLeftPx - secToPx(g.startSec, pxPerSec), widthPx - 160))}px`,
+                }}>
                 {gapLabel}
               </span>
             ) : (

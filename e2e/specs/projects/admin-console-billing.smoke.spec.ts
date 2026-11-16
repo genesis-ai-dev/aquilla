@@ -105,20 +105,27 @@ test("admin authenticator enrollment keeps email until activation and supports r
   const recoveryCodes = (await recovery.textContent())!.split("\n")
   const recoveryCode = recoveryCodes[0]
   await expect(
-    alice.getByRole("button", { name: "Enable TOTP" }),
+    alice.getByRole("button", { name: "Enable authenticator app" }),
   ).toBeDisabled()
   await alice.getByLabel("I have saved my recovery codes").check()
-  await alice.getByRole("button", { name: "Enable TOTP" }).click()
+  await alice.getByRole("button", { name: "Enable authenticator app" }).click()
   // Activation invalidates the email elevation, even on the local dev stack.
   await expect(alice.getByRole("heading", { name: "Admin verification required" })).toBeVisible()
   await expect(alice.getByRole("button", { name: "Email me a code" })).toHaveCount(0)
   await alice.getByRole("button", { name: "Use a recovery code" }).click()
   await alice.getByLabel("Recovery code", { exact: true }).fill(recoveryCode)
   await alice.getByRole("button", { name: "Verify recovery code" }).click()
-  await expect(alice.getByText("TOTP is enabled.", { exact: false })).toBeVisible()
+  await expect(alice.getByText("Authenticator app is on", { exact: true })).toBeVisible()
+  await expect(alice.getByLabel("Authenticator code", { exact: true })).toHaveCount(0)
+  await alice.getByRole("button", { name: "Turn off authenticator app", exact: true }).click()
+  await expect(alice.getByRole("alert")).toContainText("Make sure you can receive email")
+  await expect(alice.locator('[data-slot="input-otp-slot"]')).toHaveCount(6)
+  await alice.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(alice.getByText("Authenticator app is on", { exact: true })).toBeVisible()
+  await alice.getByRole("button", { name: "Turn off authenticator app", exact: true }).click()
   await alice.getByRole("button", { name: "Use a recovery code" }).click()
   await alice.getByLabel("Recovery code", { exact: true }).fill(recoveryCodes[1])
-  await alice.getByRole("button", { name: "Remove authenticator" }).click()
+  await alice.getByRole("button", { name: "Turn off and use email codes" }).click()
   await expect(
     alice.getByRole("button", { name: "Verify and set up authenticator" }),
   ).toBeVisible()

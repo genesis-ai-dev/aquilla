@@ -75,7 +75,23 @@ export interface LoadPeaksArgs {
  * never resolve, a 404 clip is gone, and a decode failure retries by itself the
  * next time the chip is on screen.
  */
+// Two columns can ask for the same clip in the same turn — each mounted time
+// column has its own lane. One decode serves both; a second decodeAudioData of
+// the same bytes is a second main-thread hitch for a waveform already coming.
+const peaksInFlight = new Map<string, Promise<Float32Array | null>>()
+
 export async function loadPeaksFor(args: LoadPeaksArgs): Promise<Float32Array | null> {
+  const flightKey = `${args.attachmentKey}:${args.bins}`
+  const pending = peaksInFlight.get(flightKey)
+  if (pending) return pending
+  const run = loadPeaksForUnshared(args).finally(() => {
+    if (peaksInFlight.get(flightKey) === run) peaksInFlight.delete(flightKey)
+  })
+  peaksInFlight.set(flightKey, run)
+  return run
+}
+
+async function loadPeaksForUnshared(args: LoadPeaksArgs): Promise<Float32Array | null> {
   const { attachmentKey, url, projectId, fileId, bins, getSyncToken } = args
   if (!attachmentKey || !Number.isFinite(bins) || bins <= 0) return null
 
@@ -189,6 +205,10 @@ export interface LoadPeaksBatchArgs {
    * CPU-heavy and must not fight whatever the user is actually doing.
    */
   concurrency?: number
+  /** Quiet time after each clip, so a long batch does not run its decodes
+   *  back to back. `decodeAudioData` itself is a main-thread task; the gap is
+   *  what lets a scroll frame in between them. */
+  pauseMs?: number
 }
 
 /** Fill peaks for a set of clips, a couple at a time. Never rejects: a clip
@@ -217,6 +237,9 @@ export async function loadPeaksBatch(args: LoadPeaksBatchArgs): Promise<void> {
       // another file's chip.
       if (isCancelled?.()) return
       if (peaks) onLoaded?.(target.attachmentKey, peaks)
+      if (args.pauseMs && args.pauseMs > 0 && !isCancelled?.()) {
+        await new Promise((resolve) => setTimeout(resolve, args.pauseMs))
+      }
     }
   }
 

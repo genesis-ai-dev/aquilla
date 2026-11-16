@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineCard } from "./TimelineCard"
+import { TimelineOrigin } from "./timeline-origin"
 import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
@@ -32,6 +33,15 @@ describe("TimelineCard", () => {
     render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />)
     const el = screen.getByTestId("tl-card-c1")
     expect(el).toHaveStyle({ left: "40px", width: "80px" }) // 1s*40, (3-1)s*40
+  })
+
+  it("positions from the mounted column's left edge", () => {
+    render(
+      <TimelineOrigin px={1000}>
+        <TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />
+      </TimelineOrigin>,
+    )
+    expect(screen.getByTestId("tl-card-c1")).toHaveStyle({ left: "-960px", width: "80px" })
   })
 
   it("selects on click", () => {
@@ -71,6 +81,42 @@ describe("TimelineCard", () => {
     fireEvent.pointerMove(window, { clientX: 140 }) // +40px = +1s
     fireEvent.pointerUp(window, { clientX: 140 })
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+  })
+
+  // AQU-2491 (review, Nov 9): a click is not a move. A press let go within
+  // the 3px click threshold used to save a retime whenever the pointer had
+  // slipped at all (75 ms at this zoom), so clicking a cue to select it could
+  // shift its timing.
+  it("does not retime on a press let go within the click threshold", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 103 })
+    fireEvent.pointerUp(window, { clientX: 103 })
+    const grips = el.querySelectorAll("span.cursor-ew-resize")
+    fireEvent.pointerDown(grips[1] as Element, { clientX: 200, pointerId: 2 })
+    fireEvent.pointerMove(window, { clientX: 198 })
+    fireEvent.pointerUp(window, { clientX: 198 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
+  // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on a
+  // phone or an iPad a tap on a cue retimed it. A finger or a pen needs to
+  // travel further before its press is a drag; a mouse keeps its 3px.
+  it("a finger's tap that wanders 8px retimes nothing; a real drag does", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    const press = (pointerType: string, dx: number) => {
+      fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, pointerType })
+      fireEvent.pointerMove(window, { clientX: 100 + dx, pointerType })
+      fireEvent.pointerUp(window, { clientX: 100 + dx, pointerType })
+    }
+    press("touch", 8)
+    expect(onRetime).not.toHaveBeenCalled()
+    press("touch", 40)
+    expect(onRetime).toHaveBeenCalledTimes(1)
   })
 
   // AQU-646 stage 2. This is a REGRESSION TEST FOR A LIVE BUG, not hardening:
@@ -456,7 +502,7 @@ describe("TimelineCard", () => {
 
       const wide = radii(200)
       expect(wide.card).toBeCloseTo(chipRadiusPx(200), 3)
-      expect(wide.card).toBe(8) // unchanged from the rounded-lg it replaced
+      expect(wide.card).toBe(6) // the app's rounded-lg (--radius)
 
       const narrow = radii(20)
       expect(narrow.card).toBeCloseTo(chipRadiusPx(20), 3)

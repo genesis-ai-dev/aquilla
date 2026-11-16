@@ -11,6 +11,7 @@
 import type { ReactNode } from "react"
 import { Info } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { TOOLTIP_POPOVER_CLASS } from "@/components/ui/tooltip-popup"
 import { cn } from "@/lib/utils"
 
 export function InfoNote({
@@ -62,8 +63,8 @@ export function InfoNote({
   )
 }
 
-/** The note's own look, shared with a disabled control's reason (AppTooltip). */
-export const NOTE_CONTENT_CLASS = "w-auto max-w-72 p-3 text-xs leading-relaxed"
+/** Same box as a tooltip, shared with a disabled control's reason (AppTooltip). */
+export const NOTE_CONTENT_CLASS = TOOLTIP_POPOVER_CLASS
 
 /**
  * A badge, a status mark or a short label that explains itself on click (AQU-2260,

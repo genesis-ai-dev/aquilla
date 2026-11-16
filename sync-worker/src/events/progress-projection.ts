@@ -603,27 +603,6 @@ export function fileProgressRecomputeStmt(
   )
 }
 
-/** Delete all section rows before a full rebuild in the same transaction. */
-export function clearSectionProgressStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-): AquillaStatement {
-  return db
-    .prepare(`DELETE FROM file_section_progress WHERE project_id = ? AND file_id = ? AND scope IN ('section', 'book')`)
-    .bind(projectId, fileId)
-}
-
-/** Rebuild every meaningful canonical section for a file. */
-export function allSectionsProgressRecomputeStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-  updatedAt: number,
-): AquillaStatement {
-  return sectionsProgressRecomputeStmt(db, projectId, fileId, updatedAt)
-}
-
 /**
  * Recompute only the sections containing the supplied cells. Passing no ids
  * rebuilds every section. The source row owns canonical_ref, matching the

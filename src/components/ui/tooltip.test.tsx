@@ -224,7 +224,7 @@ describe("AppTooltip", () => {
         expect(note).not.toBeNull()
         return note!
       })
-      fireEvent.click(screen.getByRole("button", { name: "Play cell", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Play cell" }))
       const note = await waitFor(() => {
         const popup = [...document.querySelectorAll('[data-slot="popover-content"]')].find((el) =>
           el.textContent?.includes("Nothing recorded"),
@@ -232,7 +232,7 @@ describe("AppTooltip", () => {
         expect(popup).toBeTruthy()
         return popup!
       })
-      const play = screen.getByRole("button", { name: "Play", exact: true })
+      const play = screen.getByRole("button", { name: "Play" })
       fireEvent.pointerEnter(play, { pointerType: "mouse" })
       fireEvent.mouseEnter(play)
       const enabled = await screen.findByRole("tooltip")

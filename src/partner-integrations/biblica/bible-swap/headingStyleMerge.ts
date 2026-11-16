@@ -45,7 +45,7 @@ export function mergeBibleHeadingStylesIntoStudyStylesXml(
             continue;
         }
 
-        let block = bible.block;
+        let block = withHeadingBalanceOff(bible.block);
         const basedOn = bible.basedOn;
         if (basedOn && studyStyles.has(basedOn) && !isHeadingRoleTitleStyle(basedOn)) {
             const bibleFont = resolveAppliedFont(self, bibleStyles);
@@ -57,11 +57,180 @@ export function mergeBibleHeadingStylesIntoStudyStylesXml(
         toInsert.push(block);
     }
 
-    if (toInsert.length === 0) {
-        return studyStylesXml;
+    const inserted =
+        toInsert.length === 0
+            ? studyStylesXml
+            : insertParagraphStyles(studyStylesXml, toInsert);
+    return turnOffVeeShapedHeadings(inserted);
+}
+
+/** Vee balancing splits a long section heading onto a short second line. */
+function withHeadingBalanceOff(block: string): string {
+    if (/BalanceRaggedLines="/.test(block)) {
+        return block.replace(/BalanceRaggedLines="[^"]*"/, 'BalanceRaggedLines="Off"');
+    }
+    return block.replace(
+        /(<ParagraphStyle\b[^>]*?)(\/?>)/,
+        '$1 BalanceRaggedLines="Off"$2'
+    );
+}
+
+function turnOffVeeShapedHeadings(stylesXml: string): string {
+    const styles = extractNamedBlocks(stylesXml, "ParagraphStyle");
+    let out = stylesXml;
+    for (const [self, style] of styles) {
+        if (!isHeadingRoleTitleStyle(self)) continue;
+        if (!style.block.includes('BalanceRaggedLines="VeeShape"')) continue;
+        out = out.replace(
+            style.block,
+            style.block.replace('BalanceRaggedLines="VeeShape"', 'BalanceRaggedLines="Off"')
+        );
+    }
+    return out;
+}
+
+const PORTUGUESE_BRAZILIAN = "$ID/Portuguese: Brazilian";
+const ENGLISH_LANGUAGES = new Set(["$ID/English: UK", "$ID/English: USA"]);
+
+/**
+ * Notes and boxes are hyphenated by InDesign. The study sheet still names
+ * English, so a Portuguese swap breaks those words with English rules.
+ * Bible text already carries its own discretionary hyphens and is left alone.
+ */
+function ownStyleField(block: string, name: string): string {
+    return (
+        block.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] ??
+        block.match(new RegExp(`<${name}\\b[^>]*>([^<]*)</${name}>`))?.[1] ??
+        ""
+    );
+}
+
+function styleByRef(
+    styles: Map<string, StyleRecord>,
+    ref: string
+): [string, StyleRecord] | null {
+    if (!ref) return null;
+    if (styles.has(ref)) return [ref, styles.get(ref)!];
+    const prefixed = ref.startsWith("ParagraphStyle/")
+        ? ref
+        : `ParagraphStyle/${ref}`;
+    if (styles.has(prefixed)) return [prefixed, styles.get(prefixed)!];
+    return null;
+}
+
+/**
+ * Notes inherit `$ID/English: UK` from `#base.text` and hyphenation from a
+ * parent that never restates it. Stamp the style that actually owns the
+ * English language when it, or anything that inherits it, hyphenates.
+ */
+export function stampPortugueseHyphenationLanguage(stylesXml: string): string {
+    const styles = extractNamedBlocks(stylesXml, "ParagraphStyle");
+    const resolved = (start: string, name: string): string => {
+        const seen = new Set<string>();
+        let ref: string | undefined = start;
+        while (ref && !seen.has(ref)) {
+            seen.add(ref);
+            const found = styleByRef(styles, ref);
+            if (!found) return "";
+            const value = ownStyleField(found[1].block, name);
+            if (value) return value;
+            ref = found[1].basedOn;
+        }
+        return "";
+    };
+    const languageOwner = (start: string): string | null => {
+        const seen = new Set<string>();
+        let ref: string | undefined = start;
+        while (ref && !seen.has(ref)) {
+            seen.add(ref);
+            const found = styleByRef(styles, ref);
+            if (!found) return null;
+            if (ownStyleField(found[1].block, "AppliedLanguage")) return found[0];
+            ref = found[1].basedOn;
+        }
+        return null;
+    };
+
+    const owners = new Set<string>();
+    for (const [self] of styles) {
+        const language = resolved(self, "AppliedLanguage");
+        if (!ENGLISH_LANGUAGES.has(language)) continue;
+        if (resolved(self, "Hyphenation") !== "true") continue;
+        const owner = languageOwner(self);
+        if (owner) owners.add(owner);
     }
 
-    return insertParagraphStyles(studyStylesXml, toInsert);
+    let out = stylesXml;
+    for (const self of owners) {
+        const style = styles.get(self);
+        if (!style) continue;
+        if (!ENGLISH_LANGUAGES.has(ownStyleField(style.block, "AppliedLanguage"))) {
+            continue;
+        }
+        out = out.replace(
+            style.block,
+            style.block.replace(
+                /AppliedLanguage="[^"]*"/,
+                `AppliedLanguage="${PORTUGUESE_BRAZILIAN}"`
+            )
+        );
+    }
+    return out;
+}
+
+function appliedFontOf(block: string): string | undefined {
+    return (
+        block.match(/<AppliedFont\b[^>]*>([^<]+)<\/AppliedFont>/)?.[1] ??
+        block.match(/\bAppliedFont="([^"]+)"/)?.[1]
+    );
+}
+
+function setAppliedFont(block: string, font: string): string {
+    if (/<AppliedFont\b/.test(block)) {
+        return block.replace(
+            /(<AppliedFont\b[^>]*>)[^<]*(<\/AppliedFont>)/,
+            `$1${font}$2`
+        );
+    }
+    if (/\bAppliedFont="/.test(block)) {
+        return block.replace(/\bAppliedFont="[^"]*"/, `AppliedFont="${font}"`);
+    }
+    return block.replace("<CharacterStyle", `<CharacterStyle AppliedFont="${font}"`);
+}
+
+function decodedStyleSelf(self: string): string {
+    try {
+        return decodeURIComponent(self);
+    } catch {
+        return self;
+    }
+}
+
+/**
+ * The footnote space inherits Charis SIL and the chapter-opening call inherits
+ * Source Sans 3. Point both at the font the rest of that note already uses.
+ */
+export function retargetFootnoteCharacterFonts(stylesXml: string): string {
+    const styles = extractNamedBlocks(stylesXml, "CharacterStyle");
+    const byName = new Map<string, StyleRecord>();
+    for (const [self, style] of styles) {
+        byName.set(decodedStyleSelf(self), style);
+    }
+    const pairs: Array<[string, string]> = [
+        ["CharacterStyle/notes:fr_sp", "CharacterStyle/notes:f"],
+        ["CharacterStyle/notes:f_call_dc", "CharacterStyle/notes:f_call"],
+    ];
+    let out = stylesXml;
+    for (const [targetName, sourceName] of pairs) {
+        const target = byName.get(targetName);
+        const source = byName.get(sourceName);
+        const font = source ? appliedFontOf(source.block) : undefined;
+        if (!target || !font) continue;
+        const patched = setAppliedFont(target.block, font);
+        if (patched === target.block) continue;
+        out = out.replace(target.block, patched);
+    }
+    return out;
 }
 
 

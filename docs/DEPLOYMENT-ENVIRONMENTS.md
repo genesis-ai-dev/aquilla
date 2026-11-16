@@ -639,6 +639,14 @@ leave it out. `note` is free text for why the person has access. An email can
 be added before the person signs up; `GET /api/v2/admin/admins` shows it with
 `hasAccount: false` until they do.
 
+Password sign-up refuses an address that is already in the table (the same
+`409` a taken address gets), because that form does not prove who holds the
+mailbox and the first person to register the address would become the admin.
+So a person added before they have an account signs up with **Google**, which
+does prove it. Where Google sign-in is not configured, have them register
+first and insert the row afterwards. Treat a `hasAccount: false` row as a
+loose end to close, not a place to leave things.
+
 Order for a first rollout: apply the migration (`neon:apply:dev` /
 `neon:apply:prod`), insert the admins, then deploy the auth Worker that no
 longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console

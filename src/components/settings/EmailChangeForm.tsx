@@ -13,6 +13,9 @@ import { AUTH_BASE } from "@/lib/frontier/auth"
 import { clearGoogleAttempt } from "@/lib/frontier/google-login"
 
 const messages: Record<string, MessageKey> = {
+  network_error: "auth.emailChange.networkError",
+  service_unavailable: "auth.emailChange.serviceUnavailable",
+  session_required: "auth.emailChange.sessionRequired",
   password_required: "auth.emailChange.password_required",
   incorrect_password: "auth.emailChange.incorrect_password",
   admin_verification_required: "auth.emailChange.admin_verification_required",
@@ -76,24 +79,26 @@ export function EmailChangeForm({
                 },
           ),
         },
-      )
-      const body = await response.json()
+      ).catch(() => { throw new Error("network_error") })
+      const body = await response.json().catch(() => null)
       if (!response.ok)
         throw new Error(
-          typeof body.error === "string" ? body.error : "unavailable",
+          typeof body?.error === "string" && Object.hasOwn(messages, body.error)
+            ? body.error
+            : response.status === 401 ? "session_required"
+            : response.status === 404 || response.status === 405 ? "service_unavailable"
+            : response.status === 429 ? "rate_limited"
+            : "unavailable",
         )
+      if (sent ? body?.changed !== true : body?.sent !== true) throw new Error("unavailable")
       if (sent) {
         clearGoogleAttempt()
         await removeSessionByJwt(jwt)
         navigate("/login?add=1", { replace: true, state: { emailChanged: email } })
       } else setSent(true)
     } catch (reason) {
-      setError(
-        t(
-          messages[reason instanceof Error ? reason.message : ""] ??
-            "auth.emailChange.failed",
-        ),
-      )
+      const code = reason instanceof Error ? reason.message : ""
+      setError(t(Object.hasOwn(messages, code) ? messages[code] : "auth.emailChange.failed"))
     } finally {
       setBusy(false)
       setPassword("")

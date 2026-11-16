@@ -33,7 +33,9 @@ function healthyApiFetch(host: string) {
     if (url === `https://${host}/identity/api/v2/health`) {
       return response(JSON.stringify({ ok: true, name: "aquilla-identity" }), 200, "application/json")
     }
-    if (url === `https://${host}/chat/api/v1/chat/completions`) {
+    if (url === `https://${host}/chat/api/v1/chat/completions`
+      || url === `https://${host}/identity/api/v2/auth/email-change/request`
+      || url === `https://${host}/identity/api/v2/auth/email-change/confirm`) {
       return response(JSON.stringify({ error: "Authorization header required" }), 401, "application/json")
     }
     if (url === `https://${host}/sync/events`) {
@@ -44,6 +46,21 @@ function healthyApiFetch(host: string) {
 }
 
 describe("live deployment environment verification", () => {
+  it.each(["request", "confirm"])("rejects deployment with missing email-change %s route despite healthy health checks", async action => {
+    const healthy = healthyApiFetch("api.aquilla.app")
+    await expect(verifyLiveEnvironment("production", {
+      surface: "auth", lookup, attempts: 1, log: vi.fn(),
+      fetchImpl: async (input, init) => {
+        if (String(input).endsWith(`/auth/email-change/${action}`)) {
+          expect(init?.method).toBe("POST")
+          expect(init?.body).toBe("{}")
+          expect(new Headers(init?.headers).has("Authorization")).toBe(false)
+          return Response.json({ error: "Not found" }, { status: 404 })
+        }
+        return healthy(input)
+      },
+    })).rejects.toThrow(`email-change ${action} auth guard returned HTTP 404`)
+  })
   it("verifies the production identity, chat, and sync route contracts", async () => {
     const fetchImpl = healthyApiFetch("api.aquilla.app")
 

@@ -71,12 +71,17 @@ users.get("/lookup", async (c) => {
     allowEmail = true
   }
   if (!allowEmail && looksLikeEmail(trimmed)) {
-    // Fail closed rather than silently falling through to a username lookup
-    // that can never match: the caller asked a question this route will not
-    // answer unscoped, and saying so is what sends them to the scoped call.
+    // Fail closed rather than falling through to a username lookup that can
+    // never match. The status stays 404 — unscoped, this route genuinely has
+    // no answer, and every existing caller already reads 404 as "no such
+    // user" — while the code says why, so an API consumer learns about the
+    // scoped call instead of guessing the address was simply unknown.
     return c.json(
-      { error: "email lookup requires a projectId you can add members to" },
-      400,
+      {
+        error: "user not found",
+        code: "email_lookup_requires_project",
+      },
+      404,
     )
   }
   const limit = await enforceRateLimit(c.env.AQUILLA_PG, {

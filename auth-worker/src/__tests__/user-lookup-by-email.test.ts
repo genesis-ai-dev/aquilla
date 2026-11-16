@@ -98,9 +98,15 @@ describe("GET /api/v2/users/lookup — email resolution (AQU-2576)", () => {
     expect(await real.json()).toEqual(await fake.json())
   })
 
-  it("leaves the unscoped route username-only: an email there is a 400, never a hit", async () => {
+  it("leaves the unscoped route username-only: an email there never resolves", async () => {
     const res = await lookup("bystander-2576", "naladda-2576@example.com")
-    expect(res.status).toBe(400)
+    // 404, not 400: unscoped this route has no answer, and every caller
+    // predating AQU-2576 already reads 404 as "no such user". The code is the
+    // only new thing, and it is additive.
+    expect(res.status).toBe(404)
+    expect((await res.json()) as { code?: string }).toMatchObject({
+      code: "email_lookup_requires_project",
+    })
   })
 
   it("leaves the unscoped username lookup working exactly as before", async () => {

@@ -315,8 +315,13 @@ export function MemberMultiAddRow({
           {disabledReason}
         </p>
       )}
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
-        <div className="min-w-0">
+      {/* A wrapping row, not a fixed grid: the button's label carries the scope
+          ("Add — <lane> language lane only") and can outgrow the row. The
+          username field keeps a usable width and the button drops to its own
+          line, where the lopsided grow factors let it fill that line while
+          staying label-sized when it does share the row. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
+        <div className="min-w-0 sm:flex-[999_1_10rem]">
           <UsernameTypeahead
             value={recipient}
             onChange={setRecipient}
@@ -344,7 +349,7 @@ export function MemberMultiAddRow({
         />
         <Button
           size={buttonSize}
-          className="sm:whitespace-nowrap"
+          className="h-auto min-h-8 max-w-full py-1 whitespace-normal sm:flex-[1_1_auto]"
           onClick={() => void handleAdd()}
           disabled={adding || searchDisabled || !canAdd || !lanesChosen}
         >

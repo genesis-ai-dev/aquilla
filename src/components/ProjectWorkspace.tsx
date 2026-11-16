@@ -376,6 +376,8 @@ import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeA
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { convertDraftOrthography, withOrthographyProvenance } from "@/lib/completion/orthography-draft"
+import { laneOrthography } from "@/lib/lqa/lane-builtin-checks"
 import { TimelineEditor, type TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
 import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
@@ -1096,6 +1098,14 @@ export function ProjectWorkspace() {
     if (projectFiles === hydratedProject.files) return hydratedProject
     return { ...hydratedProject, files: projectFiles }
   }, [hydratedProject, projectFiles])
+
+  // AQU-2628 call site B: the lane's spelling rules, applied to every AI draft
+  // on its way to a cell. Null for a project with no `orthography` block,
+  // which makes every conversion below a no-op.
+  const draftOrthography = useMemo(
+    () => laneOrthography({ languageProfile: project?.languageProfile }),
+    [project?.languageProfile],
+  )
 
   useEffect(() => {
     if (project?.orgId == null) return
@@ -7011,7 +7021,7 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
-  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, rawProvenance: AiDraftProvenance) => {
     if (!project?.id) return
     // FRO-365: defense-in-depth — the selection-island Translate button and
     // the header "Run AI completions"/"Complete all" actions are already
@@ -7063,7 +7073,16 @@ export function ProjectWorkspace() {
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
     // created; ordinary formats pass through unchanged.
-    const completed = normalizeProtectedCompletion(commitCell, text)
+    const normalizedDraft = normalizeProtectedCompletion(commitCell, text)
+    // AQU-2628: the model cannot be asked to spell; the draft is converted
+    // here, before the optimistic patch and before the ai_drafted commit, so
+    // the cell never holds old-spelling text for even a frame and the
+    // old-orthography check never fires on a draft.
+    const { draft: completed, stats: orthographyStats } = convertDraftOrthography(
+      normalizedDraft,
+      draftOrthography,
+    )
+    const provenance = withOrthographyProvenance(rawProvenance, orthographyStats)
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -7261,9 +7280,20 @@ export function ProjectWorkspace() {
           continue
         }
         const liveCell = live ?? draft.cell
-        const completed = normalizeProtectedCompletion(liveCell, draft.text)
+        // AQU-2628: same conversion as the single-cell path — a batch draft
+        // reaches a cell by a different route, not by different rules.
+        const { draft: completed, stats: orthographyStats } = convertDraftOrthography(
+          normalizeProtectedCompletion(liveCell, draft.text),
+          draftOrthography,
+        )
         const parentId = resolveTargetCommitParentId(liveCell)
-        prepared.push({ index, draft, liveCell, completed, parentId })
+        prepared.push({
+          index,
+          draft: { ...draft, provenance: withOrthographyProvenance(draft.provenance, orthographyStats) },
+          liveCell,
+          completed,
+          parentId,
+        })
         results[index] = { status: "fulfilled", value: undefined }
       } catch (error) {
         results[index] = { status: "rejected", reason: error }

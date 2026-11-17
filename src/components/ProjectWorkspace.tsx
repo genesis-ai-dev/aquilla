@@ -903,6 +903,7 @@ export function ProjectWorkspace() {
     projectSettings,
     roleLevel: serverRoleLevel,
     settingsFetched,
+    provisional: projectProvisional,
   } = useProject(projectId!)
   // AQU-1083: the effective policy for this project — its own answer, else its
   // org's, else count them. Both legs come from the settings hook, which is
@@ -1312,6 +1313,10 @@ export function ProjectWorkspace() {
   )
   useEffect(() => {
     if (!project || !projectId) return
+    // A record painted from the project directory lists the files the project
+    // had when the session began. Choosing a file from it, or leaving one it
+    // does not list, waits for this project's own read.
+    if (projectProvisional) return
 
     // The in-project overlay surfaces (/comments, /terminology, /agent,
     // /memory[/:section]) deliberately carry no file in the URL — don't treat
@@ -1426,6 +1431,7 @@ export function ProjectWorkspace() {
     fileIds,
     workspaceTabs.tabs,
     redirectTo,
+    projectProvisional,
     // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
     // `location.pathname` already arrives through `redirectTo`.
     location.search,
@@ -17901,7 +17907,9 @@ export function ProjectWorkspace() {
   // account switcher, breadcrumb) around a main-area skeleton. None of the
   // chrome depends on the record, so blanking it behind a whole-page template
   // only made a slow round-trip look like a page load.
-  if (status === "loading") {
+  // A directory record with no files is not evidence of an empty project (the
+  // directory may predate its first import), so it does not get the empty state.
+  if (status === "loading" || (projectProvisional && (loadedProject?.files.length ?? 0) === 0)) {
     return (
       <AppShell
         dockOpenRequest={extensionPanelRequestSeq}

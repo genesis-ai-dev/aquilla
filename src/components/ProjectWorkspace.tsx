@@ -605,6 +605,7 @@ import {
   backtranslationsReadQuery,
   recordFromHydrationRow,
   selectBtFewShotExamples,
+  sameTargetText,
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
@@ -638,6 +639,7 @@ import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
+import { createLiveBtQueue, needsLiveBacktranslation } from "@/lib/completion/live-bt"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -2352,6 +2354,10 @@ export function ProjectWorkspace() {
   // immediately before emitting the commit event, so this ref is always
   // up-to-date by the time onCellCommitted fires.
   const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
+  // Live back-translation: every save this browser confirms is reported here
+  // (see `confirmCommitted`). The queue that acts on it is built further down,
+  // next to runBacktranslation, and replaces this no-op while live mode is on.
+  const liveBtNotifyRef = useRef<(cellId: string, committedEventId?: string) => void>(() => {})
   const pendingTargetCommitHeadsRef = useRef<Map<string, { eventId: string; parentId: string | null }>>(new Map())
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
@@ -2438,6 +2444,7 @@ export function ProjectWorkspace() {
     const { refetchCell, refetchStats } = flushAppliedTracker.confirm(cellId, eventId)
     if (refetchStats) revalidateCellStats(cellId)
     if (refetchCell) revalidateCell(cellId)
+    liveBtNotifyRef.current(cellId, eventId)
   }, [flushAppliedTracker, revalidateCellStats, revalidateCell])
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
@@ -7520,6 +7527,15 @@ export function ProjectWorkspace() {
     // successive audit maps back through CellStore.setRuntime.
     revalidateCells()
     revalidateAuditStats()
+    // Live back-translation: this path confirms the whole batch with one file
+    // read instead of `confirmCommitted` per cell, so report each saved draft
+    // here. A draft that was retried onto a newer head has a new event id this
+    // scope does not hold; it is reported without one and pins to the
+    // projected head once the reading lands.
+    prepared.forEach((item, preparedIndex) => {
+      if (results[item.index]?.status !== "fulfilled") return
+      liveBtNotifyRef.current(item.draft.cell.id, staleIndexes.has(preparedIndex) ? undefined : eventIds[preparedIndex])
+    })
     return results
   }, [
     activeLane,
@@ -8022,10 +8038,13 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
+    committedEventId?: string,
   ) => {
-    // The BT pins to the commit it describes. Generation is manual-only, so
-    // there is never an in-flight commit here — the projected head is current.
-    const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
+    // The BT pins to the commit it describes. A manual Read back has no
+    // in-flight commit, so the projected head is current; a live reading runs
+    // right after a save and knows that save's event id, which the projection
+    // may not have caught up with yet (see resolveBtTargetEventId).
+    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
     const record: BacktranslationRecord = {
       cellId: cell.id,
       btText,
@@ -8115,7 +8134,11 @@ export function ProjectWorkspace() {
    * glosser is a separate read-only reference surfaced on demand via
    * `getStatisticalBt` (never persisted).
    */
-  const runBacktranslation = useCallback(async (cell: CellData, actionSource?: BacktranslationActionSource) => {
+  const runBacktranslation = useCallback(async (
+    cell: CellData,
+    actionSource?: BacktranslationActionSource,
+    committedEventId?: string,
+  ) => {
     if (!actionSource) {
       const message = "[bt] generateBacktranslation requires an explicit user action source"
       if (import.meta.env.DEV || import.meta.env.MODE === "test") throw new Error(message)
@@ -8159,14 +8182,56 @@ export function ProjectWorkspace() {
         sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
-      persistBt(cell, btText, true)
+      if (actionSource === "live") {
+        // The translation may have changed while the model was reading it;
+        // a reading of older text is dropped (that save queued its own).
+        const live = getActiveCell(cellId)
+        if (!live || !sameTargetText(live.translated ?? "", cell.translated)) return
+      }
+      persistBt(cell, btText, true, committedEventId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
+  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser, getActiveCell])
+
+  // Live back-translation (off unless the project turns it on): each save
+  // this browser confirms queues a reading of that cell. The queue reads
+  // through refs so it is built once per file and always sees the newest
+  // cache and settings.
+  const liveBacktranslationOn = Boolean(project?.completionSettings?.liveBacktranslation) && isBacktranslationConfigured
+  const runBacktranslationRef = useRef(runBacktranslation)
+  runBacktranslationRef.current = runBacktranslation
+  const backtranslationCacheRef = useRef(backtranslationCache)
+  backtranslationCacheRef.current = backtranslationCache
+  const getActiveCellRef = useRef(getActiveCell)
+  getActiveCellRef.current = getActiveCell
+  useEffect(() => {
+    if (!liveBacktranslationOn) {
+      liveBtNotifyRef.current = () => {}
+      return
+    }
+    const queue = createLiveBtQueue({
+      run: async (cellId, committedEventId) => {
+        const cell = getActiveCellRef.current(cellId)
+        if (!cell) return
+        const needed = needsLiveBacktranslation({
+          translated: cell.translated ?? "",
+          targetEventId: committedEventId || cell.targetEventId,
+          record: backtranslationCacheRef.current.get(cellId),
+        })
+        if (!needed) return
+        await runBacktranslationRef.current(cell, "live", committedEventId)
+      },
+    })
+    liveBtNotifyRef.current = (cellId, committedEventId) => queue.notify(cellId, committedEventId)
+    return () => {
+      liveBtNotifyRef.current = () => {}
+      queue.cancelAll()
+    }
+  }, [liveBacktranslationOn, activeFileId, activeLane])
 
   // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
   // hydrated from the server carries no `forText`, so the only way to tell

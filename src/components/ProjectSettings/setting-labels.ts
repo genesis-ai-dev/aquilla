@@ -61,6 +61,8 @@ export const DRAFTING_FIELD_LABELS = {
   fewShotExampleFormat: "projectSettings.ai.referenceExampleFormatLabel",
   completionBatchSize: "projectSettings.ai.completionBatchSizeLabel",
   validationBatchSize: "projectSettings.ai.validationBatchSizeLabel",
+  liveBacktranslation: "projectSettings.ai.liveBacktranslationLabel",
+  backtranslationModel: "projectSettings.ai.backtranslationModelLabel",
 } as const satisfies Record<string, MessageKey>
 export type DraftingField = keyof typeof DRAFTING_FIELD_LABELS
 

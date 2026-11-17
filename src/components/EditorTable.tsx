@@ -105,6 +105,7 @@ import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
+import { InlineBacktranslation } from "./cell/InlineBacktranslation"
 import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
@@ -9751,6 +9752,18 @@ function EditorRow({
               )}
             </EditorTargetCellWell>
             </div>
+            {/* The back-translation, one quiet line under the translation —
+                live readings land here moments after a save. */}
+            <InlineBacktranslation
+              reading={cell.backtranslation}
+              stale={isBtStale}
+              generating={Boolean(isBacktranslating)}
+              error={backtranslationError}
+              onOpen={() => {
+                setExpansionTab("backtranslation")
+                setExpanded(true)
+              }}
+            />
             {hasInlineFootnotes && (
               <FootnoteInline
                 sourceFootnotes={sourceFootnotes}

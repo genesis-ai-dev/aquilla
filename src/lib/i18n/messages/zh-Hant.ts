@@ -5961,6 +5961,7 @@ export const zh_Hant: Catalog = {
   "workspace.typeahead.addUser": "新增 {username}",
   "workspace.typeahead.alreadyMember": "{username} 已經是成員了。",
   "workspace.typeahead.noUserNamed": "找不到名為「{query}」的 Aquilla 使用者。",
+  "workspace.typeahead.noAccountWithEmail": "沒有 Aquilla 帳戶驗證過電子郵件 {query}。請用對方的 Aquilla 使用者名稱新增，或傳送邀請連結給對方，或請對方在帳戶設定中驗證該地址。",
   "workspace.typeahead.inviteByEmailInstead": "改以電子郵件邀請",
   "workspace.typeahead.noScopedMatch": "在與您共用組織或專案的人當中找不到相符的項目。",
   "workspace.typeahead.addByExactUsername": "以完全相符的使用者名稱新增「{query}」",

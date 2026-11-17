@@ -185,7 +185,10 @@ export const workspace = defineNamespace({
     "workspace.typeahead.addUser": "Add {username}",
     "workspace.typeahead.alreadyMember": "{username} is already a member.",
     "workspace.typeahead.noUserNamed": "No Aquilla user named \"{query}\".",
-    "workspace.typeahead.noAccountWithEmail": "No Aquilla account uses the email {query}.",
+    "workspace.typeahead.noAccountWithEmail":
+      "No Aquilla account has verified the email {query}. Add the person by their " +
+      "Aquilla username, send them an invite link, or ask them to verify this " +
+      "address in their account settings.",
     "workspace.typeahead.emailAlsoWorksHint":
       "Don't know their username? Enter their email address instead.",
     "workspace.typeahead.inviteByEmailInstead": "Invite by email instead",
@@ -1074,9 +1077,15 @@ export const workspace = defineNamespace({
       "workspace.typeahead.noAccountWithEmail": {
         description:
           "Shown when the typed text is an email address and the scoped " +
-          "lookup confirms no Aquilla account uses it — the email counterpart " +
-          "of workspace.typeahead.noUserNamed. {query} is the typed address, " +
-          "not quoted by the template.",
+          "lookup returns no match — the email counterpart of " +
+          "workspace.typeahead.noUserNamed. AQU-2638: the lookup only matches " +
+          "VERIFIED addresses, and it answers the same whether an account uses " +
+          "the address without having verified it or no account uses it at all, " +
+          "so this one sentence has to be true in both cases — say that no " +
+          "account has VERIFIED the address, never that none uses it. It names " +
+          "the three ways forward: add by username, send an invite link, or ask " +
+          "the person to verify the address in their account settings. {query} " +
+          "is the typed address, not quoted by the template.",
         placeholders: { query: "The typed email address." },
         screenshot: "assign-modal",
       },

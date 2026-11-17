@@ -5950,6 +5950,7 @@ export const ar: Catalog = {
   "workspace.typeahead.addUser": "إضافة {username}",
   "workspace.typeahead.alreadyMember": "{username} عضو بالفعل.",
   "workspace.typeahead.noUserNamed": "لا يوجد مستخدم Aquilla باسم \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "لم يتحقّق أي حساب Aquilla من البريد الإلكتروني {query}. أضِف الشخص باسم مستخدم Aquilla، أو أرسِل له رابط الدعوة، أو اطلب منه تأكيد هذا العنوان في إعدادات حسابه.",
   "workspace.typeahead.inviteByEmailInstead": "دعوة عبر البريد الإلكتروني بدلاً من ذلك",
   "workspace.typeahead.noScopedMatch": "لا يوجد تطابق بين الأشخاص الذين يتشاركون معك منظمة أو مشروعاً.",
   "workspace.typeahead.addByExactUsername": "إضافة \"{query}\" باسم المستخدم الدقيق",

@@ -88,6 +88,31 @@ export function journalBatch(records: readonly OutboxRecord[]): string | null {
   }
 }
 
+/**
+ * Splits `records`, in order, into consecutive runs `journalBatch` will take
+ * whole. A single record too big for any run stands alone (and goes
+ * unjournaled as a batch). Splitting gives up the batch's all-or-nothing:
+ * only use it where the writes would otherwise go out one by one.
+ */
+export function splitForJournal(records: readonly OutboxRecord[]): OutboxRecord[][] {
+  const runs: OutboxRecord[][] = []
+  let run: OutboxRecord[] = []
+  // JSON array brackets, plus a comma per record.
+  let chars = 2
+  for (const record of records) {
+    const size = estimateChars(record, BATCH_JOURNAL_MAX_CHARS) + 1
+    if (run.length > 0 && (run.length >= BATCH_JOURNAL_MAX_EVENTS || chars + size > BATCH_JOURNAL_MAX_CHARS)) {
+      runs.push(run)
+      run = []
+      chars = 2
+    }
+    run.push(record)
+    chars += size
+  }
+  if (run.length > 0) runs.push(run)
+  return runs
+}
+
 export function clearJournalBatch(key: string): void {
   clearJournalKey(key)
 }

@@ -262,7 +262,10 @@ export async function applyStagedEvents(
     }
     return built
   })
-  const queued = await enqueueEvents(applied.map(({ input }) => input))
+  // A chapter-sized proposal can be too big to journal as one batch; split
+  // it so an approved change survives a reload before IndexedDB commits, as
+  // it did when each event was enqueued (and journaled) on its own.
+  const queued = await enqueueEvents(applied.map(({ input }) => input), { splitToJournal: true })
   for (const { afterEnqueue } of applied) afterEnqueue?.()
   return queued.map(({ eventId }) => eventId)
 }

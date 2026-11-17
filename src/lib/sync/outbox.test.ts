@@ -477,6 +477,27 @@ describe("cqrs outbox", () => {
     expect(await outboxPendingCount()).toBe(503)
   })
 
+  it("enqueueOutboxEvents with splitToJournal journals a too-big batch run by run", async () => {
+    setActiveOutboxOwner("alice")
+    const many = Array.from({ length: 501 }, (_, i) => ev(`big${i}`, `c${i}`))
+    const pendingMany = enqueueOutboxEvents(many, { splitToJournal: true })
+    // The first run is journaled before IndexedDB can finish...
+    const [firstKey] = journalKeys()
+    expect(JSON.parse(localStorage.getItem(firstKey)!)).toHaveLength(500)
+    await pendingMany
+    // ...and every run is cleared once it lands.
+    expect(journalKeys()).toEqual([])
+    expect(await outboxPendingCount()).toBe(501)
+
+    // A lone commit too big for any batch entry keeps its per-commit entry.
+    const long = ["l1", "l2"].map((id) => ({ ...ev(id, id), payload: { value: "x".repeat(300_000) } }) as CqrsRawEvent)
+    const pendingLong = enqueueOutboxEvents(long, { splitToJournal: true })
+    expect(journalKeys()).toEqual(["aquilla:outbox-recovery:v1:l1"])
+    await pendingLong
+    expect(journalKeys()).toEqual([])
+    expect(await outboxPendingCount()).toBe(503)
+  })
+
   it("recovers a journaled batch whole, a create with the commit chained on it", async () => {
     const create = { ...ev("cr1", "c1"), kind: "target.cell.create", parentId: null, payload: { value: "" } } as unknown as CqrsRawEvent
     const commit = { ...ev("cm1", "c1"), parentId: "cr1" }

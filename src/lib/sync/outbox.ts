@@ -20,6 +20,7 @@ import {
   journalTargetCommit,
   clearJournalRecord,
   journalBatch,
+  splitForJournal,
   clearJournalBatch,
   readJournal,
   clearJournal,
@@ -267,8 +268,27 @@ async function openDb(): Promise<IDBDatabase> {
 /** Which of `ids` are in the outbox, in any status and for any account. */
 async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
   if (ids.length === 0) return new Set()
-  return lookupOutboxIdsIn(await openDb(), ids)
+  // An id whose write is still running may be on its way into IndexedDB:
+  // wait for where it went rather than miss it (a write only ever waits on
+  // earlier ones, so this can't deadlock).
+  const found = new Set<string>()
+  const unsettled: string[] = []
+  await Promise.all(ids.map(async (id) => {
+    const destination = writeDestinations.get(id)
+    if (destination && (await destination).has(id)) found.add(id)
+    else unsettled.push(id)
+  }))
+  for (const id of await lookupOutboxIdsIn(await openDb(), unsettled)) found.add(id)
+  return found
 }
+
+/**
+ * Writes still running in this page, by event id: each resolves to the ids
+ * that write put (or is putting) in IndexedDB, once it has decided — so a
+ * write that chains on one of them, routing meanwhile, sees a parent that
+ * is headed for IndexedDB but not there yet, and stays in the same queue.
+ */
+const writeDestinations = new Map<string, Promise<ReadonlySet<string>>>()
 
 /** `lookupOutboxIds` on an already-open database (recovery runs before openDb resolves). */
 async function lookupOutboxIdsIn(db: IDBDatabase, ids: readonly string[]): Promise<ReadonlySet<string>> {
@@ -403,7 +423,10 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
  *  are committed together into LiveStore's event_queue and never touch
  *  IndexedDB; the remainder go through the one-transaction/one-notify
  *  IndexedDB write below, which runs first. */
-export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
+export async function enqueueOutboxEvents(
+  events: CqrsRawEvent[],
+  options: EnqueueBatchOptions = {},
+): Promise<void> {
   if (events.length === 0) return
 
   // Capture before any await, as enqueueOutboxEvent does: routing can wait
@@ -415,11 +438,40 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
   // Journal the whole batch as one entry, so pagehide recovery restores all of
   // it or none (a commit is never replayed without its create). Too big a
   // batch (replace-all, import) stays out of localStorage, which it could fill.
-  const journalKey = ownerKey !== undefined ? journalBatch(records) : null
-  await writeOutboxRecords(records, {
-    routeOffline: isTauriRuntime(),
-    clearJournal: () => { if (journalKey) clearJournalBatch(journalKey) },
-  })
+  if (!options.splitToJournal || ownerKey === undefined) {
+    await writeJournaledBatch(records, ownerKey)
+    return
+  }
+  // In order, each run its own transaction, offline commit and journal
+  // entry, so at most one run's worth sits in localStorage at a time.
+  for (const run of splitForJournal(records)) await writeJournaledBatch(run, ownerKey)
+}
+
+export interface EnqueueBatchOptions {
+  /**
+   * A batch too big to journal whole is written as consecutive runs that
+   * each fit, instead of going unjournaled. Reload recovery then covers all
+   * of it, but a failure part way leaves the runs before it queued — use it
+   * only where the events would otherwise be enqueued one by one (agent
+   * apply), never where all-or-nothing matters more than recovery.
+   */
+  splitToJournal?: boolean
+}
+
+/** One batch write, journaled whole when it fits (or, for a lone target
+ *  commit too big for a batch entry, under its own per-commit entry). */
+async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxRecord["ownerKey"] | undefined): Promise<void> {
+  let clearEntry = () => {}
+  if (ownerKey !== undefined) {
+    const journalKey = journalBatch(records)
+    if (journalKey) {
+      clearEntry = () => clearJournalBatch(journalKey)
+    } else if (records.length === 1 && records[0].event.kind === "target.cell.commit") {
+      journalTargetCommit(records[0])
+      clearEntry = () => clearJournalRecord(records[0].id)
+    }
+  }
+  await writeOutboxRecords(records, { routeOffline: isTauriRuntime(), clearJournal: clearEntry })
 }
 
 /**
@@ -442,6 +494,10 @@ async function writeOutboxRecords(
   // it (a re-enqueue) isn't ours to remove on failure.
   let added: string[] = []
   let held: string[] = []
+  // Published before the first await, settled once the destination is known.
+  let settle: (inIndexedDb: ReadonlySet<string>) => void = () => {}
+  const destination = new Promise<ReadonlySet<string>>((resolve) => { settle = resolve })
+  for (const rec of records) writeDestinations.set(rec.id, destination)
   try {
     const routing = routeOffline ? await planOfflineRouting(events, lookupOutboxIds) : null
     // IndexedDB first: if it fails, nothing has reached the offline queue
@@ -455,6 +511,7 @@ async function writeOutboxRecords(
     }
     added = await addRecordsWithQuotaRecovery(toWrite)
     wrote = toWrite.length > 0
+    const inIndexedDb = new Set(toWrite.map((rec) => rec.id))
     if (routing && routing.routed.length > 0) {
       try {
         routing.commit()
@@ -462,10 +519,13 @@ async function writeOutboxRecords(
         // The offline store refused them (shut down, a materializer error):
         // send them over HTTP instead, so the batch still lands whole.
         console.warn("[outbox] Offline queue refused a batch; using the HTTP outbox", error)
+        for (const event of routing.routed) inIndexedDb.add(event.id)
+        settle(inIndexedDb)
         added = [...added, ...(await addRecordsWithQuotaRecovery(toRecords(routing.routed)))]
         wrote = true
       }
     }
+    settle(inIndexedDb)
   } catch (error) {
     // Undo what did land, so the caller's retry can't queue it twice.
     if (added.length > 0) {
@@ -477,6 +537,11 @@ async function writeOutboxRecords(
     throw error
   } finally {
     for (const id of held) heldIds.delete(id)
+    // A failed write queued nothing (its rows were undone above).
+    settle(new Set())
+    for (const rec of records) {
+      if (writeDestinations.get(rec.id) === destination) writeDestinations.delete(rec.id)
+    }
   }
   clearJournal()
   if (wrote) notifyOutboxChanged()

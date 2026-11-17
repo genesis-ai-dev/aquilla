@@ -13,6 +13,7 @@ import { projectBookNames } from "@/lib/lqa/project-book-names"
 import {
   laneCheckOverrides,
   laneNumberFormat,
+  laneOrthography,
   lanePunctuation,
   withLaneOverride,
 } from "@/lib/lqa/lane-builtin-checks"
@@ -228,9 +229,23 @@ export function useRules(
           ).conventions,
     [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
   )
+  // AQU-2628: and the old-orthography check judges a word by the project's
+  // own spelling rules. Lane-shaped like the two above so it moves with them
+  // if the Language profile ever becomes per-lane.
+  const orthography = useMemo(
+    () => laneOrthography({ languageProfile: projectLanguageProfile }),
+    [projectLanguageProfile],
+  )
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation, bookNames, numberFormat }),
-    [algorithmicChecks, bibleChecks, punctuation, bookNames, numberFormat],
+    () =>
+      resolveBuiltinRules(algorithmicChecks, {
+        bibleChecks,
+        punctuation,
+        bookNames,
+        numberFormat,
+        orthography,
+      }),
+    [algorithmicChecks, bibleChecks, punctuation, bookNames, numberFormat, orthography],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed

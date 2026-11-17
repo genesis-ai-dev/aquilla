@@ -23,6 +23,8 @@ import {
   numberFormatValue,
   numberWordsDraft,
   numberWordsValue,
+  orthographyDraft,
+  orthographyValue,
   pronounsDraft,
   pronounsValue,
   punctuationDraft,
@@ -50,6 +52,7 @@ import {
   ListEditor,
   NumberFormatEditor,
   NumberWordsEditor,
+  OrthographyEditor,
   PolicyEditor,
   PronounsEditor,
   PunctuationEditor,
@@ -128,6 +131,11 @@ const COPY: Readonly<Record<RowSlot, { title: MessageKey; description: MessageKe
     title: "languageProfile.numberWords.title",
     description: "languageProfile.numberWords.description",
     example: "languageProfile.numberWords.example",
+  },
+  orthography: {
+    title: "languageProfile.orthography.title",
+    description: "languageProfile.orthography.description",
+    example: "languageProfile.orthography.example",
   },
   numberFormat: {
     title: "languageProfile.numberFormat.title",
@@ -259,6 +267,9 @@ export function LanguageProfileSlots({
         toValue={numberFormatValue}
       >
         {(draft, setDraft, disabled) => <NumberFormatEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
+      </ProfileSlotRow>
+      <ProfileSlotRow {...row("orthography")} toDraft={orthographyDraft} toValue={orthographyValue}>
+        {(draft, setDraft, disabled) => <OrthographyEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
       </ProfileSlotRow>
       {listRow("speechVerbs")}
       <ProfileSlotRow {...row("kinTerms")} toDraft={kinTermsDraft} toValue={kinTermsValue}>

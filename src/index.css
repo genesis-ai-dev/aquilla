@@ -653,18 +653,25 @@
    base rule whatever its specificity, so `.min-h-screen` would win.
 
    Pages outside AppShell: reserve a title-bar band so the traffic lights and
-   the drag strip sit above the page rather than over it. Full-height pages
-   shrink by the band so it doesn't turn into a scroll. AppShell's header is
+   the drag strip sit above the page rather than over it. AppShell's header is
    the drag handle while it is mounted, so the band and strip go away under
-   `data-app-frame`. */
-html[data-mac-titlebar]:not([data-app-frame]) body {
-  padding-top: var(--mac-titlebar-h);
-}
-html[data-mac-titlebar]:not([data-app-frame]) body :is(.min-h-screen, .min-h-svh, .min-h-dvh, .min-h-lvh) {
-  min-height: calc(100vh - var(--mac-titlebar-h));
-}
-html[data-mac-titlebar]:not([data-app-frame]) body :is(.h-screen, .h-svh, .h-dvh, .h-lvh) {
-  height: calc(100vh - var(--mac-titlebar-h));
+   `data-app-frame` (src/hooks/useAppFrame.ts).
+
+   A viewport unit can't be redefined, so full-height pages shrink by the band
+   through the screen-height utilities they are built with — each keeping its
+   own unit. Only inside #root: dialogs and popovers portal to <body> and are
+   sized against the whole window, band or not. A page sized some other way
+   (inline 100vh, an arbitrary `h-[100dvh]`) should use these utilities. */
+html[data-mac-titlebar]:not([data-app-frame]) {
+  & body { padding-top: var(--mac-titlebar-h); }
+  & #root .min-h-screen { min-height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .min-h-svh { min-height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .min-h-dvh { min-height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .min-h-lvh { min-height: calc(100lvh - var(--mac-titlebar-h)); }
+  & #root .h-screen { height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .h-svh { height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .h-dvh { height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .h-lvh { height: calc(100lvh - var(--mac-titlebar-h)); }
 }
 html[data-app-frame] [data-slot="titlebar-drag-strip"] {
   display: none;

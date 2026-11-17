@@ -114,6 +114,34 @@ describe("useMacTitlebarOverlay", () => {
     expect(result.current.inset).toBe(true)
   })
 
+  it("keeps watching when the first fullscreen check fails", async () => {
+    vi.useFakeTimers()
+    win.isFullscreen.mockImplementationOnce(async () => { throw new Error("ipc not ready") })
+    const { result } = renderHook(() => useMacTitlebarOverlay())
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
+    expect(result.current.inset).toBe(true)
+
+    // Entering fullscreen later is still seen.
+    win.state.fullscreen = true
+    await act(async () => {
+      for (const cb of win.state.resized) cb()
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    expect(result.current.inset).toBe(false)
+  })
+
+  it("retries on the next mount when the resize listener can't be registered", async () => {
+    win.onResized.mockImplementationOnce(async () => { throw new Error("ipc not ready") })
+    const first = renderHook(() => useMacTitlebarOverlay())
+    await waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
+    await act(async () => {})
+    first.unmount()
+
+    renderHook(() => useMacTitlebarOverlay())
+    await waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(2))
+    expect(win.state.resized).toHaveLength(1)
+  })
+
   it("ignores a stale reply that arrives after a newer one", async () => {
     vi.useFakeTimers()
     const { result } = renderHook(() => useMacTitlebarOverlay())

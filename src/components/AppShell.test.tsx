@@ -8,12 +8,12 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
-import type { MacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
+import { __resetMacTitlebarStoreForTests, type MacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
 
 const titlebar = vi.hoisted(() => ({ value: { overlay: false, inset: false } as MacTitlebarOverlay }))
 const tauriWindow = vi.hoisted(() => ({
@@ -687,20 +687,37 @@ describe("AppShell macOS overlay title bar", () => {
       header: (
         <div>
           <button type="button">Real button</button>
-          <div data-testid="clicky" style={{ cursor: "pointer" }} onClick={() => {}}>
+          {/* The app gives clickable things the arrow cursor, so no
+              `cursor: pointer` here: the handler alone must give it away. */}
+          <div data-testid="clicky" onClick={() => {}}>
             <span data-testid="clicky-child">Badge</span>
           </div>
+          <span data-testid="pressy" onPointerDown={() => {}}>Chip</span>
           <span data-testid="plain-text">Title</span>
         </div>
       ),
     })
     fireEvent.mouseDown(screen.getByRole("button", { name: "Real button" }), { button: 0, detail: 1 })
     fireEvent.mouseDown(screen.getByTestId("clicky-child"), { button: 0, detail: 1 })
+    fireEvent.mouseDown(screen.getByTestId("pressy"), { button: 0, detail: 1 })
     await Promise.resolve()
     expect(tauriWindow.startDragging).not.toHaveBeenCalled()
     // Plain text in the band is still part of the title bar.
     fireEvent.mouseDown(screen.getByTestId("plain-text"), { button: 0, detail: 1 })
     await waitFor(() => expect(tauriWindow.startDragging).toHaveBeenCalledTimes(1))
+  })
+
+  it("starts the drag in the press's own tick once the window API is preloaded", async () => {
+    __resetMacTitlebarStoreForTests()
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell()
+    // Mounting the drag region loads the API ahead of any press…
+    await act(async () => {})
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    fireEvent.mouseDown(header, { button: 0, detail: 1 })
+    // …so macOS sees startDragging while the button is still down.
+    expect(tauriWindow.startDragging).toHaveBeenCalledTimes(1)
   })
 
   it("hands a still double click to the native title-bar action", async () => {

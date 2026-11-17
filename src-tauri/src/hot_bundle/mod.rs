@@ -25,6 +25,7 @@ const DEFAULT_MANIFEST_URL: &str = "https://desktop-bundles.aquilla.app/producti
 /// Long enough for the window to paint first; the check is never on the startup path.
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(5);
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const SHELL_FEATURES_FILE: &str = "shell-features.json";
 
 const EVENT_STAGED: &str = "bundle://staged";
@@ -108,6 +109,7 @@ pub fn prepare(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 /// shell turn on something the web side must cooperate with only when the code being served
 /// knows about it: a downloaded bundle can be older than this shell. The embedded assets and
 /// the `tauri dev` server are built from this shell's own commit, so they always qualify.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn serves_feature(app: &tauri::App, feature: &str) -> bool {
     let root = app.state::<HotBundleState>().serve_root.read().ok().and_then(|r| r.clone());
     let Some(dir) = root else { return true };
@@ -120,6 +122,7 @@ pub fn serves_feature(app: &tauri::App, feature: &str) -> bool {
 
 /// A missing or unreadable list declares nothing: every bundle published before the list
 /// existed predates every feature gated on it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn declares_feature(bundle_dir: &std::path::Path, feature: &str) -> bool {
     std::fs::read(bundle_dir.join(SHELL_FEATURES_FILE))
         .ok()

@@ -1,19 +1,23 @@
 //! macOS overlay title bar: the SPA's top row stands in for the native title
-//! strip (see `src/hooks/useMacTitlebarOverlay.ts`).
+//! strip (see `src/hooks/useMacTitlebarOverlay.ts`). Windows/Linux keep the native
+//! title bar: only the command is registered there, and it always zooms.
 
 /// Declared in the SPA's `shell-features.json` by builds that handle the overlay
 /// (vite.config.ts). A downloaded bundle older than this shell lacks it and gets
 /// the native title bar: it has no drag regions and would sit under the lights.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const OVERLAY_FEATURE: &str = "mac-titlebar-overlay";
 
 /// Runs before any page script on every load: tells the SPA this shell built
 /// the window with the overlay title bar, so it keeps the traffic-light corner
 /// clear and offers drag regions. Native knows; the web side shouldn't guess
 /// from the user agent.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const OVERLAY_FLAG_SCRIPT: &str = "window.__AQUILLA_MAC_TITLEBAR_OVERLAY__ = true;";
 
 /// What the user picked in System Settings › Desktop & Dock › "Double-click a
 /// window's title bar to".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 enum DoubleClickAction {
     Zoom,
@@ -24,6 +28,7 @@ enum DoubleClickAction {
 /// `AppleActionOnDoubleClick` holds "Maximize" (shown as Zoom), "Fill",
 /// "Minimize" or "None"; older systems only had the
 /// `AppleMiniaturizeOnDoubleClick` bool. Unset means the default, Zoom.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_action(action: Option<&str>, legacy_minimize: bool) -> DoubleClickAction {
     match action {
         Some("Minimize") => DoubleClickAction::Minimize,

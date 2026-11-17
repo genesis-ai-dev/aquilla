@@ -26,9 +26,11 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { useIsLgUp } from "@/hooks/useIsLgUp"
+import { useAppFrame } from "@/hooks/useAppFrame"
 import {
   TRAFFIC_LIGHTS_HEIGHT,
   TRAFFIC_LIGHTS_WIDTH,
+  titlebarInsets,
   useMacTitlebarOverlay,
   useTitlebarDrag,
 } from "@/hooks/useMacTitlebarOverlay"
@@ -214,34 +216,14 @@ export function AppShell({
   }, [dockOpenRequest, mobileNav])
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
-  // Where the traffic lights land depends on the layout under them:
-  //  - expanded sidebar: its chrome row — the brand mark gives up its slot
-  //    (a native app's window already says whose it is; the org breadcrumb
-  //    in the header still links home) and the row's start is pushed past
-  //    the lights. The beta chip is dropped too, so the row still fits at
-  //    the dock's 200px minimum;
-  //  - collapsed rail: its icon stack drops below the lights. Only the
-  //    resizable dock actually narrows to DOCK_COLLAPSED_WIDTH (the org
-  //    aside stays w-56), so only then does the header clear the overhang;
-  //  - no in-flow sidebar (narrow window): the header band starts at x=0.
-  //    The sidebar opens as a sheet from the window's left edge instead, so
-  //    the sheet's chrome row clears the lights the same way as the expanded
-  //    sidebar's (the sheet is never a collapsed rail).
-  // The lights stay at the window's physical top-left whatever the text
-  // direction, so every inset is physical (paddingLeft, never inline-start).
-  // In an RTL locale the in-flow sidebar flips to the right edge, leaving the
-  // header to clear the lights; the sheet stays on the left (side="left").
-  const sidebarAtLeft = !mobileNav && i18n?.dir !== "rtl"
-  const insetSidebarRow = titlebar.inset && !chromeCollapsed && (mobileNav || sidebarAtLeft)
-  const insetRail = titlebar.inset && sidebarAtLeft && chromeCollapsed
-  const railIsNarrow = chromeCollapsed && useDockResize
-  const headerInset = !titlebar.inset
-    ? 0
-    : !sidebarAtLeft
-      ? TRAFFIC_LIGHTS_WIDTH
-      : railIsNarrow
-        ? TRAFFIC_LIGHTS_WIDTH - DOCK_COLLAPSED_WIDTH
-        : 0
+  const { insetSidebarRow, insetRail, headerInset } = titlebarInsets({
+    inset: titlebar.inset,
+    mobileNav,
+    rtl: i18n?.dir === "rtl",
+    chromeCollapsed,
+    railIsNarrow: chromeCollapsed && useDockResize,
+    collapsedRailWidth: DOCK_COLLAPSED_WIDTH,
+  })
   const resolvedLogo = insetSidebarRow ? null : brandLogo
 
   // A pick inside the sheet can navigate by query alone — choosing an Agent
@@ -253,26 +235,8 @@ export function AppShell({
     setNavOpen(false)
   }, [pathname, search])
 
-  /**
-   * Mark the document while this frame is on screen, so the base stylesheet
-   * can refuse a viewport scroll ONLY here.
-   *
-   * Scoped rather than global, and a page that is not in this frame is why:
-   * the in-app privacy policy (removed in AQU-2243, now a 301 to /privacy)
-   * rendered a 3,400px document straight into the body, and a blanket
-   * `overflow: hidden` on html made two thirds of it unreachable — no wheel,
-   * no scrollbar, no End key — including its own analytics opt-out. Login,
-   * the invite and verify routes, the approval page and the 404 are all in
-   * the same position, and three of them carry a comment saying they scroll
-   * the document by design, so the scoping still earns its keep.
-   *
-   * Inside the frame the opposite holds: every pane scrolls on its own, so a
-   * document scroll can only slide the whole application off the top.
-   */
-  useEffect(() => {
-    document.documentElement.dataset.appFrame = "true"
-    return () => { delete document.documentElement.dataset.appFrame }
-  }, [])
+  // `html[data-app-frame]` while on screen: no document scroll, no title-bar band.
+  useAppFrame()
 
   useEffect(() => {
     if (lgUp) setNavOpen(false)

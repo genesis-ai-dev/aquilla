@@ -31,6 +31,7 @@ import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
 import { HotBundleBoot } from "@/components/HotBundleBoot"
 import { TitlebarDragStrip } from "@/components/TitlebarDragStrip"
+import { useHoldAppFrame } from "@/hooks/useAppFrame"
 import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
@@ -334,6 +335,8 @@ function AppEntry() {
 
 /** Fallback used while lazy route chunks are loading (e.g. the workspace). */
 function RouteLoadingFallback() {
+  // Between two AppShell routes: keep the frame up while the chunk loads.
+  useHoldAppFrame()
   return <LoadingOverlay />
 }
 

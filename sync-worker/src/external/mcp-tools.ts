@@ -240,6 +240,73 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'prepare_orthography_exceptions',
+    description:
+      'Stage a change to the words the project’s spelling rules must LEAVE ALONE as a ' +
+      'changeset (AQU-2642 — the MCP door onto the PatchOrthographyExceptions command). ' +
+      'Use this instead of patch_settings { key: "languageProfile" }: that replaces the whole ' +
+      'profile wholesale, so two people proposing exceptions around the same time is ' +
+      'last-write-wins on a list that records WHO asked for each word. Here you send OPS, and ' +
+      'the list is recomputed at commit from the then-current stored value, so an entry someone ' +
+      'else added meanwhile survives. Only an APPROVED exception affects the converter and the ' +
+      '"Old orthography" check — a pending one is a proposal and changes no text. ' +
+      'Contributor and up may add (lands pending); maintainer and up add as approved, and an ' +
+      'add naming an already-pending word APPROVES it, keeping the original proposer’s ' +
+      'credit. remove is maintainer-only: dropping an approved exception re-exposes the word to ' +
+      'the rules, which rewrites text. Args: projectId (required), ops (required: up to 200 ' +
+      '{ action: "add" | "remove", word, ref? }), ifMatchVersion (optional — unlike ' +
+      'patch_settings this is NOT required, because a version bump under a merge is not a ' +
+      'conflict; pass it to assert nothing changed since you read the profile), changesetId ' +
+      '(optional UUIDv7 for idempotency). A project with no languageProfile.orthography block ' +
+      'is validation_failed — a maintainer sets the rules and the canonical apostrophe ' +
+      'first. Sole command in its changeset. Returns { changesetId, summary, digest, mode, ' +
+      'approvalUrl? } like prepare_translations — nothing is applied until ' +
+      'confirm_changeset (ask mode: a human approves first). Call describe_command({ kind: ' +
+      '"PatchOrthographyExceptions" }) for the folding and no-op rules.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ops: {
+          type: 'array',
+          description:
+            'Up to 200 add/remove ops. Words are compared folded (lowercase, apostrophes ' +
+            'dropped), the way the converter matches, so naming the same word twice is ' +
+            'validation_failed.',
+          items: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', enum: ['add', 'remove'], description: 'add proposes or approves; remove is maintainer-only.' },
+              word: {
+                type: 'string',
+                description:
+                  'The word in the spelling the rules must NOT rewrite (≤ 32 characters, no ' +
+                  'whitespace). Stored with the profile’s canonical apostrophe substituted; ' +
+                  'the rules are deliberately not applied to it.',
+              },
+              ref: {
+                type: 'string',
+                description: 'Where the word was found (a cell id, a verse reference, a note) — shown in the Language profile panel.',
+              },
+            },
+            required: ['action', 'word'],
+            additionalProperties: false,
+          },
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the merge ' +
+            'runs against whatever the list holds at commit; pass it to get plan_stale if the ' +
+            'settings changed since you read them.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'ops'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_set_brief',
     description:
       'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
@@ -1662,6 +1729,9 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   // AQU-2407: both stage a changeset only; the brief write (and the L1
   // render it pays for) happens at confirm_changeset.
   prepare_set_brief: 'stage',
+  // AQU-2642: stages the exception merge only; the list is recomputed and
+  // written at confirm_changeset.
+  prepare_orthography_exceptions: 'stage',
   regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',

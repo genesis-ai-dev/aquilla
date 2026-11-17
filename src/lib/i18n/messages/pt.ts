@@ -7111,6 +7111,7 @@ export const pt: Catalog = {
   "workspace.typeahead.addUser": "Adicionar {username}",
   "workspace.typeahead.alreadyMember": "{username} já é membro.",
   "workspace.typeahead.noUserNamed": "Não há um usuário do Aquilla chamado \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "Nenhuma conta do Aquilla verificou o e-mail {query}. Adicione a pessoa pelo nome de usuário do Aquilla, envie um link de convite ou peça que ela verifique este endereço nas configurações da conta.",
   "workspace.typeahead.inviteByEmailInstead": "Convidar por e-mail em vez disso",
   "workspace.typeahead.noScopedMatch": "Nenhuma correspondência entre quem compartilha uma organização ou um projeto com você.",
   "workspace.typeahead.addByExactUsername": "Adicionar \"{query}\" pelo nome de usuário exato",

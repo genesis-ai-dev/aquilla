@@ -7416,6 +7416,7 @@ export const sw: Catalog = {
   "workspace.typeahead.addUser": "Ongeza {username}",
   "workspace.typeahead.alreadyMember": "{username} tayari ni mwanachama.",
   "workspace.typeahead.noUserNamed": "Hakuna mtumiaji wa Aquilla aliyeitwa \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "Hakuna akaunti ya Aquilla iliyothibitisha barua pepe {query}. Mwongeze mtu huyo kwa jina lake la mtumiaji la Aquilla, mtumie kiungo cha mwaliko, au muombe athibitishe anwani hii katika mipangilio ya akaunti yake.",
   "workspace.typeahead.inviteByEmailInstead": "Alika kwa barua pepe badala yake",
   "workspace.typeahead.noScopedMatch": "Hakuna anayelingana kati ya watu wanaoshiriki nawe shirika au mradi.",
   "workspace.typeahead.addByExactUsername": "Ongeza \"{query}\" kwa jina kamili la mtumiaji",

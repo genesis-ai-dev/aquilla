@@ -5988,6 +5988,7 @@ export const fr: Catalog = {
   "workspace.typeahead.addUser": "Ajouter {username}",
   "workspace.typeahead.alreadyMember": "{username} est déjà membre.",
   "workspace.typeahead.noUserNamed": "Aucun utilisateur Aquilla nommé « {query} ».",
+  "workspace.typeahead.noAccountWithEmail": "Aucun compte Aquilla n'a vérifié l'e-mail {query}. Ajoutez la personne par son nom d'utilisateur Aquilla, envoyez-lui un lien d'invitation ou demandez-lui de vérifier cette adresse dans les paramètres de son compte.",
   "workspace.typeahead.inviteByEmailInstead": "Inviter par e-mail à la place",
   "workspace.typeahead.noScopedMatch": "Aucune correspondance parmi les personnes qui partagent une organisation ou un projet avec vous.",
   "workspace.typeahead.addByExactUsername": "Ajouter « {query} » par nom d'utilisateur exact",

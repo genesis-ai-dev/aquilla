@@ -6031,6 +6031,7 @@ export const id: Catalog = {
   "workspace.typeahead.addUser": "Tambahkan {username}",
   "workspace.typeahead.alreadyMember": "{username} sudah menjadi anggota.",
   "workspace.typeahead.noUserNamed": "Tidak ada pengguna Aquilla bernama \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "Tidak ada akun Aquilla yang sudah memverifikasi email {query}. Tambahkan orang itu dengan nama pengguna Aquilla-nya, kirimkan tautan undangan, atau minta dia memverifikasi alamat ini di pengaturan akunnya.",
   "workspace.typeahead.inviteByEmailInstead": "Undang lewat email saja",
   "workspace.typeahead.noScopedMatch": "Tidak ada yang cocok di antara orang yang berbagi organisasi atau proyek dengan Anda.",
   "workspace.typeahead.addByExactUsername": "Tambahkan \"{query}\" berdasarkan nama pengguna persis",

@@ -7429,6 +7429,7 @@ export const bn: Catalog = {
   "workspace.typeahead.addUser": "{username} যোগ করুন",
   "workspace.typeahead.alreadyMember": "{username} ইতিমধ্যে সদস্য।",
   "workspace.typeahead.noUserNamed": "\"{query}\" নামে কোনো Aquilla ব্যবহারকারী নেই।",
+  "workspace.typeahead.noAccountWithEmail": "কোনও Aquilla অ্যাকাউন্ট ইমেইল {query} যাচাই করেনি। ব্যক্তিকে তাঁর Aquilla ব্যবহারকারীর নাম দিয়ে যোগ করুন, তাঁকে আমন্ত্রণ লিংক পাঠান, বা তাঁকে অ্যাকাউন্ট সেটিংসে এই ঠিকানাটি যাচাই করতে বলুন।",
   "workspace.typeahead.inviteByEmailInstead": "বরং ইমেইলে আমন্ত্রণ করুন",
   "workspace.typeahead.noScopedMatch": "যাঁরা আপনার সাথে একটি প্রতিষ্ঠান বা প্রকল্প শেয়ার করেন তাঁদের মধ্যে কোনো মিল নেই।",
   "workspace.typeahead.addByExactUsername": "হুবহু ব্যবহারকারীর নামে \"{query}\" যোগ করুন",

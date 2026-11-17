@@ -7401,6 +7401,7 @@ export const ur: Catalog = {
   "workspace.typeahead.addUser": "{username} شامل کریں",
   "workspace.typeahead.alreadyMember": "{username} پہلے سے رکن ہے۔",
   "workspace.typeahead.noUserNamed": "\"{query}\" نام کا کوئی Aquilla صارف نہیں۔",
+  "workspace.typeahead.noAccountWithEmail": "کسی بھی Aquilla اکاؤنٹ نے ای میل {query} کی تصدیق نہیں کی ہے۔ اس شخص کو اس کے Aquilla صارف نام سے شامل کریں، اسے دعوتی لنک بھیجیں، یا اس سے کہیں کہ وہ اپنی اکاؤنٹ سیٹنگز میں اس پتے کی تصدیق کرے۔",
   "workspace.typeahead.inviteByEmailInstead": "اس کے بجائے ای میل سے دعوت",
   "workspace.typeahead.noScopedMatch": "ان لوگوں میں کوئی میل نہیں جو آپ کے ساتھ تنظیم یا منصوبہ بانٹتے ہیں۔",
   "workspace.typeahead.addByExactUsername": "عین صارف نام سے \"{query}\" شامل کریں",

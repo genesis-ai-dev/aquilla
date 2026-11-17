@@ -45,6 +45,7 @@ function Harness({
   emptySuggestionsHint,
   scopedSearch,
   lookupProjectId,
+  showModeToggle = false,
   onStageTyped = () => {},
   onToggleResult = () => {},
 }: {
@@ -53,6 +54,7 @@ function Harness({
   emptySuggestionsHint?: string
   scopedSearch?: boolean
   lookupProjectId?: string | null
+  showModeToggle?: boolean
   onStageTyped?: () => void
   onToggleResult?: (u: { id: number; username: string }) => void
 }) {
@@ -61,7 +63,7 @@ function Harness({
     <UsernameTypeahead
       value={value}
       onChange={setValue}
-      showModeToggle={false}
+      showModeToggle={showModeToggle}
       suggestions={suggestions}
       emptySuggestionsHint={emptySuggestionsHint}
       scopedSearch={scopedSearch}
@@ -156,8 +158,8 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
 
   // AQU-2576: a project owner is given a reviewer's EMAIL, not their handle.
   // Where a project scopes the lookup, the address resolves to the account and
-  // a miss says so in the address's own terms — "no account uses this email",
-  // not "no user named n@example.com".
+  // a miss says so in the address's own terms — "no account has verified this
+  // email" (AQU-2638), not "no user named n@example.com".
   describe("AQU-2576: resolving an add-member target by email", () => {
     const EMAIL = "naladda@proton.me"
 
@@ -184,15 +186,38 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
       expect(onToggleResult).toHaveBeenCalledWith({ id: 1220, username: "Naladda" })
     })
 
-    it("says no ACCOUNT uses the address when the lookup confirms the miss", async () => {
+    // AQU-2638: the lookup matches VERIFIED addresses only, and answers the
+    // same for "an account uses this address but never verified it" as for "no
+    // account uses it" — so the one sentence shown has to be true in both
+    // cases. Claiming no account USES the address told an owner who typed
+    // their own signed-in email that they had no account.
+    it("says no account has VERIFIED the address — never that none uses it", async () => {
       render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
       fireEvent.focus(input())
       fireEvent.change(input(), { target: { value: EMAIL } })
 
-      expect(
-        await screen.findByText(/no aquilla account uses the email naladda@proton\.me/i),
-      ).toBeInTheDocument()
+      const miss = await screen.findByText(
+        /no aquilla account has verified the email naladda@proton\.me/i,
+      )
+      expect(miss).toBeInTheDocument()
+      expect(screen.queryByText(/uses the email/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/no aquilla user named/i)).not.toBeInTheDocument()
+    })
+
+    it("names all three ways forward, so the dead end has an exit", async () => {
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" showModeToggle />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      const miss = await screen.findByText(/no aquilla account has verified the email/i)
+      // add by username · send an invite link · verify in account settings
+      expect(miss).toHaveTextContent(/aquilla username/i)
+      expect(miss).toHaveTextContent(/invite link/i)
+      expect(miss).toHaveTextContent(/account settings/i)
+      // The existing route to the Invite link tab survives the rewording.
+      expect(
+        screen.getByRole("button", { name: /invite by email instead/i }),
+      ).toBeInTheDocument()
     })
 
     it("keeps the username wording for a typed username, scoped or not", async () => {

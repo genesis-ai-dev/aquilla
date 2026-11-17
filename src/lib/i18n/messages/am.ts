@@ -7414,6 +7414,7 @@ export const am: Catalog = {
   "workspace.typeahead.addUser": "{username} ይጨምሩ",
   "workspace.typeahead.alreadyMember": "{username} አስቀድሞ አባል ነው።",
   "workspace.typeahead.noUserNamed": "«{query}» የተባለ የAquilla ተጠቃሚ የለም።",
+  "workspace.typeahead.noAccountWithEmail": "ኢሜይል {query}ን ያረጋገጠ የAquilla መለያ የለም። ሰውየውን በAquilla የተጠቃሚ ስሙ ያክሉ፣ የግብዣ አገናኝ ይላኩለት፣ ወይም በመለያ ቅንብሮቹ ውስጥ ይህን አድራሻ እንዲያረጋግጥ ይጠይቁት።",
   "workspace.typeahead.inviteByEmailInstead": "በምትኩ በኢሜይል ይጋብዙ",
   "workspace.typeahead.noScopedMatch": "ድርጅት ወይም ፕሮጀክት ከእርስዎ ከሚጋሩ ሰዎች መካከል ተዛማጅ የለም።",
   "workspace.typeahead.addByExactUsername": "«{query}»ን በትክክለኛ የተጠቃሚ ስም ይጨምሩ",

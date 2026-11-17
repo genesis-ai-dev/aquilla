@@ -5958,6 +5958,7 @@ export const zh_Hans: Catalog = {
   "workspace.typeahead.addUser": "添加 {username}",
   "workspace.typeahead.alreadyMember": "{username} 已经是成员了。",
   "workspace.typeahead.noUserNamed": "找不到名为「{query}」的 Aquilla 用户。",
+  "workspace.typeahead.noAccountWithEmail": "没有 Aquilla 账户验证过电子邮件 {query}。请用对方的 Aquilla 用户名添加，或向其发送邀请链接，或请对方在账户设置中验证该地址。",
   "workspace.typeahead.inviteByEmailInstead": "改以电子邮件邀请",
   "workspace.typeahead.noScopedMatch": "在与您共用组织或项目的人当中找不到相符的项目。",
   "workspace.typeahead.addByExactUsername": "以完全相符的用户名添加「{query}」",

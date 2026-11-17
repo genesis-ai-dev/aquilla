@@ -7140,6 +7140,7 @@ export const hi: Catalog = {
   "workspace.typeahead.addUser": "{username} जोड़ें",
   "workspace.typeahead.alreadyMember": "{username} पहले से सदस्य है।",
   "workspace.typeahead.noUserNamed": "\"{query}\" नाम का कोई Aquilla उपयोगकर्ता नहीं।",
+  "workspace.typeahead.noAccountWithEmail": "किसी भी Aquilla खाते ने ईमेल {query} की पुष्टि नहीं की है। उस व्यक्ति को उनके Aquilla उपयोगकर्ता नाम से जोड़ें, उन्हें आमंत्रण लिंक भेजें, या उनसे अपनी खाता सेटिंग में इस पते की पुष्टि करने को कहें।",
   "workspace.typeahead.inviteByEmailInstead": "इसके बजाय ईमेल से आमंत्रित करें",
   "workspace.typeahead.noScopedMatch": "उन लोगों में कोई मेल नहीं जो आपके साथ संगठन या परियोजना साझा करते हैं।",
   "workspace.typeahead.addByExactUsername": "सटीक उपयोगकर्ता नाम से \"{query}\" जोड़ें",

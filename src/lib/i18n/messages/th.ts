@@ -5942,6 +5942,7 @@ export const th: Catalog = {
   "workspace.typeahead.addUser": "เพิ่ม {username}",
   "workspace.typeahead.alreadyMember": "{username} เป็นสมาชิกแล้ว",
   "workspace.typeahead.noUserNamed": "ไม่มีผู้ใช้ Aquilla ชื่อ \"{query}\"",
+  "workspace.typeahead.noAccountWithEmail": "ไม่มีบัญชี Aquilla ที่ยืนยันอีเมล {query} แล้ว เพิ่มบุคคลนี้ด้วยชื่อผู้ใช้ Aquilla ส่งลิงก์คำเชิญให้ หรือขอให้เขายืนยันที่อยู่นี้ในการตั้งค่าบัญชีของเขา",
   "workspace.typeahead.inviteByEmailInstead": "เชิญโดยอีเมลแทน",
   "workspace.typeahead.noScopedMatch": "ไม่มีการตรงกันในหมู่คนที่แบ่งปันองค์กรหรือโครงการกับคุณ",
   "workspace.typeahead.addByExactUsername": "เพิ่ม \"{query}\" โดย exact username",

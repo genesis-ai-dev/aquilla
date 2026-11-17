@@ -7414,6 +7414,7 @@ export const ha: Catalog = {
   "workspace.typeahead.addUser": "Ku ƙara {username}",
   "workspace.typeahead.alreadyMember": "{username} ya riga ya zama mamba.",
   "workspace.typeahead.noUserNamed": "Babu mai amfani da Aquilla mai suna \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "Babu wani asusun Aquilla da ya tabbatar da imel {query}. Ƙara mutumin da sunan mai amfani na Aquilla, aika masa hanyar gayyata, ko ka nemi ya tabbatar da wannan adireshin a cikin saitunan asusunsa.",
   "workspace.typeahead.inviteByEmailInstead": "Ku gayyata ta imel a maimakon",
   "workspace.typeahead.noScopedMatch": "Babu daidaito cikin mutanen da kuke raba ƙungiya ko aiki da su.",
   "workspace.typeahead.addByExactUsername": "Ku ƙara \"{query}\" da cikakken sunan mai amfani",

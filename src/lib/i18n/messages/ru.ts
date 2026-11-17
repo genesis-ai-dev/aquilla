@@ -6075,6 +6075,7 @@ export const ru: Catalog = {
   "workspace.typeahead.addUser": "Добавить {username}",
   "workspace.typeahead.alreadyMember": "{username} уже участник.",
   "workspace.typeahead.noUserNamed": "Пользователя Aquilla с именем «{query}» нет.",
+  "workspace.typeahead.noAccountWithEmail": "Ни один аккаунт Aquilla не подтвердил эл. почту {query}. Добавьте человека по имени пользователя Aquilla, отправьте ему ссылку-приглашение или попросите подтвердить этот адрес в настройках аккаунта.",
   "workspace.typeahead.inviteByEmailInstead": "Пригласить по эл. почте",
   "workspace.typeahead.noScopedMatch": "Среди людей, с которыми у вас общая организация или проект, совпадений нет.",
   "workspace.typeahead.addByExactUsername": "Добавить «{query}» по точному имени пользователя",

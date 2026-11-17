@@ -5916,6 +5916,7 @@ export const ms: Catalog = {
   "workspace.typeahead.addUser": "Tambah {username}",
   "workspace.typeahead.alreadyMember": "{username} sudah menjadi anggota.",
   "workspace.typeahead.noUserNamed": "Tidak ada pengguna Aquilla bernama \"{query}\".",
+  "workspace.typeahead.noAccountWithEmail": "Tiada akaun Aquilla yang telah mengesahkan emel {query}. Tambah orang itu dengan nama pengguna Aquilla mereka, hantar pautan jemputan kepada mereka, atau minta mereka mengesahkan alamat ini dalam tetapan akaun mereka.",
   "workspace.typeahead.inviteByEmailInstead": "Undang melalui email",
   "workspace.typeahead.noScopedMatch": "Tidak ada kecocokan di antara orang-orang yang berbagi organisasi atau projek dengan Anda.",
   "workspace.typeahead.addByExactUsername": "Tambah \"{query}\" berdasarkan nama pengguna yang tepat",

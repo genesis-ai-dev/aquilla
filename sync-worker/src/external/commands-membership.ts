@@ -200,7 +200,13 @@ export interface TargetUser {
  *  an `@` (none can today — signup rejects it) would still win. `users.email`
  *  is UNIQUE on LOWER(email), so at most one account can match; the two-row
  *  ceiling is defense in depth against a database that violates that invariant,
- *  failing closed rather than handing an agent an arbitrary account. */
+ *  failing closed rather than handing an agent an arbitrary account.
+ *
+ *  [Pen test] Authorization & access control (2026-11-17): only a VERIFIED
+ *  address resolves, as in auth-worker. Registration never proves the email it
+ *  stores, so an unverified match could be a squatter who registered the
+ *  invitee's address first; a matching string is not proof of control
+ *  (AQU-1579). The account stays reachable by username. */
 export async function lookupUser(db: AquillaDb, username: string): Promise<TargetUser | null> {
   const row = await db
     .prepare(`SELECT id::text AS id, username FROM users WHERE lower(username) = lower(?)`)
@@ -211,7 +217,7 @@ export async function lookupUser(db: AquillaDb, username: string): Promise<Targe
   if (!looksLikeEmail(username)) return null
   const byEmail = await db
     .prepare(
-      `SELECT id::text AS id, username FROM users WHERE lower(email) = lower(?) ORDER BY id ASC LIMIT 2`,
+      `SELECT id::text AS id, username FROM users WHERE lower(email) = lower(?) AND email_verified_at IS NOT NULL ORDER BY id ASC LIMIT 2`,
     )
     .bind(username.trim())
     .all<{ id: string; username: string }>()

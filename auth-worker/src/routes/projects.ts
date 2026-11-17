@@ -1769,7 +1769,7 @@ async function grantProjectMemberOne(
       // username typo — the person likely has no account yet — and the
       // invite link is the path that reaches them.
       message: looksLikeEmail(username)
-        ? "no Aquilla account uses that email address — send them an invite link instead"
+        ? "no Aquilla account has verified that email address — add them by username, or send them an invite link instead"
         : "user not found",
     }
   }

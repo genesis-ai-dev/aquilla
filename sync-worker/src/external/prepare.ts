@@ -40,7 +40,8 @@ import {
   previewSettingValue,
   retiredTerminologyBlobDenial,
 } from './commands-patch-settings'
-import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
+import { assertWithinBatchCap, convertDraftsOrthography, requestDrafts } from './commands-draft-cells'
+import { readLanguageProfile } from '../../../db/shared/language-profile'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
   isMembershipCommand,
@@ -820,7 +821,15 @@ async function expandDraftCells(
     )
   }
 
-  return scoped.map((d) => ({
+  // AQU-2642 §2: the lane's orthography applies to a server-side draft exactly
+  // as it does to an in-app one, and it applies BEFORE staging so the text a
+  // human approves is the text that will land.
+  const written = convertDraftsOrthography(
+    scoped,
+    readLanguageProfile(projectSettings.settings.languageProfile).orthography,
+  )
+
+  return written.map((d) => ({
     kind: 'SetTranslation' as const,
     fileId: cmd.fileId,
     cellId: d.cellId,

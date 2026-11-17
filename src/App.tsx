@@ -10,6 +10,7 @@ import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
+import { DesktopGoogleReturn } from "@/components/auth/DesktopGoogleReturn"
 import { GoogleLoginReturn } from "@/pages/GoogleLoginReturn"
 import { Login } from "@/pages/Login"
 import { NotFound } from "@/pages/NotFound"
@@ -468,6 +469,7 @@ function AppRoutes() {
   return (
     <>
       <BuildJobNotifier />
+      <DesktopGoogleReturn />
       {/* AQU-2265: `?highlight=<id>` scrolls to one setting and flashes it. */}
       <SettingHighlighter />
       {/* Workspace routes intentionally suspend to this outer boundary: when

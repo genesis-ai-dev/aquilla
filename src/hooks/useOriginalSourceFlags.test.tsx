@@ -106,4 +106,17 @@ describe("useOriginalSourceFlags (AQU-350)", () => {
     await waitFor(() => expect(second.result.current.has("GEN")).toBe(true))
     expect(listFiles).toHaveBeenCalledTimes(2)
   })
+
+  it("reads originals when a restored session replaces an unavailable token", async () => {
+    const unavailable = vi.fn(async () => null)
+    const { result, rerender } = renderHook(
+      ({ token }: { token: () => Promise<string | null> }) => useOriginalSourceFlags("p1", files, token),
+      { initialProps: { token: unavailable as () => Promise<string | null> } },
+    )
+    await waitFor(() => expect(unavailable).toHaveBeenCalled())
+    expect(listFiles).not.toHaveBeenCalled()
+    rerender({ token: getToken })
+    await waitFor(() => expect(result.current.has("GEN")).toBe(true))
+    expect(result.current.has("EXO")).toBe(false)
+  })
 })

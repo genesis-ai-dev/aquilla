@@ -71,6 +71,11 @@ The shell (`src-tauri/src/hot_bundle.rs`):
 - If a launch finds `pending` still set from the last run, that bundle never booted:
   roll back to `previous`, record the version in `quarantine.json` so it is never
   re-downloaded, and emit `bundle://rolled-back`. Keep at most two versions on disk.
+- A bundle can be older than the shell (served before the shell update, or restored by
+  a rollback). Window behaviour the SPA must cooperate with is turned on only when the
+  bundle being served lists it in `shell-features.json`, written by every SPA build
+  (`vite.config.ts`); bundles without the file list nothing. The embedded assets always
+  qualify. First user: the macOS overlay title bar (`mac-titlebar-overlay`).
 - Debug builds honour `AQUILLA_BUNDLE_MANIFEST_URL` to point at a test manifest.
 - Release builds with no compiled-in public key never apply remote bundles (log once).
 

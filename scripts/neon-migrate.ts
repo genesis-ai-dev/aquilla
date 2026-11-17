@@ -17,7 +17,9 @@
 //       baselined — re-running ALL historical files on a live DB is unsafe
 //       (0031 drops + recreates `snapshots`). Each file commits together with
 //       its `schema_migrations` row (AQU-1877) under a `lock_timeout` of 5s
-//       (AQUILLA_MIGRATION_LOCK_TIMEOUT to override); a file needing
+//       (AQUILLA_MIGRATION_LOCK_TIMEOUT to override) and with no statement or
+//       idle-in-transaction ceiling, whatever the role default says
+//       (scripts/maintenance-session.ts); a file needing
 //       `CREATE INDEX CONCURRENTLY` takes the documented non-transactional
 //       path in scripts/neon-migration-file.ts.
 //   npx tsx scripts/neon-migrate.ts baseline   one-time bootstrap: create the
@@ -44,6 +46,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Client } from "pg"
 import { neonClient } from "./pg"
+import { ceilingRefusal, SESSION_CEILINGS_SQL, type SessionSetting } from "./maintenance-session"
 import { prepareCommentsKey } from "./neon-comments-key"
 import { applyMigrationFile, lockTimeoutSetting } from "./neon-migration-file"
 import { directApplyRefusal, NO_SNAPSHOT_FLAG } from "./neon-apply-guard"
@@ -180,6 +183,17 @@ async function apply(client: Client): Promise<number> {
   const pending = migrationFiles().filter((f) => !applied.has(f))
   if (!pending.length) {
     console.log("✓ nothing to apply")
+  }
+  if (pending.length) {
+    // A role-level timeout default exists for the workers' sake; this session
+    // opts out of it at startup (scripts/maintenance-session.ts). Prove that
+    // took effect before the first file, not on the one slow statement.
+    const { rows } = await client.query<SessionSetting>(SESSION_CEILINGS_SQL)
+    const refusal = ceilingRefusal(rows)
+    if (refusal) {
+      console.error(refusal)
+      return 1
+    }
   }
   const lockTimeout = lockTimeoutSetting()
   for (const f of pending) {

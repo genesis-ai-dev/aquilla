@@ -609,15 +609,45 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
  * GET /api/v2/orgs/:orgId/assignments/mine — the caller's open assignments
  * across ALL the org's active projects, in ONE request (replaces the client's
  * per-project /:projectId/assignments/mine fan-out). Any org member.
+ *
+ * AQU-2458: and any project-only member. The query is keyed to
+ * `assignee_user_id = caller`, so it can never return another person's work —
+ * what org membership was gating was the caller's own list. A translator added
+ * directly to one shared project (a guest org, no `org_members` row) was
+ * therefore 403'd out of the only cross-project view of their own
+ * assignments.
+ *
+ * So a caller with no org role is admitted on PROJECT access instead: they
+ * must reach at least one live project in the org, and the list is filtered to
+ * the projects they reach, so revoking a grant stops listing that project's
+ * work while the `assignments` row itself survives. Reaching the org's
+ * projects but holding nothing is an empty list, not an error — that is the
+ * guest who opens the page before any work has been handed out. A true
+ * outsider, who reaches nothing here, still gets 403.
  */
 orgs.get("/:orgId/assignments/mine", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null) return c.json({ error: "not an org member" }, 403)
+  if (role != null) {
+    const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
+    return c.json({ assignments })
+  }
+
+  const live = await c.env.AQUILLA_PG.prepare(
+    "SELECT id FROM projects WHERE org_id = ? AND archived_at IS NULL",
+  )
+    .bind(orgId)
+    .all<{ id: string }>()
+  const liveIds = (live.results ?? []).map((r) => r.id)
+  if (liveIds.length === 0) return c.json({ error: "not an org member" }, 403)
+  const projectRoles = await resolveProjectRoles(c.env, user, liveIds)
+  const reachable = new Set(liveIds.filter((id) => projectRoles.get(id) != null))
+  if (reachable.size === 0) return c.json({ error: "not an org member" }, 403)
+
   const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
-  return c.json({ assignments })
+  return c.json({ assignments: assignments.filter((a) => reachable.has(a.projectId)) })
 })
 
 /**
@@ -879,7 +909,7 @@ async function grantGroupMemberOne(
       // Aquilla account yet, which the bare "user not found" never said. The
       // project invite-by-email link is the path that reaches them.
       message: allowExternal
-        ? "no Aquilla account matches that username or email — send them a project invite instead"
+        ? "no Aquilla account matches that username or a verified email — send them a project invite instead"
         : "user not found",
     }
   }
@@ -911,6 +941,24 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+
+  // [Pen test] Authorization & access control (2026-11-17): a team's project
+  // attachments are capped at the attacher's own level (POST .../projects
+  // below), but membership was not — so an org Maintainer could add themselves,
+  // or anyone, to a team an Owner had attached at Owner and hold Owner on
+  // those projects. Joining a team is receiving its grants, so the same cap
+  // applies: nobody hands out a team role above their own.
+  const top = await c.env.AQUILLA_PG.prepare(
+    "SELECT MAX(role_level) AS top FROM group_project_grants WHERE group_id = ?",
+  )
+    .bind(groupId)
+    .first<{ top: number | null }>()
+  if (Number(top?.top ?? 0) > callerRole) {
+    return c.json(
+      { error: "this team holds a project role above yours — someone at that level has to add its members" },
+      403,
+    )
+  }
 
   const body = c.req.valid("json")
 

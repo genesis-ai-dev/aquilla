@@ -176,14 +176,26 @@ export function retainTranslationPairs<T extends { source: string; target: strin
 /**
  * Merge canonical retrieval with the local approved-cell fallback into one
  * bounded prompt pool. Retrieved examples win; local cells only fill unused
- * slots. Examples already present in the live request or immediate discourse
- * window are excluded, and source text is preserved in full.
+ * slots, and source text is preserved in full.
+ *
+ * Two different things are kept out, and they are kept out differently:
+ *
+ * - `excludedContext` — the immediate discourse window, matched by SOURCE
+ *   TEXT. Those pairs are already rendered in the prompt, so a second copy
+ *   teaches nothing.
+ * - `excludedCellIds` — the cells being drafted, matched by ID. A cell is never
+ *   an example for itself (a regenerate would just be handed its old answer),
+ *   but ANOTHER cell with the same source is the best example there is: it is
+ *   what the Examples panel shows as a 100% match. Matching the drafted cells
+ *   by text threw every one of those away, so a line the project had already
+ *   translated the same way several times was drafted without them.
  */
 export function selectApprovedExamples(
   retrieved: ValidatedPair[],
   fallback: ValidatedPair[],
   limit: number,
   excludedContext: { source: string }[] = [],
+  excludedCellIds: Iterable<string> = [],
 ): ValidatedPair[] {
   if (limit <= 0) return []
 
@@ -191,7 +203,8 @@ export function selectApprovedExamples(
     excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
   )
   const seenSources = new Set<string>()
-  const seenCellIds = new Set<string>()
+  // Seeded with the drafted cells, so they are skipped like any repeat.
+  const seenCellIds = new Set<string>(excludedCellIds)
   const selected: ValidatedPair[] = []
 
   for (const example of [...retrieved, ...fallback]) {

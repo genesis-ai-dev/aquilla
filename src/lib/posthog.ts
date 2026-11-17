@@ -26,8 +26,8 @@ const posthog = {
   reset: (): void => analyticsAccount.invalidate(),
   get_session_replay_url: (): string | undefined => current() ? loaded?.get_session_replay_url() : undefined,
   /** Capture this before asynchronous work; completion cannot cross accounts. */
-  scope: (expected = analyticsAccount.getSnapshot().generation, owner?: string) => {
-    const approved = analyticsAccount.eligible() && (owner === undefined || owner === analyticsAccount.getSnapshot().username)
+  scope: (expected = analyticsAccount.getSnapshot().generation, owner?: string, ownerKind: "username" | "storage" = "username") => {
+    const approved = analyticsAccount.eligible() && (owner === undefined || owner === (ownerKind === "storage" ? analyticsAccount.storageOwner() : analyticsAccount.getSnapshot().username))
     return {
       owner: analyticsAccount.getSnapshot().username,
       enabled: () => approved && current(expected),

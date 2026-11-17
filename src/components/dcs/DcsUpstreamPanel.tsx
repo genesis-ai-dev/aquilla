@@ -10,19 +10,15 @@
 //      compares its commitSha/ref against the cursor; if newer,
 //      client.compareRefs(cursor.ref, newRef) reports the changed-file count.
 //      Shows "vOLD → vNEW, N files changed".
-//   3. "Import changes" → build the currentCells map from the adapter project's
-//      source cells (fetchProjectFiles + fetchAllFileCells(side:"source")),
-//      computeDelta(), applyDelta() bound to the typed source emitters
-//      (source.cell.create / emitSourceCellCommit / emitSourceCellDelete), then
-//      persist the advanced cursor (buildCursor) back to project_settings.
+//   3. "Import changes" → the files changed between the two refs that this
+//      project holds each take ONE file revision (reviseDcsFiles, AQU-2459),
+//      then the advanced cursor (buildCursor) is persisted to project_settings.
 //
-// Reuse-not-rebuild: this panel ONLY produces source events into the adapter
-// project. Once a source head moves, downstream linked targets flag stale
+// Reuse-not-rebuild: this panel ONLY moves the adapter project's source side. Once a source head moves, downstream linked targets flag stale
 // automatically via the inherited AD-9 / linked-projects invalidation
 // (stale-source-read + UpstreamChangesPanel). We do not touch those here.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { v7 as uuidv7 } from "uuid"
 import { RefreshCw, DownloadCloud, CheckCircle2, AlertTriangle, Wrench, Unlink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -34,27 +30,14 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
-import { buildRawEvent } from "@/lib/sync/events-emit"
-import { bulkPostEvents } from "@/lib/sync/bulk-events"
-import type { CqrsRawEvent } from "@/lib/sync/outbox-types"
+import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import { ROLE } from "@/lib/sync/role-policy"
 import { DcsClient } from "@/lib/dcs/catalog"
-import { buildCurrentCells } from "@/lib/dcs/current-cells"
 import { readCursor, buildCursor, DCS_UPSTREAM_KEY } from "@/lib/dcs/cursor"
-import {
-  computeDelta,
-  computeRepairDelta,
-  applyDelta,
-  repairRevisionToken,
-  type CurrentCell,
-  type DeltaEmitters,
-  type DeltaResult,
-  type RepairDeltaResult,
-  type RepairScan,
-} from "@/lib/dcs/delta"
+import { reviseDcsFiles, type DcsRevisionCounts, type DcsScan } from "@/lib/dcs/revision"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-// Running a DCS delta writes source.cell.* events (role-policy floor is
+// A Door43 update writes source revisions (the route's floor is
 // PROJECT_LEAD 500); spec §11 puts the adapter's importer at MAINTAINER (600).
 // Gate the destructive "Import changes" action at 600 to match.
 const IMPORT_MIN_ROLE = ROLE.MAINTAINER
@@ -82,19 +65,19 @@ type ImportState =
 
 // Repair is a two-step flow (adversarial-review blocker): a read-only SCAN
 // that reports what would change, then an explicit CONFIRM before any source
-// event is emitted. `scanned` carries everything the apply step needs so the
-// delta is computed exactly once and what the user confirmed is what runs.
+// revision is written. The scan is a dry run of the same revisions the apply
+// posts, against the same pinned ref; the apply re-checks that pin first.
 type RepairState =
   | { kind: "idle" }
   | { kind: "scanning" }
   | {
       kind: "scanned"
       entry: DcsCatalogEntry
-      currentCells: Map<string, CurrentCell>
-      delta: RepairDeltaResult
+      counts: DcsRevisionCounts
+      scan: DcsScan
     }
   | { kind: "applying" }
-  | { kind: "done"; repaired: number; scan: RepairScan }
+  | { kind: "done"; repaired: number; scan: DcsScan }
   | { kind: "error"; message: string }
 
 type DetachState =
@@ -121,7 +104,7 @@ function RepairDoneMessage({
   state,
   t,
 }: {
-  state: { repaired: number; scan: RepairScan }
+  state: { repaired: number; scan: DcsScan }
   t: ReturnType<typeof useT>
 }) {
   const { repaired, scan } = state
@@ -165,7 +148,6 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const author = session?.username ?? "local"
 
   const { settings, patch, refresh } = useProjectSettings(projectId, roleLevel)
   const cursor = useMemo(
@@ -176,8 +158,8 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
   // persisted front-matter opt-out, so every later re-parse — update delta AND
   // repair scan — has to use the SAME option. Re-parsing without it produces
   // book-name/header/TOC/title/intro cells this adapter deliberately never
-  // imported; they are absent from currentCells, so the delta classifies each as
-  // a CREATE and the next Door43 sync silently undoes the opt-out.
+  // imported; they are absent from the file's head, so the revision inserts
+  // each one and the next Door43 sync silently undoes the opt-out.
   const excludeFrontMatter = settings.importExcludeFrontMatter ?? false
 
   const dcs = useMemo(() => client ?? new DcsClient(), [client])
@@ -234,119 +216,14 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     }
   }, [cursor, dcs])
 
-  // Shared apply path: bind the classified delta to envelope builders and run
-  // applyDelta, then commit the whole batch through the bulk front door. Both
-  // "Import changes" (upstream advance) and "Re-sync content" (same-ref repair)
-  // apply through this identical wiring so chunking, idempotent event ids, and
-  // fileId resolution never diverge.
-  //
-  // AQU-1860: the emitters BUILD envelopes into a buffer rather than writing an
-  // outbox row each. The per-event path cost one IndexedDB transaction per
-  // changed cell and then uploaded them at MAX_BATCH (100) events per POST for
-  // one file at a time behind the flusher's 5 s tick, so a release touching
-  // several thousand verses trickled in. applyDelta still owns the
-  // deterministic, project-scoped event ids and the create's parsed fileId, so
-  // what lands is identical to what the outbox enqueued — only the transport
-  // changed. The trade is the outbox's durability: a failed commit is not
-  // retried in the background, so the panel surfaces the error and the user
-  // re-runs the action (deterministic ids make that a server-side no-op for
-  // everything that already landed).
-  const runApply = useCallback(
-    async (
-      delta: DeltaResult,
-      currentCells: Map<string, CurrentCell>,
-      ctx: { repo: string; sha: string },
-    ) => {
-      const fileIdByCellId = new Map<string, string>()
-      for (const [cellId, cur] of currentCells) fileIdByCellId.set(cellId, cur.fileId)
-
-      const pending: CqrsRawEvent[] = []
-      const emitters: DeltaEmitters = {
-        // A new cell has no existing projection row, so its fileId comes from
-        // the parsed DcsFile via the delta (CreateArg.fileId) — NOT from
-        // currentCells (which would miss and fall back to a phantom id).
-        create: async ({ eventId, cell, fileId }) => {
-          pending.push(
-            buildRawEvent({
-              kind: "source.cell.create",
-              projectId,
-              fileId,
-              cellId: cell.cellId,
-              parentId: null,
-              author,
-              id: eventId,
-              payload: {
-                cellId: cell.cellId,
-                anchorCellId: null,
-                value: cell.value,
-                ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
-                ...(cell.type !== undefined ? { type: cell.type } : {}),
-                ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
-                ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
-                ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
-              },
-            }) as CqrsRawEvent,
-          )
-          return eventId
-        },
-        commit: async ({ eventId, parentEventId, cell }) => {
-          const fileId = fileIdByCellId.get(cell.cellId) ?? cell.cellId
-          pending.push(
-            buildRawEvent({
-              kind: "source.cell.commit",
-              projectId,
-              fileId,
-              cellId: cell.cellId,
-              parentId: parentEventId,
-              author,
-              id: eventId,
-              payload: {
-                value: cell.value,
-                ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
-              },
-            }) as CqrsRawEvent,
-          )
-          return eventId
-        },
-        delete: async ({ cellId }) => {
-          const fileId = fileIdByCellId.get(cellId) ?? cellId
-          // Fresh UUIDv7, no parentId — exactly the envelope
-          // emitSourceCellDelete minted here before. A re-run of the same delta
-          // therefore logs a second (harmless) tombstone, as it always has;
-          // within one run the retried chunk carries these same ids, so the
-          // server's INSERT OR IGNORE dedupes it.
-          const id = uuidv7()
-          pending.push(
-            buildRawEvent({
-              kind: "source.cell.delete",
-              projectId,
-              fileId,
-              cellId,
-              parentId: null,
-              author,
-              id,
-              payload: {},
-            }) as CqrsRawEvent,
-          )
-          return id
-        },
-      }
-
-      await applyDelta(delta, emitters, { projectId, repo: ctx.repo, sha: ctx.sha })
-
-      const outcome = await bulkPostEvents({ events: pending, getToken })
-      // `rejected` is a per-event refusal inside a 200 (role, scope,
-      // validation); `stale` is a chain-mutating event the server logged but did
-      // not project because its parent was no longer the cell's head. Either way
-      // part of the delta did not land, so this must not read as success — the
-      // old path surfaced the same outcome through the outbox's dead-letter.
-      const notApplied = outcome.rejected.length + outcome.stale.length
-      if (notApplied > 0) {
-        throw new Error(t("importExport.dcs.notAppliedError", { count: notApplied }))
-      }
-    },
-    [projectId, author, getToken, t],
-  )
+  // The files this project holds. A Door43 update only ever touches these: a
+  // project that imported one book ignores the rest of a whole-repo release.
+  const heldFileIds = useCallback(async (): Promise<Set<string>> => {
+    const token = await getToken("__dcs_list__")
+    if (!token) throw new Error(t("importExport.dcs.syncTokenError"))
+    const files = await fetchProjectFiles(projectId, token)
+    return new Set(files.filter((f) => !f.deletedAt).map((f) => f.fileId))
+  }, [projectId, getToken, t])
 
   const handleImport = useCallback(async () => {
     if (!cursor || busyRef.current) return
@@ -356,36 +233,23 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     setImportState({ kind: "importing" })
     const newEntry = check.latest
     try {
-      // 1. Resolve the OLD catalog entry the cursor points at — computeDelta
-      //    needs both entries (its refType picks the raw-fetch kind).
+      // 1. Which files changed between the pinned ref and the new one.
+      //    compareRefs THROWS on a throttled/empty compare body, so a broken
+      //    upstream surfaces as "try again" instead of importing nothing.
       const oldEntry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
+      const compare = await dcs.compareRefs(newEntry.owner, newEntry.name, oldEntry.ref, newEntry.ref)
 
-      // 2. Build the adapter project's CURRENT source cells from the projection.
-      //    fetchProjectFiles → fetchAllFileCells(side:"source"), hashing each
-      //    cell's value with the SAME djb2 the server + delta engine use so
-      //    unchanged cells are suppressed. Keyed by cellId; carries the chain
-      //    head eventId (the parent for a commit) and the owning fileId (deletes
-      //    are scoped by file).
-      const currentCells = await buildCurrentCells({
-        projectId,
-        getToken,
-        tokenErrorMessage: t("importExport.dcs.syncTokenError"),
-      })
-
-      // 3. Compute + apply the delta through the typed source emitters.
-      const delta = await computeDelta({
+      // 2. One revision per changed file this project holds. The server aligns
+      //    each against the file's head, so nothing here reads the project's
+      //    source cells.
+      const delta = await reviseDcsFiles({
         client: dcs,
         projectId,
-        cursor,
-        oldEntry,
-        newEntry,
-        currentCells,
+        entry: newEntry,
+        heldFileIds: await heldFileIds(),
+        paths: compare.changedFiles,
         excludeFrontMatter,
-      })
-
-      await runApply(delta, currentCells, {
-        repo: newEntry.fullName,
-        sha: newEntry.commitSha,
+        getToken,
       })
 
       // 4. Advance + persist the cursor so a subsequent "Check for updates"
@@ -395,9 +259,9 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
 
       setImportState({
         kind: "done",
-        created: delta.creates.length,
-        updated: delta.commits.length,
-        removed: delta.deletes.length,
+        created: delta.created,
+        updated: delta.updated,
+        removed: delta.removed,
       })
       // Reflect the advanced pin: nothing more to import.
       setCheck({ kind: "up-to-date", latest: newEntry })
@@ -406,17 +270,18 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     } finally {
       busyRef.current = false
     }
-  }, [cursor, check, canImport, dcs, projectId, getToken, runApply, patch, excludeFrontMatter, t])
+  }, [cursor, check, canImport, dcs, projectId, getToken, heldFileIds, patch, excludeFrontMatter])
 
   // Repair: re-read the source at the PINNED ref with today's parser and fix any
   // cells that were imported incorrectly (e.g. by a since-fixed parser bug).
   // Upstream didn't change, so "Check for updates" can never surface these — this
-  // is the recovery path. Applies through the SAME runApply wiring; the cursor is
-  // NOT advanced (the pin is unchanged).
+  // is the recovery path. Posts the same revisions an update does, told to
+  // align even though each head already names this artifact; the cursor is NOT
+  // advanced (the pin is unchanged).
   //
   // Two steps (adversarial-review blocker): repair deletes are tombstones that
   // hide any translations attached to the removed cells, so a one-click apply
-  // could destroy work. Step 1 SCANS (no events) and reports counts; step 2
+  // could destroy work. Step 1 SCANS (a dry run) and reports counts; step 2
   // applies only after an explicit ConfirmActionDialog confirm.
   const handleRepairScan = useCallback(async () => {
     if (!cursor || busyRef.current) return
@@ -425,19 +290,17 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     setRepairState({ kind: "scanning" })
     try {
       const entry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
-      const currentCells = await buildCurrentCells({
-        projectId,
-        getToken,
-        tokenErrorMessage: t("importExport.dcs.syncTokenError"),
-      })
-      const delta = await computeRepairDelta({
+      const delta = await reviseDcsFiles({
         client: dcs,
         projectId,
         entry,
-        currentCells,
+        heldFileIds: await heldFileIds(),
         excludeFrontMatter,
+        repair: true,
+        dryRun: true,
+        getToken,
       })
-      const total = delta.creates.length + delta.commits.length + delta.deletes.length
+      const total = delta.created + delta.updated + delta.removed
       if (total === 0) {
         // Zero ops — report and stop; no confirm, no events. AQU-1896: carry
         // the scan through, because zero ops is only "nothing diverges" when
@@ -447,28 +310,33 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         setRepairState({ kind: "done", repaired: 0, scan: delta.scan })
         return
       }
-      setRepairState({ kind: "scanned", entry, currentCells, delta })
+      setRepairState({
+        kind: "scanned",
+        entry,
+        counts: { created: delta.created, updated: delta.updated, removed: delta.removed },
+        scan: delta.scan,
+      })
       setRepairConfirmOpen(true)
     } catch (err) {
       setRepairState({ kind: "error", message: err instanceof Error ? err.message : String(err) })
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, dcs, projectId, getToken, excludeFrontMatter, t])
+  }, [cursor, canImport, dcs, projectId, getToken, heldFileIds, excludeFrontMatter])
 
   const handleRepairApply = useCallback(async () => {
     if (!cursor || busyRef.current) return
     if (!canImport) return
     if (repairState.kind !== "scanned") return
-    const { entry, currentCells, delta } = repairState
+    const { entry } = repairState
     busyRef.current = true
     setRepairState({ kind: "applying" })
     try {
       // Between confirm and apply another tab may have detached the project or
       // imported a newer release. Re-read the settings cursor from the server
-      // and ABORT unless it still pins the exact revision we scanned — applying
-      // a stale delta would tombstone cells that no longer diverge (or write
-      // into a detached project).
+      // and ABORT unless it still pins the exact revision we scanned — the
+      // counts the user confirmed were for that pin (and a detached project
+      // must not be written into).
       const fresh = await refresh()
       const freshCursor = fresh ? readCursor(fresh.settings as Record<string, unknown>) : null
       if (!freshCursor || freshCursor.commitSha !== cursor.commitSha) {
@@ -478,24 +346,26 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
         })
         return
       }
-      await runApply(delta, currentCells, {
-        repo: entry.fullName,
-        // NOT the bare pinned sha — the original import already minted event ids
-        // at that revision, and reusing them would make the server silently drop
-        // every repair commit. See repairRevisionToken.
-        sha: repairRevisionToken(entry.commitSha, delta),
+      const applied = await reviseDcsFiles({
+        client: dcs,
+        projectId,
+        entry,
+        heldFileIds: await heldFileIds(),
+        excludeFrontMatter,
+        repair: true,
+        getToken,
       })
       setRepairState({
         kind: "done",
-        repaired: delta.creates.length + delta.commits.length + delta.deletes.length,
-        scan: delta.scan,
+        repaired: applied.created + applied.updated + applied.removed,
+        scan: applied.scan,
       })
     } catch (err) {
       setRepairState({ kind: "error", message: err instanceof Error ? err.message : String(err) })
     } finally {
       busyRef.current = false
     }
-  }, [cursor, canImport, repairState, refresh, runApply, t])
+  }, [cursor, canImport, repairState, refresh, dcs, projectId, heldFileIds, excludeFrontMatter, getToken, t])
 
   // Detach: the ONLY sanctioned way out of the DCS lockdown. Persist the
   // settings with the dcsUpstream key REMOVED. patch() merges shallowly (the
@@ -655,15 +525,15 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
               <div className="space-y-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
                 <p className="font-medium text-amber-900 dark:text-amber-100">
                   {t("importExport.dcs.resyncScanSummary", {
-                    repair: repairState.delta.commits.length,
-                    created: repairState.delta.creates.length,
-                    removed: repairState.delta.deletes.length,
+                    repair: repairState.counts.updated,
+                    created: repairState.counts.created,
+                    removed: repairState.counts.removed,
                   })}
                 </p>
-                {repairState.delta.deletes.length > 0 && (
+                {repairState.counts.removed > 0 && (
                   <p className="text-amber-800 dark:text-amber-200">
                     {t("importExport.dcs.resyncRemovalWarning", {
-                      count: repairState.delta.deletes.length,
+                      count: repairState.counts.removed,
                     })}
                   </p>
                 )}
@@ -682,10 +552,10 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
                   onOpenChange={setRepairConfirmOpen}
                   title={t("importExport.dcs.applyResyncConfirmTitle")}
                   description={`${t("importExport.dcs.applyResyncConfirmRepairs", {
-                    count: repairState.delta.commits.length,
-                    created: repairState.delta.creates.length,
+                    count: repairState.counts.updated,
+                    created: repairState.counts.created,
                   })} ${t("importExport.dcs.applyResyncConfirmRemovals", {
-                    count: repairState.delta.deletes.length,
+                    count: repairState.counts.removed,
                   })}`}
                   confirmLabel={t("importExport.dcs.applyResyncConfirmLabel")}
                   checkboxLabel={t("importExport.dcs.applyResyncCheckbox")}

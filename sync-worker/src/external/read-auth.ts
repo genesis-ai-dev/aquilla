@@ -15,6 +15,19 @@
 //      required) — never trusts a role baked into the credential itself.
 //
 // Nothing here is new behavior beyond that — it is read-routes.ts's gate, moved.
+//
+// AQU-2504 adds one fallback to step 3: when the live role resolves to nothing,
+// a credential carrying live SUPPORT ACCESS (a platform admin inside their
+// time-boxed window — see db/shared/api-credentials.ts) resolves to owner-level
+// on the `platform` path instead of being refused, and the access is written to
+// `admin_audit_log`. It is a FALLBACK, not an override: an operator who is a
+// genuine member of the project resolves on their genuine grant, keeps that
+// attribution, and is not audited, because reading your own org through the
+// connector is ordinary use. Steps 1 and 2 are untouched — support access never
+// widens the credential's own org/project scope.
+//
+// The rule, the ordering and the audit live in ./support-access.ts, shared with
+// the WRITE paths since the writes half landed.
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
@@ -25,6 +38,7 @@ import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lane
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
 import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { claimSupportAccess, PLATFORM_ROLE_LEVEL } from "./support-access"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
@@ -70,17 +84,31 @@ export async function authenticateCredential(
   return { ok: true, credential }
 }
 
+// AQU-2504: `claimSupportAccess` and `PLATFORM_ROLE_LEVEL` moved to
+// ./support-access.ts when the writes half landed, so the read gate and the
+// write paths decide support access in one place. Re-exported because callers
+// that resolve the project role themselves import them from here (mcp-handlers'
+// `get_project`, and the AQU-2504 tests).
+export { claimSupportAccess, PLATFORM_ROLE_LEVEL } from "./support-access"
+
 export interface AuthedContext {
   credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
+  /** AQU-2504: true when the ONLY thing granting this project was support
+   *  access — i.e. the caller has no genuine grant here. Says the access was
+   *  cross-tenant, which is what the audit trail records, and (on the write
+   *  paths) what the event's provenance is stamped with. */
+  viaSupportAccess?: boolean
 }
 
 export async function authenticateAndScope(
   request: Request,
   env: ExternalReadsEnv,
   projectId: string,
+  /** AQU-2504: the tool or route asking, for the support-access audit row. */
+  tool?: string,
 ): Promise<{ ok: true; ctx: AuthedContext } | { ok: false; response: Response }> {
   if (!env.SYNC_SECRET_KEY) {
     return { ok: false, response: new Response("SYNC_SECRET_KEY not configured", { status: 500 }) }
@@ -92,7 +120,12 @@ export async function authenticateAndScope(
   const credentialed = await authenticateCredential(request, env)
   if (!credentialed.ok) return credentialed
 
-  return scopeCredentialToProject(env, credentialed.credential, projectId)
+  return scopeCredentialToProject(
+    env,
+    credentialed.credential,
+    projectId,
+    tool ?? `${request.method} ${new URL(request.url).pathname}`,
+  )
 }
 
 /**
@@ -106,6 +139,8 @@ export async function scopeCredentialToProject(
   env: ExternalReadsEnv,
   credential: ApiCredentialContext,
   projectId: string,
+  /** AQU-2504: the tool or route asking, for the support-access audit row. */
+  tool = "external read",
 ): Promise<{ ok: true; ctx: AuthedContext } | { ok: false; response: Response }> {
   if (!env.AQUILLA_PG) {
     return { ok: false, response: new Response("AQUILLA_PG binding not configured", { status: 500 }) }
@@ -134,11 +169,15 @@ export async function scopeCredentialToProject(
 
   const resolved = await resolveProjectRoleShared(env.AQUILLA_PG, { id: credential.userId }, projectId)
   const role = resolved?.level ?? null
-  if (role === null || role < ROLE.VIEWER) {
-    return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
+  if (role !== null && role >= ROLE.VIEWER) {
+    return { ok: true, ctx: { credential, role } }
   }
 
-  return { ok: true, ctx: { credential, role } }
+  if (await claimSupportAccess(env.AQUILLA_PG, credential, projectId, tool, projectOrgId)) {
+    return { ok: true, ctx: { credential, role: PLATFORM_ROLE_LEVEL, viaSupportAccess: true } }
+  }
+
+  return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
 }
 
 /** Mint a short-lived (30s) internal sync-token JWT so we can call the

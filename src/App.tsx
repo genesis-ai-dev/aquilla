@@ -10,6 +10,7 @@ import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
+import { GoogleLoginReturn } from "@/pages/GoogleLoginReturn"
 import { Login } from "@/pages/Login"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
@@ -29,6 +30,9 @@ import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
 import { HotBundleBoot } from "@/components/HotBundleBoot"
+import { TitlebarDragStrip } from "@/components/TitlebarDragStrip"
+import { useHoldAppFrame } from "@/hooks/useAppFrame"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
@@ -248,9 +252,10 @@ function GlobalAudioShortcuts() {
 function SyncFreezeOverlay() {
   const t = useT()
   const { syncing } = useSyncing()
+  const titlebarDrag = useTopBannerDrag()
   if (!syncing) return null
   return (
-    <div className="fixed top-0 left-0 right-0 z-40 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
+    <div {...titlebarDrag} className="fixed top-0 left-0 right-0 z-40 mac-titlebar-clear bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
       {t("workspace.syncFreezeOverlay")}
     </div>
   )
@@ -330,8 +335,18 @@ function AppEntry() {
   return <Navigate to={resumeOrgPath()} replace />
 }
 
-/** Fallback used while lazy route chunks are loading (e.g. the workspace). */
+/** Full-screen loader for page states that are not a chunk load (session gating). */
 function RouteLoadingFallback() {
+  return <LoadingOverlay />
+}
+
+/**
+ * Suspense fallback while a lazy route chunk loads (e.g. the workspace). It
+ * sits between two AppShell routes, so it keeps the app frame up. Only for
+ * Suspense: AppEntry's gating states can last indefinitely and must not hold.
+ */
+function SuspenseRouteFallback() {
+  useHoldAppFrame()
   return <LoadingOverlay />
 }
 
@@ -348,7 +363,7 @@ function RedirectToExtensions() {
   return <Navigate to={`/project/${id}/extensions${toolId ? `/${toolId}` : ""}`} replace />
 }
 
-function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
+function LazyRoute({ children, fallback = <SuspenseRouteFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
   return <Suspense fallback={fallback}>{children}</Suspense>
 }
 
@@ -408,6 +423,7 @@ export default function App() {
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
           <HotBundleBoot />
+          <TitlebarDragStrip />
           <NewerOfflineDataNotice />
           <OfflineProjectAccessWatch />
           <OfflineRefusedWritesNotice />
@@ -458,7 +474,7 @@ function AppRoutes() {
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay
           remains observable. Org lazy routes catch suspension locally below. */}
-      <Suspense fallback={<RouteLoadingFallback />}>
+      <Suspense fallback={<SuspenseRouteFallback />}>
         <Routes location={backgroundLocation ?? location}>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
@@ -484,6 +500,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<Signup />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/auth/google/return" element={<GoogleLoginReturn />} />
         <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — public, no auth required */}
         <Route path="/reset-password" element={<ResetPassword />} />

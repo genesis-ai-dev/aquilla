@@ -88,22 +88,49 @@ export type AcceptFailReason =
 
 export type AcceptResult<T> =
   | { ok: true; data: T }
-  | { ok: false; reason: AcceptFailReason }
+  | {
+      ok: false
+      reason: AcceptFailReason
+      /**
+       * AQU-2576: on `wrong_email`, the address the invite was minted for,
+       * with its local part masked by the server (`n…a@proton.me`). Absent
+       * when the server predates the field or the refusal was something else.
+       * Display only — never compared against anything.
+       */
+      invitedEmail?: string
+    }
+
+interface AcceptFailure {
+  reason: AcceptFailReason
+  invitedEmail?: string
+}
 
 /** Classify a non-2xx accept response into an AcceptFailReason. */
-async function classifyAcceptFailure(res: Response): Promise<AcceptFailReason> {
-  if (res.status === 401) return "unauthorized"
-  if (res.status === 403) return "wrong_email"
-  if (res.status === 404) return "invalid"
+async function classifyAcceptFailure(res: Response): Promise<AcceptFailure> {
+  if (res.status === 401) return { reason: "unauthorized" }
+  if (res.status === 403) {
+    // AQU-2576: a mismatch now names the invited address (masked). Read it
+    // when it's there; an older server just 403s with a bare message, and the
+    // screen falls back to the generic sentence.
+    try {
+      const body = (await res.json()) as { invitedEmail?: unknown }
+      return typeof body.invitedEmail === "string" && body.invitedEmail.length > 0
+        ? { reason: "wrong_email", invitedEmail: body.invitedEmail }
+        : { reason: "wrong_email" }
+    } catch {
+      return { reason: "wrong_email" }
+    }
+  }
+  if (res.status === 404) return { reason: "invalid" }
   if (res.status === 410) {
     try {
       const body = (await res.json()) as { code?: string }
-      return body.code === "time_expired" ? "time_expired" : "used"
+      return { reason: body.code === "time_expired" ? "time_expired" : "used" }
     } catch {
-      return "used"
+      return { reason: "used" }
     }
   }
-  return "server"
+  return { reason: "server" }
 }
 
 export interface ServerInviteCreated {
@@ -271,9 +298,9 @@ export async function acceptServerInvite(
       body: JSON.stringify({ token }),
     })
     if (!res.ok) {
-      const reason = await classifyAcceptFailure(res)
-      console.warn(`[invites] acceptServerInvite → HTTP ${res.status} (${reason})`)
-      return { ok: false, reason }
+      const failure = await classifyAcceptFailure(res)
+      console.warn(`[invites] acceptServerInvite → HTTP ${res.status} (${failure.reason})`)
+      return { ok: false, ...failure }
     }
     return { ok: true, data: (await res.json()) as ServerInviteAccepted }
   } catch (err) {
@@ -465,9 +492,9 @@ export async function acceptMultiInvite(
       },
     })
     if (!res.ok) {
-      const reason = await classifyAcceptFailure(res)
-      console.warn(`[invites] acceptMultiInvite → HTTP ${res.status} (${reason})`)
-      return { ok: false, reason }
+      const failure = await classifyAcceptFailure(res)
+      console.warn(`[invites] acceptMultiInvite → HTTP ${res.status} (${failure.reason})`)
+      return { ok: false, ...failure }
     }
     return { ok: true, data: (await res.json()) as MultiInviteAccepted }
   } catch (err) {

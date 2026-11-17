@@ -139,3 +139,60 @@ describe("OAuth consent for the pre-registered Zapier client", () => {
     expect(screen.getByText(/Mode only applies/)).toBeInTheDocument()
   })
 })
+
+// AQU-2504 — the platform-admin support-access option. It is offered only when
+// the server says so, and it REPLACES the org picker rather than adding to it,
+// so the page must not send an org selection alongside it.
+describe("support access (AQU-2504)", () => {
+  const withSupport = { ...described, supportAccessAvailable: true }
+
+  it("is absent for an ordinary user, who still has to choose organizations", async () => {
+    mount()
+    expect(await screen.findByRole("button", { name: "Allow access" })).toBeDisabled()
+    expect(screen.queryByRole("checkbox", { name: /Connect for support work/ })).not.toBeInTheDocument()
+  })
+
+  it("grants every organization with no selection, and sends support_access instead of org_ids", async () => {
+    api.mockReset()
+    api.mockResolvedValueOnce({ ok: true, data: withSupport })
+    mount()
+    const allow = await screen.findByRole("button", { name: "Allow access" })
+    // Without the toggle this consent still needs an org, exactly as before.
+    expect(allow).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Connect for support work/ }))
+    // The grant is every org, so there is nothing left to pick — and the picker
+    // says so rather than sitting there empty and enabled.
+    expect(allow).toBeEnabled()
+    expect(screen.getByText(/covers every organization/)).toBeInTheDocument()
+    // The maintainer-scope hint describes the picker, so it goes with it —
+    // leaving it up beside "every organization" would contradict the grant.
+    expect(screen.queryByText(/maintainer access or higher/)).not.toBeInTheDocument()
+    // The org checkboxes are gone, not merely disabled: leaving a stale
+    // selection on screen beside "every organization" would misdescribe the grant.
+    expect(screen.queryByRole("checkbox", { name: "Come and See" })).not.toBeInTheDocument()
+
+    api.mockResolvedValueOnce({ ok: true, data: { redirect: "https://chatgpt.com/cb?code=c" } })
+    fireEvent.click(allow)
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", {
+      ...PARAMS, approve: true, support_access: true,
+    }))
+  })
+
+  it("falls back to the org picker when the toggle is turned off again", async () => {
+    api.mockReset()
+    api.mockResolvedValueOnce({ ok: true, data: withSupport })
+    mount()
+    const toggle = await screen.findByRole("checkbox", { name: /Connect for support work/ })
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    const allow = screen.getByRole("button", { name: "Allow access" })
+    expect(allow).toBeDisabled()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Second org" }))
+    api.mockResolvedValueOnce({ ok: true, data: { redirect: "https://chatgpt.com/cb?code=c" } })
+    fireEvent.click(allow)
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", {
+      ...PARAMS, approve: true, org_ids: ["2"],
+    }))
+  })
+})

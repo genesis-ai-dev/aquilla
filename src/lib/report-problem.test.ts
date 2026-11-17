@@ -23,7 +23,8 @@ import {
 
 const baseContext = { route: "/project/proj-1/editor/file/file-2", projectId: "proj-1", fileId: "file-2" }
 const basePayload: ReportProblemPayload = {
-  description: "Something broke",
+  whatHappened: "Something broke",
+  tryingTo: "Save a chapter",
   context: baseContext,
 }
 
@@ -42,6 +43,9 @@ describe("captureReportProblem", () => {
       REPORT_PROBLEM_EVENT,
       expect.objectContaining({
         description: "Something broke",
+        what_happened: "Something broke",
+        trying_to: "Save a chapter",
+        expected: null,
         route: baseContext.route,
         project_id: "proj-1",
         file_id: "file-2",
@@ -94,11 +98,14 @@ describe("buildReportText", () => {
     expect(text).toContain("Route: /project/proj-1/editor/file/file-2")
     expect(text).toContain("Project: proj-1")
     expect(text).toContain("File: file-2")
-    expect(text).toContain("Something broke")
+    expect(text).toContain("What happened?\nSomething broke")
+    expect(text).toContain("What were you trying to do?\nSave a chapter")
+    // An unanswered question gets no heading.
+    expect(text).not.toContain("What did you expect to happen?")
   })
 
   it("omits project/file lines when not present", () => {
-    const text = buildReportText({ description: "bug", context: { route: "/dashboard" } })
+    const text = buildReportText({ whatHappened: "bug", context: { route: "/dashboard" } })
     expect(text).not.toContain("Project:")
     expect(text).not.toContain("File:")
     expect(text).toContain("Route: /dashboard")

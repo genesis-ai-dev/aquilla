@@ -26,10 +26,21 @@ export function deploymentExpectation(surface, environment) {
     surface,
     environment,
     directory: resolve(REPO_ROOT, surfaceConfig.directory),
+    // Feature configuration blocks promotion, but must not make the runtime
+    // environment guard reject every API route if one feature is unavailable.
+    plainText: {
+      ...environmentConfig.plainText,
+      ...(environmentConfig.deploymentOnlyPlainText ?? {}),
+    },
     requiredSecrets: [
       ...surfaceConfig.requiredSecrets,
       ...(environmentConfig.requiredSecrets ?? []),
     ],
-    requiredBindings: surfaceConfig.requiredBindings,
+    // An environment may require bindings the others must not have (AQU-2469:
+    // the dev access list KV exists on development only).
+    requiredBindings: {
+      ...surfaceConfig.requiredBindings,
+      ...(environmentConfig.requiredBindings ?? {}),
+    },
   }
 }

@@ -12,7 +12,7 @@ import { renderHook, act, waitFor } from "@testing-library/react"
 import { IDBFactory } from "fake-indexeddb"
 import { resetBridgeStoreForTests, bridgeStore } from "./store"
 import type { BridgeProject } from "./use-paratext-discovery"
-import type { ParatextSettings } from "./project"
+import { bridgeStateId, type ParatextSettings } from "./project"
 
 const USFM = "\\id MAT\n\\c 1\n\\v 1 In the beginning.\n\\v 2 Second verse.\n"
 
@@ -28,7 +28,7 @@ vi.mock("./tauri", () => ({
 import { useParatextBook } from "./use-paratext-book"
 
 const project: BridgeProject = {
-  path: "/pt/TPP1", folderName: "TPP1", guid: "guid-1", utf8: true, access: null,
+  path: "/pt/TPP1", folderName: "TPP1", guid: "guid-1", stateId: bridgeStateId("guid-1", "/pt/TPP1"), utf8: true, access: null,
   settings: {} as ParatextSettings, books: [{ code: "MAT", fileName: "41MATTPP1.SFM" }],
 }
 

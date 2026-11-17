@@ -14,13 +14,14 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
+import { preloadWorkspace, useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
@@ -47,6 +48,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
+import { readPortfolioRowSeed } from "@/lib/frontier/portfolio-seed"
 import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -414,7 +416,9 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
-  const [audio, setAudio] = useState<PortfolioProject | null>(null)
+  // The portfolio row the list this page was opened from was already showing.
+  // `loadRow` below still reads the org's portfolio and replaces it.
+  const [audio, setAudio] = useState<PortfolioProject | null>(() => readPortfolioRowSeed(jwt, id))
   const [files, setFiles] = useState<FileSummary[]>([])
   // fileId → display name for the autopilot panel, which knows runs by file id
   // only (its rollup comes from the run table, not the file list).
@@ -517,6 +521,9 @@ export function ProjectOverview() {
   // AQU-1171: the Members card starts collapsed on every mount. The open
   // state lives only in this render — a reload always returns to the header.
   const [membersOpen, setMembersOpen] = useState(false)
+  // AQU-2479: the Team-assignments empty state points at the Members card
+  // (the actual roster), so it opens it and brings it into view.
+  const membersCardRef = useRef<HTMLDivElement>(null)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -669,18 +676,17 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow, archivedSince])
 
-  // Only redirect when the user genuinely has no access to this project.
-  // `useProject` is server-verified per-project (not org-scoped): a
-  // project-only invitee (no org membership, or org mismatch) still resolves
-  // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
-  useEffect(() => {
-    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
-    // a missing project does — back to the dashboard.
-    if (status === "not-found" || status === "forbidden") {
-      navigate("/", { replace: true })
-    }
-  }, [status, navigate])
+  // AQU-2452: a refusal is SHOWN, never navigated away from. This used to
+  // replace the URL with "/" on 403/404, so an org member who opened a
+  // project they have no grant on watched the page start to load and then sit
+  // back on the dashboard with nothing said. The refusal now renders the same
+  // ProjectNoAccess screen the workspace shows (see `nonReadyContent`).
+  //
+  // A refusal is the only case that reaches it: `useProject` is
+  // server-verified per-project (not org-scoped), so a project-only invitee
+  // (no org membership, or an org mismatch) still resolves to "ready" when
+  // they hold a direct grant. Redirecting on org mismatch alone (pre-AQU-474
+  // behavior) sent guests right back to "/".
 
   // Load per-project assignment roster for the Team card (maintainer+)
   // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
@@ -1206,6 +1212,7 @@ export function ProjectOverview() {
       const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
       let cellId: string | null = null
       if (wanted) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
@@ -1249,6 +1256,7 @@ export function ProjectOverview() {
       if (!id) return
       let cellId: string | null = null
       if (unit.sectionKey && getPlanToken) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
@@ -1803,6 +1811,9 @@ export function ProjectOverview() {
           {t("common.retry")}
         </Button>
       </div>
+    ) : status === "forbidden" || status === "not-found" ? (
+      // AQU-2452: one message for every refusal, the workspace's screen.
+      <ProjectNoAccess />
     ) : null
 
   return (
@@ -2780,7 +2791,11 @@ export function ProjectOverview() {
                           {teamOpen
                             ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
                             : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
-                          {t("editor.navTitle.team")}
+                          {/* AQU-2479: "Team assignments", not "Team" — this card
+                              lists open assignments, never the project's roster.
+                              A project can have a full team through an attached
+                              team and still have nothing assigned. */}
+                          {t("org.projectOverview.teamAssignmentsTitle")}
                         </button>
                       </h2>
                       <SectionVisibilityBadge
@@ -2876,7 +2891,34 @@ export function ProjectOverview() {
                     {teamOpen && (
                       <div id="overview-team-panel">
                         {workload.length === 0 && validations.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                          /* AQU-2479: an empty assignment list must not read as
+                             "this project has no team" — access can come from an
+                             attached team with nothing assigned yet. So point at
+                             the Members card, which is the roster. The pointer is
+                             gated on canManage because that is what renders the
+                             Members card below. */
+                          <div className="space-y-1.5" data-testid="overview-team-empty">
+                            <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                            {canManage && (
+                              <button
+                                type="button"
+                                data-testid="overview-team-empty-members"
+                                className="rounded-sm text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                                onClick={() => {
+                                  setMembersOpen(true)
+                                  // Same reduced-motion courtesy as the
+                                  // settings deep-link scroll (useSettingHighlight).
+                                  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+                                  membersCardRef.current?.scrollIntoView?.({
+                                    block: "nearest",
+                                    behavior: reduceMotion ? "auto" : "smooth",
+                                  })
+                                }}
+                              >
+                                {t("org.projectOverview.noOpenAssignmentsMembersLink")}
+                              </button>
+                            )}
+                          </div>
                         ) : workload.length === 0 ? null : (
                           <ul className="space-y-2">
                             {workload.map((w) => {
@@ -2990,6 +3032,7 @@ export function ProjectOverview() {
                   ready={projectPolicy.ready}
                 >
                   <div
+                    ref={membersCardRef}
                     className={cn(
                       "relative rounded-lg border bg-card px-5",
                       membersOpen ? "py-5" : "py-3",

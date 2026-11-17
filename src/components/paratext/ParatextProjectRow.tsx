@@ -9,18 +9,19 @@ import type { BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery
 export const paratextProjectPath = (project: Pick<BridgeProject, "path">) =>
   `/paratext/project?${new URLSearchParams({ project: project.path }).toString()}`
 
-/** GUIDs of the projects already mirrored into Aquilla (this device's links). */
-export function useLinkedGuids(projects: readonly BridgeProject[]): Set<string> {
-  const [guids, setGuids] = useState<Set<string>>(new Set())
-  const key = projects.map((p) => p.guid).join("|")
+/** State ids of the project folders already mirrored into Aquilla (this
+ *  device's links). Per folder: a second copy of a mirrored project is not. */
+export function useLinkedProjects(projects: readonly BridgeProject[]): Set<string> {
+  const [ids, setIds] = useState<Set<string>>(new Set())
+  const key = projects.map((p) => p.stateId).join("|")
   useEffect(() => {
     let cancelled = false
-    void Promise.all(projects.map(async (p) => ((await bridgeStore.link(p.guid).catch(() => null)) ? p.guid : null)))
-      .then((found) => { if (!cancelled) setGuids(new Set(found.filter((g): g is string => !!g))) })
+    void Promise.all(projects.map(async (p) => ((await bridgeStore.link(p.stateId).catch(() => null)) ? p.stateId : null)))
+      .then((found) => { if (!cancelled) setIds(new Set(found.filter((g) => g !== null))) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
-  return guids
+  return ids
 }
 
 /** One Paratext project on this computer, as a row that opens its page. */

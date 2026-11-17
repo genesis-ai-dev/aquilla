@@ -14,7 +14,7 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.removeFolder": "Forget this folder",
     "paratextBridge.noProjects": "No Paratext projects found.",
     "paratextBridge.noProjectsHint":
-      "Paratext usually keeps them in “My Paratext 9 Projects”. If yours live somewhere else, add that folder.",
+      "Aquilla looks in the folders Paratext 9, Paratext 10 and Paratext Lite use by default. If yours live somewhere else, add that folder.",
     "paratextBridge.notDesktop": "The Paratext bridge needs the desktop app, which can read the project folder on this computer.",
     "paratextBridge.browser.title": "Work on your Paratext projects in Aquilla",
     "paratextBridge.browser.body":
@@ -50,7 +50,7 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.thisComputer.find": "Find Paratext projects on this computer",
     "paratextBridge.thisComputer.prep.title": "Before the first search",
     "paratextBridge.thisComputer.prep.body":
-      "Aquilla will read the Paratext project folder on this computer: the location Paratext's settings point to, the usual “My Paratext 9 Projects” folders, and any folder you linked above.",
+      "Aquilla will read the Paratext project folders on this computer: the location Paratext's settings point to, the default folders of Paratext 9, Paratext 10 and Paratext Lite, and any folder you linked above.",
     "paratextBridge.thisComputer.prep.permission":
       "Your computer may ask whether Aquilla can access these folders. Allow it, or the search finds nothing.",
     "paratextBridge.thisComputer.prep.private": "Nothing leaves this computer.",

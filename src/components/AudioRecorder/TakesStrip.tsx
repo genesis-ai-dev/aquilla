@@ -7,7 +7,7 @@
 
 import { STATION_PICKS } from "@/lib/station/picks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { recordStep } from "@/lib/history/history"
+import { recordStep, withGroup } from "@/lib/history/history"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -24,6 +24,8 @@ import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { findVoice } from "@/lib/audio/voices"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
@@ -33,6 +35,7 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { pieceStretchOf } from "@/lib/history/take-steps"
 import { originalRecordingId, pieceNames, splitTakeName, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
 import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
@@ -408,6 +411,18 @@ export function TakesStrip({
     const displaceRecording =
       slot === GENERATED_VOICE_SLOT &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
+    // AQU-2492 (review, Nov 9): what each slot held before, read PER SLOT. The
+    // take that sounded may sit in the other slot (a generated voice sounds
+    // while the recording slot holds the source clip), and naming it put it
+    // back in the wrong slot on Undo. A choice still in flight counts in its
+    // own slot.
+    const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+    const heldIn = (s: string): string | null => {
+      if (optimisticSelectedId && takes.find((t) => t.audioId === optimisticSelectedId)?.slot === s) return groupOf(optimisticSelectedId)
+      return groupOf(s === GENERATED_VOICE_SLOT ? selectedGeneratedAudioId : selectedAudioId)
+    }
+    const slotBefore = heldIn(slot)
+    const recordingBefore = heldIn(RECORDING_SLOT)
     try {
       const selectP = emitCellAudioSelect({
         projectId, fileId, cellId, audioId, slot, author,
@@ -415,14 +430,11 @@ export function TakesStrip({
       })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
-      // AQU-1767 phase 2: choosing a take is a step — unless it also handed the
-      // recording slot back (the default track's generated-voice juggle),
-      // which a one-slot undo could not put back honestly.
+      // AQU-1767 phase 2: choosing a take is a step.
       if (!displaceRecording) {
-        const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
         recordStep({
           kind: "take.select",
-          data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
+          data: { cellId, slot, before: slotBefore, after: groupOf(audioId)! },
           labelKey: "editor.history.stepChooseTake",
           fileId,
         })
@@ -435,6 +447,26 @@ export function TakesStrip({
         if (sourceClip) injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
         else injectOptimisticAudioDeselect(fileId, cellId, RECORDING_SLOT, displaceP)
         await displaceP
+        // AQU-2492 (review, Nov 9): the default track's generated-voice juggle
+        // (an AI voice chosen over a recording also hands the recording slot
+        // back) was no step at all, so ⌘Z after it undid something else. It is
+        // ONE step of the two slot choices: Undo gives the recording slot its
+        // recording back and the voice slot what it held, each only while its
+        // slot is still as this choice left it.
+        void withGroup({ labelKey: "editor.history.stepChooseTake", fileId }, async () => {
+          recordStep({
+            kind: "take.select",
+            data: { cellId, slot, before: slotBefore, after: groupOf(audioId)! },
+            labelKey: "editor.history.stepChooseTake",
+            fileId,
+          })
+          recordStep({
+            kind: "take.select",
+            data: { cellId, slot: RECORDING_SLOT, before: recordingBefore, after: sourceClip?.audioId ?? null },
+            labelKey: "editor.history.stepChooseTake",
+            fileId,
+          })
+        }, { owns: { cells: [cellId], kinds: ["take."] } })
       }
       notifyAudioAttachmentsChanged(fileId)
     } catch {
@@ -445,7 +477,7 @@ export function TakesStrip({
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
+  }, [optimisticSelectedId, activeTakeId, selectedAudioId, selectedGeneratedAudioId, sourceClip, takes, projectId, fileId, cellId, author, targetLang])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
@@ -457,9 +489,16 @@ export function TakesStrip({
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
       const playingNow = optimisticSelectedId ?? activeTakeId
       const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      const deleted = takes.find((t) => t.audioId === audioId)
       await removeTake({
         projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
-        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+        // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
+        // AQU-2492 (review, Nov 12): and where it sat in its take.
+        history: {
+          wasSelected: groupOf(playingNow) === groupOf(audioId),
+          approvedBy: takes.find((t) => t.audioId === audioId)?.validators ?? [],
+          ...(deleted ? { stretch: pieceStretchOf(audioId, deleted) } : {}),
+        },
       })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.
@@ -486,7 +525,7 @@ export function TakesStrip({
         takes.some((t) => t.audioId === playingNow && pieceGroupOf(t, t.audioId) === group)
       await removeWholeTake({
         projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}),
-        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT })),
+        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT, validators: p.validators ?? [] })),
         history: { wasSelected },
       })
       const gone = new Set(pieces.map((p) => p.audioId))
@@ -768,6 +807,16 @@ export function TakesStrip({
     // an added track's single slot holds both kinds. AQU-2235: the one rule
     // every surface that draws the sparkle asks.
     const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
+          // AQU-2510: WHICH VOICE made this take. Two takes generated minutes
+          // apart in two different voices were indistinguishable here — the
+          // row named the date and the author, and the sparkle said only "a
+          // machine", which is the half of the answer nobody needed. The take
+          // has carried its `voiceId` since AQU-1758; this says it.
+          //
+          // Nothing is shown when that voice has since been removed from the
+          // project (`findVoice` misses), for the same reason `takeVoiceNote`
+          // says nothing then: a bare id is not a name, and a guess is worse.
+          const takeVoice = isGenerated && !isPiece ? findVoice(project.ttsSettings, att.voiceId ?? undefined) : undefined
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
@@ -1017,6 +1066,21 @@ export function TakesStrip({
                         </span>
                       )
                     })()}
+                    {/* AQU-2510: the voice that made this take, beside when
+                        it was made. A generated take only — a recording is a
+                        person's, and the row already names them. Never on a
+                        split take's row either, and a generated take is never
+                        split, so this never competes with the Slice 3A fit
+                        measurement (which only runs on `isSplit` rows). */}
+                    {takeVoice && (
+                      <span
+                        data-testid={`take-voice-${att.audioId}`}
+                        className="inline-flex min-w-0 shrink items-center gap-1 text-[10px] text-muted-foreground/60"
+                      >
+                        <VoiceAvatar voice={takeVoice} size={12} />
+                        <span className="min-w-0 truncate">{takeVoice.name}</span>
+                      </span>
+                    )}
                     {/* AQU-464: this take speaks wording the line no longer
                         carries. Advisory, not an error — reviewing audio
                         against its own older text is the point.

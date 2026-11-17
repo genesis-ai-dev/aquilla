@@ -9,7 +9,7 @@ const PLACEHOLDERS: Record<string, string> = {
   lane: "The name of a target language of the project.",
   mb: "A file size in megabytes, a whole number.",
   limit: "The largest file size allowed, in megabytes.",
-  book: "The name of a Bible book, such as Genesis, or of a project file.",
+  book: "The name of a Bible book, such as Genesis, or a project file's own name in quotes, such as “chapter one”.",
   chapter: "A chapter number.",
   ref: "A verse reference such as 'Genesis 1:40'.",
   verse: "A verse number.",
@@ -30,6 +30,7 @@ const PLACEHOLDERS: Record<string, string> = {
   recordings: "A phrase with a count, such as '12 recordings'.",
   lines: "A phrase with a count, such as '12 lines'.",
   list: "A list of lines and how many takes each gets, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4'.",
+  word: "A word taken from the audio file's name, in whatever language the file was named in, such as 'mstari'. Keep it as it is.",
   explanation: "One sentence the AI assistant wrote about what each part of the file names means, in English, such as 'Mt is Matthew, then the chapter and the verse.'",
 }
 
@@ -85,6 +86,7 @@ const KEYS = {
     "recordingsUpload.pick.introFile": "Choose the recordings for {fileName}, or a folder of them. Each file finds its line by its name.",
     "recordingsUpload.pick.safe": "Nothing uploads until you've checked where each recording goes.",
     "recordingsUpload.pick.dragDrop": "Drag recordings or a folder here, or",
+    "recordingsUpload.pick.nothingFound": "No files were found there. Choose recordings, or a folder with recordings in it.",
     "recordingsUpload.pick.language": "They go into {language}, the language you're working in.",
     "recordingsUpload.pick.languageDefault": "They go into the language you're working in.",
     "recordingsUpload.pick.formats": "WAV, MP3, M4A, OGG, FLAC and other audio files a browser can play.",
@@ -101,7 +103,7 @@ const KEYS = {
     "recordingsUpload.rules.order":
       "By order: when no file in a folder has a verse or line number in its name (phone recordings such as “IMG_4521”, or no numbers at all), the files go onto the lines in folder order, sorted so that 2 comes before 10. A folder named for a chapter starts at that chapter.",
     "recordingsUpload.rules.existing":
-      "A line that already has a recording keeps it in its take list, and the new recording becomes the one that plays. Several files for one line that aren't its parts all upload as takes, and the one modified most recently plays. Files numbered “take 1”, “take 2” go in that order, and the highest plays.",
+      "A line that already has a recording keeps it in its take list, and the new recording plays. Several files for one line that aren't its parts all upload as takes, and the one modified most recently plays. Files numbered “take 1”, “take 2” go in that order, and the highest plays.",
     "recordingsUpload.rules.unmatched": "A file that can't be placed is listed with the reason, and it is not uploaded.",
     // Loading
     "recordingsUpload.loading.reading": plural({
@@ -119,9 +121,15 @@ const KEYS = {
     "recordingsUpload.preview.recordings": plural({ one: "{count} recording", other: "{count} recordings" }),
     "recordingsUpload.preview.lines": plural({ one: "{count} line", other: "{count} lines" }),
     "recordingsUpload.preview.instructions": "Check where each recording goes, and change a line if one is wrong. Nothing uploads until you confirm.",
-    "recordingsUpload.preview.recordedCount": plural({
-      one: "{count} of those lines already has a recording. The new one will play, and the old one stays in the take list.",
-      other: "{count} of those lines already have a recording. The new ones will play, and the old ones stay in the take list.",
+    // AQU-2496 (review, Nov 9): one sentence per case, so each is true.
+    "recordingsUpload.preview.noUndo": plural({
+      one: "This can't be undone with Undo. To take it back, delete the recording it adds.",
+      other: "This can't be undone with Undo. To take it back, delete the recordings it adds.",
+    }),
+    "recordingsUpload.preview.noUndoRange": "A file that covers several lines adds a take to each of those lines; delete that take on each line.",
+    "recordingsUpload.preview.noUndoRecorded": plural({
+      one: "On {count} line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
+      other: "On {count} lines the new recordings take over from earlier ones, which stay in their take lists; after deleting the new ones, choose the earlier recording again on each.",
     }),
     "recordingsUpload.preview.notUploaded": plural({
       one: "{count} file won't be uploaded",
@@ -188,6 +196,7 @@ const KEYS = {
     "recordingsUpload.reason.noSuchLine": "This file has {count} lines, so there is no line {line}.",
     "recordingsUpload.reason.noNumber": "Its name has no verse or line number, and the other files' names do.",
     "recordingsUpload.reason.tooManyNumbers": "Its name has too many numbers to tell which line it is.",
+    "recordingsUpload.reason.wordBeforeNumber": "The app doesn't know the word “{word}” in its name, so it can't tell what the number after it means.",
     "recordingsUpload.reason.pastLastLine": "There are more files than lines. This file has {count} lines.",
     "recordingsUpload.reason.beforeFirstLine": "Starting the order earlier left this file before the first line.",
     "recordingsUpload.reason.duplicate": "{other} already goes to {target}.",
@@ -306,6 +315,10 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
   "recordingsUpload.reason.bookNumberUnclear": { description: "Why a recording named with numbers only (such as '41_001_001') is not uploaded in a whole-project upload: its first number is a book number, and the two common ways of numbering the books give different books for it (41 is Mark in one and Matthew in the other), and the project has both. {first} and {second} are the two books' names. A full sentence, then what to do." },
   "recordingsUpload.reason.unplayableFormat": { description: "Why a recording is not uploaded: it is a kind of audio file (such as .wma or .aiff) that web browsers can't play, so it would never play once uploaded. {ext} is the file's extension without the dot, such as 'wma'. Keep the extensions as written. A full sentence." },
+  "recordingsUpload.preview.noUndo": { description: "A quiet line in the preview, before the person confirms a bulk upload of recordings: the app's Undo command will not take this upload back, and the way to take it back is to delete the recording or recordings the upload adds. The count (not shown) is how many files will upload, and picks 'recording' or 'recordings'. 'Undo' is the name of the command. Full sentences." },
+  "recordingsUpload.preview.noUndoRange": { description: "Follows 'This can't be undone with Undo…' when at least one file covers several lines (a whole chapter, or a range of verses): that one file puts a take on every line it covers, so taking it back means deleting the take on each of those lines. A take is one recorded version of a line. Full sentences." },
+  "recordingsUpload.preview.noUndoRecorded": { description: "Follows 'This can't be undone with Undo…' when some lines already had a recording of their own playing on the main track: the upload's new recording plays there instead, the earlier one stays in the line's take list, and deleting the new one leaves the line with no recording chosen, so the person has to choose the earlier recording again on each such line. {count} is how many lines. Full sentences." },
+  "recordingsUpload.reason.wordBeforeNumber": { description: "Why a recording is not uploaded into a Bible book: its name gives one number, then a word the app doesn't know, then another number (such as 'Ruthu sura 2 mstari 5', where 'mstari' is Swahili for verse), so the app can't tell whether the second number is a verse. {word} is that word, exactly as the file is named. A full sentence." },
   "recordingsUpload.reason.rangeBackwards": { description: "Why a recording whose name covers several verses or lines (such as 'Genesis 1-5-3') is not uploaded: its range ends before it starts, which is usually a typo. {from} and {to} are where the name says it starts and ends (such as 'Genesis 1:5' and 'Genesis 1:3', or 'line 5' and 'line 3'). A full sentence." },
   "recordingsUpload.reason.bookVerseDisagree": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN619' in 'MAT_1_LN619') and a verse number within the chapter, and the two point to different verses. {count} is the place in the book, {verse} the verse number in the name, {ref} the verse the place points to (such as 'Matthew 19:1'). A full sentence." },
   "recordingsUpload.reason.noSuchBookVerse": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN2000'), and the book has fewer verses than that in this project. A full sentence." },

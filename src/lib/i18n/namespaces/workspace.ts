@@ -99,9 +99,13 @@ export const workspace = defineNamespace({
     "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
     "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
-    "workspace.status.forbidden":
-      "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
-    "workspace.status.notFound": "Project not found, or you don't have access. {backLink}.",
+    // AQU-2452: ONE message for every project access rejection — a project that
+    // does not exist, an org member with no grant, a non-member, a removed
+    // member. Telling those apart told the caller whether a project exists,
+    // and "You no longer have access" was simply wrong for someone who never
+    // had any.
+    "workspace.status.noAccess":
+      "Either this project does not exist, or you do not have access. Ask a project manager to invite or re-invite you if this is unexpected. {backLink}.",
     "workspace.backToDashboard": "Back to dashboard",
 
     // -- hooks/useProjectSettings: patch() error fallback when called with no
@@ -144,11 +148,16 @@ export const workspace = defineNamespace({
     "workspace.moveToCorpus.createOption": "Create a corpus",
     "workspace.moveToCorpus.corpusNameField": "Corpus name",
 
-    // -- ProjectWorkspace: TrashedProjectScreen --
-    "workspace.trashedProject.title": "This project is in Trash",
-    "workspace.trashedProject.movedMessage": "\"{name}\" was moved to Trash. Restore it to continue editing.",
-    "workspace.trashedProject.movedByMessage":
-      "\"{name}\" was moved to Trash by {deletedBy}. Restore it to continue editing.",
+    // -- ProjectWorkspace: ArchivedProjectScreen --
+    // AQU-2453: archiving is the only way into this state, so the screen says
+    // "archived" rather than "Trash", and the action sentence is split out so
+    // a reader who cannot restore is pointed at someone who can.
+    "workspace.archivedProject.title": "This project is archived",
+    "workspace.archivedProject.archivedMessage": "\"{name}\" was archived. Nothing has been deleted.",
+    "workspace.archivedProject.archivedByMessage":
+      "\"{name}\" was archived by {deletedBy}. Nothing has been deleted.",
+    "workspace.archivedProject.restoreHint": "Restore it to continue editing.",
+    "workspace.archivedProject.askHint": "Ask a maintainer to restore it.",
 
     // -- ProjectCreateDialog: the only two strings here without an exact-text
     // twin already sitting unused in projectSettings.create.* (everything else
@@ -176,6 +185,9 @@ export const workspace = defineNamespace({
     "workspace.typeahead.addUser": "Add {username}",
     "workspace.typeahead.alreadyMember": "{username} is already a member.",
     "workspace.typeahead.noUserNamed": "No Aquilla user named \"{query}\".",
+    "workspace.typeahead.noAccountWithEmail": "No Aquilla account uses the email {query}.",
+    "workspace.typeahead.emailAlsoWorksHint":
+      "Don't know their username? Enter their email address instead.",
     "workspace.typeahead.inviteByEmailInstead": "Invite by email instead",
     "workspace.typeahead.noScopedMatch": "No match among people who share an org or project with you.",
     "workspace.typeahead.addByExactUsername": "Add \"{query}\" by exact username",
@@ -244,9 +256,18 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.learnMore": "Learn more",
     "workspace.aiConsent.genericModelName": "AI model",
 
-    // -- AiModelDownloadChip --
+    // -- AiModelDownloadChip (toasts) --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
     "workspace.aiDownloadChip.runsInBackground": "Runs in the background — keep working as normal.",
+    "workspace.aiModelToast.downloading": "Downloading AI models",
+    "workspace.aiModelToast.loading": "Loading AI model",
+    "workspace.aiModelToast.loadingNamed": "Loading {model} model",
+    "workspace.aiModelToast.loadingMany": "Loading AI models",
+    "workspace.aiModelToast.starting": "starting…",
+    "workspace.aiModelToast.downloadFailed": "AI model download failed",
+    "workspace.aiModelToast.downloadFailedNamed": "{model} download failed",
+    "workspace.aiModelToast.modelProgress": "{model} {progress}",
+    "workspace.aiModelToast.downloadDetail": "{progress}. Runs in the background — keep working as normal.",
 
     // -- AiSetupDialog --
     "workspace.aiSetup.teamProviderLocked":
@@ -518,7 +539,6 @@ export const workspace = defineNamespace({
       other: "Every «{name}» line in this file ({count})",
     }),
     "workspace.castGutterVoice.scopeEverywhere": "Every «{name}» line, in every episode",
-    "workspace.castGutterVoice.scopeNoCharacter": "This line has no character, so the voice is for this line only.",
     "workspace.castGutterVoice.clearOneFileAtATime": "Choose this line or this file to remove a character.",
 
     // -- hooks/useOpenWorkspace --
@@ -798,27 +818,24 @@ export const workspace = defineNamespace({
           "server/network error (as opposed to a genuine 404) — the project may still " +
           "exist. Paired with a 'Retry' button (common.retry).",
       },
-      "workspace.status.forbidden": {
+      "workspace.status.noAccess": {
         description:
-          "Shown instead of the editor when the signed-in user's access to this " +
-          "project was revoked or never granted. {backLink} is a translated 'Back to " +
-          "dashboard' link (workspace.backToDashboard) rendered inline right before " +
-          "the final period — keep it part of the same sentence.",
-        placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
-      },
-      "workspace.status.notFound": {
-        description:
-          "Shown instead of the editor when no project with this id exists at all. " +
-          "{backLink} is the same translated 'Back to dashboard' link as " +
-          "workspace.status.forbidden, rendered inline right before the final period.",
+          "The one message shown instead of the project (editor or overview) for " +
+          "every refusal: no project with this id, an org member with no grant, a " +
+          "non-member, a member whose access was removed. Deliberately does not " +
+          "say which, so it never reveals whether a project exists — keep both " +
+          "halves of the 'either … or …' and do not split it into two messages. " +
+          "{backLink} is a translated 'Back to dashboard' link " +
+          "(workspace.backToDashboard) rendered inline right before the final " +
+          "period — keep it part of the same sentence.",
         placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
       },
       "workspace.backToDashboard": {
         description:
           "Link/button text that navigates away from a project error/access screen " +
-          "back to the project list. Reused by the not-on-device, forbidden, not-" +
-          "found and trashed-project screens so every 'return to safety' exit reads " +
-          "identically.",
+          "back to the caller's current org dashboard. Reused by the not-on-device, " +
+          "no-access and trashed-project screens so every 'return to safety' exit " +
+          "reads identically.",
       },
       "workspace.projectSettingsHook.noSessionError": {
         description:
@@ -927,29 +944,41 @@ export const workspace = defineNamespace({
           "Placeholder and accessible name for the free-text input that appears " +
           "when creating a brand-new corpus from the move-to-corpus dialog.",
       },
-      "workspace.trashedProject.title": {
+      "workspace.archivedProject.title": {
         description:
           "Full-screen heading shown instead of the editor when the whole open " +
-          "project itself has been soft-deleted (moved to Trash), not just a file " +
-          "inside it.",
+          "project itself has been archived, not just a file inside it.",
         screenshot: "confirm-dialog",
       },
-      "workspace.trashedProject.movedMessage": {
+      "workspace.archivedProject.archivedMessage": {
         description:
-          "Body text on the trashed-project screen when no record exists of who " +
-          "deleted the project. {name} is the project's own name, already quoted " +
-          "by the template.",
-        placeholders: { name: "The trashed project's display name, already quoted by the template." },
+          "Body text on the archived-project screen when no record exists of who " +
+          "archived the project. Says nothing is lost; the sentence telling the " +
+          "reader what to do next follows it (restoreHint or askHint). {name} is " +
+          "the project's own name, already quoted by the template.",
+        placeholders: { name: "The archived project's display name, already quoted by the template." },
       },
-      "workspace.trashedProject.movedByMessage": {
+      "workspace.archivedProject.archivedByMessage": {
         description:
-          "Body text on the trashed-project screen when the deleting user is " +
-          "known — same sentence as workspace.trashedProject.movedMessage plus " +
-          "who did it. {name} is already quoted by the template.",
+          "Body text on the archived-project screen when the archiving user is " +
+          "known — same sentence as workspace.archivedProject.archivedMessage " +
+          "plus who did it. {name} is already quoted by the template.",
         placeholders: {
-          name: "The trashed project's display name, already quoted by the template.",
-          deletedBy: "The username of whoever moved the project to Trash.",
+          name: "The archived project's display name, already quoted by the template.",
+          deletedBy: "The username of whoever archived the project.",
         },
+      },
+      "workspace.archivedProject.restoreHint": {
+        description:
+          "Second sentence of the archived-project screen for a reader who may " +
+          "restore it (Maintainer or above), beside whom the Restore button is " +
+          "drawn.",
+      },
+      "workspace.archivedProject.askHint": {
+        description:
+          "Second sentence of the archived-project screen for a reader who may " +
+          "NOT restore it, who gets no Restore button — so it names who can " +
+          "instead of asking them to do it themselves.",
       },
       "workspace.createDialog.targetChipsHint": {
         description:
@@ -1040,6 +1069,22 @@ export const workspace = defineNamespace({
           "with the typed name at all. {query} is the user's own typed text, " +
           "already quoted by the template.",
         placeholders: { query: "The typed username, already quoted by the template." },
+        screenshot: "assign-modal",
+      },
+      "workspace.typeahead.noAccountWithEmail": {
+        description:
+          "Shown when the typed text is an email address and the scoped " +
+          "lookup confirms no Aquilla account uses it — the email counterpart " +
+          "of workspace.typeahead.noUserNamed. {query} is the typed address, " +
+          "not quoted by the template.",
+        placeholders: { query: "The typed email address." },
+        screenshot: "assign-modal",
+      },
+      "workspace.typeahead.emailAlsoWorksHint": {
+        description:
+          "Hint under the add-member username field, shown only where the " +
+          "server will resolve an email to an account, telling the person " +
+          "they can type an email address when they don't know the username.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.inviteByEmailInstead": {
@@ -1319,9 +1364,45 @@ export const workspace = defineNamespace({
       },
       "workspace.aiDownloadChip.runsInBackground": {
         description:
-          "Small reassurance footer at the bottom of the floating AI-model-" +
-          "download status chip while downloads are in progress, noting the " +
-          "user doesn't need to wait around.",
+          "Reassurance that an AI-model download keeps running while the " +
+          "person continues working. Same sentence as workspace.aiModelToast." +
+          "downloadDetail; kept for translators who already have this key.",
+      },
+      "workspace.aiModelToast.loadingNamed": {
+        description:
+          "Title of the toast while one local AI model is loading into memory " +
+          "after its download finished. No progress bar — spinner and close only.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.downloadFailedNamed": {
+        description:
+          "Title of the error toast when one local AI model (Whisper or MMS) " +
+          "fails to download. The description under it is the raw error.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.modelProgress": {
+        description:
+          "One model's line inside the download toast: the model name and " +
+          "either a percent (58%) or the word from workspace.aiModelToast.starting.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+          progress: "Either a percent such as 58%, or the translated 'starting…' word.",
+        },
+      },
+      "workspace.aiModelToast.downloadDetail": {
+        description:
+          "Body of the toast shown while local AI model weights are still " +
+          "downloading. Closes once the download finishes. Tells the person " +
+          "they can keep working.",
+        placeholders: {
+          progress:
+            "One or more model lines (name plus percent or 'starting…'), " +
+            "joined with a middot when two models download together.",
+        },
       },
 
       "workspace.aiSetup.title": {
@@ -2225,11 +2306,6 @@ export const workspace = defineNamespace({
           "its lines in every episode (every file of the project) speak with " +
           "this voice, except lines given a voice of their own.",
         placeholders: { name: "The character (speaker) name on this line." },
-      },
-      "workspace.castGutterVoice.scopeNoCharacter": {
-        description:
-          "Shown in place of the three choices when the line has no character: " +
-          "a voice picked here can only be for this line.",
       },
       "workspace.castGutterVoice.clearOneFileAtATime": {
         description:

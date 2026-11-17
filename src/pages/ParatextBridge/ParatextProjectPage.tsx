@@ -86,24 +86,24 @@ export function ParatextProjectPage() {
     ? t("paratextBridge.project.readingCount", { done: progress.books.length, total: progress.total })
     : t("paratextBridge.project.reading")
   const [link, setLink] = useState<MirrorLink | null>(null)
-  const guid = project?.guid ?? null
+  const stateId = project?.stateId ?? null
   const [held, setHeld] = useState(0)
   const heldBooks = link ? held : 0
 
   useEffect(() => {
-    if (!guid) return
+    if (!stateId) return
     let cancelled = false
-    void bridgeStore.link(guid).then((l) => { if (!cancelled) setLink(l) }).catch(() => undefined)
+    void bridgeStore.link(stateId).then((l) => { if (!cancelled) setLink(l) }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [guid])
+  }, [stateId])
 
   useEffect(() => {
-    if (!guid || !link) return
+    if (!stateId || !link) return
     let cancelled = false
-    void Promise.all(Object.keys(link.books).map((code) => bridgeStore.hold(guid, code).catch(() => false)))
+    void Promise.all(Object.keys(link.books).map((code) => bridgeStore.hold(stateId, code).catch(() => false)))
       .then((flags) => { if (!cancelled) setHeld(flags.filter(Boolean).length) })
     return () => { cancelled = true }
-  }, [guid, link])
+  }, [stateId, link])
 
   const byStatus = useMemo(() => {
     const out: Record<BookStatus, BookProgress[]> = { "not-started": [], "in-progress": [], complete: [] }

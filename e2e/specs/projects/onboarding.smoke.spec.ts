@@ -24,9 +24,20 @@ test("welcome and privacy choice lead to signup and the app without workspace se
   await page.locator("#s-user").fill(username)
   await page.locator("#s-email").fill(`${username}@example.test`)
   await page.locator("#s-pass").fill("safe-password-12345")
+  const consentSaved = page.waitForResponse(response =>
+    response.url().endsWith("/api/v2/auth/me/analytics-consent") && response.request().method() === "PUT")
   await page.getByRole("button", { name: /Create account/i }).click()
   await page.waitForURL(/\/orgs\//, { timeout: 30_000 })
   await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible()
+  // Session adoption precedes the authenticated consent write. Wait for the
+  // browser to record its acknowledgment before testing reload persistence.
+  const consent = await consentSaved
+  expect(consent.status()).toBe(200)
+  const decision = await consent.json()
+  expect(decision.decision.allowed).toBe(true)
+  await expect.poll(() => page.evaluate((accountId) => Object.keys(localStorage).some(key =>
+    key.startsWith("aquilla:analytics-denied:") && key.endsWith(`:${accountId}:confirmed`) && localStorage.getItem(key) === "true"
+  ), String(decision.accountId))).toBe(true)
   await page.reload()
   await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible({ timeout: 30_000 })
   expect(new URL(page.url()).pathname).toMatch(/^\/orgs\//)

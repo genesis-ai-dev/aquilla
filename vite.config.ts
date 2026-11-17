@@ -24,7 +24,11 @@ function git(args: string[]): string {
     return ""
   }
 }
-const pkgVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string
+// One version number for the product: the desktop shell's, in tauri.conf.json.
+// package.json and Cargo.toml carry copies (scripts/app-version.test.ts keeps
+// them equal). Inside the desktop shell the footer swaps this baked value for
+// the installed shell's own version (src/components/VersionBadge.tsx).
+const appVersion = JSON.parse(readFileSync("./src-tauri/tauri.conf.json", "utf8")).version as string
 const buildBranch = resolveBuildBranch(process.env, git(["rev-parse", "--abbrev-ref", "HEAD"]))
 const buildSha = resolveBuildSha(process.env, git(["rev-parse", "HEAD"]))
 const buildDate = resolveBuildDate(git(["log", "-1", "--format=%cI"]))
@@ -52,7 +56,7 @@ export default defineConfig(({ mode }) => ({
   define: {
     "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
     "import.meta.env.VITE_BETA_FLAG": JSON.stringify(process.env.VITE_BETA_FLAG ?? "1"),
-    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __APP_VERSION__: JSON.stringify(appVersion),
     __APP_BRANCH__: JSON.stringify(buildBranch),
     __APP_SHA__: JSON.stringify(buildSha),
     __APP_BUILT_AT__: JSON.stringify(buildDate),
@@ -86,7 +90,9 @@ export default defineConfig(({ mode }) => ({
       // Worktrees contain their own copies of tsconfig.json; any touch there
       // triggers Vite's "changed tsconfig" path which clears the cache and
       // forces a full reload — that's the white-screen on project click.
-      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
+      // Worker mock emails and bundles are runtime output, not SPA source.
+      // Watching their HTML reloads the page in the middle of signup.
+      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**", "**/.wrangler/**"],
     },
   },
   plugins: [
@@ -114,6 +120,12 @@ export default defineConfig(({ mode }) => ({
           "dist/version.json",
           JSON.stringify({ sha: buildSha, branch: buildBranch, builtAt: buildDate }),
         )
+        // Desktop window behaviour this build handles. The Tauri shell reads it
+        // from a downloaded hot bundle before building the window and turns a
+        // feature on only when it is listed, since that bundle may predate the
+        // shell (src-tauri/src/hot_bundle/mod.rs `serves_feature`).
+        // "mac-titlebar-overlay": src/hooks/useMacTitlebarOverlay.ts.
+        writeFileSync("dist/shell-features.json", JSON.stringify(["mac-titlebar-overlay"]))
       },
     },
   ],

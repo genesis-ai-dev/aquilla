@@ -49,11 +49,19 @@
 // Connection timeouts (AQU-1876)
 // ---------------------------------
 // Every handle built by makePostgres() carries `statement_timeout` and
-// `idle_in_transaction_session_timeout` as Postgres *startup parameters*, so
-// the ceilings are in force from the connection's first query at zero extra
-// round-trips. One pathological query (a whole-project search, a large
-// confidence read) can otherwise hold a Neon connection and compute
-// indefinitely, starving Hyperdrive for every other request.
+// `idle_in_transaction_session_timeout` as Postgres *startup parameters*. One
+// pathological query (a whole-project search, a large confidence read) can
+// otherwise hold a Neon connection and compute indefinitely, starving
+// Hyperdrive for every other request.
+//
+// On a DIRECT connection (local dev stack, tests, scripts) that puts the
+// ceilings in force from the first query at zero extra round-trips. Through
+// Hyperdrive it does not: Hyperdrive forwards only `application_name` from
+// the startup message, so a deployed worker's sessions run with no statement
+// ceiling until the role they log in as carries one as its default. What was
+// measured, and the runbook for that default: docs/POSTGRES-TIMEOUTS.md.
+// A transaction-local `SET LOCAL` does work through Hyperdrive, so everything
+// below about long operations holds in both cases.
 //
 // Long operations that legitimately outrun the default opt out through ONE
 // registry — LONG_OPERATION_TIMEOUTS below — via
@@ -473,8 +481,10 @@ export class PostgresDb implements AquillaDb {
    *  types) just degrades that wave to the serial drain — correct, only
    *  slower — and the next wave pipelines again. */
   async batchPipelined<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
-    // postgres.js max_pipeline is 100; execute() past the window stalls the
-    // connection into the serial drain, so cap waves at it.
+    // The most statements written to the transaction's connection before
+    // their answers are read. postgres.js 3 stalled into its serial drain
+    // past 100; postgres.js 4 has no window of its own inside a transaction
+    // (MAX_PIPELINE does not apply there), so this is the only bound.
     const WAVE = 100
     const run = async (tx: PgExecutor): Promise<AquillaResult<T>[]> => {
       const out: AquillaResult<T>[] = new Array(stmts.length)
@@ -528,28 +538,123 @@ export class PostgresDb implements AquillaDb {
   }
 }
 
-/** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
-function fromPostgresJs(sql: postgres.Sql): PgExecutor {
-  const wrap = (s: postgres.Sql): PgExecutor => ({
-    async run(query, params, opts) {
-      const rows = (await s.unsafe(query, params as never[], opts?.prepare ? { prepare: true } : undefined)) as unknown as Record<string, unknown>[] & { count?: number }
-      return { rows, rowCount: rows.count ?? rows.length }
-    },
-    begin: (fn) => s.begin((tx) => fn(wrap(tx as unknown as postgres.Sql))) as Promise<never>,
-    close: () => sql.end({ timeout: 5 }),
-  })
-  return wrap(sql)
+/** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string).
+ *  Capped at `max`, the pool's own size (see capInFlight): this is the only
+ *  place a production executor is built, so none exists without the cap.
+ *  Exported for the unit test of exactly that. */
+export function fromPostgresJs(sql: postgres.Sql, max: number): PgExecutor {
+  const send = async (s: postgres.Sql, query: string, params: unknown[], prepare: boolean) => {
+    const rows = (await s.unsafe(query, params as never[], prepare ? { prepare: true } : undefined)) as unknown as Record<string, unknown>[] & { count?: number }
+    return { rows, rowCount: rows.count ?? rows.length }
+  }
+  const begin = (s: postgres.Sql): PgExecutor["begin"] =>
+    (fn) => s.begin((tx) => fn(inTransaction(tx as unknown as postgres.Sql))) as Promise<never>
+  const close = () => sql.end({ timeout: 5 })
+
+  /**
+   * One transaction's connection. An unprepared statement waits for the one
+   * issued before it, so the driver never holds two of them on the connection.
+   *
+   * postgres.js 3 did this itself: an unprepared statement is describe-first,
+   * and it queued behind whatever the connection was doing. postgres.js 4
+   * writes every statement issued on a transaction straight to its connection,
+   * and `max_pipeline` does not apply there. A describe-first statement
+   * written to a connection that still has one in flight is the shape
+   * Hyperdrive left half-sent in the outages
+   * (docs/decisions/0011-in-flight-statement-cap.md), so a `Promise.all`
+   * inside db.transaction() must not be able to produce one.
+   *
+   * Prepared statements are not held back: batchPipelined() dispatches a wave
+   * of them together on purpose, and that shape was measured clean through
+   * Hyperdrive on both driver versions.
+   */
+  const inTransaction = (s: postgres.Sql): PgExecutor => {
+    let previous: Promise<unknown> = Promise.resolve()
+    return {
+      run(query, params, opts) {
+        if (opts?.prepare) return send(s, query, params, true)
+        const result = previous.then(() => send(s, query, params, false))
+        // A failed statement must not reject the ones queued behind it: each
+        // gets its own answer from Postgres (an aborted-transaction error).
+        previous = result.catch(() => undefined)
+        return result
+      },
+      begin: begin(s),
+      close,
+    }
+  }
+
+  return capInFlight(
+    { run: (query, params, opts) => send(sql, query, params, opts?.prepare === true), begin: begin(sql), close },
+    max,
+  )
+}
+
+/**
+ * Hold a handle to at most `limit` units of work at once: a unit is one
+ * top-level statement or one whole transaction, i.e. one pool connection.
+ * The rest wait their turn here, in the order they were issued.
+ *
+ * Why here and not in the driver: with the cap equal to the pool size, the
+ * driver always has a free connection for whatever it is handed, so it never
+ * has to decide what to do with a statement it has no connection for. That
+ * decision is what took production down on 2026-11-13 and 2026-11-16: a
+ * statement issued past the pool was left half-sent through Hyperdrive and
+ * held an origin connection for ten minutes. The full record, including what
+ * is still not known about the trigger:
+ * docs/decisions/0011-in-flight-statement-cap.md.
+ *
+ * Statements INSIDE a transaction are not counted: they run on the
+ * connection their transaction already holds, and batchPipelined() depends
+ * on dispatching them together.
+ */
+export function capInFlight(executor: PgExecutor, limit: number): PgExecutor {
+  let active = 0
+  const waiting: Array<() => void> = []
+  const hold = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (active < limit) active += 1
+    else await new Promise<void>((resolve) => waiting.push(resolve))
+    try {
+      return await work()
+    } finally {
+      // Hand the slot straight to the next in line, so a statement issued
+      // while others wait cannot jump the queue.
+      const next = waiting.shift()
+      if (next) next()
+      else active -= 1
+    }
+  }
+  return {
+    run: (query, params, opts) => hold(() => executor.run(query, params, opts)),
+    begin: (fn) => hold(() => executor.begin(fn)),
+    close: async () => { await executor.close?.() },
+  }
 }
 
 /** Build an Aquilla database handle from a Postgres connection string (prod). */
-/** Per-request pool size. The events route fans out SIX prefetch SELECTs in
- *  one Promise.all (route.ts PERF-2) — at max=5 the sixth always queued behind
- *  a full pool, i.e. one guaranteed extra round-trip on every flush. 8 covers
- *  that fan-out with headroom for the concurrent membership/settings reads
- *  that follow, and connections are opened lazily (postgres.js dials only when
- *  a query has to wait), so a simple request still uses one or two. Hyperdrive
- *  pools the origin side, so the cost of the extra client connections is
- *  local to the Worker isolate and bounded by the request's lifetime. */
+/** Per-request pool size, and — since `capInFlight` — the ceiling on a
+ *  handle's concurrent work.
+ *
+ *  It is sized by the widest fan-out in either worker: the events route's
+ *  prefetch (`sync-worker/src/events/route.ts`, PERF-2) issues EIGHT SELECTs
+ *  in one Promise.all. It was six when this constant was chosen and has grown
+ *  since; at max=5 the sixth always queued behind a full pool, i.e. one
+ *  guaranteed extra round-trip on every flush.
+ *
+ *  So eight is EXACTLY that fan-out, with no headroom. The reads that follow
+ *  it (membership, settings) are sequential, so nothing else is in flight
+ *  beside it today — but a ninth prefetch SELECT added to that Promise.all
+ *  would silently run in a second wave rather than widening the pool. Raise
+ *  this (and re-check `capInFlight`'s limit, which tracks it) before widening
+ *  that array, not after.
+ *
+ *  Connections are opened lazily (postgres.js dials only when a query has to
+ *  wait), so a simple request still uses one or two. Hyperdrive pools the
+ *  origin side, so the cost of the extra client connections is local to the
+ *  Worker isolate and bounded by the request's lifetime.
+ *
+ *  The fan-outs in both workers that are WIDER than this, and what drives
+ *  each, are inventoried in `docs/QUERY-FAN-OUT-AUDIT-2026-11-16.md` (AQU-2614). */
 export const DEFAULT_POOL_MAX = 8
 
 /** Per-connection timeout overrides for makePostgres(). Omitted fields take
@@ -583,13 +688,39 @@ export function pgTimeoutConnectionParams(opts: PgTimeoutOptions = {}): Record<s
   return params
 }
 
-export function makePostgres(
-  connectionString: string,
-  max = DEFAULT_POOL_MAX,
-  timeouts: PgTimeoutOptions = {},
-): PostgresDb {
-  const sql = postgres(connectionString, {
+/**
+ * How many statements the driver may have in flight on ONE pool connection.
+ *
+ * One: a statement gets a connection to itself or waits for one. postgres.js 4
+ * defaults to 100 and, when every connection is busy, writes the next
+ * statement to a busy one instead of queueing it. Through Hyperdrive that left
+ * an unprepared statement half-sent: Postgres sat in `ClientRead` holding an
+ * origin connection for ten minutes, and production ran out of them on
+ * 2026-11-13 and 2026-11-16. Measured on the development Hyperdrive: 4.0.0 at
+ * its default wedged 3 runs of 3; 4.0.0 at 1 wedged 0 of 105; 3.4.9 0 of 105.
+ *
+ * It costs nothing capInFlight() does not already cost: a top-level statement
+ * past the pool waits either way. It does not reach statements inside a
+ * transaction, which the driver always writes straight to that transaction's
+ * connection: fromPostgresJs() orders those, and batchPipelined() still sends
+ * its prepared waves together (13 to 15 ms per statement through Hyperdrive on
+ * 3.4.9, on 4.0.0, and on 4.0.0 with this setting).
+ *
+ * capInFlight() is the other half: with both, the driver is neither handed a
+ * statement it has no connection for nor allowed to double one up if it is.
+ * Record: docs/decisions/0011-in-flight-statement-cap.md.
+ */
+export const MAX_PIPELINE = 1
+
+/**
+ * The postgres.js options every production handle is built with. Exported for
+ * the unit test: an option dropped here is silent in every suite that runs on
+ * PGlite, which is nearly all of them.
+ */
+export function pgDriverOptions(max: number, timeouts: PgTimeoutOptions = {}) {
+  return {
     max,
+    max_pipeline: MAX_PIPELINE,
     fetch_types: false, // recommended through Hyperdrive's pooling
     // AQU-1876: statement / idle-in-transaction ceilings on every connection.
     connection: pgTimeoutConnectionParams(timeouts),
@@ -601,8 +732,16 @@ export function makePostgres(
       numeric: { to: 1700, from: [1700], parse: (x: string) => Number(x), serialize: (x: number) => String(x) },
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
-  })
-  return new PostgresDb(fromPostgresJs(sql))
+  }
+}
+
+export function makePostgres(
+  connectionString: string,
+  max = DEFAULT_POOL_MAX,
+  timeouts: PgTimeoutOptions = {},
+): PostgresDb {
+  const sql = postgres(connectionString, pgDriverOptions(max, timeouts))
+  return new PostgresDb(fromPostgresJs(sql, max))
 }
 
 /**

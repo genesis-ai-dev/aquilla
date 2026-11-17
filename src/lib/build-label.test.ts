@@ -81,4 +81,20 @@ describe("formatBuildInfo", () => {
       formatBuildInfo({ version: "0.1.2", branch: "unknown", sha: "unknown", builtAt: "" }),
     ).toBe("v0.1.2 · unknown · unknown\nbuild: unknown@unknown")
   })
+
+  const desktop = { version: "0.2.3", branch: "main", sha: "abc1234", builtAt: "" }
+
+  it("names the hot bundle a desktop shell is serving, apart from the shell's own version", () => {
+    // Support needs both: the shell decides which native features exist, the
+    // bundle decides which web release is on screen.
+    expect(formatBuildInfo({ ...desktop, bundle: "2026.11.03.01" })).toBe(
+      "v0.2.3 · abc1234\nbuild: main@abc1234\nbundle: 2026.11.03.01",
+    )
+  })
+
+  it("does not repeat the version as a bundle while the shell is on its embedded assets", () => {
+    // A release build embeds its own tag (v0.2.3); a local build falls back to 0.2.3.
+    expect(formatBuildInfo({ ...desktop, bundle: "v0.2.3" })).not.toContain("bundle:")
+    expect(formatBuildInfo({ ...desktop, bundle: "0.2.3" })).not.toContain("bundle:")
+  })
 })

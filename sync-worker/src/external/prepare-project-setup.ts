@@ -55,6 +55,7 @@ import { loosensPolicy } from '../../../db/shared/policy-direction'
 import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import { BRIEF_SETTINGS_KEY, isBriefFieldId, isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
 import { REQUIRED_ROLE } from '../events/role-policy'
+import { briefInertWarnings, plannedInstructionsOfOps } from './brief-inert-warning'
 
 /** validation_failed / permission_denied with the offending field named — the
  *  spec's acceptance criterion for a rejected plan. */
@@ -223,6 +224,13 @@ export async function prepareProjectSetup(
       settingsChanges[`${BRIEF_SETTINGS_KEY}.freeformNotes`] = previewSettingValue(cmd.brief.freeformNotes)
     }
     if (satisfied) skipped(index, 'brief', 'every named section already holds the proposed text')
+    // AQU-2425: a setup that writes the Instructions text in the same plan
+    // strands its own brief step — which is why the question is asked of the
+    // state the plan LEAVES BEHIND, not the state it found. A superseded step
+    // writes nothing at all, so there is no inert write to report.
+    if (!satisfied) {
+      warnings.push(...briefInertWarnings(current.settings, plannedInstructionsOfOps(ops.plain)))
+    }
   }
 
   // ── step: members ────────────────────────────────────────────────────────

@@ -10,7 +10,17 @@
 // only one of its two triggers a real user can reach.
 
 import { describe, expect, it } from "vitest"
-import { orderForDrop, proposeDropIndex, type RowBound } from "./track-reorder"
+import {
+  applyPendingOrders,
+  applyPendingScopes,
+  orderForDrop,
+  proposeDropIndex,
+  settledPendingOrders,
+  settledPendingScopes,
+  withoutPendingOrder,
+  withPendingScopeOrders,
+  type RowBound,
+} from "./track-reorder"
 import type { TimelineTrack } from "./tracks"
 
 /** Four default-height rows: midpoints at 33, 99, 165 and 231. */
@@ -120,5 +130,36 @@ describe("orderForDrop", () => {
     expect(orderForDrop(FOUR, -1, 2)).toBeNull()
     expect(orderForDrop(FOUR, 0, 4)).toBeNull()
     expect(orderForDrop([track("a", 0)], 0, 0)).toBeNull()
+  })
+})
+
+describe("applyPendingScopes", () => {
+  const folder = [track("a", 0), track("b", 2), { ...track("c", 1), groupId: "grp" }]
+
+  it("paints the new folder and order immediately, and drops the overlay once the server matches", () => {
+    const pending = new Map([["c", { groupId: null, order: -1 }]])
+    const shown = applyPendingScopes(folder, pending)
+    expect(shown.map((row) => row.id)).toEqual(["c", "a", "b"])
+    expect(shown[0]).toMatchObject({ groupId: null, order: -1 })
+    expect(folder[2].groupId).toBe("grp")
+    expect(settledPendingScopes(pending, folder)).toEqual([])
+    expect(settledPendingScopes(pending, shown)).toEqual(["c"])
+  })
+
+  it("keeps one place in flight per track, so a settled folder move is where the row stays", () => {
+    // `a` was reordered to 7, then dropped at the top of the folder before
+    // that order was read back. The server read already holds the move.
+    const before = [track("a", 0), track("grp", 1), { ...track("m", 0), groupId: "grp" }]
+    const orders = withoutPendingOrder(new Map([["a", 7]]), "a")
+    const scopes = new Map([["a", { groupId: "grp", order: -1 }]])
+    const server = [{ ...track("a", -1), groupId: "grp" }, track("grp", 1), { ...track("m", 0), groupId: "grp" }]
+    expect(settledPendingOrders(orders, server)).toEqual([])
+    expect(settledPendingScopes(scopes, server)).toEqual(["a"])
+    const shown = applyPendingOrders(server, orders)
+    expect(shown.find((row) => row.id === "a")?.order).toBe(-1)
+    expect(applyPendingScopes(applyPendingOrders(before, orders), scopes).find((row) => row.id === "a"))
+      .toMatchObject({ groupId: "grp", order: -1 })
+    // An order for a track whose move is still in flight is that move's new rank.
+    expect(withPendingScopeOrders(scopes, [{ trackId: "a", order: 3 }]).get("a")).toEqual({ groupId: "grp", order: 3 })
   })
 })

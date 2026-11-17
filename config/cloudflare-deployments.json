@@ -62,7 +62,9 @@
             "GITLAB_ADMIN_TOKEN",
             "MONDAY_CLIENT_SECRET",
             "MONDAY_SIGNING_SECRET",
-            "OMNI_SHARED_SECRET"
+            "OMNI_SHARED_SECRET",
+            "ADMIN_TOTP_KEY",
+            "GOOGLE_LOGIN_CLIENT_SECRET"
           ],
           "plainText": {
             "ENVIRONMENT": "production",
@@ -75,6 +77,12 @@
           },
           "r2Buckets": {
             "SNAPSHOTS": "aquilla-snapshots"
+          },
+          "deploymentOnlyPlainText": {
+            "ALGORITHM": "HS256",
+            "GOOGLE_LOGIN_CLIENT_ID": "688714906958-u6ml2k74knt4uf1n4as3tu2mfl5c8ruo.apps.googleusercontent.com",
+            "GOOGLE_LOGIN_REDIRECT_URI": "https://api.aquilla.app/identity/api/v2/auth/oauth/google/callback",
+            "GOOGLE_LOGIN_APP_ORIGINS": "https://aquilla.app"
           }
         },
         "development": {
@@ -93,8 +101,13 @@
             "MONDAY_CLIENT_SECRET",
             "MONDAY_SIGNING_SECRET",
             "MONDAY_TOKEN_KEY",
-            "OMNI_SHARED_SECRET"
+            "OMNI_SHARED_SECRET",
+            "ADMIN_TOTP_KEY",
+            "GOOGLE_LOGIN_CLIENT_SECRET"
           ],
+          "requiredBindings": {
+            "DEV_ACCESS_LIST": "kv_namespace"
+          },
           "plainText": {
             "ENVIRONMENT": "development",
             "BASE_URL": "https://dev.aquilla.app",
@@ -106,6 +119,12 @@
           },
           "r2Buckets": {
             "SNAPSHOTS": "aquilla-snapshots-dev"
+          },
+          "deploymentOnlyPlainText": {
+            "ALGORITHM": "HS256",
+            "GOOGLE_LOGIN_CLIENT_ID": "688714906958-aokoe6iu807mvi6cb5nltthsrspug930.apps.googleusercontent.com",
+            "GOOGLE_LOGIN_REDIRECT_URI": "https://api.dev.aquilla.app/identity/api/v2/auth/oauth/google/callback",
+            "GOOGLE_LOGIN_APP_ORIGINS": "https://dev.aquilla.app"
           }
         }
       }

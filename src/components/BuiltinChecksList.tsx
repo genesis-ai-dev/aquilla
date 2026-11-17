@@ -209,9 +209,14 @@ export function BuiltinCheckRow({
   const name = translateRuleName(rule, t)
   const description = translateRuleDescription(rule, t)
   const showHarmonize = onHarmonize != null && count > 0
+  // AQU-2628: the one TEXT check with a dormancy of its own — `old-orthography`
+  // has nothing to judge a word by until the Language profile records the
+  // lane's spelling rules, so its row says so rather than looking broken.
   const needs: MessageKey[] = isBibleCheckId(checkId)
     ? bibleCheckDormancy(checkId, profile, bibleReadiness).map((d) => ("slot" in d ? NEEDS_KEY[d.slot] : NEED_KEY[d.need]))
-    : []
+    : checkId === "old-orthography" && profile.orthography === undefined
+      ? ["rules.builtinChecks.orthography.needsProfile"]
+      : []
   return (
     <li
       data-testid="builtin-row"

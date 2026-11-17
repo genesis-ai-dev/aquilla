@@ -9,7 +9,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronsUpDown, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -57,6 +57,18 @@ import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
 import { regenerateVoiceTake } from "./regenerate-voice"
+import { laneVoiceSettings } from "@/lib/audio/lane-voice-view"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { VoicePickerContent } from "@/components/voice/VoiceCombobox"
+import { getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
+import {
+  recorderVoiceChoice,
+  recorderVoiceOverride,
+  recorderVoicePicks,
+  rememberRecorderVoicePicks,
+  withRecorderVoicePick,
+  type RecorderVoicePicks,
+} from "@/lib/audio/recorder-voice"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
@@ -82,11 +94,12 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
+import { bornTakePlace, recordedTakePlaceMs } from "@/lib/audio/new-take-place"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioValidate } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -604,6 +617,22 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
+  /**
+   * AQU-2511: the voice Generate will speak in, named on the button before the
+   * credits are spent.
+   *
+   * Resolved through the SAME lane view the generate path itself uses
+   * (`laneVoiceSettings`, from the open lane's tag), and off the same subject —
+   * the linked subtitle's assignment on a cue file, this line's own otherwise.
+   * That is the point of reading it here rather than naming the project
+   * default: this button used to generate in one voice while the picker on the
+   * row had just assigned another.
+   */
+  const ttsVoiceName = useMemo(() => {
+    if (!activeCell) return null
+    const view = laneVoiceSettings(project.ttsSettings, project.lanes, laneTag)
+    return resolveCastVoice(view, readAloud?.voiceCellId ?? activeCell, activeCell.ttsSettings?.voiceId).name
+  }, [project.ttsSettings, project.lanes, laneTag, activeCell, readAloud?.voiceCellId])
   // Media redesign slice 2 (gap 8): an Audio language has no translation to
   // read, so the performer reads the source where the translation shows today
   // — the heard line's own words on a dubbing file.
@@ -933,9 +962,13 @@ export function AudioRecordingModal({
   // Round 8c: takes recorded before the webm-duration fix attached without a
   // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
   // their chips still fall back to section width. Heal the SELECTED take once
-  // per modal visit: fetch its bytes, decode the real length, re-attach with
-  // it (re-attach re-selects, which is a no-op here — and COALESCE keeps the
-  // name, while passing the trims keeps them).
+  // per modal visit: fetch its bytes, decode the real length, and fill it in.
+  //
+  // AQU-2491 (review, Nov 9): with `cell.audio.measure`, which fills an
+  // unknown length and nothing else, never a re-attach. An attach chooses the
+  // take and brings it back if deleted, and on a slow network this lands late:
+  // after a new take was recorded, or this one deleted, the old one played
+  // again. Its name, trims, place and choice are left as they are.
   const healTriedRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!open || !session?.jwt || !activeCell) return
@@ -958,26 +991,20 @@ export function AudioRecordingModal({
           new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
         )
         if (durationMs == null) return
-        const healEventId = await emitCellAudioAttach({
+        const healEventId = await emitCellAudioMeasure({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
-          // AQU-646: the take's own slot. Provably "recording" today (the find
-          // above filters on it), but this re-attach assigns slot outright, so
-          // it must not be the one place still naming it by hand once
-          // `recordingTakes` is scoped to a target track.
-          audioId: take.audioId, url: take.url, slot: take.slot,
-          mimeType: take.mimeType ?? undefined,
+          audioId: take.audioId,
           durationMs: Math.round(durationMs),
-          label: take.label ?? undefined,
-          trimStartMs: take.trimStartMs ?? undefined,
-          trimEndMs: take.trimEndMs ?? undefined,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
+        // Painted at its length at once, without claiming the slot.
         injectOptimisticAudioAttachment(
           cell.fileId,
           cell.id,
           { ...take, durationMs: Math.round(durationMs) },
           healEventId,
+          { claimSelection: false },
         )
         notifyAudioAttachmentsChanged(cell.fileId)
       } catch {
@@ -1279,6 +1306,52 @@ export function AudioRecordingModal({
    * outranks the error it is trying to replace.
    */
   const ttsShowFailure = ttsFailure != null && !ttsWorking
+  /**
+   * AQU-2510: WHICH VOICE Generate speaks in — the pick, and what it defaults
+   * to. The resolution order and why only some answers are passed on as an
+   * override live in `@/lib/audio/recorder-voice`.
+   *
+   * The picks are React state so the panel re-renders on a pick, and written
+   * through to the session memory so reopening the modal on the next line
+   * still knows what was picked on the last one. The modal stays mounted while
+   * the active line changes, so that memory only earns its keep across a
+   * close/reopen — which is most of a session.
+   */
+  const [voicePicks, setVoicePicks] = useState<RecorderVoicePicks>(() => recorderVoicePicks(project.id))
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false)
+  // Plain reads and a plain handler: these are pure and cheap, and the React
+  // Compiler memoizes them for us. Hand-written `useMemo`/`useCallback` here
+  // only made it bail ("existing memoization could not be preserved").
+  const voiceLibrary = getVoiceLibrary(project.ttsSettings)
+  // The line whose cast assignment applies: on a cue file the linked subtitle,
+  // exactly as `generateCellVoice` resolves it (a cue carries none of its own).
+  const voiceSubject = readAloud?.voiceCellId ?? activeCell
+  const voiceChoice = voiceSubject
+    ? recorderVoiceChoice({
+        settings: project.ttsSettings,
+        subject: voiceSubject,
+        cellVoiceId: activeCell?.ttsSettings?.voiceId,
+        picks: voicePicks,
+      })
+    : null
+  // One voice in the library is no choice at all — the control would only
+  // restate the project default, so it collapses (the ticket's last criterion).
+  const showVoicePicker = !deliversAudioOnly && voiceChoice != null && voiceLibrary.length > 1
+  const pickVoice = (voiceId: string) => {
+    setVoicePickerOpen(false)
+    if (!voiceSubject) return
+    setVoicePicks((prev) => {
+      const next = withRecorderVoicePick(prev, voiceSubject, voiceId)
+      rememberRecorderVoicePicks(project.id, next)
+      return next
+    })
+  }
+  const voiceOverride = recorderVoiceOverride(voiceChoice)
+  // AQU-2511 × AQU-2510: the button names the voice the press will REALLY use.
+  // A session pick (or the carried one) is handed to the generator as an
+  // override, so it outranks the lane's cast answer here exactly as it does
+  // there — otherwise the button would name one voice and generate another.
+  const generateVoiceName = voiceOverride && voiceChoice ? voiceChoice.voice.name : ttsVoiceName
   const generateTts = useCallback(async () => {
     if (!online) return // the disabled button + tooltip carry the message
     if (!activeCell || !session || ttsBusy) return
@@ -1294,12 +1367,16 @@ export function AudioRecordingModal({
         laneTag,
         text: ttsText,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
+        // AQU-2510: only a pick overrides; a cast or default answer is left for
+        // `generateCellVoice` to resolve, so a session that never opens the
+        // picker generates through exactly the path it always did.
+        ...(voiceOverride ? { voiceId: voiceOverride } : {}),
       })
       if (ok) setTtsDone(true)
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId])
+  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId, voiceOverride])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -1402,6 +1479,13 @@ export function AudioRecordingModal({
         operator,
         durationMs: takeDurationMs,
       })
+      // AQU-2491 (review, Nov 9): the place is THIS TAKE'S, never the line's.
+      // Written on the line it moved every take there with no place of its
+      // own (other tracks, other languages), and Undo left them moved. On a
+      // timed line with no pre-roll to undo, the take's first sample is the
+      // line's start, said outright so a place an older save left on the line
+      // can't pull it early. A line with no times gets no place, as before.
+      const takePlaceMs = recordedTakePlaceMs(laneOffsetMs, activeCell)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -1442,8 +1526,8 @@ export function AudioRecordingModal({
           ...takeTrimWindow,
           label: takeLabel,
           ...(laneTag ? { targetLang: laneTag } : {}),
-          // AQU-1572: the recorder's own save path — the heal re-attach above
-          // passes no origin, so a take counts exactly once.
+          // AQU-1572: the recorder's own save path — the duration heal above
+          // sends no attach at all, so a take counts exactly once.
           audioOrigin: "record",
           surface: "recorder",
           author: username,
@@ -1495,6 +1579,8 @@ export function AudioRecordingModal({
         // trip) until the server projection lands and silently corrected it.
         trimStartMs: takeTrimWindow.trimStartMs ?? null,
         trimEndMs: takeTrimWindow.trimEndMs ?? null,
+        // AQU-2491 (review, Nov 9): and its own place, written just below.
+        ...(takePlaceMs != null ? { targetOffsetMs: takePlaceMs } : {}),
         // The take's provenance, so the strip's control reads right before
         // the projection comes back: a dub, recorded by me, and — when the
         // rule says so — already carrying my vote.
@@ -1556,13 +1642,19 @@ export function AudioRecordingModal({
       // attached, and it merely sits `preRollMs` late until someone drags it.
       // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms of
       // the film keeps what runway it has — and the trim inherits the clamp.)
-      if (laneOffsetMs != null) {
+      //
+      // AQU-2491 (review, Nov 9): stored on the TAKE (`cell.audio.place`), the
+      // write a drag on the timeline makes. No place of its own following the
+      // recordings: that timing reads this one, as it read the line's before.
+      if (takePlaceMs != null) {
         try {
-          await emitCellLaneRetime({
+          await emitCellAudioPlace({
             projectId: project.id,
             fileId: activeCell.fileId,
             cellId: activeCell.id,
-            targetOffsetMs: laneOffsetMs,
+            audioId: savedTakeId,
+            targetOffsetMs: takePlaceMs,
+            recordingsOffsetMs: null,
             ...(laneTag ? { targetLang: laneTag } : {}),
             author: username,
           })
@@ -1668,6 +1760,9 @@ export function AudioRecordingModal({
         surface: "recorder",
         // Decision 11: uploading is an Undo step too.
         history: { selectedBefore: playingInSlot(audioEntry, targetSlot) },
+        // AQU-2491 (review, Nov 9): its own place, the line's start, as a
+        // recorded take with no pre-roll has.
+        place: bornTakePlace(activeCell),
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
@@ -1889,9 +1984,10 @@ export function AudioRecordingModal({
         : null,
       durationMs: previewDurationMs,
     })
-    return laneOffsetMs != null
-      ? activeCell.startTime + laneOffsetMs / 1000
-      : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
+    // AQU-2491 (review, Nov 9): Save's own rule, so a take with no pre-roll
+    // plays against its line's start, where Save puts it, and never against a
+    // place an older recording left on the line.
+    return activeCell.startTime + (recordedTakePlaceMs(laneOffsetMs, activeCell) ?? 0) / 1000
   })()
   // A split take plays from its first piece, so the film follows that piece.
   const readyAnchorAtt = readySplit?.[0] ?? readyAtt
@@ -2640,6 +2736,55 @@ export function AudioRecordingModal({
               // anchor above while the explanation stays tucked under the
               // button it belongs to.
               <div className="space-y-1.5">
+              {/* AQU-2510: WHO SPEAKS, above the button that spends the
+                  credits. On a dubbing project the cloned voice IS the point,
+                  and this panel used to generate in the project default with
+                  no way to say otherwise and no mention of which voice ran.
+
+                  It sits above the row rather than inside it: Generate and
+                  Upload already share that row at half a panel each, and a
+                  third control there would crop every voice name to an
+                  initial. Full width here, the name reads in full.
+
+                  The note after the name is the DEFAULT, said out loud — the
+                  line's own cast voice, or the project's. A pick replaces it
+                  with nothing, because a pick needs no explaining. */}
+              {showVoicePicker && voiceChoice && (
+                <Popover open={voicePickerOpen} onOpenChange={setVoicePickerOpen}>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        data-testid="rec-generate-voice"
+                        data-voice-source={voiceChoice.source}
+                        aria-label={t("audio.recordingModal.voicePickAriaLabel", { voice: voiceChoice.voice.name })}
+                        className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      />
+                    }
+                  >
+                    <VoiceAvatar voice={voiceChoice.voice} size={16} />
+                    <span data-testid="rec-generate-voice-name" className="min-w-0 truncate font-medium text-foreground/80">
+                      {voiceChoice.voice.name}
+                    </span>
+                    {(voiceChoice.source === "cast" || voiceChoice.source === "default") && (
+                      <span data-testid="rec-generate-voice-note" className="min-w-0 truncate text-muted-foreground/70">
+                        {t(voiceChoice.source === "cast"
+                          ? "audio.recordingModal.voicePickCastNote"
+                          : "audio.recordingModal.voicePickDefaultNote")}
+                      </span>
+                    )}
+                    <ChevronsUpDown className="ms-auto h-3 w-3 shrink-0 opacity-60" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-60 p-2">
+                    <VoicePickerContent
+                      voices={voiceLibrary}
+                      activeId={voiceChoice.voice.id}
+                      showLanguageBadge
+                      onPick={pickVoice}
+                    />
+                  </PopoverContent>
+                </Popover>
+              )}
               <div className="flex gap-2">
                 {!deliversAudioOnly && (
                 // Only why it is greyed out, on a click (AQU-2260): enabled, its
@@ -2696,7 +2841,9 @@ export function AudioRecordingModal({
                               : t("audio.recordingModal.generateButton")
                           : ttsShowFailure
                             ? t("audio.recordingModal.ttsFailedButton")
-                            : t("audio.recordingModal.generateButton")}
+                            : generateVoiceName
+                              ? t("audio.recordingModal.generateWithVoice", { voice: generateVoiceName })
+                              : t("audio.recordingModal.generateButton")}
                       </span>
                     </Button>
                 </AppTooltip>

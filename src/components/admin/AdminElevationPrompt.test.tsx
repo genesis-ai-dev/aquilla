@@ -12,6 +12,7 @@ import {
 } from "@/lib/errors/elevation-required-signal"
 
 vi.mock("@/lib/frontier/admin", () => ({
+  adminTotp: vi.fn().mockResolvedValue({ enabled: false }),
   requestAdminElevation: vi.fn(),
   verifyAdminElevation: vi.fn(),
 }))

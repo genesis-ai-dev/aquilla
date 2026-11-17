@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { DEPENDENT_TABLES, EXCLUDED_TABLES, SEED_TABLES } from "./seed-tables"
+import { DEPENDENT_TABLES, EXCLUDED_TABLES, SEED_TABLES, seedInsertColumns } from "./seed-tables"
 
 const SCHEMA_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../db/postgres/schema.sql")
 
@@ -112,5 +112,28 @@ describe("SEED_TABLES against db/postgres/schema.sql", () => {
       .filter((fk) => projectScoped.has(fk.to) && !seeded(fk.from) && fk.onDelete === "none" && !cleaned.has(fk.from))
       .map((fk) => `${fk.from} -> ${fk.to}`)
     expect([...new Set(violations)]).toEqual([])
+  })
+})
+
+// WHY: `seed-extract` dumps `SELECT *`, so a bundle carries every generated
+// column its source had, and `project_settings` keeps gaining them. The loader
+// skipped a fixed five by name, so the first bundle after a migration added one
+// (`agent_authorship`) failed on INSERT. The target itself says which columns it
+// computes; the loader has to ask it rather than remember.
+describe("seedInsertColumns", () => {
+  it("drops the target's generated columns per table and the legacy dropped ones, and keeps everything else", () => {
+    const generated = new Map([["project_settings", new Set(["agent_authorship", "wp_timing_locked"])]])
+    const row = {
+      project_id: "p",
+      settings: "{}",
+      agent_authorship: "ask",
+      wp_timing_locked: null,
+      validation_count: "2",
+      target_lanes: null,
+    }
+    expect(seedInsertColumns("project_settings", row, generated)).toEqual(["project_id", "settings"])
+    // Another table's generated set does not apply: the same column name is inserted there.
+    expect(seedInsertColumns("cells", { cell_id: "c", agent_authorship: "x", value_tsv: null }, generated))
+      .toEqual(["cell_id", "agent_authorship"])
   })
 })

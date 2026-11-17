@@ -64,6 +64,8 @@ export function isPastHalfLife(
   return nowSeconds - payload.iat >= lifetime / 2
 }
 
+export class SessionInvalidatedError extends Error {}
+
 export class JWTService {
   private env: Env
 
@@ -74,10 +76,15 @@ export class JWTService {
   async createAccessToken(
     username: string,
     sessionStartedAt?: number,
+    expectedUserId?: number,
+    expectedSessionVersion?: number,
   ): Promise<string> {
     const { token } = await this.createAccessTokenWithPayload(
       username,
       sessionStartedAt,
+      undefined,
+      expectedUserId,
+      expectedSessionVersion,
     )
     return token
   }
@@ -94,6 +101,8 @@ export class JWTService {
     username: string,
     sessionStartedAt?: number,
     sessionId?: string,
+    expectedUserId?: number,
+    expectedSessionVersion?: number,
   ): Promise<{ token: string; payload: JWTPayload }> {
     if (!this.env.SECRET_KEY) {
       throw new Error("SECRET_KEY is not configured for JWT signing")
@@ -101,12 +110,23 @@ export class JWTService {
     if (!this.env.ALGORITHM) {
       throw new Error("ALGORITHM is not configured for JWT signing")
     }
+    // Keep sub compatible with existing clients, but never let a username
+    // lookup during refresh or login transfer proof to a replacement account.
+    const user = await this.getUserByUsername(username)
+    if (!user || (expectedUserId !== undefined && user.id !== expectedUserId)) {
+      throw new Error("Account identity changed; log in again")
+    }
+    if (expectedSessionVersion !== undefined && (user.session_version ?? 0) !== expectedSessionVersion) {
+      throw new SessionInvalidatedError("Session invalidated; log in again")
+    }
     const now = Math.floor(Date.now() / 1000)
     const expiresIn =
       parseInt(this.env.ACCESS_TOKEN_EXPIRE_MINUTES || "43200", 10) * 60
 
     const payload: JWTPayload = {
-      sub: username,
+      sub: user.username,
+      uid: String(user.id),
+      sv: user.session_version ?? 0,
       iat: now,
       exp: now + expiresIn,
       // [Pen test] Auth & session mgmt (2026-08-03): unique id so a logged-out
@@ -162,6 +182,22 @@ export class JWTService {
       console.error("JWT verification failed:", error)
       return { ok: false, reason: "invalid" }
     }
+  }
+
+  /** Ownership proof only, never authentication. The caller must already be
+   * authenticated as `user`. Expired credentials can identify local work but
+   * cannot grant a session, permissions or access to any other account. */
+  async ownsHistoricalToken(token: string, user: AuthUser): Promise<boolean> {
+    if (!this.env.SECRET_KEY || !this.env.ALGORITHM) return false
+    try {
+      const payload = await verify(token, this.env.SECRET_KEY, { alg: this.env.ALGORITHM as "HS256", exp: false })
+      if (typeof payload.sub !== "string" || payload.sub.toLowerCase() !== user.username.toLowerCase() ||
+          typeof payload.exp !== "number" || typeof payload.iat !== "number") return false
+      if (payload.uid !== undefined) return payload.uid === String(user.id)
+      const started = typeof payload.sst === "number" ? payload.sst : payload.iat
+      const created = Math.floor(new Date(user.created_at).getTime()/1000)
+      return Number.isFinite(created) && Number.isFinite(started) && started > created && payload.iat > created
+    } catch { return false }
   }
 
   /**
@@ -244,5 +280,6 @@ export function rowToUser(row: UserRow): AuthUser {
     created_at: row.created_at,
     updated_at: row.updated_at,
     password_changed_at: row.password_changed_at ?? null,
+    session_version: row.session_version ?? 0,
   }
 }

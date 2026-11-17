@@ -84,7 +84,11 @@ CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
 `lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
 for a window where blocking every write to `events`/`cells` is acceptable — so a
 migration queued behind a long transaction fails fast instead of holding the
-write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+write queue open. Every migration session also opts out of the statement and
+idle-in-transaction ceilings at startup, so a role-level default set for the
+workers cannot cancel a long statement part-way, and `apply` refuses to start
+if that did not take effect (`docs/POSTGRES-TIMEOUTS.md`).
+**`neon:apply:prod` refuses without a snapshot decision:**
 pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
@@ -222,8 +226,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET`, `ADMIN_TOTP_KEY`, `GOOGLE_LOGIN_CLIENT_SECRET` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
@@ -639,11 +643,77 @@ leave it out. `note` is free text for why the person has access. An email can
 be added before the person signs up; `GET /api/v2/admin/admins` shows it with
 `hasAccount: false` until they do.
 
+Password sign-up refuses an address that is already in the table (the same
+`409` a taken address gets), because that form does not prove who holds the
+mailbox and the first person to register the address would become the admin.
+So a person added before they have an account signs up with **Google**, which
+does prove it. Where Google sign-in is not configured, have them register
+first and insert the row afterwards. Treat a `hasAccount: false` row as a
+loose end to close, not a place to leave things.
+
 Order for a first rollout: apply the migration (`neon:apply:dev` /
 `neon:apply:prod`), insert the admins, then deploy the auth Worker that no
 longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console
 until the rows exist. If the table is missing the Worker treats nobody as a
 table admin and logs `platform_admins read failed`; it does not fail requests.
+
+## Who can use dev.aquilla.app (AQU-2469)
+
+Dev runs untested code on a nightly copy of prod data, so the dev identity
+Worker (`aquilla-dev-identity`) admits only:
+
+- every platform admin (the `platform_admins` table, which the nightly refresh
+  copies from prod), and
+- the emails on the dev access list.
+
+Everyone else is refused at sign-in and sign-up with a plain message, and every
+API request they make answers `403` with `code: "dev_access_restricted"`.
+Production, local dev and e2e are never gated: the check keys on
+`DEPLOYMENT_WORKER_NAME` being the development identity Worker named in
+`config/cloudflare-deployments.json`. The per-branch previews
+(`aquilla-auth-preview`) enforce the same list since AQU-2555; see
+`docs/security/preview-access.md`.
+
+Automated suites sign in as ordinary accounts, so their accounts must be on
+the list too. `docs/security/preview-access.md` names them (today: Adversarial
+Jev's three bot accounts). Check that table before removing an entry you do
+not recognise.
+
+The list lives in the KV namespace `aquilla-dev-access-list`, bound as
+`DEV_ACCESS_LIST` on the development profile and on the branch previews. KV sits outside the Neon
+restore, so the nightly refresh never touches it. One key per lower-cased email.
+
+To change it, open **Admin → Platform → Dev access** on dev.aquilla.app. It
+takes effect on that person's next request; no deploy. From the command line,
+as a backup:
+
+```sh
+cd auth-worker
+npx wrangler kv key put --binding=DEV_ACCESS_LIST --env=development --remote "someone@example.com" "{}"
+npx wrangler kv key list --binding=DEV_ACCESS_LIST --env=development --remote
+npx wrangler kv key delete --binding=DEV_ACCESS_LIST --env=development --remote "someone@example.com"
+```
+
+It fails closed. If the binding is missing or KV cannot be read, dev refuses
+everyone but platform admins (`503`), and the deploy verifier refuses a dev
+version without the binding.
+
+Known gap: Agent API keys (`aqk_…`) and MCP OAuth tokens are checked by the
+sync Worker straight from Postgres, which does not read this list. Minting a
+new key on dev is gated; keys copied from prod by the nightly refresh are not.
+
+### No emailed admin code on dev (AQU-2470)
+
+Because the list closes dev, platform admins there skip the emailed 6-digit
+step-up code: the admin console and admin-power writes (for example adding a
+member to another org's project) go straight through. Audit rows are still
+written. `adminElevationRequired` in `auth-worker/src/middleware/platform-admin.ts`
+makes the skip with the same test the list uses, so it applies to
+`aquilla-dev-identity` only. Production, the per-branch previews, and a Worker
+whose name is unset or unknown still ask for the code.
+`ADMIN_REQUIRE_ELEVATION` stays `"true"` in the development profile so that, if
+the name test ever stops matching, the code comes back instead of the console
+opening.
 
 ## Change checklist
 

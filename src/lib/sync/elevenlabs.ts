@@ -76,8 +76,11 @@ export interface ElevenLabsAccount {
   tier: string
   characterCount: number
   characterLimit: number
-  canClone: boolean
+  /** Null when the key may not read the account, so the plan is unknown. */
+  canClone: boolean | null
   resetAtUnix: number | null
+  /** False for a restricted key without `user_read`: connected, quota unknown. */
+  quotaKnown?: boolean
 }
 
 /** GET /api/v1/elevenlabs/user — also how a pasted key is validated. */
@@ -118,6 +121,56 @@ export async function listElevenLabsVoices(
   const res = await send(`${base()}/voices?${params}`, { headers: await authHeaders(scope, getSyncToken) }, READ_TIMEOUT_MS)
   const json = (await res.json()) as Partial<ElevenLabsVoicePage>
   return { voices: Array.isArray(json.voices) ? json.voices : [], nextPageToken: json.nextPageToken ?? null }
+}
+
+/** A voice in ElevenLabs' public voice library, not yet in the account (AQU-2577). */
+export interface ElevenLabsLibraryVoiceRow {
+  id: string
+  /** The sharing user's public id: adding the voice needs it. */
+  ownerId: string
+  name: string
+  labels: Record<string, string>
+  previewUrl: string | null
+  description: string | null
+  /** Already saved to this account. */
+  added: boolean
+}
+
+export interface ElevenLabsLibraryPage {
+  voices: ElevenLabsLibraryVoiceRow[]
+  nextPage: number | null
+}
+
+/** GET /api/v1/elevenlabs/library — search ElevenLabs' public voice library. */
+export async function searchElevenLabsLibrary(
+  scope: ElevenLabsScope & { search?: string; language?: string; gender?: string; age?: string; page?: number },
+  getSyncToken: SyncTokenForFile,
+): Promise<ElevenLabsLibraryPage> {
+  const params = new URLSearchParams({ projectId: scope.projectId })
+  if (scope.search?.trim()) params.set("search", scope.search.trim())
+  if (scope.language) params.set("language", scope.language)
+  if (scope.gender) params.set("gender", scope.gender)
+  if (scope.age) params.set("age", scope.age)
+  if (scope.page) params.set("page", String(scope.page))
+  const res = await send(`${base()}/library?${params}`, { headers: await authHeaders(scope, getSyncToken) }, READ_TIMEOUT_MS)
+  const json = (await res.json()) as Partial<ElevenLabsLibraryPage>
+  return { voices: Array.isArray(json.voices) ? json.voices : [], nextPage: json.nextPage ?? null }
+}
+
+/**
+ * POST /api/v1/elevenlabs/library/add — save a library voice to the user's own
+ * ElevenLabs account. Returns the voice's id in that account.
+ */
+export async function addElevenLabsLibraryVoice(
+  scope: ElevenLabsScope & { ownerId: string; voiceId: string; name: string },
+  getSyncToken: SyncTokenForFile,
+): Promise<string> {
+  const res = await send(`${base()}/library/add`, {
+    method: "POST",
+    headers: { ...(await authHeaders(scope, getSyncToken)), "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId: scope.projectId, ownerId: scope.ownerId, voiceId: scope.voiceId, name: scope.name }),
+  }, READ_TIMEOUT_MS)
+  return ((await res.json()) as { voiceId: string }).voiceId
 }
 
 /** GET /api/v1/elevenlabs/models — the curated TTS models this account has. */

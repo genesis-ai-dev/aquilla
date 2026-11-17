@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { LaneAccessFields } from "@/components/LaneAccessFields";
+import { NoLaneAccessConfirm } from "@/components/NoLaneAccessConfirm";
 import { ROLE } from "@/lib/frontier/roles";
 import {
+  grantsNoLanes,
+  initialLaneChoice,
   laneChoiceReady,
   needsLaneChoice,
   toMemberLaneAccess,
@@ -13,9 +16,12 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GrantScopeNotice } from "@/components/GrantScopeNotice";
 import { RoleSelect } from "@/components/RoleSelect";
-import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
+import {
+  UsernameTypeahead,
+  type RecipientValue,
+  type TypeaheadPerson,
+} from "@/components/UsernameTypeahead";
 import { toast } from "@/components/ui/toast";
-import type { UserSearchResult } from "@/hooks/useUserSearch";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 import {
   describeGrant,
@@ -69,8 +75,12 @@ export interface MemberMultiAddRowProps {
   excludedUserIds?: readonly number[];
   /** Disable for org membership, where search should find any Aquilla user. */
   scopedUserSearch?: boolean;
-  /** Eligible-colleague rows offered before any search (see UsernameTypeahead). */
-  suggestions?: readonly UserSearchResult[];
+  /**
+   * Eligible-colleague rows offered before any search (see UsernameTypeahead).
+   * AQU-2609: each row may carry a `secondary` identifier (an email the viewer
+   * is already permitted to see) so similar usernames stay distinguishable.
+   */
+  suggestions?: readonly TypeaheadPerson[];
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string;
   /** Fires as an Add attempt starts — lets the parent clear its own error UI. */
@@ -101,6 +111,13 @@ export interface MemberMultiAddRowProps {
    * picks every lane or names the ones this person may use.
    */
   targetLanes?: readonly TargetLaneOption[];
+  /**
+   * AQU-2576: the project being staffed. Passing it lets the typeahead resolve
+   * an EMAIL to the matching account (server-gated to callers who can already
+   * add members to that project) and shows the "enter their email instead"
+   * hint. Omit on org/team surfaces, where no single project scopes the lookup.
+   */
+  lookupProjectId?: string | null;
 }
 
 /**
@@ -124,6 +141,7 @@ export function MemberMultiAddRow({
   buttonSize = "default",
   grantScope,
   targetLanes = [],
+  lookupProjectId,
 }: MemberMultiAddRowProps) {
   const { t, locale } = useI18n();
   const searchDisabled = disabled || disabledReason != null;
@@ -141,9 +159,17 @@ export function MemberMultiAddRow({
   // or pressing Enter accumulates people here so they survive new searches.
   const [staged, setStaged] = useState<StagedRecipient[]>([]);
   const [role, setRole] = useState(defaultRole);
-  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null);
+  // Null until the sharer answers. AQU-2358: a one-lane project behaves as if
+  // its lane were already checked, so `laneChoice` is the answer DERIVED from
+  // that default — the lanes arrive from a fetch, so seeding the state in an
+  // effect would mean a cascading render. Any answer the sharer makes,
+  // including emptying the selection, is non-null and overrides the default.
+  const [pickedLanes, setPickedLanes] = useState<LaneAccessChoice | null>(null);
+  const laneChoice = pickedLanes ?? initialLaneChoice(targetLanes, role);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  // AQU-2358: true while the no-lane warning is open.
+  const [confirmNoLanes, setConfirmNoLanes] = useState(false);
 
   function stageOne(person: StagedRecipient) {
     setStaged((prev) =>
@@ -187,13 +213,23 @@ export function MemberMultiAddRow({
     return name ? [{ username: name }] : [];
   }
 
-  async function handleAdd() {
+  /**
+   * AQU-2358: `confirmedNoLanes` is set only by the warning dialog's "Add
+   * without lanes". Without it, a choice that grants no lane opens the warning
+   * instead of adding.
+   */
+  async function handleAdd(confirmedNoLanes = false) {
     const toAdd = effectiveStaged();
     if (toAdd.length === 0) return;
     const submittedRole = role;
     const askingLanes = needsLaneChoice(submittedRole, targetLanes.length);
     if (askingLanes && !laneChoiceReady(laneChoice, submittedRole, targetLanes.length)) {
       setAddError(t("projectSettings.share.laneChoiceRequired"));
+      return;
+    }
+    if (!confirmedNoLanes && grantsNoLanes(laneChoice, submittedRole, targetLanes.length)) {
+      setAddError(null);
+      setConfirmNoLanes(true);
       return;
     }
     const laneAccess = askingLanes && laneChoice ? toMemberLaneAccess(laneChoice) : undefined;
@@ -287,8 +323,13 @@ export function MemberMultiAddRow({
           {disabledReason}
         </p>
       )}
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
-        <div className="min-w-0">
+      {/* A wrapping row, not a fixed grid: the button's label carries the scope
+          ("Add — <lane> language lane only") and can outgrow the row. The
+          username field keeps a usable width and the button drops to its own
+          line, where the lopsided grow factors let it fill that line while
+          staying label-sized when it does share the row. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
+        <div className="min-w-0 sm:flex-[999_1_10rem]">
           <UsernameTypeahead
             value={recipient}
             onChange={setRecipient}
@@ -300,6 +341,7 @@ export function MemberMultiAddRow({
             scopedSearch={scopedUserSearch}
             suggestions={suggestions}
             emptySuggestionsHint={emptySuggestionsHint}
+            lookupProjectId={lookupProjectId}
             multiSelect={{
               stagedUsernames,
               onToggleResult: (u) => toggleStaged({ username: u.username, id: u.id }),
@@ -316,7 +358,7 @@ export function MemberMultiAddRow({
         />
         <Button
           size={buttonSize}
-          className="sm:whitespace-nowrap"
+          className="h-auto min-h-8 max-w-full py-1 whitespace-normal sm:flex-[1_1_auto]"
           onClick={() => void handleAdd()}
           disabled={adding || searchDisabled || !canAdd || !lanesChosen}
         >
@@ -327,7 +369,7 @@ export function MemberMultiAddRow({
         <LaneAccessFields
           lanes={targetLanes}
           value={laneChoice}
-          onChange={setLaneChoice}
+          onChange={setPickedLanes}
           disabled={adding || searchDisabled}
         />
       )}
@@ -335,6 +377,15 @@ export function MemberMultiAddRow({
         <p className="text-[10px] text-muted-foreground">{t("projectSettings.share.laneChoiceLeadNote")}</p>
       )}
       {addError && <p className="text-xs text-destructive">{addError}</p>}
+      <NoLaneAccessConfirm
+        open={confirmNoLanes}
+        kind="add"
+        onBack={() => setConfirmNoLanes(false)}
+        onProceed={() => {
+          setConfirmNoLanes(false);
+          void handleAdd(true);
+        }}
+      />
     </div>
   );
 }
@@ -353,6 +404,8 @@ function liveGrantScope(
   if (scope.kind !== "project" || !needsLaneChoice(role, lanes.length)) return scope;
   if (!choice) return { ...scope, lanes: "unknown" };
   if (choice.kind === "all") return { ...scope, lanes: "all" };
+  // AQU-2358: an empty selection is "no lanes", not an unresolved label list.
+  if (choice.laneIds.length === 0) return { ...scope, lanes: "none" };
   const labels = lanes.filter((lane) => choice.laneIds.includes(lane.id)).map((lane) => lane.label);
   return { ...scope, lanes: labels };
 }

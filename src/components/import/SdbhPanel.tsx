@@ -101,13 +101,15 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
           k="importExport.sdbh.description"
           values={{
             dictName: <span className="font-medium">{t("importExport.sdbh.dictionaryName")}</span>,
+            // i18n-exempt example filename
             masterFile: <code>SDBH-en.JSON</code>,
+            // i18n-exempt example filename
             localizedFile: <code>SDBH-es.JSON</code>,
           }}
         />
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
           {masterFile ? masterFile.name : t("importExport.sdbh.chooseMaster")}
           <input
             type="file"
@@ -120,7 +122,9 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
             disabled={importing}
           />
         </Button>
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
+          {/* AQU-2487 (review, Nov 9): the label already ends in "(optional)"; an
+              OptionalMark after it said it twice. */}
           {localizedFile ? localizedFile.name : t("importExport.sdbh.chooseLocalized")}
           <input
             type="file"
@@ -143,7 +147,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
               max: formatNumber(SDBH_MAX_REFERENCES, locale),
             })}
           </p>
-          <ul className="list-disc pl-4">
+          <ul className="list-disc ps-4">
             {notImported.slice(0, 5).map((f) => (
               <li key={f.conId}>
                 {t("importExport.sdbh.notImported.item", { lemma: f.lemma, count: formatNumber(f.count, locale) })}

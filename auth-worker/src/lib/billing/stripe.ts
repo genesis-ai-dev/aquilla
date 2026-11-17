@@ -28,12 +28,6 @@ export function checkoutEnabled(env: Env): boolean {
   return env.BILLING_CHECKOUT_ENABLED === "true" && stripeConfigured(env)
 }
 
-export function addonPriceId(env: Env): string {
-  const id = env.STRIPE_PRICE_ADDON?.trim()
-  if (!id) throw new StripeConfigError("STRIPE_PRICE_ADDON is not configured")
-  return id
-}
-
 export async function stripeForm(
   env: Env,
   method: "GET" | "POST",

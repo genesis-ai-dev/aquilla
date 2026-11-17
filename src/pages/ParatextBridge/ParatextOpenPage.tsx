@@ -62,7 +62,7 @@ export function ParatextOpenPage() {
     let cancelled = false
     const run = async () => {
       // Already mirrored: straight to its editor.
-      const existing = await bridgeStore.link(project.guid)
+      const existing = await bridgeStore.link(project.stateId)
       if (existing) {
         const first = project.books.map((b) => existing.books[b.code]?.fileId).find(Boolean)
         navigate(editorPathForLink(existing.projectId, first), { replace: true })
@@ -123,7 +123,7 @@ export function ParatextOpenPage() {
       if (code && file) books[code] = { fileId: ref.id, fileName: file.fileName }
     }
     const mirrored = Object.values(books).flatMap((b) => importedBytes.current.get(b.fileName) ?? [])
-    await setMirrorBase(project.guid, mirrored)
+    await setMirrorBase(project.stateId, mirrored)
     await bridgeStore.putLink({
       projectGuid: project.guid, projectPath: project.path, projectId: phase.projectId,
       books, targetLang: phase.targetLang, createdAt: Date.now(),

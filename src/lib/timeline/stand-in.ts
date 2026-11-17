@@ -49,12 +49,52 @@ export function hasNothingToFollow(cells: readonly CellData[]): boolean {
 
 /** The words a line is read from: its translation, else its source. */
 export function standInText(cell: Pick<CellData, "translated" | "original" | "transcription">): string {
-  return (cell.translated?.trim() || cell.original?.trim() || cell.transcription?.trim() || "").replace(/\s+/g, " ")
+  const raw = cell.translated?.trim() || cell.original?.trim() || cell.transcription?.trim() || ""
+  // A book lays out every line on open. Most lines are already single-spaced,
+  // and rebuilding each one with a regex is a visible stall.
+  let pendingSpace = false
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i)
+    const ws = code <= 32 || code === 0x00A0 || code === 0x3000
+    if (ws && (pendingSpace || code !== 32)) return raw.replace(/\s+/g, " ")
+    pendingSpace = ws
+  }
+  return raw
 }
 
 /** Characters as a reader voices them: code points, spaces between words included. */
 function charCount(text: string): number {
-  return [...text].length
+  let n = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code >= 0xD800 && code <= 0xDBFF) i++
+    n++
+  }
+  return n
+}
+
+/** ASCII and the Latin/Greek/Cyrillic blocks, without a regex per character.
+ *  A book is tens of thousands of lines; testing every letter with a unicode
+ *  pattern is what stalls the first timeline layout. */
+function isAlphabeticCode(code: number): boolean {
+  return (code >= 0x41 && code <= 0x5A)
+    || (code >= 0x61 && code <= 0x7A)
+    || (code >= 0xC0 && code <= 0x24F)
+    || (code >= 0x1E00 && code <= 0x1EFF)
+    || (code >= 0x370 && code <= 0x3FF)
+    || (code >= 0x400 && code <= 0x52F)
+    || (code >= 0x530 && code <= 0x58F)
+    || (code >= 0x10A0 && code <= 0x10FF)
+}
+
+function isCjkCode(code: number): boolean {
+  return (code >= 0x3000 && code <= 0x303F)
+    || (code >= 0x3040 && code <= 0x30FF)
+    || (code >= 0x31F0 && code <= 0x31FF)
+    || (code >= 0x3400 && code <= 0x4DBF)
+    || (code >= 0x4E00 && code <= 0x9FFF)
+    || (code >= 0xF900 && code <= 0xFAFF)
+    || (code >= 0xFF00 && code <= 0xFFEF)
 }
 
 /** The default reading pace for a text, by the script most of it is written in. */
@@ -62,11 +102,24 @@ export function defaultPaceCps(text: string): number {
   let cjk = 0
   let alpha = 0
   let other = 0
-  for (const ch of text) {
-    if (/\s/u.test(ch)) continue
-    if (CJK.test(ch)) cjk++
-    else if (ALPHABETIC.test(ch)) alpha++
-    else if (/\p{L}/u.test(ch)) other++
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code <= 32 || code === 0x00A0) continue
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const ch = text[i] + (text[i + 1] ?? "")
+      i++
+      if (CJK.test(ch)) cjk++
+      else if (ALPHABETIC.test(ch)) alpha++
+      else if (/\p{L}/u.test(ch)) other++
+      continue
+    }
+    if (code < 0x80) {
+      if ((code >= 0x41 && code <= 0x5A) || (code >= 0x61 && code <= 0x7A)) alpha++
+      continue
+    }
+    if (isCjkCode(code)) cjk++
+    else if (isAlphabeticCode(code)) alpha++
+    else if (/\p{L}/u.test(text[i])) other++
   }
   if (cjk === 0 && alpha === 0 && other === 0) return PACE_ALPHABETIC_CPS
   if (cjk >= alpha && cjk >= other) return PACE_CJK_CPS

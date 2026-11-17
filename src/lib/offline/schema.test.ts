@@ -187,6 +187,33 @@ describe("event queue", () => {
     store.commit(events.eventDequeued({ id: "q1" }))
     expect(store.query(tables.eventQueue.select())).toHaveLength(0)
   })
+
+  const queued = (id: string) => ({
+    id,
+    projectId: "proj1",
+    fileId: "file1",
+    cellId: "GEN 1:1",
+    kind: "target.cell.commit",
+    payload: { text: id },
+    parentId: null,
+    author: "dev@local.test",
+    schemaVersion: 1,
+    clientTs: new Date("2026-01-01T00:00:00Z"),
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+  })
+
+  it("queues a batch, and an id already queued doesn't cost the rest of it", () => {
+    store.commit(events.eventQueued(queued("q1")))
+    store.commit(events.eventQueueStatusSet({ id: "q1", status: "flushing" }))
+    store.commit(events.eventsQueued({ rows: [queued("q2"), queued("q1"), queued("q3"), queued("q3")] }))
+    store.commit(events.eventQueued(queued("q2")))
+    expect(store.query(tables.eventQueue.select("id", "status").orderBy("id", "asc"))).toEqual([
+      // A re-enqueue leaves the queued row as it was — a write in flight stays in flight.
+      { id: "q1", status: "flushing" },
+      { id: "q2", status: "pending" },
+      { id: "q3", status: "pending" },
+    ])
+  })
 })
 
 describe("offline projects", () => {

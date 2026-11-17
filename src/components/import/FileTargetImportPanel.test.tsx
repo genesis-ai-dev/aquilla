@@ -346,6 +346,49 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
 // UUID would be the only alternative), and match positionally — which means the
 // order-match warning has to be visible before anything commits.
 
+// AQU-2508: a Paratext bridge (`\v 27-28`) over verses the open file keeps
+// apart used to be dropped as an unmatched row, so the bridged translation
+// never reached the project and both verses stayed empty.
+describe("FileTargetImportPanel — a bridged verse range (AQU-2508)", () => {
+  const luke = [26, 27, 28, 29].map((v) => ({
+    cellId: `cell-luk-5-${v}`,
+    fileId: "file-1",
+    canonicalRef: `LUK 5:${v}`,
+    sourceEventId: `se-${v}`,
+    targetEventId: undefined,
+    translated: "",
+    original: `SOURCE ${v}`,
+  }))
+  const BRIDGED_USFM =
+    "\\id LUK\n\\c 5\n\\v 26 Amazed.\n\\v 27-28 He saw a publican, and followed him.\n\\v 29 A feast.\n"
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 0, skippedCount: 0 })
+  })
+
+  it("pairs the bridge with the range's first verse, pills it, and leaves it for a person to tick", async () => {
+    renderPanel({ cells: luke })
+    await selectFile(makeFile(BRIDGED_USFM, "luke.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+
+    const row = screen
+      .getByText("He saw a publican, and followed him.")
+      .closest<HTMLElement>("[data-review-cell]")!
+    // Paired with verse 27 — the bridge's own spelling shown beside it.
+    expect(row.textContent).toContain("LUK 5:27")
+    expect(row.textContent).toContain("LUK 5:27-28")
+    expect(row.textContent).toContain("Bridged verses")
+    // Unticked: anchoring a range is a decision, not a plain pairing.
+    expect(row.querySelector<HTMLInputElement>("input[type=checkbox]")!.checked).toBe(false)
+    // The plain verses either side are ticked as usual.
+    const plain = screen.getByText("Amazed.").closest<HTMLElement>("[data-review-cell]")!
+    expect(plain.querySelector<HTMLInputElement>("input[type=checkbox]")!.checked).toBe(true)
+    // Nothing is unmatched any more — the translation is no longer stranded.
+    expect(screen.queryByText(/unmatched row/i)).not.toBeInTheDocument()
+  })
+})
+
 describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
   const SRT_FIXTURE = [
     "1",
@@ -956,8 +999,20 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
     expect(within(entryOf("Seven")).getByText("No line has this reference")).toBeInTheDocument()
   })
 
-  it("names the verses of a bridge the file keeps apart", async () => {
-    renderPanel()
+  // Since AQU-2508 such a bridge normally LANDS on the range's first verse
+  // (covered in the AQU-2508 block above), so what is left to explain is a
+  // bridge with no line to anchor on — here the file starts at verse 2.
+  it("names the verses of a bridge the file keeps apart and cannot anchor", async () => {
+    const fromTwo = [2, 3].map((v) => ({
+      cellId: `cell-gen-1-${v}`,
+      fileId: "file-1",
+      canonicalRef: `GEN 1:${v}`,
+      sourceEventId: `se-${v}`,
+      targetEventId: undefined,
+      translated: "",
+      original: `source ${v}`,
+    }))
+    renderPanel({ cells: fromTwo })
     await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1-2 Both verses\n"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
     openList(/Verses that didn't find a line/)

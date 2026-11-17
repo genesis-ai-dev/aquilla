@@ -66,8 +66,10 @@ export const workspace = defineNamespace({
       one: "{count} change hasn't reached the server — it was refused, so it won't send on its own. It stays saved on this device.",
       other: "{count} changes haven't reached the server, and some were refused and won't send on their own. They all stay saved on this device.",
     }),
-    "workspace.update.unknownDetail": "This device couldn't confirm that every change has reached the server. Anything not yet sent stays saved on this device.",
-    "workspace.update.updateAnyway": "Update anyway",
+    // Says only what is known to be true: unsent work survives the update. Not a warning.
+    "workspace.update.unknownDetail": "Any changes that haven't reached the server yet stay saved on this device.",
+    // Key name predates the wording; "anyway" read as a compromise, so the label is neutral.
+    "workspace.update.updateAnyway": "Update now",
     // Hot web bundle (src/lib/offline/bundle-update.ts): the shell rolled back a bundle that never booted.
     "workspace.update.rolledBackToast": "Aquilla reverted to the previous version after an update failed to start.",
     // Tauri offline mode: the server refuses to sync a downloaded project —
@@ -185,7 +187,10 @@ export const workspace = defineNamespace({
     "workspace.typeahead.addUser": "Add {username}",
     "workspace.typeahead.alreadyMember": "{username} is already a member.",
     "workspace.typeahead.noUserNamed": "No Aquilla user named \"{query}\".",
-    "workspace.typeahead.noAccountWithEmail": "No Aquilla account uses the email {query}.",
+    "workspace.typeahead.noAccountWithEmail":
+      "No Aquilla account has verified the email {query}. Add the person by their " +
+      "Aquilla username, send them an invite link, or ask them to verify this " +
+      "address in their account settings.",
     "workspace.typeahead.emailAlsoWorksHint":
       "Don't know their username? Enter their email address instead.",
     "workspace.typeahead.inviteByEmailInstead": "Invite by email instead",
@@ -697,7 +702,7 @@ export const workspace = defineNamespace({
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when some changes made on this device still haven't " +
           "been sent to the server. Reassures that updating keeps them. Paired " +
-          "with an 'Update anyway' action (workspace.update.updateAnyway). " +
+          "with an 'Update now' action (workspace.update.updateAnyway). " +
           "Plain language — no 'queue' or 'sync' jargon.",
         placeholders: {
           count: "How many changes haven't been sent yet.",
@@ -708,7 +713,7 @@ export const workspace = defineNamespace({
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when some unsent changes were refused by the server and " +
           "won't send on their own. Must not promise they'll send after the " +
-          "update. Paired with an 'Update anyway' action " +
+          "update. Paired with an 'Update now' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
           "'sync' jargon.",
         placeholders: {
@@ -719,14 +724,17 @@ export const workspace = defineNamespace({
         description:
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when the app couldn't open its local storage to check " +
-          "for unsent changes. Paired with an 'Update anyway' action " +
+          "for unsent changes. Reassures that anything not yet sent is kept " +
+          "on the device; calm, not a warning, and it must not claim that " +
+          "everything was sent. Paired with an 'Update now' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue', " +
           "'store' or 'sync' jargon.",
       },
       "workspace.update.updateAnyway": {
         description:
           "Action button on the 'changes not sent yet' update toast; installs " +
-          "the update and relaunches without waiting. Short imperative.",
+          "the update and relaunches without waiting. Short imperative. " +
+          "Neutral — avoid wording like 'anyway' that suggests a risk.",
       },
       "workspace.update.rolledBackToast": {
         description:
@@ -1074,9 +1082,15 @@ export const workspace = defineNamespace({
       "workspace.typeahead.noAccountWithEmail": {
         description:
           "Shown when the typed text is an email address and the scoped " +
-          "lookup confirms no Aquilla account uses it — the email counterpart " +
-          "of workspace.typeahead.noUserNamed. {query} is the typed address, " +
-          "not quoted by the template.",
+          "lookup returns no match — the email counterpart of " +
+          "workspace.typeahead.noUserNamed. AQU-2638: the lookup only matches " +
+          "VERIFIED addresses, and it answers the same whether an account uses " +
+          "the address without having verified it or no account uses it at all, " +
+          "so this one sentence has to be true in both cases — say that no " +
+          "account has VERIFIED the address, never that none uses it. It names " +
+          "the three ways forward: add by username, send an invite link, or ask " +
+          "the person to verify the address in their account settings. {query} " +
+          "is the typed address, not quoted by the template.",
         placeholders: { query: "The typed email address." },
         screenshot: "assign-modal",
       },

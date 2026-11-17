@@ -5939,6 +5939,7 @@ export const my: Catalog = {
   "workspace.typeahead.addUser": "{username} ထည့်သွင်းပါ",
   "workspace.typeahead.alreadyMember": "{username} သည် အဖွဲ့ဝင် ဖြစ်သည့်ကြောင့် ရှိပြီးသား။",
   "workspace.typeahead.noUserNamed": "Aquilla အသုံးပြုသူ \"{query}\" အမည်ရှိသည် မရှိ။",
+  "workspace.typeahead.noAccountWithEmail": "အီးမေးလ် {query} ကို အတည်ပြုပြီးသော Aquilla အကောင့် မရှိပါ။ ထိုသူကို Aquilla အသုံးပြုသူ အမည်ဖြင့် ထည့်ပါ၊ ဖိတ်ကြားလင့်ခ် ပေးပို့ပါ၊ သို့မဟုတ် ဤလိပ်စာကို အကောင့် ဆက်တင်များတွင် အတည်ပြုရန် တောင်းဆိုပါ။",
   "workspace.typeahead.inviteByEmailInstead": "အစားထိုး အီမေလ်မှတစ်ဆင့် ဖိတ်ခေါ်ပါ",
   "workspace.typeahead.noScopedMatch": "သင် ရှေ့ အဖွဲ့အကျ သို့မဟုတ် ပရောဂျက်များကို မျှဝေသူများထဲတွင် ကိုက်ညီမှု မရှိ။",
   "workspace.typeahead.addByExactUsername": "အတိအကျ အသုံးပြုသူ အမည်မှတစ်ဆင့် \"{query}\" ထည့်သွင်းပါ",

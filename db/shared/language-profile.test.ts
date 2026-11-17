@@ -112,6 +112,12 @@ const FULL: LanguageProfile = {
   numberWords: { '1': 'one', '12': 'twelve' },
   // AQU-2430
   numberFormat: { group: ['.'], decimal: [','] },
+  // AQU-2628
+  orthography: {
+    rules: [['sh', 'ş'], ['ch', 'ç']],
+    apostrophe: '\u02BC',
+    exceptions: [{ word: 'Is\u02BChoq', status: 'approved' }],
+  },
   speechVerbs: ['said', 'asked'],
   kinTerms: { relativeAgeDistinction: true, notes: 'kakak / adik' },
   divineNames: { yhwh: 'the LORD', deityPronounCapitalization: false, kyriosJesus: 'Lord', kyriosGod: 'the Lord' },

@@ -16,9 +16,13 @@ name: Tutorial videos
 # left out and the film that is up stays up; the run goes red and says which.
 #
 # Secrets (Settings → Secrets and variables → Actions):
-#   ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID   the voice. Without them the videos
-#                                              are filmed and published with
-#                                              captions and no voice.
+#   GEMINI_API_KEY                             the voice, from a Google project
+#                                              with billing on (a free key stops
+#                                              after about 20 lines a day).
+#   ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID   the other voice, used when there
+#                                              is no Gemini key. With neither,
+#                                              the videos are filmed and
+#                                              published with captions only.
 #   TUTORIALS_R2_TOKEN                         a Cloudflare API token that can
 #                                              write objects in the aquilla-docs
 #                                              bucket and nothing else. Only
@@ -79,6 +83,7 @@ jobs:
 
       - name: Say, film and put together the videos
         env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
           CLOUDFLARE_API_TOKEN: ${{ inputs.publish && secrets.TUTORIALS_R2_TOKEN || '' }}

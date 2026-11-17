@@ -85,15 +85,25 @@ The demo's content is public domain and no real project is ever filmed.
 
 ## Voice
 
-The voice is ElevenLabs, with the two variables the Showcase assembler already
-reads: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`. A line's recording is
-named by its words, so only a changed line is said again, and the recordings
-are made before filming so the take can hold each line for exactly its length.
+Two voices can say the lines (`scripts/tutorials/voice.ts`):
 
-Without those variables nothing is said. The videos are filmed at reading
-speed and carry captions only, and `videos.json` marks them `voiced: false`.
-When the variables arrive, the next run says the lines and publishes every
-video again by itself.
+- **Gemini**, when `GEMINI_API_KEY` is set: the model and voice LangQuest's
+  tutorial videos use (`gemini-3.8-flash-tts`, "Sulafat"). `TUTORIAL_TTS_MODEL`
+  and `TUTORIAL_TTS_VOICE` change them. The key's Google project needs billing
+  on: a free key allows a few requests a minute and stopped after 20 of the 29
+  lines in a day.
+- **ElevenLabs**, when there is no Gemini key: `ELEVENLABS_API_KEY` and
+  `ELEVENLABS_VOICE_ID`, the two variables the Showcase assembler reads.
+
+A line's recording is named by its words and kept in
+`.video-staging/tutorials/voice/`, so only a changed line is said again. The
+recordings are made before filming, so the take can hold each line for exactly
+its length. Changing the voice or the model says every line again.
+
+With no key, nothing is said. The videos are filmed at reading speed and
+carry captions only, and `videos.json` marks them `voiced: false`. When a key
+arrives, the next run says the lines and publishes every video again by
+itself.
 
 ## The look
 

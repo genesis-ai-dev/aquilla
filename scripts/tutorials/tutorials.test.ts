@@ -4,7 +4,7 @@ import { lookOf, steadyScreen } from "../../e2e/recordings/tutorials/look"
 import { INTRO_MS, OUTRO_MS } from "./brand"
 import { buildVtt, composeArgs, totalMs, type Take } from "./compose"
 import { plan, whyPublish, type Filmed, type VideoEntry } from "./manifest"
-import { unsaidLines } from "./voice"
+import { pcmToWav, unsaidLines } from "./voice"
 
 const take: Take = {
   id: "translate-a-verse",
@@ -104,5 +104,14 @@ describe("tutorial videos", () => {
     const all = unsaidLines([tutorial], null)
     expect(all).toHaveLength(Object.keys(tutorial.lines).length)
     expect(unsaidLines([tutorial], { voice: "v", model: "m", lines: {} })).toEqual(all)
+  })
+
+  it("Gemini's raw speech becomes a WAV a player can read", () => {
+    const wav = pcmToWav(Buffer.alloc(48_000), 24_000) // one second, 16-bit mono
+    expect(wav.subarray(0, 4).toString()).toBe("RIFF")
+    expect(wav.readUInt32LE(24)).toBe(24_000)
+    expect(wav.readUInt32LE(28)).toBe(48_000) // bytes a second
+    expect(wav.readUInt32LE(40)).toBe(48_000)
+    expect(wav.length).toBe(44 + 48_000)
   })
 })

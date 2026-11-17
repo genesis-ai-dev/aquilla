@@ -585,6 +585,49 @@ describe("cqrs outbox", () => {
     expect(await peekOutboxBatch(10)).toEqual([])
   })
 
+  it("leaves a journal entry another live page is still writing to that page", async () => {
+    // A minimal Web Locks: names held across "pages", granted at once.
+    const held = new Set<string>()
+    const locks = {
+      request: async (name: string, callback: () => Promise<void>) => {
+        held.add(name)
+        try { await callback() } finally { held.delete(name) }
+      },
+      query: async () => ({ held: [...held].map((name) => ({ name, mode: "exclusive" })), pending: [] }),
+    }
+    Object.defineProperty(navigator, "locks", { value: locks, configurable: true })
+    try {
+      const key = "aquilla:outbox-recovery:v1:e1"
+      // This page's own write holds its entry's lock until the write lands.
+      setActiveOutboxOwner("alice")
+      const pending = enqueueOutboxEvent(sample)
+      await vi.waitFor(() => expect(held).toEqual(new Set(["aquilla:outbox-journal:" + key])))
+      await pending
+      await vi.waitFor(() => expect(held.size).toBe(0))
+      await removeOutboxEvents([sample.id])
+
+      // Another tab journaled e1 and is still writing it.
+      localStorage.setItem(key, JSON.stringify({
+        id: sample.id, event: sample, ownerKey: "alice", enqueuedAt: 1,
+        attempts: 0, lastAttemptAt: null, lastError: null, status: "pending",
+      }))
+      held.add("aquilla:outbox-journal:" + key)
+      await resetOutboxConnectionForTests()
+      setActiveOutboxOwner("alice")
+      expect(await peekOutboxBatch(10)).toEqual([])
+      expect(localStorage.getItem(key)).not.toBeNull()
+
+      // That tab dies, releasing its lock: the next open recovers the entry.
+      held.clear()
+      await resetOutboxConnectionForTests()
+      setActiveOutboxOwner("alice")
+      expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["e1"])
+      expect(localStorage.getItem(key)).toBeNull()
+    } finally {
+      Reflect.deleteProperty(navigator, "locks")
+    }
+  })
+
   it("leaves this page's in-flight journal entries out of recovery", () => {
     const rec = { id: "f1", event: ev("f1", "c1"), ownerKey: "alice", enqueuedAt: 1,
       attempts: 0, lastAttemptAt: null, lastError: null, status: "pending" as const }
@@ -1196,6 +1239,41 @@ describe("Tauri offline routing", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("holds back IndexedDB records that depend on an edit still in the offline queue", async () => {
+    setActiveOutboxOwner("alice")
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    await enqueueOutboxEvent(commitEvent) // queued offline
+    expect(queuedIds()).toEqual(["tc1"])
+    // Landed in IndexedDB anyway (a recovery whose routing timed out): a
+    // commit chained on tc1, and a validate of that commit.
+    setTauriRuntime(false)
+    const child = { ...commitEvent, id: "tc2", parentId: "tc1" } as CqrsRawEvent
+    const validate = {
+      ...commitEvent, id: "v2", kind: "cell.validate", parentId: null, payload: { editEventId: "tc2" },
+    } as unknown as CqrsRawEvent
+    await enqueueOutboxEvents([child, validate])
+    setTauriRuntime(true)
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { events: { id: string }[] }
+      return new Response(JSON.stringify({ accepted: sent.events.map(({ id }) => ({ id })), rejected: [] }), { status: 200 })
+    })
+    const flush = () => flushOutboxBatch({
+      getTokenForFile: async () => ({ token: "tok", status: 200 }),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(2)
+
+    // The offline queue sends tc1 (here: it leaves the waiting statuses).
+    currentOfflineStore!.commit(offlineEvents.eventQueueStatusSet({ id: "tc1", status: "failed" }))
+    await flush()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await outboxPendingCount()).toBe(0)
   })
 
   it("keeps the flusher off a batch's records until its offline commit settles", async () => {

@@ -42,7 +42,7 @@ async function openOfflineQueue() {
   const [
     { getOfflineStore },
     { isProjectOfflineReady },
-    { events: offlineEvents },
+    { events: offlineEvents, tables: offlineTables },
     { commitOrThrow, isOfflineStoreShutDown },
   ] = await Promise.all([
     import("@/lib/offline/store"),
@@ -83,6 +83,11 @@ async function openOfflineQueue() {
   return {
     offlineEvents,
     isReady: (projectId: string) => isProjectOfflineReady(liveStore, projectId),
+    /** Ids queued offline and not yet sent (a `failed` row isn't going anywhere). */
+    waitingIds: (): ReadonlySet<string> => new Set([
+      ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "pending" })),
+      ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "flushing" })),
+    ]),
     commit: (run: (booted: typeof liveStore) => void) => commitOrThrow(liveStore, () => run(liveStore)),
   }
 }
@@ -120,13 +125,35 @@ export interface OfflineRouting {
 /** Which of `ids` are in the IndexedDB outbox, in any status. */
 export type OutboxLookup = (ids: readonly string[]) => Promise<ReadonlySet<string>>
 
-/** The events `event` chains on or validates, by id. */
-function dependencyIds(event: CqrsRawEvent): string[] {
+/** The events `event` chains on, validates or is guarded by, by id. */
+export function dependencyIds(event: Pick<CqrsRawEvent, "parentId" | "payload">): string[] {
   const ids: string[] = []
   if (event.parentId) ids.push(event.parentId)
-  const editEventId = (event.payload as { editEventId?: unknown } | null)?.editEventId
-  if (typeof editEventId === "string") ids.push(editEventId)
+  const payload = event.payload as { editEventId?: unknown; expectedTargetEventId?: unknown } | null
+  if (typeof payload?.editEventId === "string") ids.push(payload.editEventId)
+  // A repin is refused unless this is still the cell's target head.
+  if (typeof payload?.expectedTargetEventId === "string") ids.push(payload.expectedTargetEventId)
   return ids
+}
+
+/**
+ * Ids still waiting in LiveStore's offline queue, or null when the store
+ * can't say (not booted within the wait, unopenable, shut down). The HTTP
+ * flusher holds back anything that depends on one of them: the two queues
+ * flush independently, so a record that landed in IndexedDB while its parent
+ * sits in the offline queue — a crash-recovered edit whose routing timed out,
+ * a repin guarded by a commit queued offline — would otherwise reach the
+ * server first and be refused or logged stale.
+ */
+export async function offlineQueueWaitingIds(): Promise<ReadonlySet<string> | null> {
+  const queue = await openOfflineQueue()
+  if (!queue) return null
+  try {
+    return queue.waitingIds()
+  } catch (error) {
+    console.warn("[outbox] offline store couldn't list its queue — not holding anything back for it", error)
+    return null
+  }
 }
 
 /** Labels each event with its dependency group: events linked, either way, by

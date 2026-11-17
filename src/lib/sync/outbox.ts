@@ -23,6 +23,7 @@ import {
   splitForJournal,
   clearJournalBatch,
   readJournal,
+  journalKeysLockedElsewhere,
   clearJournal,
   releaseJournal,
   forgetInFlightJournalForTests,
@@ -200,31 +201,35 @@ async function openDb(): Promise<IDBDatabase> {
       req.onerror = () => reject(req.error ?? new Error("IDB open failed"))
       req.onsuccess = () => {
         const db = req.result
-        // Recover before exposing the database to readers or the flusher.
-        const journal = readJournal()
-        if (journal.records.length === 0) {
-          clearJournal(journal.keys)
-          resolve(db)
-          return
-        }
-        // On desktop a recovered edit may belong in the offline queue, next
-        // to the edits it chains on. Finding out can wait on the offline
-        // store (bounded by its boot timeout), and readers still wait for
-        // it: an editor that opened first would show server text and chain
-        // the next commit on the server head, a sibling of the recovered one.
-        // Only a launch with something to recover pays this.
-        if (isTauriRuntime()) {
-          void recoverIntoQueues(db, journal).finally(() => resolve(db))
-          return
-        }
-        addOutboxRecords(db, STORE, journal.records).then(() => {
-          clearJournal(journal.keys)
-          resolve(db)
-        }, (error: unknown) => {
-          releaseJournal(journal.keys)
-          db.close()
-          dbPromise = null
-          reject(error)
+        // Entries another live tab or window is still writing are its own;
+        // replaying them here would queue them a second time.
+        void journalKeysLockedElsewhere().then((lockedElsewhere) => {
+          // Recover before exposing the database to readers or the flusher.
+          const journal = readJournal(lockedElsewhere)
+          if (journal.records.length === 0) {
+            clearJournal(journal.keys)
+            resolve(db)
+            return
+          }
+          // On desktop a recovered edit may belong in the offline queue, next
+          // to the edits it chains on. Finding out can wait on the offline
+          // store (bounded by its boot timeout), and readers still wait for
+          // it: an editor that opened first would show server text and chain
+          // the next commit on the server head, a sibling of the recovered one.
+          // Only a launch with something to recover pays this.
+          if (isTauriRuntime()) {
+            void recoverIntoQueues(db, journal).finally(() => resolve(db))
+            return
+          }
+          addOutboxRecords(db, STORE, journal.records).then(() => {
+            clearJournal(journal.keys)
+            resolve(db)
+          }, (error: unknown) => {
+            releaseJournal(journal.keys)
+            db.close()
+            dbPromise = null
+            reject(error)
+          })
         })
       }
       req.onupgradeneeded = (ev) => {

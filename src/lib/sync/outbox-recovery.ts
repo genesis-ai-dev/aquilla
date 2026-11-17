@@ -19,6 +19,50 @@ const BATCH_JOURNAL_MAX_EVENTS = 500
  */
 const inFlight = new Set<string>()
 
+const LOCK_PREFIX = "aquilla:outbox-journal:"
+/** Releases the cross-page lock on each of this page's journal entries. */
+const lockReleases = new Map<string, () => void>()
+
+function webLocks(): LockManager | null {
+  return typeof navigator !== "undefined" && navigator.locks ? navigator.locks : null
+}
+
+/**
+ * Hold a Web Lock named for `key` until the entry is cleared, so another
+ * page's recovery can tell the entry is still being written (localStorage is
+ * shared across tabs and windows; `inFlight` only covers this page). A page
+ * that dies releases its locks, so a crashed page's entries become
+ * recoverable as soon as it is gone.
+ */
+function lockJournalKey(key: string): void {
+  const locks = webLocks()
+  if (!locks) return
+  void locks.request(LOCK_PREFIX + key, () => new Promise<void>((resolve) => {
+    // Cleared before the lock was even granted: let it go at once.
+    if (!inFlight.has(key)) resolve()
+    else lockReleases.set(key, resolve)
+  })).catch(() => { /* recovery falls back to inFlight alone */ })
+}
+
+/**
+ * Journal keys another live page is still writing (its lock held or
+ * requested), so recovery leaves them to it. Empty without Web Locks.
+ */
+export async function journalKeysLockedElsewhere(): Promise<ReadonlySet<string>> {
+  const locks = webLocks()
+  if (!locks) return new Set()
+  try {
+    const { held = [], pending = [] } = await locks.query()
+    const keys = new Set<string>()
+    for (const { name } of [...held, ...pending]) {
+      if (name?.startsWith(LOCK_PREFIX)) keys.add(name.slice(LOCK_PREFIX.length))
+    }
+    return keys
+  } catch {
+    return new Set()
+  }
+}
+
 /**
  * Bridge the document-teardown gap before an async IndexedDB transaction.
  * The record is the SAME account-scoped event envelope, not a second draft.
@@ -31,6 +75,7 @@ export function journalTargetCommit(record: OutboxRecord): void {
   if (record.event.kind !== "target.cell.commit") return
   const key = PREFIX + record.id
   inFlight.add(key)
+  lockJournalKey(key)
   try {
     localStorage.setItem(key, JSON.stringify(record))
   } catch {
@@ -78,11 +123,12 @@ export function journalBatch(records: readonly OutboxRecord[]): string | null {
   if (json.length > BATCH_JOURNAL_MAX_CHARS) return null
   const key = BATCH_PREFIX + uuidv7()
   inFlight.add(key)
+  lockJournalKey(key)
   try {
     localStorage.setItem(key, json)
     return key
   } catch {
-    inFlight.delete(key)
+    clearJournalKey(key)
     console.warn("[outbox] Reload recovery storage unavailable; keep the page open until saved")
     return null
   }
@@ -119,6 +165,8 @@ export function clearJournalBatch(key: string): void {
 
 function clearJournalKey(key: string): void {
   inFlight.delete(key)
+  lockReleases.get(key)?.()
+  lockReleases.delete(key)
   try { localStorage.removeItem(key) } catch { /* unavailable storage */ }
 }
 
@@ -139,16 +187,17 @@ export interface JournalContents {
 
 /**
  * Reads the entries a previous page left behind, skipping this page's own
- * in-flight writes. Malformed entries are listed in `keys` (to clear) but
+ * in-flight writes and those another live page holds a lock on
+ * (`journalKeysLockedElsewhere`). Malformed entries are listed in `keys` (to clear) but
  * contribute no records. The keys stay marked in flight until cleared, so a
  * recovery that hasn't finished isn't read twice.
  */
-export function readJournal(): JournalContents {
+export function readJournal(lockedElsewhere: ReadonlySet<string> = new Set()): JournalContents {
   const records: OutboxRecord[] = []
   const keys: string[] = []
   try {
     for (const key of Object.keys(localStorage)) {
-      if (inFlight.has(key)) continue
+      if (inFlight.has(key) || lockedElsewhere.has(key)) continue
       if (key.startsWith(BATCH_PREFIX)) {
         keys.push(key)
         try {
@@ -179,6 +228,8 @@ export function clearJournal(keys: readonly string[]): void {
 /** Forgets this page's in-flight keys, as a reload would (tests only). */
 export function forgetInFlightJournalForTests(): void {
   inFlight.clear()
+  for (const release of lockReleases.values()) release()
+  lockReleases.clear()
 }
 
 /** Gives up on recovering `keys` in this page, leaving them for the next one. */

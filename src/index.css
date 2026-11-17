@@ -673,7 +673,10 @@ html[data-mac-titlebar]:not([data-app-frame]) {
   & #root .h-dvh { height: calc(100dvh - var(--mac-titlebar-h)); }
   & #root .h-lvh { height: calc(100lvh - var(--mac-titlebar-h)); }
 }
-html[data-app-frame] [data-slot="titlebar-drag-strip"] {
+/* Hidden only while an AppShell header is actually on screen: under a "held"
+   frame (a lazy route's fallback between two AppShells) the strip is the
+   window's only drag handle. */
+html[data-app-frame="true"] [data-slot="titlebar-drag-strip"] {
   display: none;
 }
 

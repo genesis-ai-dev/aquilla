@@ -25,7 +25,14 @@ import { useLayoutEffect } from "react"
  *  - a lazy route's loading fallback sits between two AppShells while its
  *    chunk loads. It calls `useHoldAppFrame()`: it keeps a frame that is
  *    already up, but never raises one (a fallback before the sign-in page
- *    must not drop that page's band).
+ *    must not drop that page's band). Only a Suspense fallback may hold —
+ *    a page state that merely looks like one (AppEntry's gating) can last
+ *    indefinitely and must not.
+ *
+ * Values: "true" while an AppShell is mounted; "held" while only a hold keeps
+ * it. Every `html[data-app-frame]` rule applies to both, but the drag strip is
+ * hidden only under "true" — with no AppShell header on screen during a hold,
+ * the strip is the window's only drag handle.
  */
 let frames = 0
 let holds = 0
@@ -35,6 +42,7 @@ function apply(): void {
   const root = document.documentElement
   if (frames > 0) root.dataset.appFrame = "true"
   else if (holds === 0) delete root.dataset.appFrame
+  else if (root.dataset.appFrame) root.dataset.appFrame = "held"
 }
 
 function settleSoon(): void {

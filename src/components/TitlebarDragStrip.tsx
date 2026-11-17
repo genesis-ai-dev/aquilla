@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useLayoutEffect } from "react"
 import {
   TITLEBAR_BAND_HEIGHT,
   TRAFFIC_LIGHTS_WIDTH,
@@ -16,7 +16,7 @@ import {
  * nothing sits under the traffic lights.
  *
  * AppShell's own header takes over while it is mounted (index.css drops the
- * band and hides the strip under `html[data-app-frame]`). In native
+ * band and hides the strip under `html[data-app-frame="true"]`). In native
  * fullscreen the lights are hidden and there is no window to drag, so the
  * band goes away too.
  */
@@ -24,7 +24,9 @@ export function TitlebarDragStrip() {
   const { inset } = useMacTitlebarOverlay()
   const drag = useTitlebarDrag(inset)
 
-  useEffect(() => {
+  // Layout effect, like useAppFrame: the first painted frame must already have
+  // the band, or the page paints under the traffic lights and then jumps.
+  useLayoutEffect(() => {
     if (!inset) return
     const root = document.documentElement
     root.dataset.macTitlebar = "true"

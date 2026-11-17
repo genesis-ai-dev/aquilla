@@ -402,7 +402,8 @@ The Tauri shell (`src-tauri/`) updates on two channels
 - **Native shell — rare, signed.** `tauri-release.yml` on a `v*` tag, gated by the
   `desktop-release-signing` environment; its `pnpm run build:hosted` step embeds a
   production-host fallback bundle. The existing Tauri updater (GitHub Releases
-  `latest.json`) ships it.
+  `latest.json`) ships it. The release is a draft until `desktop-release-verify.yml`
+  passes, and `desktop-release-cut.yml` tags it when the shell changed: `docs/DESKTOP-RELEASES.md`.
 
 Secrets:
 

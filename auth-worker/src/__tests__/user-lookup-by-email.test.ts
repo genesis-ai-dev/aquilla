@@ -25,6 +25,15 @@ beforeEach(async () => {
   await seedUser(2571, "naladda-2576") // the target, outside the caller's scope
   await seedUser(2572, "bystander-2576") // signed in, no access to PROJECT
   await seedUser(2573, "viewer-2576") // on PROJECT, below the add-member floor
+  await seedUser(2574, "squatter-2576") // claims an address it never verified
+  // Only a verified address resolves ([Pen test] 2026-11-17): the target has
+  // proven theirs, the squatter has not.
+  await env.AQUILLA_PG.prepare(
+    "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 2571",
+  ).run()
+  await env.AQUILLA_PG.prepare(
+    "UPDATE users SET email = 'reviewer-2576@partner.org' WHERE id = 2574",
+  ).run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
   )
@@ -72,6 +81,23 @@ describe("GET /api/v2/users/lookup — email resolution (AQU-2576)", () => {
   it("404s for an email no account uses", async () => {
     const res = await lookup("lead-2576", "nobody@example.com", PROJECT)
     expect(res.status).toBe(404)
+  })
+
+  // [Pen test] Authorization & access control (2026-11-17): registration never
+  // proves the email it stores, so an unverified match may be someone who
+  // registered the invitee's address first. Answering with their handle would
+  // point the lead's next click — Add — at the wrong person.
+  it("does not resolve an address its account has not verified", async () => {
+    const res = await lookup("lead-2576", "reviewer-2576@partner.org", PROJECT)
+    expect(res.status).toBe(404)
+    // Indistinguishable from an address nobody uses.
+    const nobody = await lookup("lead-2576", "nobody@example.com", PROJECT)
+    expect(await res.json()).toEqual(await nobody.json())
+  })
+
+  it("still resolves the unverified account by its username", async () => {
+    const res = await lookup("lead-2576", "squatter-2576", PROJECT)
+    expect(res.status).toBe(200)
   })
 
   it("still resolves a plain username when scoped to a project", async () => {

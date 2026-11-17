@@ -1,10 +1,11 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ request: vi.fn(), start: vi.fn(), preview: false }))
-vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), start: vi.fn(), clearGoogleAttempt: vi.fn(), preview: false }))
+vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start, clearGoogleAttempt: mocks.clearGoogleAttempt }))
 vi.mock("@/lib/deployment-environment", () => ({ resolveBackendEnvironment: () => ({ kind: mocks.preview ? "preview" : "development" }) }))
 import { GoogleLoginButton } from "./GoogleLoginButton"
 afterEach(() => vi.unstubAllGlobals())
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(true) }))
 beforeEach(() => { mocks.preview = false; vi.clearAllMocks(); mocks.start.mockRejectedValue(new Error("unavailable")) })
 it.each([true, false, "unavailable"])("only explicit activation can start Google; capability=%s", async enabled => {
   if (enabled === "unavailable") mocks.request.mockRejectedValue(new Error("offline"))
@@ -19,7 +20,7 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
     expect(mocks.start).not.toHaveBeenCalled()
     fireEvent.click(button)
     await screen.findByRole("alert")
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true)
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true, undefined, false, expect.any(AbortSignal))
     expect(button).toBeEnabled()
   } else {
     await screen.findByRole("alert")
@@ -82,11 +83,22 @@ it("shows the failure category, never raw server details, and lets the user retr
   }
 })
 
-it("explains desktop support before an OAuth attempt and never calls the web-only endpoint", () => {
+it("gates desktop on server capability and lets a pending native login be cancelled", async () => {
   vi.stubGlobal("__TAURI__", {})
-  render(<GoogleLoginButton />)
+  mocks.request.mockResolvedValue({enabled:true})
+  const view = render(<GoogleLoginButton />)
+  await screen.findByText(/isn’t available in the desktop app/)
   expect(screen.getByRole("button", {name:"Continue with Google"})).toBeDisabled()
-  expect(screen.getByText(/isn’t available in the desktop app/)).toBeVisible()
-  expect(mocks.request).not.toHaveBeenCalled()
   expect(mocks.start).not.toHaveBeenCalled()
+  view.unmount()
+  mocks.request.mockResolvedValue({enabled:true,desktop:true})
+  mocks.start.mockResolvedValue(undefined)
+  render(<GoogleLoginButton />)
+  const button = screen.getByRole("button", {name:"Continue with Google"})
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+  await screen.findByText(/Finish signing in with Google/)
+  fireEvent.click(screen.getByRole("button", {name:"Cancel"}))
+  expect(mocks.clearGoogleAttempt).toHaveBeenCalledOnce()
+  expect(button).toBeEnabled()
 })

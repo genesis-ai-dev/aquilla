@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
-import { googleRequest, startGoogleLogin, readGoogleAttempt, clearGoogleAttempt, saveGoogleProgress } from "./google-login"
+import { googleRequest, startGoogleLogin, readGoogleAttempt, clearGoogleAttempt, saveGoogleProgress, acceptDesktopGoogleReturn } from "./google-login"
 import { confirmSignupAnalyticsChoice, clearSignupAnalyticsChoice } from "../signup-analytics-choice"
+const native = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock("@tauri-apps/api/core", () => native)
 beforeEach(() => { sessionStorage.clear(); clearSignupAnalyticsChoice(); vi.spyOn(navigator, "onLine", "get").mockReturnValue(true) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it("distinguishes invalid sessions from incorrect Google-link password proofs", async () => {
@@ -73,10 +75,40 @@ it("classifies start failures without changing other Google endpoint contracts",
    }
  })
 
-it("rejects desktop Google handoff before creating browser state or contacting the server", async () => {
+it("opens the browser and accepts only this attempt's bounded, one-use PKCE handoff", async () => {
   vi.stubGlobal("__TAURI__", {})
-  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher)
-  await expect(startGoogleLogin("/app", false)).rejects.toThrow("desktop_unsupported")
-  expect(fetcher).not.toHaveBeenCalled()
+  native.invoke.mockResolvedValue(true)
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ desktop: true, authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?state=server-state" })))
+  vi.stubGlobal("fetch", fetcher)
+  await startGoogleLogin("/preferences/login-methods", false)
+  const attempt = readGoogleAttempt()!
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ challenge: attempt.desktopChallenge, desktop: true })
+  expect(native.invoke).toHaveBeenCalledWith("open_auth_browser", { authUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=server-state" })
+  const callback = `aquilla://auth/google#code=${"c".repeat(64)}&state=${attempt.desktopChallenge}`
+  for (const value of [callback.replace("aquilla:", "https:"), callback.replace("state=", "state=wrong"), callback + "&token=jwt", "aquilla://auth/callback?token=jwt&refresh=r"]) expect(acceptDesktopGoogleReturn(value)).toBeNull()
+  expect(acceptDesktopGoogleReturn(callback)?.get("code")).toBe("c".repeat(64))
+  expect(acceptDesktopGoogleReturn(callback)).toBeNull()
+  clearGoogleAttempt()
+  expect(acceptDesktopGoogleReturn(callback)).toBeNull()
+  await startGoogleLogin("/app", false)
+  const next = readGoogleAttempt()!
+  expect(acceptDesktopGoogleReturn(callback)).toBeNull()
+  const cancel = `aquilla://auth/google#error=cancelled&state=${next.desktopChallenge}`
+  expect(acceptDesktopGoogleReturn(cancel)?.get("error")).toBe("cancelled")
+  clearGoogleAttempt()
+  await startGoogleLogin("/app", false)
+  const expired = `aquilla://auth/google#code=${"c".repeat(64)}&state=${readGoogleAttempt()!.desktopChallenge}`
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000)
+  expect(acceptDesktopGoogleReturn(expired)).toBeNull()
+})
+
+it("does not open the browser or leave an attempt when cancelled during startup", async () => {
+  vi.stubGlobal("__TAURI__", {})
+  native.invoke.mockClear(); native.invoke.mockResolvedValue(true)
+  const abort = new AbortController()
+  const starting = startGoogleLogin("/app", false, undefined, false, abort.signal)
+  abort.abort()
+  await starting
   expect(readGoogleAttempt()).toBeNull()
+  expect(native.invoke).not.toHaveBeenCalledWith("open_auth_browser", expect.anything())
 })

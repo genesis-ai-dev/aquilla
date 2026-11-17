@@ -1,10 +1,11 @@
+import { parseDesktopGoogleCallback } from "../../../shared/desktop-google"
 import { ANALYTICS_DISCLOSURE_VERSION } from "../../../shared/analytics-consent"
 import { AUTH_BASE } from "./auth"
 import { isTauriRuntime } from "../offline/is-tauri"
 import { safeLoginNext } from "../navigation/login-path"
 import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup-analytics-choice"
 const KEY = `aquilla:google-login:${AUTH_BASE}`
-export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
+export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; desktopChallenge?: string; desktopReturned?: boolean; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
 export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
 export async function googleRequest<T>(path: string, body?: object, jwt?: string): Promise<T> {
@@ -30,21 +31,36 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
   if (!response.ok) throw new Error(data.code === "dev_access_restricted" ? data.code : typeof data.error === "string" ? data.error : "unavailable")
   return data as T
 }
-export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false): Promise<void> {
-  if (isTauriRuntime() || ["app:", "tauri:"].includes(window.location.protocol)) throw new Error("desktop_unsupported")
+export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false, signal?: AbortSignal): Promise<void> {
+  const desktop = isTauriRuntime()
+  if (desktop) {
+    const { invoke } = await import("@tauri-apps/api/core")
+    if (!await invoke<boolean>("google_login_supported").catch(() => false)) throw new Error("desktop_unsupported")
+  }
   if (!navigator.onLine) throw new Error("offline")
   const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("")
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))
   const challenge = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  if (signal?.aborted) return
   // Storage must survive the redirect. If unavailable, stay here without ever
   // contacting Google; password login remains usable.
-  const attempt: GoogleAttempt = { verifier, next: safeLoginNext(next), expires: Date.now() + 10 * 60_000, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
+  const attempt: GoogleAttempt = { ...(desktop ? { desktopChallenge: challenge } : {}), verifier, next: safeLoginNext(next), expires: Date.now() + 10 * 60_000, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
   try { sessionStorage.setItem(KEY, JSON.stringify(attempt)) }
   catch { throw new Error("storage_unavailable") }
-  const result = await googleRequest<{ authorization_url: string }>("start", { challenge })
+  const result = await googleRequest<{ authorization_url: string; desktop?: boolean }>("start", { challenge, ...(desktop ? { desktop: true } : {}) })
+  if (desktop && result.desktop !== true) { clearGoogleAttempt(); throw new Error("desktop_unsupported") }
   const url = new URL(result.authorization_url)
   if (url.origin !== "https://accounts.google.com" || url.pathname !== "/o/oauth2/v2/auth") throw new Error("invalid_request")
-  window.location.assign(url.href)
+  if (desktop) {
+    // Cancellation/replacement while the request was in flight must not open a
+    // browser for an obsolete attempt.
+    if (signal?.aborted || readGoogleAttempt()?.verifier !== verifier) return
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      if (signal?.aborted || readGoogleAttempt()?.verifier !== verifier) return
+      await invoke("open_auth_browser", { authUrl: url.href })
+    } catch (cause) { if (readGoogleAttempt()?.verifier === verifier) clearGoogleAttempt(); throw new Error("browser_open_failed", { cause }) }
+  } else window.location.assign(url.href)
 }
 export function readGoogleAttempt(): GoogleAttempt | null {
   try {
@@ -64,4 +80,16 @@ export function saveGoogleProgress(verifier: string, update: { pending?: GoogleP
   const attempt = readGoogleAttempt()
   if (!attempt || attempt.verifier !== verifier) throw new Error("expired_request")
   sessionStorage.setItem(KEY, JSON.stringify({ ...attempt, ...update, expires: Math.min(attempt.expires, Date.now() + 4 * 60_000) }))
+}
+
+/** Accept only a callback for this window's unexpired native attempt. Codes
+ * remain PKCE-bound server-side; no JWTs or passwords enter through deep links. */
+export function acceptDesktopGoogleReturn(value: string): URLSearchParams | null {
+  if (!isTauriRuntime()) return null
+  try {
+    const result = parseDesktopGoogleCallback(value), attempt = readGoogleAttempt()
+    if (!result || !attempt?.desktopChallenge || attempt.desktopReturned || result.state !== attempt.desktopChallenge) return null
+    sessionStorage.setItem(KEY, JSON.stringify({ ...attempt, desktopReturned: true }))
+    return new URLSearchParams(result.code ? { code: result.code } : { error: result.error! })
+  } catch { return null }
 }

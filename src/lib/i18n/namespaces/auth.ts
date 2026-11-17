@@ -236,6 +236,15 @@ export const auth = defineNamespace({
       "Sign out and sign in with the invited address, or ask the project owner to add " +
       "your account \u201C{username}\u201D directly.",
     "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
+    "auth.join.emailUnverified": "Verify your email address to accept this invite.",
+    "auth.join.emailUnverifiedInvited":
+      "This invite was sent to {email}, and this account hasn\u2019t confirmed that " +
+      "address yet.",
+    "auth.join.emailUnverifiedBody":
+      "This invite was sent to an email address this account hasn\u2019t confirmed yet.",
+    "auth.join.emailUnverifiedNext":
+      "Send yourself a verification link, open it, then come back to this invite and " +
+      "accept.",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -275,6 +284,19 @@ export const auth = defineNamespace({
     "auth.verifyEmail.confirmedBody": "Thanks — your email address is confirmed.",
     "auth.verifyEmail.goToApp": "Go to Aquilla",
     "auth.verifyEmail.couldntVerify": "Couldn't verify",
+    "auth.verifyEmail.statusVerified": "Email verified",
+    "auth.verifyEmail.statusUnverified": "Email not verified",
+    "auth.verifyEmail.unverifiedWhy":
+      "Verify this address so teammates can add you to a project by email.",
+    "auth.verifyEmail.sendLink": "Send verification link",
+    "auth.verifyEmail.sending": "Sending…",
+    "auth.verifyEmail.linkSent": "Verification link sent to {email}. Open it to confirm this address.",
+    "auth.verifyEmail.already_verified": "This address is already verified.",
+    "auth.verifyEmail.rate_limited":
+      "Too many verification emails were sent. Try again later.",
+    "auth.verifyEmail.email_delivery_unavailable":
+      "We could not send the verification email. Try again later.",
+    "auth.verifyEmail.sendFailed": "We could not send the verification email. Try again.",
     "auth.verifyEmail.stillUsable":
       "You can still use Aquilla — verification isn't required to sign in.",
 
@@ -894,6 +916,35 @@ export const auth = defineNamespace({
           "Button on the email-mismatch rejection that signs the person out " +
           "so they can sign back in with the address the invite was sent to.",
       },
+      "auth.join.emailUnverified": {
+        description:
+          "Heading on the join page when accepting was refused because the signed-in " +
+          "account has never confirmed the email address the invite was sent to. The " +
+          "account is the right one \u2014 this is not the wrong-address rejection " +
+          "(auth.join.wrongEmail).",
+      },
+      "auth.join.emailUnverifiedInvited": {
+        description:
+          "Detail under auth.join.emailUnverified. {email} is the signed-in account's " +
+          "own address, masked (\u201Cn\u2026a@proton.me\u201D) and rendered inline " +
+          "\u2014 never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The signed-in account's own email address, masked. It is also the address " +
+            "the invite was sent to, which is why the invite matched this account at all.",
+        },
+      },
+      "auth.join.emailUnverifiedBody": {
+        description:
+          "Stands in for auth.join.emailUnverifiedInvited when the session carries no " +
+          "email address to name.",
+      },
+      "auth.join.emailUnverifiedNext": {
+        description:
+          "One line under auth.join.emailUnverified saying what to do: use the send " +
+          "button below it, open the emailed link, then return here and accept. Makes " +
+          "clear that verifying alone does not join the project.",
+      },
       "auth.join.noLongerValidFresh": {
         description:
           "Error shown when accepting an invite fails for a definitive server reason " +
@@ -1050,6 +1101,59 @@ export const auth = defineNamespace({
       },
       "auth.verifyEmail.couldntVerify": {
         description: "Error heading shown when the verification link could not be processed.",
+      },
+      "auth.verifyEmail.statusVerified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has been confirmed. Read-only — there is no action next to it.",
+      },
+      "auth.verifyEmail.statusUnverified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has not been confirmed yet.",
+      },
+      "auth.verifyEmail.unverifiedWhy": {
+        description:
+          "One line under auth.verifyEmail.statusUnverified saying why confirming the " +
+          "address matters: an unconfirmed address cannot be found by a project owner " +
+          "adding members by email.",
+      },
+      "auth.verifyEmail.sendLink": {
+        description:
+          "Button in account settings that emails a fresh verification link to the " +
+          "account's own address.",
+      },
+      "auth.verifyEmail.sending": {
+        description: "Label on auth.verifyEmail.sendLink while the request is in flight.",
+      },
+      "auth.verifyEmail.linkSent": {
+        description:
+          "Confirmation after the link was emailed. {email} is the account's own email " +
+          "address, rendered inline — never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The account's own email address, the only address the link is ever sent to.",
+        },
+      },
+      "auth.verifyEmail.already_verified": {
+        description:
+          "Shown instead of a confirmation when the address turned out to be verified " +
+          "already (for example it was confirmed in another tab).",
+      },
+      "auth.verifyEmail.rate_limited": {
+        description:
+          "Shown when the send button has been used too many times in a short period, " +
+          "so no further email was sent.",
+      },
+      "auth.verifyEmail.email_delivery_unavailable": {
+        description:
+          "Shown when Aquilla could not hand the verification email to its mail " +
+          "provider, so nothing was sent.",
+      },
+      "auth.verifyEmail.sendFailed": {
+        description:
+          "Generic failure for the send-verification-link button when no more specific " +
+          "reason is known (e.g. the network dropped).",
       },
       "auth.verifyEmail.stillUsable": {
         description:

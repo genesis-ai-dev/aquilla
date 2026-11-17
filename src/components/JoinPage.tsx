@@ -16,7 +16,7 @@ import {
   type MultiInvitePreview,
 } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { isJwtExpired } from "@/lib/frontier/auth"
+import { isJwtExpired, resendVerificationEmail } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -176,6 +176,21 @@ export function JoinPage() {
     if (single.reason === "network") {
       setPhase("error")
       setErrorKey("auth.join.networkError")
+      return
+    }
+    // AQU-2639: AQU-1579 refuses an email-bound invite when the account has
+    // never confirmed the address, with the same 403 as a wrong-account
+    // mismatch — but it is the opposite situation: this IS the right account,
+    // so the way out is to verify, not to sign in as someone else. Either
+    // endpoint may be the one that answered (a single-project token is
+    // redeemed through the multi accept first), so take the verdict from
+    // whichever did.
+    if (
+      single.reason === "email_unverified" ||
+      (!multi.ok && multi.reason === "email_unverified")
+    ) {
+      setPhase("error")
+      setErrorKey("auth.join.emailUnverified")
       return
     }
     if (single.reason === "wrong_email") {
@@ -449,6 +464,16 @@ export function JoinPage() {
                     })
                   }}
                 />
+              ) : shownErrorKey === "auth.join.emailUnverified" && session?.jwt ? (
+                // AQU-2639: the refusal that used to dead-end. The account is
+                // the invited one — it just has not proven it owns the address
+                // — so the page carries the way out instead of naming a
+                // requirement with nowhere to satisfy it.
+                <EmailUnverifiedNotice
+                  jwt={session.jwt}
+                  accountEmail={session.email ?? null}
+                  onAccept={() => session.jwt && void redeem(session.jwt)}
+                />
               ) : (
                 <div className="flex items-center gap-2 text-destructive">
                   <AlertCircle className="h-5 w-5" />
@@ -465,6 +490,115 @@ export function JoinPage() {
         </CardContent>
       </AuthPanel>
     </AuthPage>
+  )
+}
+
+/**
+ * AQU-2639: an email-bound invite refused because the signed-in account has
+ * never verified the address it was sent to.
+ *
+ * AQU-1579 made that refusal correct — registration stores whatever address it
+ * is given, so a string match is not proof of control — but the join page
+ * showed the server's sentence and nothing else. The person was signed in to
+ * the right account, holding a valid invite, with no control anywhere in the
+ * app that could send a verification link: on the dev database only 27 of
+ * 1,287 accounts were verified, so this was the common case, not the edge.
+ *
+ * What this screen adds is the action: send the link (AQU-2636's
+ * `POST /auth/me/resend-verification`, which mails only the address already on
+ * the account), say where it went, and let the person accept from this same
+ * page once they have opened it. Accepting is still explicit — verifying grants
+ * nothing on its own (AQU-335).
+ *
+ * The address is masked, as every address on this page is: it is enough to
+ * recognise your own mailbox, and a screenshot pasted into a support thread
+ * does not spread it. The confirmation masks the address the SERVER says it
+ * mailed, not the one in client state, so it cannot claim a send to an address
+ * that never got one.
+ */
+export function EmailUnverifiedNotice({
+  jwt,
+  accountEmail,
+  onAccept,
+}: {
+  jwt: string
+  /** The signed-in account's own email, masked here before display. */
+  accountEmail: string | null
+  /** Retry the accept — offered once a link has been sent. */
+  onAccept: () => void
+}) {
+  const t = useT()
+  const [sending, setSending] = useState(false)
+  // Either the confirmation naming the address the link went to, or the reason
+  // nothing was sent. A key (not a resolved sentence) for the failure so a
+  // language switch re-renders it in the new locale (AQU-511 finding 7); the
+  // confirmation carries the server's address, so it holds its own text.
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [failureKey, setFailureKey] = useState<MessageKey | null>(null)
+
+  function send() {
+    if (sending) return
+    setSending(true)
+    setSentTo(null)
+    setFailureKey(null)
+    void resendVerificationEmail(jwt)
+      .then((email) => setSentTo(email ? maskEmail(email) : ""))
+      .catch((reason: unknown) => {
+        // The server answers with a stable code (already_verified,
+        // rate_limited, email_delivery_unavailable); anything else is a
+        // transport failure and gets the generic line.
+        const code = reason instanceof Error ? reason.message : ""
+        const known = ["already_verified", "rate_limited", "email_delivery_unavailable"]
+        setFailureKey(
+          known.includes(code)
+            ? (`auth.verifyEmail.${code}` as MessageKey)
+            : "auth.verifyEmail.sendFailed",
+        )
+      })
+      .finally(() => setSending(false))
+  }
+
+  const strong = (text: string) => (
+    <span className="font-medium text-foreground">{text}</span>
+  )
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 text-destructive">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <p className="text-sm">{t("auth.join.emailUnverified")}</p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {accountEmail ? (
+          <RichMessage
+            k="auth.join.emailUnverifiedInvited"
+            values={{ email: strong(maskEmail(accountEmail)) }}
+          />
+        ) : (
+          t("auth.join.emailUnverifiedBody")
+        )}
+      </p>
+      <p className="text-sm text-muted-foreground">{t("auth.join.emailUnverifiedNext")}</p>
+      <Button onClick={send} disabled={sending} className="w-full">
+        {t(sending ? "auth.verifyEmail.sending" : "auth.verifyEmail.sendLink")}
+      </Button>
+      {sentTo !== null && (
+        <p className="text-sm text-muted-foreground" role="status">
+          {t("auth.verifyEmail.linkSent", { email: sentTo })}
+        </p>
+      )}
+      {failureKey && (
+        <p className="text-sm text-destructive" role="status">
+          {t(failureKey)}
+        </p>
+      )}
+      {/* Offered only after a link has gone out: before that there is nothing
+          to have opened, and a retry would just repeat the same refusal. */}
+      {sentTo !== null && (
+        <Button variant="outline" onClick={onAccept} className="w-full">
+          {t("auth.join.acceptInvitation")}
+        </Button>
+      )}
+    </div>
   )
 }
 

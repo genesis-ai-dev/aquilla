@@ -1,6 +1,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { rememberOrgPortfolio, rememberPortfolioRows } from "./portfolio-seed"
 import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import {
   audioDenominator,
@@ -260,12 +261,14 @@ export async function getOrgPortfolioSummary(
     projects?: PortfolioProject[]
     activeLanguageCount?: number
   }
-  return {
+  const summary: OrgPortfolioSummary = {
     projects: body.projects ?? [],
     activeLanguageCount: Number.isFinite(body.activeLanguageCount)
       ? Number(body.activeLanguageCount)
       : 0,
   }
+  rememberOrgPortfolio(jwt, orgId, summary)
+  return summary
 }
 
 export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
@@ -300,6 +303,7 @@ export async function getPortfolioPage(
   )
   if (!res.ok) throw new UserError(res.status, "", "org")
   const body = (await res.json()) as { projects: PortfolioProject[]; nextCursor?: string | null }
+  rememberPortfolioRows(jwt, body.projects ?? [])
   return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
@@ -331,12 +335,11 @@ export async function getPortfoliosPage(
     portfolios: OrgPortfolio[]
     nextCursor?: string | null
   }
-  return {
-    projects: (body.portfolios ?? []).flatMap((portfolio) =>
-      portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
-    ),
-    nextCursor: body.nextCursor ?? null,
-  }
+  const projects = (body.portfolios ?? []).flatMap((portfolio) =>
+    portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
+  )
+  rememberPortfolioRows(jwt, projects)
+  return { projects, nextCursor: body.nextCursor ?? null }
 }
 
 export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {

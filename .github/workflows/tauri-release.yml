@@ -161,9 +161,10 @@ jobs:
       # v0.2.4 was published by its first finished build and for hours
       # offered Windows and Linux an update that macOS did not have.
       #
-      # Two attempts: Apple's notary service answers a healthy upload with an
-      # HTTP 500 often enough (it failed the Intel build of v0.2.4) that one
-      # retry is cheaper than a person re-running the job through the gate.
+      # Two attempts, ten minutes apart: Apple's notary service answers a
+      # healthy upload with an HTTP 500 for stretches at a time. It failed the
+      # Intel build of v0.2.4 twice, an hour apart, and accepted the same
+      # build on the third try. A second failure leaves the release a draft.
       - name: Build, sign and upload
         id: bundle
         continue-on-error: true
@@ -200,7 +201,7 @@ jobs:
       - name: Wait before the second attempt
         if: steps.bundle.outcome == 'failure'
         shell: bash
-        run: sleep 120
+        run: sleep 600
 
       # Same step, same inputs. Keep the two in step.
       - name: Build, sign and upload (second attempt)

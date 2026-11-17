@@ -82,9 +82,11 @@ Two things changed:
   finished. v0.2.4 offered Windows and Linux an update for hours while macOS
   had none, and would have left Intel Macs without one for good had nobody
   re-run the failed job.
-- **The upload is tried twice.** Apple's notary service fails healthy uploads
-  with an HTTP 500 (it failed the Intel build of v0.2.4). The second attempt
-  runs only if the first failed.
+- **The upload is tried twice, ten minutes apart.** Apple's notary service
+  fails healthy uploads with an HTTP 500 for stretches at a time: it failed
+  the Intel build of v0.2.4 twice, an hour apart, then accepted it. The second
+  attempt runs only if the first failed; if both fail the release stays a
+  draft and the failed job is re-run by hand.
 
 ### What verification proves
 

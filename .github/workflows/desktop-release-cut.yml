@@ -88,7 +88,11 @@ jobs:
       - name: Plan
         id: plan
         run: |
-          open="$(gh pr list --state open --base dev --json headRefName -q '[.[] | select(.headRefName | startswith("desktop-release/"))] | length')"
+          # A bump is in flight when its branch exists in THIS repository. Only
+          # people with write access can create one, and the merge step deletes
+          # it. Counting open pull requests by head name instead would let a
+          # fork's pull request named desktop-release/x hold every release back.
+          open="$(git ls-remote --heads origin 'refs/heads/desktop-release/*' | wc -l | tr -d ' ')"
           BUMP_PR_OPEN="$([ "$open" -gt 0 ] && echo true || echo false)" pnpm exec tsx scripts/desktop-release-cut.ts plan > "$RUNNER_TEMP/plan.json"
           cat "$RUNNER_TEMP/plan.json"
           {

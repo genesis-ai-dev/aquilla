@@ -39,7 +39,7 @@ export interface CutInputs {
   taggedVersions: readonly string[]
   /** Paths changed between the tag of `headVersion` and dev's head; unused when that tag is missing. */
   changedSinceTag: readonly string[]
-  /** An open bump pull request already exists. */
+  /** A bump is already in flight: its `desktop-release/*` branch exists in this repository. */
   bumpPrOpen: boolean
 }
 

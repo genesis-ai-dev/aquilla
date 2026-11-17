@@ -6,8 +6,8 @@
 //   tsx scripts/desktop-release-cut.ts plan          → the plan, as JSON
 //   tsx scripts/desktop-release-cut.ts bump 0.2.4 0.2.5
 //
-// `plan` reads BUMP_PR_OPEN=true|false from the environment (the workflow asks
-// GitHub; a local run defaults to false).
+// `plan` reads BUMP_PR_OPEN=true|false from the environment (the workflow looks
+// for a bump branch in this repository; a local run defaults to false).
 
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"

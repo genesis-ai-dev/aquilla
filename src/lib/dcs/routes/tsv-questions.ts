@@ -82,6 +82,7 @@ export const tsvQuestionsRoute: ResourceRoute = {
         const value = combineQuestion(question, response)
         const cell: DcsCell = {
           cellId: dcsCellId(`${repo}|${book}|${row.rowId}`),
+          unitKey: `${book}|${row.rowId}`,
           value,
           type: "text",
           canonicalRef: canonicalRefFromTsv(book, row.reference),

@@ -58,6 +58,9 @@ export interface FileSummary {
   deletedAt?: number | null
   /** AQU-656: original import blob exists. Absent on older sync-workers. */
   hasOriginalSource?: boolean
+  /** AQU-2459: the source side is a revision chain; refresh it with a
+   *  revision, not per-cell events. Absent on older sync-workers. */
+  revisioned?: boolean
   /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
    *  owner, meta). Null/absent on ordinary files and older sync-workers. */
   extension?: FileExtensionMeta | null

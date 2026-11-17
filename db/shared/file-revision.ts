@@ -241,6 +241,47 @@ export function revisionCellId(fileId: string, revisionN: number, unitKey: strin
   return uuidV5(revisionN === 1 ? `cell:${unitKey}` : `cell:r${revisionN}:${unitKey}`, fileId)
 }
 
+/**
+ * Give a manifest's units the keys a provider knows them by, before alignment.
+ *
+ * A legacy file is adopted with keys derived from its cells (`canonical_ref`,
+ * plus an ordinal when several cells share one), because nothing better is
+ * stored. A provider whose cell ids were already deterministic (Door43:
+ * `uuidv5(repo|book|rowId)`) knows the real key of every cell it ever wrote,
+ * so it sends `cellId → unitKey` and its next parse pairs by that key instead
+ * of by an ordinal that shifts when a sibling is inserted upstream.
+ *
+ * A hinted unit becomes reference-addressed. Keys stay unique: a unit whose
+ * own key is taken by a hint falls back to `cell:<cellId>`, and a hint that
+ * repeats an earlier hint is ignored. Units the hints do not name are
+ * untouched.
+ */
+export function rekeyUnits<U extends RevisionUnit>(
+  units: readonly U[],
+  keysByCellId: Readonly<Record<string, string>>,
+): U[] {
+  const hinted = new Map<number, string>()
+  const used = new Set<string>()
+  units.forEach((u, i) => {
+    const key = Object.prototype.hasOwnProperty.call(keysByCellId, u.cellId) ? keysByCellId[u.cellId] : undefined
+    if (typeof key !== "string" || !key || used.has(key)) return
+    hinted.set(i, key)
+    used.add(key)
+  })
+  if (hinted.size === 0) return [...units]
+  return units.map((u, i) => {
+    const key = hinted.get(i)
+    if (key !== undefined) return { ...u, unitKey: key, positional: false }
+    if (!used.has(u.unitKey)) {
+      used.add(u.unitKey)
+      return u
+    }
+    const fallback = `cell:${u.cellId}`
+    used.add(fallback)
+    return { ...u, unitKey: fallback }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Alignment
 // ---------------------------------------------------------------------------

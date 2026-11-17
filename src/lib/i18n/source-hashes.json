@@ -4964,7 +4964,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9913,7 +9919,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14849,7 +14861,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19811,7 +19829,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26048,7 +26072,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32287,7 +32317,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38598,7 +38634,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -44956,7 +44998,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51229,7 +51277,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59448,7 +59502,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67672,7 +67732,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76307,7 +76373,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84585,7 +84657,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93240,7 +93318,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -101888,7 +101972,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110572,7 +110662,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119242,7 +119338,13 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -127904,6 +128006,12 @@
     "editor.panel.resizeCheck": "aa9a5d04bc06411e",
     "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
     "editor.panel.resizeParallelBibles": "9f519c13c69533be",
-    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc",
+    "editor.cell.openDetails": "9d177b47a0d4e50b",
+    "editor.translationNotes.loadFailed": "2948ac722b982175",
+    "editor.cellDetail.title": "c42c7e5f1257038c",
+    "editor.cellDetail.description": "71dd0d2b1ebdedcc",
+    "editor.cellDetail.previous": "ae8d98943ee3ec98",
+    "editor.cellDetail.next": "cbf247c49ed2b7ad"
   }
 }

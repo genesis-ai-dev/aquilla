@@ -530,6 +530,14 @@ export const projectSettings = defineNamespace({
       "How many eligible cells one \"Batch validate\" run approves (0–500). {zeroNote} " +
       "set a cap to validate in bounded batches.",
     "projectSettings.ai.validationBatchSizeZeroNote": "0 validates all eligible cells (default);",
+    "projectSettings.ai.liveBacktranslationLabel": "Live back-translation",
+    "projectSettings.ai.liveBacktranslationDescription":
+      "Back-translate each translation as soon as it is drafted or edited, and show the reading under the row. " +
+      "Uses AI credits for every save. Hand-corrected back-translations are never replaced.",
+    "projectSettings.ai.backtranslationModelLabel": "Back-translation model",
+    "projectSettings.ai.backtranslationModelDescription":
+      "The model back-translations are made with, through the same provider. Leave blank to use the drafting model.",
+    "projectSettings.ai.backtranslationModelPlaceholder": "Same as drafting",
     "projectSettings.ai.contextWindowLabel": "Context window",
     "projectSettings.ai.contextWindowSmall": "Small — tight window",
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",

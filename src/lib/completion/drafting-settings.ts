@@ -42,6 +42,8 @@ const DRAFTING_DEFAULTS: Required<DraftingSettings> = {
   fewShotExampleFormat: "source-and-target",
   completionBatchSize: DEFAULT_COMPLETION_BATCH_SIZE,
   validationBatchSize: 0,
+  liveBacktranslation: false,
+  backtranslationModel: "",
 }
 
 /**
@@ -66,6 +68,8 @@ export function draftingSettingsFrom(settings: Partial<CompletionSettings> | und
     fewShotExampleFormat: full.fewShotExampleFormat,
     completionBatchSize: full.completionBatchSize ?? DRAFTING_DEFAULTS.completionBatchSize,
     validationBatchSize: full.validationBatchSize ?? DRAFTING_DEFAULTS.validationBatchSize,
+    liveBacktranslation: full.liveBacktranslation ?? DRAFTING_DEFAULTS.liveBacktranslation,
+    backtranslationModel: full.backtranslationModel ?? DRAFTING_DEFAULTS.backtranslationModel,
   }) ?? {}
 }
 

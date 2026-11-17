@@ -185,7 +185,8 @@ async fn run_check_logged(app: &AppHandle) {
 }
 
 /// `None` when nothing new is available (or this shell must not apply it); otherwise the bundle
-/// now staged for the next launch. Repeat calls return the already-staged bundle.
+/// now staged for the next launch. Every call asks the server again, so a bundle staged earlier
+/// is replaced by a newer one rather than applied first.
 #[tauri::command]
 pub async fn check_bundle_update(app: AppHandle) -> Result<Option<StagedBundle>, String> {
     run_check(&app).await
@@ -228,9 +229,27 @@ async fn run_check(app: &AppHandle) -> Result<Option<StagedBundle>, String> {
     let state = app.state::<HotBundleState>();
     let _checking = state.checking.lock().await;
     let store = state.store()?;
-    if let Some(info) = store.staged_version().and_then(|v| store.info(&v)) {
-        return Ok(Some(info.into()));
+    // A bundle already waiting does not end the check: releases are hourly, so by the time the
+    // user restarts it may be several behind, and applying it would only prompt them again.
+    let waiting = store.staged_version().and_then(|v| store.info(&v));
+    match stage_latest(app, store).await {
+        Ok(Some(info)) => {
+            let _ = app.emit(EVENT_STAGED, StagedBundle::from(info.clone()));
+            Ok(Some(info.into()))
+        }
+        Ok(None) => Ok(waiting.map(Into::into)),
+        // Offline or a failed download: the bundle already waiting is still good.
+        Err(err) if waiting.is_some() => {
+            log::warn!("[hot_bundle] could not look for a newer bundle, keeping the staged one: {err}");
+            Ok(waiting.map(Into::into))
+        }
+        Err(err) => Err(err),
     }
+}
+
+/// Stages the manifest's bundle when it is news to this shell, replacing any bundle already
+/// waiting. `None` when there is nothing newer to stage.
+async fn stage_latest(app: &AppHandle, store: &BundleStore) -> Result<Option<BundleInfo>, String> {
     let Some(public_key) = public_key() else {
         static WARNED: std::sync::Once = std::sync::Once::new();
         WARNED.call_once(|| {
@@ -261,9 +280,7 @@ async fn run_check(app: &AppHandle) -> Result<Option<StagedBundle>, String> {
         return Ok(None);
     }
 
-    let info = download_and_stage(store, &manifest).await?;
-    let _ = app.emit(EVENT_STAGED, StagedBundle::from(info.clone()));
-    Ok(Some(info.into()))
+    download_and_stage(store, &manifest).await.map(Some)
 }
 
 async fn download_and_stage(store: &BundleStore, manifest: &manifest::Manifest) -> Result<BundleInfo, String> {

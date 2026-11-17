@@ -60,6 +60,7 @@ type PendingUpdate = { kind: "shell"; version: string } | { kind: "bundle"; vers
 type Props = {
   commands?: DesktopUpdateCommands
   recheckMs?: number
+  bundleRecheckMs?: number
   graceMs?: number
 }
 
@@ -67,6 +68,7 @@ type Props = {
 export function DesktopUpdatePrompt({
   commands = tauriCommands,
   recheckMs = RECHECK_MS,
+  bundleRecheckMs,
   graceMs = UPDATE_DRAIN_GRACE_MS,
 }: Props): null {
   const t = useT()
@@ -82,7 +84,12 @@ export function DesktopUpdatePrompt({
   const [graceOver, setGraceOver] = useState(false)
 
   const requestShellCheck = useCallback(() => setShellCheckNonce((n) => n + 1), [])
-  const staged = useStagedHotBundle({ source: commands, online, onShellOutdated: requestShellCheck })
+  const staged = useStagedHotBundle({
+    source: commands,
+    online,
+    onShellOutdated: requestShellCheck,
+    recheckMs: bundleRecheckMs,
+  })
   const update = useMemo<PendingUpdate | null>(
     () =>
       shellUpdate

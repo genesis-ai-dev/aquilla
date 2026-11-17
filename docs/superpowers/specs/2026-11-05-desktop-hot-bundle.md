@@ -58,6 +58,10 @@ at the commit being released, so bumping the shell version is also what raises t
 The shell (`src-tauri/src/hot_bundle.rs`):
 
 - On launch and on every offline→online transition, fetches the manifest (60 s timeout).
+  The SPA also asks hourly while it stays open (`check_bundle_update`). Every check fetches
+  the manifest even when a bundle is already staged: a newer one replaces it (the superseded
+  directory is removed at once), so one restart reaches the latest release instead of
+  stepping through each one. If the fetch or download fails, the staged bundle stays.
 - Verifies the signature, compares `version` to the current bundle, and checks
   `minShellVersion <= shell version`. A too-old shell does not download; it emits
   `bundle://shell-outdated` so the SPA nudges the user to the shell updater.

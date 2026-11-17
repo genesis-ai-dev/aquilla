@@ -1334,6 +1334,18 @@ export interface CompletionSettings {
    * reviewer can approve in bounded batches. Clamped 0–500 at the UI.
    */
   validationBatchSize?: number
+
+  /**
+   * Live back-translation: read each translation back as soon as this browser
+   * drafts or saves it, instead of waiting for Read back. Off unless set.
+   */
+  liveBacktranslation?: boolean
+
+  /**
+   * The model back-translations are read with. Blank = the drafting `model`,
+   * through the same provider and endpoint.
+   */
+  backtranslationModel?: string
 }
 
 export interface WeightedExample {

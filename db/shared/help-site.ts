@@ -1,15 +1,28 @@
-// Public app-help reader (AQU-2581): the data behind the get_help MCP tool and
-// its REST mirror. It reads the aquilla-help site (help.aquilla.app), which
+// Public app-help reader (AQU-2581, AQU-2582). Both agents use it: the external
+// get_help MCP tool and its REST mirror (sync-worker), and the in-app agent's
+// docs tool (auth-worker). It reads the aquilla-help site (help.aquilla.app), which
 // publishes an index at /llms-index.json and each page as Markdown at the
 // index's markdownUrl. No project data, no credential check beyond the caller's
 // own gate.
 //
 // Only URLs that come from the index are fetched. Caller input is matched
 // against the index's `path` values and never turned into a URL, so the tool
-// cannot be pointed at another host. Neither function throws: every failure
-// comes back as a result the MCP handler and the REST route can serialize.
+// cannot be pointed at another host. The developer map (/dev/) is dropped from
+// the index on load, so neither agent can list or fetch it. Neither function
+// throws: every failure comes back as a result the caller can serialize.
 
 export const DEFAULT_HELP_SITE_URL = 'https://help.aquilla.app'
+
+/** A help-site fetch that takes longer than this counts as an outage, so a
+ *  slow help site cannot hold an agent run open. */
+const HELP_FETCH_TIMEOUT_MS = 8000
+
+function helpFetch(url: string): Promise<Response> {
+  return fetch(url, {
+    cf: { cacheTtl: 300, cacheEverything: true },
+    signal: AbortSignal.timeout(HELP_FETCH_TIMEOUT_MS),
+  })
+}
 
 export interface HelpSiteEnv {
   /** Optional override of the help site origin (staging, local). */
@@ -66,6 +79,12 @@ function sameHost(url: string, host: string): boolean {
   }
 }
 
+/** The developer map lives under /dev/ and is never served to an agent. */
+function isDevMapPath(path: string): boolean {
+  const p = path.trim().toLowerCase()
+  return p === '/dev' || p === '/dev/' || p.startsWith('/dev/')
+}
+
 function toEntry(raw: unknown, host: string): HelpPageEntry | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
@@ -83,7 +102,7 @@ function toEntry(raw: unknown, host: string): HelpPageEntry | null {
 }
 
 async function loadIndex(base: string, host: string): Promise<HelpIndex> {
-  const res = await fetch(`${base}/llms-index.json`, { cf: { cacheTtl: 300, cacheEverything: true } })
+  const res = await helpFetch(`${base}/llms-index.json`)
   if (!res.ok) throw new HelpUpstreamError(`index HTTP ${res.status}`)
   let raw: unknown
   try {
@@ -93,7 +112,9 @@ async function loadIndex(base: string, host: string): Promise<HelpIndex> {
   }
   const doc = (raw ?? {}) as { site?: unknown; pages?: unknown }
   if (!Array.isArray(doc.pages)) throw new HelpUpstreamError('index has no pages array')
-  const pages = doc.pages.map((p) => toEntry(p, host)).filter((p): p is HelpPageEntry => p !== null)
+  const pages = doc.pages
+    .map((p) => toEntry(p, host))
+    .filter((p): p is HelpPageEntry => p !== null && !isDevMapPath(p.path))
   return { site: typeof doc.site === 'string' ? doc.site : base, pages }
 }
 
@@ -148,7 +169,7 @@ export async function helpPage(env: HelpSiteEnv, input: string): Promise<HelpRes
       ? undefined
       : index.pages.find((p) => p.path.toLowerCase() === path.toLowerCase())
     if (!entry) return notFound(input)
-    const res = await fetch(entry.markdownUrl, { cf: { cacheTtl: 300, cacheEverything: true } })
+    const res = await helpFetch(entry.markdownUrl)
     if (!res.ok) throw new HelpUpstreamError(`page HTTP ${res.status}`)
     const markdown = await res.text()
     return { ok: true, body: { path: entry.path, title: entry.title, url: entry.url, markdown } }

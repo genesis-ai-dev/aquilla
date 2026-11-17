@@ -111,6 +111,25 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('MCP get_help: the developer map', () => {
+  it('drops /dev/ entries from the index and refuses to fetch them', async () => {
+    const DEV_MD = `${SITE}/dev/map.md`
+    const devEntries = ['/dev/', '/dev/map/'].map((path) => ({
+      path, title: 'Dev map', description: 'Internals.', section: 'Dev', url: `${SITE}${path}`, markdownUrl: DEV_MD,
+    }))
+    const fetchMock = mockHelpSite({
+      [INDEX_URL]: () => Response.json({ ...INDEX, pages: [...INDEX.pages, ...devEntries] }),
+      [DEV_MD]: () => new Response('# secret map', { status: 200 }),
+    })
+    const token = await credToken(tdb)
+    const list = await callTool(tdb, token, 'get_help', {})
+    expect(list.payload.pages.map((p: { path: string }) => p.path)).toEqual(['/export/', '/roles/'])
+    const page = await callTool(tdb, token, 'get_help', { page: '/dev/map/' })
+    expect(page.isError).toBe(true)
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).not.toContain(DEV_MD)
+  })
+})
+
 describe('MCP get_help: the index', () => {
   it('omits page and returns every indexed page without its markdownUrl', async () => {
     const fetchMock = mockHelpSite()

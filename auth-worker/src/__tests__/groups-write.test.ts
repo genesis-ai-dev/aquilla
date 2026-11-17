@@ -101,9 +101,23 @@ describe("team membership", () => {
 
   it("resolves an outside invite by email address", async () => {
     await seedTeam()
+    // Only a verified address resolves ([Pen test] 2026-11-17).
+    await env.AQUILLA_PG.prepare("UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 9").run()
     const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "OUTSIDER@example.com", external: true }) }, env)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ userId: 9, username: "outsider" })
+  })
+
+  // [Pen test] Authorization & access control (2026-11-17): registration never
+  // proves the email it stores, so an unverified match may be an account that
+  // registered the invitee's address first — and a team carries its project
+  // grants with it.
+  it("does not put an account on the team for an address it has not verified", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "outsider@example.com", external: true }) }, env)
+    expect(res.status).toBe(404)
+    const row = await env.AQUILLA_PG.prepare("SELECT user_id FROM group_members WHERE group_id = 10 AND user_id = 9").first()
+    expect(row).toBeNull()
   })
 
   it("404s an outside invite for someone with no account, and names the invite path", async () => {

@@ -909,7 +909,7 @@ async function grantGroupMemberOne(
       // Aquilla account yet, which the bare "user not found" never said. The
       // project invite-by-email link is the path that reaches them.
       message: allowExternal
-        ? "no Aquilla account matches that username or email — send them a project invite instead"
+        ? "no Aquilla account matches that username or a verified email — send them a project invite instead"
         : "user not found",
     }
   }

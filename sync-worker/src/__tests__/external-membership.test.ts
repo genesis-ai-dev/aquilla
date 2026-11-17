@@ -225,6 +225,14 @@ describe('membership — validation', () => {
   })
 })
 
+/** Only an address the account has proven it controls resolves ([Pen test]
+ *  2026-11-17), so the by-email cases start from a verified target. */
+async function seedMaintainerCallerVerifiedTarget() {
+  const seeded = await seedMaintainerCaller()
+  await tdb.pg.query(`UPDATE users SET email_verified_at = now() WHERE id = $1`, [TARGET.id])
+  return seeded
+}
+
 // ── naming the target by email (AQU-2576) ────────────────────────────────────
 //
 // An agent staffing a project is handed an address, not a handle. Before this,
@@ -235,7 +243,7 @@ describe('membership — validation', () => {
 // resolution is a lookup key, not a permission.
 describe('membership — target named by email (AQU-2576)', () => {
   it('resolves an email passed as `username`', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, username: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
     ])
@@ -244,7 +252,7 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('accepts `email` as an alias for `username`', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
     ])
@@ -253,7 +261,7 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('matches the address case-insensitively', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name.toUpperCase()}@X.COM`, role: ROLE.CONTRIBUTOR },
     ])
@@ -261,7 +269,7 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('applies the grant to the resolved account at commit', async () => {
-    const { token, credentialId } = await seedMaintainerCaller()
+    const { token, credentialId } = await seedMaintainerCallerVerifiedTarget()
     const { res: prepRes, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
     ])
@@ -274,7 +282,7 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('still 404s for an address no account uses', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, email: 'nobody@proton.me', role: ROLE.CONTRIBUTOR },
     ])
@@ -283,7 +291,7 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('keeps the grant cap when the target is named by email', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.OWNER },
     ])
@@ -292,12 +300,26 @@ describe('membership — target named by email (AQU-2576)', () => {
   })
 
   it('rejects a command that names neither a username nor an email', async () => {
-    const { token } = await seedMaintainerCaller()
+    const { token } = await seedMaintainerCallerVerifiedTarget()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, role: ROLE.CONTRIBUTOR },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
+  })
+
+  // [Pen test] Authorization & access control (2026-11-17): registration never
+  // proves the email it stores, so an unverified match may be an account that
+  // registered the invitee's address first. An agent told "invite
+  // reviewer@org" must not hand that account the project.
+  it('does not resolve an address its account has not verified', async () => {
+    const { token } = await seedMaintainerCaller() // TARGET's email unverified
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(404)
+    expect(body.error.details.code).toBe('user_not_found')
+    expect(await directRole(TARGET.id)).toBeNull()
   })
 })
 

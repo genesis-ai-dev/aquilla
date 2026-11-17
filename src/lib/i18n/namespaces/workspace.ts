@@ -185,6 +185,9 @@ export const workspace = defineNamespace({
     "workspace.typeahead.addUser": "Add {username}",
     "workspace.typeahead.alreadyMember": "{username} is already a member.",
     "workspace.typeahead.noUserNamed": "No Aquilla user named \"{query}\".",
+    "workspace.typeahead.noAccountWithEmail": "No Aquilla account uses the email {query}.",
+    "workspace.typeahead.emailAlsoWorksHint":
+      "Don't know their username? Enter their email address instead.",
     "workspace.typeahead.inviteByEmailInstead": "Invite by email instead",
     "workspace.typeahead.noScopedMatch": "No match among people who share an org or project with you.",
     "workspace.typeahead.addByExactUsername": "Add \"{query}\" by exact username",
@@ -1066,6 +1069,22 @@ export const workspace = defineNamespace({
           "with the typed name at all. {query} is the user's own typed text, " +
           "already quoted by the template.",
         placeholders: { query: "The typed username, already quoted by the template." },
+        screenshot: "assign-modal",
+      },
+      "workspace.typeahead.noAccountWithEmail": {
+        description:
+          "Shown when the typed text is an email address and the scoped " +
+          "lookup confirms no Aquilla account uses it — the email counterpart " +
+          "of workspace.typeahead.noUserNamed. {query} is the typed address, " +
+          "not quoted by the template.",
+        placeholders: { query: "The typed email address." },
+        screenshot: "assign-modal",
+      },
+      "workspace.typeahead.emailAlsoWorksHint": {
+        description:
+          "Hint under the add-member username field, shown only where the " +
+          "server will resolve an email to an account, telling the person " +
+          "they can type an email address when they don't know the username.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.inviteByEmailInstead": {

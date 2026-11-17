@@ -1,5 +1,6 @@
 import { ANALYTICS_DISCLOSURE_VERSION } from "../../../shared/analytics-consent"
 import { AUTH_BASE } from "./auth"
+import { isTauriRuntime } from "../offline/is-tauri"
 import { safeLoginNext } from "../navigation/login-path"
 import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup-analytics-choice"
 const KEY = `aquilla:google-login:${AUTH_BASE}`
@@ -13,10 +14,16 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
     headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
-  } catch { throw new Error("unavailable") }
+  } catch (error) {
+    if (path === "start") throw new Error(error instanceof Error && error.name === "TimeoutError" ? "timeout" : "network_error", { cause: error })
+    throw new Error("unavailable", { cause: error })
+  }
   // Only this read endpoint's 401 unambiguously means the session is invalid.
   // Link/disconnect can also return 401 for an incorrect password proof.
   if (path === "methods" && jwt && response.status === 401) throw new Error("session_expired")
+  // Gateways may return HTML, so classify HTTP failures before parsing JSON.
+  if (path === "start" && response.status === 429) throw new Error("rate_limited")
+  if (path === "start" && response.status >= 500) throw new Error("service_unavailable")
   let data
   try { data = await response.json() } catch { throw new Error("unavailable") }
   if (!data || typeof data !== "object") throw new Error("unavailable")
@@ -24,6 +31,7 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
   return data as T
 }
 export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false): Promise<void> {
+  if (isTauriRuntime() || ["app:", "tauri:"].includes(window.location.protocol)) throw new Error("desktop_unsupported")
   if (!navigator.onLine) throw new Error("offline")
   const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("")
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))
@@ -31,7 +39,8 @@ export async function startGoogleLogin(next: string, signup: boolean, connectUse
   // Storage must survive the redirect. If unavailable, stay here without ever
   // contacting Google; password login remains usable.
   const attempt: GoogleAttempt = { verifier, next: safeLoginNext(next), expires: Date.now() + 10 * 60_000, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
-  sessionStorage.setItem(KEY, JSON.stringify(attempt))
+  try { sessionStorage.setItem(KEY, JSON.stringify(attempt)) }
+  catch { throw new Error("storage_unavailable") }
   const result = await googleRequest<{ authorization_url: string }>("start", { challenge })
   const url = new URL(result.authorization_url)
   if (url.origin !== "https://accounts.google.com" || url.pathname !== "/o/oauth2/v2/auth") throw new Error("invalid_request")

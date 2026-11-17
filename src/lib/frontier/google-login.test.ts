@@ -15,7 +15,7 @@ describe("Google login intent", () => {
     expect(readGoogleAttempt()).toBeNull(); clearGoogleAttempt()
     expect(fetcher).not.toHaveBeenCalled()
     vi.spyOn(sessionStorage, "setItem").mockImplementationOnce(() => { throw new Error("denied") })
-    await expect(startGoogleLogin("/app", false)).rejects.toThrow("denied")
+    await expect(startGoogleLogin("/app", false)).rejects.toThrow("storage_unavailable")
     expect(fetcher).not.toHaveBeenCalled()
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
     await expect(startGoogleLogin("/app", false)).rejects.toThrow("offline")
@@ -59,4 +59,24 @@ it("keeps only a bounded tab-local continuation, preserving consent across reloa
   vi.spyOn(Date,"now").mockReturnValue(expires+1)
   expect(readGoogleAttempt()).toBeNull()
   expect(fetcher).toHaveBeenCalledOnce()
+})
+
+it("classifies start failures without changing other Google endpoint contracts", async () => {
+   for (const [reply, code] of [[new Response("gateway error", {status:502}), "service_unavailable"], [new Response("limit", {status:429}), "rate_limited"]] as const) {
+     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply))
+     await expect(googleRequest("start", {})).rejects.toThrow(code)
+   }
+   for (const [failure, code] of [[new DOMException("deadline", "TimeoutError"), "timeout"], [new TypeError("fetch failed"), "network_error"]] as const) {
+     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(failure))
+     await expect(googleRequest("start", {})).rejects.toThrow(code)
+     await expect(googleRequest("config")).rejects.toThrow("unavailable")
+   }
+ })
+
+it("rejects desktop Google handoff before creating browser state or contacting the server", async () => {
+  vi.stubGlobal("__TAURI__", {})
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher)
+  await expect(startGoogleLogin("/app", false)).rejects.toThrow("desktop_unsupported")
+  expect(fetcher).not.toHaveBeenCalled()
+  expect(readGoogleAttempt()).toBeNull()
 })

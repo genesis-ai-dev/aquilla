@@ -942,6 +942,24 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
 
+  // [Pen test] Authorization & access control (2026-11-17): a team's project
+  // attachments are capped at the attacher's own level (POST .../projects
+  // below), but membership was not — so an org Maintainer could add themselves,
+  // or anyone, to a team an Owner had attached at Owner and hold Owner on
+  // those projects. Joining a team is receiving its grants, so the same cap
+  // applies: nobody hands out a team role above their own.
+  const top = await c.env.AQUILLA_PG.prepare(
+    "SELECT MAX(role_level) AS top FROM group_project_grants WHERE group_id = ?",
+  )
+    .bind(groupId)
+    .first<{ top: number | null }>()
+  if (Number(top?.top ?? 0) > callerRole) {
+    return c.json(
+      { error: "this team holds a project role above yours — someone at that level has to add its members" },
+      403,
+    )
+  }
+
   const body = c.req.valid("json")
 
   const allowExternal = body.external === true

@@ -120,6 +120,32 @@ describe("team membership", () => {
     expect(row).toBeNull()
   })
 
+  // [Pen test] Authorization & access control (2026-11-17): attaching a team
+  // to a project is capped at the attacher's level, and joining the team is
+  // receiving that grant — so adding members is capped the same way.
+  it("refuses a Maintainer adding anyone (themselves included) to a team attached at Owner", async () => {
+    await seedTeam()
+    await env.AQUILLA_PG.prepare("UPDATE org_members SET role_level = 600 WHERE org_id = 1 AND user_id = 2").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Bambara', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'pa', 700, 1)").run()
+    const self = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ username: "anna" }) }, env)
+    expect(self.status).toBe(403)
+    const row = await env.AQUILLA_PG.prepare("SELECT user_id FROM group_members WHERE group_id = 10").first()
+    expect(row).toBeNull()
+    // The Owner who made the attachment still staffs it.
+    const owner = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "anna" }) }, env)
+    expect(owner.status).toBe(200)
+  })
+
+  it("lets a Maintainer staff a team whose attachments are at or below Maintainer", async () => {
+    await seedTeam()
+    await env.AQUILLA_PG.prepare("UPDATE org_members SET role_level = 600 WHERE org_id = 1 AND user_id = 2").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Bambara', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'pa', 600, 1)").run()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ username: "anna" }) }, env)
+    expect(res.status).toBe(200)
+  })
+
   it("404s an outside invite for someone with no account, and names the invite path", async () => {
     await seedTeam()
     const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "nobody@example.com", external: true }) }, env)

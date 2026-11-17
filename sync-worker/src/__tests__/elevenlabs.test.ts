@@ -228,6 +228,42 @@ describe("ElevenLabs reads", () => {
     expect(upstreamUrl.searchParams.get("category")).toBe("premade")
   })
 
+  // AQU-2577: the public voice library. The add call needs the sharer's public
+  // id beside the voice id, so a row without one is unusable and is dropped.
+  it("searches the public voice library and saves a voice to the caller's account", async () => {
+    const calls = stubUpstream((url) => url.includes("/v1/voices/add/")
+      ? Response.json({ voice_id: "added123" })
+      : Response.json({
+        voices: [
+          { voice_id: "lib1", public_owner_id: "owner9", name: "Layla", language: "ar", gender: "female", age: "young", preview_url: "https://p/l.mp3", is_added_by_user: false },
+          { voice_id: "lib2", name: "No owner" },
+        ],
+        has_more: true,
+      }))
+    const headers = { Authorization: `Bearer ${await token()}`, "X-ElevenLabs-Key": KEY }
+    const res = await get(makeEnv(), "library?projectId=p1&search=narrator&language=ar&page=2", headers)
+    expect(await res.json()).toEqual({
+      voices: [{
+        id: "lib1", ownerId: "owner9", name: "Layla", labels: { language: "ar", gender: "female", age: "young" },
+        previewUrl: "https://p/l.mp3", description: null, added: false,
+      }],
+      nextPage: 3,
+    })
+    const search = new URL(calls[0].url)
+    expect([search.pathname, search.searchParams.get("search"), search.searchParams.get("language"), search.searchParams.get("page")])
+      .toEqual(["/v1/shared-voices", "narrator", "ar", "2"])
+
+    const added = (await call(makeEnv(), new Request("https://w/api/v1/elevenlabs/library/add", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: "p1", ownerId: "owner9", voiceId: "lib1", name: "Layla" }),
+    })))!
+    expect(await added.json()).toEqual({ voiceId: "added123" })
+    expect([calls[1].method, new URL(calls[1].url).pathname]).toEqual(["POST", "/v1/voices/add/owner9/lib1"])
+    expect(JSON.parse(String(calls[1].body))).toEqual({ new_name: "Layla" })
+    expect(calls[1].headers.get("xi-api-key")).toBe(KEY)
+  })
+
   it("offers only the curated TTS models the account has", async () => {
     stubUpstream(() => Response.json([
       { model_id: "eleven_flash_v2_5", can_do_text_to_speech: true },

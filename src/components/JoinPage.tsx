@@ -25,6 +25,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { maskEmail } from "../../db/shared/mask-email"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -50,7 +51,7 @@ export function JoinPage() {
   const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, loading: sessionLoading } = useFrontierSession()
+  const { session, loading: sessionLoading, logout } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
   // The KEY of the error to show, not the resolved sentence (AQU-511 finding 7).
   // Resolving with t() at the moment the failure happened froze the message in
@@ -58,6 +59,13 @@ export function JoinPage() {
   // stale-language error on screen. A key in state is resolved at render, so it
   // follows the active locale for free.
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null)
+  // AQU-2576: an email-bound invite redeemed from the wrong account used to
+  // dead-end on "a different email address" — which address, and which account
+  // am I? Neither the recipient nor the owner could act on that. Hold the
+  // server's masked invited address so the rejection can name all three facts:
+  // the address wanted, the account signed in, and the two ways out. `null`
+  // means a mismatch with no address from the server (older deploy).
+  const [mismatchInvitedEmail, setMismatchInvitedEmail] = useState<string | null>(null)
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
@@ -125,6 +133,7 @@ export function JoinPage() {
     if (!token) return
     setPhase("redeeming")
     setErrorKey(null)
+    setMismatchInvitedEmail(null)
     // Prefer the multi-project accept — it also redeems a single-project token
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
@@ -170,6 +179,11 @@ export function JoinPage() {
       return
     }
     if (single.reason === "wrong_email") {
+      // Either endpoint may carry the masked address; the multi accept ran
+      // first, so prefer whichever actually answered with one.
+      const invited =
+        single.invitedEmail ?? (multi.ok ? undefined : multi.invitedEmail) ?? null
+      setMismatchInvitedEmail(invited)
       setPhase("error")
       setErrorKey("auth.join.wrongEmail")
       return
@@ -416,10 +430,31 @@ export function JoinPage() {
             </div>
           ) : effectivePhase === "error" ? (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertCircle className="h-5 w-5" />
-                <p className="text-sm">{shownErrorKey ? t(shownErrorKey) : null}</p>
-              </div>
+              {shownErrorKey === "auth.join.wrongEmail" && session ? (
+                // AQU-2576: the one error a person can actually act on, so it
+                // says what it knows: which address the invite wanted (masked
+                // by the server — it is not this account's to read in full),
+                // which account is signed in (username in FULL: that is the
+                // string the project owner needs to add them directly), and
+                // both ways out.
+                <EmailMismatchNotice
+                  invitedEmail={mismatchInvitedEmail}
+                  username={session.username}
+                  signedInEmail={session.email ?? null}
+                  onSignOut={() => {
+                    void logout().then(() => {
+                      setMismatchInvitedEmail(null)
+                      setErrorKey(null)
+                      setPhase("initial")
+                    })
+                  }}
+                />
+              ) : (
+                <div className="flex items-center gap-2 text-destructive">
+                  <AlertCircle className="h-5 w-5" />
+                  <p className="text-sm">{shownErrorKey ? t(shownErrorKey) : null}</p>
+                </div>
+              )}
               <Button variant="outline" onClick={() => navigate("/")} className="w-full">
                 {t("auth.join.backToProjects")}
               </Button>
@@ -430,6 +465,88 @@ export function JoinPage() {
         </CardContent>
       </AuthPanel>
     </AuthPage>
+  )
+}
+
+/**
+ * AQU-2576: the email-bound invite rejection, told honestly.
+ *
+ * An invite minted for one address, opened by an account registered under
+ * another, used to render "This invite was sent to a different email address."
+ * and stop. Two of four Biblica reviewers hit exactly that in a single day,
+ * and it cost one of them a working day: the screen named neither the address
+ * the invite wanted nor the account they were signed in as, so the recipient
+ * could not pick the right account and the project owner could not add them
+ * directly either.
+ *
+ * What is safe to say, and why:
+ *   - the INVITED address is masked (`n…a@proton.me`) by the server. Whoever
+ *     holds this link is by definition not the person it was minted for, so
+ *     they do not get to read it in full — but a masked address is enough to
+ *     recognise your own.
+ *   - the signed-in USERNAME is shown in full. It is this account's own name,
+ *     already theirs to see, and it is the exact string the project owner
+ *     needs for "Add members" — the one fact that unblocks the other way out.
+ *   - the signed-in EMAIL is masked too, so a shoulder-surfer or a screenshot
+ *     pasted into a support thread does not spread it.
+ *
+ * Both exits are offered: sign out and come back as the invited address, or
+ * stay and have the owner add this account. Nothing auto-joins — the person
+ * chose which account to sign in with.
+ */
+export function EmailMismatchNotice({
+  invitedEmail,
+  username,
+  signedInEmail,
+  onSignOut,
+}: {
+  /** Masked invited address, or null when the server did not name one. */
+  invitedEmail: string | null
+  /** The signed-in account's username, shown in full. */
+  username: string
+  /** The signed-in account's email, masked here before display. */
+  signedInEmail: string | null
+  onSignOut: () => void
+}) {
+  const t = useT()
+  const strong = (text: string) => (
+    <span className="font-medium text-foreground">{text}</span>
+  )
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 text-destructive">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <p className="text-sm">
+          {invitedEmail ? (
+            <RichMessage
+              k="auth.join.wrongEmailInvited"
+              values={{ email: strong(invitedEmail) }}
+            />
+          ) : (
+            t("auth.join.wrongEmail")
+          )}
+        </p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {signedInEmail ? (
+          <RichMessage
+            k="auth.join.wrongEmailSignedInWithEmail"
+            values={{ username: strong(username), email: maskEmail(signedInEmail) }}
+          />
+        ) : (
+          <RichMessage
+            k="auth.join.wrongEmailSignedIn"
+            values={{ username: strong(username) }}
+          />
+        )}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        {t("auth.join.wrongEmailAskOwner", { username })}
+      </p>
+      <Button variant="outline" onClick={onSignOut} className="w-full">
+        {t("auth.join.wrongEmailSignOut")}
+      </Button>
+    </div>
   )
 }
 

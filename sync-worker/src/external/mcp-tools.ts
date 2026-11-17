@@ -1005,6 +1005,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
       'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
       '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'AQU-2576: `username` may be an email address, and `email` is an accepted alias for ' +
+      'it — the target resolves by username first, then by account email. Do not guess a ' +
+      'handle you were not given. ' +
       'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
       'the credential\'s mode — membership is governance, so every change passes a human at ' +
       'the approvalUrl. You cannot grant a role above your own (permission_denied ' +

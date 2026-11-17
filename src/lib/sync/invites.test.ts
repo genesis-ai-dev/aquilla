@@ -291,6 +291,30 @@ describe("acceptServerInvite", () => {
     expect(result).toEqual({ ok: false, reason: "wrong_email" })
   })
 
+  // AQU-2576: the 403 now names the address the invite was minted for, masked
+  // server-side. JoinPage cannot tell the recipient which account to use
+  // without it, so it has to survive the classification step.
+  it("carries the masked invited address off a 403 that names one", async () => {
+    global.fetch = mockFetch(403, {
+      error: "different email",
+      code: "email_mismatch",
+      invitedEmail: "n…a@proton.me",
+    }) as unknown as typeof fetch
+    const result = await acceptServerInvite("jwt", "token", API)
+    expect(result).toEqual({
+      ok: false,
+      reason: "wrong_email",
+      invitedEmail: "n…a@proton.me",
+    })
+  })
+
+  it("still classifies a 403 from a server that names no address", async () => {
+    global.fetch = mockFetch(403, { error: "different email" }) as unknown as typeof fetch
+    const result = await acceptServerInvite("jwt", "token", API)
+    expect(result).toEqual({ ok: false, reason: "wrong_email" })
+    expect((result as { invitedEmail?: string }).invitedEmail).toBeUndefined()
+  })
+
   it("returns {ok:false, reason:'network'} on network error without throwing", async () => {
     global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
     const result = await acceptServerInvite("jwt", "t", API)
@@ -319,6 +343,22 @@ describe("acceptMultiInvite", () => {
     global.fetch = mockFetch(403, { error: "different email" }) as unknown as typeof fetch
     const result = await acceptMultiInvite("jwt", "tok", API)
     expect(result).toEqual({ ok: false, reason: "wrong_email" })
+  })
+
+  // AQU-2576: this is the endpoint JoinPage calls first, so the masked
+  // address has to come through here too.
+  it("carries the masked invited address off a 403 that names one", async () => {
+    global.fetch = mockFetch(403, {
+      error: "different email",
+      code: "email_mismatch",
+      invitedEmail: "m…l@biblica.com",
+    }) as unknown as typeof fetch
+    const result = await acceptMultiInvite("jwt", "tok", API)
+    expect(result).toEqual({
+      ok: false,
+      reason: "wrong_email",
+      invitedEmail: "m…l@biblica.com",
+    })
   })
 
   it("returns {ok:false, reason:'used'} on 410 with code:'used'", async () => {

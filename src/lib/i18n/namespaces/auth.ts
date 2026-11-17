@@ -229,6 +229,13 @@ export const auth = defineNamespace({
     "auth.join.invalidInviteLink": "Invalid invite link",
     "auth.join.networkError": "Couldn't reach the server. Check your connection and try again.",
     "auth.join.wrongEmail": "This invite was sent to a different email address.",
+    "auth.join.wrongEmailInvited": "This invite is for {email}.",
+    "auth.join.wrongEmailSignedInWithEmail": "You're signed in as {username} ({email}).",
+    "auth.join.wrongEmailSignedIn": "You're signed in as {username}.",
+    "auth.join.wrongEmailAskOwner":
+      "Sign out and sign in with the invited address, or ask the project owner to add " +
+      "your account \u201C{username}\u201D directly.",
+    "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -847,7 +854,45 @@ export const auth = defineNamespace({
       "auth.join.wrongEmail": {
         description:
           "Error shown when accepting fails because the invite is bound to a " +
-          "different email address than the signed-in account's.",
+          "different email address than the signed-in account's. Fallback for " +
+          "a server that does not name the invited address; otherwise " +
+          "auth.join.wrongEmailInvited is shown.",
+      },
+      "auth.join.wrongEmailInvited": {
+        description:
+          "Headline of the email-mismatch rejection, naming the address the " +
+          "invite was minted for. {email} is already masked by the server " +
+          "(for example 'n…a@proton.me') and is rendered in bold.",
+        placeholders: { email: "The masked invited address, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailSignedInWithEmail": {
+        description:
+          "Second line of the email-mismatch rejection, naming the account " +
+          "the person is signed in as. {username} is shown in full and bold " +
+          "(it is what a project owner needs to add them directly); {email} " +
+          "is that account's own address, masked before display.",
+        placeholders: {
+          username: "The signed-in username, rendered as bold markup.",
+          email: "The signed-in account's masked email address.",
+        },
+      },
+      "auth.join.wrongEmailSignedIn": {
+        description:
+          "Same as auth.join.wrongEmailSignedInWithEmail, for a session that " +
+          "carries no email claim — the username alone.",
+        placeholders: { username: "The signed-in username, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailAskOwner": {
+        description:
+          "The two ways out of an email-mismatch rejection: sign in with the " +
+          "invited address, or have the project owner add this account by its " +
+          "username. {username} is quoted by the template.",
+        placeholders: { username: "The signed-in username, quoted by the template." },
+      },
+      "auth.join.wrongEmailSignOut": {
+        description:
+          "Button on the email-mismatch rejection that signs the person out " +
+          "so they can sign back in with the address the invite was sent to.",
       },
       "auth.join.noLongerValidFresh": {
         description:

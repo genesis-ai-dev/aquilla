@@ -155,6 +155,11 @@ export function AddProjectMemberDialog({
         row: {
           defaultRole: ROLE.CONTRIBUTOR,
           grantScope: { kind: "project", projectName, lanes: "all" },
+          // AQU-2576: this dialog's caller already cleared the project's
+          // member-grant floor, which is exactly the bar the server applies to
+          // an email lookup — so an owner handed a reviewer's address can
+          // resolve it here instead of hunting for a username.
+          lookupProjectId: projectId,
           targetLanes,
           onAdd: async (usernames, role, laneAccess) => {
             const outcomes = await handleAddMany(usernames, role, laneAccess)

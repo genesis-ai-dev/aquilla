@@ -129,6 +129,8 @@
     "worktree:new": "tsx scripts/worktree-new.ts",
     "desktop:bundle:publish": "tsx scripts/desktop-bundle-publish.ts",
     "desktop:bundle:keygen": "tsx scripts/desktop-bundle-keygen.ts",
+    "desktop:release:plan": "tsx scripts/desktop-release-cut.ts plan",
+    "desktop:release:verify": "tsx scripts/desktop-release-verify.ts",
     "media:chapters": "tsx scripts/media-chapters.ts",
     "media:chapters:eval": "tsx scripts/media-chapters-eval.ts",
     "seams:eval": "tsx scripts/seam-eval.ts",

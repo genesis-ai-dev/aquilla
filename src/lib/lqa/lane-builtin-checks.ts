@@ -5,6 +5,8 @@
 //
 //   * the lane's punctuation conventions — the marks the two punctuation
 //     checks judge the target by (db/shared/punctuation-conventions.ts);
+//   * the lane's number format — the separators and digits the number-format
+//     check judges the target by (AQU-2430, db/shared/number-format.ts);
 //   * the lane's built-in check overrides — a maintainer may switch a check
 //     off, or change its severity, for ONE lane, on top of the project-wide
 //     `algorithmicChecks` every lane already shared.
@@ -18,6 +20,8 @@ import type {
 } from "@/lib/parsers/types"
 import { laneLanguage, laneLanguageCode } from "@/lib/lanes/lane-display"
 import { readLanguageProfile } from "../../../db/shared/language-profile"
+import { resolveNumberFormat, type ResolvedNumberFormat } from "../../../db/shared/number-format"
+import { hasOrthography, type OrthographyProfile } from "../../../db/shared/orthography"
 import { resolvePunctuation, type ResolvedPunctuation } from "../../../db/shared/punctuation-conventions"
 
 type LaneRow = NonNullable<ProjectRecord["lanes"]>[number]
@@ -88,6 +92,45 @@ export function lanePunctuation(
     language: laneLanguageForChecks(project, lane),
     profile: readLanguageProfile(project?.languageProfile).punctuation ?? null,
   })
+}
+
+/**
+ * The number format in force in `lane`: the project's Language profile slot
+ * laid over CLDR's answer for the lane's language, else that answer alone,
+ * else none — which leaves the number-format check silent (AQU-2430).
+ *
+ * The Language profile is a PROJECT-level record, so a filled slot applies in
+ * every lane, exactly as it does for punctuation.
+ */
+export function laneNumberFormat(
+  project: Pick<ProjectRecord, "lanes" | "targetLanguage" | "languageProfile"> | null | undefined,
+  lane: string,
+): ResolvedNumberFormat {
+  return resolveNumberFormat({
+    language: laneLanguageForChecks(project, lane),
+    profile: readLanguageProfile(project?.languageProfile).numberFormat ?? null,
+  })
+}
+
+/**
+ * The orthography in force in `lane` (AQU-2628): the project's Language
+ * profile slot, or null — which leaves the old-orthography check silent and
+ * every converter call site a no-op.
+ *
+ * There is no table to fall back to and never will be: an alphabet reform is
+ * a decision a project records, not a fact about a language tag. A lane whose
+ * project has not filled the slot therefore behaves exactly as it did before
+ * this feature existed.
+ *
+ * The Language profile is a PROJECT-level record, so a filled slot applies in
+ * every lane, exactly as it does for punctuation and number format.
+ */
+export function laneOrthography(
+  project: Pick<ProjectRecord, "languageProfile"> | null | undefined,
+  _lane?: string,
+): OrthographyProfile | null {
+  const profile = readLanguageProfile(project?.languageProfile).orthography
+  return hasOrthography(profile) ? profile : null
 }
 
 /**

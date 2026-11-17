@@ -14,6 +14,7 @@ import { useStoragePressure } from "@/hooks/useStoragePressure"
 import { useOpfsAvailability } from "@/hooks/useOpfsAvailability"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 
 const DISMISS_KEY_PREFIX = "aq:storage-full-banner-dismissed:"
 const memoryDismissals = new Set<string>()
@@ -42,6 +43,7 @@ function writeDismissed(key: string): void {
 
 export function StorageFullBanner() {
   const t = useT()
+  const titlebarDrag = useTopBannerDrag()
   const nearlyFull = useStoragePressure()
   const opfsAvailable = useOpfsAvailability()
   const { session, loading } = useFrontierSession()
@@ -64,7 +66,7 @@ export function StorageFullBanner() {
   }
 
   return (
-    <div className="fixed top-0 start-0 end-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+    <div {...titlebarDrag} className="fixed top-0 start-0 end-0 z-40 mac-titlebar-clear flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
       <HardDrive className="h-3.5 w-3.5 shrink-0" />
       <span>{t("error.storageNearlyFull.message")}</span>
       <button

@@ -7,7 +7,7 @@
 //     account doesn't exist. Only a lookup that confirms non-existence shows
 //     the definitive "no such user" copy.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { useState } from "react"
 import { UsernameTypeahead, type RecipientValue } from "./UsernameTypeahead"
@@ -44,13 +44,15 @@ function Harness({
   suggestions,
   emptySuggestionsHint,
   scopedSearch,
+  lookupProjectId,
   onStageTyped = () => {},
   onToggleResult = () => {},
 }: {
   multiSelect: boolean
-  suggestions?: Array<{ id: number; username: string }>
+  suggestions?: Array<{ id: number; username: string; secondary?: string | null }>
   emptySuggestionsHint?: string
   scopedSearch?: boolean
+  lookupProjectId?: string | null
   onStageTyped?: () => void
   onToggleResult?: (u: { id: number; username: string }) => void
 }) {
@@ -63,6 +65,7 @@ function Harness({
       suggestions={suggestions}
       emptySuggestionsHint={emptySuggestionsHint}
       scopedSearch={scopedSearch}
+      lookupProjectId={lookupProjectId}
       multiSelect={
         multiSelect
           ? { stagedUsernames: new Set(), onToggleResult, onStageTyped }
@@ -146,7 +149,69 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
     fireEvent.change(input(), { target: { value: "zed" } })
 
     expect(await screen.findByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
-    expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", "zed")
+    // AQU-2576 added a third argument: the project scoping an email lookup.
+    // Unscoped surfaces pass null, which keeps the route username-only.
+    expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", "zed", null)
+  })
+
+  // AQU-2576: a project owner is given a reviewer's EMAIL, not their handle.
+  // Where a project scopes the lookup, the address resolves to the account and
+  // a miss says so in the address's own terms — "no account uses this email",
+  // not "no user named n@example.com".
+  describe("AQU-2576: resolving an add-member target by email", () => {
+    const EMAIL = "naladda@proton.me"
+
+    it("scopes the lookup to the project when one is given", async () => {
+      vi.mocked(lookupUser).mockResolvedValue({ id: 1220, username: "Naladda" })
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      expect(await screen.findByText(/is an aquilla user/i)).toBeInTheDocument()
+      expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", EMAIL, "proj-1")
+    })
+
+    it("offers the resolved account by username — the string the owner needs", async () => {
+      vi.mocked(lookupUser).mockResolvedValue({ id: 1220, username: "Naladda" })
+      const onToggleResult = vi.fn()
+      render(
+        <Harness multiSelect scopedSearch lookupProjectId="proj-1" onToggleResult={onToggleResult} />,
+      )
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      fireEvent.click(await screen.findByRole("button", { name: /add naladda/i }))
+      expect(onToggleResult).toHaveBeenCalledWith({ id: 1220, username: "Naladda" })
+    })
+
+    it("says no ACCOUNT uses the address when the lookup confirms the miss", async () => {
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: EMAIL } })
+
+      expect(
+        await screen.findByText(/no aquilla account uses the email naladda@proton\.me/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/no aquilla user named/i)).not.toBeInTheDocument()
+    })
+
+    it("keeps the username wording for a typed username, scoped or not", async () => {
+      render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      fireEvent.focus(input())
+      fireEvent.change(input(), { target: { value: "zed" } })
+
+      expect(await screen.findByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
+    })
+
+    it("tells the person an email works here, only where one actually would", () => {
+      const hint = /enter their email address instead/i
+      const { unmount } = render(<Harness multiSelect scopedSearch lookupProjectId="proj-1" />)
+      expect(screen.getByText(hint)).toBeInTheDocument()
+      unmount()
+
+      render(<Harness multiSelect scopedSearch />)
+      expect(screen.queryByText(hint)).not.toBeInTheDocument()
+    })
   })
 })
 
@@ -192,5 +257,125 @@ describe("UsernameTypeahead — dropdown placement", () => {
 
     expect(dropdown().style.bottom).toBe(`${window.innerHeight - 716 + 4}px`)
     expect(dropdown().style.top).toBe("")
+  })
+})
+
+// AQU-2609: the suggestion list grants project access. A row the operator
+// cannot read in full — "Math…" next to "matth…" — is a mis-grant waiting to
+// happen, so the list is no longer pinned to the narrow field's width and each
+// row can carry a secondary identifier.
+describe("UsernameTypeahead — identifying people in the dropdown (AQU-2609)", () => {
+  function mockInputRect(rect: { left: number; width: number }) {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      x: rect.left,
+      y: 100,
+      left: rect.left,
+      right: rect.left + rect.width,
+      width: rect.width,
+      height: 32,
+      top: 100,
+      bottom: 132,
+      toJSON: () => ({}),
+    } as DOMRect)
+  }
+
+  function dropdownFor(name: string): HTMLElement {
+    const el = screen.getByRole("checkbox", { name }).closest(".fixed")
+    expect(el).not.toBeNull()
+    return el as HTMLElement
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("is anchored to the field but free to grow past its width", () => {
+    mockInputRect({ left: 40, width: 220 })
+    render(<Harness multiSelect suggestions={[{ id: 5, username: "dana" }]} />)
+    fireEvent.focus(input())
+
+    const el = dropdownFor("dana")
+    // The field is the floor, not the ceiling: no fixed width pins the list
+    // (the regression — `width: 220px` — cut usernames to a few characters).
+    expect(el.style.minWidth).toBe("220px")
+    expect(el.style.width).toBe("")
+    expect(el.className).toContain("w-max")
+    expect(parseFloat(el.style.maxWidth)).toBeGreaterThan(220)
+  })
+
+  it("never grows past the viewport's right edge", () => {
+    // Field pushed right: only (innerWidth - left - 8px gutter) is available,
+    // which is less than the field itself — so the list matches the field.
+    mockInputRect({ left: window.innerWidth - 100, width: 220 })
+    render(<Harness multiSelect suggestions={[{ id: 5, username: "dana" }]} />)
+    fireEvent.focus(input())
+
+    const el = dropdownFor("dana")
+    expect(el.style.minWidth).toBe("220px")
+    expect(el.style.maxWidth).toBe("220px")
+  })
+
+  it("keeps two usernames that share a prefix fully distinguishable", () => {
+    mockInputRect({ left: 40, width: 220 })
+    render(
+      <Harness
+        multiSelect
+        suggestions={[
+          { id: 7, username: "Mathew-Ebenezer-Translator" },
+          { id: 8, username: "matthew-ebenezer-reviewer" },
+        ]}
+      />,
+    )
+    fireEvent.focus(input())
+
+    // Each row names its person in full — as visible text and, for the case
+    // where the cap still clips, in the row's hover title.
+    for (const username of [
+      "Mathew-Ebenezer-Translator",
+      "matthew-ebenezer-reviewer",
+    ]) {
+      const row = screen.getByRole("checkbox", { name: username })
+      expect(row).toHaveAttribute("title", username)
+      expect(row.textContent).toContain(username)
+    }
+  })
+
+  it("shows the secondary identifier a caller supplies, in the row and its title", () => {
+    mockInputRect({ left: 40, width: 220 })
+    render(
+      <Harness
+        multiSelect
+        suggestions={[
+          { id: 7, username: "Mathew", secondary: "mathew.k@biblica.com" },
+          { id: 8, username: "matthew", secondary: "m.taylor@biblica.com" },
+        ]}
+      />,
+    )
+    fireEvent.focus(input())
+
+    expect(screen.getByText("mathew.k@biblica.com")).toBeInTheDocument()
+    expect(screen.getByText("m.taylor@biblica.com")).toBeInTheDocument()
+    expect(
+      screen.getByRole("checkbox", { name: /^Mathew mathew\.k@biblica\.com$/ }),
+    ).toHaveAttribute("title", "Mathew — mathew.k@biblica.com")
+  })
+
+  it("leaves the row's accessible name and click-to-toggle untouched", () => {
+    mockInputRect({ left: 40, width: 220 })
+    const onToggleResult = vi.fn()
+    render(
+      <Harness
+        multiSelect
+        suggestions={[{ id: 5, username: "dana", secondary: "dana@example.com" }]}
+        onToggleResult={onToggleResult}
+      />,
+    )
+    fireEvent.focus(input())
+    fireEvent.click(screen.getByRole("checkbox", { name: /dana/ }))
+    expect(onToggleResult).toHaveBeenCalledWith({
+      id: 5,
+      username: "dana",
+      secondary: "dana@example.com",
+    })
   })
 })

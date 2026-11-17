@@ -85,6 +85,37 @@ export const languageProfile = defineNamespace({
     "languageProfile.numberWords.words": "Numbers and words",
     "languageProfile.numberWords.wordsHint": "One on each line, as number = word. For example, 12 = twelve",
 
+    // ── Number separators (AQU-2430) ──
+    "languageProfile.numberFormat.title": "Number separators",
+    "languageProfile.numberFormat.description":
+      "The characters your translation groups thousands with and marks a decimal fraction with. Leave this alone unless your language writes them differently from the standard for it.",
+    "languageProfile.numberFormat.example": "German groups with a dot and fractions with a comma: 1.234,56",
+    "languageProfile.numberFormat.group": "Thousands separator",
+    "languageProfile.numberFormat.decimal": "Decimal mark",
+    "languageProfile.numberFormat.hint": "Type the character itself. A space counts.",
+
+    // ── Orthography (AQU-2628) ──
+    "languageProfile.orthography.title": "Spelling rules",
+    "languageProfile.orthography.description":
+      "The spellings your language replaced, and what replaced them. Imported text and AI drafts are converted with these rules before they reach a cell, and anything still typed the old way is flagged.",
+    "languageProfile.orthography.example":
+      "Uzbek's 2026 alphabet: sh > \u015F, ch > \u00E7, o\u02BB > \u00F6, g\u02BB > \u011F",
+    "languageProfile.orthography.rules": "Replacements",
+    "languageProfile.orthography.rulesHint":
+      "One on each line, as old > new. Write the old spelling in lower case \u2014 capitals follow from it.",
+    "languageProfile.orthography.apostrophe": "Apostrophe",
+    "languageProfile.orthography.apostropheHint":
+      "The apostrophe your alphabet uses. Every other apostrophe people type becomes this one.",
+    "languageProfile.orthography.exceptions": "Words the rules leave alone",
+    "languageProfile.orthography.exceptionsEmpty": "No exceptions yet.",
+    "languageProfile.orthography.approved": "Approved",
+    "languageProfile.orthography.pending": "Proposed",
+    "languageProfile.orthography.approve": "Approve",
+    "languageProfile.orthography.reject": "Remove",
+    "languageProfile.orthography.addPlaceholder": "Paste words, one on each line",
+    "languageProfile.orthography.addHint": "Words you add here are approved when you save.",
+    "languageProfile.orthography.exportCsv": "Export CSV",
+
     // ── Kin terms ──
     "languageProfile.kinTerms.title": "Kin terms",
     "languageProfile.kinTerms.description": "Whether words for brother, sister and other relatives say who is older.",
@@ -242,6 +273,69 @@ export const languageProfile = defineNamespace({
       "languageProfile.numberWords.description": { description: "Explains the row." },
       "languageProfile.numberWords.example": {
         description: "Example: digits and the words for them. Translate the words; keep the digits.",
+      },
+      "languageProfile.orthography.title": {
+        description: "Row title: the spelling rules the language writes in. Short.",
+        maxLength: 30,
+      },
+      "languageProfile.orthography.description": { description: "Explains the row." },
+      "languageProfile.orthography.example": {
+        description:
+          "Example naming Uzbek's 2026 alphabet reform. Translate the words; keep the letters and the "
+          + "'>' arrows exactly as written.",
+      },
+      "languageProfile.orthography.rules": {
+        description:
+          "Field label above the box holding one replacement per line, each an old spelling and what " +
+          "replaced it.",
+        maxLength: 24,
+      },
+      "languageProfile.orthography.rulesHint": {
+        description: "Hint under that box: the format is 'old > new', one per line, old spelling lower case.",
+      },
+      "languageProfile.orthography.apostrophe": { description: "Field label: the alphabet's own apostrophe." },
+      "languageProfile.orthography.apostropheHint": {
+        description: "Hint: every apostrophe-like character someone types is normalised to this one.",
+      },
+      "languageProfile.orthography.exceptions": {
+        description: "Heading above the list of words the rules must not change.",
+      },
+      "languageProfile.orthography.exceptionsEmpty": { description: "Shown when that list is empty." },
+      "languageProfile.orthography.approved": {
+        description: "Badge on an exception a maintainer has accepted. One word.",
+        maxLength: 16,
+      },
+      "languageProfile.orthography.pending": {
+        description: "Badge on an exception a contributor has only suggested. One word.",
+        maxLength: 16,
+      },
+      "languageProfile.orthography.approve": { description: "Button that accepts a suggested exception.", maxLength: 16 },
+      "languageProfile.orthography.reject": { description: "Button that takes a word off the list.", maxLength: 16 },
+      "languageProfile.orthography.addPlaceholder": {
+        description: "Placeholder in the box for pasting several exception words at once.",
+      },
+      "languageProfile.orthography.addHint": { description: "Hint under that box." },
+      "languageProfile.orthography.exportCsv": {
+        description: "Button that downloads the exception list as a spreadsheet file.",
+        maxLength: 20,
+      },
+      "languageProfile.numberFormat.title": {
+        description: "Row title: the characters used inside a number. Short.",
+        maxLength: 30,
+      },
+      "languageProfile.numberFormat.description": { description: "Explains the row." },
+      "languageProfile.numberFormat.example": {
+        description:
+          "Example naming German's separators. Translate the sentence; keep the number 1.234,56 as written.",
+      },
+      "languageProfile.numberFormat.group": {
+        description: "Field label: the character between groups of three digits, e.g. the comma in 1,000.",
+      },
+      "languageProfile.numberFormat.decimal": {
+        description: "Field label: the character before the fraction, e.g. the dot in 3.5.",
+      },
+      "languageProfile.numberFormat.hint": {
+        description: "Hint under both fields: type the character, and a space is a valid answer.",
       },
       "languageProfile.numberWords.source": { description: "Label of a choice between the two options below." },
       "languageProfile.numberWords.cldr": {

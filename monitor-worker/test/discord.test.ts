@@ -8,6 +8,7 @@ const USER = "223456789012345678"
 const config: MonitorConfig = {
   environment: "production",
   targets: [{ id: "sync", name: "Sync API", url: "https://api.aquilla.app/sync/health" }],
+  stuckSessions: null,
   failureThreshold: 3,
   recoveryThreshold: 2,
   reminderMinutes: 60,

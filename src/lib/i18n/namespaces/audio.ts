@@ -22,8 +22,10 @@ export const audio = defineNamespace({
     "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
     "audio.train.addRecordings": "Add recordings",
     "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
-    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min in total · WAV, or MP3/M4A up to 20 MB per file",
     "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.fileTooLargeUseWav": "Over {mb} MB — use a WAV for a recording this long",
+    "audio.train.tooMuchData": "Over {mb} MB in total (the limit is {max} min) — remove some",
     "audio.train.removeRecordingAriaLabel": "Remove {name}",
     "audio.train.audioMeter": "{minutes} min",
     "audio.train.tooMuchAudio": "Over {max} min — remove some",
@@ -343,6 +345,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
+    // AQU-2511: which voice the press will spend credits on, before it is spent.
+    "audio.recordingModal.generateWithVoice": "Generate with {voice}",
+    // AQU-2510: which voice Generate will speak in, above the button itself.
+    "audio.recordingModal.voicePickAriaLabel": "Choose the voice Generate uses — now {voice}",
+    "audio.recordingModal.voicePickCastNote": "· this line's voice",
+    "audio.recordingModal.voicePickDefaultNote": "· project default",
     "audio.recordingModal.uploadButton": "Upload",
     "audio.recordingModal.takesLabel": "Takes",
     "audio.recordingModal.formatLockedTooltip":
@@ -467,6 +475,13 @@ export const audio = defineNamespace({
     "audio.changeVoice.batchSkippedNotTrained": plural({
       one: "{count} cell was skipped because its voice has no trained voice model.",
       other: "{count} cells were skipped because their voice has no trained voice model.",
+    }),
+    // AQU-2499 (review, Nov 9): lines that share one recording with others.
+    // Said before the run (the confirmation) and after it (the toast), so it
+    // is in the present tense, true in both.
+    "audio.changeVoice.batchSkippedShared": plural({
+      one: "{count} line stays as it is: it shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
+      other: "{count} lines stay as they are: each shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
     }),
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
@@ -631,6 +646,8 @@ export const audio = defineNamespace({
     "audio.elevenLabs.accountUnavailable": "Couldn't check your ElevenLabs account.",
     "audio.elevenLabs.checkingAccount": "Checking your account\u2026",
     "audio.elevenLabs.charactersLeft": "{left} characters left",
+    "audio.elevenLabs.connectedNoQuota": "Connected",
+    "audio.elevenLabs.connectedNoQuotaHint": "This key can't read your ElevenLabs account, so the characters left aren't shown.",
     "audio.elevenLabs.searchPlaceholder": "Search your voices",
     "audio.elevenLabs.searchAriaLabel": "Search ElevenLabs voices",
     "audio.elevenLabs.categoryPremade": "Premade",
@@ -670,6 +687,9 @@ export const audio = defineNamespace({
     "audio.aiError.elevenLabsNoKeyBody": "This voice uses ElevenLabs with your own API key, and this device has none. Connect your key in the Voice Studio (edit the voice) or in Project settings → Voice.",
     "audio.aiError.elevenLabsInvalidKeyTitle": "ElevenLabs rejected your key",
     "audio.aiError.elevenLabsInvalidKeyBody": "Check the key in your ElevenLabs account, then disconnect and connect it again.",
+    "audio.aiError.elevenLabsMissingPermissionTitle": "Your ElevenLabs key isn't allowed to do that",
+    "audio.aiError.elevenLabsMissingPermissionBody": "This ElevenLabs key is restricted and is missing the permission \u201c{permission}\u201d. In ElevenLabs, edit the key to allow it, then try again.",
+    "audio.aiError.elevenLabsMissingPermissionUnnamedBody": "This ElevenLabs key is restricted and is missing a permission this needs. In ElevenLabs, edit the key's permissions, then try again.",
     "audio.aiError.elevenLabsQuotaTitle": "Out of ElevenLabs characters",
     "audio.aiError.elevenLabsQuotaBody": "Your ElevenLabs account has used this period's characters. Upgrade your ElevenLabs plan or wait for it to reset.",
     "audio.aiError.elevenLabsCloneNotAllowedTitle": "Cloning isn't on your ElevenLabs plan",
@@ -891,6 +911,17 @@ export const audio = defineNamespace({
       "audio.train.recommendedHint": {
         description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
         placeholders: { recommended: "Recommended minutes, e.g. '15'." },
+      },
+      "audio.train.fileTooLargeUseWav": {
+        description: "Shown in red next to one picked recording in Train voice when a compressed audio file (MP3, M4A) is over the per-file size limit. Uncompressed WAV files have no per-file limit, so the fix is to use a WAV. WAV, MP3 and MB are not translated.",
+        placeholders: { mb: "The per-file size limit in megabytes, e.g. '20'." },
+      },
+      "audio.train.tooMuchData": {
+        description: "Shown instead of the meter line in Train voice when the picked recordings are too large to upload in total, even though they may be within the maximum length. MB is not translated.",
+        placeholders: {
+          mb: "The total upload limit in megabytes, e.g. '1600'.",
+          max: "Maximum minutes of audio allowed, e.g. '60'.",
+        },
       },
       "audio.train.tooMuchAudio": {
         description: "Shown instead of the meter line when the recordings exceed the maximum.",
@@ -1683,6 +1714,19 @@ export const audio = defineNamespace({
           "the list back at the bottom of the window.",
         maxLength: 32,
       },
+      "audio.recordingModal.generateWithVoice": {
+        description:
+          "Label of the button that generates a spoken take for this line, naming " +
+          "the voice it will be read in — {voice} is a voice's name, which the user " +
+          "typed or picked (do not translate it). Shown instead of the plain " +
+          "'Generate' when the line's voice is known, so the user can see which " +
+          "voice their credits will be spent on before pressing. Short; the button " +
+          "is about half a panel wide and longer text is truncated.",
+        placeholders: {
+          voice: "The name of the voice this line will be read in, e.g. 'Narrator' — a name the user typed or picked, never translated.",
+        },
+        maxLength: 40,
+      },
       "audio.recordingModal.trimHint": {
         description:
           "Tiny hint beside the trim readout, in two parts: the Space bar plays the " +
@@ -2082,6 +2126,32 @@ export const audio = defineNamespace({
           "same subtitle got no audio from it — so it reads as a to-do, naming " +
           "what is still silent. Always at least 2, so the plural is safe.",
         placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
+      },
+      // AQU-2510
+      "audio.recordingModal.voicePickAriaLabel": {
+        description:
+          "Accessible name of the voice control above the recorder's Generate " +
+          "button. It opens a list of the project's voices and names the one " +
+          "that will be used if Generate is pressed now. Announced with no " +
+          "layout to lean on, so it says both what the control does and what " +
+          "is currently chosen.",
+        placeholders: { voice: "Name of the voice Generate would use right now, e.g. Narrator." },
+      },
+      "audio.recordingModal.voicePickCastNote": {
+        description:
+          "Suffix after the voice name on that control, shown when the voice " +
+          "comes from this line's own cast assignment (its character) rather " +
+          "than from a pick. Says WHY that voice is the one offered. Starts " +
+          "with a middle dot because it follows the name inline.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.voicePickDefaultNote": {
+        description:
+          "Suffix after the voice name on that control, shown when nothing " +
+          "casts this line and nothing has been picked, so the project's " +
+          "default voice is the one offered. Starts with a middle dot because " +
+          "it follows the name inline.",
+        maxLength: 24,
       },
       "audio.recordingModal.ttsNoLinkedLine": {
         description:
@@ -2678,6 +2748,16 @@ export const audio = defineNamespace({
           "cell shows its own error badge with the reason.",
         placeholders: { count: "How many conversions failed." },
       },
+      "audio.changeVoice.batchSkippedShared": {
+        description:
+          "Shown twice for the bulk 'Change voice of existing audio' run: in its " +
+          "confirmation, BEFORE anything has run, and in the toast after it. So it is " +
+          "in the present tense and must read true in both: these lines are left as " +
+          "they are. Their recording is also used by other lines (for example a whole " +
+          "chapter uploaded as one file and placed on each verse), and re-voicing one " +
+          "line would re-voice the whole recording. 'Change voice' is the name of the action.",
+        placeholders: { count: "How many lines are left as they are." },
+      },
       "audio.changeVoice.batchSkippedNotTrained": {
         description:
           "Toast detail after the bulk run (also the confirmation's notice): cells " +
@@ -2948,6 +3028,12 @@ export const audio = defineNamespace({
       "audio.elevenLabs.checkingAccount": {
         description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') while the app reads the account's quota.",
       },
+      "audio.elevenLabs.connectedNoQuota": {
+        description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') in place of the quota, when the user's API key works but is not allowed to read the account's quota.",
+      },
+      "audio.elevenLabs.connectedNoQuotaHint": {
+        description: "Hover text on the connected ElevenLabs line when it says 'Connected' in place of a quota: the key is restricted, so the remaining characters cannot be read. ElevenLabs is a brand name: do not translate it.",
+      },
       "audio.elevenLabs.charactersLeft": {
         description: "Quota on the connected ElevenLabs line, shown after 'ElevenLabs \u00b7 ': how many characters of text the user's ElevenLabs plan can still speak this billing period.",
         placeholders: {
@@ -3085,6 +3171,18 @@ export const audio = defineNamespace({
       },
       "audio.aiError.elevenLabsInvalidKeyBody": {
         description: "Popover body for an invalid ElevenLabs key: the fix is to replace it.",
+      },
+      "audio.aiError.elevenLabsMissingPermissionTitle": {
+        description: "Popover title when the user's own ElevenLabs API key is valid but restricted, and lacks the permission for the action they tried (reading text aloud, re-voicing a recording, cloning). ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.aiError.elevenLabsMissingPermissionBody": {
+        description: "Popover body for a restricted ElevenLabs API key: names the missing permission and says to edit the key in ElevenLabs. ElevenLabs is a brand name: do not translate it.",
+        placeholders: {
+          "permission": "ElevenLabs' own identifier for the permission, shown as is (e.g. text_to_speech, voices_write). Do not translate.",
+        },
+      },
+      "audio.aiError.elevenLabsMissingPermissionUnnamedBody": {
+        description: "Popover body for a restricted ElevenLabs API key when ElevenLabs did not say which permission is missing. ElevenLabs is a brand name: do not translate it.",
       },
       "audio.aiError.elevenLabsQuotaTitle": {
         description: "Popover title when the user's ElevenLabs plan has used up its characters for the billing period.",

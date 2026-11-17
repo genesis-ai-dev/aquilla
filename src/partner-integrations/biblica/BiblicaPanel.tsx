@@ -10,13 +10,13 @@
  * Default-exported because `React.lazy` expects a module with a default export.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { countReimportDiff, type ReimportChangeCounts } from "@/lib/import/reimport-diff"
-import { ReimportAnalysis } from "@/components/import/ReimportAnalysis"
+import { ReimportAnalysis, ReimportUpdateNote } from "@/components/import/ReimportAnalysis"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 import { importBiblicaStudyNotes, previewBiblicaStudyNotes, type BiblicaProgress } from "./import"
 import {
@@ -101,6 +101,10 @@ function BiblicaPanel({
   const knownEdition = editionFromImport(reimport?.profileId, reimport?.corpusMarker)
   const [edition, setEdition] = useState<BiblicaEdition>(knownEdition ?? "study-notes")
   const [changes, setChanges] = useState<ReimportChangeCounts | null>(null)
+  // AQU-2487 (review, Nov 9): only "Update this file" hides the cells the new
+  // package no longer has; the line that says so is tied to that button.
+  const updateNoteId = useId()
+  const removedCount = reimport != null ? changes?.removed ?? 0 : 0
   const [reading, setReading] = useState(false)
   const existingSource = reimport?.existingSource
   const recounting = reimport != null
@@ -322,7 +326,11 @@ function BiblicaPanel({
             <Button variant="outline" onClick={() => { void handleImport("updated-copy") }} disabled={!file || importing}>
               {t("importExport.reimport.updatedCopy")}
             </Button>
-            <Button onClick={() => { void handleImport("update") }} disabled={!file || importing}>
+            <Button
+              onClick={() => { void handleImport("update") }}
+              disabled={!file || importing}
+              aria-describedby={removedCount > 0 ? updateNoteId : undefined}
+            >
               {importing ? t("importExport.action.importing") : t("importExport.reimport.update")}
             </Button>
           </>
@@ -332,6 +340,7 @@ function BiblicaPanel({
           </Button>
         )}
       </div>
+      {reimport && <ReimportUpdateNote id={updateNoteId} removed={removedCount} />}
     </div>
   )
 }

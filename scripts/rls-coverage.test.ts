@@ -115,7 +115,7 @@ const UNCOVERED: Record<string, string> = {
   // so, as with file_milestones, it is not granted to app_runtime and a policy
   // `TO app_runtime` would be inert.
   file_revisions: "never granted to app_runtime",
-  // AQU-2459 (0198): a project's linked Google Drive folders. Written and read
+  // AQU-2459 (0205): a project's linked Google Drive folders. Written and read
   // only through the sync-worker perimeter (drive-links-route.ts and the
   // DriveFolderPoller), so, as with file_revisions, it is not granted to
   // app_runtime and a policy `TO app_runtime` would be inert.
@@ -147,6 +147,10 @@ const UNCOVERED: Record<string, string> = {
   // undone. Written and read only by the sync-worker's projection of
   // source.cell.delete / source.cell.restore; no app read path touches it.
   removed_cell_archive: "never granted to app_runtime",
+  // AQU-2492 (0199): the approvals a cut or its undo took off a take, kept so
+  // the cut can be undone and redone with them. Written and read only by the
+  // sync-worker's projection of cell.audio.cut / cell.audio.uncut.
+  cell_audio_cut_votes: "never granted to app_runtime",
   // Decision 11 (0191): each person's undo history for a project, read and
   // written only by auth-worker's /edit-history route for the caller's own row.
   edit_histories: "never granted to app_runtime",

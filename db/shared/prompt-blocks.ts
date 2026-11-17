@@ -102,6 +102,8 @@ const PROFILE_SLOT_LABELS: Readonly<Record<LanguageProfileSlot, string>> = {
   pronouns: 'Pronoun distinctions',
   negators: 'Negators',
   numberWords: 'Number words',
+  numberFormat: 'Number separators (grouping and decimal)',
+  orthography: 'Spelling rules (applied after drafting, not by the model)',
   speechVerbs: 'Speech verbs for quote margins',
   kinTerms: 'Kin terms',
   divineNames: 'Divine names',
@@ -120,6 +122,14 @@ export function languageProfileHintLines(profile: LanguageProfile | null | undef
   for (const slot of LANGUAGE_PROFILE_SLOTS) {
     const value = profile[slot]
     if (value === undefined) continue
+    // AQU-2628: `orthography` is deliberately NOT hinted. The run that
+    // justified the feature put the whole alphabet rule in the prompt,
+    // confirmed it arrived, and got 175 old-spelling forms back across 31 of
+    // 31 verses — spelling instructions do not work on a model that has read
+    // millions of pages of the old spelling. The converter runs over the
+    // model's output instead, so hinting this would spend tokens (an
+    // exception list can be long) to buy nothing.
+    if (slot === 'orthography') continue
     lines.push(`- ${PROFILE_SLOT_LABELS[slot]}: ${clip(JSON.stringify(value), PROFILE_LINE_MAX_CHARS)}`)
   }
   return lines

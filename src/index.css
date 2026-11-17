@@ -298,6 +298,17 @@
   }
 }
 
+/* Banners pinned to the window's top edge: keep their content clear of the
+   macOS traffic lights. Left only — the lights sit at the physical top-left
+   whatever the text direction, and padding both sides cost a narrow window
+   152px of message. Centred text sits half that off-centre, which is fine.
+   Pair with useTopBannerDrag(): the banner covers the title-bar band. */
+@utility mac-titlebar-clear {
+  html[data-mac-titlebar] & {
+    padding-left: var(--mac-traffic-lights-w);
+  }
+}
+
 /* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
    diagonal stripes of the translated colour and the stripe colour. One
    utility so the Progress card, the bars and the swatches all draw the same
@@ -640,6 +651,39 @@
   }
 }
 
+/* macOS desktop (TitlebarDragStrip sets `data-mac-titlebar` and the vars).
+   Deliberately outside @layer base: Tailwind's utilities layer beats every
+   base rule whatever its specificity, so `.min-h-screen` would win.
+
+   Pages outside AppShell: reserve a title-bar band so the traffic lights and
+   the drag strip sit above the page rather than over it. AppShell's header is
+   the drag handle while it is mounted, so the band and strip go away under
+   `data-app-frame` (src/hooks/useAppFrame.ts).
+
+   A viewport unit can't be redefined, so full-height pages shrink by the band
+   through the screen-height utilities they are built with — each keeping its
+   own unit. Only inside #root: dialogs and popovers portal to <body> and are
+   sized against the whole window, band or not. A page sized some other way
+   (inline 100vh, an arbitrary `h-[100dvh]`) should use these utilities. */
+html[data-mac-titlebar]:not([data-app-frame]) {
+  & body { padding-top: var(--mac-titlebar-h); }
+  & #root .min-h-screen { min-height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .min-h-svh { min-height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .min-h-dvh { min-height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .min-h-lvh { min-height: calc(100lvh - var(--mac-titlebar-h)); }
+  & #root .h-screen { height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .h-svh { height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .h-dvh { height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .h-lvh { height: calc(100lvh - var(--mac-titlebar-h)); }
+}
+/* Hidden only while an AppShell header is actually on screen: under a "held"
+   frame (a lazy route's fallback between two AppShells) the strip is the
+   window's only drag handle. */
+html[data-app-frame="true"] [data-slot="titlebar-drag-strip"] {
+  display: none;
+}
+
+
 /* App-chrome: kill drag-select everywhere. Unlayered + * so it wins over
    @layer base/utilities and doesn't rely on user-select inheritance (which
    WebKit treats as non-inherited `auto` with special rules). Re-enable only
@@ -685,6 +729,14 @@ textarea,
   text-underline-offset: 3px;
   text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
   cursor: pointer;
+}
+/* Media tab: the arrow stays. Clickable marks (health, notes, chips) used
+   the hand; hover already shows they respond. Unlayered so it wins over the
+   `cursor-pointer` utility. Resize, grab, text, and not-allowed are their
+   own classes and stay. */
+[data-media-editor] .cursor-pointer,
+[data-media-editor] .smart-edit-blot {
+  cursor: default;
 }
 .smart-edit-blot-jev { text-decoration-style: dotted; }
 .smart-edit-blot-llm {
@@ -1112,3 +1164,43 @@ textarea,
   --extension-accent-line: oklch(0.8 0.085 292 / 0.26);
   --extension-accent-glow: oklch(0.8 0.085 292 / 0.08);
 }
+
+/* AQU-2317 (AQU-1352 design board 2, "the role ladder"): the seven role levels
+   on one lightness scale derived from --primary — darker is more. Only chroma
+   and hue come from the brand token, so an achromatic brand stays achromatic;
+   the lightness of each rung is absolute, which is what lets a rung and its
+   ink carry the SAME contrast in light and dark theme instead of chasing
+   --background. Chroma is scaled per rung to stay inside sRGB at that
+   lightness — a clipped colour would move the lightness and with it the
+   contrast. The pairing and the 4.5:1 floor are machine-checked in
+   src/lib/access/role-scale.test.ts; RoleBadge is the only component that
+   paints these. */
+:root {
+  --role-ink-dark: oklch(from var(--primary) 0.2 calc(c * 0.6) h);
+  --role-ink-light: oklch(0.99 0 0);
+  --role-rung-1: oklch(from var(--primary) 0.96 calc(c * 0.3) h);
+  --role-rung-2: oklch(from var(--primary) 0.89 calc(c * 0.55) h);
+  --role-rung-3: oklch(from var(--primary) 0.82 calc(c * 0.8) h);
+  --role-rung-4: oklch(from var(--primary) 0.75 calc(c * 1.05) h);
+  --role-rung-5: oklch(from var(--primary) 0.68 calc(c * 1.3) h);
+  --role-rung-6: oklch(from var(--primary) 0.45 calc(c * 1.7) h);
+  --role-rung-7: oklch(from var(--primary) 0.32 calc(c * 1.5) h);
+}
+
+/* Fill + ink as one utility per rung, so a caller cannot pair rung 7's fill
+   with rung 1's ink. `-edge` is the dashed outline of an inherited pill, whose
+   ink stays --foreground. */
+@utility role-rung-1 { background-color: var(--role-rung-1); color: var(--role-ink-dark); }
+@utility role-rung-2 { background-color: var(--role-rung-2); color: var(--role-ink-dark); }
+@utility role-rung-3 { background-color: var(--role-rung-3); color: var(--role-ink-dark); }
+@utility role-rung-4 { background-color: var(--role-rung-4); color: var(--role-ink-dark); }
+@utility role-rung-5 { background-color: var(--role-rung-5); color: var(--role-ink-dark); }
+@utility role-rung-6 { background-color: var(--role-rung-6); color: var(--role-ink-light); }
+@utility role-rung-7 { background-color: var(--role-rung-7); color: var(--role-ink-light); }
+@utility role-rung-1-edge { border-color: var(--role-rung-1); }
+@utility role-rung-2-edge { border-color: var(--role-rung-2); }
+@utility role-rung-3-edge { border-color: var(--role-rung-3); }
+@utility role-rung-4-edge { border-color: var(--role-rung-4); }
+@utility role-rung-5-edge { border-color: var(--role-rung-5); }
+@utility role-rung-6-edge { border-color: var(--role-rung-6); }
+@utility role-rung-7-edge { border-color: var(--role-rung-7); }

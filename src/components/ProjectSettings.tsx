@@ -254,6 +254,8 @@ interface SavedSettings {
   fewShotExampleFormat: "source-and-target" | "target-only"
   completionBatchSize: number
   validationBatchSize: number
+  liveBacktranslation: boolean
+  backtranslationModel: string
   autoSyncEnabled: boolean
   autoSyncInterval: number
   /** AQU-1771: the project's own numbers; null = take the organization's default. */
@@ -294,7 +296,7 @@ interface SavedSettings {
   importExcludeFrontMatter: boolean
   /** AQU-1720: what one imported cell is for docx/txt/md uploads. */
   importCellUnit: CellUnit
-  /** Curly quotes as you type in the cell editor. Absent/false is off. */
+  /** Curly quotes as you type in the cell editor. On unless stored as false. */
   smartQuotes: boolean
   termMatching: TermMatchingSettings
 }
@@ -318,6 +320,8 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     completionBatchSize: project.completionSettings?.completionBatchSize ?? MAX_BATCH_COMPLETIONS,
     // 0 = validate all eligible cells (default, unchanged behavior).
     validationBatchSize: project.completionSettings?.validationBatchSize ?? 0,
+    liveBacktranslation: project.completionSettings?.liveBacktranslation ?? false,
+    backtranslationModel: project.completionSettings?.backtranslationModel ?? "",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     // AQU-1771: `project` here carries only the project's own blob (this page
@@ -353,7 +357,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
     importCellUnit: project.importCellUnit ?? "sentence",
-    smartQuotes: project.smartQuotes ?? false,
+    smartQuotes: project.smartQuotes ?? true,
     termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
@@ -545,7 +549,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     projectPolicy.ready
     && (project?.syncRole?.level ?? 0) >= projectPolicy.rosterViewMinRole.effective
   const canSeeMembers = !isCloudProject || canViewRoster
-  const [privilegedOpen, setPrivilegedOpen] = useState(false)
+  // AQU-2457: one PrivilegedMembersDialog serves every lock line, so it has to
+  // know which one opened it. This holds that section's role floor (null =
+  // closed); the dialog names that role and lists members at it or above.
+  const [privilegedFloor, setPrivilegedFloor] = useState<number | null>(null)
   // project.files is a fresh array each render; key on the file ids. The key is
   // computed here because a dependency list entry has to be a simple expression
   // (react-hooks/use-memo).
@@ -665,7 +672,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const roleLockHint = (
     <PermissionLockHint
       role={privilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(ROLE.MAINTAINER) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -694,7 +701,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const languageRoleLockHint = (
     <PermissionLockHint
       role={languagePrivilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(languageEditFloor) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -716,7 +723,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const structuralRoleLockHint = (
     <PermissionLockHint
       role={structuralPrivilegedRole}
-      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      onView={id ? () => setPrivilegedFloor(ROLE.PROJECT_LEAD) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
         id
@@ -762,6 +769,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     name, provider, endpoint, apiKey, model, maxTokens, temperature,
     top_k: topK, contextSize, fewShotExampleFormat,
     main_chat_language: mainChatLanguage, completionBatchSize, validationBatchSize,
+    liveBacktranslation, backtranslationModel,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
@@ -1032,9 +1040,9 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // built-in checks, and the Language profile they read). A row in the AI
     // pane, findable by every old name.
     { id: "section-checks", label: t("terminology.livingMemory.section.checks.title"), keywords: ["checks", "rules", "style rules", "quality", "translation quality", "built-in checks", "org rules", "decisions", "project decisions", "language profile", "quotation marks", "quote marks", "bible data checks"] },
-    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "back-translation", "backtranslation", "live back-translation"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom", "back-translation model"] },
     // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
     { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
     { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
@@ -1948,6 +1956,20 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 }
               />
               <SettingsRow
+                saveId="draftingSettings.liveBacktranslation"
+                label={<label htmlFor="live-backtranslation">{t("projectSettings.ai.liveBacktranslationLabel")}</label>}
+                description={t("projectSettings.ai.liveBacktranslationDescription")}
+                control={
+                  <Switch
+                    id="live-backtranslation"
+                    checked={liveBacktranslation}
+                    onCheckedChange={(checked) => setDrafting("liveBacktranslation", checked)}
+                    disabled={!canChangeShared}
+                    aria-label={t("projectSettings.ai.liveBacktranslationLabel")}
+                  />
+                }
+              />
+              <SettingsRow
                 saveId="draftingSettings.contextSize"
                 label={<label htmlFor="context-size">{t("projectSettings.ai.contextWindowLabel")}</label>}
                 description={t("projectSettings.ai.contextWindowDescription")}
@@ -2295,6 +2317,22 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 />
               )}
 
+              <SettingsRow
+                saveId="draftingSettings.backtranslationModel"
+                label={<label htmlFor="backtranslation-model">{t("projectSettings.ai.backtranslationModelLabel")}</label>}
+                description={t("projectSettings.ai.backtranslationModelDescription")}
+                control={
+                  <CommitTextInput
+                    id="backtranslation-model"
+                    disabled={!canChangeShared}
+                    value={backtranslationModel}
+                    onCommit={(next, info) => setDrafting("backtranslationModel", next.trim(), info)}
+                    placeholder={t("projectSettings.ai.backtranslationModelPlaceholder")}
+                    aria-label={t("projectSettings.ai.backtranslationModelLabel")}
+                    className="w-56 bg-background"
+                  />
+                }
+              />
               <SettingsRow
                 saveId="draftingSettings.maxTokens"
                 label={<label htmlFor="mt">{t("projectSettings.advancedLlm.maxTokensLabel")}</label>}
@@ -2827,10 +2865,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     <>
       {shell}
       <PrivilegedMembersDialog
-        open={privilegedOpen}
-        onOpenChange={setPrivilegedOpen}
+        open={privilegedFloor != null}
+        onOpenChange={(next) => { if (!next) setPrivilegedFloor(null) }}
         projectId={id ?? null}
-        roleLabel={privilegedRole}
+        minRole={privilegedFloor ?? ROLE.MAINTAINER}
       />
 
     </>

@@ -91,9 +91,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.reconnectToEdit": "Reconnect to edit shared settings.",
     "projectSettings.permission.onlyRoleCanModify": "Only {role} can modify",
     "projectSettings.permission.viewPrivilegedMembers": "View {role}",
-    "projectSettings.permission.privilegedDialogTitle": "Project {role}",
-    "projectSettings.permission.privilegedDialogDescription":
-      "{role} can change shared settings, members, and other project configuration.",
     "projectSettings.permission.privilegedDialogEmpty": "No {role} on this project.",
     "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
@@ -301,8 +298,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceLegend": "Language lanes",
     "projectSettings.share.laneChoiceAll": "Every current language lane",
     "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceAllCurrent": "All current language lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
     "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
+    "projectSettings.share.laneChoiceNoneNote":
+      "No language lanes selected — this person will see the project and its source text, and no translation.",
+    "projectSettings.share.noLanesConfirmTitle": "No language lanes selected",
+    "projectSettings.share.noLanesConfirmInvite":
+      "This invitation does not include permission for any language lanes, so the recipient will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmAdd":
+      "This does not include permission for any language lanes, so this person will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmBack": "Go back and choose language lanes",
+    "projectSettings.share.noLanesConfirmProceed": "Add without language lanes",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
@@ -523,6 +530,14 @@ export const projectSettings = defineNamespace({
       "How many eligible cells one \"Batch validate\" run approves (0–500). {zeroNote} " +
       "set a cap to validate in bounded batches.",
     "projectSettings.ai.validationBatchSizeZeroNote": "0 validates all eligible cells (default);",
+    "projectSettings.ai.liveBacktranslationLabel": "Live back-translation",
+    "projectSettings.ai.liveBacktranslationDescription":
+      "Back-translate each translation as soon as it is drafted or edited, and show the reading under the row. " +
+      "Uses AI credits for every save. Hand-corrected back-translations are never replaced.",
+    "projectSettings.ai.backtranslationModelLabel": "Back-translation model",
+    "projectSettings.ai.backtranslationModelDescription":
+      "The model back-translations are made with, through the same provider. Leave blank to use the drafting model.",
+    "projectSettings.ai.backtranslationModelPlaceholder": "Same as drafting",
     "projectSettings.ai.contextWindowLabel": "Context window",
     "projectSettings.ai.contextWindowSmall": "Small — tight window",
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",
@@ -975,6 +990,25 @@ export const projectSettings = defineNamespace({
       "into the files whose source you are replacing. Your other files, and every " +
       "translation and validation, are left as they are. Detach later to stop " +
       "following the upstream.",
+    // The IDML placement the workspace runs after a link replaced a file's source
+    // (useAdoptedIdmlAlignment): the same pass a re-import runs, so its progress
+    // line is importExport.upload.aligningIdmlStyles.
+    "projectSettings.linkSource.alignIdmlStarting":
+      "Checking the translations in {fileName} against the linked source…",
+    "projectSettings.linkSource.alignIdmlDone": plural({
+      one: "{count} translation in {fileName} was placed into the linked source.",
+      other: "{count} translations in {fileName} were placed into the linked source.",
+    }),
+    "projectSettings.linkSource.alignIdmlManual": plural({
+      one:
+        "{count} translation in {fileName} could not be placed into the linked source " +
+        "automatically. It is marked for Align styles.",
+      other:
+        "{count} translations in {fileName} could not be placed into the linked source " +
+        "automatically. They are marked for Align styles.",
+    }),
+    "projectSettings.linkSource.alignIdmlFailed":
+      "Couldn't place the translations in {fileName} into the linked source: {message}",
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
@@ -1692,22 +1726,6 @@ export const projectSettings = defineNamespace({
         description:
           "Next-action control under the per-control lock hint. Opens a modal of " +
           "people who can change the setting (GitHub: 'View admins'). Short, no period.",
-        placeholders: {
-          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
-        },
-      },
-      "projectSettings.permission.privilegedDialogTitle": {
-        description:
-          "Title of the GitHub-style 'Workspace admins' modal listing people who " +
-          "can change shared project settings. Short, no period.",
-        placeholders: {
-          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
-        },
-      },
-      "projectSettings.permission.privilegedDialogDescription": {
-        description:
-          "One-line explanation under the privileged-members modal title. Names " +
-          "what that role class can do, not the caller's current role.",
         placeholders: {
           role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },
@@ -3177,6 +3195,43 @@ export const projectSettings = defineNamespace({
           "(source replaced, translations kept) rather than gaining a second copy.",
         placeholders: {
           count: "How many existing files will follow the link; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlStarting": {
+        description:
+          "Loading toast in the editor after a link replaced the source of an InDesign " +
+          "(IDML) file the project already had: the existing translations are being " +
+          "checked against the new source before any is placed into its style runs. " +
+          "Progress then continues in importExport.upload.aligningIdmlStyles.",
+        placeholders: { fileName: "Name of the IDML file — not translated." },
+      },
+      "projectSettings.linkSource.alignIdmlDone": {
+        description:
+          "Success toast ending that pass: how many of the file's translations were " +
+          "placed into the linked source's style runs.",
+        placeholders: {
+          count: "How many translations were placed; governs the plural form.",
+          fileName: "Name of the IDML file — not translated.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlManual": {
+        description:
+          "Warning toast ending that pass when some translations could not be placed " +
+          "without a person: those cells carry an Align styles mark in the editor. " +
+          "'Align styles' is the editor action's name and stays as the interface says it.",
+        placeholders: {
+          count: "How many translations need a manual pass; governs the plural form.",
+          fileName: "Name of the IDML file — not translated.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlFailed": {
+        description:
+          "Error toast when that pass could not run at all for a file (network or " +
+          "server failure); the translations are unchanged and the pass is retried on " +
+          "the next load.",
+        placeholders: {
+          fileName: "Name of the IDML file — not translated.",
+          message: "The failure's own message, as the system reported it — not translated.",
         },
       },
       "projectSettings.linkSource.clashWarningHeading": {

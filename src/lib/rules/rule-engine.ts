@@ -1,9 +1,11 @@
-import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, InfractionSpan } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
 import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-rules"
+import type { BuiltinCheckRunContext } from "@/lib/lqa/builtin-run-context"
+import { suggestionFor } from "@/lib/lqa/check-functions/old-orthography"
 
 /**
  * AQU-1688: per-cell inputs for checks that need more than the cell's own
@@ -249,13 +251,18 @@ function checkRule(
       // needed for them and a keystroke still re-evaluates one cell. Built only
       // when there are conventions to pass: this runs once per rule per cell,
       // and a whole Bible is ~31k cells × ~20 rules (AQU-1864).
-      // AQU-1735 adds `bookNames` the same way.
-      const spans = check.punctuation || check.bookNames?.length
-        ? def.run(source, cell.translated, {
-            ...(check.punctuation ? { punctuation: check.punctuation } : {}),
-            ...(check.bookNames?.length ? { bookNames: check.bookNames } : {}),
-          })
-        : def.run(source, cell.translated)
+      // AQU-1735 adds `bookNames` the same way, AQU-2430 `numberFormat`,
+      // AQU-2628 `orthography`.
+      const runContext =
+        check.punctuation || check.bookNames?.length || check.numberFormat || check.orthography
+          ? {
+              ...(check.punctuation ? { punctuation: check.punctuation } : {}),
+              ...(check.bookNames?.length ? { bookNames: check.bookNames } : {}),
+              ...(check.numberFormat ? { numberFormat: check.numberFormat } : {}),
+              ...(check.orthography ? { orthography: check.orthography } : {}),
+            }
+          : undefined
+      const spans = runContext ? def.run(source, cell.translated, runContext) : def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       return {
         ruleId: rule.id,
@@ -263,11 +270,29 @@ function checkRule(
         fileId,
         reason: `builtin:${check.checkId}`,
         reasonParams:
-          check.checkId === "placeholder-integrity" ? placeholderIntegrityParams(spans) : undefined,
+          check.checkId === "placeholder-integrity"
+            ? placeholderIntegrityParams(spans)
+            : check.checkId === "old-orthography"
+              ? oldOrthographyParams(spans, runContext)
+              : undefined,
         spans,
       }
     }
   }
+}
+
+/**
+ * `builtin:old-orthography` (AQU-2628) names the word and what the lane's
+ * rules make of it, so the finding reads "use “şahar” for “shahar”" rather
+ * than a rule number. Both halves are raw cell content derived from it, so
+ * they are interpolated as vars and never routed through `t()`.
+ */
+function oldOrthographyParams(
+  spans: InfractionSpan[],
+  context: BuiltinCheckRunContext | undefined,
+): Record<string, string> | undefined {
+  const suggestion = suggestionFor(spans, context)
+  return suggestion ? { word: suggestion.word, suggestion: suggestion.suggestion } : undefined
 }
 
 /**

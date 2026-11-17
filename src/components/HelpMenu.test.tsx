@@ -74,7 +74,7 @@ describe("HelpMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /help & community/i }))
     fireEvent.click(await screen.findByRole("menuitem", { name: /feedback/i }))
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/what went wrong/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/what happened\?/i)).toBeInTheDocument()
     })
     // The dialog's own contents (screenshot affordance, submit, confirmation)
     // are ReportProblemDialog.test.tsx's business; what this pins is that the

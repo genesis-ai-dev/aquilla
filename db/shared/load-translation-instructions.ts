@@ -49,6 +49,46 @@ export function settingsObject(raw: unknown): Record<string, unknown> {
     : {}
 }
 
+/** A nested settings object (the legacy copies), or {}. */
+function nestedObject(settings: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = settings[key]
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function stringAt(settings: Record<string, unknown>, key: string): string {
+  const value = settings[key]
+  return typeof value === 'string' ? value : ''
+}
+
+/**
+ * AQU-2422: THE stored `systemPrompt` that feeds migrate-on-read, for every
+ * caller — the prompt preview and the live drafting paths alike.
+ *
+ * The written instructions are the TOP-LEVEL `settings.systemPrompt` (see
+ * ./drafting-settings.ts). An older build also kept the copy nested inside
+ * `completionSettings` (and the SPA's record overlay still resolves the two
+ * the same way), so a legacy project whose customized prompt only ever landed
+ * there still reaches `resolveTranslationInstructions`. The top-level key wins
+ * whenever it holds text; `draftingSettings` is read ahead of the older
+ * `completionSettings` for the same reason the rest of the drafting settings
+ * are (AQU-2259), though its validator refuses the field.
+ *
+ * This lookup lives HERE, in one place, because a preview that reads a source
+ * the draft call cannot see is the defect AQU-2422 names.
+ */
+export function legacySystemPromptSetting(
+  settings: Record<string, unknown> | null | undefined,
+): string {
+  const s = settings ?? {}
+  return (
+    stringAt(s, 'systemPrompt') ||
+    stringAt(nestedObject(s, 'draftingSettings'), 'systemPrompt') ||
+    stringAt(nestedObject(s, 'completionSettings'), 'systemPrompt')
+  )
+}
+
 /** The agent's legacy free-text brief, or "" (no row, or a failed read). */
 export async function readProjectBriefText(db: InstructionsDb, projectId: string): Promise<string> {
   try {
@@ -122,6 +162,10 @@ export async function loadTranslationInstructions(
   if (storedTranslationInstructions(blob) !== null) {
     return { text: resolveTranslationInstructions(blob), stored: true }
   }
+  // AQU-2422: one lookup decides which stored `systemPrompt` migrates on read,
+  // so no caller can resolve a different one by handing over a differently
+  // pre-chewed blob.
+  const resolvable = { ...blob, systemPrompt: legacySystemPromptSetting(blob) }
   const projectBriefText = await readLegacyServerInstructions(db, projectId)
-  return { text: resolveTranslationInstructions(blob, { projectBriefText }), stored: false }
+  return { text: resolveTranslationInstructions(resolvable, { projectBriefText }), stored: false }
 }

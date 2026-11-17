@@ -45,10 +45,12 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
 const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-deselect")
+const emitMeasure = vi.fn(async (..._args: unknown[]) => "evt-measure")
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioMeasure: (...args: unknown[]) => emitMeasure(...args),
   emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioValidate: vi.fn(async () => "evt"),
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
   emitCellAudioRemove: vi.fn(async () => "evt"),
@@ -95,6 +97,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { resetRecorderVoicePicksForTests } from "@/lib/audio/recorder-voice"
 import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
@@ -186,24 +189,36 @@ describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
     emitAttach.mockClear()
+    emitMeasure.mockClear()
+    injectOptimistic.mockClear()
   })
 
-  it("re-attaches the SELECTED webm take with its decoded duration, keeping name and trims", async () => {
+  // AQU-2491 (review, Nov 9): the heal used to RE-ATTACH the take, and an
+  // attach chooses it and brings it back if deleted. On a slow network the
+  // measure lands after the person has recorded a new take or deleted this
+  // one, which then played again. It sends the fill-only length instead
+  // (`cell.audio.measure`), which chooses nothing and keeps name and trims.
+  it("fills in the SELECTED webm take's decoded length without choosing it again", async () => {
     seedEntry({
       "audio-c1-200-take.webm": att("audio-c1-200-take.webm", {
         mimeType: "audio/webm", durationMs: null, label: "Take 1", trimStartMs: 100, trimEndMs: 900,
       }),
     }, "audio-c1-200-take.webm")
     renderModal(cellWith("bonjour"))
-    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
-    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(emitMeasure).toHaveBeenCalledTimes(1))
+    expect(emitMeasure).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "f1",
+      cellId: "c1",
       audioId: "audio-c1-200-take.webm",
-      slot: "recording",
       durationMs: 1000, // the mocked probe's decode result
-      label: "Take 1",
-      trimStartMs: 100,
-      trimEndMs: 900,
     }))
+    expect(emitAttach).not.toHaveBeenCalled()
+    // Painted at its length at once, without claiming the slot.
+    await waitFor(() => expect(injectOptimistic).toHaveBeenCalled())
+    const paint = injectOptimistic.mock.calls.at(-1) as unknown[]
+    expect(paint[2]).toMatchObject({ audioId: "audio-c1-200-take.webm", durationMs: 1000, label: "Take 1", trimStartMs: 100, trimEndMs: 900 })
+    expect(paint[3]).toBe("evt-measure")
+    expect(paint[4]).toEqual({ claimSelection: false })
   })
 
   it("does nothing when the selected take already has a duration", async () => {
@@ -211,6 +226,7 @@ describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
     renderModal(cellWith("bonjour"))
     await new Promise((r) => setTimeout(r, 50))
     expect(emitAttach).not.toHaveBeenCalled()
+    expect(emitMeasure).not.toHaveBeenCalled()
   })
 })
 
@@ -428,14 +444,14 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
 
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
     onActiveCellChange.mockClear()
     recorderState.value = { kind: "idle" }
   })
   afterEach(() => {
     recorderState.value = { kind: "idle" }
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
   })
 
@@ -466,35 +482,37 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     const sw = screen.getByTestId("rec-auto-advance")
     expect(sw).toHaveAttribute("role", "switch")
     fireEvent.click(sw)
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
-    fireEvent.click(screen.getByText("Move on after saving a recording"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByText("Move on after saving a recording"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
     expect(screen.queryByText(/Saved recordings (jump|stay)/)).toBeNull()
   })
 
-  it("defaults to on — saving still moves to the next line", async () => {
+  // AQU-2620 (Matthew, 2026-11-16): off is the default now. Saving a take
+  // leaves you on the line you are working, recorder open, for another take.
+  it("defaults to off — saving stays on the same line for another take", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
     // By testid, not by name: the settings popover is open at this point, and
     // AQU-1216 put the word "Saved" into the auto-advance description, so a
     // /Save/ role query matches that control too.
     fireEvent.click(screen.getByTestId("rec-save"))
-    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
+    await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
+    expect(onActiveCellChange).not.toHaveBeenCalled()
   })
 
-  it("turned off, saving stays on the same line for another take", async () => {
+  it("turned on, saving moves to the next line", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
 
     fireEvent.click(screen.getByTestId("rec-save"))
-    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
-    await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
-    expect(onActiveCellChange).not.toHaveBeenCalled()
+    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
   })
 
   it("the choice survives a remount", () => {
@@ -507,7 +525,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
   })
 })
 
@@ -872,5 +890,136 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     fireEvent.click(screen.getByTestId("rec-edit-text"))
     expect(screen.queryByTestId("rec-confirm-close")).toBeNull()
     expect(onEditText).toHaveBeenCalledWith("c1")
+  })
+})
+
+// ── AQU-2510 ──────────────────────────────────────────────────────────────
+// WHICH VOICE Generate speaks in. On a dubbing project the cloned voice is
+// the whole point, and this panel used to synthesize in the project default
+// with no way to say otherwise and no mention of which voice ran.
+describe("AudioRecordingModal — the Generate voice (AQU-2510)", () => {
+  const narrator = { id: "v-narrator", name: "Narrator", color: "#475569" }
+  const chip = { id: "v-chip", name: "Chip Ingram", color: "#0e7490" }
+  const clone = { id: "v-clone", name: "Test Arabic Chip", color: "#0d9488" }
+  const castProject = (ttsSettings: Record<string, unknown>) =>
+    ({ id: "p1", name: "P", ttsSettings: { voices: [narrator, chip, clone], defaultVoiceId: narrator.id, ...ttsSettings } }) as unknown as ProjectRecord
+
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    generateCellVoice.mockClear()
+    resetRecorderVoicePicksForTests()
+  })
+
+  it("names the project default when nothing casts the line, and says that is what it is", () => {
+    renderModal(cellWith("bonjour"), { project: castProject({}) })
+    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Narrator")
+    expect(screen.getByTestId("rec-generate-voice-note")).toHaveTextContent("project default")
+    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "default")
+  })
+
+  it("defaults to the line's own cast voice and says so", () => {
+    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
+    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Chip Ingram")
+    expect(screen.getByTestId("rec-generate-voice-note")).toHaveTextContent("this line's voice")
+    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "cast")
+  })
+
+  // A single-voice project has no choice to offer: the control would only
+  // restate the default.
+  it("hides the control on a project with one voice", () => {
+    renderModal(cellWith("bonjour"), { project: castProject({ voices: [narrator] }) })
+    expect(screen.queryByTestId("rec-generate-voice")).toBeNull()
+    expect(screen.getByTestId("rec-generate-tts")).toBeInTheDocument()
+  })
+
+  it("generates in the picked voice, overriding the line's cast voice", async () => {
+    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
+    fireEvent.click(screen.getByTestId("rec-generate-voice"))
+    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
+    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Test Arabic Chip")
+    // A pick needs no explaining — the note is the DEFAULT, said out loud.
+    expect(screen.queryByTestId("rec-generate-voice-note")).toBeNull()
+    // AQU-2511: the button names the voice the press will really use — the
+    // pick, not the cast voice it overrides.
+    expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Generate with Test Arabic Chip")
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
+    expect(generateCellVoice).toHaveBeenCalledWith(expect.objectContaining({ voiceId: clone.id }))
+  })
+
+  // THE CONTAINMENT RULE: a session that never opens the picker generates
+  // through exactly the path it always did — `generateCellVoice` resolves the
+  // line's voice for itself, so no override is passed.
+  it("passes NO voiceId when the default voice is the one offered", async () => {
+    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
+    expect(generateCellVoice.mock.calls[0][0]).not.toHaveProperty("voiceId")
+  })
+
+  it("carries the pick to the next line of the session, so repeat generation does not re-ask", () => {
+    const project = castProject({})
+    const { unmount } = renderModal(cellWith("bonjour"), { project })
+    fireEvent.click(screen.getByTestId("rec-generate-voice"))
+    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
+    unmount()
+    // Reopened on another line, nothing cast: the pick is still in force.
+    render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={[{ ...cellWith("hola"), id: "c2" } as CellData]}
+        activeCellId="c2"
+        username="sam"
+        onActiveCellChange={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Test Arabic Chip")
+    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "carried")
+  })
+
+  // Parity with the editor's character-tag → sparkle path: a line someone
+  // deliberately cast is not re-voiced by a pick made on another line.
+  it("does not carry the pick over a line that IS cast", () => {
+    const project = castProject({ castAssignments: { c2: chip.id } })
+    const { unmount } = renderModal(cellWith("bonjour"), { project })
+    fireEvent.click(screen.getByTestId("rec-generate-voice"))
+    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
+    unmount()
+    render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={[{ ...cellWith("hola"), id: "c2" } as CellData]}
+        activeCellId="c2"
+        username="sam"
+        onActiveCellChange={() => {}}
+        onClose={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Chip Ingram")
+  })
+
+  it("names the voice each generated take was made in", () => {
+    seedEntry({
+      "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
+      "audio-c1-300-tts.wav": att("audio-c1-300-tts.wav", { slot: "generatedVoice", voiceId: clone.id, label: "Take 2" }),
+    }, "audio-c1-200-take.webm", "audio-c1-300-tts.wav")
+    renderModal(cellWith("bonjour"), { project: castProject({}) })
+    expect(screen.getByTestId("take-voice-audio-c1-300-tts.wav")).toHaveTextContent("Test Arabic Chip")
+    // A recording is a person's — the row already names them.
+    expect(screen.queryByTestId("take-voice-audio-c1-200-take.webm")).toBeNull()
+  })
+
+  // AQU-1941: the voice may be pruned from the project after the take was
+  // made. A bare id is not a name, and a guess is worse.
+  it("says nothing about a take whose voice has since been removed", () => {
+    seedEntry({
+      "audio-c1-300-tts.wav": att("audio-c1-300-tts.wav", { slot: "generatedVoice", voiceId: "v-deleted", label: "Take 1" }),
+    }, null, "audio-c1-300-tts.wav")
+    renderModal(cellWith("bonjour"), { project: castProject({}) })
+    expect(screen.getByTestId("take-row-audio-c1-300-tts.wav")).toBeInTheDocument()
+    expect(screen.queryByTestId("take-voice-audio-c1-300-tts.wav")).toBeNull()
   })
 })

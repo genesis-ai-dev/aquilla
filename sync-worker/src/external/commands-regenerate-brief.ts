@@ -26,6 +26,7 @@ import {
 import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
 import { renderBriefSummary } from './brief-summary-bridge'
+import { briefInertWarnings } from './brief-inert-warning'
 import type {
   ChangesetSummary,
   ExternalEnv,
@@ -141,7 +142,10 @@ export async function prepareRegenerateBriefSummary(
     settingsChanges: {
       [`${BRIEF_SETTINGS_KEY}.l1Summary`]: `(regenerated from ${briefFilledSectionCount(brief)} sections)`,
     },
-    warnings: [],
+    // AQU-2425: the summary this renders is exactly what the brief used to
+    // contribute to a prompt, so once Instructions are saved this is a model
+    // call for nothing as far as the AI is concerned — say so before approval.
+    warnings: briefInertWarnings(current.settings),
   }
 
   return stageAndRespond(db, env, {

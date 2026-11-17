@@ -1,7 +1,7 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 6
+export const OFFLINE_DATA_GENERATION = 7
 
 /**
  * Which server row fields a local cell row carries. A sync cursor records the
@@ -187,6 +187,20 @@ export const tables = { projects, files, cells, eventQueue, offlineProjects, syn
 // authoritative and reaches LiveStore only through the custom sync adapter (Phase 3),
 // never through LiveStore's own sync backend. These events exist purely to drive local
 // SQLite materialization.
+const QueuedEvent = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  fileId: Schema.NullOr(Schema.String),
+  cellId: Schema.NullOr(Schema.String),
+  kind: Schema.String,
+  payload: Schema.Unknown,
+  parentId: Schema.NullOr(Schema.String),
+  author: Schema.String,
+  schemaVersion: Schema.Number,
+  clientTs: Schema.Date,
+  createdAt: Schema.Date,
+})
+
 const events = {
   // The one global event, pushed only to local-sync-backend.ts and materializing
   // nothing: confirming it lets LiveStore drop every client event before it from
@@ -376,19 +390,14 @@ const events = {
   }),
   eventQueued: Events.clientOnly({
     name: "v1.EventQueued",
-    schema: Schema.Struct({
-      id: Schema.String,
-      projectId: Schema.String,
-      fileId: Schema.NullOr(Schema.String),
-      cellId: Schema.NullOr(Schema.String),
-      kind: Schema.String,
-      payload: Schema.Unknown,
-      parentId: Schema.NullOr(Schema.String),
-      author: Schema.String,
-      schemaVersion: Schema.Number,
-      clientTs: Schema.Date,
-      createdAt: Schema.Date,
-    }),
+    schema: QueuedEvent,
+  }),
+  // Batched eventQueued: a bulk write (replace-all, a model's draft of a
+  // chapter) queued one event per edit, and each commit re-ran every query on
+  // the queue — 3,000 edits froze the page for over a minute.
+  eventsQueued: Events.clientOnly({
+    name: "v1.EventsQueued",
+    schema: Schema.Struct({ rows: Schema.Array(QueuedEvent) }),
   }),
   eventQueueStatusSet: Events.clientOnly({
     name: "v1.EventQueueStatusSet",
@@ -446,6 +455,9 @@ const events = {
 }
 
 export { events }
+
+const queueRow = (row: typeof QueuedEvent.Type) =>
+  tables.eventQueue.insert({ ...row, status: "pending" }).onConflict("id", "ignore")
 
 const materializers = State.SQLite.materializers(events, {
   "v1.LocalCheckpoint": () => [],
@@ -509,21 +521,10 @@ const materializers = State.SQLite.materializers(events, {
       tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, DEFAULT_LANE_KEY) }),
     ),
 
-  "v1.EventQueued": ({ id, projectId, fileId, cellId, kind, payload, parentId, author, schemaVersion, clientTs, createdAt }) =>
-    tables.eventQueue.insert({
-      id,
-      projectId,
-      fileId,
-      cellId,
-      kind,
-      payload,
-      parentId,
-      author,
-      schemaVersion,
-      clientTs,
-      createdAt,
-      status: "pending",
-    }),
+  // An id already queued is left as it is: a plain insert would fail the
+  // materializer, which shuts the whole store down.
+  "v1.EventQueued": (row) => queueRow(row),
+  "v1.EventsQueued": ({ rows }) => rows.map(queueRow),
   "v1.EventQueueStatusSet": ({ id, status }) => tables.eventQueue.update({ status }).where({ id }),
   "v1.EventDequeued": ({ id }) => tables.eventQueue.delete().where({ id }),
   "v1.EventsDequeued": ({ ids }) => ids.map((id) => tables.eventQueue.delete().where({ id })),

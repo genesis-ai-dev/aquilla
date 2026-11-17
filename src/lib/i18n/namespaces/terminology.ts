@@ -58,6 +58,15 @@ export const terminology = defineNamespace({
     "terminology.editor.errorSourceAndRenderingRequired":
       "A source term and rendering are required before the term can be active.",
     "terminology.editor.errorImportFailed": "Import failed",
+    "terminology.editor.importNothingNew": "Every term in this file is already in the list, so nothing was added.",
+    "terminology.editor.importAdded": plural({
+      one: "{count} term added.",
+      other: "{count} terms added.",
+    }),
+    "terminology.editor.importAlreadyListed": plural({
+      one: "{count} term in the file was already in the list.",
+      other: "{count} terms in the file were already in the list.",
+    }),
     "terminology.editor.findingTerms": "Finding terms…",
     "terminology.editor.suggestTerms": "Suggest terms",
     "terminology.editor.exportCsv": "Export CSV",
@@ -415,20 +424,6 @@ export const terminology = defineNamespace({
     "terminology.mergeDialog.merging": "Merging…",
     "terminology.mergeDialog.confirmMerge": "Confirm merge",
 
-    // ── TerminologyReviewQueue.tsx ───────────────────────────────────────────
-    "terminology.reviewQueue.approveAria": "Approve concept {term}",
-    "terminology.reviewQueue.rejectAria": "Reject concept {term}",
-    // "Read-only" permission badge → common.readOnly (identical text)
-    "terminology.reviewQueue.readOnlyTooltip":
-      "Requires the Project Lead role or higher to approve/reject concepts.",
-    "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",
-    "terminology.reviewQueue.emptyDescription":
-      "Draft concepts promoted from candidates will appear here.",
-    "terminology.reviewQueue.awaitingReviewCount": plural({
-      one: "concept awaiting review",
-      other: "concepts awaiting review",
-    }),
-
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
     "terminology.equivalents.promoteButton": "Add",
     "terminology.equivalents.approvedHeading": "Approved translations",
@@ -619,6 +614,16 @@ export const terminology = defineNamespace({
       },
       "terminology.sharing.publishAria": {
         description: "Accessible name for the publish-to-org toggle switch.",
+      },
+      "terminology.editor.importAdded": {
+        description:
+          "Status line above the term list after a term-list file was imported: how many terms the import added. A full sentence; terminology.editor.importAlreadyListed may follow it after a space.",
+        placeholders: { count: "Number of terms added; also selects the plural form." },
+      },
+      "terminology.editor.importAlreadyListed": {
+        description:
+          "Second sentence of the status line after a term-list import, shown after terminology.editor.importAdded only when some terms in the file were left out because the list already had them.",
+        placeholders: { count: "Number of terms in the file the list already had; also selects the plural form." },
       },
       "terminology.editor.showArchived": {
         description:
@@ -990,24 +995,6 @@ export const terminology = defineNamespace({
           "count when the server scan stopped before the end of the project; {count} is " +
           "the occurrences found so far, so the real total is that or more.",
         placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
-      },
-      "terminology.reviewQueue.approveAria": {
-        description:
-          "Accessible name for the checkmark button approving a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.rejectAria": {
-        description:
-          "Accessible name for the X button rejecting (deleting) a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.awaitingReviewCount": {
-        description:
-          "Collapsible header phrase for the review queue, following a separate numeral " +
-          "badge; no {count} placeholder appears in the text itself, but the locale's " +
-          "CLDR category still must be selected from the same count.",
       },
       "terminology.equivalents.noManagedRenderings": {
         description:

@@ -15,6 +15,7 @@
 
 import { emitCellAudioTrim } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 
 export interface PersistTakeTrimInput {
@@ -24,7 +25,8 @@ export interface PersistTakeTrimInput {
   fileId: string
   cellId: string
   audioId: string
-  att: Pick<CodexCellAttachment, "url" | "slot" | "voiceId" | "referenceAudioId" | "durationMs" | "validatorCount" | "validators" | "validatorDecidedTs">
+  /** The take as the caller reads it, whole: the overlay is made from it. */
+  att: Omit<CodexCellAttachment, "type">
   /** The owner's recorded selection, only to infer a slot the clip lacks. */
   selectedAudioId?: string
   trimStartMs: number | null
@@ -45,20 +47,15 @@ export function persistTakeTrim(input: PersistTakeTrimInput): Promise<string> {
     projectId, fileId, cellId, audioId, trimStartMs, trimEndMs, author,
     ...(input.targetLang ? { targetLang: input.targetLang } : {}),
   })
+  // AQU-490: the overlay REPLACES the attachment rather than merging into it,
+  // so a field left out here is one the editor stops seeing while the shadow
+  // lives. AQU-2495 (browser pass, Nov 11): so it is the whole take with the
+  // new window, built as the timeline's trim builds it (`attachmentOutFrom`).
+  // A hand-picked list left out the take's name, place, level and piece link:
+  // a Recording-tab trim renamed "Music bed" to "Take 1" (the takes list names
+  // a take with no name), and the next trim's floor read no place.
   injectOptimisticAudioTrim(fileId, cellId, {
-    audioId,
-    url: att.url,
-    slot,
-    mimeType: null,
-    voiceId: att.voiceId ?? null,
-    referenceAudioId: att.referenceAudioId ?? null,
-    durationMs: att.durationMs ?? null,
-    // AQU-490: the overlay REPLACES the attachment rather than merging into it,
-    // so a field left out here is one the editor stops seeing while the shadow
-    // lives — the line would flicker to unvalidated on every trim.
-    ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
-    ...(att.validators ? { validators: att.validators } : {}),
-    ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),
+    ...attachmentOutFrom(audioId, { type: "audio", ...att }, slot),
     trimStartMs,
     trimEndMs,
   }, trimP)

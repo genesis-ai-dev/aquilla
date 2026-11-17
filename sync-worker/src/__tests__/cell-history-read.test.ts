@@ -109,4 +109,35 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
     const res = await handleCellHistoryReadRequest(req, envWith(db))
     expect(res).toBeNull()
   })
+
+  describe("lane read wall (AQU-730)", () => {
+    const events = [
+      makeEvent({ id: "s1", kind: "source.cell.create", parent_id: null, server_seq: 1, payload: '{"value":"src"}' }),
+      makeEvent({ id: "a1", kind: "target.cell.commit", parent_id: "s1", server_seq: 2, payload: '{"value":"mine","laneId":"lane-a"}' }),
+      makeEvent({ id: "b1", kind: "target.cell.commit", parent_id: "s1", server_seq: 3, payload: '{"value":"theirs","laneId":"lane-b"}' }),
+      makeEvent({ id: "u1", kind: "target.cell.commit", parent_id: "s1", server_seq: 4, payload: '{"value":"unstamped"}' }),
+    ]
+    const get = async (claims: Parameters<typeof makeTestToken>[1], wall: string | undefined) => {
+      const { db } = await makeTestDb({ events })
+      const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", ...claims })
+      const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells/cell-1/history", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const res = (await handleCellHistoryReadRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
+      return ((await res.json()) as { events: Array<{ id: string }> }).events.map((e) => e.id)
+    }
+
+    it("hides other lanes' and unstamped target events from a walled member", async () => {
+      expect(await get({ role: 400, laneGrants: [{ lane: "lane-a", level: 400 }] }, "1")).toEqual(["a1", "s1"])
+    })
+
+    it("a walled member with no grants sees source events only", async () => {
+      expect(await get({ role: 400 }, "1")).toEqual(["s1"])
+    })
+
+    it("leaves maintainers and a wall-off deploy unrestricted", async () => {
+      expect(await get({ role: 600 }, "1")).toHaveLength(4)
+      expect(await get({ role: 400 }, undefined)).toHaveLength(4)
+    })
+  })
 })

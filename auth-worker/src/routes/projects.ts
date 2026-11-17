@@ -82,7 +82,8 @@ import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "
 import { loadLaneMateIds, selectMentionCandidates } from "../services/mention-candidates"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
-import { lookupUserByUsername } from "../services/user-lookup"
+import { lookupUserByUsernameOrEmail } from "../services/user-lookup"
+import { looksLikeEmail, maskEmail } from "../../../db/shared/mask-email"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
@@ -1499,15 +1500,27 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
- * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
- * floor (Maintainer+) is accepted — a lower floor would leak the full roster
- * to callers the org has hidden it from. Invalid / absent → unfiltered list
- * under the normal AQU-485 roster gate.
+ * Lowest `?minRole=` that bypasses the AQU-485 roster hide. A settings-write
+ * floor still, but Project Lead rather than Maintainer (AQU-2457): project
+ * settings do not share one floor — Languages gates on the org's
+ * `languageEditMinRole` (Project Lead by default) and "Count headings" on
+ * Project Lead — and the lock line already names that role to the caller, so
+ * the "view admins" list it opens has to be able to name the same people.
+ * Below this, `?minRole=` filters but grants nothing: a lower floor would
+ * leak the roster to callers the org has hidden it from.
+ */
+const PRIVILEGED_MIN_ROLE_BYPASS_FLOOR = ROLE.PROJECT_LEAD
+
+/**
+ * Parse `?minRole=` for the privileged-members list. Any point on the role
+ * ladder filters the list; only a settings-write floor
+ * (`PRIVILEGED_MIN_ROLE_BYPASS_FLOOR`+) also bypasses the roster hide.
+ * Invalid / absent → unfiltered list under the normal AQU-485 roster gate.
  */
 function parsePrivilegedMinRole(raw: string | undefined): number | null {
   if (raw == null || raw === "") return null
   const n = Number.parseInt(raw, 10)
-  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  if (!Number.isInteger(n) || n < ROLE.VIEWER || n > ROLE.OWNER) return null
   return n
 }
 
@@ -1519,10 +1532,11 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
  *
- * Exception: `?minRole=` at Maintainer or Owner returns only members at that
- * floor or above, even when the full roster is hidden. That is the GitHub
- * "view admins" contract — a contributor still needs to see who can change
- * settings, without learning who else is on the project.
+ * Exception: `?minRole=` at a settings-write floor (Project Lead and above,
+ * AQU-2457) returns only members at that floor or above, even when the full
+ * roster is hidden. That is the GitHub "view admins" contract — a contributor
+ * still needs to see who can change a setting they cannot, without learning
+ * who else is on the project.
  *
  * AQU-1308: the floor applied here is `getProjectRosterViewMinRole` — the
  * lower of the org's `rosterViewMinRole` and its `assignmentMinRole` — so a
@@ -1550,7 +1564,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
-  if (privilegedMinRole == null) {
+  if (privilegedMinRole == null || privilegedMinRole < PRIVILEGED_MIN_ROLE_BYPASS_FLOOR) {
     const rosterMinRole = await getProjectRosterListFloor(c.env, projectId, project.org_id)
     if (rosterMinRole != null && !canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
@@ -1595,7 +1609,14 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     }
   }
 
-  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+  // Emails are withheld on the bypass path only: there the caller is being
+  // served a list the org's roster policy would otherwise have denied them.
+  // A `?minRole=` below the bypass floor is a plain filter over a roster the
+  // caller may already read, so it hides nothing it did not hide before.
+  const hideEmails =
+    privilegedMinRole != null &&
+    privilegedMinRole >= PRIVILEGED_MIN_ROLE_BYPASS_FLOOR &&
+    role.level < ROLE.MAINTAINER
 
   return c.json({
     members: members.map((m) => ({
@@ -1669,7 +1690,10 @@ const projectMemberSingle = z.object({
   role: roleLevelSchema,
   /** AQU-1808: explicit "every current target lane". Omitted is not that choice. */
   allCurrentLanes: z.literal(true).optional(),
-  /** AQU-1808: the lanes this person may use. Absent is not "every lane". */
+  /**
+   * AQU-1808: the lanes this person may use. Absent is not "every lane".
+   * AQU-2358: the reserved value `__no_lanes__`, alone, means no lanes at all.
+   */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
@@ -1730,9 +1754,24 @@ async function grantProjectMemberOne(
     }
   }
 
-  const target = await lookupUserByUsername(env, username)
+  // AQU-2576: the identifier may be an email. The caller already cleared the
+  // `role >= project_lead` gate on this project, which is exactly the bar the
+  // scoped lookup route applies, so no new audience gains the email oracle —
+  // and nothing else about the grant changes: the role cap, the self-grant
+  // guard and the target-level cap below all run on the resolved account.
+  const target = await lookupUserByUsernameOrEmail(env, username)
   if (!target) {
-    return { ok: false, username, code: "user_not_found", message: "user not found" }
+    return {
+      ok: false,
+      username,
+      code: "user_not_found",
+      // An email that resolves to nothing is a different situation from a
+      // username typo — the person likely has no account yet — and the
+      // invite link is the path that reaches them.
+      message: looksLikeEmail(username)
+        ? "no Aquilla account has verified that email address — add them by username, or send them an invite link instead"
+        : "user not found",
+    }
   }
   if (target.id === callerUserId) {
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
@@ -2172,6 +2211,7 @@ const createInviteSchema = z.object({
    * AQU-528 / AQU-1808: lanes to auto-grant on join. Naming lanes limits the
    * joiner to those. Omitting them is not "every lane" — send allCurrentLanes
    * for that. A value is a lane id or a legacy tag that names exactly one lane.
+   * AQU-2358: the reserved value `__no_lanes__`, alone, grants no lanes at all.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
@@ -2480,8 +2520,17 @@ projects.post(
       invite.email &&
       invite.email.toLowerCase() !== user.email.toLowerCase()
     ) {
+      // AQU-2576: name the address the invite wanted (masked) and tag the
+      // refusal, so the join screen can tell the recipient which account to
+      // use instead of dead-ending on "a different email address". The
+      // unmasked value stays server-side — whoever is holding this link is,
+      // by definition, not the person it was minted for.
       return c.json(
-        { error: "This invite was sent to a different email address." },
+        {
+          error: "This invite was sent to a different email address.",
+          code: "email_mismatch",
+          invitedEmail: maskEmail(invite.email),
+        },
         403,
       )
     }

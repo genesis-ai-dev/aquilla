@@ -12,6 +12,8 @@ import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import { projectBookNames } from "@/lib/lqa/project-book-names"
 import {
   laneCheckOverrides,
+  laneNumberFormat,
+  laneOrthography,
   lanePunctuation,
   withLaneOverride,
 } from "@/lib/lqa/lane-builtin-checks"
@@ -211,9 +213,39 @@ export function useRules(
   // Paratext BookNames.xml and a USFM file's \toc lines already land.
   const projectFiles = project?.files
   const bookNames = useMemo(() => projectBookNames(projectFiles), [projectFiles])
+  // AQU-2430: and the number-format check judges a number by the ACTIVE lane's
+  // own number format, resolved the same way and for the same reason.
+  const numberFormat = useMemo(
+    () =>
+      lane === undefined
+        ? null
+        : laneNumberFormat(
+            {
+              lanes: projectLanes,
+              targetLanguage: projectTargetLanguage ?? "",
+              languageProfile: projectLanguageProfile,
+            },
+            lane,
+          ).conventions,
+    [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
+  )
+  // AQU-2628: and the old-orthography check judges a word by the project's
+  // own spelling rules. Lane-shaped like the two above so it moves with them
+  // if the Language profile ever becomes per-lane.
+  const orthography = useMemo(
+    () => laneOrthography({ languageProfile: projectLanguageProfile }),
+    [projectLanguageProfile],
+  )
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation, bookNames }),
-    [algorithmicChecks, bibleChecks, punctuation, bookNames],
+    () =>
+      resolveBuiltinRules(algorithmicChecks, {
+        bibleChecks,
+        punctuation,
+        bookNames,
+        numberFormat,
+        orthography,
+      }),
+    [algorithmicChecks, bibleChecks, punctuation, bookNames, numberFormat, orthography],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed

@@ -11,6 +11,7 @@ import { handleCheckingRequest } from "./checking/route"
 
 import { handleAdminRequest } from "./admin"
 import { handleDbTimeoutsRequest } from "./db-timeouts-route"
+import { handleDbStuckSessionsRequest } from "./db-stuck-sessions-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -114,6 +115,7 @@ import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
 import { handleExternalSkillsRequest } from "./external/skills-route"
+import { handleExternalHelpRequest } from "./external/help-route"
 export { ProjectSync } from "./project-do"
 export { DriveFolderPoller } from "./drive/drive-poller-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
@@ -240,6 +242,8 @@ declare global {
       SIDE_EFFECTS?: Queue<import("./side-effects/types").SideEffectMessage>
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
+      /** Optional — public help site read by the get_help tool. Unset = https://help.aquilla.app. */
+      HELP_SITE_URL?: string
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
        *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
       POSTHOG_KEY?: string
@@ -460,6 +464,8 @@ const worker = {
     // and 404s anything it does not recognise.
     const dbTimeoutsResponse = await handleDbTimeoutsRequest(request, env)
     if (dbTimeoutsResponse) return dbTimeoutsResponse
+    const dbStuckSessionsResponse = await handleDbStuckSessionsRequest(request, env)
+    if (dbStuckSessionsResponse) return dbStuckSessionsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const checkingResponse = await handleCheckingRequest(request, env, ctx)
@@ -695,6 +701,9 @@ const worker = {
     if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
     const externalSkillsResponse = handleExternalSkillsRequest(request)
     if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
+    // AQU-2581: app help from the public help site (REST half of get_help).
+    const externalHelpResponse = await handleExternalHelpRequest(request, env)
+    if (externalHelpResponse) return withCors(externalHelpResponse, request)
 
     // Static command documentation (the REST half of describe_command).
     // Unauthenticated like the discovery root, and mounted with it so both sit

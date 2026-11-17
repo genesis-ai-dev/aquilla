@@ -2,6 +2,7 @@
 // draft from src/lib/bible-data/language-profile-drafts.ts and reports every
 // change; ProfileSlotRow owns the draft, the save and the status line.
 
+import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,11 +16,17 @@ import {
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { downloadBlob } from "@/lib/export/export-service"
+import type { OrthographyException } from "../../../../db/shared/orthography"
 import {
+  NUMBER_FORMAT_ROLES,
   PUNCTUATION_MARK_CLASSES,
+  orthographyExceptionsCsv,
   type DivineNamesDraft,
   type KinTermsDraft,
+  type NumberFormatDraft,
   type NumberWordsDraft,
+  type OrthographyDraft,
   type PronounsDraft,
   type PunctuationDraft,
   type PunctuationMarkClass,
@@ -172,6 +179,31 @@ export function PunctuationEditor({ draft, setDraft, disabled }: EditorProps<Pun
         onChange={(noTerminalMark) => setDraft({ ...draft, noTerminalMark })}
         disabled={disabled}
       />
+    </>
+  )
+}
+
+/** AQU-2430: one field per number-format role, each holding its character. */
+const NUMBER_FORMAT_LABELS: Readonly<Record<(typeof NUMBER_FORMAT_ROLES)[number], MessageKey>> = {
+  group: "languageProfile.numberFormat.group",
+  decimal: "languageProfile.numberFormat.decimal",
+}
+
+export function NumberFormatEditor({ draft, setDraft, disabled }: EditorProps<NumberFormatDraft>) {
+  const t = useT()
+  return (
+    <>
+      {NUMBER_FORMAT_ROLES.map((role) => (
+        <TextField
+          key={role}
+          id={`profile-number-format-${role}`}
+          label={t(NUMBER_FORMAT_LABELS[role])}
+          hint={t("languageProfile.numberFormat.hint")}
+          value={draft[role]}
+          onChange={(value) => setDraft({ ...draft, [role]: value })}
+          disabled={disabled}
+        />
+      ))}
     </>
   )
 }
@@ -347,5 +379,127 @@ export function PolicyEditor({
   return (
     <Choice id={id} label={label} value={draft} options={[{ value: "unset", label: t("languageProfile.notSet") }, ...options]}
       onChange={setDraft} disabled={disabled} />
+  )
+}
+
+/**
+ * AQU-2628: the orthography row — the rules, the canonical apostrophe and the
+ * exception list in one place, because they are one decision.
+ *
+ * The exception list is the part that needs more than a text box: each entry
+ * carries who proposed it and where they found it, and a maintainer approves
+ * or rejects it here. A contributor's proposal is inert until then, so the
+ * list is also the queue.
+ */
+export function OrthographyEditor({ draft, setDraft, disabled }: EditorProps<OrthographyDraft>) {
+  const t = useT()
+  const setStatus = (index: number, status: OrthographyException["status"]) =>
+    setDraft({
+      ...draft,
+      exceptions: draft.exceptions.map((entry, i) => (i === index ? { ...entry, status } : entry)),
+    })
+  const remove = (index: number) =>
+    setDraft({ ...draft, exceptions: draft.exceptions.filter((_, i) => i !== index) })
+
+  return (
+    <>
+      <div className="space-y-1">
+        <label className="text-xs font-medium" htmlFor="profile-orthography-rules">
+          {t("languageProfile.orthography.rules")}
+        </label>
+        <Textarea
+          id="profile-orthography-rules"
+          rows={4}
+          className="font-mono text-sm"
+          value={draft.rules}
+          onChange={(event) => setDraft({ ...draft, rules: event.target.value })}
+          disabled={disabled}
+        />
+        <p className="text-xs text-muted-foreground">{t("languageProfile.orthography.rulesHint")}</p>
+      </div>
+      <TextField
+        id="profile-orthography-apostrophe"
+        label={t("languageProfile.orthography.apostrophe")}
+        hint={t("languageProfile.orthography.apostropheHint")}
+        value={draft.apostrophe}
+        onChange={(apostrophe) => setDraft({ ...draft, apostrophe })}
+        disabled={disabled}
+      />
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t("languageProfile.orthography.exceptions")}</p>
+        {draft.exceptions.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("languageProfile.orthography.exceptionsEmpty")}</p>
+        ) : (
+          <ul className="divide-y rounded border" data-testid="orthography-exceptions">
+            {draft.exceptions.map((entry, index) => (
+              <li key={`${entry.word}-${index}`} className="flex items-center gap-2 px-2 py-1.5 text-sm">
+                <span className="font-mono">{entry.word}</span>
+                <span
+                  className={
+                    entry.status === "pending"
+                      ? "rounded bg-amber-100 px-1.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                      : "rounded bg-muted px-1.5 text-xs text-muted-foreground"
+                  }
+                >
+                  {t(
+                    entry.status === "pending"
+                      ? "languageProfile.orthography.pending"
+                      : "languageProfile.orthography.approved",
+                  )}
+                </span>
+                {entry.ref ? <span className="text-xs text-muted-foreground">{entry.ref}</span> : null}
+                <span className="ms-auto flex gap-1">
+                  {entry.status === "pending" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={disabled}
+                      onClick={() => setStatus(index, "approved")}
+                    >
+                      {t("languageProfile.orthography.approve")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={disabled}
+                    onClick={() => remove(index)}
+                  >
+                    {t("languageProfile.orthography.reject")}
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Textarea
+          id="profile-orthography-add"
+          rows={3}
+          placeholder={t("languageProfile.orthography.addPlaceholder")}
+          value={draft.added}
+          onChange={(event) => setDraft({ ...draft, added: event.target.value })}
+          disabled={disabled}
+        />
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">{t("languageProfile.orthography.addHint")}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={draft.exceptions.length === 0}
+            onClick={() =>
+              downloadBlob(
+                new Blob([orthographyExceptionsCsv(draft.exceptions)], { type: "text/csv;charset=utf-8" }),
+                "orthography-exceptions.csv",
+              )
+            }
+          >
+            {t("languageProfile.orthography.exportCsv")}
+          </Button>
+        </div>
+      </div>
+    </>
   )
 }

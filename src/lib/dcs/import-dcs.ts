@@ -1,12 +1,13 @@
 // DCS genesis import (spec §3, §7). Fetch a Door43 resource at a pinned ref,
-// parse it through the routed parser, map every unit to a deterministic cell id
-// (spec §5), and emit it into an adapter project's SOURCE lane via the existing
-// bulk import front door (`bulkUploadSource`) — never raw inserts.
+// parse it through the routed parser, and write each file into an adapter
+// project's SOURCE lane as ONE file revision (AQU-2459, `./revision.ts`) through
+// the bulk import front door (`bulkUploadSource`) — never raw inserts.
 //
-// The BulkImportCell.id is the DETERMINISTIC EVENT id `uuidv5(repo|sha|cellId)`,
-// so re-running the same import dedupes through the server's idempotent /import.
-// Event ids AND file ids are project-scoped (AQU-1891), so the same resource can
-// be imported into any number of projects without one landing on another's rows.
+// The file id is deterministic and project-scoped (AQU-1891); the server
+// derives each cell id from the file id and the unit key. Re-running the same
+// import finds the head already naming the same artifact and stamp, which is a
+// no-op. Importing over a file from before revisions adopts it with its cell
+// ids intact (the revision carries `cellKeys`).
 
 import type { FileReference } from "@/lib/parsers/types"
 
@@ -17,6 +18,7 @@ import { bulkUploadSource } from "@/lib/sync/bulk-import"
 import { fetchDcsSources, planDcsFiles } from "./import-plan"
 import { dcsEventId } from "./cell-id"
 import { buildCursor } from "./cursor"
+import { dcsRevision } from "./revision"
 
 /** Emit surface — defaults to the real bulk uploader, injectable for tests. */
 export type EmitFn = (args: BulkUploadArgs) => Promise<void>
@@ -47,10 +49,9 @@ export interface ImportDcsSummary {
   cursor: DcsCursor
 }
 
-/** Turn a parsed DcsFile's cells into anchor-chained BulkImportCells whose ids
- *  are the deterministic per-revision, per-PROJECT EVENT ids (mirrors
- *  buildBulkCells). projectId scopes the event id so importing the same resource
- *  into two projects does not collide on the events-table PK. */
+/** The file's cells in the bulk uploader's shape. With a revision the uploader
+ *  sends none of them (the units travel once); they are what it counts for
+ *  progress and what the summary reports. */
 function toBulkCells(
   file: DcsFile,
   projectId: string,
@@ -80,8 +81,7 @@ function toBulkCells(
  * Import a Door43 resource into an adapter project as source cells.
  *
  * Pipeline: fetch manifest → parse → route → getTree → fetchRaw routed files →
- * route.parse() → build anchor-chained BulkImportCells (deterministic ids) →
- * one bulkUploadSource per file. Returns a summary + the cursor to persist.
+ * route.parse() → one bulkUploadSource per file, carrying one revision. Returns a summary + the cursor to persist.
  */
 export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsSummary> {
   const emit = args.emit ?? bulkUploadSource
@@ -104,12 +104,13 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   for (const { file, fileType, routeId, rawSource } of planned) {
     try {
       const cells = toBulkCells(file, args.projectId, repo, entry.commitSha)
+      const revision = dcsRevision(file, routeId, { excludeFrontMatter: args.excludeFrontMatter })
       const meta: BulkImportFileMeta = {
         id: file.fileId,
         name: file.name,
         fileType,
         importFormat: routeId,
-        parserVersion: `builtin:dcs-${routeId}@1`,
+        parserVersion: revision.stamp,
         ...(file.bookCode !== undefined ? { bookCode: file.bookCode } : {}),
       }
       await emit({
@@ -119,6 +120,7 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
         cells,
         rawSource,
         rawSourceFormat: fileType,
+        revision,
         getToken: args.getToken,
         ...(args.onProgress !== undefined ? { onProgress: args.onProgress } : {}),
         ...(args.signal !== undefined ? { signal: args.signal } : {}),

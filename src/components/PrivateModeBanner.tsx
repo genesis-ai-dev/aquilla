@@ -10,6 +10,7 @@ import { ShieldAlert, X } from "lucide-react"
 import { useOpfsAvailability } from "@/hooks/useOpfsAvailability"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 
 const DISMISS_KEY_PREFIX = "aq:private-mode-banner-dismissed:"
 const memoryDismissals = new Set<string>()
@@ -38,6 +39,7 @@ function writeDismissed(key: string): void {
 
 export function PrivateModeBanner() {
   const t = useT()
+  const titlebarDrag = useTopBannerDrag()
   const opfsAvailable = useOpfsAvailability()
   const { session, loading } = useFrontierSession()
   // Wait for a resolved login identity before considering display. Lazy route
@@ -66,14 +68,19 @@ export function PrivateModeBanner() {
   }
 
   return (
-    <div className="fixed top-0 start-0 end-0 z-40 flex items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
-      <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-      <span>{t("error.privateMode.message")}</span>
+    <div {...titlebarDrag} className="fixed top-0 start-0 end-0 z-40 mac-titlebar-clear flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+      {/* The message owns the free space so the dismiss control is pinned to the
+          bar's end edge at every width (AQU-2483) — wrapping text can no longer
+          drag it inline after the last word. */}
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+        <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+        <span>{t("error.privateMode.message")}</span>
+      </div>
       <button
         type="button"
         onClick={handleDismiss}
         aria-label={t("common.dismiss")}
-        className="ms-1 flex h-5 w-5 items-center justify-center rounded text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600/60 dark:text-amber-300/70 dark:hover:bg-amber-900/40 dark:hover:text-amber-100"
       >
         <X className="h-3 w-3" />
       </button>

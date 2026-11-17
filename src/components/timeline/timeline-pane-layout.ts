@@ -27,10 +27,11 @@ import type { PanelSize } from "./media-layout-start"
  * the shipped chrome — 39 toolbar (a 26px button row inside `py-1.5` plus the
  * border) + 28 ruler (`h-7`) + 3 rows x 66 (`ROW_H_DEFAULT`) + 39 timing row (a
  * 23px pill inside `py-2` plus the border) — and line heights can land a pixel
- * either way. `docs/qa/browser-passes/browser-verify-media-table-sync.mjs`
- * already logs the real height ("layout: timeline Npx tall") on every run: true
- * this up from that line the next time the pass is run against a build with
- * three rows and no notice bars showing.
+ * either way, and NO COMMITTED BROWSER PASS MEASURES IT: the pass this comment
+ * used to cite (`browser-verify-media-table-sync.mjs`) was never committed on
+ * any ref, and nothing under `scripts/browser-verify/` logs the timeline's
+ * height. True this number up from a real measurement — a build with three
+ * rows and no notice bars showing — the next time someone is in front of one.
  */
 export const TIMELINE_PANE_DEFAULT_HEIGHT = 304
 

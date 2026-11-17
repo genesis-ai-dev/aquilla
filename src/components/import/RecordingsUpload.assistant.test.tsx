@@ -54,6 +54,9 @@ type Route = { method: string; url: string; body: Record<string, unknown> | null
 /** An answer that fails, and one that never comes until the request is aborted. */
 const FAIL = Symbol("fail")
 const HANG = Symbol("hang")
+/** An answer the server refuses, saying why (AQU-2496). */
+const REFUSED = Symbol("refused")
+const REFUSED_WHY = "The template \"{book}-ch{chapter}_v{verse}{any}\" can't be used: {any} can't sit right beside another placeholder."
 let calls: Route[] = []
 let answers: unknown[] = []
 let saved: Record<string, unknown> = {}
@@ -98,6 +101,9 @@ beforeEach(() => {
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
         })
+      }
+      if (answer === REFUSED) {
+        return new Response(JSON.stringify({ error: "invalid_naming_rule", reason: REFUSED_WHY }), { status: 502 })
       }
       if (answer === FAIL) {
         await new Promise((r) => setTimeout(r, 20))
@@ -283,6 +289,45 @@ describe("at most two calls for a folder (review, Oct 30)", () => {
     await waitFor(() => expect(asks()).toHaveLength(2))
     again.unmount()
     expect(asks()[1].signal?.aborted).toBe(true)
+  })
+})
+
+// AQU-2496 (review, Nov 9): an answer the server refused came back the same
+// however often it was asked for, so a folder mixing "v01" with "v02a" failed
+// every time. The refusal now says why, and the one re-ask carries the reason.
+describe("an answer the server refuses is asked about once more, with the reason", () => {
+  it("asks again on its own, sends the reason, and places the files by the second answer", async () => {
+    answers = [REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(2)
+    expect(asks()[0].body).not.toHaveProperty("refused")
+    expect(asks()[1].body).toMatchObject({ names: NAMES, refused: REFUSED_WHY })
+    expect(asks()[0].headers.get("Idempotency-Key")).not.toBe(asks()[1].headers.get("Idempotency-Key"))
+    expect(screen.queryByTestId("recordings-assistant-problem")).toBeNull()
+  })
+
+  it("counts as the folder's second call: a second refusal ends it, and the offer doesn't come back", async () => {
+    answers = [REFUSED, REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    const problem = await screen.findByTestId("recordings-assistant-problem")
+    expect(problem).toHaveTextContent("The assistant couldn't work out the naming")
+    expect(problem).not.toHaveTextContent("Try again")
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.queryByTestId("recordings-assistant-ask")).toBeNull()
+  })
+
+  it("is never a third call after a retry: a refused retry leaves the first answer's files placed", async () => {
+    answers = [RULE, REFUSED, RULE]
+    review(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v99.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.getAllByTestId("recordings-row")).toHaveLength(2)
   })
 })
 
@@ -520,6 +565,152 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
   })
 })
 
+// AQU-2487 (review of the browser pass, Nov 12): in the sheet "chapter one"'s
+// own Upload recordings…, the row read "“chapter one” 1:2" while the line
+// picker offered "chapter one 1:2", from its own copy of the label. Both use
+// match.ts's one label, so a line reads the same in the row and the picker.
+describe("a file that isn't a Bible book, named in the row and in the line picker", () => {
+  const JONAH_1: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+  /** Upload recordings… from one file's own ⋯ menu. */
+  const into = (target: TargetFile, names: string[]) => {
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(target)
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: target.fileId, name: target.name }}
+        projectFiles={[{ id: target.fileId, name: target.name, bookCode: target.bookCode } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(names)}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+  }
+  /** What the open line picker offers for a search: "label  line text". */
+  const offered = async (q: string) => {
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: q } })
+    await settle(50)
+    return screen.queryAllByTestId("recordings-line-option").map((o) => o.textContent?.trim() ?? "").filter((t) => t !== "Don't upload")
+  }
+
+  // AQU-2487 (review, Nov 12): a heading was named by the file's raw name, so
+  // the sheet's heading read "chapter one", unquoted, and a book whose file is
+  // named "রূত" showed "রূত" for its heading beside "Ruth 1:2" for its verses.
+  // A heading is named by its file's label, the way a verse names its book.
+  it("names a heading by its file's label, in the picker and in its row once chosen", async () => {
+    const heading = (cellId: string, text: string): TargetLine => ({ cellId, ref: null, text, structural: true, hasRecording: false })
+    into({ fileId: "sheet", name: "chapter one", bookCode: null, lines: [heading("s:h", "Jonah, chapter one"), ...JONAH_1] }, ["Jonah 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("Jonah, chapter")).toEqual(["“chapter one”  Jonah, chapter one"])
+    fireEvent.click(screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("Jonah, chapter"))!)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one”"))
+    cleanup()
+    const verses = Array.from({ length: 22 }, (_, i): TargetLine => ({ cellId: `rut:1:${i + 1}`, ref: `RUT 1:${i + 1}`, text: `Ruth 1:${i + 1}`, structural: false, hasRecording: false }))
+    into({ fileId: "rut", name: "রূত", bookCode: "RUT", lines: [heading("rut:title", "The Book of Ruth"), ...verses] }, ["Ruth 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("The Book of Ruth")).toEqual(["Ruth  The Book of Ruth"])
+    expect(await offered("Ruth 1:2")).toContain("Ruth 1:2  Ruth 1:2")
+  })
+
+  // AQU-2487 (review, Nov 12): the picker lists every file's lines in one
+  // list, and a line with no verse reference read "line 3" alone, so "Welcome
+  // letter" and "Thank you letter" offered two identical "line 3  Hello
+  // there", and searching a file's name found only its heading. In the picker
+  // such a line carries its file's label in front; rows stay under their
+  // file's heading and keep "line 3".
+  it("names the file of a line with no verse reference in the picker, so files' lines can be told apart and found", async () => {
+    const doc = (fileId: string, name: string): TargetFile => ({
+      fileId, name, bookCode: null,
+      lines: [
+        { cellId: `${fileId}:h`, ref: null, text: `${name} heading`, structural: true, hasRecording: false },
+        ...Array.from({ length: 5 }, (_, i): TargetLine => ({ cellId: `${fileId}:${i + 1}`, ref: null, text: "Hello there", structural: false, hasRecording: false })),
+      ],
+    })
+    const files: Record<string, TargetFile> = { a: doc("a", "Welcome letter"), b: doc("b", "Thank you letter"), mat: matthew() }
+    vi.mocked(loadTargetFile).mockImplementation(async (_p, f) => files[(f as { fileId: string }).fileId])
+    try {
+      render(
+        <RecordingsReview
+          projectId="p1"
+          canAskAssistant
+          file={null}
+          projectFiles={[
+            { id: "a", name: "Welcome letter", bookCode: null } as never,
+            { id: "b", name: "Thank you letter", bookCode: null } as never,
+            { id: "mat", name: "Matthew", bookCode: "MAT" } as never,
+          ]}
+          getToken={async () => "file-jwt"}
+          lane=""
+          languageLabel={null}
+          username="lee"
+          chosen={chosen(["Welcome letter 3.ogg", "Thank you letter 3.ogg", "Matthew 19-1.ogg"])}
+          onStarted={() => {}}
+          onCancel={() => {}}
+        />,
+      )
+      await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+      expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target")).sort()).toEqual(["Matthew 19:1", "line 3", "line 3"])
+      fireEvent.click(screen.getAllByTestId("recordings-change")[0])
+      expect(await offered("line 3")).toEqual(["“Welcome letter” · line 3  Hello there", "“Thank you letter” · line 3  Hello there"])
+      expect(await offered("Thank you letter")).toEqual([
+        "“Thank you letter”  Thank you letter heading",
+        ...[1, 2, 3, 4, 5].map((n) => `“Thank you letter” · line ${n}  Hello there`),
+      ])
+      expect(await offered("Matthew 19:1")).toContain("Matthew 19:1  Matthew 19:1")
+    } finally {
+      vi.mocked(loadTargetFile).mockImplementation(async () => matthew())
+    }
+    cleanup()
+    // A book's line with no reference (an introduction) carries the book's name.
+    const intro: TargetLine = { cellId: "rut:intro", ref: null, text: "Introduction paragraph", structural: false, hasRecording: false }
+    const verses = Array.from({ length: 22 }, (_, i): TargetLine => ({ cellId: `rut:1:${i + 1}`, ref: `RUT 1:${i + 1}`, text: `Ruth 1:${i + 1}`, structural: false, hasRecording: false }))
+    into({ fileId: "rut", name: "রূত", bookCode: "RUT", lines: [intro, ...verses] }, ["Ruth 1-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    expect(await offered("Introduction")).toEqual(["Ruth · line 1  Introduction paragraph"])
+  })
+
+  it("names a line the same way in the row and in the picker, and after it is chosen", async () => {
+    const lines: TargetLine[] = Array.from({ length: 17 }, (_, i) => ({ cellId: `s:${i + 1}`, ref: `JON 1:${i + 1}`, text: `Jonah 1:${i + 1} text`, structural: false, hasRecording: false }))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce({ fileId: "sheet", name: "chapter one", bookCode: null, lines })
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={{ id: "sheet", name: "chapter one" }}
+        projectFiles={[{ id: "sheet", name: "chapter one", bookCode: null } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(["Jonah 1-2.ogg"])}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const row = await waitFor(() => screen.getByTestId("recordings-row"))
+    expect(row).toHaveAttribute("data-target", "“chapter one” 1:2")
+    fireEvent.click(screen.getByTestId("recordings-change"))
+    const search = await screen.findByRole("combobox", { name: "Search lines" })
+    fireEvent.change(search, { target: { value: "1:5" } })
+    const option = await waitFor(() => {
+      const found = screen.getAllByTestId("recordings-line-option").find((o) => o.textContent?.includes("1:5 "))
+      if (!found) throw new Error("no option for 1:5")
+      return found
+    })
+    expect(option.textContent?.split("  ")[0].trim()).toBe("“chapter one” 1:5")
+    fireEvent.click(option)
+    await waitFor(() => expect(screen.getByTestId("recordings-row")).toHaveAttribute("data-target", "“chapter one” 1:5"))
+  })
+})
+
 // ── The second review (Oct 30) ──────────────────────────────────────────────
 
 describe("a saved rule that places only part of a folder (review, Oct 30)", () => {
@@ -677,6 +868,84 @@ describe("smaller review items (review, Oct 30)", () => {
   })
 })
 
+// AQU-2496 (review, Nov 9): the "can't be undone" note said "the recordings"
+// for one file, didn't say a file over several lines adds a take to each, and
+// said to choose the earlier recording again on lines where it never stopped
+// playing (it plays on an added track or a layer; every bulk take goes on the
+// main track).
+describe("the can't-be-undone note is true for every kind of upload", () => {
+  const note = () => screen.getByTestId("recordings-no-undo-note")
+  const withLines = (patch: Record<string, Partial<TargetLine>>) => {
+    const file = matthew()
+    file.lines = file.lines.map((line) => (patch[line.cellId] ? { ...line, ...patch[line.cellId] } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(file)
+  }
+
+  it("says the recording, for one file", async () => {
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(/^This can't be undone with Undo\. To take it back, delete the recording it adds\.$/)
+  })
+
+  it("says a file over several lines adds a take to each of them", async () => {
+    review(["Matthew 19.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recording it adds. A file that covers several lines adds a take to each of those lines; delete that take on each line.",
+    )
+  })
+
+  // AQU-2496 (browser pass and its review, Nov 12): a separate "N of those
+  // lines already has a recording" note counted differently from the rows'
+  // "already recorded" marks, which are true per row (a take on any track).
+  // It is gone: the one sentence that counts lines, "takes over from an
+  // earlier one", says the earlier recording stays in its take list.
+  const marked = () => screen.getAllByTestId("recordings-how").filter((el) => el.textContent?.includes("already recorded")).length
+  it("leaves out choosing again where the earlier recording plays on another track and never stopped; the row still says already recorded", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(marked()).toBe(1)
+    expect(note()).not.toHaveTextContent("earlier")
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(marked()).toBe(2)
+    expect(note()).toHaveTextContent(
+      "On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
+    )
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+  })
+
+  // AQU-2496 (review of the browser pass, Nov 12): the (i) said the new
+  // recording "becomes the one that plays", untrue where the earlier one plays
+  // on an added track and goes on playing there.
+  it("says in the (i) that the new recording plays, true on any track", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    fireEvent.click(screen.getByRole("button", { name: "How each recording finds its line" }))
+    const rule = await screen.findByText(/A line that already has a recording keeps it in its take list/)
+    expect(rule.textContent).toMatch(/^A line that already has a recording keeps it in its take list, and the new recording plays\. Several files/)
+  })
+
+  it("says where the new recordings take over from earlier ones, one line or several", async () => {
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 2 lines the new recordings take over from earlier ones, which stay in their take lists; after deleting the new ones, choose the earlier recording again on each.",
+    )
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.")
+  })
+})
+
 // Sam, Oct 30: "Forget this naming for the team" only for someone the server
 // will let forget it, and a plain word when it didn't go through.
 describe("forgetting a team's naming", () => {
@@ -799,5 +1068,67 @@ describe("whether the naming will be kept", () => {
     await screen.findByTestId("recordings-assistant-note")
     await settle()
     expect(screen.queryByTestId("recordings-assistant-keep")).toBeNull()
+  })
+})
+
+// AQU-2496 (review, Nov 9; Sam's call the same day: say it, don't build a
+// grouped Undo). A bulk upload records no Undo step, so the preview says so
+// before the person commits, and how to take it back.
+describe("the preview says a bulk upload can't be undone", () => {
+  const PLACED = ["Matthew 19-1.ogg", "Matthew 19-2.ogg"]
+
+  it("says so in one line, with how to take it back, before anything uploads", async () => {
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    const note = screen.getByTestId("recordings-no-undo-note")
+    expect(note).toHaveTextContent("This can't be undone with Undo. To take it back, delete the recordings it adds.")
+    expect(note).not.toHaveTextContent("earlier recording")
+    expect(started).not.toHaveBeenCalled()
+  })
+
+  it("adds what else it takes on a line that already had a recording: choosing the earlier one again", async () => {
+    const recorded = matthew()
+    recorded.lines = recorded.lines.map((line) => (line.cellId === "mat:19:2" ? { ...line, hasRecording: true, mainTake: true } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(recorded)
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.queryByTestId("recordings-recorded-note")).toBeNull()
+    expect(screen.getByTestId("recordings-no-undo-note")).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 1 line the new recording takes over from an earlier one, which stays in its take list; after deleting the new one, choose the earlier recording again there.",
+    )
+  })
+
+  it("says nothing when no file can be placed, since nothing would upload", async () => {
+    review()
+    await enabledAsk()
+    expect(screen.queryByTestId("recordings-no-undo-note")).toBeNull()
+  })
+})
+
+// AQU-2435: a folder named in a script's own digits is read like its twin in
+// 0–9, by a fresh rule and by the team's saved one.
+describe("a folder in another script's digits", () => {
+  /** "Mt-ch19_v01.ogg" → "Mt-ch١٩_v٠١.ogg". */
+  const arabic = (names: readonly string[]) => names.map((n) => n.replace(/\d/g, (d) => String.fromCodePoint(0x660 + Number(d))))
+
+  it("sends the names as they are, places every file by the rule, and keeps it under the shape of its twin in 0–9", async () => {
+    review(arabic(DENSE))
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(1)
+    expect(asks()[0].body!.names).toEqual(arabic(DENSE))
+    expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target"))).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:3"])
+    expect(await screen.findByTestId("recordings-assistant-keep")).toHaveTextContent("Your team will keep this naming for next time.")
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(saves()).toHaveLength(1))
+    expect(saves()[0].body!.shapes).toEqual(["mt-ch#_v#"])
+  })
+
+  it("is read with the team's rule kept from the same naming in 0–9, with no call", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review(arabic(NAMES))
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(0)
+    expect(within(screen.getAllByTestId("recordings-row")[0]).getByTestId("recordings-how")).toHaveTextContent("by your team's saved rule")
   })
 })

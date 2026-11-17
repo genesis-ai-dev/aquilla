@@ -45,6 +45,7 @@ import {
 } from "../services/invite-scopes"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { emailBoundInviteUnverified } from "../services/verified-email-invite"
+import { maskEmail } from "../../../db/shared/mask-email"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -82,7 +83,8 @@ const createMultiInviteSchema = z.object({
    * AQU-528: lane scopes auto-granted on join. The same set applies to every
    * project on the token. AQU-1808: omitting this is not every current lane —
    * send allCurrentLanes, or name the lanes, when any project has current
-   * target lanes.
+   * target lanes. AQU-2358: the reserved value `__no_lanes__`, alone, grants
+   * no lanes at all.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
@@ -441,8 +443,15 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   // check must live here too or the binding is a dead letter (AQU-326).
   // All rows share the token's email; sample the first.
   if (first.email && first.email.toLowerCase() !== user.email.toLowerCase()) {
+    // AQU-2576: same masked disclosure as the single-project accept — this is
+    // the endpoint JoinPage actually calls first, so the richer rejection has
+    // to live here too or the recipient still sees the dead-end sentence.
     return c.json(
-      { error: "This invite was sent to a different email address." },
+      {
+        error: "This invite was sent to a different email address.",
+        code: "email_mismatch",
+        invitedEmail: maskEmail(first.email),
+      },
       403,
     )
   }

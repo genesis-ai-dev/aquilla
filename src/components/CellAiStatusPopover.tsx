@@ -78,7 +78,7 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
                   className="mt-1 h-6 gap-1 px-1.5 text-[10px]"
                 >
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {copied ? "Copied" : "Copy error"}
+                  {copied ? t("editor.ai.copyErrorDone") : t("editor.ai.copyError")}
                 </Button>
               </details>
             )}

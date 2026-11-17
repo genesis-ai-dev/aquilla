@@ -5,6 +5,7 @@ import {
   laneCheckOverrides,
   laneLanguageForChecks,
   laneLanguageLabel,
+  laneNumberFormat,
   lanePunctuation,
   targetLaneRow,
   withLaneOverride,
@@ -89,6 +90,39 @@ describe("lanePunctuation", () => {
       languageProfile: { punctuation: { question: ["not one character"] } },
     })
     expect(lanePunctuation(p, "th-lane").origin).toEqual({ kind: "language", subtag: "th" })
+  })
+})
+
+describe("laneNumberFormat", () => {
+  it("gives each lane its own language's number format", () => {
+    const p = project({ lanes: TWO_LANES })
+    // Spanish groups with "." and fractions with ","; Thai is like English.
+    expect(laneNumberFormat(p, "").conventions).toMatchObject({ group: ["."], decimal: [","] })
+    expect(laneNumberFormat(p, "th-lane").conventions).toMatchObject({ group: [","], decimal: ["."] })
+  })
+
+  it("leaves a lane whose language CLDR does not list with nothing to judge by", () => {
+    const lanes = [laneRow({ language: "Siberian Tatar", legacyTag: "x" })]
+    expect(laneNumberFormat(project({ lanes }), "x")).toEqual({
+      conventions: null,
+      origin: { kind: "unknown-language" },
+    })
+  })
+
+  it("lets the project's Language profile slot win in every lane, per role", () => {
+    const p = project({ lanes: TWO_LANES, languageProfile: { numberFormat: { group: ["'"] } } })
+    const resolved = laneNumberFormat(p, "th-lane")
+    expect(resolved.origin).toEqual({ kind: "profile" })
+    // The answered role wins; the rest stays the lane language's own.
+    expect(resolved.conventions).toMatchObject({ group: ["'"], decimal: ["."] })
+  })
+
+  it("ignores a damaged profile slot rather than silencing the language", () => {
+    const p = project({
+      lanes: TWO_LANES,
+      languageProfile: { numberFormat: { group: ["not one character"] } },
+    })
+    expect(laneNumberFormat(p, "th-lane").origin).toEqual({ kind: "language", locale: "th" })
   })
 })
 

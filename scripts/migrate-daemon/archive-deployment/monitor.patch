@@ -1,0 +1,12 @@
+--- a/monitor.py
++++ b/monitor.py
+@@ -138,6 +138,9 @@
+         for original in rows:
+             row = dict(original)
+             row.setdefault('sha', projects.get(row['project_id'], {}).get('head_sha'))
++            if row.get('stage') == 'skipped_archived' and not row.get('error'):
++                details.append(dict(scope='skipped_archived', project_id=row['project_id'], job_id=row.get('id'), sha=row.get('sha')))
++                continue
+             if row.get('error'):
+                 fp = fingerprint(scope, row)
+                 details.append(dict(scope=scope, project_id=row['project_id'],

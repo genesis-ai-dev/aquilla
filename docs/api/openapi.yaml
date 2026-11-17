@@ -1101,6 +1101,80 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
+  /api/v1/external/help:
+    get:
+      summary: Index of the public app-help pages (unauthenticated)
+      description: >
+        REST half of the MCP get_help tool. Lists the pages of the public Aquilla
+        help site (https://help.aquilla.app) for questions about the app's
+        interface. This is app help, not API documentation. The index is read from
+        the site's llms-index.json and cached at the edge for five minutes. No
+        project data; no auth needed.
+      responses:
+        "200":
+          description: The index.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { type: string }
+                  pages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: { type: string, example: "/export/" }
+                        title: { type: string }
+                        description: { type: string }
+                        section: { type: string }
+                        url: { type: string, format: uri }
+                  note: { type: string }
+        "500":
+          description: job_failed — the help site could not be read. Try again later.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/help/{page}:
+    get:
+      summary: One app-help page as Markdown (unauthenticated)
+      description: >
+        REST half of the MCP get_help tool with a page argument. Only a page
+        listed in the help site's index is fetched. The page path may be written
+        with or without its slashes (help/export, help/export/). Nested paths are
+        allowed (help/a/b/).
+      parameters:
+        - name: page
+          in: path
+          required: true
+          description: >
+            Page path. The route takes everything after help/, so a nested path such
+            as a/b/ works without escaping its slashes.
+          schema: { type: string, example: "export/" }
+      responses:
+        "200":
+          description: The page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string, example: "/export/" }
+                  title: { type: string }
+                  url: { type: string, format: uri }
+                  markdown: { type: string }
+        "404":
+          description: not_found — the page is not in the help site's index. Call the index route for the list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "500":
+          description: job_failed — the help site could not be read. Try again later.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /api/v1/external/mcp:
     post:
       summary: MCP JSON-RPC 2.0 endpoint (initialize, ping, tools/list, tools/call)

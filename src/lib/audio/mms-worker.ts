@@ -247,6 +247,7 @@ async function getSession(lang: string, requestId: string): Promise<MmsSession> 
       executionProviders: ["wasm"],
       graphOptimizationLevel: "all",
     })
+    postProgress(requestId, `${key}/model.onnx`, modelBytes.byteLength, modelBytes.byteLength, "ready")
     return {
       session,
       tokens: parseTokens(new TextDecoder().decode(tokensBytes)),

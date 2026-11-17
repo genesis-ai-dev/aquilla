@@ -12,8 +12,12 @@
 
 import { ownerScopedLocalStorageKey } from "@/lib/frontier/client-local-storage"
 
-/** Explicit user action that may persist a BT — never implied by a commit. */
-export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
+/**
+ * What asked for a BT to be persisted: an explicit user action, or "live" —
+ * the project turned on live back-translation and this browser just saved the
+ * translation (see live-bt.ts). Never implied by a commit otherwise.
+ */
+export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate" | "live"
 
 export interface BacktranslationRecord {
   cellId: string

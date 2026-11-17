@@ -34,7 +34,7 @@ not a micro-spec farm.
 | Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load; imported video automatically links its picture and preserves signed range playback and seeking after reload; YouTube imports support a picture only whose first captions, attached from the Text view without the track-editing switch, become its own rows (subtitle file type, original caption download) while a later caption file stays a timeline-only track (AQU-1566), original media with configured ASR or embedded-caption review, and user caption exports with unchanged original download | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
 | Audio & Voice | Transcription is a background job, never a gate on the document (AQU-1917): with the hosted ASR endpoint hung or returning 500, automatic transcription after a media import still leaves the contributor able to edit a cell, save it, switch files and reload with the edit intact (SPA → sync-worker → Postgres), reports in a toast rather than a modal, and writes nothing into the document on a failed run. The per-cell badge's own error/retry rendering is covered in RTL (`src/components/CellTranscribeBadge.test.tsx`) | `e2e/specs/editor/transcription-never-blocks.smoke.spec.ts` |
-| Editor | BIA ghost-text next words learned from validated target cells (projection → SPA read → forecast worker); the suggestion is a decoration only until Tab/→ accepts it; "words that fit here" replaces a selected word; both commit like typing (full suite, not smoke — an aid that never writes on its own; off by default since AQU-2117, so the spec and the showcases turn the "Suggest next words" switch on through View settings first; never-mutates-the-document, Esc, setting toggle and Tab-over-cell-navigation covered in RTL: `TranslatedEditor.ghostText.test.tsx`, `ghost-text-plugin.test.ts`) | `e2e/specs/editor/ghost-text.spec.ts` |
+| Editor | BIA ghost-text next words learned from validated target cells (projection → SPA read → forecast worker); the suggestion is a decoration only until Tab (or Ctrl+→) accepts it, one word at a time, only after typing and only at the end of the line; "words that fit here" replaces a selected word; both commit like typing (full suite, not smoke — an aid that never writes on its own; on by default again after the AQU-2117 follow-up, which the spec and the showcases assert through View settings first; never-mutates-the-document, Esc, setting toggle and Tab-over-cell-navigation covered in RTL: `TranslatedEditor.ghostText.test.tsx`, `ghost-text-plugin.test.ts`) | `e2e/specs/editor/ghost-text.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
 | Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
 | Project management | A project's lane-independent numbers live on its SOURCE lane's progress row, not on the former default target lane's — so the plan board's totals, the files list's counts and the org overview's per-lane denominators are the same whichever target lanes a project has, and a lane with no translations yet still shows the full denominator (AQU-1599) | Covered in worker integration (`sync-worker/src/__tests__/progress-projection.test.ts` — a row per real lane, the source lane's row carrying the denominator and no translations; `lane-validators-progress.test.ts` — the per-lane row sets and the source lane's own; `progress-book-audio.test.ts` — the prune reaches the source lane's rows too; `progress-lane-join.test.ts` — the lane join stays the bare, indexable `target_lang` equality; `plan-read.test.ts` and `files-read.test.ts` — the readers; `auth-worker/src/__tests__/org-portfolio.test.ts` — the org overview's denominator and lane order). No new smoke, on the same reading as the AQU-1424 row above: nothing here can lose data, access or a committed artifact — a regression misreports a number — and the surfaces it shows up on already have smoke journeys. |
@@ -65,7 +65,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility; org invitation → password recovery in a fresh browser session → explicit acceptance and server-verified membership. The browser consumes the actual reset email captured by Miniflare; worker integration tests also cover ordinary resets and rejected redirect targets (no real mail is sent). | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Admin TOTP enrollment, recovery acknowledgment and recovery-code removal; Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -234,12 +234,14 @@ UI chrome that used to be one smoke file per click is covered under
   `EditorTable.editorActions.test.tsx`). Pending-edit page-hide flush is covered
   in `TranslatedEditor.commit.test.tsx` and import-and-edit smoke.
 
-- A cell's own label (AQU-2408): typed in the expansion panel's Label row at or
-  above the project's `cellLabelFloor` tier (maintainer unless opened to project
-  leads), stored as `metadata.cellLabel` on the source row by the non-chain
-  `cell.label.set` event, shown in the corner label slot beneath an assigned
-  voice or cast name, and never a voice itself. Covered in RTL
-  (`CellLabelRow.test.tsx`, `EditorTable.cellLabelRow.test.tsx`,
+- A cell's own label (AQU-2408): typed where it is read — the source corner's
+  label slot becomes a field, opened by the "Add label" / "Edit label" button in
+  the cell rail's `⋯` menu or by a click on the label — at or above the
+  project's `cellLabelFloor` tier (maintainer unless opened to project leads),
+  never in the details panel, stored as `metadata.cellLabel` on the source row
+  by the non-chain `cell.label.set` event, shown in the corner label slot
+  beneath an assigned voice or cast name, and never a voice itself. Covered in
+  RTL (`CellLabelField.test.tsx`, `EditorTable.cellLabel.test.tsx`,
   `ProjectSettings.cellLabel.test.tsx`), with the projection, floors, read model
   and undo step pinned in `sync-worker/src/__tests__/cell-label-set.test.ts`,
   `cell-label-gate.test.ts`, `cell-label-floor.test.ts`, `label-steps.test.ts`
@@ -595,6 +597,14 @@ UI chrome that used to be one smoke file per click is covered under
 - In-app feedback (AQU-1028, moved to the Help menu by AQU-1548): the Help ("?") menu's **Feedback** item opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `HelpMenu.test.tsx` for the entry point, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 - A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 
+- The no-files empty state below the project's import floor (AQU-2475): no Import
+  button, and the body replaced by the role that may import, read from the floor the
+  workspace resolved so a raised org floor names Maintainer rather than Project Lead.
+  Covered in RTL (`src/components/CellAreaPlaceholder.test.tsx`). No smoke, per the
+  rules above: it is an empty state in a single component, nothing is lost if it
+  breaks, and the import journey behind it is already walked by
+  `e2e/specs/editor/import-and-edit.smoke.spec.ts`.
+
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
 
@@ -612,3 +622,23 @@ positive controls, account-specific identities and recordings, masking, stale
 callbacks, withdrawal, offline recovery and cross-tab refusal in Chromium,
 Firefox and WebKit. `projects/onboarding.smoke.spec.ts` checks the initially
 checked draft, explicit confirmation, Back/login navigation and denied storage.
+
+### Google login (AQU-1057)
+
+`auth/google-login.spec.ts` covers click-only provider contact, cancellation,
+return destination and normal session adoption in Chromium/Firefox/WebKit using
+a simulated provider boundary and a real Aquilla JWT. It does not claim live
+Google Cloud verification. `auth-worker/src/__tests__/oauth-google.test.ts`
+verifies signed provider claims through real Postgres creation/linking and the
+normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
+`src/pages/GoogleLoginReturn.test.tsx` covers separate account-bound analytics
+approval. The existing onboarding/account-switch smoke remains the session
+regression gate. Run the browser matrix with
+`E2E_CONFIG=e2e/config/playwright.config.google-login.ts pnpm exec tsx scripts/e2e-up.ts -- e2e/specs/auth/google-login.spec.ts`.
+
+Google login-method settings are covered in RTL by
+`LoginMethodsSection.test.tsx` and `GoogleLoginReturn.test.tsx`: explicit connect,
+account-switch isolation, password confirmation, unchanged session/consent and
+last-method guidance. The existing Google worker integration test covers actual
+identity linking/disconnection, authorization, password proof, email mismatch
+and the server-enforced last-method guard.

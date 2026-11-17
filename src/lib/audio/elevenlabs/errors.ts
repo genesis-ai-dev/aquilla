@@ -10,13 +10,14 @@
 export type ElevenLabsFailure =
   | "no key"
   | "invalid key"
+  | "missing permission"
   | "out of characters"
   | "cloning not allowed"
   | "rate limited"
   | "failed"
 
 /** Matches the lead-in every ElevenLabs error message starts with. */
-export const ELEVENLABS_ERROR_RE = /^elevenlabs \((no key|invalid key|out of characters|cloning not allowed|rate limited|failed)\)/i
+export const ELEVENLABS_ERROR_RE = /^elevenlabs \((no key|invalid key|missing permission|out of characters|cloning not allowed|rate limited|failed)\)/i
 
 export class ElevenLabsError extends Error {
   readonly failure: ElevenLabsFailure
@@ -35,6 +36,7 @@ export function elevenLabsKeyMissingError(): ElevenLabsError {
 const CODE_TO_FAILURE: Record<string, ElevenLabsFailure> = {
   elevenlabs_key_missing: "no key",
   elevenlabs_invalid_key: "invalid key",
+  elevenlabs_missing_permission: "missing permission",
   elevenlabs_quota_exceeded: "out of characters",
   elevenlabs_clone_not_allowed: "cloning not allowed",
   elevenlabs_rate_limited: "rate limited",
@@ -45,9 +47,12 @@ export function errorFromElevenLabs(status: number, bodyText: string): Error {
   let code = ""
   let message = bodyText.trim()
   try {
-    const parsed = JSON.parse(bodyText) as { error?: unknown; message?: unknown }
+    const parsed = JSON.parse(bodyText) as { error?: unknown; message?: unknown; permission?: unknown }
     if (typeof parsed.error === "string") code = parsed.error
     if (typeof parsed.message === "string") message = parsed.message
+    // A restricted key: the detail is the permission it lacks, which the
+    // matcher lifts back out (elevenLabsMissingPermission).
+    if (code === "elevenlabs_missing_permission") message = typeof parsed.permission === "string" ? parsed.permission : ""
   } catch {
     // A plain-text worker refusal (bad request, auth) — keep the text.
   }
@@ -56,4 +61,9 @@ export function errorFromElevenLabs(status: number, bodyText: string): Error {
   // Our own per-user throttle, not ElevenLabs'.
   if (status === 429) return new ElevenLabsError("rate limited", message || `HTTP ${status}`)
   return new ElevenLabsError("failed", `${message || `HTTP ${status}`} (${status})`)
+}
+
+/** The permission a `missing permission` message names ("text_to_speech"), or null. */
+export function elevenLabsMissingPermission(message: string): string | null {
+  return message.match(/^elevenlabs \(missing permission\): ([a-z0-9_]+)/i)?.[1] ?? null
 }

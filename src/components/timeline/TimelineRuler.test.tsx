@@ -86,6 +86,21 @@ describe("TimelineRuler", () => {
     expect(screen.queryByText("0:00")).not.toBeInTheDocument()
   })
 
+  it("labels a tick past an hour as h:mm:ss", () => {
+    // 40 px/s → a 2 s step. 83316 s is the 1388:36 the ruler used to print.
+    render(
+      <TimelineRuler
+        durationSec={90000}
+        pxPerSec={40}
+        viewStartSec={83316}
+        viewEndSec={83316}
+        onScrub={() => {}}
+      />,
+    )
+    expect(screen.getByText("23:08:36")).toBeInTheDocument()
+    expect(screen.queryByText("1388:36")).not.toBeInTheDocument()
+  })
+
   it("keeps the full-track width even when windowed", () => {
     render(
       <TimelineRuler

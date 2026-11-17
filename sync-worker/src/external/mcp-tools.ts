@@ -250,7 +250,13 @@ const TOOL_SPECS: McpToolSpec[] = [
       'merges them into the live brief (unnamed sections keep their value), reassembles ' +
       'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
       'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
-      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'the copilot. That last part holds only WHILE the project has not written ' +
+      'translationInstructions: once it has, the saved instructions are what every drafting ' +
+      'prompt reads, this write reaches no prompt, and the staged changeset says so with an ' +
+      'inert_write warning (AQU-2425). The brief document still changes — to change what the ' +
+      'AI reads, use patch_settings { key: "translationInstructions" }. Check which case a ' +
+      'project is in with get_prompt_preview → parts.instructions before promising a brief ' +
+      'edit will change the AI. Args: projectId (required), parameters (partial map of section id → ' +
       'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
       'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
       'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
@@ -367,6 +373,34 @@ const TOOL_SPECS: McpToolSpec[] = [
         name: {
           type: 'string',
           description: 'Skill name (e.g. "project-setup"). Omit for the index of all skills.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_help',
+    description:
+      'Read the public Aquilla help site (https://help.aquilla.app), the user guide to the app. ' +
+      'Use it when the user asks how to do something in Aquilla or where a control or setting is ' +
+      'in the interface, for example "where is Export?" or "what can a Viewer do?". This is app ' +
+      'help, not API help: for API commands use describe_command, and for API workflows use ' +
+      'get_skill. Args: page (optional). Omit page for the index ({ site, pages: [{ path, title, ' +
+      'description, section, url }] }). Pass one page path ("/export/", "export" or a full ' +
+      'help.aquilla.app URL) for its Markdown ({ path, title, url, markdown }). Start with the ' +
+      'index, fetch the pages that answer the question, and give the user each page\'s url so they ' +
+      'can read it. The whole site is also in one file at https://help.aquilla.app/llms-full.txt ' +
+      'if you prefer to read everything. An unknown page returns a not_found tool error; a help ' +
+      'site outage returns a job_failed tool error. Reads no project data and needs no projectId. ' +
+      '(REST: GET /api/v1/external/help and GET /api/v1/external/help/:page.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: {
+          type: 'string',
+          description:
+            'Help page path or URL (e.g. "/export/", "export", "https://help.aquilla.app/export/"). ' +
+            'Omit for the index of all pages.',
         },
       },
       additionalProperties: false,
@@ -971,6 +1005,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
       'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
       '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'AQU-2576: `username` may be an email address, and `email` is an accepted alias for ' +
+      'it — the target resolves by username first, then by account email. Do not guess a ' +
+      'handle you were not given. ' +
       'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
       'the credential\'s mode — membership is governance, so every change passes a human at ' +
       'the approvalUrl. You cannot grant a role above your own (permission_denied ' +
@@ -1628,6 +1665,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
+  get_help: 'read',
   search_project: 'read',
   find_similar_cells: 'read',
   transcribe_audio: 'spend',

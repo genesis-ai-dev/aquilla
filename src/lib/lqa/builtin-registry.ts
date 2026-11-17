@@ -21,6 +21,8 @@ import * as unpairedQuotes from "./check-functions/unpaired-quotes"
 import * as untranslatedFragment from "./check-functions/untranslated-fragment"
 import * as lengthRatio from "./check-functions/length-ratio"
 import * as scriptureReference from "./check-functions/scripture-reference"
+import * as numberFormat from "./check-functions/number-format"
+import * as oldOrthography from "./check-functions/old-orthography"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -202,6 +204,27 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     runsOnEmptyTarget: false,
     run: scriptureReference.runCheck,
     message: scriptureReference.MESSAGE,
+  },
+  // AQU-2430: the number-format half of the same parity work. Off by default;
+  // reads the target language's conventions off `context.numberFormat`.
+  "number-format": {
+    ...TEXT_CHECK_META["number-format"],
+    description:
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
+    runsOnEmptyTarget: false,
+    run: numberFormat.runCheck,
+    message: numberFormat.MESSAGE,
+  },
+  // AQU-2628: dormant until the project's Language profile carries an
+  // `orthography` block; from then on it is the guard on human-typed text,
+  // since import and AI drafting already converted everything else.
+  "old-orthography": {
+    ...TEXT_CHECK_META["old-orthography"],
+    description:
+      "Words in the translation are spelled in the Language lane's own orthography. Dormant until the Language profile records one; approved exceptions are never flagged.",
+    runsOnEmptyTarget: false,
+    run: oldOrthography.runCheck,
+    message: oldOrthography.MESSAGE,
   },
 }
 

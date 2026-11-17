@@ -47,8 +47,8 @@ export const MAX_DCS_RAW_BYTES = 20 * 1024 * 1024
  *
  * Separated from every other fetch failure because an absent member is NORMAL
  * input, not an error: `compareRefs` returns the union of the filenames touched
- * by every commit in the range (the Gitea per-commit quirk documented in
- * delta.ts), so a path that was renamed or deleted part-way through the range
+ * by every commit in the range (the Gitea per-commit quirk documented on
+ * `compareRefs`), so a path that was renamed or deleted part-way through the range
  * appears in the changed list and does not exist at the new ref. Measured on
  * WycliffeAssociates/en_udb v19-01...v19-10: 84 changed paths, 73 present at
  * v19-10, 11 absent. Callers that walk a changed list skip these; callers that

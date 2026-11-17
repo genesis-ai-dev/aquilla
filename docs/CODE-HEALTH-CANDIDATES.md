@@ -4124,12 +4124,9 @@ shape; needs a human to say the route no longer returns it),
 routine may not touch) and `lib/contextual/types.ts:42 REDRAFT_MAX_ITERATIONS` (the standing
 `contextual/tick.ts` invariant warning).
 
-### The `sync-worker` half — next run's slice, unchanged in size
+### The `sync-worker` half — DONE 2026-11-16
 
-Three safe symbols remain, all in one package, so it is one more clean run on the same terms
-(and it adds only `cd sync-worker && npm test` to the gate):
-`events/progress-projection.ts:605,616` (`clearSectionProgressStmt`,
-`allSectionsProgressRecomputeStmt`) and `events/scoped-search.ts:259 sanitizeFtsAnyTerm`.
+All three symbols shipped; see the 2026-11-16 entry at the end of this file.
 
 ### Sandbox note that cost this run ~25 minutes, for the next run
 
@@ -4215,3 +4212,161 @@ failed all three shards at boot with `Could not resolve "partyserver"`; the fix 
 `sync-worker/` and `agent-worker/`. A second attempt then failed on
 `Address already in use (127.0.0.1:9788)` — a failed shard boot leaves its `wrangler dev`
 behind, and those must be stopped before retrying.
+
+## 2026-11-16 — dead-code run: the three `sync-worker` zero-reference exports (the slice 2026-11-13 queued)
+
+**Done this run** (theme 1, dead-code deletion; 3 files counting this ledger, 2 source +
+this one, **no test file touched**). This closes the `sync-worker` half of the 23 worker
+exports the 2026-11-11 entry found: 47 lines deleted, 0 added, both files in
+`sync-worker/src/events/`.
+
+Every symbol verified at **zero references repo-wide, before and after the edit** — a
+word-boundary `git grep` across every tracked `.ts`/`.tsx`/`.js`/`.mjs`/`.json`/`.md`/`.sql`
+(this ledger excluded) plus a substring sweep of the whole tree minus `node_modules`/`.git`/
+`dist`. One hit each, the declaration itself.
+
+- `events/progress-projection.ts:607 clearSectionProgressStmt` — a per-file
+  `DELETE FROM file_section_progress … AND scope IN ('section','book')`, documented "before a
+  full rebuild in the same transaction". **Superseded, not lost**, and the successor is
+  *broader*: the live full rebuild (`events/rebuild.ts:119`) issues its own project-wide
+  `DELETE FROM file_section_progress WHERE project_id = ?` before replay, and
+  `fullProgressRecomputeStmts` (the live 3-statement bundle, ~40 call sites across
+  `events/*`, `progress-selfheal-cron.ts` and `scripts/*`) rewrites rows through
+  `ON CONFLICT … DO UPDATE` rather than clearing them first. Nothing needed the narrower
+  per-file clear.
+- `events/progress-projection.ts:618 allSectionsProgressRecomputeStmt` — an 8-line
+  pass-through whose entire body was `return sectionsProgressRecomputeStmt(db, projectId,
+  fileId, updatedAt)`. The target **stays and is live** (`events/route.ts:65,1898`, plus 9
+  test files). Deleting a forwarder cannot change what the forwarded-to function does.
+- `events/scoped-search.ts:259 sanitizeFtsAnyTerm` — **the one worth a reviewer's eye, and it
+  checks out.** It built an any-term OR query in the **FTS5** dialect (`"t1" OR "t2"`, and its
+  doc comment still spoke of `bm25`), for AD-14 health-as-confidence retrieval. That feature
+  is very much alive — so the question was whether this was half a live feature. It is not:
+  the any-term retrieval exists in **two Postgres-dialect forms, neither of which calls it**.
+  (1) `neighborTsquery()` at `scoped-search.ts:663`, a *private* helper 4 lines above the live
+  `querySourceNeighbors`, with the **same Unicode class** (`/[\p{L}\p{M}\p{N}]+/gu`), the same
+  `new Set` dedupe and the **same 40-term cap**, emitting `t1 | t2` for
+  `to_tsquery('simple', …)`. (2) The batched `queryFileSourceNeighbors` (AQU-641) rebuilds the
+  same OR-tsquery **in SQL** from each asker's stored `value_tsv` lexemes via
+  `string_agg(… ' | ')`, capped by `MAX_QUERY_TERMS = 40` — whose own comment reads "mirrors
+  the 40-term slice in `querySourceNeighbors`". So the tuning was not lost; the builder was
+  re-expressed in Postgres syntax at the D1→Postgres cutover and the FTS5-shaped JS copy was
+  left behind. Its two siblings in the same file, `sanitizeFtsQuery` (live at `:339`) and
+  `sanitizeFtsExactPhrase` (live at `:560`), survived the cutover because their callers now
+  feed Postgres `phraseto_tsquery`/tsquery — which is exactly why they are **not** in this
+  deletion.
+
+**No helper was orphaned.** Re-checked after the edit: `sectionsProgressRecomputeStmt`,
+`fullProgressRecomputeStmts`, `neighborTsquery`, `querySourceNeighbors`,
+`queryFileSourceNeighbors`, `MAX_QUERY_TERMS`, `tokenizeForConfidence`, `lexicalConfidence`,
+`sanitizeFtsQuery`, `sanitizeFtsExactPhrase` all still have callers, and `AquillaDb` /
+`AquillaStatement` still have 4 uses each in `progress-projection.ts` (no import went unused).
+
+**Frozen-zone check**: `git diff --stat` is 2 files, both `sync-worker/src/events/*.ts`. Zero
+changes under `e2e/`, `**/*.test.ts`, `**/*.spec.ts`, `src/test-setup.ts`, `db/`,
+`**/migrations/`, `**/wrangler*.toml`, `package.json`/any lockfile, `scripts/deploy*`,
+`.github/`. `progress-projection.ts` lives in the projection area, but the frozen rule guards
+projection *behaviour* (the head compare-and-swap, last-write-wins vs first-child); code with
+no call sites executes never. The four `sync-worker/src/external/*` Agent-API symbols stay
+queued and untouched, as do the other 7 frozen-zone members of the 23 the 2026-11-13 entry
+lists.
+
+### Gates recorded 2026-11-16 (`origin/dev` `77ba0219`)
+
+| gate | baseline | after |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — 1061 problems, 0 errors | exit 0 — 1061 problems, 0 errors; **`diff` of the two full outputs is empty — byte-identical** |
+| `pnpm build` | exit 0 (`tsc -b` + `vite build` + brand check) | exit 0 |
+| `cd sync-worker && npm test` | **exit 0** — 326 files passed; 4828 passed / 21 skipped (4849), 1829.86s | **exit 0 — identical counts**, 1812.03s |
+| `pnpm test` | exit 1 — 1 failed / 2439 passed / 2 skipped (2442 files); 1 failed / 28398 passed / 1 expected fail / 23 skipped (28423), 1079.80s | **exit 1 — identical counts**, same single failure, 990.53s |
+| `pnpm test:e2e:smoke` | not re-baselined this run (see below) | s1 42 passed / **3 failed**, s2 33 passed, s3 38 passed |
+
+**The one `pnpm test` failure is the same pre-existing one** the 2026-11-09/11/13 entries
+document: `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > fails
+loud when the pick cannot commit, and leaves nothing in progress`. It sets
+`commit.gpgsign=true` with a nonexistent `gpg.program` and expects a throw; in this sandbox
+the commit succeeds anyway. The diff is `sync-worker/`, that test is `scripts/` — it imports
+nothing this run touched, and it is frozen by the "a file whose tests are already red is
+frozen" rule. Still owed to Ryder rather than filed.
+
+**Smoke, stated plainly**: this run did **not** take a fresh clean-`dev` smoke baseline. The
+numbers above are an exact match for the clean-`origin/dev` baseline the 2026-11-13 entry
+recorded (s1 42 passed / 3 failed, s2 33 passed, s3 38 passed), and s1's 3 failures are the
+documented pre-existing ones — `editor/import-and-edit.smoke.spec.ts:339`, the same file, the
+same line and the same three caption formats (srt, vtt, sbv), each a 15s locator timeout —
+which have now failed on clean `dev` across four consecutive runs. Shard 3, which flaked in
+the 2026-11-13 run, was **fully green** here. A caption-import spec cannot be reached by
+deleting three unreferenced `sync-worker` functions, so a fresh 30-minute baseline was judged
+to add no information; what the diff proves mechanically is stronger anyway — zero references
+repo-wide, byte-identical lint, and sync-worker's own 326-file / 4828-test suite identical
+before and after, which is precisely where live code would have broken.
+
+### Sandbox notes — three of these cost this run real time, read before the next one
+
+**1. NEVER run `pnpm lint` concurrently with any vitest suite.** `pnpm lint` asks for an
+8 GiB heap (`NODE_OPTIONS=--max-old-space-size=8192`) on a 15 GB box. Run alongside the
+sync-worker suite, it was **OOM-killed — `Killed`, exit 137** — *and* took a test worker down
+with it, so the same attempt reported `sync-worker` as "325 passed (326), 1 error,
+`Worker exited unexpectedly with signal SIGKILL` on `import-route.test.ts`". **Neither was a
+real result**: run alone, lint exits 0 and the sync-worker suite is 326/326 green. Serialize
+every gate — the whole chain is ~65 min and that is simply the cost.
+
+**2. `rm -rf packages/*/dist` must precede the *baseline* lint too, not just the after-lint.**
+ESLint's `globalIgnores(['dist', …])` does not reach nested `packages/*/dist` (the standing
+candidate higher in this file), so whether those build artifacts exist changes the total:
+**1063** problems with `packages/idml-roundtrip/dist/{engine,legacy}.js` present, **1061**
+without. A first comparison here showed a spurious 2-warning "improvement" that had nothing
+to do with the diff — both warnings were `Unused eslint-disable directive` inside those dist
+files. Re-run under matched conditions and the outputs are byte-identical.
+
+**3. `pnpm test:e2e:smoke` needs three container fixes, and two of them are not in this
+file yet.** Each failure mode looks like a broken suite and is not:
+- **Worker `node_modules` are absent in a fresh container.** `pnpm install --frozen-lockfile
+  --ignore-workspace` in each of `sync-worker/`, `auth-worker/`, `agent-worker/` (~2s each,
+  leaves `git status` clean, touches no lockfile). The 2026-11-13 note on this still holds.
+- **Playwright's browsers are revision-pinned and the container's are one build off.** The
+  repo's `@playwright/test@1.65.0` looks for `/opt/pw-browsers/chromium-1254/...` and
+  `/opt/pw-browsers/ffmpeg-1013/ffmpeg-linux`; this container ships **chromium-1243** and
+  **ffmpeg-1011**. Symptom: all 3 shards die at boot with "Playwright browser executable is
+  missing", and — after chromium is fixed but not ffmpeg — **7 specs fail with
+  `browserContext.newPage: Executable doesn't exist at /opt/pw-browsers/ffmpeg-1013/
+  ffmpeg-linux`** (auth, onboarding and share-invite specs, none of them really broken). Fix
+  with two symlinks, and **do not run `playwright install`** — this sandbox forbids it and a
+  fresh download will not find the preinstalled browser:
+  `ln -sfn /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1254` and
+  `ln -sfn /opt/pw-browsers/ffmpeg-1011 /opt/pw-browsers/ffmpeg-1013`
+  (the headless shell too, if a shard asks for it:
+  `ln -sfn /opt/pw-browsers/chromium_headless_shell-1243 /opt/pw-browsers/chromium_headless_shell-1254`).
+  Chromium 1243 ran the whole suite with no protocol trouble.
+- **No Postgres is running and Docker is unavailable.** Use the repo's own provisioner —
+  `bash scripts/e2e-pg-native.sh` (AQU-1820) — and export the single `E2E_PG_ADMIN_URL` line
+  it prints on stdout. **Do not hand-start the Debian `16/main` cluster instead**: the
+  Docker-less reset in `scripts/e2e-up.ts` shells out to `psql` with
+  `E2E_PG_ADMIN_URL` defaulting to `postgresql:///postgres`, i.e. over the **local socket as
+  the OS user**, so on a cluster provisioned by hand it dies with
+  `FATAL: role "root" does not exist` and "refusing to run against a stale schema" — which
+  reads like a harness bug and is just a missing role. The script's cluster has it.
+- One residual flake worth knowing: `projects/admin-console-billing.smoke.spec.ts:51` failed
+  once mid-run with `ENOENT: no such file or directory, scandir
+  'auth-worker/.wrangler/tmp/email'` and passed on the next run. The 2026-11-13 entry saw the
+  same harness artifact. Not an assertion failure.
+
+### New candidate — FTS5-era vocabulary in a Postgres search path
+
+- **Found**: 2026-11-16, while establishing that `sanitizeFtsAnyTerm`'s `bm25`/FTS5 comment
+  described a dialect the live code no longer speaks.
+- **Friction**: `git grep -in "fts5\|bm25\|cells_fts"` over `sync-worker/src/**/*.ts` returns
+  **125 hits across 15 files** (`events/scoped-search.ts` 19, `lib/branching-search/
+  algorithm.ts` 13, `events/search-route.ts` 6, `events/event-projection.ts` 6, plus test
+  helpers). Some are accurate history, some are live-sounding claims about a datastore that
+  was replaced — e.g. `queryScopedSearch`'s "Throws on FTS5 syntax errors so the route layer
+  can decide 400 vs 500" and "FTS5 JOIN: `cells_fts.rowid` lines up with `cells.rowid` via the
+  virtual table's external-content binding (migration 0003)", both sitting above SQL that now
+  calls `to_tsquery`/`phraseto_tsquery` against a generated `value_tsv` column.
+- **Why deferred**: this run's theme was dead-code deletion, and the routine allows one theme
+  per run. It is also genuinely a judgement call per hit — the `rebuild-fts` admin route and
+  `/admin/projects/:id/rebuild-fts` endpoint keep the FTS name legitimately, and some
+  comments are deliberately historical — so it is a read-every-hit job, not a sweep.
+- **Proof needed**: comments-only, so the ordinary full gate suffices. Worth one doc-drift
+  run scoped to `sync-worker/src/events/` plus `lib/branching-search/`, leaving test helpers
+  and the `rebuild-fts` route names alone.

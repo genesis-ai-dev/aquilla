@@ -476,6 +476,13 @@ export const audio = defineNamespace({
       one: "{count} cell was skipped because its voice has no trained voice model.",
       other: "{count} cells were skipped because their voice has no trained voice model.",
     }),
+    // AQU-2499 (review, Nov 9): lines that share one recording with others.
+    // Said before the run (the confirmation) and after it (the toast), so it
+    // is in the present tense, true in both.
+    "audio.changeVoice.batchSkippedShared": plural({
+      one: "{count} line stays as it is: it shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
+      other: "{count} lines stay as they are: each shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
+    }),
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
     "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
@@ -2740,6 +2747,16 @@ export const audio = defineNamespace({
           "Toast detail after the bulk run when some conversions failed. Each failed " +
           "cell shows its own error badge with the reason.",
         placeholders: { count: "How many conversions failed." },
+      },
+      "audio.changeVoice.batchSkippedShared": {
+        description:
+          "Shown twice for the bulk 'Change voice of existing audio' run: in its " +
+          "confirmation, BEFORE anything has run, and in the toast after it. So it is " +
+          "in the present tense and must read true in both: these lines are left as " +
+          "they are. Their recording is also used by other lines (for example a whole " +
+          "chapter uploaded as one file and placed on each verse), and re-voicing one " +
+          "line would re-voice the whole recording. 'Change voice' is the name of the action.",
+        placeholders: { count: "How many lines are left as they are." },
       },
       "audio.changeVoice.batchSkippedNotTrained": {
         description:

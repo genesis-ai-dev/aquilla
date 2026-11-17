@@ -29,8 +29,8 @@ test("ghost text learns from validated cells; Tab and words-that-fit commit like
   const cellId = seeded.cellIds[seeded.rowOf(HELD_OUT_REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
-  // Off by default (AQU-2117): opt in through the real switch before typing.
-  await assist.enableGhostText()
+  // On by default: the switch starts checked in a fresh browser.
+  await assist.expectGhostTextOnByDefault()
 
   await assist.openNextUnfinished(cellId)
   await assist.type("E hizo Dios animales de ")
@@ -42,17 +42,21 @@ test("ghost text learns from validated cells; Tab and words-that-fit commit like
   await expect(async () => {
     await page.keyboard.press("Backspace")
     await page.keyboard.type(" ")
-    await expect(assist.ghost(cellId)).toHaveText("la tierra", { timeout: 1_000 })
+    await expect(assist.ghost(cellId)).toHaveText("la", { timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
   // A decoration, not text: the editor's document does not contain it.
   expect(await assist.documentText(cellId))
     .toBe("E hizo Dios animales de ")
 
+  // One word at a time; after an accept the next word follows.
+  await assist.acceptSuggestion()
+  await expect.poll(() => assist.documentText(cellId)).toBe("E hizo Dios animales de la")
+  await expect(assist.ghost(cellId)).toHaveText(" tierra")
   await assist.acceptSuggestion()
   await expect.poll(() => assist.documentText(cellId)).toBe("E hizo Dios animales de la tierra")
   await assist.type(" según ")
-  await expect(assist.ghost(cellId)).toHaveText("su género")
-  // →: just the next word.
+  await expect(assist.ghost(cellId)).toHaveText("su")
+  // Ctrl + → accepts too; a plain → only moves the caret.
   await assist.acceptNextWord()
   await expect.poll(() => assist.documentText(cellId)).toBe("E hizo Dios animales de la tierra según su")
   await assist.type(" género, y ganado")
@@ -87,8 +91,8 @@ test("ghost text uses the cell's source verse: an empty cell's first word, and a
   const cellId = seeded.cellIds[seeded.rowOf(SOURCE_DRIVEN_REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
-  // Off by default (AQU-2117): opt in through the real switch before typing.
-  await assist.enableGhostText()
+  // On by default: the switch starts checked in a fresh browser.
+  await assist.expectGhostTextOnByDefault()
   await assist.openNextUnfinished(cellId)
 
   // Empty cell: "God blessed …" → "bendijo". Re-type a space and remove it

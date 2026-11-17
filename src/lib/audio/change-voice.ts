@@ -21,6 +21,7 @@ import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { Voice } from "@/lib/parsers/types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { pieceGroupOf, slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { probeDurationMsSafe } from "@/lib/import"
@@ -29,7 +30,7 @@ import { keptTakePlace, placeNewTake, placedFields } from "./new-take-place"
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey } from "./tts"
-import { fetchCellAudio, audioIdSeededWith } from "./upload"
+import { fetchCellAudio, audioIdSeededWith, parseFrontierAudioUrl } from "./upload"
 import { convertToLibraryVoice, type ConvertToLibraryVoiceResult } from "./voice-clone"
 import { convertElevenLabsSpeech } from "@/lib/sync/elevenlabs"
 import { elevenLabsConversionKey, elevenLabsSettingsOf, isElevenLabsVoice, ELEVENLABS_STS_MODEL } from "./elevenlabs/settings"
@@ -90,8 +91,14 @@ function isImportedSourceClip(cell: CellData, audioId: string, att: CodexCellAtt
  * The take Change voice acts on: the cell's playable take (recording first,
  * then generated voice — the order the voice panel plays them in), never the
  * imported programme clip, whose object is the whole file's audio.
+ *
+ * AQU-2499 (review, Nov 9): with `audioId`, the take the person picked (a take
+ * on an added track, or the one open in the Station) rather than the main
+ * track's. A piece of the take playing in its track stands for that take, as
+ * on the main track: the whole take, whichever piece was right-clicked.
  */
-export function changeVoiceSourceTake(cell: CellData): ChangeVoiceTake | null {
+export function changeVoiceSourceTake(cell: CellData, audioId?: string): ChangeVoiceTake | null {
+  if (audioId) return pickedTake(cell, audioId)
   for (const audioId of [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId]) {
     if (!audioId) continue
     const att = cell.attachments?.[audioId]
@@ -101,6 +108,22 @@ export function changeVoiceSourceTake(cell: CellData): ChangeVoiceTake | null {
     return { audioId, slot, attachment: att }
   }
   return null
+}
+
+function pickedTake(cell: CellData, audioId: string): ChangeVoiceTake | null {
+  const att = cell.attachments?.[audioId]
+  if (!att || att.isDeleted || isImportedSourceClip(cell, audioId, att)) return null
+  const slot = att.slot ?? (audioId === cell.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
+  const playing = slotSelections({
+    selectedBySlot: cell.selectedBySlot,
+    selectedAudioId: cell.selectedAudioId ?? null,
+    selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+  })[slot]
+  const playingAtt = playing ? cell.attachments?.[playing] : undefined
+  if (playing && playingAtt && !playingAtt.isDeleted && pieceGroupOf(playingAtt, playing) === pieceGroupOf(att, audioId)) {
+    return { audioId: playing, slot, attachment: playingAtt }
+  }
+  return { audioId, slot, attachment: att }
 }
 
 /**
@@ -139,15 +162,63 @@ export function originalTakeId(
   return current
 }
 
-/** Why Change voice can't run on a cell, or null when it can. */
-export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date"
+/**
+ * AQU-2499 (review, Nov 9): which lines hold a take of each stored recording,
+ * by the `frontier-audio://` url the worker reads it from. Built once for a
+ * file and handed to `recordingSharedBy`. Lines, not takes: the pieces of a
+ * cut take all sit on one line, so they count once.
+ */
+export type RecordingLines = ReadonlyMap<string, ReadonlySet<string>>
 
-export function changeVoiceBlocker(cell: CellData, voice: Voice): ChangeVoiceBlocker | null {
-  const take = changeVoiceSourceTake(cell)
+type HeldTake = { url: string; isDeleted?: boolean; role?: string | null }
+
+export function recordingLinesOf(
+  lines: Iterable<readonly [lineId: string, line: { attachments?: Record<string, HeldTake> | null } | undefined]>,
+): RecordingLines {
+  const out = new Map<string, Set<string>>()
+  for (const [lineId, line] of lines) {
+    for (const att of Object.values(line?.attachments ?? {})) {
+      if (att.isDeleted || att.role === "source" || !parseFrontierAudioUrl(att.url)) continue
+      const held = out.get(att.url) ?? new Set<string>()
+      held.add(lineId)
+      out.set(att.url, held)
+    }
+  }
+  return out
+}
+
+/**
+ * AQU-2499 (review, Nov 9): how many lines hold the stored recording Change
+ * voice would convert for this take, this line included; 0 with no take.
+ *
+ * The worker converts the WHOLE recording a take plays. On one line that is
+ * right: a whole take, or the pieces of a cut take, which are one line's
+ * recording (1). Above 1 the recording is shared by several lines — a chapter
+ * uploaded as one file and put on each verse, a Station version saved over
+ * several lines — and re-voicing one of them would convert all of it, paid,
+ * once per line, and put the whole of it on each line. That is refused.
+ */
+export function recordingSharedBy(cell: CellData, audioId: string | undefined, lines: RecordingLines): number {
+  const take = changeVoiceSourceTake(cell, audioId)
+  if (!take) return 0
+  const url = cell.attachments?.[originalTakeId(cell.attachments, take.audioId)]?.url ?? ""
+  const held = parseFrontierAudioUrl(url) ? lines.get(url) : undefined
+  return held ? new Set([cell.id, ...held]).size : 1
+}
+
+/** Why Change voice can't run on a cell, or null when it can. AQU-2499:
+ *  "shared", its recording is shared by several lines (`recordingSharedBy`). */
+export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date" | "shared"
+
+/** `audioId`: the take the person picked (AQU-2499); else the line's own.
+ *  `lines`: the file's `recordingLinesOf`, to refuse a shared recording. */
+export function changeVoiceBlocker(cell: CellData, voice: Voice, audioId?: string, lines?: RecordingLines): ChangeVoiceBlocker | null {
+  const take = changeVoiceSourceTake(cell, audioId)
   if (!take) return "no-take"
   const key = voiceConversionKey(voice)
   if (!key) return "not-trained"
   if (take.attachment.voiceId === voice.id && voiceChangedWithReference(take.audioId, key)) return "up-to-date"
+  if (lines && recordingSharedBy(cell, audioId, lines) > 1) return "shared"
   return null
 }
 
@@ -173,6 +244,8 @@ export interface ChangeVoiceArgs {
   targetLang?: string
   /** Decision 11: record an Undo step for the changed take. Bulk runs leave it off. */
   recordStep?: boolean
+  /** AQU-2499: the take picked (an added track's, the Station's); else the line's own. */
+  audioId?: string
 }
 
 export interface ChangeVoiceResult {
@@ -184,7 +257,7 @@ export interface ChangeVoiceResult {
 export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeVoiceResult> {
   const { projectId, cell, voice, session, author } = args
   if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
-  const take = changeVoiceSourceTake(cell)
+  const take = changeVoiceSourceTake(cell, args.audioId)
   if (!take) throw new Error("This line has no take to change.")
   const elevenLabs = isElevenLabsVoice(voice) ? voice.elevenLabs : undefined
   if (!voice.libraryVoiceId && !elevenLabs) {
@@ -193,6 +266,13 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
   const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
+  // AQU-2499 (review, Nov 9): the worker reads the stored recording by name,
+  // and a take can play another take's recording (a piece of a cut take, a
+  // later line of a range uploaded as one file, a Station version used on
+  // several lines), so send the object its url names, as Remove noise does.
+  // The new take still links back to the take itself.
+  const stored = parseFrontierAudioUrl(cell.attachments?.[sourceAudioId]?.url ?? "")
+  const storedAudioId = stored ? `${stored.audioId}.${stored.ext}` : sourceAudioId
   const getSyncToken = audioSyncTokenFetcherForSession(session)
   let conv: ConvertToLibraryVoiceResult
   if (voice.libraryVoiceId || !elevenLabs) {
@@ -201,7 +281,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
       fileId: cell.fileId,
       cellId: cell.id,
       libraryVoiceId: voice.libraryVoiceId ?? "",
-      sourceAudioId,
+      sourceAudioId: storedAudioId,
       getSyncToken,
     })
   } else {
@@ -212,7 +292,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
       fileId: cell.fileId,
       cellId: cell.id,
       voiceId: elevenLabs.voiceId,
-      sourceAudioId,
+      sourceAudioId: storedAudioId,
       modelId: ELEVENLABS_STS_MODEL,
       voiceSettings: elevenLabsSettingsOf(voice),
     }, getSyncToken)

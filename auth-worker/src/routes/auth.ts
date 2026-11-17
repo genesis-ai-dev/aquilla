@@ -252,6 +252,27 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       }
     }
 
+    // [Pen test] Auth & session (2026-11-16): the same refusal for the
+    // `platform_admins` TABLE, in every environment. Admin identity is by
+    // email, a row may be added before its owner signs up
+    // (docs/DEPLOYMENT-ENVIRONMENTS.md), and this route proves nothing about
+    // who holds the mailbox — so whoever registered a pre-provisioned address
+    // first became that platform admin. The emailed step-up code was the only
+    // thing in the way, and it is off on dev (AQU-2470), where the access list
+    // below also waves every admin email through (AQU-2469). The owner signs
+    // up with Google, which proves the mailbox, or is added to the table after
+    // registering. Read directly rather than through isPlatformAdminEmail,
+    // which answers "not an admin" when the read fails: here a failed read
+    // must refuse (it throws into the 500 below), not admit.
+    const adminIdentity = await c.env.AQUILLA_PG.prepare(
+      "SELECT 1 AS ok FROM platform_admins WHERE email = LOWER(?) OR email = LOWER(?)",
+    )
+      .bind(email.trim(), username.trim())
+      .first<{ ok: number }>()
+    if (adminIdentity) {
+      return c.json({ detail: "User already exists", error: "Registration failed" }, 409)
+    }
+
     // AQU-2469: on dev, only listed emails may create an account. Without
     // this the account would be created and then refused on its first request.
     const devAccess = await checkDevAccess(c.env, email)

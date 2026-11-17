@@ -110,11 +110,11 @@ function fakeCommands(version: string | null = "1.2.0", staged: StagedBundle | n
 
 const STAGED: StagedBundle = { version: "2026.11.05.03", sha: "abc123" }
 
-function renderPrompt(commands: DesktopUpdateCommands, graceMs = 60_000) {
+function renderPrompt(commands: DesktopUpdateCommands, graceMs = 60_000, bundleRecheckMs?: number) {
   return render(
     <>
       <Toaster />
-      <DesktopUpdatePrompt commands={commands} graceMs={graceMs} />
+      <DesktopUpdatePrompt commands={commands} graceMs={graceMs} bundleRecheckMs={bundleRecheckMs} />
     </>,
   )
 }
@@ -354,6 +354,22 @@ describe("DesktopUpdatePrompt", () => {
 
       act(() => commands.emit("bundle://staged", STAGED))
       expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+    })
+
+    // Releases are hourly: an app left open must not make the user restart once per release.
+    it("replaces the offer with a newer bundle found while the app stays open, so one restart reaches the latest", async () => {
+      const user = userEvent.setup()
+      const commands = fakeCommands(null, STAGED)
+      renderPrompt(commands, 60_000, 40)
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+
+      commands.checkBundle.mockResolvedValue({ version: "2026.11.05.07", sha: "def456" })
+      expect(await screen.findByText("Aquilla 2026.11.05.07 is ready to install.")).toBeInTheDocument()
+      expect(screen.queryByText("Aquilla 2026.11.05.03 is ready to install.")).toBeNull()
+      expect(screen.getAllByRole("button", { name: "Restart to update" })).toHaveLength(1)
+
+      await user.click(screen.getByRole("button", { name: "Restart to update" }))
+      expect(commands.restart).toHaveBeenCalledTimes(1)
     })
 
     it("prefers the shell update when both are pending, since installing it relaunches anyway", async () => {

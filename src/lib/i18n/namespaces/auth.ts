@@ -45,7 +45,10 @@ export const auth = defineNamespace({
     "auth.emailChange.invalid_or_expired_code": "That code is invalid or expired. Request a new verification email.",
     "auth.emailChange.rate_limited": "Too many attempts. Please wait before trying again.",
     "auth.emailChange.restart": "Start again",
-    "auth.emailChange.failed": "We could not complete the change. Check your connection and try again.",
+    "auth.emailChange.failed": "Aquilla could not process this request. Please try again shortly.",
+    "auth.emailChange.networkError": "We could not reach Aquilla. Check your connection and try again.",
+    "auth.emailChange.serviceUnavailable": "Email changes are temporarily unavailable. Please try again later.",
+    "auth.emailChange.sessionRequired": "Please log in again before changing your email.",
     "auth.emailChange.password_required": "Set an Aquilla password first. You’ll use it with your new email after Google is disconnected. Your email and Google login stay unchanged until you verify the new email.",
     "auth.emailChange.unlinkWarningTitle": "Google login will be disconnected",
     "auth.emailChange.unlinkWarning": "When you confirm your new email, Google login will be disconnected from this account. Log in with your new email and Aquilla password afterward. Your projects and permissions will stay the same.",
@@ -226,6 +229,13 @@ export const auth = defineNamespace({
     "auth.join.invalidInviteLink": "Invalid invite link",
     "auth.join.networkError": "Couldn't reach the server. Check your connection and try again.",
     "auth.join.wrongEmail": "This invite was sent to a different email address.",
+    "auth.join.wrongEmailInvited": "This invite is for {email}.",
+    "auth.join.wrongEmailSignedInWithEmail": "You're signed in as {username} ({email}).",
+    "auth.join.wrongEmailSignedIn": "You're signed in as {username}.",
+    "auth.join.wrongEmailAskOwner":
+      "Sign out and sign in with the invited address, or ask the project owner to add " +
+      "your account \u201C{username}\u201D directly.",
+    "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -301,6 +311,9 @@ export const auth = defineNamespace({
       "auth.emailChange.invalid_or_expired_code": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
       "auth.emailChange.rate_limited": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
       "auth.emailChange.restart": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.networkError": { description: "Network failure or timeout during email change." },
+      "auth.emailChange.serviceUnavailable": { description: "Email change endpoint is unavailable on the server." },
+      "auth.emailChange.sessionRequired": { description: "Session rejected during email change." },
       "auth.emailChange.failed": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
       "auth.emailChange.password_required": { description: "Password prerequisite for a verified email change." },
       "auth.emailChange.unlinkWarning": { description: "Warn that confirming an email change removes Google login." },
@@ -841,7 +854,45 @@ export const auth = defineNamespace({
       "auth.join.wrongEmail": {
         description:
           "Error shown when accepting fails because the invite is bound to a " +
-          "different email address than the signed-in account's.",
+          "different email address than the signed-in account's. Fallback for " +
+          "a server that does not name the invited address; otherwise " +
+          "auth.join.wrongEmailInvited is shown.",
+      },
+      "auth.join.wrongEmailInvited": {
+        description:
+          "Headline of the email-mismatch rejection, naming the address the " +
+          "invite was minted for. {email} is already masked by the server " +
+          "(for example 'n…a@proton.me') and is rendered in bold.",
+        placeholders: { email: "The masked invited address, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailSignedInWithEmail": {
+        description:
+          "Second line of the email-mismatch rejection, naming the account " +
+          "the person is signed in as. {username} is shown in full and bold " +
+          "(it is what a project owner needs to add them directly); {email} " +
+          "is that account's own address, masked before display.",
+        placeholders: {
+          username: "The signed-in username, rendered as bold markup.",
+          email: "The signed-in account's masked email address.",
+        },
+      },
+      "auth.join.wrongEmailSignedIn": {
+        description:
+          "Same as auth.join.wrongEmailSignedInWithEmail, for a session that " +
+          "carries no email claim — the username alone.",
+        placeholders: { username: "The signed-in username, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailAskOwner": {
+        description:
+          "The two ways out of an email-mismatch rejection: sign in with the " +
+          "invited address, or have the project owner add this account by its " +
+          "username. {username} is quoted by the template.",
+        placeholders: { username: "The signed-in username, quoted by the template." },
+      },
+      "auth.join.wrongEmailSignOut": {
+        description:
+          "Button on the email-mismatch rejection that signs the person out " +
+          "so they can sign back in with the address the invite was sent to.",
       },
       "auth.join.noLongerValidFresh": {
         description:

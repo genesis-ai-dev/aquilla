@@ -192,4 +192,29 @@ describe("SpreadsheetImportPanel", () => {
     expect(importFile).toHaveBeenCalledOnce()
     expect(onImported).toHaveBeenCalledTimes(2)
   })
+
+  // AQU-2487 (import sweep, Nov 2): the message was set and never drawn, so
+  // "Map columns" looked dead on a sheet with a header and no rows.
+  it("says so when the mapped sheet has no rows to import", async () => {
+    render(
+      <SpreadsheetImportPanel
+        projectId="project-1"
+        username="alice"
+        sourceLanguage="en"
+        targetLanguage="fr"
+        getToken={vi.fn(async () => "token")}
+        onImported={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, {
+      target: { files: [new File(["source,target\n"], "empty.csv", { type: "text/csv" })] },
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+
+    expect(await screen.findByText(/No data rows found after applying the mapping/)).toBeTruthy()
+    expect(importFile).not.toHaveBeenCalled()
+  })
 })

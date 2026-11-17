@@ -278,7 +278,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
-import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
+import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLinesOf, recordingSharedBy } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
 import { injectOptimisticAudioTrim,
@@ -12451,7 +12451,9 @@ export function ProjectWorkspace() {
     // Includes takes already in the current voice, so the menu stays and the
     // confirmation can say there is nothing left to convert.
     const plan = planChangeVoiceAll(holders, tts.laneSettings)
-    const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"]
+    // AQU-2499 (review, Nov 9): and lines whose recording other lines share,
+    // so the confirmation can say why they are left alone.
+    const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"] + plan.skipped.shared
     return { untranscribed, unsynthesized: synthTargets.length, voiceChangeable }
   }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.laneSettings])
 
@@ -13105,6 +13107,7 @@ export function ProjectWorkspace() {
         settings: tts.laneSettings,
         session: frontierSession ?? null,
         author: currentUsername,
+        ...(activeLane ? { targetLang: activeLane } : {}), // AQU-2499 (review, Nov 9)
       }).then(({ converted, failed, skipped }) => {
         const notTrained = skipped["not-trained"]
         toast.add({
@@ -13113,6 +13116,8 @@ export function ProjectWorkspace() {
           description: [
             failed > 0 ? t("audio.changeVoice.batchFailed", { count: failed }) : null,
             notTrained > 0 ? t("audio.changeVoice.batchSkippedNotTrained", { count: notTrained }) : null,
+            // AQU-2499 (review, Nov 9): counted and named, not failed.
+            skipped.shared > 0 ? t("audio.changeVoice.batchSkippedShared", { count: skipped.shared }) : null,
           ].filter(Boolean).join(" ") || undefined,
         })
         revalidateCells?.()
@@ -13622,6 +13627,13 @@ export function ProjectWorkspace() {
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
+  // AQU-2499 (review, Nov 9): which lines hold each stored recording, from
+  // the always-loaded reads of the file's takes and its audio cues', so Change
+  // voice refuses a take whose recording other lines share.
+  const changeVoiceLines = useMemo(
+    () => recordingLinesOf([...audioValidationByCellId, ...cueAudioByCellId]),
+    [audioValidationByCellId, cueAudioByCellId],
+  )
   /**
    * AQU-2026: Change voice for ONE line, from the Media timeline's take menu.
    *
@@ -13638,24 +13650,28 @@ export function ProjectWorkspace() {
    * generated voice and never the film's programme audio.
    */
   const timelineChangeVoiceState = useCallback(
-    (cellId: string): ChangeVoiceMenuState | null => {
+    // AQU-2499 (review, Nov 9): `audioId` is the take right-clicked or open
+    // in the Station, so an added track's take is the one judged.
+    (cellId: string, audioId?: string): ChangeVoiceMenuState | null => {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return null
       const { cell } = owner
       // Nothing of this line's own to convert — the menu says nothing at all,
       // as the voice card renders no button on `no-take`.
-      const take = changeVoiceSourceTake(cell)
+      const take = changeVoiceSourceTake(cell, audioId)
       if (!take) return null
       const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       const status = getTtsStatus(ttsStatusKey(cell.id))
       const busy = status.kind === "loading" || status.kind === "synthesizing"
-      return { voiceName: voice.name, blocker: busy ? "busy" : changeVoiceBlocker(cell, voice) }
+      const blocker = busy ? "busy" : changeVoiceBlocker(cell, voice, audioId, changeVoiceLines)
+      if (blocker === "shared") return { voiceName: voice.name, blocker, sharedLines: recordingSharedBy(cell, audioId, changeVoiceLines) }
+      return { voiceName: voice.name, blocker }
     },
-    [tts.laneSettings],
+    [tts.laneSettings, changeVoiceLines],
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, opts?: { voice?: Voice }) => {
+    async (cellId: string, opts?: { voice?: Voice; audioId?: string }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
@@ -13665,7 +13681,13 @@ export function ProjectWorkspace() {
       const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
-      if (changeVoiceBlocker(cell, voice) != null) return
+      const blocker = changeVoiceBlocker(cell, voice, opts?.audioId, changeVoiceLines)
+      // AQU-2499 (review, Nov 9): a cast pick or the line's one-click gets
+      // here without the menu's reason; say why a shared recording is left.
+      if (blocker === "shared") {
+        toast.add({ type: "info", title: t("editor.voice.changeVoiceShared", { count: recordingSharedBy(cell, opts?.audioId, changeVoiceLines) }) })
+      }
+      if (blocker != null) return
       toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
       const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
@@ -13675,6 +13697,7 @@ export function ProjectWorkspace() {
         author: currentUsername,
         ...(activeLane ? { targetLang: activeLane } : {}),
         recordStep: true, // decision 11: an Undo step
+        ...(opts?.audioId ? { audioId: opts.audioId } : {}), // AQU-2499
       }))
       if (ok) {
         toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
@@ -13691,7 +13714,7 @@ export function ProjectWorkspace() {
         ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
       })
     },
-    [project, frontierSession, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
+    [project, frontierSession, tts.laneSettings, currentUsername, activeLane, revalidateCells, t, changeVoiceLines],
   )
   // AQU-1758 / AQU-2212: the Audio view card's rules (lib/audio/line-voice),
   // run through the timeline's own Regenerate and Change voice so every way of
@@ -13874,12 +13897,19 @@ export function ProjectWorkspace() {
             })
         return res.audioId
       },
-      changeVoice: (cellId) => {
-        const state = timelineChangeVoiceState(cellId)
+      changeVoice: (cellId, audioId) => {
+        // AQU-2499 (review, Nov 9): the take open here, not the main track's;
+        // never a layer's clip (music, effects), as on the timeline's menu.
+        const slot = resolveTakeCellRef.current(cellId)?.cell.attachments?.[audioId]?.slot
+        const onLayer = slot != null && deriveTracksForFile(project.files.find((f) => f.id === activeFileId))
+          .some((tr) => tr.kind === "audio" && tr.setsLineLengths === false && slotForTrack(tr.id) === slot)
+        if (onLayer) return t("editor.station.voiceUnavailable")
+        const state = timelineChangeVoiceState(cellId, audioId)
         // AQU-2291: one conversion, no quality to pick — it runs when nothing
         // blocks it, else the Station says why not.
+        if (state?.blocker === "shared") return t("editor.voice.changeVoiceShared", { count: state.sharedLines ?? 2 }) // AQU-2499 (review, Nov 9)
         if (!state || state.blocker != null) return t("editor.station.voiceUnavailable")
-        handleChangeTimelineVoice(cellId)
+        handleChangeTimelineVoice(cellId, { audioId })
         return null
       },
       approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
@@ -20507,8 +20537,16 @@ export function ProjectWorkspace() {
             : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           notice={pendingActionConfirm.id === "split-quotes" && project && openTargetLaneCount(project) >= 2
             ? t("nav.workspaceActions.splitQuotes.multiLaneWarning")
-            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["not-trained"] ?? 0) > 0
-              ? t("audio.changeVoice.batchSkippedNotTrained", { count: changeVoicePlan?.skipped["not-trained"] ?? 0 })
+            : pendingActionConfirm.id === "change-voice-all"
+              ? [
+                  (changeVoicePlan?.skipped["not-trained"] ?? 0) > 0
+                    ? t("audio.changeVoice.batchSkippedNotTrained", { count: changeVoicePlan?.skipped["not-trained"] ?? 0 })
+                    : null,
+                  // AQU-2499 (review, Nov 9): lines whose recording other lines share.
+                  (changeVoicePlan?.skipped.shared ?? 0) > 0
+                    ? t("audio.changeVoice.batchSkippedShared", { count: changeVoicePlan?.skipped.shared ?? 0 })
+                    : null,
+                ].filter(Boolean).join(" ") || undefined
               : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}

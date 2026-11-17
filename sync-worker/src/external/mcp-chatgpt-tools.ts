@@ -91,7 +91,10 @@ const descriptions: Record<string, string> = {
     'Read current settings first and supply the base version. Permission or approval requirements cannot be bypassed.',
   prepare_set_brief: 'Stage the project translation brief as answers to its named sections, within the ' +
     'existing per-key permission checks. Send only the sections the user asked to change; the server merges them, ' +
-    'reassembles the brief document and records authorship. Show the summary before confirm_changeset.',
+    'reassembles the brief document and records authorship. Once a project has saved translationInstructions, ' +
+    'those instructions are what every drafting prompt reads and this write reaches no prompt: the staged ' +
+    'changeset carries an inert_write warning, and the brief document still changes. Show the summary, ' +
+    'including any warning, before confirm_changeset.',
   regenerate_brief_summary: 'Stage a re-render of the translation brief summary from the sections already saved. ' +
     'It adds no content of its own and changes no answers. Use it when a saved brief reports an unrendered summary.',
   read_content: 'Read source and target cells in an authorized file. Use lane to select a target language lane. ' +

@@ -225,6 +225,82 @@ describe('membership — validation', () => {
   })
 })
 
+// ── naming the target by email (AQU-2576) ────────────────────────────────────
+//
+// An agent staffing a project is handed an address, not a handle. Before this,
+// `InviteMember{username:"nsilawajanakul@proton.me"}` 404'd `user_not_found`
+// while the same command with the real username succeeded — the backend had
+// the account the whole time, and the only way to find the handle was to walk
+// other projects' rosters. Every gate still runs on the RESOLVED account;
+// resolution is a lookup key, not a permission.
+describe('membership — target named by email (AQU-2576)', () => {
+  it('resolves an email passed as `username`', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, username: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(200)
+    expect(body.changeset.id).toBeTruthy()
+  })
+
+  it('accepts `email` as an alias for `username`', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(200)
+    expect(body.changeset.id).toBeTruthy()
+  })
+
+  it('matches the address case-insensitively', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name.toUpperCase()}@X.COM`, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(200)
+  })
+
+  it('applies the grant to the resolved account at commit', async () => {
+    const { token, credentialId } = await seedMaintainerCaller()
+    const { res: prepRes, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(prepRes.status).toBe(200)
+    await approve(body.changeset.id, body.digest, CALLER.id, credentialId)
+    const { res } = await commit(token, body.changeset.id)
+    expect(res.status).toBe(200)
+    // The row lands on the account the address resolved to, not on a stub.
+    expect(await directRole(TARGET.id)).toBe(ROLE.CONTRIBUTOR)
+  })
+
+  it('still 404s for an address no account uses', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: 'nobody@proton.me', role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(404)
+    expect(body.error.details.code).toBe('user_not_found')
+  })
+
+  it('keeps the grant cap when the target is named by email', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, email: `${TARGET.name}@x.com`, role: ROLE.OWNER },
+    ])
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+  })
+
+  it('rejects a command that names neither a username nor an email', async () => {
+    const { token } = await seedMaintainerCaller()
+    const { res, body } = await prepare(token, [
+      { kind: 'InviteMember', projectId: PROJECT, role: ROLE.CONTRIBUTOR },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+  })
+})
+
 // ── the MAINTAINER floor ─────────────────────────────────────────────────────
 
 describe('membership — role floor', () => {

@@ -54,6 +54,11 @@ export interface ChangesetWarning {
      *  events that DID land; the changeset is still `committing`, so retrying
      *  the commit resumes from there without duplicating them. */
     | 'apply_incomplete'
+    /** AQU-2425: the write lands, and reaches no AI prompt. Today the only
+     *  case is a translation-brief write on a project whose saved
+     *  `translationInstructions` already decide every prompt — the brief
+     *  document changes, the AI does not. See `brief-inert-warning.ts`. */
+    | 'inert_write'
   fileId: string
   cellId: string
   message: string

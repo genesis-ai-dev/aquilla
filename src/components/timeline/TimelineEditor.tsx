@@ -339,9 +339,10 @@ export interface TimelineEditorProps {
   onRegenerateVoice?(cellId: string, slot: string): void
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
-   *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string): void
-  changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+   *  says what it may do (see `TakeMenuActions`). AQU-2499: both name the
+   *  take right-clicked, so an added track's take is the one re-voiced. */
+  onChangeVoice?(cellId: string, take?: { audioId?: string }): void
+  changeVoiceStateFor?(cellId: string, audioId?: string): ChangeVoiceMenuState | null
   /** AQU-1758 / AQU-2291: "Train a voice from this recording" on a take's
    *  menu. Absent leaves it out (someone who may not make voices). */
   onTrainFromTake?(cellId: string, audioId: string): void
@@ -1134,9 +1135,11 @@ function LaneLabel({
       {/* The indent is on the CONTENT, not the row, so the row's background
           still spans the full gutter. A member steps in past the folder's
           own name, which is what makes the nest readable. It eases on the
-          rows' slide curve, so a track dragged over a folder steps in with
-          the gap opening for it. */}
+          rows' slide curve while this node stays mounted (a drag). A menu
+          move remounts the row in its new folder, so that transition never
+          runs; playTrackMove eases this element's padding instead. */}
       <div
+        data-tl-track-indent=""
         className={cn(
           "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
           indented && !collapsed && "pl-6",
@@ -2915,13 +2918,15 @@ export function TimelineEditor({
   }, [canCut, onCutTargets])
   // AQU-1767 (Sam, 2026-10-14): a take's right-click menu, per track slot.
   const [renamingTake, setRenamingTake] = useState<{ cellId: string; audioId: string; label: string } | null>(null)
-  const takeMenuFor = (slot: string): TakeMenuActions | undefined =>
+  // AQU-2499 (review, Nov 9): `layer`, a track made a layer (music, effects):
+  // its clips are no line's voice, so Change voice is left out there.
+  const takeMenuFor = (slot: string, layer = false): TakeMenuActions | undefined =>
     editable
       ? {
           ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
-          ...(onChangeVoice && changeVoiceStateFor
-            ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
+          ...(onChangeVoice && changeVoiceStateFor && !layer
+            ? { changeVoice: (cellId: string, audioId: string) => onChangeVoice(cellId, { audioId }), changeVoiceState: changeVoiceStateFor }
             : {}),
           ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
           // The line's own voice and its take: the line's own track only.
@@ -4775,7 +4780,7 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
-            takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeMenu={takeMenuFor(slotForTrack(track.id), track.setsLineLengths === false)}
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}

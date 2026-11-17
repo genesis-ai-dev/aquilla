@@ -250,7 +250,13 @@ const TOOL_SPECS: McpToolSpec[] = [
       'merges them into the live brief (unnamed sections keep their value), reassembles ' +
       'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
       'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
-      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'the copilot. That last part holds only WHILE the project has not written ' +
+      'translationInstructions: once it has, the saved instructions are what every drafting ' +
+      'prompt reads, this write reaches no prompt, and the staged changeset says so with an ' +
+      'inert_write warning (AQU-2425). The brief document still changes — to change what the ' +
+      'AI reads, use patch_settings { key: "translationInstructions" }. Check which case a ' +
+      'project is in with get_prompt_preview → parts.instructions before promising a brief ' +
+      'edit will change the AI. Args: projectId (required), parameters (partial map of section id → ' +
       'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
       'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
       'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
@@ -999,6 +1005,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
       'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
       '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'AQU-2576: `username` may be an email address, and `email` is an accepted alias for ' +
+      'it — the target resolves by username first, then by account email. Do not guess a ' +
+      'handle you were not given. ' +
       'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
       'the credential\'s mode — membership is governance, so every change passes a human at ' +
       'the approvalUrl. You cannot grant a role above your own (permission_denied ' +

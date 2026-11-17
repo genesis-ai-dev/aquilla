@@ -81,8 +81,16 @@ jobs:
       # migration → utils/password → bcryptjs). auth-worker is its own npm
       # package, not a pnpm workspace member, so the root install leaves its
       # node_modules empty and the users step died with ERR_MODULE_NOT_FOUND.
+      #
+      # pnpm, like every other job that installs auth-worker (ci.yml,
+      # dev-deploy.yml) — NOT `npm ci`. auth-worker's vitest 5 sits outside
+      # @cloudflare/vitest-pool-workers' peer range (^4.1), which npm treats as
+      # a hard ERESOLVE and pnpm as a warning. While this step ran `npm ci` it
+      # failed every night, so the users step below was skipped and no Frontier
+      # account reached Aquilla (AQU-1403 tracks the peer conflict itself).
       - name: Install auth-worker deps (imported by migrate-users.ts)
-        run: npm ci --prefix auth-worker
+        run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
 
       # Restore the delta state (HEAD-sha-per-project, for audioFastSha) so
       # unchanged projects are skipped without cloning. Missing object →

@@ -88,6 +88,7 @@ import { needsInworldLanguagePicker, toInworldLanguage } from "@/lib/audio/inwor
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { uploadVoiceReference } from "@/lib/audio/voice-clone"
+import { VOICE_PROJECT_SCOPE_FILE_ID } from "@/lib/audio/voice-project-scope"
 import { fetchTakeAsFile } from "@/lib/audio/take-file"
 import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -344,16 +345,20 @@ function NewVoiceModalBody({
       let voiceName = designSelection.voiceId
       let designPreviewAudioId = next.designPreviewAudioId
       if (designSelection.unpublished) {
-        if (!projectId || !fileId || !session) {
+        // AQU-2487 (review, Nov 9): the designed voice and its preview clip
+        // are saved for the project, so no file has to be open (the Voices
+        // panel with no file selected), as on the Clone voice tab.
+        if (!projectId || !session) {
           setTakeError(t("audio.newVoice.errorDesignNoProject"))
           return
         }
+        const tokenFileId = fileId || VOICE_PROJECT_SCOPE_FILE_ID
         setSaving(true)
         try {
           voiceName = await publishInworldVoice(
             {
               projectId,
-              fileId,
+              fileId: tokenFileId,
               voiceId: designSelection.voiceId,
               displayName: next.name,
               ...(next.prompt ? { description: next.prompt } : {}),
@@ -365,7 +370,7 @@ function NewVoiceModalBody({
             const id = buildDesignPreviewAudioId(inworldDesignPreviewExt(designSelection.previewAudio))
             await uploadVoiceReference({
               projectId,
-              fileId,
+              fileId: tokenFileId,
               referenceAudioId: id,
               blob,
               getSyncToken: audioSyncTokenFetcherForSession(session),

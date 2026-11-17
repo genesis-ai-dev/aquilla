@@ -4957,7 +4957,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9899,7 +9907,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14828,7 +14844,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19783,7 +19807,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26013,7 +26045,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32245,7 +32285,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38549,7 +38597,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -44900,7 +44956,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51166,7 +51230,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59378,7 +59450,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67595,7 +67675,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76223,7 +76311,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84494,7 +84590,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93142,7 +93246,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -101783,7 +101895,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110460,7 +110580,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119123,7 +119251,15 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -127778,6 +127914,14 @@
     "common.searchListAria": "fa199181610e0d22",
     "common.aboutAria": "c200f2ef2a407ce5",
     "editor.ai.copyError": "19dc540f83585b33",
-    "editor.ai.copyErrorDone": "8d525e5f158b9afe"
+    "editor.ai.copyErrorDone": "8d525e5f158b9afe",
+    "editor.panel.resizeDefault": "c9fe271c08aac0c3",
+    "editor.panel.resizeHistory": "c985d9c7d38f9915",
+    "editor.panel.resizeComments": "1b576440ba9d4b71",
+    "editor.panel.resizeRule": "44b8785a708ef2aa",
+    "editor.panel.resizeCheck": "aa9a5d04bc06411e",
+    "editor.panel.resizeTranslationNotes": "0e0da8143eb60fd3",
+    "editor.panel.resizeParallelBibles": "9f519c13c69533be",
+    "editor.panel.resizeVerseResources": "dd585d61dd9e77bc"
   }
 }

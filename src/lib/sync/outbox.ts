@@ -207,11 +207,13 @@ async function openDb(): Promise<IDBDatabase> {
           return
         }
         // On desktop a recovered edit may belong in the offline queue, next
-        // to the edits it chains on; finding out can wait seconds on the
-        // offline store, so route it in the background.
+        // to the edits it chains on. Finding out can wait on the offline
+        // store (bounded by its boot timeout), and readers still wait for
+        // it: an editor that opened first would show server text and chain
+        // the next commit on the server head, a sibling of the recovered one.
+        // Only a launch with something to recover pays this.
         if (isTauriRuntime()) {
-          resolve(db)
-          void recoverIntoQueues(db, journal)
+          void recoverIntoQueues(db, journal).finally(() => resolve(db))
           return
         }
         addOutboxRecords(db, STORE, journal.records).then(() => {
@@ -264,12 +266,19 @@ async function openDb(): Promise<IDBDatabase> {
 
 /** Which of `ids` are in the outbox, in any status and for any account. */
 async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
+  if (ids.length === 0) return new Set()
+  return lookupOutboxIdsIn(await openDb(), ids)
+}
+
+/** `lookupOutboxIds` on an already-open database (recovery runs before openDb resolves). */
+async function lookupOutboxIdsIn(db: IDBDatabase, ids: readonly string[]): Promise<ReadonlySet<string>> {
   const found = new Set<string>()
   if (ids.length === 0) return found
-  const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readonly")
     tx.onerror = () => reject(tx.error ?? new Error("outbox lookup failed"))
+    // An abort without a request error fires neither of the others.
+    tx.onabort = () => reject(tx.error ?? new Error("outbox lookup aborted"))
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
     for (const id of ids) {
@@ -293,12 +302,13 @@ async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<stri
 async function recoverIntoQueues(db: IDBDatabase, { records, keys }: JournalContents): Promise<void> {
   try {
     // Already queued in IndexedDB: the crash came after that write landed.
-    const present = await lookupOutboxIds(records.map((record) => record.id))
+    const lookup = (ids: readonly string[]) => lookupOutboxIdsIn(db, ids)
+    const present = await lookup(records.map((record) => record.id))
     const pending = records.filter((record) => !present.has(record.id))
     const owner = activeOwnerKey
     const routable = owner === undefined ? [] : pending.filter((record) => record.ownerKey === owner)
     const routing = routable.length > 0
-      ? await planOfflineRouting(routable.map((record) => record.event), lookupOutboxIds)
+      ? await planOfflineRouting(routable.map((record) => record.event), lookup)
       : null
     const routedIds = new Set(routing?.routed.map((event) => event.id))
     await addOutboxRecords(db, STORE, pending.filter((record) => !routedIds.has(record.id)))
@@ -373,29 +383,13 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
   // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
   // adds no overhead to the browser SPA's write path.
   // A scoped (guest) write never takes the signed-in desktop's offline queue.
-  if (!scope && isTauriRuntime()) {
-    const routing = await planOfflineRouting([event], lookupOutboxIds)
-    if (routing.rest.length === 0) {
-      try {
-        routing.commit()
-        clearJournalRecord(event.id)
-        return
-      } catch (error) {
-        // Nothing was queued offline; the HTTP outbox below takes it, as the
-        // batch path does.
-        console.warn("[outbox] Offline queue refused an edit; using the HTTP outbox", error)
-      }
-    }
-  }
-  const db = await openDb()
-  await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite")
-    tx.onerror = () => reject(tx.error ?? new Error("enqueue tx failed"))
-    tx.oncomplete = () => resolve()
-    tx.objectStore(STORE).put(rec)
-  }))
-  clearJournalRecord(event.id)
-  notifyOutboxChanged()
+  // Same write as a batch of one, so both entry points share idempotency (an
+  // already-queued id keeps its attempts and quarantine state) and failure
+  // handling (the journal entry goes either way: a refusal means not queued).
+  await writeOutboxRecords([rec], {
+    routeOffline: !scope && isTauriRuntime(),
+    clearJournal: () => clearJournalRecord(event.id),
+  })
 }
 
 /** Enqueue many events in ONE transaction and fire a SINGLE change
@@ -422,6 +416,24 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
   // it or none (a commit is never replayed without its create). Too big a
   // batch (replace-all, import) stays out of localStorage, which it could fill.
   const journalKey = ownerKey !== undefined ? journalBatch(records) : null
+  await writeOutboxRecords(records, {
+    routeOffline: isTauriRuntime(),
+    clearJournal: () => { if (journalKey) clearJournalBatch(journalKey) },
+  })
+}
+
+/**
+ * The write behind both enqueue entry points: routes what it can to the
+ * offline queue (when `routeOffline`), adds the rest to IndexedDB without
+ * overwriting ids already there, and clears the caller's journal entry once
+ * the write has settled, failed or not — a refusal means nothing was queued,
+ * so nothing may be replayed on the next launch either.
+ */
+async function writeOutboxRecords(
+  records: readonly OutboxRecord[],
+  { routeOffline, clearJournal }: { routeOffline: boolean; clearJournal: () => void },
+): Promise<void> {
+  const events = records.map((rec) => rec.event)
   const byEvent = new Map(records.map((rec) => [rec.event, rec]))
   const toRecords = (list: readonly CqrsRawEvent[]) => list.map((event) => byEvent.get(event)!)
 
@@ -431,7 +443,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
   let added: string[] = []
   let held: string[] = []
   try {
-    const routing = isTauriRuntime() ? await planOfflineRouting(events, lookupOutboxIds) : null
+    const routing = routeOffline ? await planOfflineRouting(events, lookupOutboxIds) : null
     // IndexedDB first: if it fails, nothing has reached the offline queue
     // either, so a refusal means none of the batch was queued.
     const toWrite = routing ? toRecords(routing.rest) : records
@@ -461,12 +473,12 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
         console.warn("[outbox] Couldn't undo a partly queued batch", cleanupError)
       })
     }
-    if (journalKey) clearJournalBatch(journalKey)
+    clearJournal()
     throw error
   } finally {
     for (const id of held) heldIds.delete(id)
   }
-  if (journalKey) clearJournalBatch(journalKey)
+  clearJournal()
   if (wrote) notifyOutboxChanged()
 }
 

@@ -33,6 +33,7 @@ import {
   outboxPendingCount,
   peekOutboxBatch,
   peekPendingOutboxBatch,
+  removeOutboxEvents,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
   OUTBOX_MAX_ATTEMPTS,
@@ -203,6 +204,9 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "alice" }))
     const fetchMock = vi.fn(async () => {
       setActiveOutboxOwner("bob")
+      // An enqueue never overwrites a queued id, so the replacement lands
+      // only after alice's row has gone (here, removed under her scope).
+      await removeOutboxEvents(["shared-id"], { ownerKey: "alice" })
       await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "bob" }))
       return jsonResponse({ accepted: [{ id: "shared-id" }], rejected: [] })
     })

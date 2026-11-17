@@ -31,6 +31,7 @@ import {
   outboxRecordCountAllOwners,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
+import type { OutboxRecord } from "./outbox"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 import { flushOutboxBatch } from "./outbox-flush"
 import { journalBatch, journalTargetCommit, readJournal, clearJournal, forgetInFlightJournalForTests } from "./outbox-recovery"
@@ -511,7 +512,7 @@ describe("cqrs outbox", () => {
     expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["o1"])
   })
 
-  it("enqueueOutboxEvents is idempotent on duplicate ids (same-id put overwrites)", async () => {
+  it("enqueueOutboxEvents is idempotent on duplicate ids", async () => {
     await enqueueOutboxEvents([ev("dup", "c1")])
     await enqueueOutboxEvents([ev("dup", "c1")])
     const rows = await peekOutboxBatch(100)
@@ -526,6 +527,41 @@ describe("cqrs outbox", () => {
     expect(rec.status).toBe("failed")
     expect(rec.attempts).toBe(1)
     expect(rec.lastError).toEqual({ status: 403, reason: "forbidden" })
+  })
+
+  it("enqueueOutboxEvent leaves an already-queued record's attempts and quarantine alone, as the batch path does", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    await quarantineOutboxEvents([sample.id], { status: 403, reason: "forbidden" })
+    await enqueueOutboxEvent(sample)
+    const [rec] = await peekOutboxBatch(10)
+    expect(rec.status).toBe("failed")
+    expect(rec.lastError).toEqual({ status: 403, reason: "forbidden" })
+  })
+
+  it("enqueueOutboxEvent clears its journal entry when the IndexedDB write fails", async () => {
+    setActiveOutboxOwner("alice")
+    await outboxPendingCount() // open the connection before failing its writes
+    const original = IDBDatabase.prototype.transaction
+    const transaction = vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+      this: IDBDatabase, ...args: Parameters<IDBDatabase["transaction"]>
+    ) {
+      if (this.name === "aquilla-cqrs-outbox" && args[1] === "readwrite") {
+        throw new DOMException("disk full", "QuotaExceededError")
+      }
+      return original.apply(this, args)
+    })
+    try {
+      await expect(enqueueOutboxEvent(sample)).rejects.toThrow(/disk full/)
+    } finally {
+      transaction.mockRestore()
+    }
+    // Refused means not queued: the next launch must not replay it behind
+    // the caller's back.
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:e1")).toBeNull()
+    await resetOutboxConnectionForTests() // the next launch
+    setActiveOutboxOwner("alice")
+    expect(await peekOutboxBatch(10)).toEqual([])
   })
 
   it("leaves this page's in-flight journal entries out of recovery", () => {
@@ -1112,6 +1148,33 @@ describe("Tauri offline routing", () => {
     expect(queuedIds()).toEqual(["tc1"])
     setActiveOutboxOwner("bob")
     expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["tc-bob"])
+  })
+
+  it("holds readers until desktop crash recovery lands, even while the offline store boots", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      localStorage.clear()
+      journalTargetCommit({
+        id: commitEvent.id, event: commitEvent, ownerKey: "alice", enqueuedAt: 1,
+        attempts: 0, lastAttemptAt: null, lastError: null, status: "pending",
+      })
+      await resetOutboxConnectionForTests() // the next launch
+      setActiveOutboxOwner("alice")
+      setTauriRuntime(true)
+      markProjectOfflineReady("proj1")
+      getOfflineStoreMock.mockReturnValueOnce(new Promise<never>(() => {}))
+
+      // The first read (an editor's pending overlay) must already see the
+      // recovered edit, or the next commit would chain on the server head.
+      let firstRead: OutboxRecord[] | undefined
+      void peekOutboxBatch(10).then((rows) => { firstRead = rows })
+      // Recovery sets its boot timeout only once IDB has opened.
+      for (let i = 0; i < 50 && !firstRead; i++) await vi.advanceTimersByTimeAsync(1_000)
+      expect(firstRead?.map((r) => r.id)).toEqual(["tc1"])
+      expect(journalLeft()).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("keeps the flusher off a batch's records until its offline commit settles", async () => {

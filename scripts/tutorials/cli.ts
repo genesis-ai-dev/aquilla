@@ -49,6 +49,7 @@ function option(name: string): string | undefined {
 }
 
 interface Storyboard {
+  generatedAt: string
   verified: boolean
   durationMs: number
   tutorial?: {
@@ -121,6 +122,9 @@ async function main(): Promise<void> {
       : `[tutorials] voice: ${voice.said} lines said, ${voice.kept} kept.`,
   )
 
+  // A take left by an earlier run is not this run's film: when the recorder
+  // stops before it starts (no database, say), its output folder is untouched.
+  const filmingBegan = flag("--skip-film") ? 0 : Date.now()
   if (!flag("--skip-film") && !film(tutorials)) {
     problems.push("a take failed (see the recording's output above)")
   }
@@ -130,7 +134,7 @@ async function main(): Promise<void> {
   for (const tutorial of tutorials) {
     const board = readStoryboard(tutorial.id)
     const shot = board?.tutorial
-    if (!board || !shot || !board.verified || !shot.video) {
+    if (!board || !shot || !board.verified || !shot.video || Date.parse(board.generatedAt) < filmingBegan) {
       problems.push(`${tutorial.id}: no verified take, so the film that is up stays up`)
       continue
     }

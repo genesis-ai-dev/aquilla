@@ -1783,8 +1783,10 @@ export function ProjectWorkspace() {
     () => createProjectPresenceStore(currentUsername),
     [currentUsername, project?.id],
   )
-  const jwtRef = useRef<string | null>(null)
-  useEffect(() => {
+  const jwtRef = useRef<string | null>(frontierSession?.jwt ?? null)
+  // Child passive effects mint tokens too. Publish the session before those
+  // effects run, including the first render after session restoration.
+  useLayoutEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
@@ -1846,6 +1848,7 @@ export function ProjectWorkspace() {
       },
     )
   }, [
+    frontierSession?.jwt,
     project?.id,
     project?.name,
     project?.origin?.kind,

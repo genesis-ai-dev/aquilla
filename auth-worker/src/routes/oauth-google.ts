@@ -42,7 +42,7 @@ function configured(env: AuthHonoEnv["Bindings"]): boolean {
 routes.get("/config", async c => {
   if (!configured(c.env)) return c.json({ enabled: false })
   if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
-  return c.json({ enabled: true })
+  return c.json({ enabled: true, desktop: true })
 })
 // Account management never contacts Google merely to read connection status.
 routes.get("/methods", authMiddleware, async c => {
@@ -99,12 +99,16 @@ routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managemen
 })
 // POST avoids prefetch/link scanners starting sign-in. Only exact configured SPA
 // origins may receive a handoff; never accept an arbitrary return URL.
-routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })), async c => {
+routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), desktop: z.boolean().optional() })), async c => {
   if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
   if (!configured(c.env)) return c.json({ error: "unavailable" }, 503)
   const origin = c.req.header("Origin") ?? ""
   const allowed = c.env.GOOGLE_LOGIN_APP_ORIGINS!.split(",").map(s => s.trim())
-  if (!allowed.includes(origin)) return c.json({ error: "invalid_origin" }, 400)
+  const desktop = c.req.valid("json").desktop === true
+  // Native origins are accepted only for the fixed native return target. They
+  // never become arbitrary redirect destinations or bypass Google verification.
+  const nativeOrigins = ["app://localhost", "http://app.localhost", "https://app.localhost", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
+  if (!allowed.includes(origin) && !(desktop && nativeOrigins.includes(origin))) return c.json({ error: "invalid_origin" }, 400)
   const ip = ipIdentifier(c.req.header("CF-Connecting-IP") || "unknown")
   if (await countRecentEvents(c.env.AQUILLA_PG, "social_login", ip, { onlyFailures: false }) >= 30) return c.json({ error: "rate_limited" }, 429)
   await recordAuthEvent(c.env.AQUILLA_PG, "social_login", ip, true)
@@ -112,10 +116,10 @@ routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(
   await c.env.AQUILLA_PG.prepare("DELETE FROM social_login_flows WHERE expires_at < now()").run()
   await c.env.AQUILLA_PG.prepare(`INSERT INTO social_login_flows
     (state_hash, browser_challenge, google_verifier, nonce, app_origin, status) VALUES (?, ?, ?, ?, ?, 'started')`)
-    .bind(await sha256Hex(state), c.req.valid("json").challenge, verifier, nonce, origin).run()
+    .bind(await sha256Hex(state), c.req.valid("json").challenge, verifier, nonce, desktop ? "aquilla://auth" : origin).run()
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
   url.search = new URLSearchParams({ client_id: c.env.GOOGLE_LOGIN_CLIENT_ID!, redirect_uri: c.env.GOOGLE_LOGIN_REDIRECT_URI!, response_type: "code", scope: "openid email", state, nonce, code_challenge: await pkceChallenge(verifier), code_challenge_method: "S256", prompt: "select_account" }).toString()
-  return c.json({ authorization_url: url.href })
+  return c.json({ authorization_url: url.href, ...(desktop ? { desktop: true } : {}) })
 })
 routes.get("/callback", async c => {
   const state = c.req.query("state") ?? ""
@@ -125,8 +129,10 @@ routes.get("/callback", async c => {
   const flow = await c.env.AQUILLA_PG.prepare(`UPDATE social_login_flows SET status = 'callback'
     WHERE state_hash = ? AND status = 'started' AND expires_at > now() RETURNING *`).bind(await sha256Hex(state)).first<Flow>()
   if (!flow) return c.json({ error: "expired_request" }, 400)
-  const back = new URL("/auth/google/return", flow.app_origin)
-  const fail = (error: string) => { back.hash = new URLSearchParams({ error }).toString(); return c.redirect(back.href, 303) }
+  const desktop = flow.app_origin === "aquilla://auth"
+  const back = new URL(desktop ? "/google" : "/auth/google/return", flow.app_origin)
+  const returnParams = (values: Record<string, string>) => new URLSearchParams({ ...values, ...(desktop ? { state: flow.browser_challenge } : {}) }).toString()
+  const fail = (error: string) => { back.hash = returnParams({ error }); return c.redirect(back.href, 303) }
   if (c.req.query("error")) return fail("cancelled")
   const code = c.req.query("code")
   if (!code || code.length > 4096) return fail("invalid_request")
@@ -159,7 +165,7 @@ routes.get("/callback", async c => {
       .bind(await sha256Hex(handoff), payload.sub, payload.email, payload.email.toLowerCase().endsWith("@gmail.com") || (typeof payload.hd === "string" && payload.hd.length > 0), flow.state_hash).run()
     // Fragment isn't sent in HTTP requests/referrers. The SPA removes it before
     // rendering and requires its tab-local verifier to redeem it.
-    back.hash = new URLSearchParams({ code: handoff }).toString()
+    back.hash = returnParams({ code: handoff })
     return c.redirect(back.href, 303)
   } catch {
     console.warn("[social-login] callback failed", stage)

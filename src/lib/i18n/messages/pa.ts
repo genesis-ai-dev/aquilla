@@ -7410,6 +7410,7 @@ export const pa: Catalog = {
   "workspace.typeahead.addUser": "{username} ਜੋੜੋ",
   "workspace.typeahead.alreadyMember": "{username} ਪਹਿਲਾਂ ਹੀ ਸਦੱਸ ਹੈ.",
   "workspace.typeahead.noUserNamed": "\"{query}\" ਨਾਮ ਦਾ ਕੋਈ Aquilla ਵਰਤੋਂਕਾਰ ਨਹੀਂ.",
+  "workspace.typeahead.noAccountWithEmail": "ਕਿਸੇ ਵੀ Aquilla ਖਾਤੇ ਨੇ ਈਮੇਲ {query} ਦੀ ਪੁਸ਼ਟੀ ਨਹੀਂ ਕੀਤੀ। ਉਸ ਵਿਅਕਤੀ ਨੂੰ ਉਸ ਦੇ Aquilla ਵਰਤੋਂਕਾਰ-ਨਾਮ ਨਾਲ ਜੋੜੋ, ਉਸ ਨੂੰ ਸੱਦਾ ਲਿੰਕ ਭੇਜੋ, ਜਾਂ ਉਸ ਨੂੰ ਆਪਣੀਆਂ ਖਾਤਾ ਸੈਟਿੰਗਾਂ ਵਿੱਚ ਇਸ ਪਤੇ ਦੀ ਪੁਸ਼ਟੀ ਕਰਨ ਲਈ ਕਹੋ।",
   "workspace.typeahead.inviteByEmailInstead": "ਇਸ ਦੀ ਬਜਾਏ ਈਮੇਲ ਰਾਹੀਂ ਸੱਦੋ",
   "workspace.typeahead.noScopedMatch": "ਉਨ੍ਹਾਂ ਲੋਕਾਂ ਵਿੱਚ ਕੋਈ ਮੇਲ ਨਹੀਂ ਜੋ ਤੁਹਾਡੇ ਨਾਲ ਸੰਸਥਾ ਜਾਂ ਪ੍ਰੋਜੈਕਟ ਸਾਂਝਾ ਕਰਦੇ ਹਨ.",
   "workspace.typeahead.addByExactUsername": "ਸਹੀ ਵਰਤੋਂਕਾਰ-ਨਾਮ ਨਾਲ \"{query}\" ਜੋੜੋ",

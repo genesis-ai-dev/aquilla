@@ -21,6 +21,9 @@ design and audit material.
   a developer a PII-scrubbed copy of one project without Neon or R2 access
   (`seed:extract:dev` → bundle → `seed:load --local`).
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
+- [Tutorial videos](TUTORIAL-VIDEOS.md) — the short how-to videos for the help
+  site: how they are filmed, when one is published again, and the `videos.json`
+  the help site reads (`pnpm tutorials`).
 - Postgres row-level security — the policies themselves are the documentation:
   `db/postgres/migrations/` (for example `0136_contextual_run_traces_rls.sql`).
   There is no separate rollout document today; this index used to link an

@@ -89,6 +89,7 @@
     "test:e2e:production:timing": "pnpm run test:e2e:guard && tsx scripts/e2e-production-timing.ts",
     "record": "E2E_CONFIG=e2e/config/playwright.config.recordings.ts tsx scripts/e2e-up.ts --",
     "record:assemble": "tsx scripts/assemble-showcase.ts",
+    "tutorials": "tsx scripts/tutorials/cli.ts",
     "promo:capture": "E2E_CONFIG=e2e/config/playwright.config.recordings.ts tsx scripts/e2e-up.ts -- -g \"Promo capture\"",
     "promo:render": "tsx scripts/promo/render.ts",
     "promo": "tsx scripts/promo/build.ts",

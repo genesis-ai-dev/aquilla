@@ -76,6 +76,14 @@ Pipeline:
 
 `promo.config.ts` is the single source of truth for duration/fps/scenes/beats — edit a number, re-run `npm run promo`. If no app stills exist yet, the composition falls back to a stylized panel so the pipeline always produces something.
 
+## Tutorial videos
+
+Short how-to videos for the help site are built on this harness: a fixed
+format, a voice timed to the screen, an Aquilla frame, and a `videos.json`
+the help site reads. `pnpm tutorials` makes them; see
+[docs/TUTORIAL-VIDEOS.md](../../docs/TUTORIAL-VIDEOS.md). Their scripts are in
+`specs/tutorials/` and their lines in `tutorials/catalog.ts`.
+
 ## Anonymization
 
 Always record against seeded/synthetic data (`dev-project`, `sample.md`, invented persona names). Never record real customer projects, names, or corpora.

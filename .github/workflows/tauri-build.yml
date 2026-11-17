@@ -118,7 +118,10 @@ jobs:
       # which this arm64 runner can't run.
       - name: Build e2e binary
         if: (github.event_name == 'pull_request' || inputs.smoke) && matrix.target != 'x86_64-apple-darwin'
-        run: pnpm tauri build --debug --no-bundle --features e2e-webdriver --config src-tauri/tauri.e2e.conf.json --config src-tauri/tauri.unsigned.conf.json
+        run: pnpm tauri build --debug --no-bundle --features e2e-webdriver --config src-tauri/tauri.unsigned.conf.json --config src-tauri/tauri.e2e.conf.json
+
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Run Tauri e2e smoke suite
         if: (github.event_name == 'pull_request' || inputs.smoke) && matrix.target != 'x86_64-apple-darwin'

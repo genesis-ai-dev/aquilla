@@ -1203,7 +1203,6 @@ export const bn: Catalog = {
   "editor.row.mediaInsertReason": "আমদানি করা অডিওতে সেল যোগ করা যায় না।",
   "editor.row.mediaRemoveReason": "এই সারি মূল রেকর্ডিংয়ের একটি টুকরো, তাই সরানো যায় না।",
   "editor.row.idmlReason": "IDML ফাইল নিজের মূল বিন্যাস রাখে, তাই সেল যোগ বা সরানো যায় না।",
-  "editor.row.maintainerOnlyReason": "আমদানি করা লাইন শুধু একজন রক্ষণাবেক্ষক সরাতে পারেন।",
   "editor.removeCell.title": "এই সেল সরাবেন?",
   "editor.removeCell.confirmLabel": "এটি সরান",
   "editor.removeCell.lead": "এতে সেল ও এর ওপরের সব কিছু সরে:",

@@ -972,7 +972,6 @@ export const zh_Hans: Catalog = {
   "editor.row.mediaInsertReason": "无法向导入的音频中添加单元格。",
   "editor.row.mediaRemoveReason": "此行是原始录音的一部分，因此无法移除。",
   "editor.row.idmlReason": "IDML 文件会保留其原始版式，因此无法添加或移除单元格。",
-  "editor.row.maintainerOnlyReason": "只有维护者才能移除导入的行。",
   "editor.removeCell.title": "移除此单元格？",
   "editor.removeCell.confirmLabel": "移除",
   "editor.removeCell.lead": "这将移除该单元格及其上的所有内容：",

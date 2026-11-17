@@ -65,7 +65,6 @@ import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
-import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -396,14 +395,6 @@ export interface TimelineEditorProps {
    * authority is now the thing that keeps the surfaces agreeing.
    */
   canAddLine?: boolean
-  /**
-   * May they remove an IMPORTED cell, not just a line added here?
-   *
-   * The second gate, maintainer-only, whatever tier the project runs. An
-   * imported line is the client's own work; the confirmation dialog upstream
-   * is what makes taking one back safe.
-   */
-  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs project lead access,
@@ -1344,7 +1335,6 @@ export function TimelineEditor({
   film,
   onAddLine,
   canAddLine,
-  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -4576,19 +4566,11 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here.
-            // AQU-1068 widened this: a MAINTAINER may take back any cell,
-            // imported ones included, and the confirmation dialog upstream is
-            // what makes that safe. Below that rank only a line added here can
-            // go — but a line added here can ALWAYS go, however full it is.
-            // The same shared predicate the text table asks, so the two
-            // surfaces can never disagree about what is removable; see
-            // `isImportedRow` for the emptiness clause that used to live here.
-            canRemove={
-              canAddLine
-                ? (c) => canRemoveImportedCells || !isImportedRow(c)
-                : undefined
-            }
+            // Anyone who may restructure the project may take back any line,
+            // imported ones included: the project's "who can add and remove
+            // cells" setting decides who that is (AQU-2632), and the
+            // confirmation dialog upstream is what makes it safe.
+            canRemove={canAddLine ? () => true : undefined}
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would

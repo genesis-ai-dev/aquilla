@@ -1201,7 +1201,6 @@ export const pa: Catalog = {
   "editor.row.mediaInsertReason": "ਇੰਪੋਰਟ ਕੀਤੀ ਆਡੀਓ ਵਿੱਚ ਸੈੱਲ ਨਹੀਂ ਜੋੜੇ ਜਾ ਸਕਦੇ.",
   "editor.row.mediaRemoveReason": "ਇਹ ਕਤਾਰ ਮੂਲ ਰਿਕਾਰਡਿੰਗ ਦਾ ਟੁਕੜਾ ਹੈ, ਇਸ ਲਈ ਇਸਨੂੰ ਹਟਾਇਆ ਨਹੀਂ ਜਾ ਸਕਦਾ.",
   "editor.row.idmlReason": "IDML ਫ਼ਾਈਲਾਂ ਆਪਣਾ ਮੂਲ ਖਾਕਾ ਰੱਖਦੀਆਂ ਹਨ, ਇਸ ਲਈ ਸੈੱਲ ਨਾ ਜੋੜੇ ਜਾ ਸਕਦੇ ਹਨ ਨਾ ਹਟਾਏ.",
-  "editor.row.maintainerOnlyReason": "ਇੰਪੋਰਟ ਕੀਤੀ ਲਾਈਨ ਸਿਰਫ਼ ਸੰਭਾਲਕ ਹਟਾ ਸਕਦਾ ਹੈ.",
   "editor.removeCell.title": "ਇਹ ਸੈੱਲ ਹਟਾਉਣਾ ਹੈ?",
   "editor.removeCell.confirmLabel": "ਇਸਨੂੰ ਹਟਾਓ",
   "editor.removeCell.lead": "ਇਹ ਸੈੱਲ ਅਤੇ ਇਸ ਉੱਤੇ ਸਭ ਕੁਝ ਹਟਾਉਂਦਾ ਹੈ:",

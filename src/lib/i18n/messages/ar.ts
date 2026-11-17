@@ -972,7 +972,6 @@ export const ar: Catalog = {
   "editor.row.mediaInsertReason": "لا يمكن إضافة خلايا إلى الصوت المستورد.",
   "editor.row.mediaRemoveReason": "هذا الصف جزء من التسجيل الأصلي، لذا لا يمكن إزالته.",
   "editor.row.idmlReason": "تحتفظ ملفات IDML بتخطيطها الأصلي، لذا لا يمكن إضافة خلايا أو إزالتها.",
-  "editor.row.maintainerOnlyReason": "لا يستطيع إزالة سطر مستورد إلا المشرف على الصيانة.",
   "editor.removeCell.title": "إزالة هذه الخلية؟",
   "editor.removeCell.confirmLabel": "إزالتها",
   "editor.removeCell.lead": "سيؤدي هذا إلى إزالة الخلية وكل ما عليها:",

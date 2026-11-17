@@ -372,8 +372,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
       "Puts buttons on each row to insert or remove cells. Removing one also removes its " +
-      "translations, recordings and comments; removing an imported cell always needs a " +
-      "maintainer.",
+      "translations, recordings and comments. Whoever this allows can remove any cell, " +
+      "including cells that came in with an imported file.",
     // Open-dropdown option text for the cell-editing floor select. FLOOR_LABEL
     // (src/pages/settings/constants.ts) supplies the shorter closed-trigger
     // word for each rung; "No one" is not a role, so it has no FLOOR_LABEL

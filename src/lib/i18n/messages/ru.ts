@@ -993,7 +993,6 @@ export const ru: Catalog = {
   "editor.row.mediaInsertReason": "В импортированное аудио нельзя добавлять ячейки.",
   "editor.row.mediaRemoveReason": "Эта строка — часть оригинальной записи, поэтому её нельзя удалить.",
   "editor.row.idmlReason": "Файлы IDML сохраняют оригинальную вёрстку, поэтому ячейки нельзя добавлять или удалять.",
-  "editor.row.maintainerOnlyReason": "Удалить импортированную строку может только куратор.",
   "editor.removeCell.title": "Удалить эту ячейку?",
   "editor.removeCell.confirmLabel": "Удалить",
   "editor.removeCell.lead": "Это удалит ячейку и всё, что к ней относится:",

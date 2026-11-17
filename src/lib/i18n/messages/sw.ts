@@ -1194,7 +1194,6 @@ export const sw: Catalog = {
   "editor.row.mediaInsertReason": "Seli haziwezi kuongezwa kwenye sauti iliyoingizwa.",
   "editor.row.mediaRemoveReason": "Safu hii ni kipande cha rekodi asili, kwa hiyo haiwezi kuondolewa.",
   "editor.row.idmlReason": "Faili za IDML huhifadhi mpangilio wa asili, kwa hiyo seli haziwezi kuongezwa wala kuondolewa.",
-  "editor.row.maintainerOnlyReason": "Mtunzaji pekee ndiye awezaye kuondoa mstari ulioingizwa.",
   "editor.removeCell.title": "Ondoa seli hii?",
   "editor.removeCell.confirmLabel": "Ondoa",
   "editor.removeCell.lead": "Hii huondoa seli na kila kitu kilicho nayo:",

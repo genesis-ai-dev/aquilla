@@ -1162,7 +1162,6 @@ export const hi: Catalog = {
   "editor.row.mediaInsertReason": "आयातित ऑडियो में कक्ष नहीं जोड़े जा सकते।",
   "editor.row.mediaRemoveReason": "यह पंक्ति मूल रिकॉर्डिंग का एक टुकड़ा है, इसलिए हटाई नहीं जा सकती।",
   "editor.row.idmlReason": "IDML फ़ाइलें अपना मूल लेआउट रखती हैं, इसलिए कक्ष जोड़े या हटाए नहीं जा सकते।",
-  "editor.row.maintainerOnlyReason": "केवल अनुरक्षक एक आयातित पंक्ति हटा सकता है।",
   "editor.removeCell.title": "यह कक्ष हटाएँ?",
   "editor.removeCell.confirmLabel": "इसे हटाएँ",
   "editor.removeCell.lead": "यह कक्ष और उस पर सब हटाता है:",

@@ -299,10 +299,13 @@
 }
 
 /* Banners pinned to the window's top edge: keep their content clear of the
-   macOS traffic lights (on both sides, so centred text stays centred). */
+   macOS traffic lights. Left only — the lights sit at the physical top-left
+   whatever the text direction, and padding both sides cost a narrow window
+   152px of message. Centred text sits half that off-centre, which is fine.
+   Pair with useTopBannerDrag(): the banner covers the title-bar band. */
 @utility mac-titlebar-clear {
   html[data-mac-titlebar] & {
-    padding-inline: var(--mac-traffic-lights-w);
+    padding-left: var(--mac-traffic-lights-w);
   }
 }
 

@@ -22,11 +22,13 @@ import {
   onSessionExpired,
 } from "@/lib/errors/session-expired-signal"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 import { useAccounts } from "@/hooks/useAccounts"
 import { SessionRecoveryButton } from "@/components/auth/SessionRecoveryButton"
 
 export function SessionExpiredBanner() {
   const t = useT()
+  const titlebarDrag = useTopBannerDrag()
   // The signal module is the store; reading it through useSyncExternalStore
   // means the first render already reflects a 401 that fired during boot,
   // before this component mounted.
@@ -42,6 +44,7 @@ export function SessionExpiredBanner() {
     <div
       role="alert"
       aria-live="assertive"
+      {...titlebarDrag}
       className="fixed top-0 start-0 end-0 z-50 mac-titlebar-clear flex items-center justify-between gap-2 bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/80 dark:border-amber-800 dark:text-amber-100"
     >
       <span>

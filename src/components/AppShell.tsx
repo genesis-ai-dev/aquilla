@@ -27,13 +27,7 @@ import {
 } from "@/components/ui/resizable"
 import { useIsLgUp } from "@/hooks/useIsLgUp"
 import { useAppFrame } from "@/hooks/useAppFrame"
-import {
-  TRAFFIC_LIGHTS_HEIGHT,
-  TRAFFIC_LIGHTS_WIDTH,
-  titlebarInsets,
-  useMacTitlebarOverlay,
-  useTitlebarDrag,
-} from "@/hooks/useMacTitlebarOverlay"
+import { useAppShellTitlebar } from "@/hooks/useAppShellTitlebar"
 
 export { useIsLgUp } from "@/hooks/useIsLgUp"
 
@@ -186,10 +180,6 @@ export function AppShell({
   // ~20 page-level tests that don't wrap I18nProvider, so this reads null
   // there instead of throwing — the switcher just doesn't render.
   const i18n = useI18nOptional()
-  // macOS desktop: the top strip doubles as the window's title bar — except in
-  // native fullscreen, where there is no window to move or zoom.
-  const titlebar = useMacTitlebarOverlay()
-  const titlebarDrag = useTitlebarDrag(titlebar.inset)
   const brandLogo = logoSlot ?? (brand ? (
     <Link
       to="/"
@@ -216,8 +206,8 @@ export function AppShell({
   }, [dockOpenRequest, mobileNav])
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
-  const { insetSidebarRow, insetRail, headerInset } = titlebarInsets({
-    inset: titlebar.inset,
+  // macOS desktop: the top strip doubles as the window's title bar.
+  const { insetSidebarRow, sidebarChromeProps, headerProps } = useAppShellTitlebar({
     mobileNav,
     rtl: i18n?.dir === "rtl",
     chromeCollapsed,
@@ -327,14 +317,7 @@ export function AppShell({
       {(brandLogo || logoAccessory) && (
         <div
           data-slot="app-shell-sidebar-chrome"
-          {...(!mobileNav ? titlebarDrag : undefined)}
-          style={
-            insetSidebarRow
-              ? { paddingLeft: TRAFFIC_LIGHTS_WIDTH }
-              : insetRail
-                ? { paddingTop: TRAFFIC_LIGHTS_HEIGHT }
-                : undefined
-          }
+          {...sidebarChromeProps}
           className={cn(
             // Align every chrome child on the same vertical midline — no fixed
             // height; natural content size with items-center.
@@ -440,8 +423,7 @@ export function AppShell({
           separate row below it and must not move the breadcrumb baseline. */}
       <div
         data-slot="app-shell-header"
-        {...titlebarDrag}
-        style={headerInset > 0 ? { paddingLeft: headerInset } : undefined}
+        {...headerProps}
         className="flex h-[52px] min-h-[52px] shrink-0 items-center"
       >
         {mobileNav ? (

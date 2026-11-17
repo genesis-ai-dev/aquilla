@@ -10,6 +10,7 @@ import { ShieldAlert, X } from "lucide-react"
 import { useOpfsAvailability } from "@/hooks/useOpfsAvailability"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 
 const DISMISS_KEY_PREFIX = "aq:private-mode-banner-dismissed:"
 const memoryDismissals = new Set<string>()
@@ -38,6 +39,7 @@ function writeDismissed(key: string): void {
 
 export function PrivateModeBanner() {
   const t = useT()
+  const titlebarDrag = useTopBannerDrag()
   const opfsAvailable = useOpfsAvailability()
   const { session, loading } = useFrontierSession()
   // Wait for a resolved login identity before considering display. Lazy route
@@ -66,7 +68,7 @@ export function PrivateModeBanner() {
   }
 
   return (
-    <div className="fixed top-0 start-0 end-0 z-40 mac-titlebar-clear flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+    <div {...titlebarDrag} className="fixed top-0 start-0 end-0 z-40 mac-titlebar-clear flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
       {/* The message owns the free space so the dismiss control is pinned to the
           bar's end edge at every width (AQU-2483) — wrapping text can no longer
           drag it inline after the last word. */}

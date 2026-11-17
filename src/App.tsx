@@ -32,6 +32,7 @@ import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
 import { HotBundleBoot } from "@/components/HotBundleBoot"
 import { TitlebarDragStrip } from "@/components/TitlebarDragStrip"
 import { useHoldAppFrame } from "@/hooks/useAppFrame"
+import { useTopBannerDrag } from "@/hooks/useMacTitlebarOverlay"
 import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
@@ -251,9 +252,10 @@ function GlobalAudioShortcuts() {
 function SyncFreezeOverlay() {
   const t = useT()
   const { syncing } = useSyncing()
+  const titlebarDrag = useTopBannerDrag()
   if (!syncing) return null
   return (
-    <div className="fixed top-0 left-0 right-0 z-40 mac-titlebar-clear bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
+    <div {...titlebarDrag} className="fixed top-0 left-0 right-0 z-40 mac-titlebar-clear bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
       {t("workspace.syncFreezeOverlay")}
     </div>
   )

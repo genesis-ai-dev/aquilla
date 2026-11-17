@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import {
   __resetMacTitlebarStoreForTests,
   isMacTitlebarOverlay,
   useMacTitlebarOverlay,
+  useTopBannerDrag,
 } from "./useMacTitlebarOverlay"
 
 const win = vi.hoisted(() => {
@@ -11,6 +12,7 @@ const win = vi.hoisted(() => {
   return {
     state,
     isFullscreen: vi.fn(async () => state.fullscreen),
+    startDragging: vi.fn(async () => {}),
     onResized: vi.fn(async (cb: () => void) => {
       state.resized.push(cb)
       return () => {}
@@ -27,11 +29,13 @@ const setOverlayFlag = (on: boolean) => {
 describe("useMacTitlebarOverlay", () => {
   beforeEach(() => {
     setOverlayFlag(true)
+    sessionStorage.clear()
     __resetMacTitlebarStoreForTests()
     win.state.fullscreen = false
     win.state.resized = []
     win.isFullscreen.mockClear()
     win.onResized.mockClear()
+    win.startDragging.mockClear()
   })
   afterEach(() => {
     setOverlayFlag(false)
@@ -130,16 +134,37 @@ describe("useMacTitlebarOverlay", () => {
     expect(result.current.inset).toBe(false)
   })
 
-  it("retries on the next mount when the resize listener can't be registered", async () => {
+  it("retries on its own when the resize listener can't be registered", async () => {
+    vi.useFakeTimers()
     win.onResized.mockImplementationOnce(async () => { throw new Error("ipc not ready") })
-    const first = renderHook(() => useMacTitlebarOverlay())
-    await waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
-    await act(async () => {})
-    first.unmount()
+    const { result } = renderHook(() => useMacTitlebarOverlay())
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(1))
 
-    renderHook(() => useMacTitlebarOverlay())
-    await waitFor(() => expect(win.onResized).toHaveBeenCalledTimes(2))
+    // No remount: the store retries with backoff and registers the listener.
+    await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+    expect(win.onResized).toHaveBeenCalledTimes(2)
     expect(win.state.resized).toHaveLength(1)
+
+    // The component that was already mounted now follows fullscreen.
+    win.state.fullscreen = true
+    await act(async () => {
+      for (const cb of win.state.resized) cb()
+      await vi.advanceTimersByTimeAsync(150)
+    })
+    expect(result.current.inset).toBe(false)
+  })
+
+  it("starts from the last value this tab saw, so a reload in fullscreen paints no inset", async () => {
+    win.state.fullscreen = true
+    const before = renderHook(() => useMacTitlebarOverlay())
+    await waitFor(() => expect(before.result.current.inset).toBe(false))
+    before.unmount()
+
+    // Reload: module state is gone, the native answer hasn't arrived yet.
+    __resetMacTitlebarStoreForTests()
+    win.isFullscreen.mockImplementationOnce(() => new Promise<boolean>(() => {}))
+    const after = renderHook(() => useMacTitlebarOverlay())
+    expect(after.result.current.inset).toBe(false)
   })
 
   it("ignores a stale reply that arrives after a newer one", async () => {
@@ -159,5 +184,27 @@ describe("useMacTitlebarOverlay", () => {
     // The first (older) check finally answers "not fullscreen": too late.
     await act(async () => { resolveSlow(false) })
     expect(result.current.inset).toBe(false)
+  })
+
+  it("a top-pinned banner drags the window from its empty space, not from its controls", async () => {
+    function Banner() {
+      const drag = useTopBannerDrag()
+      return (
+        <div data-testid="banner" {...drag}>
+          <span>Message</span>
+          <button type="button">Dismiss</button>
+        </div>
+      )
+    }
+    render(<Banner />)
+    fireEvent.mouseDown(screen.getByRole("button"), { button: 0, detail: 1 })
+    fireEvent.mouseDown(screen.getByText("Message"), { button: 0, detail: 1 })
+    await waitFor(() => expect(win.startDragging).toHaveBeenCalledTimes(1))
+  })
+
+  it("a banner is no drag handle outside the overlay shell", () => {
+    setOverlayFlag(false)
+    const { result } = renderHook(() => useTopBannerDrag())
+    expect(result.current).toEqual({})
   })
 })

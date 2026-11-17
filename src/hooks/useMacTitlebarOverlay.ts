@@ -107,8 +107,26 @@ export function titlebarInsets(input: TitlebarInsetInput): TitlebarInsets {
 // async IPC would flash the inset layout on each navigation while in native
 // fullscreen. One subscription for the app's lifetime; mounts read the last
 // known value synchronously.
-let fullscreen = false
+//
+// The first IPC answer lands after the first paint, so the starting value is
+// seeded from the last one this tab saw: a reload while in native fullscreen
+// (Cmd+R, a hot-bundle reload) must not paint the inset layout first. Session
+// storage, not local: a fresh launch opens windowed (no window-state plugin).
+const FULLSCREEN_KEY = "aquilla.macTitlebar.fullscreen"
+function readSeed(): boolean {
+  try {
+    return sessionStorage.getItem(FULLSCREEN_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+let fullscreen = readSeed()
 let started = false
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+let retryDelay = 0
+/** Backoff for registering the resize watch while IPC isn't ready yet. */
+const WATCH_RETRY_MIN_MS = 250
+const WATCH_RETRY_MAX_MS = 10_000
 
 // Dynamic imports keep @tauri-apps/api out of the browser bundle. One cached
 // load per module; the resolved window API is also kept synchronously so a
@@ -142,6 +160,11 @@ const FULLSCREEN_SETTLE_MS = 150
 const FULLSCREEN_RECHECK_MS = 1000
 
 function setFullscreen(next: boolean): void {
+  try {
+    sessionStorage.setItem(FULLSCREEN_KEY, next ? "1" : "0")
+  } catch {
+    // Storage blocked: only the reload seed is lost.
+  }
   if (next === fullscreen) return
   fullscreen = next
   for (const l of listeners) l()
@@ -168,10 +191,17 @@ function startFullscreenWatch(): void {
       for (const t of timers) clearTimeout(t)
       timers = [setTimeout(check, FULLSCREEN_SETTLE_MS), setTimeout(check, FULLSCREEN_RECHECK_MS)]
     })
+    retryDelay = 0
   }).catch(() => {
-    // No resize listener (module or IPC not ready yet): let the next mount
-    // try again rather than leaving the inset stuck on for the session.
-    started = false
+    // No resize listener (module or IPC not ready yet). Retry on our own with
+    // backoff: the components already subscribed would otherwise keep a stale
+    // value until some later mount happened to try again.
+    retryDelay = Math.min(Math.max(retryDelay * 2, WATCH_RETRY_MIN_MS), WATCH_RETRY_MAX_MS)
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      started = false
+      startFullscreenWatch()
+    }, retryDelay)
   })
 }
 
@@ -184,6 +214,10 @@ function subscribe(listener: () => void): () => void {
 const getFullscreen = () => fullscreen
 const subscribeNoop = () => () => {}
 
+// Start at load, not at the first mount: the shell sets the flag before any
+// page script, and the answer then has the whole boot to arrive.
+if (isMacTitlebarOverlay()) startFullscreenWatch()
+
 export function useMacTitlebarOverlay(): MacTitlebarOverlay {
   const overlay = isMacTitlebarOverlay()
   const fs = useSyncExternalStore(overlay ? subscribe : subscribeNoop, getFullscreen, getFullscreen)
@@ -192,8 +226,11 @@ export function useMacTitlebarOverlay(): MacTitlebarOverlay {
 
 /** Test seam: reset the module store between tests. */
 export function __resetMacTitlebarStoreForTests(): void {
-  fullscreen = false
+  fullscreen = readSeed()
   started = false
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  retryDelay = 0
   listeners.clear()
   windowApi = null
   windowApiLoaded = null
@@ -314,4 +351,16 @@ export function useTitlebarDrag(enabled: boolean): TitlebarDragProps {
       .catch(() => {})
   }, [])
   return enabled ? { onMouseDown, onMouseUp } : {}
+}
+
+/**
+ * Drag props for a banner pinned to the window's top edge (`mac-titlebar-clear`).
+ * It sits over the title-bar band — level with the traffic lights, above the
+ * drag strip and AppShell's header — so it must be a drag handle itself, or
+ * the window couldn't be moved by its top edge while a banner shows. Its
+ * buttons and links stay clickable (isTitlebarDragTarget backs off them).
+ */
+export function useTopBannerDrag(): TitlebarDragProps {
+  const { inset } = useMacTitlebarOverlay()
+  return useTitlebarDrag(inset)
 }

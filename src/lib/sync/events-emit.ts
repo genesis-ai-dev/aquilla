@@ -15,7 +15,7 @@
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
+import { enqueueOutboxEvent, enqueueOutboxEvents, type EnqueueBatchOptions } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canAttachSourceAudio, canImportSourceFiles, canPerform, importDenialFloor, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
@@ -300,6 +300,7 @@ export async function enqueueEvent<K extends OutboxEventKind>(
  *  once via enqueueOutboxEvents (one notify → one overlay rebuild). */
 export async function enqueueEvents<K extends OutboxEventKind>(
   inputs: BuildEventInput<K>[],
+  options?: EnqueueBatchOptions,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }[]> {
   if (inputs.length === 0) return []
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
@@ -311,6 +312,7 @@ export async function enqueueEvents<K extends OutboxEventKind>(
   })
   await enqueueOutboxEvents(
     events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
+    options,
   )
   return events.map((event) => ({ event, eventId: event.id }))
 }

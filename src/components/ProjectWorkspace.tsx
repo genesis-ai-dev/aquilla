@@ -211,8 +211,6 @@ import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
 import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
-import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
-import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
 import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
 import { extensionEditorReadOnlyBanner, extensionEditorWriteCaps } from "@/lib/tools/editor-write-caps"
@@ -328,8 +326,7 @@ import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
-import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
-import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
+import type { ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
@@ -339,7 +336,6 @@ import type { CharacterAgreement } from "@/lib/timeline/character-agreement"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import type { AudioCharacterPlan } from "@/lib/import/audio-character-sheet"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
-import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -382,7 +378,7 @@ import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { convertDraftOrthography, withOrthographyProvenance } from "@/lib/completion/orthography-draft"
 import { laneOrthography } from "@/lib/lqa/lane-builtin-checks"
-import { TimelineEditor, type TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
+import type { TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
 import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -441,7 +437,6 @@ import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
-import { AgentWorkbench } from "./agent/AgentWorkbench"
 import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
@@ -462,7 +457,6 @@ import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
-import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
@@ -482,7 +476,7 @@ import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { EditorLayoutSwitch } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
 import type { EditorLens } from "@/components/EditorModeToggle"
-import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
+import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -500,13 +494,10 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
-import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
 import { captionTrackDestinations } from "@/lib/import/caption-destinations"
 import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
 import type { MediaTextSource } from "@/lib/import/media-cues"
-import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
-import { MediaVideoPane } from "./timeline/MediaVideoPane"
 // Media redesign, layout: the panels' constraints, sizes, folds and full
 // screen all come from `useMediaDock`; the gate for the film stays here.
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
@@ -525,7 +516,6 @@ import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
 import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
-import { StationPanel } from "@/components/station/StationPanel"
 import { StationMenuItems } from "@/components/station/StationHistory"
 import type { StationHost, StationTake } from "@/components/station/station-host"
 import type { InsertChoice } from "@/components/station/StationEdits"
@@ -595,7 +585,6 @@ import {
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
@@ -716,6 +705,52 @@ const VOICES_DOCK_DEFAULT_WIDTH = 380
 // workspace-internal and was never extracted into a shared package, so the
 // ImportDialog stays hosted here. Lazy-loaded because the eBible parser
 // bundles a ~2MB vref table.
+// Surfaces that only some files, lenses or actions open (timeline, transcribe,
+// agent workbench, station, voices, Who's Who, the timeline import/check dialogs
+// and drawers, the recorder) load on first use, not with the workspace chunk.
+// Each render site has its own Suspense so a load never blanks the workspace.
+const TimelineEditor = lazy(() =>
+  import("@/components/timeline/TimelineEditor").then((m) => ({ default: m.TimelineEditor })),
+)
+const AgentWorkbench = lazy(() =>
+  import("./agent/AgentWorkbench").then((m) => ({ default: m.AgentWorkbench })),
+)
+const StationPanel = lazy(() =>
+  import("@/components/station/StationPanel").then((m) => ({ default: m.StationPanel })),
+)
+const AudioRecordingModal = lazy(() =>
+  import("./AudioRecorder/AudioRecordingModal").then((m) => ({ default: m.AudioRecordingModal })),
+)
+const VoiceSidebar = lazy(() =>
+  import("./voice/VoiceSidebar").then((m) => ({ default: m.VoiceSidebar })),
+)
+const MediaVideoPane = lazy(() =>
+  import("./timeline/MediaVideoPane").then((m) => ({ default: m.MediaVideoPane })),
+)
+const TranscribeEditor = lazy(() =>
+  import("@/components/transcribe/TranscribeEditor").then((m) => ({ default: m.TranscribeEditor })),
+)
+const SetupChecklistDrawer = lazy(() =>
+  import("./onboarding/SetupChecklistDrawer").then((m) => ({ default: m.SetupChecklistDrawer })),
+)
+const ImportCharactersDialog = lazy(() =>
+  import("./timeline/ImportCharactersDialog").then((m) => ({ default: m.ImportCharactersDialog })),
+)
+const ImportTimelineTextDialog = lazy(() =>
+  import("./import/ImportTimelineTextDialog").then((m) => ({ default: m.ImportTimelineTextDialog })),
+)
+const WhosWhoSidebar = lazy(() =>
+  import("./bible-data/WhosWhoSidebar").then((m) => ({ default: m.WhosWhoSidebar })),
+)
+const CharacterCheckDrawer = lazy(() =>
+  import("./timeline/CharacterCheckDrawer").then((m) => ({ default: m.CharacterCheckDrawer })),
+)
+const CueLinkDrawer = lazy(() =>
+  import("./timeline/CueLinkDrawer").then((m) => ({ default: m.CueLinkDrawer })),
+)
+const AlignTimelineScriptDialog = lazy(() =>
+  import("./import/AlignTimelineScriptDialog").then((m) => ({ default: m.AlignTimelineScriptDialog })),
+)
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )
@@ -18580,6 +18615,7 @@ export function ProjectWorkspace() {
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <VoiceSidebar
                     cells={audioMergedCells}
                     project={audioProject ?? project}
@@ -18594,6 +18630,7 @@ export function ProjectWorkspace() {
                     clip={inspectedClip}
                     makeSpeech={makeSpeechForRail}
                   />
+                  </Suspense>
                 </div>
               ) : undefined
             }
@@ -19152,6 +19189,7 @@ export function ProjectWorkspace() {
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
           // same shared session as the dock tab, plus the three-pane
           // Source | Agent | Target working set from the agent-workspace branch.
+          <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
           <AgentWorkbench
             agent={{
               projectId: project.id,
@@ -19217,6 +19255,7 @@ export function ProjectWorkspace() {
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
+          </Suspense>
         ) : activeFileId && activeFile && extensionEditorChoice.pending ? (
           // Smart Extensions: the default editor may be the first-party
           // extension — wait for the project's extensions rather than flash
@@ -19366,6 +19405,7 @@ export function ProjectWorkspace() {
                     }
                     inert={!dock.view.isOpen("tl") || undefined}
                   >
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <TimelineEditor
                     cells={timelineCells}
                     // AQU-1758: a book's text has no times to drag it to.
@@ -19583,6 +19623,7 @@ export function ProjectWorkspace() {
                     }}
                     linkingModeRequest={linkingModeRequest}
                   />
+                  </Suspense>
                   </div>
                   </ResizablePanel>
                   {/* A pinned panel cannot be dragged, so the handle beside it
@@ -19614,6 +19655,7 @@ export function ProjectWorkspace() {
               {/* The film, once: the dock moves its host into its area. */}
               {dock.hosts.film && timelineStacked && showVideoPane && activeFile?.coreMediaUrl
                 ? createPortal(
+                <Suspense fallback={null}>
                 <MediaVideoPane
                   key={activeFile.id}
                   src={activeFile.coreMediaUrl}
@@ -19638,6 +19680,7 @@ export function ProjectWorkspace() {
                   sourceTextDirection={fileMeta.sourceTextDirection}
                   targetTextDirection={fileMeta.targetTextDirection}
                 />
+                </Suspense>
                     ,
                     dock.hosts.film,
                   )
@@ -19659,6 +19702,7 @@ export function ProjectWorkspace() {
                 <div className="flex h-full min-h-0 flex-col">
                   {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
                   {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -19672,6 +19716,7 @@ export function ProjectWorkspace() {
                     // AQU-2146: "no audio yet" only once the read has answered.
                     audioLoaded={workspaceAudioLoaded}
                   />
+                  </Suspense>
                 </div>
               ) : extensionEditorActive && activeFileId && activeFile ? (
                 // Smart Extensions: the editor extension takes EditorTable's
@@ -19906,7 +19951,7 @@ export function ProjectWorkspace() {
                 : null}
               {/* AQU-2327: the Station, once — a tab beside Lines (the text). */}
               {dock.hosts.station && timelineStacked
-                ? createPortal(<StationPanel host={stationHost} visible={dock.view.isShowing("station")} />, dock.hosts.station)
+                ? createPortal(<Suspense fallback={null}><StationPanel host={stationHost} visible={dock.view.isShowing("station")} /></Suspense>, dock.hosts.station)
                 : null}
               </ForecastProvider>
               </EditorActionsProvider>
@@ -20014,6 +20059,7 @@ export function ProjectWorkspace() {
               {/* AQU-1689: Who's Who, the passage's cast — open panel only;
                   its "People" edge tab rides in asideEdge. */}
               {rightRail.openPanel === "people" && (
+                <Suspense fallback={null}>
                 <WhosWhoSidebar
                   project={project!}
                   fileId={activeFile?.id ?? null}
@@ -20027,6 +20073,7 @@ export function ProjectWorkspace() {
                     if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
+                </Suspense>
               )}
               {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                   and a translation cell with a matching canonicalRef is focused. */}
@@ -20047,6 +20094,7 @@ export function ProjectWorkspace() {
                 content box — the file tabs, breadcrumbs and import button live
                 above it and a drawer has no business covering them. */}
             {cueLinkDrawerOpen && audioCueSibling && (
+              <Suspense fallback={null}>
               <CueLinkDrawer
                 review={cueLinkReview}
                 pending={cueLinksPending}
@@ -20071,8 +20119,10 @@ export function ProjectWorkspace() {
                 onReject={(t, c) => handleReviewPair(t, c, false)}
                 onRepairAll={() => void handleRepairAllCueLinks()}
               />
+              </Suspense>
             )}
             {characterCheckOpen && (
+              <Suspense fallback={null}>
               <CharacterCheckDrawer
                 agreement={characterAgreement}
                 bothSheetsImported={bothCharacterSheets}
@@ -20097,6 +20147,7 @@ export function ProjectWorkspace() {
                   canManageSources ? () => setImportCharactersOpen(true) : undefined
                 }
               />
+              </Suspense>
             )}
             {checkOpen && (
               <CheckFindingsDrawer
@@ -20279,6 +20330,7 @@ export function ProjectWorkspace() {
         }
       />
       {project && (
+        <Suspense fallback={null}>
         <SetupChecklistDrawer
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
@@ -20311,6 +20363,7 @@ export function ProjectWorkspace() {
             navigate(path)
           }}
         />
+        </Suspense>
       )}
       {project && (
         <AiSetupDialog
@@ -20357,6 +20410,7 @@ export function ProjectWorkspace() {
         />
       )}
       {project && (
+        <Suspense fallback={null}>
         <AudioRecordingModal
           open={recordingCellId !== null}
           /* AQU-2511: `audioProject` — `project` with the OPEN LANE's voices,
@@ -20446,6 +20500,7 @@ export function ProjectWorkspace() {
           }}
           onClose={() => setRecordingCellId(null)}
         />
+        </Suspense>
       )}
       {/* Manual boundary editor for a "Voice together" combined clip. */}
       {combinedEditor && activeFileId && project && (
@@ -21026,6 +21081,7 @@ export function ProjectWorkspace() {
           // AQU-1566 (Sam's option b): the captions become this linked video's
           // own rows. One staged file and one receipt per reviewed preview,
           // so pressing again after a failure never writes twice.
+          <Suspense fallback={null}>
           <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
             filmUrl={activeFile.coreMediaUrl}
@@ -21059,7 +21115,9 @@ export function ProjectWorkspace() {
               await refreshAfterCaptionRows()
             }}
           />
+          </Suspense>
         ) : (
+          <Suspense fallback={null}>
           <ImportTimelineTextDialog key={captionDialogFileId}
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
             filmUrl={activeFile.coreMediaUrl}
@@ -21084,6 +21142,7 @@ export function ProjectWorkspace() {
               await refresh()
             }}
           />
+          </Suspense>
         )
       )}
       {pendingTrackRows && pendingTrackRows.fileId === activeFileId && (
@@ -21093,6 +21152,7 @@ export function ProjectWorkspace() {
       )}
       {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
         && project && alignmentClipUrl && (
+        <Suspense fallback={null}>
         <AlignTimelineScriptDialog key={alignmentDialogFileId}
           projectId={project.id} fileId={alignmentDialogFileId}
           mediaName={activeFile.name} clipUrl={alignmentClipUrl}
@@ -21110,6 +21170,7 @@ export function ProjectWorkspace() {
           onSaved={async () => { refresh() }}
           onCancel={() => setAlignmentDialogFileId(null)}
         />
+        </Suspense>
       )}
       {/* AQU-1139: the clip's sidecar subtitles, into this file's own source
           lane. Up here with its two siblings for the same reason — the
@@ -21131,6 +21192,7 @@ export function ProjectWorkspace() {
         }}
       />
       {project && activeFile && (
+        <Suspense fallback={null}>
         <ImportCharactersDialog
           open={importCharactersOpen}
           textFileName={activeFile.name}
@@ -21170,6 +21232,7 @@ export function ProjectWorkspace() {
               : undefined
           }
         />
+        </Suspense>
       )}
       <LinkVideoTimingDialog
         open={pendingVideoUrl !== null}

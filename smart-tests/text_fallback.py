@@ -14,10 +14,12 @@ import re
 
 # Tried in order after TEXT_MODEL. Small, fast, JSON-mode models from three
 # different providers, so one provider leaving does not take the helper down.
+# gpt-5.4-nano is first because it is the one that answered on the first live
+# run (PR #2092, 23 of 23 text calls); OpenRouter refused the Gemini id there.
 FALLBACK_TEXT_MODELS = (
-    "google/gemini-3.5-flash-lite",
     "openai/gpt-5.4-nano",
     "anthropic/claude-haiku-5.5",
+    "google/gemini-3.5-flash-lite",
 )
 
 # The ids above are OpenRouter's. Another provider would not know them.

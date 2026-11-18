@@ -1,5 +1,7 @@
-// The Transcribe lens. What matters: "Transcribe all" is speech recognition
-// only, on rows with nothing transcribed; the AI cleanup runs only on rows a
+// The Transcribe lens. What matters: opening the view starts speech
+// recognition by itself (on the Fast model), and that pass and "Transcribe all"
+// are speech recognition only, on rows with nothing transcribed; the AI
+// cleanup runs only on rows a
 // person picks (the sparkle, or the ticked rows), and never on a validated
 // take. A hand edit saves as a correction (no AI mark); emptying it goes back
 // to what ASR heard without teaching a word fix; clearing on the left removes
@@ -131,7 +133,10 @@ beforeEach(() => {
 })
 
 describe("TranscribeEditor", () => {
-  it("transcribes all without cleaning up, and only rows with nothing transcribed", async () => {
+  // The first pass is a cheap draft, so nobody should have to ask for it. The
+  // cleanup is never part of it: it learns from the person's corrections, so
+  // it runs when they say.
+  it("starts transcribing as the view opens, without cleaning up, and only rows with nothing transcribed", async () => {
     const cells = [
       take("fresh"),
       take("fresh2"),
@@ -139,11 +144,29 @@ describe("TranscribeEditor", () => {
       take("untouched", { heard: "x y", transcript: "x y" }),
     ]
     render(<TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable />)
-    fireEvent.click(screen.getByTestId("transcribe-run-all"))
-    // The button comes back when the run has finished every row it chose.
-    await waitFor(() => expect(screen.queryByTestId("transcribe-progress")).toBeNull())
-    expect(asrCalls.sort()).toEqual(["fresh", "fresh2"])
+    await waitFor(() => expect(asrCalls.sort()).toEqual(["fresh", "fresh2"]))
+    // The button comes back when the pass has finished every row it chose.
+    await screen.findByTestId("transcribe-run-all")
     expect(runCalls).toEqual([])
+    // Once per visit: the rows the stub left untranscribed are not run again.
+    expect(asrCalls).toHaveLength(2)
+  })
+
+  // Smart can mean zero-shot, the expensive model. Opening a view must not
+  // spend that on a whole file; it waits for the button.
+  it("waits for Transcribe all on Smart, and while the file's audio is still being read", async () => {
+    act(() => setTranscribeSpeed("u", "smart"))
+    const smart = render(<TranscribeEditor project={project} cells={[take("fresh")]} session={session} concepts={[]} editable />)
+    fireEvent.click(await screen.findByTestId("transcribe-run-all"))
+    await waitFor(() => expect(asrCalls).toEqual(["fresh"]))
+    smart.unmount()
+
+    act(() => setTranscribeSpeed("u", "fast"))
+    asrCalls.length = 0
+    const { rerender } = render(<TranscribeEditor project={project} cells={[take("late")]} session={session} concepts={[]} editable audioLoaded={false} />)
+    expect(asrCalls).toEqual([])
+    rerender(<TranscribeEditor project={project} cells={[take("late")]} session={session} concepts={[]} editable audioLoaded />)
+    await waitFor(() => expect(asrCalls).toEqual(["late"]))
   })
 
   it("cleans up the ticked rows — Shift-click ticks a range — and never a validated take", async () => {
@@ -232,7 +255,8 @@ describe("TranscribeEditor", () => {
     render(<TranscribeEditor project={project} cells={[take("c1")]} session={session} concepts={[]} editable />)
     expect(screen.getByTestId("transcribe-heard").textContent).toBe("Not transcribed yet")
 
-    fireEvent.click(screen.getByTestId("transcribe-run"))
+    // The opening pass (stubbed: it leaves the row as it was) ends first.
+    fireEvent.click(await screen.findByTestId("transcribe-run"))
     // Listening: a cursor where the words will go, and the step named.
     await waitFor(() => expect(screen.getByTestId("transcribe-stage").textContent).toBe("Listening…"))
     expect(screen.getByTestId("transcribe-cursor")).toBeTruthy()
@@ -265,7 +289,6 @@ describe("TranscribeEditor", () => {
   it("runs the fast speech model unless the person picked Smart", async () => {
     const view = render(<TranscribeEditor project={project} cells={[take("c1")]} session={session} concepts={[]} editable />)
     expect(screen.getByTestId("transcribe-speed").textContent).toContain("Fast")
-    fireEvent.click(screen.getByTestId("transcribe-run"))
     await waitFor(() => expect(runSpeech.c1).toEqual({ model: "omni-fast" }))
     view.unmount()
 
@@ -293,7 +316,7 @@ describe("TranscribeEditor", () => {
 
   it("runs the sparkle against the generated take itself", async () => {
     render(<TranscribeEditor project={project} cells={[voice("tts")]} session={session} concepts={[]} editable />)
-    fireEvent.click(screen.getByTestId("transcribe-run"))
+    fireEvent.click(await screen.findByTestId("transcribe-run"))
     await waitFor(() => expect(runCalls).toEqual(["tts"]))
     expect(runAudio.tts).toBe("audio-tts-1700000000-tts.webm")
   })

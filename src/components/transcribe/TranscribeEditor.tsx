@@ -8,8 +8,9 @@
 // the corrections already made in this file's rows of the same language.
 //
 // The toolbar picks the speech model, Fast or Smart (transcribe-speed.ts), and
-// the view wakes that model as it opens. A row shows each step as it happens:
-// see TranscribeRow.tsx.
+// the view wakes that model as it opens. On Fast it also starts the
+// speech-recognition pass by itself. A row shows each step as it happens: see
+// TranscribeRow.tsx.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { AudioLines, Sparkles, Square, X } from "lucide-react"
@@ -278,6 +279,26 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
     })
   }, [session, rows, project, targetLang, hosted, choiceFor, runBatch, setLive, onProgress, finish, waitOutLimit])
 
+  // Opening the view starts the first pass by itself (Ryder, 2026-11-18): the
+  // fast model costs little and its text is only a draft, so there is no
+  // reason to make a person ask for it. The cleanup stays theirs to start,
+  // because it learns from the lines they have corrected by then.
+  //
+  // Only the Fast choice does this. Smart can mean zero-shot, the expensive
+  // model, and on-device transcription would open a download prompt; those
+  // wait for "Transcribe all". Once per file per visit, so pressing Stop is
+  // not undone by the next row that arrives.
+  const autoRanFor = useRef<string | null>(null)
+  const fileId = rows[0]?.cell.fileId ?? null
+  const autoRun = editable && session !== null && hosted && speed === "fast" && audioLoaded
+    && fileId !== null && batch === null
+    && rows.some((r) => !r.validated && !r.heard && !r.transcript)
+  useEffect(() => {
+    if (!autoRun || autoRanFor.current === fileId) return
+    autoRanFor.current = fileId
+    void runAll()
+  }, [autoRun, fileId, runAll])
+
   const cleanUpSelected = useCallback(async () => {
     const learned = loadTranscriptCorrections(project.id)
     const todo = rows.filter((r) => selected.has(r.cell.id) && !r.validated)
@@ -456,7 +477,9 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
           row={row}
           label={row.cell.cellLabel ?? String(cells.indexOf(row.cell) + 1 || i + 1)}
           editable={editable}
-          canRun={canRun && !batch}
+          // During a transcription pass a row that already has its text can
+          // still be cleaned up: the pass only touches rows with none.
+          canRun={canRun && (!batch || Boolean(row.heard || row.transcript))}
           status={statusById[row.cell.id] ?? { kind: "idle" }}
           {...(liveById[row.cell.id] && !caughtUp(row, liveById[row.cell.id]) ? { live: liveById[row.cell.id] } : {})}
           modelWaking={modelState.kind === "starting"}

@@ -286,6 +286,11 @@ What changed after Ryder's review of the lens, and why.
   10 s cold, under a second warm) and Smart is zero-shot, falling back to
   `omni-fast` without asking when zero-shot cannot run. A model pinned in
   Preferences is what Smart runs.
+- **The first pass starts by itself.** On Fast, opening the view runs speech
+  recognition on every row with nothing transcribed, once per visit. Smart and
+  on-device transcription wait for "Transcribe all". The cleanup is always the
+  person's to start, because it learns from their corrections. A row that
+  already has its text can be cleaned up while the pass is still running.
 - **Waking up.** The view wakes the chosen model as it opens. The toolbar says
   so and counts the seconds; a row asked to run meanwhile says it is waiting
   for the model. The Modal service must be deployed for this to work: the

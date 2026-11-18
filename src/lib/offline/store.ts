@@ -1,6 +1,6 @@
 // Boots the local LiveStore SQLite store used to hold offline project data in
 // the Tauri desktop app. Only valid inside the Tauri WebView (OPFS + a
-// SharedWorker leader election) — the plain browser SPA has no use for this
+// dedicated leader worker) — the plain browser SPA has no use for this
 // and keeps reading through sync-worker HTTP (see src/lib/sync/*-read.ts).
 import { createStorePromise, type Adapter, type Store } from "@livestore/livestore"
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
@@ -29,24 +29,32 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   // starts downloading and compiling its 605 KB SQLite engine immediately
   // (sqlite-loader.js kicks it off at module load), and a top-level import put
   // that on every browser visit, though only the desktop app ever boots a store.
-  const [{ makePersistedAdapter }, { default: LiveStoreWorker }, { default: LiveStoreSharedWorker }] = await Promise.all([
+  const [{ makeSingleTabAdapter }, { default: LiveStoreWorker }] = await Promise.all([
     import("@livestore/adapter-web"),
     import("./livestore.worker?worker"),
-    import("@livestore/adapter-web/shared-worker?sharedworker"),
   ])
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
   installBfcacheGuard()
   // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
   listenForOfflineRebuildProgress()
-  return makePersistedAdapter({
-    worker: (options: WorkerOptions) => {
+  await holdLeaderLock()
+  // Single-tab, not makePersistedAdapter: that one relays every session ↔
+  // leader message through a SharedWorker, and WKWebView hosts SharedWorkers
+  // in a separate WebContent process that it kills under memory pressure
+  // ("Suspended WebProcess is exiting due to memory pressure", 2026-11-17,
+  // during a project download). It starts a fresh SharedWorker that no
+  // leader is attached to, so every later write lands only in the page's
+  // memory — lost on restart. The desktop app has one window, so the page
+  // talks to its own leader worker directly. Same worker, OPFS files and
+  // clientId as before.
+  return makeSingleTabAdapter({
+    worker: (options: { name: string }) => {
       const worker = new LiveStoreWorker(options)
       trackLeaderWorker(worker)
-      devBridge?.watchLeaderWorker(worker, options.name ?? "leader")
+      devBridge?.watchLeaderWorker(worker, options.name)
       return worker
     },
-    sharedWorker: LiveStoreSharedWorker,
     storage: { type: "opfs" },
     // The fast path reads the state db straight from OPFS, in parallel with
     // the leader's boot. After an offline schema change the leader is
@@ -57,6 +65,22 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
     // rebuild included. A leader that never boots now never hands out a
     // store either; OfflineLeaderWatchdog prompts a restart if boot drags on.
     experimental: { disableFastPath: true },
+  })
+}
+
+// The lock makePersistedAdapter took before spawning a leader (same name). A
+// reloaded page (head-check, bfcache guard, bundle update) must not start its
+// leader while the old page's still holds the OPFS access handles; the lock
+// is released when the old page goes away. Held for the life of the page.
+const LEADER_LOCK = `livestore-tab-lock-${STORE_ID}`
+
+function holdLeaderLock(): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.locks) return Promise.resolve()
+  return new Promise<void>((granted) => {
+    void navigator.locks.request(LEADER_LOCK, () => {
+      granted()
+      return new Promise<never>(() => {})
+    })
   })
 }
 

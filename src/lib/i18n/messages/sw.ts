@@ -493,6 +493,8 @@ export const sw: Catalog = {
   "editor.panel.resizeParallelBibles": "Badilisha ukubwa wa kidirisha cha Biblia sambamba",
   "editor.panel.resizeVerseResources": "Badilisha ukubwa wa kidirisha cha nyenzo za mstari",
   "editor.translationNotes.loadFailed": "Imeshindwa kupakia maelezo ya tafsiri",
+  "editor.bookHealth.showFewerCells": "Onyesha seli chache",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"Onyesha seli {count} zaidi","other":"Onyesha seli {count} zaidi"},"countVar":"count"},
   "editor.ai.copyError": "Nakili hitilafu",
   "editor.ai.copyErrorDone": "Imenakiliwa",
   "editor.audio.record": "Rekodi sauti",

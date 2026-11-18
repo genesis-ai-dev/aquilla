@@ -494,6 +494,8 @@ export const bn: Catalog = {
   "editor.panel.resizeParallelBibles": "পাশাপাশি বাইবেল প্যানেলের আকার পরিবর্তন করুন",
   "editor.panel.resizeVerseResources": "পদের সহায়ক উপকরণ প্যানেলের আকার পরিবর্তন করুন",
   "editor.translationNotes.loadFailed": "অনুবাদ নোট লোড করা যায়নি",
+  "editor.bookHealth.showFewerCells": "কম সেল দেখান",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"আরও {count}টি সেল দেখান","other":"আরও {count}টি সেল দেখান"},"countVar":"count"},
   "editor.ai.copyError": "ত্রুটি কপি করুন",
   "editor.ai.copyErrorDone": "কপি হয়েছে",
   "editor.audio.record": "অডিও রেকর্ড করুন",

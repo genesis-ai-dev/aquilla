@@ -493,6 +493,8 @@ export const ur: Catalog = {
   "editor.panel.resizeParallelBibles": "متوازی بائبلوں کے پینل کا سائز بدلیں",
   "editor.panel.resizeVerseResources": "آیت کے وسائل کے پینل کا سائز بدلیں",
   "editor.translationNotes.loadFailed": "ترجمے کے نوٹس لوڈ نہیں ہو سکے",
+  "editor.bookHealth.showFewerCells": "کم خانے دکھائیں",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"مزید {count} خانہ دکھائیں","other":"مزید {count} خانے دکھائیں"},"countVar":"count"},
   "editor.ai.copyError": "خرابی نقل کریں",
   "editor.ai.copyErrorDone": "نقل ہو گیا",
   "editor.audio.record": "آڈیو ریکارڈ کریں",

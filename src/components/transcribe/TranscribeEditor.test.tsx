@@ -4,10 +4,14 @@
 // take. A hand edit saves as a correction (no AI mark); emptying it goes back
 // to what ASR heard without teaching a word fix; clearing on the left removes
 // both.
+//
+// And a run is never a bare spinner: what ASR heard shows the moment it
+// arrives, the cleanup shows as it is written with its changes marked over the
+// heard text, and the result stays on the row while the save is read back.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createRef } from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: () => ({
@@ -18,20 +22,38 @@ vi.mock("@/hooks/useCellAudio", () => ({
   }),
 }))
 
+// The lens asks the server about the speech model as it opens; no test here
+// is about that (useSpeechModelWarmup.test.tsx is), so the model is up.
+vi.mock("@/lib/audio/omni-warmup", () => ({
+  WARMUP_POLL_MS: 4000,
+  WARMUP_CAP_MS: 60_000,
+  fetchOmniStatus: vi.fn(async () => ({ state: "ready" })),
+  warmOmni: vi.fn(async () => undefined),
+}))
+
 const runCalls: string[] = []
+/** The speech model each run was told to use, by cell. */
+const runSpeech: Record<string, unknown> = {}
+/** Set by a test to drive a run step by step; the run waits on it. */
+let script: ((onProgress: (p: unknown) => void) => Promise<unknown>) | null = null
 const asrCalls: string[] = []
 /** The clip each run was handed, by cell: the sparkle must transcribe the
  *  row's own take, not whatever the recording slot holds. */
 const runAudio: Record<string, string> = {}
 vi.mock("@/lib/transcript-cleanup/run", () => ({
   rowLanguage: () => undefined,
-  transcribeAndCleanUp: vi.fn(async ({ row }: { row: { cell: { id: string }; audioId: string } }) => {
+  transcribeAndCleanUp: vi.fn(async ({ row, speech, onProgress }: {
+    row: { cell: { id: string }; audioId: string }; speech?: unknown; onProgress: (p: unknown) => void
+  }) => {
     runCalls.push(row.cell.id)
     runAudio[row.cell.id] = row.audioId
-    return { kind: "cleaned", changes: 1 }
+    runSpeech[row.cell.id] = speech
+    if (script) return script(onProgress)
+    return { kind: "cleaned", changes: 1, text: "cleaned" }
   }),
-  transcribeRow: vi.fn(async ({ row }: { row: { cell: { id: string } } }) => {
+  transcribeRow: vi.fn(async ({ row, speech }: { row: { cell: { id: string } }; speech?: unknown }) => {
     asrCalls.push(row.cell.id)
+    runSpeech[row.cell.id] = speech
     return { kind: "transcribed" }
   }),
 }))
@@ -50,6 +72,7 @@ vi.mock("@/lib/transcript-cleanup/save", () => ({
 }))
 
 import { TranscribeEditor, type TranscribeEditorHandle } from "./TranscribeEditor"
+import { setTranscribeSpeed } from "./transcribe-speed"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -101,6 +124,8 @@ beforeEach(() => {
   asrCalls.length = 0
   saves.length = 0
   clears.length = 0
+  script = null
+  for (const key of Object.keys(runSpeech)) delete runSpeech[key]
   window.localStorage.clear()
   window.confirm = vi.fn(() => true)
 })
@@ -162,10 +187,102 @@ describe("TranscribeEditor", () => {
     await waitFor(() => expect(saves).toEqual([{ cellId: "c1", text: "Yesu", ai: undefined }]))
   })
 
-  it("shows what ASR heard beside the transcript", () => {
+  // "Cleaned up · 5 changes" told the person a number and left them to find
+  // the five. The changes are drawn over the heard text instead.
+  it("marks what the transcript changed over what ASR heard", () => {
     render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema akasema", transcript: "Yesu akasema" })]} session={session} concepts={[]} editable />)
-    expect(screen.getByTestId("transcribe-heard").textContent).toBe("eema akasema")
+    const heard = screen.getByTestId("transcribe-heard")
+    expect(heard.getAttribute("data-heard")).toBe("eema akasema")
+    expect(heard.querySelector("del")?.textContent).toBe("eema")
+    expect(heard.querySelector("ins")?.textContent).toBe("Yesu")
+    expect(heard.textContent).toBe("eema Yesu akasema")
     expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("Yesu akasema")
+  })
+
+  it("shows the heard text unmarked when the transcript still says the same", () => {
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema akasema", transcript: "eema akasema" })]} session={session} concepts={[]} editable />)
+    const heard = screen.getByTestId("transcribe-heard")
+    expect(heard.textContent).toBe("eema akasema")
+    expect(heard.querySelector("del, ins")).toBeNull()
+  })
+
+  // A correction typed by hand is seen against the machine's text as it is
+  // typed, before it is saved: that is how a person feels what they changed.
+  it("redraws the marks as the transcript is edited", () => {
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema akasema", transcript: "eema akasema" })]} session={session} concepts={[]} editable />)
+    fireEvent.change(screen.getByTestId("transcribe-transcript"), { target: { value: "Yesu akasema" } })
+    expect(screen.getByTestId("transcribe-heard").querySelector("ins")?.textContent).toBe("Yesu")
+  })
+
+  // The whole point of the live row: each step is on screen when it happens,
+  // not after the save has been flushed and the file read back.
+  it("shows each step of a run as it happens, and keeps the result while the save is read back", async () => {
+    let step: (value?: unknown) => void = () => {}
+    const next = () => new Promise((resolve) => { step = resolve })
+    script = async (onProgress) => {
+      onProgress({ stage: "listening" })
+      await next()
+      onProgress({ stage: "heard", heard: "eema akasema", transcript: "eema akasema" })
+      await next()
+      onProgress({ stage: "cleaning", heard: "eema akasema", text: "Yesu " })
+      await next()
+      return { kind: "cleaned", changes: 1, text: "Yesu akasema" }
+    }
+    // `cells` never changes in this test: nothing here comes from a refetch.
+    render(<TranscribeEditor project={project} cells={[take("c1")]} session={session} concepts={[]} editable />)
+    expect(screen.getByTestId("transcribe-heard").textContent).toBe("Not transcribed yet")
+
+    fireEvent.click(screen.getByTestId("transcribe-run"))
+    // Listening: a cursor where the words will go, and the step named.
+    await waitFor(() => expect(screen.getByTestId("transcribe-stage").textContent).toBe("Listening…"))
+    expect(screen.getByTestId("transcribe-cursor")).toBeTruthy()
+    expect(screen.getByTestId("transcribe-row").getAttribute("aria-busy")).toBe("true")
+
+    // Heard: typed out at once.
+    await act(async () => { step() })
+    expect(screen.getByTestId("transcribe-heard").getAttribute("data-heard")).toBe("eema akasema")
+    await waitFor(() => expect(screen.getByTestId("transcribe-typed").textContent).toBe("eema akasema"))
+
+    // Cleaning: the reply so far on the right; on the left only the part of
+    // the heard text it has reached is marked, and the rest waits unmarked.
+    await act(async () => { step() })
+    expect(screen.getByTestId("transcribe-writing").textContent).toBe("Yesu ")
+    expect(screen.getByTestId("transcribe-stage").textContent).toBe("Cleaning up…")
+    const heard = screen.getByTestId("transcribe-heard")
+    expect(heard.querySelector("del")?.textContent).toBe("eema")
+    expect(heard.querySelector("ins")?.textContent).toBe("Yesu")
+    expect(heard.querySelector('[data-diff="pending"]')?.textContent).toBe("akasema")
+
+    // Done: the cleanup and its mark are on the row before any refetch.
+    await act(async () => { step() })
+    await waitFor(() => expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("Yesu akasema"))
+    expect(screen.getByTestId("transcribe-cleaned").textContent).toContain("1 change")
+    expect(screen.queryByTestId("transcribe-stage")).toBeNull()
+  })
+
+  // Fast is the default: the first pass only has to be quick, the cleanup
+  // rewrites it. Smart is the person's own pick, remembered for the account.
+  it("runs the fast speech model unless the person picked Smart", async () => {
+    const view = render(<TranscribeEditor project={project} cells={[take("c1")]} session={session} concepts={[]} editable />)
+    expect(screen.getByTestId("transcribe-speed").textContent).toContain("Fast")
+    fireEvent.click(screen.getByTestId("transcribe-run"))
+    await waitFor(() => expect(runSpeech.c1).toEqual({ model: "omni-fast" }))
+    view.unmount()
+
+    act(() => setTranscribeSpeed("u", "smart"))
+    render(<TranscribeEditor project={project} cells={[take("c2")]} session={session} concepts={[]} editable />)
+    expect(screen.getByTestId("transcribe-speed").textContent).toContain("Smart")
+    fireEvent.click(screen.getByTestId("transcribe-run-all"))
+    await waitFor(() => expect(runSpeech.c2).toEqual({ model: "omni-zs", quietFallback: "omni-fast" }))
+  })
+
+  // "Nothing to clean up" on text that is plainly misspelled reads as a bug.
+  // With nothing to learn from, the row says that, and what will teach it.
+  it("says there is nothing to learn from yet, rather than nothing to clean up", async () => {
+    script = async () => ({ kind: "unlearned" })
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "x", transcript: "x" })]} session={session} concepts={[]} editable />)
+    fireEvent.click(screen.getByTestId("transcribe-run"))
+    await waitFor(() => expect(screen.getByTestId("transcribe-status").textContent).toMatch(/No examples yet/))
   })
 
   it("lists a line voiced only by a generated voice instead of calling the file silent (AQU-2146)", () => {

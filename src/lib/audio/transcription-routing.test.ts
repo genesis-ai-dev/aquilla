@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, afterEach, expect, it, vi } from "vitest"
 import { setTranscriptionProvider } from "./transcription-preference"
+import { setTranscriptionModel } from "./transcription-model"
 
 const consent = vi.fn(async () => true)
 vi.mock("./ai-consent", async original => ({
@@ -79,6 +80,31 @@ it("signed-out transcription retains the local path", async () => {
     .toEqual({ text: "local", chunks: [] })
   expect(consent).toHaveBeenCalledOnce()
   expect(fetchSpy).not.toHaveBeenCalled()
+})
+it("a run's hosted model reaches the server in place of the account's choice", async () => {
+  // The Transcribe lens picks Fast or Smart per run. `model` on these options
+  // is the on-device model id, so the hosted pick has its own field; if it
+  // were dropped here the lens would silently run the Preferences model.
+  setTranscriptionModel(session.username, "whisper")
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ text: "hosted", chunks: [] }),
+  )
+  await transcription.transcribeAudio(new Uint8Array(2), {
+    session, projectId: "project", model: "onnx-community/whisper-base", hostedModel: "omni-fast",
+  })
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({ model: "omni-fast" })
+})
+it("a zero-shot run with a quiet fallback runs the fallback when there is no cell to learn from", async () => {
+  // No `zeroShot` context (a source clip): the lens's Smart falls back to its
+  // Fast model, not to the automatic one, and nothing is asked.
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({ text: "hosted", chunks: [] }),
+  )
+  await transcription.transcribeAudio(new Uint8Array(2), {
+    session, projectId: "project", hostedModel: "omni-zs", hostedQuietFallback: "omni-fast",
+  })
+  expect(fetchSpy).toHaveBeenCalledOnce()
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({ model: "omni-fast" })
 })
 // Restore the browser constructor for other tests in the same process.
 import { afterAll } from "vitest"

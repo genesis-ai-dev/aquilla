@@ -1,7 +1,8 @@
 # Aquilla Omnilingual ASR — self-hosted server with the same HTTP contract as
 # the Modal web app in infra/modal/omni_asr.py:
-#   POST /transcribe {model: "ctc"|"zs", audio: base64, lang?, examples?}
-#   GET  /status?model=ctc|zs        POST /warm {model}
+#   POST /transcribe {model: "ctc"|"zs"|"fast", audio: base64, lang?, examples?}
+#   GET  /status?model=ctc|zs|fast   POST /warm {model}
+# `fast` is the 300M aligner this server always loads, run in one pass.
 # Every route checks the X-Omni-Secret header. Models load once at startup and
 # stay in memory, so there is no cold start. The auth-worker calls this server
 # first (OMNI_ASR_PRIMARY_URL) and falls back to Modal on a network error or 5xx.
@@ -41,8 +42,8 @@ from fastapi import FastAPI, Header, HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "modal"))
 from omni_asr import (  # noqa: E402
-    EST_GPU_SEC_PER_AUDIO_SEC, MAX_AUDIO_SEC, MAX_CONTEXT_SEC, MAX_EXAMPLES, SAMPLE_RATE,
-    _Aligner, _decode_wav, _fetch_example,
+    BAD_MODEL, EST_GPU_SEC_PER_AUDIO_SEC, MAX_AUDIO_SEC, MAX_CONTEXT_SEC, MAX_EXAMPLES, SAMPLE_RATE,
+    MODELS, _Aligner, _decode_wav, _fetch_example,
 )
 
 ALIGNER_CARD = "omniASR_CTC_300M"
@@ -73,15 +74,6 @@ def quantize_int8(model: torch.nn.Module) -> torch.nn.Module:
     return torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
 
 
-def _greedy_text(aligner: _Aligner, emis: torch.Tensor) -> str:
-    """CTC greedy decode of log-probs [T, V], as upstream's
-    _apply_model_wav2vec2asr does: collapse repeats; the decoder drops blanks."""
-    ids = emis.argmax(dim=-1)
-    keep = torch.ones_like(ids, dtype=torch.bool)
-    keep[1:] = ids[1:] != ids[:-1]
-    return aligner.pipe.token_decoder(ids[keep]).strip()
-
-
 class CTC:
     def __init__(self, card: str, device: torch.device, quantize: str | None) -> None:
         from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
@@ -103,12 +95,23 @@ class CTC:
 
     def transcribe(self, wav: torch.Tensor, lang: str | None) -> tuple[str, list[dict], bool]:
         if self.pipe is None:
-            emis = self.aligner.emissions(wav)
-            text = _greedy_text(self.aligner, emis)
-            return (text, *self.aligner.align(wav, text, emis))
+            return self.aligner.transcribe(wav)
         text = self.pipe.transcribe([{"waveform": wav, "sample_rate": SAMPLE_RATE}],
                                     lang=[lang], batch_size=1)[0]
         return (text, *self.aligner.align(wav, text))
+
+
+class Fast:
+    """Model `fast`: the 300M aligner the CTC side already holds, in one pass
+    (as on Modal's OmniFast). It shares the CTC lock: same device."""
+
+    def __init__(self, ctc: CTC) -> None:
+        self.aligner = ctc.aligner
+        self.device = ctc.device
+        self.lock = ctc.lock
+
+    def transcribe(self, wav: torch.Tensor, lang: str | None) -> tuple[str, list[dict], bool]:
+        return self.aligner.transcribe(wav)
 
 
 class ZS:
@@ -139,7 +142,7 @@ def _default_devices() -> tuple[str, str]:
     return ("cuda:0" if n else "cpu"), ("cuda:1" if n >= 2 else "off")
 
 
-models: dict[str, CTC | ZS] = {}
+models: dict[str, CTC | ZS | Fast] = {}
 
 
 def load_models() -> None:
@@ -150,6 +153,7 @@ def load_models() -> None:
     models["ctc"] = CTC(os.environ.get("OMNI_CTC_MODEL", "omniASR_CTC_1B"), ctc_dev,
                         os.environ.get("OMNI_CTC_QUANTIZE") or None)
     print(f"[ctc] loaded in {time.time() - t0:.1f}s on {device_label(ctc_dev)}", flush=True)
+    models["fast"] = Fast(models["ctc"])
     if zs_dev != "off":
         t0 = time.time()
         models["zs"] = ZS(torch.device(zs_dev), models["ctc"].aligner)
@@ -174,9 +178,9 @@ def check(secret: str | None) -> None:
         raise HTTPException(status_code=401, detail="bad shared secret")
 
 
-def model_or_503(model: str | None) -> CTC | ZS:
-    if model not in ("ctc", "zs"):
-        raise HTTPException(status_code=400, detail="model must be ctc or zs")
+def model_or_503(model: str | None) -> CTC | ZS | Fast:
+    if model not in MODELS:
+        raise HTTPException(status_code=400, detail=BAD_MODEL)
     if model not in models:
         # 5xx on purpose: the worker falls back to Modal, which has ZS.
         raise HTTPException(status_code=503, detail=f"{model} is not served here")

@@ -273,6 +273,42 @@ Per `AGENTS.md`. The cases that carry the intent:
   ASR and LLM, see Heard and the cleaned transcript, edit it, reload, and see
   the pair counted for the lane.
 
+## Addendum, 2026-11-18: the live row (AQU-2649)
+
+What changed after Ryder's review of the lens, and why.
+
+- **Fast and Smart.** The toolbar picks the speech model
+  (`src/components/transcribe/transcribe-speed.ts`). Fast is the default: the
+  first pass only has to be quick, because the cleanup rewrites it. For a
+  language Whisper or Qwen knows, both choices use the automatic route. For
+  any other language, and for a language with no code at all, Fast is
+  `omni-fast` (Omnilingual CTC 300M on a CPU container: no GPU queue, about
+  10 s cold, under a second warm) and Smart is zero-shot, falling back to
+  `omni-fast` without asking when zero-shot cannot run. A model pinned in
+  Preferences is what Smart runs.
+- **Waking up.** The view wakes the chosen model as it opens. The toolbar says
+  so and counts the seconds; a row asked to run meanwhile says it is waiting
+  for the model. The Modal service must be deployed for this to work: the
+  2026-10-27 CTC status change sat undeployed until this date, so production
+  always answered "ready".
+- **A row shows its work.** A cursor while it listens, the heard text typed out
+  when it arrives (before the save is read back), the cleanup as the model
+  writes it. The cleanup route streams with `stream: true`
+  (Server-Sent Events: `delta` frames, then one `result` frame) and still
+  answers JSON to a client that does not ask.
+- **The diff.** What the transcript changed is drawn over the heard text
+  (`src/lib/transcript-cleanup/diff.ts`). While the cleanup streams, only the
+  part of the heard text the reply has reached is compared; the rest waits
+  unmarked. Editing the transcript by hand redraws the same marks.
+- **Capitals and punctuation are changes.** They are the orthography. A
+  cleanup that only restores them is saved, and a person who adds them has
+  corrected the transcript (so the pair teaches the next cleanup).
+- **Written lines as evidence.** The cleanup is shown up to 12 other lines of
+  the file's target text, nearest first, as examples of the spelling. Never
+  the line the take reads (rule 3 of the prompt). With no pair, no written
+  line and no key term, an unchanged result reads "No examples yet", not
+  "Nothing to clean up".
+
 ## Out of scope
 
 - Writing transcripts into the target translation text.

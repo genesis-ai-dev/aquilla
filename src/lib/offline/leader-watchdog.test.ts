@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { watchLeaderLiveness } from "./leader-watchdog"
+import { leaderHasPersisted, watchLeaderLiveness, watchLeaderPersisted } from "./leader-watchdog"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
@@ -86,5 +86,77 @@ describe("watchLeaderLiveness", () => {
     stop()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(onStall).not.toHaveBeenCalled()
+  })
+})
+
+describe("leaderHasPersisted", () => {
+  it("compares global then client sequence numbers", () => {
+    expect(leaderHasPersisted("e5.3", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e5.4", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e6", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e5.2", "e5.3")).toBe(false)
+    expect(leaderHasPersisted("e5", "e5.1")).toBe(false)
+    expect(leaderHasPersisted("e4.9", "e5")).toBe(false)
+  })
+
+  it("ignores the rebase generation", () => {
+    expect(leaderHasPersisted("e5.3r1", "e5.3")).toBe(true)
+  })
+
+  it("treats an unreadable head as not persisted", () => {
+    expect(leaderHasPersisted("garbage", "e5.3")).toBe(false)
+    expect(leaderHasPersisted("e5.3", "")).toBe(false)
+  })
+})
+
+describe("watchLeaderPersisted", () => {
+  function makeFeed(upstreamHead: string) {
+    let current = upstreamHead
+    const listeners = new Set<(status: { upstreamHead: string }) => void>()
+    const store = {
+      syncStatus: () => ({ upstreamHead: current }),
+      subscribeSyncStatus: (cb: (status: { upstreamHead: string }) => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    } as unknown as Parameters<typeof watchLeaderPersisted>[0]
+    return {
+      store,
+      listeners,
+      advance: (next: string) => {
+        current = next
+        for (const cb of [...listeners]) cb({ upstreamHead: next })
+      },
+    }
+  }
+
+  it("calls back at once when the head is already persisted", () => {
+    const { store, listeners } = makeFeed("e3.2")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e3.1", onPersisted)
+    expect(onPersisted).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("calls back once the leader catches up, then unsubscribes", () => {
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e3.2", onPersisted)
+    advance("e3.1")
+    expect(onPersisted).not.toHaveBeenCalled()
+    advance("e3.2")
+    advance("e3.3")
+    expect(onPersisted).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("stops waiting when told to", () => {
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const onPersisted = vi.fn()
+    const stop = watchLeaderPersisted(store, "e3.2", onPersisted)
+    stop()
+    advance("e3.5")
+    expect(onPersisted).not.toHaveBeenCalled()
+    expect(listeners.size).toBe(0)
   })
 })

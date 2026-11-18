@@ -63,6 +63,56 @@ export type LeaderWatchdogOptions = {
   now?: () => number
 }
 
+// LiveStore's sequence number strings: e{global}[.{client}][r{rebaseGeneration}].
+const SEQ_NUM = /^e(\d+)(?:\.(\d+))?(?:r\d+)?$/
+
+/**
+ * True once `upstreamHead` (what the leader has confirmed) has reached `head`
+ * (a session's `localHead` right after a commit), i.e. the leader has written
+ * that commit to its eventlog. Every offline event is client-only, so the
+ * rebase generation never moves and is ignored. An unreadable head counts as
+ * not persisted: the caller keeps its backup.
+ */
+export function leaderHasPersisted(upstreamHead: string, head: string): boolean {
+  const upstream = SEQ_NUM.exec(upstreamHead)
+  const target = SEQ_NUM.exec(head)
+  if (!upstream || !target) return false
+  const [upGlobal, upClient] = [Number(upstream[1]), Number(upstream[2] ?? 0)]
+  const [global, client] = [Number(target[1]), Number(target[2] ?? 0)]
+  return upGlobal > global || (upGlobal === global && upClient >= client)
+}
+
+type SyncStatusFeed = Pick<Store<typeof schema>, "syncStatus" | "subscribeSyncStatus">
+
+/**
+ * Calls `onPersisted` once the leader has persisted everything up to `head`
+ * (see `leaderHasPersisted`); returns a function that stops waiting. A dead
+ * leader never calls back — the stall watchdog covers that.
+ */
+export function watchLeaderPersisted(store: SyncStatusFeed, head: string, onPersisted: () => void): () => void {
+  let done = false
+  let unsubscribe: (() => void) | undefined
+  const check = (upstreamHead: string) => {
+    if (done || !leaderHasPersisted(upstreamHead, head)) return
+    done = true
+    unsubscribe?.()
+    onPersisted()
+  }
+  try {
+    check(store.syncStatus().upstreamHead)
+    if (done) return () => {}
+    unsubscribe = store.subscribeSyncStatus((status) => check(status.upstreamHead))
+    if (done) unsubscribe()
+  } catch (error) {
+    // A store that shut down can't confirm anything; the caller's backup stays.
+    console.warn("[offline] Couldn't watch the leader persist a commit", error)
+  }
+  return () => {
+    done = true
+    unsubscribe?.()
+  }
+}
+
 const DEFAULT_STALL_MS = 15_000
 const DEFAULT_CHECK_EVERY_MS = 2_000
 

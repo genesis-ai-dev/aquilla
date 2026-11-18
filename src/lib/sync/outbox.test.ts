@@ -810,7 +810,7 @@ describe("Tauri offline routing", () => {
     }
   })
 
-  it("journals a target commit before waiting on the offline store, and clears it once routed", async () => {
+  it("journals a target commit before waiting on the offline store, and clears it once persisted", async () => {
     setActiveOutboxOwner("alice")
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")
@@ -820,7 +820,8 @@ describe("Tauri offline routing", () => {
     expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ ownerKey: "alice", event: { id: "tc1" } })
     await pending
 
-    expect(localStorage.getItem(key)).toBeNull()
+    // Kept until the leader has written the commit to disk, then cleared.
+    await vi.waitFor(() => expect(localStorage.getItem(key)).toBeNull())
     expect(currentOfflineStore!.query(offlineTables.eventQueue.select()).map((r) => r.id)).toEqual(["tc1"])
     expect(await outboxPendingCount()).toBe(0)
   })

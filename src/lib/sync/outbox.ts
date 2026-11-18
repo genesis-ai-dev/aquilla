@@ -30,7 +30,8 @@ import {
   addOutboxRecords,
   type JournalContents,
 } from "./outbox-recovery"
-import { planOfflineRouting } from "./offline-routing"
+import { isLeaderStalled } from "@/lib/offline/leader-watchdog"
+import { markRescuedFromOfflineQueue, planOfflineRouting, type WhenPersisted } from "./offline-routing"
 import { purgeCellsCacheForQuota } from "./cells-cache"
 import { withStorageQuotaRecovery } from "@/lib/storage/storage-pressure"
 
@@ -337,20 +338,93 @@ async function recoverIntoQueues(db: IDBDatabase, { records, keys }: JournalCont
       : null
     const routedIds = new Set(routing?.routed.map((event) => event.id))
     await addOutboxRecords(db, STORE, pending.filter((record) => !routedIds.has(record.id)))
+    let whenPersisted: WhenPersisted | null = null
     if (routing && routedIds.size > 0) {
       try {
-        routing.commit()
+        whenPersisted = routing.commit()
       } catch (error) {
         console.warn("[outbox] Offline queue refused recovered edits; using the HTTP outbox", error)
         await addOutboxRecords(db, STORE, pending.filter((record) => routedIds.has(record.id)))
       }
     }
-    clearJournal(keys)
+    if (whenPersisted) {
+      holdJournalUntilPersisted(pending.filter((record) => routedIds.has(record.id)), whenPersisted, () => clearJournal(keys))
+    } else {
+      clearJournal(keys)
+    }
     if (pending.length > 0) notifyOutboxChanged()
   } catch (error) {
     releaseJournal(keys)
     console.warn("[outbox] Couldn't recover journaled edits; will retry on next launch", error)
   }
+}
+
+/**
+ * Edits committed to LiveStore's offline queue that its leader hasn't yet
+ * written to disk. Until it has, a commit lives only in this page's memory,
+ * so each keeps its localStorage journal entry (replayed on the next launch
+ * if the page dies first) and, if the leader stalls, is copied to IndexedDB
+ * by `rescueUnpersistedOfflineWrites`. A healthy leader confirms within
+ * milliseconds.
+ */
+interface AwaitingPersist {
+  records: readonly OutboxRecord[]
+  clearJournal: () => void
+  stopWatching: () => void
+}
+const awaitingPersist = new Set<AwaitingPersist>()
+
+function holdJournalUntilPersisted(
+  records: readonly OutboxRecord[],
+  whenPersisted: WhenPersisted,
+  clearJournal: () => void,
+): void {
+  const entry: AwaitingPersist = { records, clearJournal, stopWatching: () => {} }
+  awaitingPersist.add(entry)
+  entry.stopWatching = whenPersisted(() => {
+    if (awaitingPersist.delete(entry)) entry.clearJournal()
+  })
+  // Committed just as the watchdog fired: the rescue it started missed this one.
+  if (awaitingPersist.has(entry) && isLeaderStalled()) void rescueUnpersistedOfflineWrites()
+}
+
+/**
+ * The offline store's leader has stopped persisting (OfflineLeaderWatchdog):
+ * copies every edit it hasn't confirmed into the IndexedDB outbox, so a
+ * restart — or the page dying — can't lose it, and it uploads over HTTP when
+ * online. New edits already skip the offline queue while it's stalled
+ * (`planOfflineRouting`). The copies stay in the in-memory offline queue too;
+ * if both send one, the server keeps the first (ids are idempotent).
+ *
+ * Resolves true when there was nothing to rescue or everything was copied.
+ * On false, the edits' journal entries stay, and the next launch replays them.
+ */
+export async function rescueUnpersistedOfflineWrites(): Promise<boolean> {
+  const entries = [...awaitingPersist]
+  if (entries.length === 0) return true
+  for (const entry of entries) {
+    awaitingPersist.delete(entry)
+    entry.stopWatching()
+  }
+  const records = entries.flatMap((entry) => entry.records)
+  try {
+    // Add-not-put: an id already in IndexedDB keeps its state.
+    await addRecordsWithQuotaRecovery(records)
+  } catch (error) {
+    console.error("[outbox] Couldn't copy unsaved offline edits to IndexedDB; they stay in the restart journal", error)
+    return false
+  }
+  markRescuedFromOfflineQueue(records.map((record) => record.id))
+  for (const entry of entries) entry.clearJournal()
+  console.warn(`[outbox] Copied ${records.length} offline edit(s) the stalled store hadn't saved to IndexedDB`)
+  notifyOutboxChanged()
+  return true
+}
+
+/** Test-only reset. */
+export function forgetAwaitingPersistForTests(): void {
+  for (const entry of awaitingPersist) entry.stopWatching()
+  awaitingPersist.clear()
 }
 
 /**
@@ -495,6 +569,9 @@ async function writeOutboxRecords(
   const toRecords = (list: readonly CqrsRawEvent[]) => list.map((event) => byEvent.get(event)!)
 
   let wrote: boolean
+  // Set once the offline queue took the routed events: their journal entry
+  // then waits for the leader to persist them (holdJournalUntilPersisted).
+  let offlineCommit: { routed: readonly OutboxRecord[]; whenPersisted: WhenPersisted } | null = null
   // Ids this call added to IndexedDB. A record that was already queued before
   // it (a re-enqueue) isn't ours to remove on failure.
   let added: string[] = []
@@ -519,7 +596,7 @@ async function writeOutboxRecords(
     const inIndexedDb = new Set(toWrite.map((rec) => rec.id))
     if (routing && routing.routed.length > 0) {
       try {
-        routing.commit()
+        offlineCommit = { routed: toRecords(routing.routed), whenPersisted: routing.commit() }
       } catch (error) {
         // The offline store refused them (shut down, a materializer error):
         // send them over HTTP instead, so the batch still lands whole.
@@ -548,7 +625,8 @@ async function writeOutboxRecords(
       if (writeDestinations.get(rec.id) === destination) writeDestinations.delete(rec.id)
     }
   }
-  clearJournal()
+  if (offlineCommit) holdJournalUntilPersisted(offlineCommit.routed, offlineCommit.whenPersisted, clearJournal)
+  else clearJournal()
   if (wrote) notifyOutboxChanged()
 }
 

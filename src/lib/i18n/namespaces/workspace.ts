@@ -43,6 +43,9 @@ export const workspace = defineNamespace({
     // Tauri offline mode: the local store's leader worker stopped persisting
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
+    // Same, once the edits it hadn't saved were moved to the upload queue
+    // (rescueUnpersistedOfflineWrites in src/lib/sync/outbox.ts).
+    "workspace.offline.leaderStalledBackedUpToast": "This device stopped saving changes to your offline copy, so your edits are being kept in the upload queue instead. They're safe and will upload when you're online. Restart the app to fix offline saving.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
@@ -625,6 +628,15 @@ export const workspace = defineNamespace({
           "Paired with a 'Restart app' action (workspace.offline.leaderStalledRestart). " +
           "Two full sentences with periods. Plain language — no 'worker', 'store' " +
           "or 'sync' jargon.",
+      },
+      "workspace.offline.leaderStalledBackedUpToast": {
+        description:
+          "Replaces workspace.offline.leaderStalledToast in the Tauri desktop app " +
+          "once the edits the on-device storage hadn't saved were moved to the " +
+          "queue that uploads them to the server. Reassures that nothing is lost " +
+          "and that restarting fixes offline saving. Paired with a 'Restart app' " +
+          "action (workspace.offline.leaderStalledRestart). Three full sentences " +
+          "with periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
       },
       "workspace.offline.leaderStalledRestart": {
         description:

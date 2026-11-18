@@ -13,6 +13,7 @@
  * a store round-trip at all.
  */
 
+import { isLeaderStalled, watchLeaderPersisted } from "@/lib/offline/leader-watchdog"
 import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
 
 /**
@@ -32,6 +33,23 @@ let warnedOfflineStoreUnavailable = false
 let warnedOfflineStoreShutDown = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
+
+/**
+ * Ids copied from LiveStore's queue into IndexedDB after the leader stalled
+ * (see `rescueUnpersistedOfflineWrites` in outbox.ts). They stay in the
+ * page's in-memory queue, which a dead leader never flushes, so the HTTP
+ * flusher must not hold their dependents back waiting on them there.
+ */
+const rescuedIds = new Set<string>()
+
+export function markRescuedFromOfflineQueue(ids: readonly string[]): void {
+  for (const id of ids) rescuedIds.add(id)
+}
+
+/** Test-only reset. */
+export function forgetRescuedIdsForTests(): void {
+  rescuedIds.clear()
+}
 
 // Rows per v1.EventsQueued. One commit for a whole replace-all would put every
 // edit's payload in one eventlog row, re-parsed whole on every rebuild.
@@ -87,8 +105,14 @@ async function openOfflineQueue() {
     waitingIds: (): ReadonlySet<string> => new Set([
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "pending" })),
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "flushing" })),
-    ]),
-    commit: (run: (booted: typeof liveStore) => void) => commitOrThrow(liveStore, () => run(liveStore)),
+    ].filter((id) => !rescuedIds.has(id))),
+    commit: (run: (booted: typeof liveStore) => void): WhenPersisted => {
+      commitOrThrow(liveStore, () => run(liveStore))
+      // The commit is the newest pending event, so the leader has persisted
+      // it once its confirmed head reaches the session's head.
+      const head = liveStore.syncStatus().localHead
+      return (onPersisted) => watchLeaderPersisted(liveStore, head, onPersisted)
+    },
   }
 }
 
@@ -108,6 +132,14 @@ function toQueuedRow(event: CqrsRawEvent) {
   }
 }
 
+/** Calls back once the leader has written a commit to disk; returns a stop function. */
+export type WhenPersisted = (onPersisted: () => void) => () => void
+
+const nothingToPersist: WhenPersisted = (onPersisted) => {
+  onPersisted()
+  return () => {}
+}
+
 /** Where `planOfflineRouting` sends a batch. */
 export interface OfflineRouting {
   /** The events for IndexedDB, in order. */
@@ -117,9 +149,10 @@ export interface OfflineRouting {
   /** Commits the others to LiveStore's queue, or throws having queued none of
    *  them (the store shut down before or during the commit). Synchronous, so
    *  a caller can clear their journal entries with nothing able to land in
-   *  between. A commit that returns is applied in memory; LiveStore persists
-   *  it to disk shortly after. */
-  commit: () => void
+   *  between. A commit that returns is applied in memory only; the leader
+   *  persists it to disk shortly after — the returned `WhenPersisted` says
+   *  when, and never calls back if the leader has died. */
+  commit: () => WhenPersisted
 }
 
 /** Which of `ids` are in the IndexedDB outbox, in any status. */
@@ -201,8 +234,11 @@ export async function planOfflineRouting(
   events: CqrsRawEvent[],
   inOutbox: OutboxLookup,
 ): Promise<OfflineRouting> {
-  const none: OfflineRouting = { rest: events, routed: [], commit: () => {} }
+  const none: OfflineRouting = { rest: events, routed: [], commit: () => nothingToPersist }
   if (!events.some((event) => OFFLINE_ROUTABLE_KINDS.has(event.kind))) return none
+  // A stalled leader persists nothing: a commit would live only in this
+  // page's memory. IndexedDB until it recovers (OfflineLeaderWatchdog).
+  if (isLeaderStalled()) return none
   const queue = await openOfflineQueue()
   if (!queue) return none
   const readiness = new Map<string, boolean>()
@@ -251,9 +287,9 @@ export async function planOfflineRouting(
   const routed: CqrsRawEvent[] = []
   const rest: CqrsRawEvent[] = []
   events.forEach((event, i) => (blocked.has(groups[i]) ? rest : routed).push(event))
-  const commit = () => {
-    if (routed.length === 0) return
-    queue.commit((store) => {
+  const commit = (): WhenPersisted => {
+    if (routed.length === 0) return nothingToPersist
+    return queue.commit((store) => {
       const batches = []
       for (let i = 0; i < routed.length; i += OFFLINE_QUEUE_CHUNK) {
         batches.push(queue.offlineEvents.eventsQueued({ rows: routed.slice(i, i + OFFLINE_QUEUE_CHUNK).map(toQueuedRow) }))

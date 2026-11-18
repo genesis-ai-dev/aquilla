@@ -6,6 +6,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { LeaderLogEntry } from "@/lib/offline/leader-log-bridge"
 import { setLeaderStalled, watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
 import { getOfflineBootProgress } from "@/lib/offline/boot-progress"
+import { rescueUnpersistedOfflineWrites } from "@/lib/sync/outbox"
 
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
 const SLOW_BOOT_TOAST_ID = "offline-slow-boot"
@@ -58,6 +59,7 @@ type Props = {
   stallMs?: number
   checkEveryMs?: number
   restart?: () => void
+  rescue?: () => Promise<boolean>
 }
 
 /**
@@ -82,6 +84,7 @@ export function OfflineLeaderWatchdog({
   stallMs,
   checkEveryMs,
   restart = restartApp,
+  rescue = rescueUnpersistedOfflineWrites,
 }: Props): null {
   const { store, loading } = useOfflineStore()
   const t = useT()
@@ -178,10 +181,13 @@ export function OfflineLeaderWatchdog({
 
   useEffect(() => {
     if (!store) return
+    let stalled = false
     return watchLeaderLiveness(store, {
       stallMs,
       checkEveryMs,
       onStall: (stall) => {
+        stalled = true
+        // First, so edits made from here on go to IndexedDB, not the dead queue.
         setLeaderStalled(true)
         const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
         console.error("[offline] LiveStore leader stopped persisting writes", {
@@ -198,13 +204,20 @@ export function OfflineLeaderWatchdog({
             onClick: restart,
           },
         })
+        // Copy what the leader never saved to IndexedDB; once that's done the
+        // edits are safe, so the toast stops saying they may be lost. Later
+        // edits skip the offline queue until the leader recovers.
+        void rescue().then((rescued) => {
+          if (rescued && stalled) toast.update(LEADER_STALLED_TOAST_ID, { title: t("workspace.offline.leaderStalledBackedUpToast") })
+        })
       },
       onRecover: () => {
+        stalled = false
         setLeaderStalled(false)
         toast.close(LEADER_STALLED_TOAST_ID)
       },
     })
-  }, [store, stallMs, checkEveryMs, restart, t])
+  }, [store, stallMs, checkEveryMs, restart, rescue, t])
 
   return null
 }

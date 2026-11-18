@@ -42,7 +42,7 @@ import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { assignLaneOptions } from "@/lib/sync/assignment-lane"
-import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { laneCodesByTag, laneLabelsByTag, laneLanguageCodeForTag, laneRowLanguage, liveTargetLaneLanguages, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import {
   acknowledgeLaneArchive,
@@ -7133,7 +7133,7 @@ export function ProjectWorkspace() {
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
     // created; ordinary formats pass through unchanged.
-    const normalizedDraft = normalizeProtectedCompletion(commitCell, text)
+    const normalizedDraft = normalizeProtectedCompletion(commitCell, text, { promptCell: cell })
     // AQU-2628: the model cannot be asked to spell; the draft is converted
     // here, before the optimistic patch and before the ai_drafted commit, so
     // the cell never holds old-spelling text for even a frame and the
@@ -7343,7 +7343,7 @@ export function ProjectWorkspace() {
         // AQU-2628: same conversion as the single-cell path — a batch draft
         // reaches a cell by a different route, not by different rules.
         const { draft: completed, stats: orthographyStats } = convertDraftOrthography(
-          normalizeProtectedCompletion(liveCell, draft.text),
+          normalizeProtectedCompletion(liveCell, draft.text, { promptCell: draft.cell }),
           draftOrthography,
         )
         const parentId = resolveTargetCommitParentId(liveCell)
@@ -20685,6 +20685,7 @@ export function ProjectWorkspace() {
           sourceLanguage={activeSourceLanguage}
           targetLanguage={activeLaneTargetLanguage}
           targetLang={activeLane}
+          targetLanguageCode={laneLanguageCodeForTag(activeLane, laneRows)}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
           // AQU-965: the number the line's own audio check compares against,

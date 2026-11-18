@@ -64,7 +64,7 @@ export const DOCX_PARITY_EXPECTED_CELLS: {
     original: "Plain sentence with an emphasised word & an entity.",
     context: "Paragraph",
     type: "text",
-    originalHtml: "Plain sentence with an <b>emphasised</b> word & an entity.",
+    originalHtml: "Plain sentence with an <b>emphasised</b> word &amp; an entity.",
     paragraphStart: true,
   },
   {

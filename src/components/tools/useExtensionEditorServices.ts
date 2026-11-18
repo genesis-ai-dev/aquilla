@@ -32,6 +32,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import type { ToolEditorServices } from "@/lib/tools/editor-services"
 import type { ToolRev4Services } from "@/lib/tools/host-handlers-rev4"
 import { suggestFor, recordSuggestionFeedback, setSuggestionMemory } from "@/lib/tools/suggestions"
+import { markedPreviewText } from "@/lib/completion/docx-marks"
 import type { ToolOrigin } from "../../../shared/tools/manifest"
 import type {
   ToolBacktranslation,
@@ -304,7 +305,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
     }
     const ai: ToolCellSignals["ai"] = {}
     for (const [cellId, phase] of args.completing) {
-      ai[cellId] = { phase: phase === "searching" ? "searching" : phase === "aligning" ? "aligning" : "generating", preview: args.previews.get(cellId) ?? null, error: null }
+      ai[cellId] = { phase: phase === "searching" ? "searching" : phase === "aligning" ? "aligning" : "generating", preview: markedPreviewText(args.store.getCellView(cellId), args.previews.get(cellId)) ?? null, error: null }
     }
     for (const [cellId, error] of args.errors) ai[cellId] = { phase: ai[cellId]?.phase ?? null, preview: ai[cellId]?.preview ?? null, error }
     return {

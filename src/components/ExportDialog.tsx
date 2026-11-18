@@ -451,6 +451,10 @@ interface ExportDialogProps {
   targetLanguage?: string
   /** Storage lane for the active target. Distinct from its display language. */
   targetLang?: string
+  /** AQU-2539: the active target's BCP 47 code ("fr-FR"), when one is known.
+   *  The Word export sets it as the proofing language and applies French
+   *  spacing for French. `targetLanguage` above is freeform ("French"). */
+  targetLanguageCode?: string | null
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -590,6 +594,7 @@ export function ExportDialog({
   sourceLanguage = "und",
   targetLanguage = "und",
   targetLang = "",
+  targetLanguageCode = null,
   ttsSettings,
   getToken,
   orgId,
@@ -1642,7 +1647,10 @@ export function ExportDialog({
         // AQU-1148: a non-validated cell keeps its place (the package is located
         // through it) but carries no translation, so the exporter leaves that
         // paragraph's original words alone — as it already does when untranslated.
-        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
+        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), {
+          removedCells,
+          targetLanguage: targetLanguageCode,
+        })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([
@@ -1651,7 +1659,14 @@ export function ExportDialog({
             segment: w.segment,
             detail: w.detail,
           })),
-          ...collectInlineStyleWarnings(cells),
+          // AQU-2539: only paragraphs where a look was actually lost, by their
+          // first words, with the words that lost it.
+          ...(result.lostLooks ?? []).map((l) => ({
+            kind: "look-lost" as const,
+            segment: l.segment,
+            detail: l.words.map((w) => `“${w}”`).join(", "),
+          })),
+          ...collectInlineStyleWarnings(cells, { formattingReportedByExporter: true }),
         ])
         const fileName = `${baseName}.docx`
         setStatus({
@@ -3510,27 +3525,33 @@ export function ExportDialog({
           </div>
         )}
 
-        {/* Inline-style fidelity report: formatting the export could not keep. */}
+        {/* Inline-style fidelity report: formatting the export could not keep.
+            Word paragraphs that lost a look (AQU-2539) get a note of their own,
+            headed in plain words; every other warning keeps the first one. */}
         {/* i18n-exempt "ok" is an export-status kind tag, not copy */}
-        {fidelityWarnings.length > 0 && (status.kind === "ok" || status.kind === "ok-lossy") && (
+        {(status.kind === "ok" || status.kind === "ok-lossy") && ([
+          [fidelityWarnings.filter((w) => w.kind !== "look-lost"), "importExport.dialog.fidelityWarningsHeader"],
+          [fidelityWarnings.filter((w) => w.kind === "look-lost"), "importExport.dialog.lookLostHeader"],
+        ] as const).map(([list, header]) => list.length > 0 && (
           <div
+            key={header}
             role="note"
             className="flex flex-col gap-1 rounded-xl bg-amber-50 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
           >
             <span className="flex items-center gap-1 font-medium">
               <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-              {t("importExport.dialog.fidelityWarningsHeader", { count: fidelityWarnings.length })}
+              {t(header, { count: list.length })}
             </span>
             <ul className="ms-4 list-disc space-y-0.5">
-              {fidelityWarnings.slice(0, 6).map((w, i) => (
+              {list.slice(0, 6).map((w, i) => (
                 <li key={i}>
                   <span className="font-medium">{w.segment}</span>: {w.detail}
                 </li>
               ))}
-              {fidelityWarnings.length > 6 && <li>{t("importExport.dialog.andMore", { count: fidelityWarnings.length - 6 })}</li>}
+              {list.length > 6 && <li>{t("importExport.dialog.andMore", { count: list.length - 6 })}</li>}
             </ul>
           </div>
-        )}
+        ))}
         <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} />
         </>
         )}

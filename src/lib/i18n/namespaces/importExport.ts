@@ -1031,6 +1031,12 @@ export const importExport = defineNamespace({
       other: "{count} segments lost inline formatting in this export",
     }),
     "importExport.dialog.andMore": "…and {count} more",
+    // AQU-2539: a Word export lists the paragraphs where words with their own
+    // look (bold, italic, a highlight…) were changed by the translation.
+    "importExport.dialog.lookLostHeader": plural({
+      one: "In {count} paragraph, some words lost their bold, italic or other look because the translation changed them.",
+      other: "In {count} paragraphs, some words lost their bold, italic or other look because the translation changed them.",
+    }),
     "importExport.dialog.exportAgain": "Export again",
 
     // — Export dialog: handleExport status messages —
@@ -2749,6 +2755,13 @@ export const importExport = defineNamespace({
       "importExport.dialog.andMore": {
         description: "Truncation notice at the end of the fidelity-warnings list.",
         placeholders: { count: "Number of additional warnings not shown." },
+      },
+      "importExport.dialog.lookLostHeader": {
+        description:
+          "Heading of a note shown after a Word export. Below it, each paragraph is named by its first words, " +
+          "followed by the words that lost their look. Words that the translation kept unchanged keep their look, " +
+          "so only changed words are listed.",
+        placeholders: { count: "Number of paragraphs listed." },
       },
       "importExport.status.downloadingCount": {
         description: "Busy-status message while downloading a project-scope USFM zip, file by file.",

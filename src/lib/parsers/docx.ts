@@ -7,13 +7,22 @@ import { assertSafeArchiveInputSize, assertSafeZipLiteArchive } from "./zip-safe
 import { readZipLite, readZipLiteEntryText, type ZipLiteArchive } from "./zip-lite"
 import {
   elementsByTagName,
-  firstElementByTagName,
   getAttribute,
   parseXmlLite,
   textContent,
   type XmlElement,
 } from "./xml-lite"
-import { createUsfmFootnoteMarker } from "../footnotes/insert"
+import {
+  directChild,
+  docxLine,
+  hiddenRunTest,
+  readDocxStyleSheet,
+  scanDocxParagraphs,
+  walkDocxParagraph,
+  type DocxLineChunk,
+  type DocxMark,
+  type DocxWalkContext,
+} from "./docx-structure"
 
 // AQU-662: DOCX footnotes (word/footnotes.xml) are followed from their
 // w:footnoteReference anchors in word/document.xml and inlined into the cell
@@ -42,8 +51,17 @@ const MASK_OPEN = ""
 const MASK_CLOSE = ""
 const MASK_RE = /(\d+)/g
 
+// Stand-ins for a tab and a line break while the segment splitter runs
+// (AQU-2539): not whitespace, so the splitter neither cuts at them nor turns
+// them into spaces.
+const TAB_MASK = ""
+const BREAK_MASK = ""
+const TAB_MASK_RE = //g
+const BREAK_MASK_RE = //g
+
 const DOCUMENT_PART = "word/document.xml"
 const FOOTNOTES_PART = "word/footnotes.xml"
+const STYLES_PART = "word/styles.xml"
 
 /**
  * Ceiling on the inflated `word/document.xml` this parser will try to build a
@@ -74,6 +92,8 @@ const MAX_DOCUMENT_XML_CHARS = 64 * 1024 * 1024 // 64 M chars
 export interface DocxParts {
   documentXml: string
   footnotesXml?: string
+  /** word/styles.xml: where text hidden through a style is declared (AQU-2539). */
+  stylesXml?: string
 }
 
 /** Per-import parse options. `cellUnit: "paragraph"` (AQU-1720) emits one cell
@@ -101,10 +121,12 @@ export async function extractDocxStrings(
   const documentXml = await readZipLiteEntryText(archive, DOCUMENT_PART)
   if (documentXml === null) throw new Error("DOCX file does not contain word/document.xml")
   const footnotesXml = await readZipLiteEntryText(archive, FOOTNOTES_PART)
+  const stylesXml = await readZipLiteEntryText(archive, STYLES_PART)
 
   return docxPartsToStrings({
     documentXml,
     ...(footnotesXml !== null ? { footnotesXml } : {}),
+    ...(stylesXml !== null ? { stylesXml } : {}),
   }, options)
 }
 
@@ -135,11 +157,32 @@ export function docxPartsToStrings(
 
   const results: TranslatableString[] = []
   const paragraphs = elementsByTagName(doc, "w:p")
+  // AQU-2539: the exporter finds paragraphs in the raw XML with this same scan,
+  // so `w:p[N]` means the same paragraph on both sides — nested ones included.
+  const spans = scanDocxParagraphs(parts.documentXml)
+  if (spans.length !== paragraphs.length) {
+    throw new Error(
+      `DOCX paragraph scan disagrees with the XML tree (${spans.length} vs ${paragraphs.length})`,
+    )
+  }
+  // AQU-2539: the app imports what Word shows and prints; hidden runs are not
+  // part of any line (see hiddenRunTest in docx-structure.ts).
+  const walkContext: DocxWalkContext = {
+    footnotes,
+    isHiddenRun: hiddenRunTest(
+      readDocxStyleSheet(parts.stylesXml === undefined ? undefined : parseXmlLite(parts.stylesXml)),
+    ),
+  }
 
   for (let i = 0; i < paragraphs.length; i++) {
+    // A paragraph in a later branch of mc:AlternateContent is a copy of one in
+    // the first branch (the same text box stored for old readers): no line.
+    if (spans[i].isCopy) continue
     const p = paragraphs[i]
-    const { plain, html, hasFormatting, hasFootnote } = extractRuns(p, footnotes)
-    if (!plain.trim()) continue
+    const line = docxLine(walkDocxParagraph(p, walkContext))
+    if (!line.hasWords) continue
+    const plain = line.text
+    const hasFootnote = line.chunks.some((chunk) => chunk.piece.kind === "footnote")
 
     const style = getParaStyle(p)
     const context = style || "Paragraph"
@@ -152,16 +195,19 @@ export function docxPartsToStrings(
       blockPath: `w:p[${i + 1}]`,
     }
 
+    // AQU-2539: every line of the paragraph carries its own inline marks, so a
+    // paragraph split into several lines keeps them too. A footnote is carried
+    // as an inline USFM marker in the plain text and rendered by the plain-text
+    // footnote decoration; the source's HTML display has no footnote
+    // representation, so a footnoted paragraph still has no HTML.
+    const htmls = hasFootnote ? segments.map(() => undefined) : segmentHtml(plain, line.chunks, segments)
+
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i]
       results.push({
         id: uuid(),
         original: seg.text,
-        // A footnote is carried as an inline USFM marker in the plain text and
-        // rendered by the plain-text footnote decoration; the run-formatting
-        // HTML path has no footnote representation, so disable it for footnoted
-        // paragraphs rather than drop the note from display.
-        originalHtml: segments.length === 1 && hasFormatting && !hasFootnote ? html : undefined,
+        originalHtml: htmls[i],
         translated: "",
         context,
         group: seg.group,
@@ -188,16 +234,27 @@ function splitFootnoteAware(
   // Nothing is ever cut in paragraph mode, so the masking round-trip that
   // protects footnote spans from the splitter has no work to do (AQU-1720).
   if (cellUnit === "paragraph") return splitIntoSegments(plain, undefined, "paragraph")
-  if (!plain.includes("\\f")) return splitIntoSegments(plain)
+  if (!plain.includes("\\f") && !plain.includes("\t") && !plain.includes("\n")) {
+    return splitIntoSegments(plain)
+  }
 
   const spans: string[] = []
-  const masked = plain.replace(FOOTNOTE_SPAN_RE, (span) => {
-    spans.push(span)
-    return `${MASK_OPEN}${spans.length - 1}${MASK_CLOSE}`
-  })
+  // AQU-2539: a tab or line break is part of the line. The splitter treats
+  // them as whitespace it may cut at and rejoin with a plain space, which would
+  // silently turn them into spaces; masked, they stay inside their segment.
+  const masked = plain
+    .replace(FOOTNOTE_SPAN_RE, (span) => {
+      spans.push(span)
+      return `${MASK_OPEN}${spans.length - 1}${MASK_CLOSE}`
+    })
+    .replace(/\t/g, TAB_MASK)
+    .replace(/\n/g, BREAK_MASK)
 
   const restore = (text: string) =>
-    text.replace(MASK_RE, (_m, idx) => spans[Number(idx)] ?? "")
+    text
+      .replace(MASK_RE, (_m, idx) => spans[Number(idx)] ?? "")
+      .replace(TAB_MASK_RE, "\t")
+      .replace(BREAK_MASK_RE, "\n")
 
   return splitIntoSegments(masked).map((s) => ({ ...s, text: restore(s.text) }))
 }
@@ -207,7 +264,7 @@ function splitFootnoteAware(
  * special separator / continuationSeparator footnotes (ids -1, 0) carry no
  * user content and are skipped.
  */
-function loadFootnotes(footnotesXml: string): Map<string, string> {
+export function loadFootnotes(footnotesXml: string): Map<string, string> {
   const map = new Map<string, string>()
   const doc = parseXmlLite(footnotesXml)
   const notes = elementsByTagName(doc, "w:footnote")
@@ -229,96 +286,71 @@ function loadFootnotes(footnotesXml: string): Map<string, string> {
   return map
 }
 
-function extractRuns(
-  p: XmlElement,
-  footnotes: Map<string, string>,
-): { plain: string; html: string; hasFormatting: boolean; hasFootnote: boolean } {
-  const runs = elementsByTagName(p, "w:r")
-  let plain = ""
-  let html = ""
-  let hasFormatting = false
-  let hasFootnote = false
-
-  for (let i = 0; i < runs.length; i++) {
-    const run = runs[i]
-
-    // A footnote-reference run carries no w:t; it anchors a note from
-    // word/footnotes.xml. Inline the note as a USFM marker at this position.
-    const ref = firstElementByTagName(run, "w:footnoteReference")
-    if (ref) {
-      const id = getAttribute(ref, "w:id")
-      const noteText = id !== null ? footnotes.get(id) : undefined
-      if (noteText) {
-        const marker = createUsfmFootnoteMarker({ caller: "+", text: noteText })
-        plain += marker
-        html += marker
-        hasFootnote = true
+/**
+ * Each segment's inline-mark HTML, or undefined when it carries no mark. The
+ * splitter may rejoin a cut with one space where the paragraph had other
+ * whitespace, so each segment is aligned to the paragraph's characters, any
+ * whitespace run matching any whitespace run; a character takes the marks of
+ * the run it came from. Text is HTML-escaped.
+ */
+function segmentHtml(
+  plain: string,
+  chunks: readonly DocxLineChunk[],
+  segments: readonly { text: string }[],
+): (string | undefined)[] {
+  const marks: ReadonlySet<DocxMark>[] = []
+  for (const chunk of chunks) for (let k = 0; k < chunk.text.length; k++) marks.push(chunk.marks)
+  if (!marks.some((m) => m.size > 0)) return segments.map(() => undefined)
+  const isSpace = (ch: string | undefined) => ch !== undefined && /\s/.test(ch)
+  let cursor = 0
+  return segments.map(({ text }) => {
+    while (cursor < plain.length && isSpace(plain[cursor]) && !isSpace(text[0])) cursor++
+    // at[k]: the paragraph character that segment character k came from.
+    const at: number[] = []
+    let k = 0
+    while (k < text.length) {
+      if (isSpace(text[k]) && isSpace(plain[cursor])) {
+        // A whitespace run in the segment matches the paragraph's whole run.
+        const from = cursor
+        while (cursor < plain.length && isSpace(plain[cursor])) cursor++
+        while (k < text.length && isSpace(text[k])) {
+          at.push(from)
+          k++
+        }
+        continue
       }
-      continue
+      at.push(Math.min(cursor, plain.length - 1))
+      cursor++
+      k++
     }
-
-    const textEls = elementsByTagName(run, "w:t")
-    let text = ""
-    for (let j = 0; j < textEls.length; j++) {
-      text += textContent(textEls[j])
+    let html = ""
+    let any = false
+    let start = 0
+    const keyAt = (k: number) => markKeyOf(marks[at[k]])
+    for (let k = 1; k <= text.length; k++) {
+      if (k < text.length && keyAt(k) === keyAt(start)) continue
+      const set = marks[at[start]] ?? NO_DOCX_MARKS
+      let piece = escapeHtml(text.slice(start, k))
+      if (set.has("b")) { piece = `<b>${piece}</b>`; any = true }
+      if (set.has("i")) { piece = `<i>${piece}</i>`; any = true }
+      if (set.has("u")) { piece = `<u>${piece}</u>`; any = true }
+      if (set.has("s")) { piece = `<s>${piece}</s>`; any = true }
+      html += piece
+      start = k
     }
-
-    if (!text) continue
-
-    const rPr = firstElementByTagName(run, "w:rPr")
-    const bold = isToggleOn(rPr, "w:b")
-    const italic = isToggleOn(rPr, "w:i")
-    const underline = isUnderlineOn(rPr)
-    const strike = isToggleOn(rPr, "w:strike")
-
-    plain += text
-
-    let htmlText = text
-    if (bold) { htmlText = `<b>${htmlText}</b>`; hasFormatting = true }
-    if (italic) { htmlText = `<i>${htmlText}</i>`; hasFormatting = true }
-    if (underline) { htmlText = `<u>${htmlText}</u>`; hasFormatting = true }
-    if (strike) { htmlText = `<s>${htmlText}</s>`; hasFormatting = true }
-    html += htmlText
-  }
-
-  return { plain, html, hasFormatting, hasFootnote }
+    return any ? html : undefined
+  })
 }
 
-// AQU-1719: an OOXML toggle property is ON when it is present with no `w:val`,
-// and OFF when `w:val` is `0`, `false` or `off` (ECMA-376 ST_OnOff). Google Docs
-// exports write an explicit off flag for every toggle on every run
-// (`<w:b w:val="0"/><w:i w:val="0"/><w:strike w:val="0"/><w:u w:val="none"/>`),
-// so reading mere presence as "on" rendered unformatted source text as
-// `<s><u><i><b>…`. Only short paragraphs showed it, because `originalHtml` is
-// kept for single-segment paragraphs only.
-function isToggleOn(rPr: XmlElement | undefined, tagName: string): boolean {
-  if (rPr === undefined) return false
-  const el = firstElementByTagName(rPr, tagName)
-  if (el === undefined) return false
-  return isOnOffValueTrue(getAttribute(el, "w:val"))
-}
-
-/** `w:val` is ST_OnOff: absent means on; `0`/`false`/`off` mean off. */
-function isOnOffValueTrue(val: string | null): boolean {
-  if (val === null) return true
-  const normalized = val.trim().toLowerCase()
-  return normalized !== "0" && normalized !== "false" && normalized !== "off"
-}
-
-/** `w:u` carries ST_Underline, whose off value is `none` (not an ST_OnOff flag). */
-function isUnderlineOn(rPr: XmlElement | undefined): boolean {
-  if (rPr === undefined) return false
-  const el = firstElementByTagName(rPr, "w:u")
-  if (el === undefined) return false
-  const val = getAttribute(el, "w:val")
-  if (val !== null && val.trim().toLowerCase() === "none") return false
-  return isOnOffValueTrue(val)
-}
+const NO_DOCX_MARKS: ReadonlySet<DocxMark> = new Set()
+const markKeyOf = (set: ReadonlySet<DocxMark> | undefined) => (set ? [...set].sort().join("+") : "")
+const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 function getParaStyle(p: XmlElement): string | null {
-  const pPr = firstElementByTagName(p, "w:pPr")
+  // The paragraph's OWN pPr: a descendant search would read a text box's style.
+  const pPr = directChild(p, "w:pPr")
   if (!pPr) return null
-  const pStyle = firstElementByTagName(pPr, "w:pStyle")
+  const pStyle = directChild(pPr, "w:pStyle")
   if (!pStyle) return null
   const val = getAttribute(pStyle, "w:val") || ""
 

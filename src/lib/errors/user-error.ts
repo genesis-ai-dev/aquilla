@@ -9,6 +9,7 @@
 // This module runs outside React (plain fetch-helper code, no hooks), so it
 // can't call useT(); it uses the standalone `t()` instead — see AQU-832.
 
+import { formatDenialScope } from "../access/scope-path"
 import { t, tIfLocalized } from "../i18n/standalone"
 import type { MessageKey } from "../i18n/messages/en"
 import { resolveRoleName } from "../frontier/roles"
@@ -219,9 +220,7 @@ export function roleRequiredMessage(raw: string): string | null {
   const actualLevel = b.actual?.roleLevel
   if (typeof actualLevel !== "number") return t("error.network.roleRequiredNoRole", { required })
   const role = resolveRoleName(t, actualLevel)
-  const path = Array.isArray(b.actual?.scopePath)
-    ? b.actual.scopePath.filter((s): s is string => typeof s === "string").join(" › ")
-    : ""
+  const path = formatDenialScope(b.actual?.scopePath)
   const sourceKey = typeof b.actual?.source === "string" ? SOURCE_LABEL_KEYS[b.actual.source] : undefined
   const origin = [sourceKey ? t(sourceKey) : "", path].filter(Boolean).join(" · ")
   return origin

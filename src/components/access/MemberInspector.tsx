@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { formatScopePath, scopePathKey } from "@/lib/access/scope-path"
+import { formatScopePath, scopePathKey, viaTeamName } from "@/lib/access/scope-path"
 import type { AccessChainEntry, MemberAccess, ScopePath, ScopeType } from "@/lib/access/types"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -118,7 +118,7 @@ export function MemberInspector({
                 {g.entries.map((e, i) => (
                   <li key={`${scopePathKey(e.scopePath)}#${i}`} className="flex justify-between gap-3">
                     <span className="min-w-0 truncate">
-                      {formatScopePath(e.scopePath)}
+                      {g.type === "team" ? (viaTeamName(e.scopePath) ?? formatScopePath(e.scopePath)) : formatScopePath(e.scopePath)}
                       {e.descendantCount != null && e.descendantCount > 0 && (
                         <span className="text-muted-foreground">
                           {" ▸ "}

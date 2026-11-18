@@ -327,9 +327,9 @@ export function laneOfGlossEvent(payload: unknown): string {
   return typeof lang === 'string' ? lang : ''
 }
 
-// FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
-// generated column + GIN index on every cells write, so the projection emits no
-// FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
+// Full-text index maintenance: none. Postgres auto-maintains the
+// cells.value_tsv generated column + its GIN index on every cells write, so the
+// projection emits no index statements of its own.
 
 /**
  * Recompute the denormalized `files` rollup counters from the live `cells`
@@ -869,10 +869,6 @@ export function buildEventProjectionStmts(
       // NOTE: buildBulkSourceCellCreateStmt (above) mirrors this insert for
       // the bulk-import path — change them together.
 
-      // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
-      // row already exists for this key. No-op when this is a genuine first
-      // insert.
-
       // The lane is part of the row key via lane_id. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
       // own row beside its siblings. The projection target_lang column is not filled.
@@ -936,9 +932,6 @@ export function buildEventProjectionStmts(
             ...gateBinds,
           ),
       )
-
-      // FTS5 maintenance (post-DML): insert the new value now that the cells
-      // row reflects the post-create/update state.
 
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -1074,10 +1067,6 @@ export function buildEventProjectionStmts(
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
-
-      // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
-      // overwrite the cells row. Must run first so the old value is still
-      // readable from `cells`.
 
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
@@ -1316,9 +1305,6 @@ export function buildEventProjectionStmts(
         }
       }
 
-      // FTS5 maintenance (post-DML): insert the new indexed value now that
-      // the cells row has been updated/upserted.
-
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
@@ -1337,10 +1323,6 @@ export function buildEventProjectionStmts(
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
       const lane = laneOfEvent(event.kind, event.payload)
       const dependentGateBinds = dependentGateBindsFor(side, lane)
-
-      // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
-      // the cells row so the OLD value is still readable for the 'delete'
-      // command.
 
       // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
       //

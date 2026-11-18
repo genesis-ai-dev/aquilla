@@ -706,3 +706,33 @@ describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypas
     expect(guard("SELECT 'tree' FROM cells WHERE project_id = :project").ok).toBe(true)
   })
 })
+
+// A single quote inside a double-quoted identifier opened a "literal" for the
+// mask that Postgres never saw, so everything up to the next quote — a whole
+// subquery against a banned table — skipped every check. Each case here passed
+// guardSql() unchanged before the fix.
+describe("guardSql — pen-test 2026-11-18 double-quoted identifier desync", () => {
+  it.each([
+    `SELECT c.cell_id AS "a'", (SELECT max(password_hash) FROM users) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT c.cell_id AS "a'", (SELECT string_agg(token || chr(58) || email, chr(44)) FROM project_invites) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT c.cell_id AS "a'", pg_read_file(chr(47)) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT 'x' AS "a'", (SELECT max(email) FROM users) AS "b'" FROM cells WHERE project_id = :project`,
+    `SELECT U&"a'", (SELECT max(email) FROM users) AS "b'" FROM cells WHERE project_id = :project`,
+  ])("rejects a subquery hidden between quoted identifiers: %s", (sql) => {
+    const r = guard(sql)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/double-quoted identifiers/)
+  })
+
+  it("rejects a plain quoted alias too, with the unquoted spelling in the message", () => {
+    const r = guard(`SELECT count(*) AS "n" FROM cells WHERE project_id = :project`)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain("AS n")
+  })
+
+  it("still accepts a double quote inside a string literal", () => {
+    const r = guard(`SELECT cell_id FROM cells WHERE project_id = :project AND value LIKE '%"hi"%'`)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.sql).toContain(`'%"hi"%'`)
+  })
+})

@@ -631,6 +631,8 @@ a simulated provider boundary and a real Aquilla JWT. It does not claim live
 Google Cloud verification. `auth-worker/src/__tests__/oauth-google.test.ts`
 verifies signed provider claims through real Postgres creation/linking and the
 normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
+`e2e/tauri/smoke.spec.ts` covers native callback delivery and rejects credential-bearing links. The worker Google suite passes native callbacks through the shared desktop parser and tests PKCE and replay (AQU-2640).
+`GoogleLoginButton.test.tsx` and `google-login.test.ts` cover start-failure classification, safe fallback messages, and retry (AQU-2640, covered in RTL).
 `src/pages/GoogleLoginReturn.test.tsx` covers separate account-bound analytics
 approval. The existing onboarding/account-switch smoke remains the session
 regression gate. Run the browser matrix with

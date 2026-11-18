@@ -1,3 +1,4 @@
+import { parseDesktopGoogleCallback } from "../../../shared/desktop-google"
 import { URL as NodeURL } from "node:url"
 import { readFileSync } from "node:fs"
 import { PGlite } from "@electric-sql/pglite"
@@ -50,6 +51,31 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("returns native handoffs through the desktop parser, requiring PKCE and rejecting replay", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    const challenge = await pkceChallenge(verifier)
+    expect((await post("start", {challenge}, "app://localhost")).status).toBe(400)
+    expect((await post("start", {challenge,desktop:true}, "https://evil.example")).status).toBe(400)
+    const begin = await post("start", {challenge,desktop:true}, "app://localhost")
+    expect(begin.status).toBe(200)
+    const auth = new URL((await begin.json() as {authorization_url:string}).authorization_url)
+    const response = await callback(auth)
+    const result = parseDesktopGoogleCallback(response.headers.get("location")!)!
+    expect(result.state).toBe(challenge)
+    expect(result.code).toMatch(/^[a-f0-9]{64}$/)
+    expect((await post("exchange", {code:result.code,verifier:"b".repeat(64)}, "app://localhost")).status).toBe(400)
+    const exchange = await post("exchange", {code:result.code,verifier}, "app://localhost")
+    expect(exchange.status).toBe(200)
+    expect(await exchange.json()).toMatchObject({username:"alice",created:false})
+    expect((await post("exchange", {code:result.code,verifier}, "app://localhost")).status).toBe(400)
+    expect((await callback(auth)).status).toBe(400)
+    const cancelStart = await post("start", {challenge,desktop:true}, "http://app.localhost")
+    const cancelAuth = new URL((await cancelStart.json() as {authorization_url:string}).authorization_url)
+    const cancel = await app.request(`/api/v2/auth/oauth/google/callback?state=${cancelAuth.searchParams.get("state")}&error=access_denied`, {}, testEnv)
+    expect(parseDesktopGoogleCallback(cancel.headers.get("location")!)).toEqual({state:challenge,error:"cancelled"})
+  })
+
   it("refuses a legacy Google link whose email no longer matches the account", async () => {
     await seedUser(1,"alice")
     await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()

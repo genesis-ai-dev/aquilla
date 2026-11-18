@@ -455,6 +455,25 @@ export function guardSql(
     return { ok: false, error: "E'…' / U&'…' escape string literals are not allowed — use plain '…' literals" }
   }
   const masked = sql.replace(STRING_LITERAL_RE, (literal) => `'${"s".repeat(literal.length - 2)}'`)
+  // Double-quoted identifiers are refused outright (AQU pen-test finding,
+  // 2026-11-18). The mask above only models '…' literals, but Postgres also
+  // tokenises "…" — and an identifier may contain a single quote. `"a'"`
+  // therefore opened a "literal" for the mask that ran to the next `'`, so
+  //   SELECT c.cell_id AS "a'", (SELECT max(password_hash) FROM users) AS "b'"
+  //   FROM cells c WHERE c.project_id = :project
+  // hid the whole subquery from every check below (keywords, banned
+  // tables/columns/functions, the relation allowlist and its scoping rewrite)
+  // while Postgres ran it. Checked on the MASKED copy so a `"` inside a real
+  // string literal (`LIKE '%"word"%'`) stays legal: scanning left to right,
+  // the guard and Postgres agree on every '…' literal up to the first `"`
+  // that sits outside one, and that `"` is by construction unmasked. No
+  // readable table or column needs quoting, and U&"…" goes with it.
+  if (masked.includes('"')) {
+    return {
+      ok: false,
+      error: 'double-quoted identifiers are not allowed — use plain lowercase names and aliases (AS n, not AS "n")',
+    }
+  }
   // An unpaired quote survives masking — reject; the checks below can't be
   // trusted when the literal structure is ambiguous.
   if (masked.replace(/'s*'/g, "").includes("'")) {

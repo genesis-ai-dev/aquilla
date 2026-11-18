@@ -1016,6 +1016,31 @@ describe("exportDocx — which paragraphs lost a look (AQU-2539)", () => {
     expect(result.lostLooks).toEqual([])
   })
 
+  it("lists no paragraph when the translator put the source's bold and italic on their own words", async () => {
+    // The source's marked words are not in the translation, but the
+    // translation carries the same kinds of mark on its own words.
+    const bold = "<w:rPr><w:b/></w:rPr>"
+    const body = para(run("See the ") + run("Word list", bold) + run(" and the ") + run("key stone", italic) + run(" here."))
+    const cells = [cellAt(1, "Voir la liste de mots et la pierre clé ici.", {
+      original: "See the Word list and the key stone here.",
+      translatedHtml: "<p>Voir la <strong>liste de mots</strong> et la <em>pierre clé</em> ici.</p>",
+    })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(xml).toContain("<w:b/>")
+    expect(result.lostLooks).toEqual([])
+  })
+
+  it("names only the words whose kind of mark the translator's formatting does not carry", async () => {
+    const bold = "<w:rPr><w:b/></w:rPr>"
+    const body = para(run("See the ") + run("Word list", bold) + run(" and the ") + run("key stone", italic) + run(" here."))
+    const cells = [cellAt(1, "Voir la liste de mots et la pierre clé ici.", {
+      original: "See the Word list and the key stone here.",
+      translatedHtml: "<p>Voir la liste de mots et la <em>pierre clé</em> ici.</p>",
+    })]
+    const { result } = await exportedXml(body, cells)
+    expect(result.lostLooks).toEqual([{ segment: "See the Word list and the key stone…", words: ["Word list"] }])
+  })
+
   it("names a paragraph whose ordinal lost its superscript", async () => {
     // "12th" is looked for as its whole word, which starts in the main look.
     const body = para(run("In the 12") + run("th", '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>') + run(" century."))

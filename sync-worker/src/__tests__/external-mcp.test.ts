@@ -226,7 +226,7 @@ describe('MCP tools/list', () => {
     })
   })
 
-  it('returns all 38 tools each with an input schema', async () => {
+  it('returns all 39 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -252,6 +252,8 @@ describe('MCP tools/list', () => {
         'patch_settings', 'prepare_import',
         // AQU-2407 brief writes.
         'prepare_set_brief', 'regenerate_brief_summary',
+        // AQU-2642 orthography exception merge.
+        'prepare_orthography_exceptions',
         'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
         'read_content', 'read_history',
         // AQU-1231 quality reads.
@@ -262,7 +264,7 @@ describe('MCP tools/list', () => {
         'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(38)
+    expect(body.result.tools).toHaveLength(39)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -968,6 +970,155 @@ describe('MCP tools/call — settings + command discovery', () => {
     expect((payload as any).error.code).toBe('validation_failed')
     expect((payload as any).error.message).toMatch(/nothing to summarize/i)
     expect(calls).toHaveLength(0)
+    vi.unstubAllGlobals()
+  })
+
+  // AQU-2425: since AQU-2342 the saved `translationInstructions` are what every
+  // drafting prompt reads, so a brief write on such a project lands in the
+  // document and reaches no AI. It may no longer pass approval silently.
+  const INERT_SETTINGS = { translationInstructions: 'Formal register. Keep verse numbers.' }
+
+  /** The inert_write warnings on a staged changeset's summary. */
+  function inertWarnings(payload: unknown): { code: string; message: string }[] {
+    const warnings = (payload as any).summary?.warnings ?? []
+    return warnings.filter((w: { code: string }) => w.code === 'inert_write')
+  }
+
+  it('prepare_set_brief warns that the write reaches no AI once Instructions are saved — and still writes the brief, leaving the Instructions as the prompt text', async () => {
+    await promoteToMaintainer()
+    await seedSettings(INERT_SETTINGS, 1)
+    const { env, calls } = envWithRenderer('Plain-register translation.')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 70, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { audience: 'Rural youth' } },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+
+    // The approver is told before approving (the page already renders
+    // summary.warnings), and the warning names the key that does reach the AI.
+    const warned = inertWarnings(staged.payload)
+    expect(warned).toHaveLength(1)
+    expect(warned[0].message).toContain('translationInstructions')
+    expect(warned[0].message).toMatch(/will not reach the AI/i)
+
+    // Warn and keep the write: approval still commits the brief.
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 71, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    expect(toolPayload(((await commitRes.json()) as any).result).isError).toBe(false)
+    const stored = await storedSettings()
+    expect(stored[BRIEF_KEY].parameters.audience).toBe('Rural youth')
+
+    // Must not change: the saved Instructions text is still the resolved
+    // prompt text, and nothing overwrote it.
+    const after = await rpc(env, token, {
+      jsonrpc: '2.0', id: 72, method: 'tools/call',
+      params: { name: 'get_project_settings', arguments: { projectId: PROJECT } },
+    })
+    expect(toolPayload(((await after.json()) as any).result).payload).toMatchObject({
+      translationInstructions: INERT_SETTINGS.translationInstructions,
+      translationInstructionsStored: true,
+    })
+    expect(calls).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('prepare_set_brief does not warn while Instructions are unwritten — there the brief IS the prompt text', async () => {
+    await promoteToMaintainer()
+    // No sibling source (a custom systemPrompt would compose in too), so the
+    // resolved text is exactly what the brief contributed.
+    await seedSettings({}, 1)
+    const { env } = envWithRenderer('Plain-register translation for rural youth.')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 73, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { audience: 'Rural youth' } },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect(inertWarnings(staged.payload)).toHaveLength(0)
+
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 74, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    expect(toolPayload(((await commitRes.json()) as any).result).isError).toBe(false)
+
+    // Must not change: the rendered summary still reaches every drafting
+    // prompt, composed on read.
+    const after = await rpc(env, token, {
+      jsonrpc: '2.0', id: 75, method: 'tools/call',
+      params: { name: 'get_project_settings', arguments: { projectId: PROJECT } },
+    })
+    expect(toolPayload(((await after.json()) as any).result).payload).toMatchObject({
+      translationInstructions: 'Plain-register translation for rural youth.',
+      translationInstructionsStored: false,
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('a raw patch_settings op on the brief key carries the same warning, and an op on another key does not', async () => {
+    await promoteToMaintainer()
+    await seedSettings(INERT_SETTINGS, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const onBrief = await rpc(env, token, {
+      jsonrpc: '2.0', id: 76, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: {
+          projectId: PROJECT,
+          ifMatchVersion: 1,
+          ops: [{ key: BRIEF_KEY, value: { version: 1, parameters: { audience: 'Rural youth' } } }],
+        },
+      },
+    })
+    const briefStaged = toolPayload(((await onBrief.json()) as any).result)
+    expect(briefStaged.isError, JSON.stringify(briefStaged.payload)).toBe(false)
+    expect(inertWarnings(briefStaged.payload)).toHaveLength(1)
+
+    const onOther = await rpc(env, token, {
+      jsonrpc: '2.0', id: 77, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: { projectId: PROJECT, ifMatchVersion: 1, ops: [{ key: 'systemPrompt', value: 'x' }] },
+      },
+    })
+    const otherStaged = toolPayload(((await onOther.json()) as any).result)
+    expect(otherStaged.isError, JSON.stringify(otherStaged.payload)).toBe(false)
+    expect(inertWarnings(otherStaged.payload)).toHaveLength(0)
+  })
+
+  it('regenerate_brief_summary warns rather than quietly rendering a summary no prompt will read', async () => {
+    await promoteToMaintainer()
+    await seedSettings(
+      { ...INERT_SETTINGS, [BRIEF_KEY]: { version: 2, parameters: { audience: 'Rural youth' } } },
+      1,
+    )
+    const { env } = envWithRenderer('Plain-register translation.')
+    const token = await credToken(tdb)
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 78, method: 'tools/call',
+      params: { name: 'regenerate_brief_summary', arguments: { projectId: PROJECT } },
+    })
+    const staged = toolPayload(((await res.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect(inertWarnings(staged.payload)).toHaveLength(1)
     vi.unstubAllGlobals()
   })
 })

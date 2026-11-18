@@ -28,6 +28,7 @@ import { useLocation, useParams } from "react-router-dom"
 import { Camera, ImagePlus, X } from "lucide-react"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -250,10 +251,14 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open && !capturing} onOpenChange={handleClose}>
-      <DialogContent className={frame ? "max-w-3xl" : "max-w-md"}>
+      {/* Crop state: the `sm:` prefix is needed because the base class list carries
+          `sm:max-w-lg`, which a bare max-w-* never beats at 640px and wider. */}
+      <DialogContent
+        className={frame ? "max-h-[94dvh] sm:max-w-[min(96vw,100rem)]" : "max-w-md"}
+      >
         <DialogHeader>
           <DialogTitle>{t("nav.report.title")}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className={frame ? "sr-only" : undefined}>
             {analyticsEnabled
               ? t("nav.report.descriptionEnabled")
               : t("nav.report.descriptionDisabled")}
@@ -281,7 +286,7 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
           />
         ) : (
           <>
-            <div className="flex flex-col gap-2 py-1">
+            <DialogBody className="flex flex-col gap-2 py-1">
               <Field data-invalid={attempted && !!whatHappenedError}>
                 <FieldLabel htmlFor="report-problem-what-happened">
                   {t("nav.report.whatHappenedLabel")}
@@ -415,13 +420,13 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                   {t("nav.report.analyticsOffNotice")}
                 </p>
               )}
+            </DialogBody>
 
-              {sendError && (
-                <p className="text-xs text-destructive" role="alert">
-                  {t("nav.report.sendFailed")}
-                </p>
-              )}
-            </div>
+            {sendError && (
+              <p className="text-xs text-destructive" role="alert">
+                {t("nav.report.sendFailed")}
+              </p>
+            )}
 
             <DialogFooter className="flex-col gap-2 sm:flex-row">
               <Button

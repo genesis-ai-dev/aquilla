@@ -84,7 +84,11 @@ CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
 `lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
 for a window where blocking every write to `events`/`cells` is acceptable — so a
 migration queued behind a long transaction fails fast instead of holding the
-write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+write queue open. Every migration session also opts out of the statement and
+idle-in-transaction ceilings at startup, so a role-level default set for the
+workers cannot cancel a long statement part-way, and `apply` refuses to start
+if that did not take effect (`docs/POSTGRES-TIMEOUTS.md`).
+**`neon:apply:prod` refuses without a snapshot decision:**
 pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
@@ -398,7 +402,8 @@ The Tauri shell (`src-tauri/`) updates on two channels
 - **Native shell — rare, signed.** `tauri-release.yml` on a `v*` tag, gated by the
   `desktop-release-signing` environment; its `pnpm run build:hosted` step embeds a
   production-host fallback bundle. The existing Tauri updater (GitHub Releases
-  `latest.json`) ships it.
+  `latest.json`) ships it. The release is a draft until `desktop-release-verify.yml`
+  passes, and `desktop-release-cut.yml` tags it when the shell changed: `docs/DESKTOP-RELEASES.md`.
 
 Secrets:
 
@@ -638,6 +643,14 @@ DELETE FROM platform_admins WHERE email = 'someone@example.com';
 leave it out. `note` is free text for why the person has access. An email can
 be added before the person signs up; `GET /api/v2/admin/admins` shows it with
 `hasAccount: false` until they do.
+
+Password sign-up refuses an address that is already in the table (the same
+`409` a taken address gets), because that form does not prove who holds the
+mailbox and the first person to register the address would become the admin.
+So a person added before they have an account signs up with **Google**, which
+does prove it. Where Google sign-in is not configured, have them register
+first and insert the row afterwards. Treat a `hasAccount: false` row as a
+loose end to close, not a place to leave things.
 
 Order for a first rollout: apply the migration (`neon:apply:dev` /
 `neon:apply:prod`), insert the admins, then deploy the auth Worker that no

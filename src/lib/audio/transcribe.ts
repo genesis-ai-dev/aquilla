@@ -24,6 +24,7 @@ import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
+import type { TranscriptionModel } from "./transcription-model"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -65,6 +66,12 @@ export interface TranscriptionOptions {
   /** A hosted zero-shot run is waiting for the model to start. */
   onWaitingForModel?: (waiting: boolean) => void
   model?: string
+  /** Hosted only: this run's hosted model, in place of the account's
+   *  Preferences choice (`model` above is the on-device model id). */
+  hostedModel?: TranscriptionModel
+  /** Hosted only: what runs, silently, when a zero-shot `hostedModel` cannot
+   *  (see `transcribeHosted`'s `quietFallback`). */
+  hostedQuietFallback?: TranscriptionModel
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
@@ -270,6 +277,8 @@ export async function transcribeAudio(
       language: opts.languageTag ?? opts.language,
       zeroShot: opts.zeroShot,
       onWaitingForModel: opts.onWaitingForModel,
+      ...(opts.hostedModel ? { model: opts.hostedModel } : {}),
+      ...(opts.hostedQuietFallback ? { quietFallback: opts.hostedQuietFallback } : {}),
       ...(opts.onRateLimited ? { onRateLimited: opts.onRateLimited } : {}),
     }), kept.toWindowSec)
   }
@@ -398,6 +407,12 @@ export interface TranscribeCellArgs {
   /** The batch's "Use automatic": this run skips zero-shot whatever the
    *  account chose. */
   forceAutoModel?: boolean
+  /** Hosted only: this run's model, in place of the account's Preferences
+   *  choice — the Transcribe lens's Fast/Smart picker. */
+  hostedModel?: TranscriptionModel
+  /** Hosted only: what a zero-shot `hostedModel` falls back to, with no
+   *  prompt or toast (see `transcribeHosted`'s `quietFallback`). */
+  hostedQuietFallback?: TranscriptionModel
   /** Two-step transcription: what ASR heard (before learned corrections), the
    *  transcript that was stored, and the model that ran. Called once, after
    *  the attach is queued. */
@@ -564,6 +579,8 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         setTranscribeStatus(audioId, waiting ? { kind: "transcribing", waiting: "model" } : { kind: "transcribing" })
       },
       askAgain,
+      ...(args.hostedModel ? { hostedModel: args.hostedModel } : {}),
+      ...(args.hostedQuietFallback ? { hostedQuietFallback: args.hostedQuietFallback } : {}),
       trim,
       ...(split ? { keep: split.keep } : {}),
       // Read only if the held clip went away in the meantime.

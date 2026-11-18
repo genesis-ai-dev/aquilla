@@ -116,3 +116,33 @@ it.each([
   expect((await screen.findByRole("alert")).textContent).toContain(message)
   expect(screen.queryByLabelText("Verification code")).toBeNull()
 })
+
+it.each([
+  [404, { error: "Not found" }, "Email changes are temporarily unavailable"],
+  [405, "Method not allowed", "Email changes are temporarily unavailable"],
+  [500, { error: "Internal server error" }, "Aquilla could not process this request"],
+  [502, "Bad gateway", "Aquilla could not process this request"],
+  [401, { error: "Token expired", code: "token_expired" }, "Please log in again"],
+  [429, {}, "Too many attempts"],
+  [200, {}, "Aquilla could not process this request"],
+] as const)("reports HTTP %s accurately without advancing or clearing the session", async (status, body, message) => {
+  fetchMock.mockResolvedValue(typeof body === "string" ? new Response(body, { status }) : Response.json(body, { status }))
+  renderForm()
+  fireEvent.change(screen.getByLabelText("New email"), { target: { value: "new@example.com" } })
+  fireEvent.change(screen.getByLabelText("Aquilla password"), { target: { value: "secret" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send verification email" }))
+  expect((await screen.findByRole("alert")).textContent).toContain(message)
+  expect(screen.queryByLabelText("Verification code")).toBeNull()
+  expect(mocks.remove).not.toHaveBeenCalled()
+  expect(mocks.navigate).not.toHaveBeenCalled()
+})
+
+it.each([new TypeError("Failed to fetch"), new DOMException("Timed out", "TimeoutError")])("distinguishes transport failures from server rejections: %s", async failure => {
+  fetchMock.mockRejectedValue(failure)
+  renderForm()
+  fireEvent.change(screen.getByLabelText("New email"), { target: { value: "new@example.com" } })
+  fireEvent.change(screen.getByLabelText("Aquilla password"), { target: { value: "secret" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send verification email" }))
+  expect((await screen.findByRole("alert")).textContent).toContain("We could not reach Aquilla")
+  expect(screen.queryByLabelText("Verification code")).toBeNull()
+})

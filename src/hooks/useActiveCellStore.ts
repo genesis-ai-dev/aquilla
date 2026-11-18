@@ -3191,6 +3191,18 @@ export interface UseActiveCellStoreResult {
   isError: boolean
 }
 
+// The lane grants of the last sync token minted in this tab, per user and
+// project. A file's cached rows are keyed by those grants, so knowing them
+// ahead of the next token lets that file paint while its token is minted.
+// It only ever picks WHICH snapshot to try first: the token that arrives is
+// still the one that decides whether the rows stay (see doFetch).
+const lastGrantsVersionByProject = new Map<string, string>()
+
+/** Test-only. */
+export function clearLastGrantsVersions(): void {
+  lastGrantsVersionByProject.clear()
+}
+
 export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCellStoreResult {
   const {
     projectId,
@@ -3230,6 +3242,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
   const grantsVersionRef = useRef("")
+  // Rows painted from the cache before their sync token arrived, kept only
+  // while that token is still outstanding (see doFetch).
+  const paintedAheadRef = useRef<{ pid: string; fid: string; grantsVersion: string } | null>(null)
+  const usernameRef = useRef(username)
+  usernameRef.current = username
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // I3: queue, don't drop. A second event.applied for a cell while its GET is
   // in flight marks it dirty; the in-flight fetch re-runs once when it lands.
@@ -3283,6 +3300,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       fetchRetryTimerRef.current = null
     }
     if (!isEnabled || !pid || !fid) {
+      paintedAheadRef.current = null
       store.reset(pid, fid)
       setLoadProgress(null)
       setIsLoading(false)
@@ -3346,12 +3364,40 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       return
     }
 
-    let token: string | null = null
-    try {
-      token = tokenFetcher ? await tokenFetcher(fid) : null
-    } catch {
-      token = null
+    // The token is asked for first and awaited second: the cached file can
+    // paint while the mint is in flight. The cache is keyed by the token's
+    // lane grants, which are not known until it arrives, so the paint uses the
+    // grants this user's last token for this project carried (in this tab) and
+    // is thrown away below if the new token's differ.
+    const tokenPromise: Promise<string | null> = (tokenFetcher ? tokenFetcher(fid) : Promise.resolve(null)).catch(() => null)
+    const grantsKey = `${usernameRef.current}\u0000${pid}`
+    let paintedAhead: string | null = null
+    if (!soft) {
+      const held = paintedAheadRef.current
+      if (held && held.pid === pid && held.fid === fid && store.getCellCount() > 0) {
+        // A retry after a failed mint: the rows are already up, and may carry
+        // an edit made since. Leave them be.
+        paintedAhead = held.grantsVersion
+      } else {
+        paintedAheadRef.current = null
+        const expected = lastGrantsVersionByProject.get(grantsKey)
+        if (expected !== undefined) {
+          store.reset(pid, fid)
+          const cached = await readCellsCache(pid, fid, expected)
+          if (generationRef.current !== gen) return
+          if (cached && cached.rows.length > 0) {
+            store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+            store.setProjectEpoch(cached.projectEpoch ?? null)
+            setIsLoading(false)
+            setIsRefreshing(true)
+            paintedAhead = expected
+            paintedAheadRef.current = { pid, fid, grantsVersion: expected }
+          }
+        }
+      }
     }
+
+    const token = await tokenPromise
     if (generationRef.current !== gen) return
     if (!token) {
       const attempt = ++tokenAttemptsRef.current
@@ -3372,10 +3418,15 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     tokenAttemptsRef.current = 0
     grantsVersionRef.current = grantsVersionFromSyncToken(token)
+    lastGrantsVersionByProject.set(grantsKey, grantsVersionRef.current)
+    paintedAheadRef.current = null
 
     let usedCache = false
 
-    if (!soft) {
+    if (!soft && paintedAhead === grantsVersionRef.current) {
+      // The rows painted ahead of the token are the ones this token unlocks.
+      usedCache = true
+    } else if (!soft) {
       store.reset(pid, fid)
       const cached = await readCellsCache(pid, fid, grantsVersionRef.current)
       if (generationRef.current !== gen) return

@@ -43,6 +43,10 @@ TEXT_MODEL_REASONING=none
 TEXT_MODEL=inception/mercury-2.5
 ```
 
+If OpenRouter refuses `TEXT_MODEL` (for example HTTP 404 when no provider serves
+it), the text helper tries the models in `smart-tests/text_fallback.py` in order.
+The decision model has no fallback. The evidence records the model that answered.
+
 ```sh
 SMART_TEST_ENV_FILE=.env.smart-tests.local pnpm test:smart
 # Select a condition or collect repeated, independently reported runs:

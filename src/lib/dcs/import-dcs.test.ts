@@ -114,6 +114,22 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
     )
   })
 
+  it("sends each file as ONE revision keyed by reference, with the keys of pre-revision cells", async () => {
+    // AQU-2459: the units travel once and the server derives identity from the
+    // key. `cellKeys` is what lets a re-import over a file from before
+    // revisions adopt it with every cell id (and so every translation) intact.
+    const emit = vi.fn(async (_args: BulkUploadArgs) => {})
+    await importDcsResource({ entry: ENTRY, projectId: "proj-1", client: fakeClient() as any, emit, getToken: async () => "tok" })
+    const { revision, file } = emit.mock.calls[0][0]
+    expect(revision?.origin).toBe("dcs")
+    expect(revision?.stamp).toBe(file.parserVersion)
+    expect(revision?.units.map((u) => [u.unitKey, u.positional])).toEqual([["TIT 1:1", false], ["TIT 1:2", false]])
+    expect(revision?.cellKeys).toEqual({
+      [dcsCellId("unfoldingWord/en_ult|TIT 1:1")]: "TIT 1:1",
+      [dcsCellId("unfoldingWord/en_ult|TIT 1:2")]: "TIT 1:2",
+    })
+  })
+
   it("re-running the same import derives identical event ids (idempotent)", async () => {
     const emitA = vi.fn(async (_args: BulkUploadArgs) => {})
     const emitB = vi.fn(async (_args: BulkUploadArgs) => {})

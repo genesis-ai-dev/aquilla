@@ -28,6 +28,7 @@ import {
   type ProjectLifecycleCommand,
   type RegenerateBriefSummaryCommand,
   type RenameFileCommand,
+  type PatchOrthographyExceptionsCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -40,7 +41,8 @@ import {
   previewSettingValue,
   retiredTerminologyBlobDenial,
 } from './commands-patch-settings'
-import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
+import { assertWithinBatchCap, convertDraftsOrthography, requestDrafts } from './commands-draft-cells'
+import { readLanguageProfile } from '../../../db/shared/language-profile'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
   isMembershipCommand,
@@ -57,9 +59,13 @@ import {
   type VisibilityCommand,
 } from './commands-hide-cell'
 import { prepareSetBrief } from './commands-set-brief'
+import { preparePatchOrthographyExceptions } from './commands-orthography-exceptions'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
+import { briefInertWarnings, plannedInstructionsOf } from './brief-inert-warning'
+import { deepEqualJson } from './canonical'
+import { BRIEF_SETTINGS_KEY } from '../../../db/shared/brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
@@ -311,6 +317,32 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', `${lifecycle.kind} must be the only command in a changeset`)
     }
     return prepareProjectLifecycle(db, cred, projectId, id, autonomyMode, lifecycle, env)
+  }
+
+  // PatchOrthographyExceptions (AQU-2642 §4): sole command — it merges into the
+  // `languageProfile` key of the same versioned settings blob, so sharing a
+  // changeset with another settings write would double-bump the version. Its
+  // role floors (CONTRIBUTOR proposes, MAINTAINER approves and removes), the
+  // no-orthography refusal and the merge live in its module.
+  const orthographyExceptions = validated.commands.find(
+    (c): c is PatchOrthographyExceptionsCommand => c.kind === 'PatchOrthographyExceptions',
+  )
+  if (orthographyExceptions) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        'PatchOrthographyExceptions must be the only command in a changeset',
+      )
+    }
+    return preparePatchOrthographyExceptions(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      orthographyExceptions,
+      env,
+    )
   }
 
   // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of
@@ -817,7 +849,15 @@ async function expandDraftCells(
     )
   }
 
-  return scoped.map((d) => ({
+  // AQU-2642 §2: the lane's orthography applies to a server-side draft exactly
+  // as it does to an in-app one, and it applies BEFORE staging so the text a
+  // human approves is the text that will land.
+  const written = convertDraftsOrthography(
+    scoped,
+    readLanguageProfile(projectSettings.settings.languageProfile).orthography,
+  )
+
+  return written.map((d) => ({
     kind: 'SetTranslation' as const,
     fileId: cmd.fileId,
     cellId: d.cellId,
@@ -1399,12 +1439,19 @@ async function prepareUpdateProjectSettings(
   for (const key of Object.keys(cmd.settings)) {
     settingsChanges[key] = previewSettingValue(cmd.settings[key])
   }
+  // AQU-2425: this blob IS the settings it leaves behind, so it answers the
+  // inert-brief question about itself — a blob that carries the instructions
+  // key strands the brief it also carries, and one that DROPS the key hands
+  // the job back to the brief and must not warn.
+  const blobWritesBrief = !deepEqualJson(cmd.settings[BRIEF_SETTINGS_KEY], current.settings[BRIEF_SETTINGS_KEY])
   const summary: ChangesetSummary = {
     command: 'UpdateProjectSettings',
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges,
-    warnings: [],
+    warnings: blobWritesBrief
+      ? briefInertWarnings(current.settings, plannedInstructionsOf(cmd.settings))
+      : [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, summary, env)
 }

@@ -15,6 +15,11 @@ import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { useExactUserLookup } from "@/hooks/useExactUserLookup"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { looksLikeEmail } from "../../db/shared/mask-email"
+
+/** AQU-2609: how wide the suggestion list may grow, and the viewport margin it keeps. */
+const DROPDOWN_CAP_PX = 480
+const VIEWPORT_GUTTER_PX = 8
 
 /**
  * AQU-734: multi-select wiring. When passed, each search result renders as a
@@ -30,6 +35,19 @@ export interface MultiSelectConfig {
   onToggleResult: (u: UserSearchResult) => void
   /** Stage whatever is currently typed (Enter key). Parent clears `raw`. */
   onStageTyped: () => void
+}
+
+/**
+ * AQU-2609: a person offered as a dropdown row — the server search result plus
+ * an optional secondary identifier that distinguishes two similar usernames
+ * ("Mathew" vs "matthew") when the handle alone cannot. The caller passes an
+ * identifier it ALREADY holds and the viewer is already permitted to see — the
+ * org roster's email, which `GET /orgs/:id/members` only returns above the
+ * org's `rosterViewMinRole`. Never fetch a new identifier to fill this in, and
+ * never synthesise one from a field the viewer cannot otherwise see.
+ */
+export interface TypeaheadPerson extends UserSearchResult {
+  secondary?: string | null
 }
 
 export type RecipientMode = "username" | "email"
@@ -70,9 +88,53 @@ interface Props {
    * typing narrows them by substring, and 2+ characters merges in server
    * search results. Absent = dropdown only opens once something is typed.
    */
-  suggestions?: readonly UserSearchResult[]
+  suggestions?: readonly TypeaheadPerson[]
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string
+  /**
+   * AQU-2576: the project being staffed. When set, the exact lookup resolves an
+   * EMAIL as well as a username, so an owner who was given a reviewer's address
+   * and not their handle can still find the account — and the dead-end states
+   * say "no account uses this email" instead of "no user named <address>".
+   * Omit where no single project is in hand; the input stays username-only.
+   */
+  lookupProjectId?: string | null
+}
+
+/**
+ * AQU-2609: the hover text for a suggestion row. The dropdown now sizes to its
+ * content, so a name only ellipsises past DROPDOWN_CAP_PX — this is the
+ * last-resort affordance that still names the person in full.
+ */
+function personRowTitle(u: TypeaheadPerson): string {
+  const secondary = u.secondary?.trim()
+  return secondary ? `${u.username} — ${secondary}` : u.username
+}
+
+/**
+ * AQU-2609: one suggestion row's label — the username, and under it the
+ * secondary identifier when the caller supplied one. Two people whose handles
+ * share a prefix are told apart here, before the grant, not after it.
+ */
+function PersonRowLabel({ person }: { person: TypeaheadPerson }) {
+  const secondary = person.secondary?.trim()
+  return (
+    <span className="flex min-w-0 flex-1 flex-col items-start">
+      <UsernameWithAvatar
+        userId={person.id}
+        username={person.username}
+        size="xs"
+        nameClassName="text-sm font-normal"
+      />
+      {secondary && (
+        // pl-7 == the xs avatar (size-5) plus the chip's gap-2, so the
+        // secondary line hangs under the username, not under the mark.
+        <span className="max-w-full truncate pl-7 text-[11px] text-muted-foreground">
+          {secondary}
+        </span>
+      )}
+    </span>
+  )
 }
 
 /**
@@ -109,6 +171,7 @@ export function UsernameTypeahead({
   multiSelect,
   suggestions,
   emptySuggestionsHint,
+  lookupProjectId,
 }: Props) {
   const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
@@ -117,7 +180,10 @@ export function UsernameTypeahead({
   // row near the bottom of a settings pane.
   const [dropdownPosition, setDropdownPosition] = useState<{
     left: number
-    width: number
+    /** Floor: never narrower than the field it hangs off. */
+    minWidth: number
+    /** Ceiling: content width is allowed up to here (AQU-2609). */
+    maxWidth: number
     top?: number
     bottom?: number
   } | null>(null)
@@ -150,7 +216,7 @@ export function UsernameTypeahead({
     )
     .sort(byName)
   const suggestedIds = new Set(matchingSuggestions.map((u) => u.id))
-  const visibleRows =
+  const visibleRows: readonly TypeaheadPerson[] =
     trimmedRaw.length >= 2
       ? [
           ...matchingSuggestions,
@@ -183,7 +249,13 @@ export function UsernameTypeahead({
   const exactLookup = useExactUserLookup(
     value.mode === "username" ? trimmedRaw : "",
     canShowSettledEmptyState && lastFetchOk,
+    lookupProjectId,
   )
+  // AQU-2576: an email can only resolve where the caller named a project they
+  // can staff, so the email-flavoured copy follows the same condition as the
+  // lookup itself — nowhere else does the input accept an address at all.
+  const emailLookupAvailable = lookupProjectId != null && lookupProjectId !== ""
+  const typedLooksLikeEmail = emailLookupAvailable && looksLikeEmail(trimmedRaw)
   const exactLookupCurrent = exactLookup.forUsername === trimmedRaw
   const exactUser =
     exactLookupCurrent && exactLookup.status === "found" ? exactLookup.user : null
@@ -222,14 +294,26 @@ export function UsernameTypeahead({
       const DROPDOWN_MAX_PX = 176 + 8
       const spaceBelow = window.innerHeight - rect.bottom
       const openAbove = spaceBelow < DROPDOWN_MAX_PX && rect.top > spaceBelow
+      // AQU-2609: this list grants project access, so a row the operator
+      // cannot read in full is a mis-grant waiting to happen. Pinning the
+      // dropdown to the narrow field's width cut usernames to "Math…" /
+      // "matth…" — indistinguishable people. The field is still the anchor and
+      // the floor, but the list may grow to its content up to DROPDOWN_CAP_PX,
+      // never past the viewport's right edge.
+      const minWidth = rect.width
+      const maxWidth = Math.max(
+        minWidth,
+        Math.min(DROPDOWN_CAP_PX, window.innerWidth - rect.left - VIEWPORT_GUTTER_PX),
+      )
       setDropdownPosition(
         openAbove
           ? {
               left: rect.left,
-              width: rect.width,
+              minWidth,
+              maxWidth,
               bottom: window.innerHeight - rect.top + 4,
             }
-          : { left: rect.left, width: rect.width, top: rect.bottom + 4 },
+          : { left: rect.left, minWidth, maxWidth, top: rect.bottom + 4 },
       )
     }
 
@@ -360,14 +444,25 @@ export function UsernameTypeahead({
         </InputGroup>
       </div>
 
+      {/* AQU-2576: the field is labelled "Aquilla username", and an owner
+          staffing a project usually has an email and nothing else. Say that the
+          address works here, under the field, rather than leaving them to find
+          out from a dead end. Only where the server will actually resolve one. */}
+      {value.mode === "username" && emailLookupAvailable && !disabled && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("workspace.typeahead.emailAlsoWorksHint")}
+        </p>
+      )}
+
       {/* Username suggestions dropdown */}
       {showSuggestions && dropdownPosition && typeof document !== "undefined" && createPortal(
         <div
           ref={dropdownRef}
-          className="fixed z-[60] max-h-44 overflow-y-auto rounded-md border bg-popover shadow-md"
+          className="fixed z-[60] max-h-44 w-max overflow-y-auto overflow-x-hidden rounded-md border bg-popover shadow-md"
           style={{
             left: dropdownPosition.left,
-            width: dropdownPosition.width,
+            minWidth: dropdownPosition.minWidth,
+            maxWidth: dropdownPosition.maxWidth,
             top: dropdownPosition.top,
             bottom: dropdownPosition.bottom,
           }}
@@ -446,7 +541,9 @@ export function UsernameTypeahead({
               ) : exactLookup.status === "notfound" ? (
                 <>
                   <p className="text-[11px] text-muted-foreground">
-                    {t("workspace.typeahead.noUserNamed", { query: trimmedRaw })}
+                    {typedLooksLikeEmail
+                      ? t("workspace.typeahead.noAccountWithEmail", { query: trimmedRaw })
+                      : t("workspace.typeahead.noUserNamed", { query: trimmedRaw })}
                   </p>
                   {showModeToggle && (
                     <button
@@ -525,6 +622,7 @@ export function UsernameTypeahead({
                         role="checkbox"
                         aria-checked={checked}
                         onClick={() => multiSelect.onToggleResult(u)}
+                        title={personRowTitle(u)}
                         className={`flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-muted ${
                           checked ? "bg-muted/60" : ""
                         }`}
@@ -539,14 +637,7 @@ export function UsernameTypeahead({
                         >
                           {checked && <Check className="h-3 w-3" />}
                         </span>
-                        <span className="min-w-0 flex-1 truncate">
-                          <UsernameWithAvatar
-                            userId={u.id}
-                            username={u.username}
-                            size="xs"
-                            nameClassName="text-sm font-normal"
-                          />
-                        </span>
+                        <PersonRowLabel person={u} />
                       </button>
                     </li>
                   )
@@ -558,16 +649,12 @@ export function UsernameTypeahead({
                     <button
                       type="button"
                       onClick={() => handlePick(u)}
-                      className={`flex w-full items-center justify-between px-3 py-1.5 text-start text-sm hover:bg-muted ${
+                      title={personRowTitle(u)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-start text-sm hover:bg-muted ${
                         isSelected ? "bg-muted/60" : ""
                       }`}
                     >
-                      <UsernameWithAvatar
-                        userId={u.id}
-                        username={u.username}
-                        size="xs"
-                        nameClassName="text-sm font-normal"
-                      />
+                      <PersonRowLabel person={u} />
                       {isSelected && (
                         <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                       )}

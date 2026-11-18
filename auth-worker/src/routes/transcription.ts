@@ -14,7 +14,9 @@ import { admitPaidCall } from "../lib/billing/paid-call"
 import { releaseChatUsage } from "../lib/billing/chat-usage"
 import { settleWorkspaceUsage } from "../lib/billing/workspace-usage"
 import { COMPRESSED_AUDIO_FORMATS, transcribe, type TranscribeResult } from "../lib/transcribe-core"
-import { omniConfigured, omniFetch, omniStatusSchema, zeroShotEnabledForOrg } from "../lib/omni-asr"
+import {
+  omniConfigured, omniFetch, omniRefusesModel, omniStatusSchema, zeroShotEnabledForOrg,
+} from "../lib/omni-asr"
 
 const transcription = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -105,8 +107,9 @@ transcription.post("/internal/transcriptions",
 // a user can loop on.
 
 /** Accept our model ids and Modal's short names alike. */
-const omniModelParam = z.enum(["ctc", "zs", "omni-ctc", "omni-zs"])
-  .transform((m): OmniModel => (m === "omni-ctc" || m === "ctc" ? "ctc" : "zs"))
+const omniModelParam = z.enum(["ctc", "zs", "fast", "omni-ctc", "omni-zs", "omni-fast"])
+  .transform((m): OmniModel => (
+    m === "omni-ctc" || m === "ctc" ? "ctc" : m === "omni-fast" || m === "fast" ? "fast" : "zs"))
 
 async function omniGate(env: Env, projectId: string, model: OmniModel): Promise<{ error: string; status: 403 | 503 } | null> {
   if (!omniConfigured(env)) return { error: "Omnilingual transcription is not configured", status: 503 }
@@ -146,6 +149,9 @@ async function warm(c: AppContext, projectId: string, model: OmniModel, userId: 
       if (gate.usage && response.status >= 400 && response.status < 500 && response.status !== 408) {
         await releaseChatUsage(c.env, gate.usage)
       }
+      // A service older than `fast` has nothing to warm, and the run falls
+      // back to CTC (transcribe-core.ts): not an error the client should show.
+      if (model === "fast" && await omniRefusesModel(response)) return c.json({ ok: true }, 202)
       return c.json({ error: "Warm-up failed" }, 502)
     }
   } catch { return c.json({ error: "Warm-up unavailable" }, 502) }
@@ -162,6 +168,11 @@ async function status(c: AppContext, projectId: string, model: OmniModel) {
   if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
   try {
     const { response } = await omniFetch(c.env, `/status?model=${model}`, { method: "GET", timeoutMs: 10000 })
+    // A service older than `fast` refuses the model. There is nothing to wait
+    // for: the run falls back to CTC (transcribe-core.ts), so say "ready".
+    if (model === "fast" && await omniRefusesModel(response)) {
+      return c.json({ state: "ready" as const }, 200, { "Cache-Control": "no-store" })
+    }
     if (!response.ok) return c.json({ error: "Status unavailable" }, 502)
     const parsed = omniStatusSchema.safeParse(await response.json().catch(() => null))
     if (!parsed.success) return c.json({ error: "Invalid status response" }, 502)

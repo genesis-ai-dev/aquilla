@@ -32,8 +32,8 @@ test("BIA · ghost-text suggestions and words that fit here", async ({ page }) =
   const cellId = seeded.cellIds[seeded.rowOf(HELD_OUT_REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
-  // Off by default (AQU-2117): opt in through the real switch before typing.
-  await assist.enableGhostText()
+  // On by default: the switch starts checked in a fresh browser.
+  await assist.expectGhostTextOnByDefault()
 
   const show = new Showcase(page, {
     persona: "p1-field-translator",
@@ -51,24 +51,29 @@ test("BIA · ghost-text suggestions and words that fit here", async ({ page }) =
     await expect(async () => {
       await page.keyboard.press("Backspace")
       await page.keyboard.type(" ")
-      await expect(assist.ghost(cellId)).toHaveText("la tierra", { timeout: 1_000 })
+      await expect(assist.ghost(cellId)).toHaveText("la", { timeout: 1_000 })
     }).toPass({ timeout: 15_000 })
     await show.caption("A faint suggestion, learned from the other 30 validated verses.")
     await show.beat(1400)
 
-    await show.caption("Tab accepts it…")
+    await show.caption("Tab accepts it, one word at a time…")
+    await assist.acceptSuggestion()
+    await expect(assist.ghost(cellId)).toHaveText(" tierra")
+    await show.beat(700)
     await assist.acceptSuggestion()
     await show.beat(900)
 
     await assist.type(" según ", 70)
-    await expect(assist.ghost(cellId)).toHaveText("su género")
-    await show.caption("…→ takes just the next word.")
+    await expect(assist.ghost(cellId)).toHaveText("su")
+    await show.caption("…and keeps offering the next one.")
     await show.beat(600)
     await assist.acceptNextWord()
     await assist.type(" género", 70)
     await assist.type(", y ganado según ", 60)
-    await expect(assist.ghost(cellId)).toHaveText("su género")
+    await expect(assist.ghost(cellId)).toHaveText("su")
     await show.beat(600)
+    await assist.acceptSuggestion()
+    await expect(assist.ghost(cellId)).toHaveText(" género")
     await assist.acceptSuggestion()
     await show.beat(800)
 

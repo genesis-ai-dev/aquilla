@@ -8,6 +8,7 @@ import {
   neighbourTranscripts,
   pickCleanupPairs,
   pickCorrectedOnly,
+  pickWritingSamples,
   transcriptRowOf,
   type TranscriptRow,
 } from "./rows"
@@ -128,6 +129,17 @@ describe("isHumanCorrected", () => {
     expect(isHumanCorrected(row(take("c1", { heard: "eema akasema", transcript: "Yesu alisema" })), learned)).toBe(true)
   })
 
+  // Capital letters and punctuation are orthography. A person who added them
+  // has taught the cleanup how this language is written; reading that as "no
+  // correction" left the next cleanup with nothing to copy.
+  it("counts capital letters and punctuation a person added", () => {
+    expect(isHumanCorrected(row(take("c1", { heard: "yesu akasema", transcript: "Yesu akasema." })), [])).toBe(true)
+  })
+
+  it("does not count a difference that is only where the spaces fall around punctuation", () => {
+    expect(isHumanCorrected(row(take("c1", { heard: "Yesu, akasema", transcript: "Yesu , akasema" })), [])).toBe(false)
+  })
+
   it("never counts an AI cleanup awaiting review — the model must not learn from itself", () => {
     expect(isHumanCorrected(row(take("c1", { heard: "eema", transcript: "Yesu alisema", ai: true })), [])).toBe(false)
   })
@@ -190,5 +202,20 @@ describe("neighbourTranscripts", () => {
   it("is empty for a take: a take's context would be the written line, which must not reach the model", () => {
     const target = row(take("t", { transcript: "a" }))
     expect(neighbourTranscripts([row(take("a", { transcript: "b" })), target], target)).toEqual([])
+  })
+})
+
+describe("pickWritingSamples", () => {
+  const line = (id: string, translated: string) => ({ ...take(id, { heard: "h", transcript: "h" }), translated }) as CellData
+  const cells = [line("c0", "Mstari sifuri."), line("c1", "Mstari mmoja."), line("c2", "Mstari mbili."), line("c3", ""), line("c4", "Mstari mmoja.")]
+
+  // A take's transcript is compared with the line it reads to catch
+  // misreadings, so the cleanup must never be shown that line.
+  it("offers the nearest written lines, never the line the take reads, each once", () => {
+    expect(pickWritingSamples(cells, row(cells[2]))).toEqual(["Mstari mmoja.", "Mstari sifuri."])
+  })
+
+  it("offers none for a source segment: its lane's writing is its own transcripts", () => {
+    expect(pickWritingSamples(cells, { ...row(cells[2]), isSourceSegment: true })).toEqual([])
   })
 })

@@ -355,11 +355,11 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
     emitAttach.mockClear()
     uploadSpy.mockClear()
     onActiveCellChange.mockClear()
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
   })
   afterEach(() => {
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
   })
 
@@ -379,9 +379,10 @@ describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () =>
 
   it("with auto-advance ON, uploading does NOT jump to the next line", async () => {
     renderTwo(project)
-    // Auto-advance really is on — otherwise this passes for the wrong reason,
-    // and the default is the whole point (it is what the operator hit).
+    // Auto-advance really is on — otherwise this passes for the wrong reason.
+    // Since AQU-2620 it is off at rest, so the operator switches it on here.
     fireEvent.click(screen.getByTestId("rec-settings"))
+    fireEvent.click(screen.getByTestId("rec-auto-advance"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
 
     pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))

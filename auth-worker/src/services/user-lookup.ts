@@ -159,6 +159,17 @@ export async function searchUsersByScopedPrefix(
  * is the same defense in depth the username fallback keeps: against a legacy
  * fixture or partially migrated database that violates the invariant, the
  * lookup fails closed rather than granting access to an arbitrary account.
+ *
+ * [Pen test] Authorization & access control (2026-11-17): only a VERIFIED
+ * address resolves. Registration stores whatever email it is given and hands
+ * back a working session without proving it (`email_verified_at` stays NULL
+ * until the link is clicked), so matching on the string alone let anyone
+ * register a reviewer's address first and be the account a project lead's
+ * "add reviewer@org" lands on — admitted at whatever role the lead picked,
+ * with no invite and no step of their own. It is the same rule the invite
+ * paths already keep (AQU-1579, services/verified-email-invite.ts): a
+ * matching string is not proof of control. An unverified account is still
+ * reachable by its username, which only its owner can give out.
  */
 export async function lookupUserByUsernameOrEmail(
   env: Env,
@@ -173,6 +184,7 @@ export async function lookupUserByUsernameOrEmail(
   const matches = await env.AQUILLA_PG.prepare(
     `SELECT id, username FROM users
       WHERE LOWER(email) = LOWER(?)
+        AND email_verified_at IS NOT NULL
       ORDER BY id ASC
       LIMIT 2`,
   )

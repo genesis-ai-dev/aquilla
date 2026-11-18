@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import type { CellStore } from "@/hooks/useActiveCellStore"
-import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { BacktranslationActionSource, BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { ProjectPresenceStore, TargetPresenceSelection } from "@/lib/sync/presence-store"
@@ -86,7 +86,7 @@ export interface ExtensionEditorServicesArgs {
   /** apiRev 5: the project's decay warn threshold (cellNeedsAttention). */
   decayWarnThreshold?: number
   openAiSetup: () => void
-  runBacktranslation: (cell: CellData, source: "read-back" | "refresh" | "regenerate") => Promise<void> | void
+  runBacktranslation: (cell: CellData, source: BacktranslationActionSource) => Promise<void> | void
   saveBacktranslation: (cell: CellData, text: string, polished: boolean) => void
   openHistory: (cellId: string) => void
   openAttachment: (cellId: string, attachmentId: string) => void

@@ -1215,6 +1215,39 @@ async function prepareSetBriefTool(
   return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
+/** prepare_orthography_exceptions (AQU-2642 §4): the dedicated MCP door onto
+ *  PatchOrthographyExceptions. Only argument marshalling lives here — the op
+ *  validation, the CONTRIBUTOR/MAINTAINER split, the no-orthography refusal and
+ *  the commit-time merge all stay in commands-orthography-exceptions.ts.
+ *
+ *  `ifMatchVersion` is passed through only when the caller supplied one: the
+ *  merge is the point of this command, so the server must NOT helpfully pin a
+ *  version the caller did not ask to pin (that would turn every concurrent
+ *  entry into a plan_stale). */
+async function prepareOrthographyExceptionsTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!Array.isArray(args.ops) || args.ops.length === 0) {
+    return fail(
+      'validation_failed',
+      'ops must be a non-empty array of { action: "add" | "remove", word, ref? }',
+    )
+  }
+
+  const command = {
+    kind: 'PatchOrthographyExceptions',
+    projectId,
+    ops: args.ops,
+    ...(args.ifMatchVersion !== undefined ? { ifMatchVersion: args.ifMatchVersion } : {}),
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
 /** regenerate_brief_summary (AQU-2407): the dedicated MCP door onto
  *  RegenerateBriefSummary — the agent's equivalent of the in-app "Regenerate
  *  summary" button. The render, its metering and the empty-brief refusal are
@@ -1660,6 +1693,8 @@ export async function callTool(
       return patchSettings(env, token, args, ctx)
     case 'prepare_set_brief':
       return prepareSetBriefTool(env, token, args, ctx)
+    case 'prepare_orthography_exceptions':
+      return prepareOrthographyExceptionsTool(env, token, args, ctx)
     case 'regenerate_brief_summary':
       return regenerateBriefSummaryTool(env, token, args, ctx)
     case 'upload_artifact':

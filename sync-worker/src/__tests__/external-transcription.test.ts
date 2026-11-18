@@ -177,6 +177,46 @@ describe('raw WAV', () => {
   })
 })
 
+describe('omni-fast', () => {
+  // Fast is CTC 300M behind the same 40 s service limit as the other
+  // Omnilingual models. If the shared model list or window table lost it, an
+  // agent's Fast request would be refused here, or cut at 60 s and fail upstream.
+  it('is accepted and windowed at 30 s like the other Omnilingual models', async () => {
+    const token = await credToken({ userId: 2 })
+    reply = () => Response.json({ text: 'ami', chunks: [], model: 'omni-fast', timingsApproximate: false, creditsCharged: 0.05 })
+    const response = await post(token, { audio: { data: wav(70, [29, 58.5]), format: 'wav' }, language: 'luo', model: 'omni-fast' })
+    expect(response.status).toBe(200)
+    expect(calls.map(c => c.body.model)).toEqual(['omni-fast', 'omni-fast', 'omni-fast'])
+    expect(((await response.json()) as { model: string }).model).toBe('omni-fast')
+  })
+
+  it('forwards a stored webm take, which only the Omnilingual service can decode', async () => {
+    const token = await credToken({ userId: 2 })
+    expect((await post(token, { laneId: LANE, fileId: FILE, cellId: 'c-new', model: 'omni-fast' })).status).toBe(200)
+    expect(calls[0].body).toMatchObject({ model: 'omni-fast', audio: { format: 'webm' } })
+  })
+
+  it('can be status-checked, so an agent can see its cold start', async () => {
+    const token = await credToken({ userId: 2 })
+    reply = () => Response.json({ state: 'ready', estGpuSecPerAudioSec: 0.1 })
+    const response = await post(token, { model: 'omni-fast' }, true)
+    expect(response.status).toBe(200)
+    expect(calls[0].body).toMatchObject({ model: 'omni-fast', action: 'status' })
+  })
+
+  it('is offered by both MCP tools and described in discovery', async () => {
+    // An agent only learns a model id from the tool schema and the endpoint map.
+    const { MCP_TOOLS } = await import('../external/mcp-tools')
+    for (const name of ['transcribe_audio', 'transcription_status']) {
+      const tool = MCP_TOOLS.find(t => t.name === name)!
+      const model = (tool.inputSchema.properties as Record<string, { enum?: string[] }>).model
+      expect(model.enum, name).toContain('omni-fast')
+    }
+    const map = (await handleExternalDiscoveryRequest(new Request('https://w/api/v1/external'))!.json()) as { endpoints: Record<string, string> }
+    expect(map.endpoints['POST /api/v1/external/projects/:projectId/transcriptions']).toContain('omni-fast')
+  })
+})
+
 describe("a cell's take, zero-shot", () => {
   it("forwards the stored webm and this lane's best examples, ranked by the cell's source text", async () => {
     const token = await credToken({ userId: 2 })

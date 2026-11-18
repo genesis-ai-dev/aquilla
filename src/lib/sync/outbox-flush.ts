@@ -16,6 +16,8 @@ import {
   type OutboxRecord,
 } from "./outbox"
 import { sanitizeStoredEvents } from "./outbox-sanitize"
+import { dependencyIds, offlineQueueWaitingIds } from "./offline-routing"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
@@ -231,6 +233,26 @@ function elevationHoldKey(record: OutboxRecord): string {
 
 function isElevationHeld(record: OutboxRecord): boolean {
   return elevationHolds.has(elevationHoldKey(record))
+}
+
+/**
+ * The flusher's skip: elevation holds, plus — on desktop — any record that
+ * depends on an edit still waiting in LiveStore's offline queue, directly or
+ * through another record held here. The two queues flush independently, so
+ * sending it first would get it refused or logged stale; it goes on a later
+ * tick, once the offline queue has sent its dependency. The peek walks oldest
+ * first, so a held record is in `waiting` before its dependents come up.
+ */
+function holdBackFor(offlineWaiting: ReadonlySet<string> | null): (record: OutboxRecord) => boolean {
+  if (!offlineWaiting || offlineWaiting.size === 0) return isElevationHeld
+  const waiting = new Set(offlineWaiting)
+  return (record) => {
+    if (dependencyIds(record.event).some((id) => waiting.has(id))) {
+      waiting.add(record.id)
+      return true
+    }
+    return isElevationHeld(record)
+  }
 }
 
 /**
@@ -472,7 +494,8 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   }
   const shouldSurface = (): boolean => deps.ownerScope?.shouldSurface?.() ?? true
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, isElevationHeld)
+  const offlineWaiting = isTauriRuntime() ? await offlineQueueWaitingIds() : null
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, holdBackFor(offlineWaiting))
   if (records.length === 0 || !(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }

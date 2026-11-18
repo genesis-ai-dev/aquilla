@@ -121,7 +121,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { FileReference, LineDelivery, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -211,8 +211,6 @@ import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
 import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
-import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
-import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
 import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
 import { extensionEditorReadOnlyBanner, extensionEditorWriteCaps } from "@/lib/tools/editor-write-caps"
@@ -280,7 +278,11 @@ import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLinesOf, recordingSharedBy } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
-import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -324,8 +326,7 @@ import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
-import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
-import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
+import type { ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
@@ -335,7 +336,6 @@ import type { CharacterAgreement } from "@/lib/timeline/character-agreement"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import type { AudioCharacterPlan } from "@/lib/import/audio-character-sheet"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
-import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
@@ -376,7 +376,9 @@ import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeA
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
-import { TimelineEditor, type TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
+import { convertDraftOrthography, withOrthographyProvenance } from "@/lib/completion/orthography-draft"
+import { laneOrthography } from "@/lib/lqa/lane-builtin-checks"
+import type { TimelineActivateRequest } from "@/components/timeline/TimelineEditor"
 import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -408,7 +410,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
-import { lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
+import { lineTake, lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
 import { whileVoicingAs } from "@/lib/audio/voicing-as"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -435,7 +437,6 @@ import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
-import { AgentWorkbench } from "./agent/AgentWorkbench"
 import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
@@ -456,7 +457,6 @@ import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
-import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
@@ -476,7 +476,7 @@ import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { EditorLayoutSwitch } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
 import type { EditorLens } from "@/components/EditorModeToggle"
-import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
+import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -494,13 +494,10 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
-import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
 import { captionTrackDestinations } from "@/lib/import/caption-destinations"
 import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
 import type { MediaTextSource } from "@/lib/import/media-cues"
-import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
-import { MediaVideoPane } from "./timeline/MediaVideoPane"
 // Media redesign, layout: the panels' constraints, sizes, folds and full
 // screen all come from `useMediaDock`; the gate for the film stays here.
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
@@ -519,7 +516,6 @@ import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
 import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
-import { StationPanel } from "@/components/station/StationPanel"
 import { StationMenuItems } from "@/components/station/StationHistory"
 import type { StationHost, StationTake } from "@/components/station/station-host"
 import type { InsertChoice } from "@/components/station/StationEdits"
@@ -589,7 +585,6 @@ import {
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
@@ -605,6 +600,7 @@ import {
   backtranslationsReadQuery,
   recordFromHydrationRow,
   selectBtFewShotExamples,
+  sameTargetText,
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
@@ -638,6 +634,7 @@ import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
+import { createLiveBtQueue, needsLiveBacktranslation } from "@/lib/completion/live-bt"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -696,6 +693,11 @@ import {
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
 
+// The Voices panel holds the clip inspector and Make speech, which are cramped
+// at the width the file list wants. It opens wider and keeps its own remembered
+// width, so widening it leaves the other tabs alone (AQU-2577).
+const VOICES_DOCK_DEFAULT_WIDTH = 380
+
 // Import runs inline in the workspace (upload + eBible corpus tabs). An
 // earlier AD-11 plan carved import out into a standalone import Worker; that
 // monorepo layout was abandoned (see CLAUDE.md), so there is nowhere to route
@@ -703,6 +705,52 @@ import {
 // workspace-internal and was never extracted into a shared package, so the
 // ImportDialog stays hosted here. Lazy-loaded because the eBible parser
 // bundles a ~2MB vref table.
+// Surfaces that only some files, lenses or actions open (timeline, transcribe,
+// agent workbench, station, voices, Who's Who, the timeline import/check dialogs
+// and drawers, the recorder) load on first use, not with the workspace chunk.
+// Each render site has its own Suspense so a load never blanks the workspace.
+const TimelineEditor = lazy(() =>
+  import("@/components/timeline/TimelineEditor").then((m) => ({ default: m.TimelineEditor })),
+)
+const AgentWorkbench = lazy(() =>
+  import("./agent/AgentWorkbench").then((m) => ({ default: m.AgentWorkbench })),
+)
+const StationPanel = lazy(() =>
+  import("@/components/station/StationPanel").then((m) => ({ default: m.StationPanel })),
+)
+const AudioRecordingModal = lazy(() =>
+  import("./AudioRecorder/AudioRecordingModal").then((m) => ({ default: m.AudioRecordingModal })),
+)
+const VoiceSidebar = lazy(() =>
+  import("./voice/VoiceSidebar").then((m) => ({ default: m.VoiceSidebar })),
+)
+const MediaVideoPane = lazy(() =>
+  import("./timeline/MediaVideoPane").then((m) => ({ default: m.MediaVideoPane })),
+)
+const TranscribeEditor = lazy(() =>
+  import("@/components/transcribe/TranscribeEditor").then((m) => ({ default: m.TranscribeEditor })),
+)
+const SetupChecklistDrawer = lazy(() =>
+  import("./onboarding/SetupChecklistDrawer").then((m) => ({ default: m.SetupChecklistDrawer })),
+)
+const ImportCharactersDialog = lazy(() =>
+  import("./timeline/ImportCharactersDialog").then((m) => ({ default: m.ImportCharactersDialog })),
+)
+const ImportTimelineTextDialog = lazy(() =>
+  import("./import/ImportTimelineTextDialog").then((m) => ({ default: m.ImportTimelineTextDialog })),
+)
+const WhosWhoSidebar = lazy(() =>
+  import("./bible-data/WhosWhoSidebar").then((m) => ({ default: m.WhosWhoSidebar })),
+)
+const CharacterCheckDrawer = lazy(() =>
+  import("./timeline/CharacterCheckDrawer").then((m) => ({ default: m.CharacterCheckDrawer })),
+)
+const CueLinkDrawer = lazy(() =>
+  import("./timeline/CueLinkDrawer").then((m) => ({ default: m.CueLinkDrawer })),
+)
+const AlignTimelineScriptDialog = lazy(() =>
+  import("./import/AlignTimelineScriptDialog").then((m) => ({ default: m.AlignTimelineScriptDialog })),
+)
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
 )
@@ -899,6 +947,7 @@ export function ProjectWorkspace() {
     projectSettings,
     roleLevel: serverRoleLevel,
     settingsFetched,
+    provisional: projectProvisional,
   } = useProject(projectId!)
   // AQU-1083: the effective policy for this project — its own answer, else its
   // org's, else count them. Both legs come from the settings hook, which is
@@ -1096,6 +1145,14 @@ export function ProjectWorkspace() {
     if (projectFiles === hydratedProject.files) return hydratedProject
     return { ...hydratedProject, files: projectFiles }
   }, [hydratedProject, projectFiles])
+
+  // AQU-2628 call site B: the lane's spelling rules, applied to every AI draft
+  // on its way to a cell. Null for a project with no `orthography` block,
+  // which makes every conversion below a no-op.
+  const draftOrthography = useMemo(
+    () => laneOrthography({ languageProfile: project?.languageProfile }),
+    [project?.languageProfile],
+  )
 
   useEffect(() => {
     if (project?.orgId == null) return
@@ -1300,6 +1357,10 @@ export function ProjectWorkspace() {
   )
   useEffect(() => {
     if (!project || !projectId) return
+    // A record painted from the project directory lists the files the project
+    // had when the session began. Choosing a file from it, or leaving one it
+    // does not list, waits for this project's own read.
+    if (projectProvisional) return
 
     // The in-project overlay surfaces (/comments, /terminology, /agent,
     // /memory[/:section]) deliberately carry no file in the URL — don't treat
@@ -1414,6 +1475,7 @@ export function ProjectWorkspace() {
     fileIds,
     workspaceTabs.tabs,
     redirectTo,
+    projectProvisional,
     // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
     // `location.pathname` already arrives through `redirectTo`.
     location.search,
@@ -1756,8 +1818,10 @@ export function ProjectWorkspace() {
     () => createProjectPresenceStore(currentUsername),
     [currentUsername, project?.id],
   )
-  const jwtRef = useRef<string | null>(null)
-  useEffect(() => {
+  const jwtRef = useRef<string | null>(frontierSession?.jwt ?? null)
+  // Child passive effects mint tokens too. Publish the session before those
+  // effects run, including the first render after session restoration.
+  useLayoutEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
@@ -1819,6 +1883,7 @@ export function ProjectWorkspace() {
       },
     )
   }, [
+    frontierSession?.jwt,
     project?.id,
     project?.name,
     project?.origin?.kind,
@@ -2352,6 +2417,10 @@ export function ProjectWorkspace() {
   // immediately before emitting the commit event, so this ref is always
   // up-to-date by the time onCellCommitted fires.
   const lastOptimisticEditRef = useRef<{ cellId: string } | null>(null)
+  // Live back-translation: every save this browser confirms is reported here
+  // (see `confirmCommitted`). The queue that acts on it is built further down,
+  // next to runBacktranslation, and replaces this no-op while live mode is on.
+  const liveBtNotifyRef = useRef<(cellId: string, committedEventId?: string) => void>(() => {})
   const pendingTargetCommitHeadsRef = useRef<Map<string, { eventId: string; parentId: string | null }>>(new Map())
 
   // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
@@ -2438,6 +2507,7 @@ export function ProjectWorkspace() {
     const { refetchCell, refetchStats } = flushAppliedTracker.confirm(cellId, eventId)
     if (refetchStats) revalidateCellStats(cellId)
     if (refetchCell) revalidateCell(cellId)
+    liveBtNotifyRef.current(cellId, eventId)
   }, [flushAppliedTracker, revalidateCellStats, revalidateCell])
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
@@ -7011,7 +7081,7 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
-  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, rawProvenance: AiDraftProvenance) => {
     if (!project?.id) return
     // FRO-365: defense-in-depth — the selection-island Translate button and
     // the header "Run AI completions"/"Complete all" actions are already
@@ -7063,7 +7133,16 @@ export function ProjectWorkspace() {
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
     // created; ordinary formats pass through unchanged.
-    const completed = normalizeProtectedCompletion(commitCell, text, { promptCell: cell })
+    const normalizedDraft = normalizeProtectedCompletion(commitCell, text, { promptCell: cell })
+    // AQU-2628: the model cannot be asked to spell; the draft is converted
+    // here, before the optimistic patch and before the ai_drafted commit, so
+    // the cell never holds old-spelling text for even a frame and the
+    // old-orthography check never fires on a draft.
+    const { draft: completed, stats: orthographyStats } = convertDraftOrthography(
+      normalizedDraft,
+      draftOrthography,
+    )
+    const provenance = withOrthographyProvenance(rawProvenance, orthographyStats)
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -7261,9 +7340,20 @@ export function ProjectWorkspace() {
           continue
         }
         const liveCell = live ?? draft.cell
-        const completed = normalizeProtectedCompletion(liveCell, draft.text, { promptCell: draft.cell })
+        // AQU-2628: same conversion as the single-cell path — a batch draft
+        // reaches a cell by a different route, not by different rules.
+        const { draft: completed, stats: orthographyStats } = convertDraftOrthography(
+          normalizeProtectedCompletion(liveCell, draft.text, { promptCell: draft.cell }),
+          draftOrthography,
+        )
         const parentId = resolveTargetCommitParentId(liveCell)
-        prepared.push({ index, draft, liveCell, completed, parentId })
+        prepared.push({
+          index,
+          draft: { ...draft, provenance: withOrthographyProvenance(draft.provenance, orthographyStats) },
+          liveCell,
+          completed,
+          parentId,
+        })
         results[index] = { status: "fulfilled", value: undefined }
       } catch (error) {
         results[index] = { status: "rejected", reason: error }
@@ -7520,6 +7610,15 @@ export function ProjectWorkspace() {
     // successive audit maps back through CellStore.setRuntime.
     revalidateCells()
     revalidateAuditStats()
+    // Live back-translation: this path confirms the whole batch with one file
+    // read instead of `confirmCommitted` per cell, so report each saved draft
+    // here. A draft that was retried onto a newer head has a new event id this
+    // scope does not hold; it is reported without one and pins to the
+    // projected head once the reading lands.
+    prepared.forEach((item, preparedIndex) => {
+      if (results[item.index]?.status !== "fulfilled") return
+      liveBtNotifyRef.current(item.draft.cell.id, staleIndexes.has(preparedIndex) ? undefined : eventIds[preparedIndex])
+    })
     return results
   }, [
     activeLane,
@@ -8022,10 +8121,13 @@ export function ProjectWorkspace() {
     cell: CellData,
     btText: string,
     polished: boolean,
+    committedEventId?: string,
   ) => {
-    // The BT pins to the commit it describes. Generation is manual-only, so
-    // there is never an in-flight commit here — the projected head is current.
-    const pinnedTargetEventId = resolveBtTargetEventId(undefined, cell.targetEventId)
+    // The BT pins to the commit it describes. A manual Read back has no
+    // in-flight commit, so the projected head is current; a live reading runs
+    // right after a save and knows that save's event id, which the projection
+    // may not have caught up with yet (see resolveBtTargetEventId).
+    const pinnedTargetEventId = resolveBtTargetEventId(committedEventId, cell.targetEventId)
     const record: BacktranslationRecord = {
       cellId: cell.id,
       btText,
@@ -8115,7 +8217,11 @@ export function ProjectWorkspace() {
    * glosser is a separate read-only reference surfaced on demand via
    * `getStatisticalBt` (never persisted).
    */
-  const runBacktranslation = useCallback(async (cell: CellData, actionSource?: BacktranslationActionSource) => {
+  const runBacktranslation = useCallback(async (
+    cell: CellData,
+    actionSource?: BacktranslationActionSource,
+    committedEventId?: string,
+  ) => {
     if (!actionSource) {
       const message = "[bt] generateBacktranslation requires an explicit user action source"
       if (import.meta.env.DEV || import.meta.env.MODE === "test") throw new Error(message)
@@ -8159,14 +8265,56 @@ export function ProjectWorkspace() {
         sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
-      persistBt(cell, btText, true)
+      if (actionSource === "live") {
+        // The translation may have changed while the model was reading it;
+        // a reading of older text is dropped (that save queued its own).
+        const live = getActiveCell(cellId)
+        if (!live || !sameTargetText(live.translated ?? "", cell.translated)) return
+      }
+      persistBt(cell, btText, true, committedEventId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
+  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser, getActiveCell])
+
+  // Live back-translation (off unless the project turns it on): each save
+  // this browser confirms queues a reading of that cell. The queue reads
+  // through refs so it is built once per file and always sees the newest
+  // cache and settings.
+  const liveBacktranslationOn = Boolean(project?.completionSettings?.liveBacktranslation) && isBacktranslationConfigured
+  const runBacktranslationRef = useRef(runBacktranslation)
+  runBacktranslationRef.current = runBacktranslation
+  const backtranslationCacheRef = useRef(backtranslationCache)
+  backtranslationCacheRef.current = backtranslationCache
+  const getActiveCellRef = useRef(getActiveCell)
+  getActiveCellRef.current = getActiveCell
+  useEffect(() => {
+    if (!liveBacktranslationOn) {
+      liveBtNotifyRef.current = () => {}
+      return
+    }
+    const queue = createLiveBtQueue({
+      run: async (cellId, committedEventId) => {
+        const cell = getActiveCellRef.current(cellId)
+        if (!cell) return
+        const needed = needsLiveBacktranslation({
+          translated: cell.translated ?? "",
+          targetEventId: committedEventId || cell.targetEventId,
+          record: backtranslationCacheRef.current.get(cellId),
+        })
+        if (!needed) return
+        await runBacktranslationRef.current(cell, "live", committedEventId)
+      },
+    })
+    liveBtNotifyRef.current = (cellId, committedEventId) => queue.notify(cellId, committedEventId)
+    return () => {
+      liveBtNotifyRef.current = () => {}
+      queue.cancelAll()
+    }
+  }, [liveBacktranslationOn, activeFileId, activeLane])
 
   // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
   // hydrated from the server carries no `forText`, so the only way to tell
@@ -12134,7 +12282,10 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
-    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells) ? activeFileId : null,
+    // `exportOpen`: the export dialog reads its takes from this map, so opened
+    // from the Text lens it used to say "nothing is recorded" about a fully
+    // recorded episode.
+    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells || exportOpen) ? activeFileId : null,
     activeLane, // AQU-1591: takes belong to a lane.
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
@@ -13588,19 +13739,22 @@ export function ProjectWorkspace() {
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
   const handleRegenerateTimelineVoice = useCallback(
-    async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
-      if (!project || !frontierSession) return
+    // AQU-2577: resolves to whether a take was made, and `quiet` leaves the
+    // toasts to the caller — Make speech runs this for many lines and shows
+    // its own per-line progress.
+    async (cellId: string, slot: string, opts?: { voiceId?: string; quiet?: boolean; delivery?: LineDelivery }): Promise<boolean> => {
+      if (!project || !frontierSession) return false
       const owner = resolveTakeCellRef.current(cellId)
-      if (!owner) return
+      if (!owner) return false
       // The words a cue performs, and whose voice says them, live on the
       // subtitle it is linked to; off a cue file, the line's own.
       const readAloud = audioCueCells ? resolveCueReadAloud(cellId) : null
       const text = (readAloud?.text ?? owner.cell.translated ?? "").trim()
       if (!text) {
-        toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
-        return
+        if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
+        return false
       }
-      toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
+      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
       // AQU-2212: a pick reads in the voice picked, before the cast settings
       // catch up; otherwise the line's own cast voice. Named while it runs.
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
@@ -13619,10 +13773,14 @@ export function ProjectWorkspace() {
         text,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
+        ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
-      toast.add(ok
-        ? { type: "success", title: t("editor.timeline.regenerateDone") }
-        : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      if (!opts?.quiet) {
+        toast.add(ok
+          ? { type: "success", title: t("editor.timeline.regenerateDone") }
+          : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      }
+      return ok
     },
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
@@ -13671,10 +13829,10 @@ export function ProjectWorkspace() {
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, opts?: { voice?: Voice; audioId?: string }) => {
-      if (!project || !frontierSession) return
+    async (cellId: string, opts?: { voice?: Voice; quiet?: boolean; audioId?: string }): Promise<boolean> => {
+      if (!project || !frontierSession) return false
       const owner = resolveTakeCellRef.current(cellId)
-      if (!owner) return
+      if (!owner) return false
       const { cell } = owner
       // AQU-2212: a pick re-voices into the voice picked, before the cast
       // settings catch up; otherwise into the line's own cast voice.
@@ -13687,8 +13845,8 @@ export function ProjectWorkspace() {
       if (blocker === "shared") {
         toast.add({ type: "info", title: t("editor.voice.changeVoiceShared", { count: recordingSharedBy(cell, opts?.audioId, changeVoiceLines) }) })
       }
-      if (blocker != null) return
-      toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
+      if (blocker != null) return false
+      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
       const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
         cell,
@@ -13700,19 +13858,22 @@ export function ProjectWorkspace() {
         ...(opts?.audioId ? { audioId: opts.audioId } : {}), // AQU-2499
       }))
       if (ok) {
-        toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
+        if (!opts?.quiet) toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
         revalidateCells?.()
-        return
+        return true
       }
       // `changeCellVoice` swallows the throw into the cell's tts badge, which
       // is where the Audio tab reads it; say what it said rather than a bare
       // "it failed", since the timeline shows no voice card to open.
       const failure = getTtsStatus(ttsStatusKey(cell.id))
-      toast.add({
-        type: "error",
-        title: t("editor.timeline.changeVoiceFailed"),
-        ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
-      })
+      if (!opts?.quiet) {
+        toast.add({
+          type: "error",
+          title: t("editor.timeline.changeVoiceFailed"),
+          ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
+        })
+      }
+      return false
     },
     [project, frontierSession, tts.laneSettings, currentUsername, activeLane, revalidateCells, t, changeVoiceLines],
   )
@@ -13968,13 +14129,159 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(cellId)
     if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
   }, [])
+  /**
+   * AQU-2577: the speech clip the Voices rail is inspecting. Set by a click on
+   * a clip in the timeline, which also brings the rail forward; cleared by the
+   * inspector's back arrow, and whenever the file changes under it.
+   */
+  const [inspectedTake, setInspectedTake] = useState<{ fileId: string; cellId: string; audioId: string } | null>(null)
+  const inspectedBusyStatus = useTtsStatus(inspectedTake ? ttsStatusKey(inspectedTake.cellId) : undefined)
+  /**
+   * AQU-2577: the three steps Make speech chains (make-speech.ts), as this
+   * workspace already does each of them: draft a line, read it in a voice,
+   * change the take into another voice. Run quietly — the panel shows each
+   * line's progress itself.
+   */
+  const makeSpeechActions = useMemo<MakeSpeechActions>(() => ({
+    hasText: (cellId) => Boolean(resolveTakeCellRef.current(cellId)?.cell.translated?.trim()),
+    translate: async (cellId) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
+    },
+    speak: (cellId, readerVoiceId, delivery) =>
+      handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, {
+        quiet: true,
+        ...(readerVoiceId ? { voiceId: readerVoiceId } : {}),
+        ...(delivery ? { delivery } : {}),
+      }),
+    revoice: async (cellId, characterVoiceId) => {
+      const voice = findVoice(tts.laneSettings, characterVoiceId)
+      return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
+    },
+  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings])
+  const loadInspectedTake = useCallback(async (att: CodexCellAttachment): Promise<Blob> => {
+    const ref = parseFrontierAudioUrl(att.url)
+    if (!project || !inspectedTake || !ref || !frontierSession) throw new Error("audio fetch: this clip has no stored audio")
+    const bytes = await fetchCellAudio({
+      projectId: project.id, fileId: inspectedTake.fileId, audioId: ref.audioId, ext: ref.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(frontierSession),
+    })
+    return new Blob([bytes as BlobPart], { type: ref.ext === "mp3" ? "audio/mpeg" : ref.ext === "wav" ? "audio/wav" : `audio/${ref.ext}` })
+  }, [project, inspectedTake, frontierSession])
+  /** Speak the inspected line again the way its take was made: the same reader, then the same character. */
+  const handleRegenerateInspected = useCallback(() => {
+    if (!inspectedTake) return
+    const owner = resolveTakeCellRef.current(inspectedTake.cellId)
+    const story = owner ? takeStory(owner.cell, inspectedTake.audioId, tts.laneSettings) : null
+    if (!story) return
+    toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
+    void runMakeSpeech(
+      [inspectedTake.cellId],
+      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+      makeSpeechActions,
+      () => {},
+    ).then((result) => {
+      const ok = result.get(inspectedTake.cellId)?.kind === "done"
+      toast.add(ok
+        ? { type: "success", title: t("editor.timeline.regenerateDone") }
+        : { type: "error", title: t("editor.timeline.regenerateFailed") })
+      if (!ok) return
+      // Follow the line to the take that plays now, so the panel shows the new one.
+      const next = resolveTakeCellRef.current(inspectedTake.cellId)
+      const audioId = next ? lineTake(next.cell).audioId : undefined
+      if (audioId) setInspectedTake((cur) => (cur?.cellId === inspectedTake.cellId ? { ...cur, audioId } : cur))
+    })
+  }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
+
+  /**
+   * AQU-2577: the lines picked for Make speech on the timeline. A click on a
+   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
+   * lines already picked. Picking generates nothing: the panel's button does.
+   */
+  const [pickedGhostIds, setPickedGhostIds] = useState<readonly string[]>([])
+  const pickedGhostSet = useMemo(() => new Set(pickedGhostIds), [pickedGhostIds])
+  const handlePickGhost = useCallback((cellId: string, opts: { additive: boolean }) => {
+    setPickedGhostIds((cur) => (opts.additive
+      ? (cur.includes(cellId) ? cur.filter((id) => id !== cellId) : [...cur, cellId])
+      : [cellId]))
+    setInspectedTake(null)
+    setDockTab("voices")
+  }, [setDockTab])
+  const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
+  /** The lines whose speech is being made right now: their ghosts show a spinner. */
+  const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
+  const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
+    const running = state.kind === "running"
+    setMakingSpeechCellIds((cur) => {
+      if (cur.has(cellId) === running) return cur
+      const next = new Set(cur)
+      if (running) next.add(cellId)
+      else next.delete(cellId)
+      return next
+    })
+  }, [])
+
+  // The inspected clip as the rail needs it. A take on an audio-cue sibling is
+  // not in this file's cells, so the rail keeps the roster for it.
+  const inspectedCell = inspectedTake && inspectedTake.fileId === activeFileId
+    ? audioMergedCells.find((c) => c.id === inspectedTake.cellId) ?? null
+    : null
+  const inspectedClip = inspectedTake && inspectedCell && lens === "audio"
+    ? {
+        cell: inspectedCell,
+        audioId: inspectedTake.audioId,
+        fileId: inspectedTake.fileId,
+        busy: inspectedBusyStatus.kind === "loading" || inspectedBusyStatus.kind === "synthesizing",
+        loadTake: loadInspectedTake,
+        onRegenerate: handleRegenerateInspected,
+        onPickVoice: (voiceId: string) => handleLineVoicePicked(inspectedCell, voiceId),
+        ...(trainFromTake && lineTake(inspectedCell).human
+          ? { onTrainFromTake: () => trainFromTake(inspectedTake.cellId, inspectedTake.audioId) }
+          : {}),
+        onClose: () => setInspectedTake(null),
+      }
+    : null
+  const makeSpeechLines = useMemo(
+    () => audioMergedCells
+      .filter((c) => c.type !== "paratext" && Boolean((c.translated || c.original || "").trim()))
+      .map((c) => ({
+        cellId: c.id,
+        label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        hasText: Boolean(c.translated?.trim()),
+        hasSpeech: lineTake(c).audioId != null,
+        voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
+      })),
+    [audioMergedCells, tts.laneSettings],
+  )
+  const makeSpeechForRail = useMemo(
+    () => (lens === "audio" && activeLaneDelivers !== "audio"
+      ? {
+          lines: makeSpeechLines,
+          selectedCellId: timelineSelectedCellId,
+          actions: makeSpeechActions,
+          picked: pickedGhostIds,
+          onClearPicked: clearPickedGhosts,
+          onLineState: handleMakeSpeechLineState,
+        }
+      : undefined),
+    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
+  )
+
   const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
   const stationShowingRef = useRef(false)
   const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
-    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
     const owner = resolveTakeCellRef.current(cellId)
+    // AQU-2577: a clicked clip is what the Voices rail is about until the user
+    // goes back to the roster.
+    if (owner) {
+      setInspectedTake({ fileId: owner.fileId, cellId, audioId })
+      setPickedGhostIds([])
+      setDockTab("voices")
+    }
+    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
     if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
-  }, [])
+  }, [setDockTab])
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the
@@ -17806,12 +18113,15 @@ export function ProjectWorkspace() {
   // account switcher, breadcrumb) around a main-area skeleton. None of the
   // chrome depends on the record, so blanking it behind a whole-page template
   // only made a slow round-trip look like a page load.
-  if (status === "loading") {
+  // A directory record with no files is not evidence of an empty project (the
+  // directory may predate its first import), so it does not get the empty state.
+  if (status === "loading" || (projectProvisional && (loadedProject?.files.length ?? 0) === 0)) {
     return (
       <AppShell
         dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
-        dockStorageKey={projectId}
+        dockStorageKey={dockTab === "voices" ? `${projectId}:voices` : projectId}
+        dockDefaultWidth={dockTab === "voices" ? VOICES_DOCK_DEFAULT_WIDTH : undefined}
         leftDock={
           <LeftDock
             activeTab={dockTab}
@@ -18266,7 +18576,8 @@ export function ProjectWorkspace() {
       <AppShell
         dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
-        dockStorageKey={projectId}
+        dockStorageKey={dockTab === "voices" ? `${projectId}:voices` : projectId}
+        dockDefaultWidth={dockTab === "voices" ? VOICES_DOCK_DEFAULT_WIDTH : undefined}
         logoAccessory={
           dockTab !== null && lgUp ? (
             <AppTooltip content={t("nav.dock.hidePanel")} side="bottom">
@@ -18304,6 +18615,7 @@ export function ProjectWorkspace() {
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <VoiceSidebar
                     cells={audioMergedCells}
                     project={audioProject ?? project}
@@ -18315,7 +18627,10 @@ export function ProjectWorkspace() {
                     fileId={activeFileId}
                     laneId={activeLaneId}
                     leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
+                    clip={inspectedClip}
+                    makeSpeech={makeSpeechForRail}
                   />
+                  </Suspense>
                 </div>
               ) : undefined
             }
@@ -18874,6 +19189,7 @@ export function ProjectWorkspace() {
           // Agent workbench (agent-mode-v2 §4): full-screen agent surface —
           // same shared session as the dock tab, plus the three-pane
           // Source | Agent | Target working set from the agent-workspace branch.
+          <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
           <AgentWorkbench
             agent={{
               projectId: project.id,
@@ -18939,6 +19255,7 @@ export function ProjectWorkspace() {
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
+          </Suspense>
         ) : activeFileId && activeFile && extensionEditorChoice.pending ? (
           // Smart Extensions: the default editor may be the first-party
           // extension — wait for the project's extensions rather than flash
@@ -19088,6 +19405,7 @@ export function ProjectWorkspace() {
                     }
                     inert={!dock.view.isOpen("tl") || undefined}
                   >
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <TimelineEditor
                     cells={timelineCells}
                     // AQU-1758: a book's text has no times to drag it to.
@@ -19243,6 +19561,9 @@ export function ProjectWorkspace() {
                     // the timeline's corner cell beside "Tracks".
                     layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
+                    onPickGhost={makeSpeechForRail ? handlePickGhost : undefined}
+                    pickedGhostIds={pickedGhostSet}
+                    makingSpeechCellIds={makingSpeechCellIds}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
@@ -19302,6 +19623,7 @@ export function ProjectWorkspace() {
                     }}
                     linkingModeRequest={linkingModeRequest}
                   />
+                  </Suspense>
                   </div>
                   </ResizablePanel>
                   {/* A pinned panel cannot be dragged, so the handle beside it
@@ -19333,6 +19655,7 @@ export function ProjectWorkspace() {
               {/* The film, once: the dock moves its host into its area. */}
               {dock.hosts.film && timelineStacked && showVideoPane && activeFile?.coreMediaUrl
                 ? createPortal(
+                <Suspense fallback={null}>
                 <MediaVideoPane
                   key={activeFile.id}
                   src={activeFile.coreMediaUrl}
@@ -19357,6 +19680,7 @@ export function ProjectWorkspace() {
                   sourceTextDirection={fileMeta.sourceTextDirection}
                   targetTextDirection={fileMeta.targetTextDirection}
                 />
+                </Suspense>
                     ,
                     dock.hosts.film,
                   )
@@ -19378,6 +19702,7 @@ export function ProjectWorkspace() {
                 <div className="flex h-full min-h-0 flex-col">
                   {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
                   {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
+                  <Suspense fallback={<LoadingPanel label={t("common.loading")} />}>
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -19391,6 +19716,7 @@ export function ProjectWorkspace() {
                     // AQU-2146: "no audio yet" only once the read has answered.
                     audioLoaded={workspaceAudioLoaded}
                   />
+                  </Suspense>
                 </div>
               ) : extensionEditorActive && activeFileId && activeFile ? (
                 // Smart Extensions: the editor extension takes EditorTable's
@@ -19625,7 +19951,7 @@ export function ProjectWorkspace() {
                 : null}
               {/* AQU-2327: the Station, once — a tab beside Lines (the text). */}
               {dock.hosts.station && timelineStacked
-                ? createPortal(<StationPanel host={stationHost} visible={dock.view.isShowing("station")} />, dock.hosts.station)
+                ? createPortal(<Suspense fallback={null}><StationPanel host={stationHost} visible={dock.view.isShowing("station")} /></Suspense>, dock.hosts.station)
                 : null}
               </ForecastProvider>
               </EditorActionsProvider>
@@ -19733,6 +20059,7 @@ export function ProjectWorkspace() {
               {/* AQU-1689: Who's Who, the passage's cast — open panel only;
                   its "People" edge tab rides in asideEdge. */}
               {rightRail.openPanel === "people" && (
+                <Suspense fallback={null}>
                 <WhosWhoSidebar
                   project={project!}
                   fileId={activeFile?.id ?? null}
@@ -19746,6 +20073,7 @@ export function ProjectWorkspace() {
                     if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
+                </Suspense>
               )}
               {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                   and a translation cell with a matching canonicalRef is focused. */}
@@ -19766,6 +20094,7 @@ export function ProjectWorkspace() {
                 content box — the file tabs, breadcrumbs and import button live
                 above it and a drawer has no business covering them. */}
             {cueLinkDrawerOpen && audioCueSibling && (
+              <Suspense fallback={null}>
               <CueLinkDrawer
                 review={cueLinkReview}
                 pending={cueLinksPending}
@@ -19790,8 +20119,10 @@ export function ProjectWorkspace() {
                 onReject={(t, c) => handleReviewPair(t, c, false)}
                 onRepairAll={() => void handleRepairAllCueLinks()}
               />
+              </Suspense>
             )}
             {characterCheckOpen && (
+              <Suspense fallback={null}>
               <CharacterCheckDrawer
                 agreement={characterAgreement}
                 bothSheetsImported={bothCharacterSheets}
@@ -19816,6 +20147,7 @@ export function ProjectWorkspace() {
                   canManageSources ? () => setImportCharactersOpen(true) : undefined
                 }
               />
+              </Suspense>
             )}
             {checkOpen && (
               <CheckFindingsDrawer
@@ -19998,6 +20330,7 @@ export function ProjectWorkspace() {
         }
       />
       {project && (
+        <Suspense fallback={null}>
         <SetupChecklistDrawer
           open={checklistOpen}
           onOpenChange={handleChecklistOpenChange}
@@ -20030,6 +20363,7 @@ export function ProjectWorkspace() {
             navigate(path)
           }}
         />
+        </Suspense>
       )}
       {project && (
         <AiSetupDialog
@@ -20076,6 +20410,7 @@ export function ProjectWorkspace() {
         />
       )}
       {project && (
+        <Suspense fallback={null}>
         <AudioRecordingModal
           open={recordingCellId !== null}
           /* AQU-2511: `audioProject` — `project` with the OPEN LANE's voices,
@@ -20165,6 +20500,7 @@ export function ProjectWorkspace() {
           }}
           onClose={() => setRecordingCellId(null)}
         />
+        </Suspense>
       )}
       {/* Manual boundary editor for a "Voice together" combined clip. */}
       {combinedEditor && activeFileId && project && (
@@ -20746,6 +21082,7 @@ export function ProjectWorkspace() {
           // AQU-1566 (Sam's option b): the captions become this linked video's
           // own rows. One staged file and one receipt per reviewed preview,
           // so pressing again after a failure never writes twice.
+          <Suspense fallback={null}>
           <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
             filmUrl={activeFile.coreMediaUrl}
@@ -20779,7 +21116,9 @@ export function ProjectWorkspace() {
               await refreshAfterCaptionRows()
             }}
           />
+          </Suspense>
         ) : (
+          <Suspense fallback={null}>
           <ImportTimelineTextDialog key={captionDialogFileId}
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
             filmUrl={activeFile.coreMediaUrl}
@@ -20804,6 +21143,7 @@ export function ProjectWorkspace() {
               await refresh()
             }}
           />
+          </Suspense>
         )
       )}
       {pendingTrackRows && pendingTrackRows.fileId === activeFileId && (
@@ -20813,6 +21153,7 @@ export function ProjectWorkspace() {
       )}
       {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
         && project && alignmentClipUrl && (
+        <Suspense fallback={null}>
         <AlignTimelineScriptDialog key={alignmentDialogFileId}
           projectId={project.id} fileId={alignmentDialogFileId}
           mediaName={activeFile.name} clipUrl={alignmentClipUrl}
@@ -20830,6 +21171,7 @@ export function ProjectWorkspace() {
           onSaved={async () => { refresh() }}
           onCancel={() => setAlignmentDialogFileId(null)}
         />
+        </Suspense>
       )}
       {/* AQU-1139: the clip's sidecar subtitles, into this file's own source
           lane. Up here with its two siblings for the same reason — the
@@ -20851,6 +21193,7 @@ export function ProjectWorkspace() {
         }}
       />
       {project && activeFile && (
+        <Suspense fallback={null}>
         <ImportCharactersDialog
           open={importCharactersOpen}
           textFileName={activeFile.name}
@@ -20890,6 +21233,7 @@ export function ProjectWorkspace() {
               : undefined
           }
         />
+        </Suspense>
       )}
       <LinkVideoTimingDialog
         open={pendingVideoUrl !== null}

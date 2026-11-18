@@ -59,7 +59,7 @@ function AuthDialogBody({
             returnTo={returnTo}
             initialUsername={loginPrefill}
           />
-          <p className="text-center text-sm text-muted-foreground">
+          <p data-login-alternative className="text-center text-sm text-muted-foreground">
             {t("nav.account.newToFrontier")}{" "}
             <button
               type="button"
@@ -80,7 +80,7 @@ function AuthDialogBody({
               setMode("login")
             }}
           />
-          <p className="text-center text-sm text-muted-foreground">
+          <p data-login-alternative className="text-center text-sm text-muted-foreground">
             {t("auth.join.alreadyHaveAccount")}{" "}
             <button
               type="button"

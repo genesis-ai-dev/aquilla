@@ -3569,11 +3569,14 @@ describe("imported originals on the overview (AQU-656)", () => {
     }
   }
 
-  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+  function useFiles(
+    files: import("@/lib/sync/cells-read").FileSummary[],
+    level = ROLE.MAINTAINER,
+  ) {
     fetchProjectFiles.mockResolvedValue(files)
     useProject.mockReturnValue({
       project: projectRecord({
-        level: 400,
+        level,
         name: "My Project",
         files: files.map((f) => ({
           id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount,
@@ -3619,16 +3622,58 @@ describe("imported originals on the overview (AQU-656)", () => {
     expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
 
-  it("hides original-download controls when the caller is below the org's export floor", async () => {
-    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
-    useFiles([fileWith("f1", "Genesis.usfm", true)])
+  it("hides the originals card for a Contributor when the org never set a floor, and keeps the plan CSV", async () => {
+    // The bug's own shape: canExport is true because the setting is absent,
+    // and the download routes still refuse below Maintainer.
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      canExport: true,
+      exportMinRole: null,
+    })
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [{
+        fileId: "f1", fileName: "Genesis.usfm", fileRole: null, fileKind: null, sectionKey: "",
+        totalCount: 10, filledCount: 5, validatedCount: 2,
+        audioCount: 0, audioValidatedCount: 0, lastEditAt: null,
+        targetDate: null, doneAt: null, doneBy: null, updatedAt: null, updatedBy: null,
+      }],
+    })
+    useFiles([fileWith("f1", "Genesis.usfm", true)], ROLE.CONTRIBUTOR)
+
+    renderOverview()
+
+    expect(await screen.findByTestId("plan-csv-download")).toBeInTheDocument()
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  it("shows the originals card to a Contributor when the org lowered the floor", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      canExport: true,
+      exportMinRole: ROLE.CONTRIBUTOR,
+    })
+    useFiles([fileWith("f1", "Genesis.usfm", true)], ROLE.CONTRIBUTOR)
+
+    renderOverview()
+
+    expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
+  })
+
+  it("hides the originals card from a Maintainer when the org raised the floor to Owner", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      canExport: false,
+      exportMinRole: ROLE.OWNER,
+    })
+    useFiles([fileWith("f1", "Genesis.usfm", true)], ROLE.MAINTAINER)
 
     renderOverview()
 
     await screen.findByTestId("plan-board")
     expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
 
   const manyOriginals = (n: number) =>

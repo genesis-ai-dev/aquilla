@@ -385,7 +385,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -18084,6 +18084,18 @@ export function ProjectWorkspace() {
     }
   }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, tts.settings, tts.saveTts, activeLane])
 
+  // AQU-2476: Download original's only implementation is the server route,
+  // which reads an unset export floor as Maintainer. `canExport` stays the
+  // gate for the Export dialog, whose client-side formats work below it.
+  const downloadOriginalRole = project?.syncRole?.level ?? null
+  const downloadOriginalsAllowed = canDownloadOriginals(
+    downloadOriginalRole,
+    projectPolicy.exportMinRole,
+  )
+  const downloadOriginalDisabledReason = downloadOriginalsAllowed
+    ? undefined
+    : denialMessage(t, resolveExportFloor(projectPolicy.exportMinRole), downloadOriginalRole)
+
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
 
@@ -18236,18 +18248,22 @@ export function ProjectWorkspace() {
         },
       })
     }
-    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+    if (activeFile && projectId && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
         label: t("fileDetails.downloadOriginal"),
         icon: Download,
-        onClick: () => {
-          void downloadImportedOriginal({
-            projectId,
-            file: activeFile,
-            getToken: getTokenForFile,
-          })
-        },
+        disabled: !downloadOriginalsAllowed,
+        disabledReason: downloadOriginalDisabledReason,
+        onClick: downloadOriginalsAllowed
+          ? () => {
+              void downloadImportedOriginal({
+                projectId,
+                file: activeFile,
+                getToken: getTokenForFile,
+              })
+            }
+          : undefined,
       })
     }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
@@ -18270,8 +18286,9 @@ export function ProjectWorkspace() {
     adoptingSpeaker,
     canAssignWork,
     canDiarize,
-    canExportByOrgPolicy,
     currentRoleLevel,
+    downloadOriginalDisabledReason,
+    downloadOriginalsAllowed,
     diarizeBusy,
     diarizeError,
     diarizePhase,
@@ -19013,7 +19030,7 @@ export function ProjectWorkspace() {
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? setPendingDeleteId : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
-                  canExportByOrgPolicy={canExportByOrgPolicy}
+                  downloadOriginalDisabledReason={downloadOriginalDisabledReason}
                   assignedFileIds={myAssignedFileIds}
                   filterFocus={fileFilterFocus}
                   // AQU-1569: PROJECT_LEAD+, mirroring the server floor for

@@ -132,7 +132,13 @@ pub async fn models_handler(
 
 /// Origins the app's own webview uses (Tauri 2 per-platform schemes + vite dev).
 /// Any other web page is a cross-site caller and must not reach this proxy.
+/// Shipped builds serve the SPA from the hot bundle's `app` scheme
+/// (`hot_bundle::serve::SCHEME`): `app://localhost` on macOS/Linux,
+/// `http(s)://app.localhost` on Windows.
 const ALLOWED_ORIGINS: &[&str] = &[
+    "app://localhost",
+    "http://app.localhost",
+    "https://app.localhost",
     "tauri://localhost",
     "http://tauri.localhost",
     "https://tauri.localhost",
@@ -192,6 +198,8 @@ mod tests {
     #[test]
     fn only_app_origins_and_loopback_hosts_are_allowed() {
         assert!(origin_allowed("tauri://localhost"));
+        assert!(origin_allowed("app://localhost"));
+        assert!(origin_allowed("http://app.localhost"));
         assert!(origin_allowed("http://127.0.0.1:1420"));
         assert!(!origin_allowed("https://evil.example"));
         assert!(!origin_allowed("null"));

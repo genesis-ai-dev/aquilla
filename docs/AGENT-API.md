@@ -1532,3 +1532,52 @@ with the answers, and the provenance fields are whatever the agent typed.
 - **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
   because the brief lives *inside* the settings blob and an agent that found
   `patch_settings` first had no reason to look further.
+
+## Status addendum (2026-11-17, AQU-2642 §4 — the orthography exception list is merged, not replaced)
+
+AQU-2628 gave a project's target lane a spelling configuration
+(`languageProfile.orthography`: the digraphs the alphabet replaced, its canonical
+apostrophe, and the words those rules must leave alone). The exception list was writable
+only through `PatchSettings { key: 'languageProfile' }` — a wholesale replace. That makes
+proposing one word a read-modify-write of the whole profile, and two people doing it around
+the same time is last-write-wins on a list where **every entry records who asked for the
+word and whether a maintainer approved it**. Losing one of those entries to a race, with
+nothing to say it happened, is not an acceptable outcome; the version guard turns the race
+into a `plan_stale` the caller has to retry, which is only half an answer when the two
+writes never actually conflicted.
+
+- **`PatchOrthographyExceptions { projectId, ops: [{ action: "add" | "remove", word, ref? }],
+  ifMatchVersion? }`** — sole command, receipt-only. It carries **ops, not a list**, and the
+  list is recomputed **at commit** from the then-current stored value, so an entry someone
+  else wrote while the plan waited for approval survives it. At most 200 ops per changeset;
+  the merged list caps at the profile's 2000.
+- **Roles are resolved live, and the acting role decides the STATUS** — the command cannot
+  assert one. `contributor` (400+) proposes: the entry lands `pending`, which is inert, so
+  it changes no text and silences no flag. `maintainer` (600+) adds as `approved`, and an
+  add naming an already-pending word **is** the approval — the entry keeps the original
+  proposer's `by` / `ref`, because it records who found the word, not who approved it.
+  `remove` is maintainer-only: dropping an approved exception re-exposes the word to the
+  rules, which rewrites text.
+- **`ifMatchVersion` is OPTIONAL, and here that is a design statement rather than an
+  ergonomic one.** A settings-version bump under a merge is not a conflict — it is the case
+  the merge exists for — so pinning is how a caller *asserts* nothing moved since it read
+  the profile (`plan_stale` at prepare), not a precondition of writing. The write itself is
+  still version-guarded (`patchProjectSettingsShared` pinned to the version read in the same
+  commit pass), so the rest of the blob can never be clobbered; a lost race re-reads and
+  re-merges, up to three times, and then marks the changeset stale rather than overwriting.
+- **An op whose state already holds is a no-op, not an error.** Approving an approved word or
+  removing an absent one is reported in the receipt's `orthographyExceptions.words` and
+  leaves the rest of the batch to apply; a plan where *every* op is a no-op stages with an
+  `inert_write` warning and commits without bumping the settings version. Words are compared
+  **folded** (case-insensitively, with apostrophe variants treated as one mark) because that
+  is how the converter matches, so one word can never sit in the list twice.
+- **A project with no `languageProfile.orthography` block is refused**, at prepare and again
+  at commit. The rules and the canonical apostrophe are a maintainer's decision — this
+  command never seeds one from a single word.
+- **`prepare_orthography_exceptions`** is the MCP door onto it; `mcp-handlers.ts` marshals
+  arguments and nothing else. The merge is pure and lives in
+  `db/shared/orthography-exceptions.ts`, so the prepare preview, the commit write, the
+  supersede predicate and the in-app affordance all run one rule table.
+- The **reviewer-facing** half — **Propose exception** / **Add as exception** beside Fix in
+  the violation panel — is still open on AQU-2642 §1. The rules above are enforced on the
+  write, so whichever surface adds the button inherits them.

@@ -28,6 +28,7 @@ import {
   type ProjectLifecycleCommand,
   type RegenerateBriefSummaryCommand,
   type RenameFileCommand,
+  type PatchOrthographyExceptionsCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -58,6 +59,7 @@ import {
   type VisibilityCommand,
 } from './commands-hide-cell'
 import { prepareSetBrief } from './commands-set-brief'
+import { preparePatchOrthographyExceptions } from './commands-orthography-exceptions'
 import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
@@ -315,6 +317,32 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', `${lifecycle.kind} must be the only command in a changeset`)
     }
     return prepareProjectLifecycle(db, cred, projectId, id, autonomyMode, lifecycle, env)
+  }
+
+  // PatchOrthographyExceptions (AQU-2642 §4): sole command — it merges into the
+  // `languageProfile` key of the same versioned settings blob, so sharing a
+  // changeset with another settings write would double-bump the version. Its
+  // role floors (CONTRIBUTOR proposes, MAINTAINER approves and removes), the
+  // no-orthography refusal and the merge live in its module.
+  const orthographyExceptions = validated.commands.find(
+    (c): c is PatchOrthographyExceptionsCommand => c.kind === 'PatchOrthographyExceptions',
+  )
+  if (orthographyExceptions) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        'PatchOrthographyExceptions must be the only command in a changeset',
+      )
+    }
+    return preparePatchOrthographyExceptions(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      orthographyExceptions,
+      env,
+    )
   }
 
   // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of

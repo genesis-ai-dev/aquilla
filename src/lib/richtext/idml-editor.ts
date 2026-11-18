@@ -14,7 +14,7 @@ import {
   idmlStyleCatalogFromMetadata,
 } from "@/lib/idml/style-catalog"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { decorateIdmlStyleElement, syncIdmlStyleSegmentEmpty } from "@/lib/richtext/idml-style-display"
+import { decorateIdmlStyleElement, syncIdmlPlainGroups, syncIdmlStyleSegmentEmpty } from "@/lib/richtext/idml-style-display"
 import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
@@ -1060,6 +1060,11 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
     },
     addProseMirrorPlugins() {
       return [new Plugin({
+        view(editorView) {
+          const sync = () => syncIdmlPlainGroups(editorView.dom)
+          sync()
+          return { update: sync }
+        },
         filterTransaction(transaction) {
           if (!transaction.docChanged) return true
           const html = serializeIdmlEditorDocument(transaction.doc)

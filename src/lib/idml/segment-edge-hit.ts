@@ -54,6 +54,7 @@ export function segmentEdgeHit(
   for (const slot of slots) {
     const slotIndex = Number(slot.getAttribute("data-idml-slot"))
     if (!Number.isInteger(slotIndex)) continue
+    const group = slot.getAttribute("data-style-emphasis-group")
     const rects = [...slot.getClientRects()]
     const first = rects[0]
     const last = rects[rects.length - 1]
@@ -63,6 +64,9 @@ export function segmentEdgeHit(
       { physical: rtl ? "left" : "right", rect: last, edge: "end" },
     ]
     for (const candidate of candidates) {
+      if (group === "mid") continue
+      if (group === "start" && candidate.edge === "end") continue
+      if (group === "end" && candidate.edge === "start") continue
       const distance = edgeDistance(candidate.rect, candidate.physical, x, y)
       if (distance === null) continue
       if (!best || distance < best.distance) {

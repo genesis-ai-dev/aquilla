@@ -2,6 +2,7 @@ import { v4 as uuid } from "uuid"
 // Types come from core-types (not types.ts): types.ts pulls `@/`-aliased SPA
 // modules, and this parser is now imported by the sync-worker too (AQU-1237).
 import type { CellUnit, TranslatableString } from "./core-types"
+import { groupTypesetLines, joinTypesetLines, orderTypesetLines, splitTypesetSentences, type TypesetLine } from "./docx-line-reflow"
 import { splitIntoSegments } from "./text-splitter"
 import { assertSafeArchiveInputSize, assertSafeZipLiteArchive } from "./zip-safety"
 import { readZipLite, readZipLiteEntryText, type ZipLiteArchive } from "./zip-lite"
@@ -135,25 +136,52 @@ export function docxPartsToStrings(
 
   const results: TranslatableString[] = []
   const paragraphs = elementsByTagName(doc, "w:p")
+  const lines: Array<TypesetLine & { index: number; hasFormatting: boolean; hasFootnote: boolean }> = []
+  let page = 0
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i]
-    const { plain, html, hasFormatting, hasFootnote } = extractRuns(p, footnotes)
-    if (!plain.trim()) continue
+    const extracted = extractRuns(p, footnotes)
+    if (extracted.plain.trim()) {
+      const style = getParaStyle(p)
+      lines.push({
+        index: i,
+        plain: extracted.plain,
+        html: extracted.html,
+        hasFormatting: extracted.hasFormatting,
+        hasFootnote: extracted.hasFootnote,
+        style,
+        type: style?.startsWith("Heading") || style === "Title" ? "heading" : "text",
+        emphasis: extracted.emphasis,
+        fontHalfPoints: extracted.fontHalfPoints,
+        frame: readLineFrame(p),
+        page,
+      })
+    }
+    // The break belongs to this paragraph, so its text stays on the current page.
+    if (paragraphEndsPage(p)) page++
+  }
 
-    const style = getParaStyle(p)
-    const context = style || "Paragraph"
-    const type = style?.startsWith("Heading") || style === "Title"
-      ? ("heading" as const)
-      : ("text" as const)
-    const segments = splitFootnoteAware(plain, cellUnit)
+  for (const block of groupTypesetLines(orderTypesetLines(lines))) {
+    const joined = joinTypesetLines(block)
+    const head = block[0]
+    const context = head.style || "Paragraph"
+    // A stack of positioned lines is one paragraph that was typeset one line per
+    // w:p. Split that paragraph on sentences. An ordinary paragraph keeps the
+    // shared length-capped splitter.
+    const reflowed = block.length > 1 && block.every((line) => line.frame !== null)
+    const segments = reflowed && cellUnit !== "paragraph"
+      ? splitReflowedSentences(joined.plain)
+      : splitFootnoteAware(joined.plain, cellUnit)
+    const hasFormatting = block.some((line) => line.hasFormatting)
+    const hasFootnote = block.some((line) => line.hasFootnote)
     const sourceLocation = {
       file: DOCUMENT_PART,
-      blockPath: `w:p[${i + 1}]`,
+      blockPath: `w:p[${head.index + 1}]`,
     }
 
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i]
+    for (let segIndex = 0; segIndex < segments.length; segIndex++) {
+      const seg = segments[segIndex]
       results.push({
         id: uuid(),
         original: seg.text,
@@ -161,19 +189,37 @@ export function docxPartsToStrings(
         // rendered by the plain-text footnote decoration; the run-formatting
         // HTML path has no footnote representation, so disable it for footnoted
         // paragraphs rather than drop the note from display.
-        originalHtml: segments.length === 1 && hasFormatting && !hasFootnote ? html : undefined,
+        originalHtml: segments.length === 1 && hasFormatting && !hasFootnote ? joined.html : undefined,
         translated: "",
         context,
         group: seg.group,
-        type,
+        type: head.type,
         sourceLocation,
         // D2: first sub-cell of each paragraph block carries paragraphStart; continuations do not.
-        ...(i === 0 ? { paragraphStart: true } : {}),
+        ...(segIndex === 0 ? { paragraphStart: true } : {}),
       })
     }
   }
 
   return results
+}
+
+function paragraphEndsPage(p: XmlElement): boolean {
+  if (firstElementByTagName(p, "w:lastRenderedPageBreak")) return true
+  for (const br of elementsByTagName(p, "w:br")) {
+    if (getAttribute(br, "w:type") === "page") return true
+  }
+  return false
+}
+
+/** w:framePr on a paragraph is a typeset line, not a semantic paragraph. */
+function readLineFrame(p: XmlElement): { x: number; y: number } | null {
+  const frame = firstElementByTagName(p, "w:framePr")
+  if (!frame) return null
+  const x = Number(getAttribute(frame, "w:x"))
+  const y = Number(getAttribute(frame, "w:y"))
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x, y }
 }
 
 /**
@@ -200,6 +246,22 @@ function splitFootnoteAware(
     text.replace(MASK_RE, (_m, idx) => spans[Number(idx)] ?? "")
 
   return splitIntoSegments(masked).map((s) => ({ ...s, text: restore(s.text) }))
+}
+
+/** Sentence cells for a reflowed line stack. Footnote spans stay whole, same as the packed splitter. */
+function splitReflowedSentences(plain: string): { text: string; group: string }[] {
+  const group = uuid()
+  if (!plain.includes("\\f")) {
+    return splitTypesetSentences(plain).map((text) => ({ text, group }))
+  }
+
+  const spans: string[] = []
+  const masked = plain.replace(FOOTNOTE_SPAN_RE, (span) => {
+    spans.push(span)
+    return `${MASK_OPEN}${spans.length - 1}${MASK_CLOSE}`
+  })
+  const restore = (text: string) => text.replace(MASK_RE, (_m, idx) => spans[Number(idx)] ?? "")
+  return splitTypesetSentences(masked).map((text) => ({ text: restore(text), group }))
 }
 
 /**
@@ -232,12 +294,22 @@ function loadFootnotes(footnotesXml: string): Map<string, string> {
 function extractRuns(
   p: XmlElement,
   footnotes: Map<string, string>,
-): { plain: string; html: string; hasFormatting: boolean; hasFootnote: boolean } {
+): {
+  plain: string
+  html: string
+  hasFormatting: boolean
+  hasFootnote: boolean
+  emphasis: "bold" | "plain" | "mixed"
+  fontHalfPoints: number | null
+} {
   const runs = elementsByTagName(p, "w:r")
   let plain = ""
   let html = ""
   let hasFormatting = false
   let hasFootnote = false
+  let textRuns = 0
+  let boldRuns = 0
+  let fontHalfPoints: number | null = null
 
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i]
@@ -267,6 +339,12 @@ function extractRuns(
 
     const rPr = firstElementByTagName(run, "w:rPr")
     const bold = isToggleOn(rPr, "w:b")
+    textRuns++
+    if (bold) boldRuns++
+    const halfPoints = runFontHalfPoints(rPr)
+    if (halfPoints !== null && (fontHalfPoints === null || halfPoints > fontHalfPoints)) {
+      fontHalfPoints = halfPoints
+    }
     const italic = isToggleOn(rPr, "w:i")
     const underline = isUnderlineOn(rPr)
     const strike = isToggleOn(rPr, "w:strike")
@@ -281,7 +359,17 @@ function extractRuns(
     html += htmlText
   }
 
-  return { plain, html, hasFormatting, hasFootnote }
+  const emphasis = textRuns > 0 && boldRuns === textRuns ? "bold" : boldRuns > 0 ? "mixed" : "plain"
+  return { plain, html, hasFormatting, hasFootnote, emphasis, fontHalfPoints }
+}
+
+/** `w:sz` is in half-points. Absent on a line whose size comes from a style. */
+function runFontHalfPoints(rPr: XmlElement | undefined): number | null {
+  if (rPr === undefined) return null
+  const sz = firstElementByTagName(rPr, "w:sz")
+  if (sz === undefined) return null
+  const value = Number(getAttribute(sz, "w:val"))
+  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 // AQU-1719: an OOXML toggle property is ON when it is present with no `w:val`,

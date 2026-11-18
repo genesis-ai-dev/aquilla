@@ -773,16 +773,23 @@ export function ExportDialog({
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
       // and the Export button acting on a format nobody can see.
-      if (
-        remembered.foldFormat &&
-        BASE_FORMAT_OPTIONS.some((f) => f.id === remembered.foldFormat)
-      ) {
-        setFormat(remembered.foldFormat as ExportFormat)
+      // Round-trip ids (idml, docx, …) are in the catalog for every file, but
+      // the fold only lists the one this file was imported as. Remembering
+      // InDesign from another file in the project must not make Export read a
+      // Word package as an IDML archive.
+      const rememberedFormat = remembered.foldFormat
+      const roundTripOnly = rememberedFormat === "usfm" || rememberedFormat === "docx"
+        || rememberedFormat === "pptx" || rememberedFormat === "idml" || rememberedFormat === "json"
+      const rememberedIsOffered = !!rememberedFormat
+        && BASE_FORMAT_OPTIONS.some((f) => f.id === rememberedFormat)
+        && !(roundTripOnly && (rememberedFormat !== activeFileType || !roundTripAvailable))
+      if (rememberedIsOffered) {
+        setFormat(rememberedFormat as ExportFormat)
       }
       restoredRef.current = true
     }
     prevOpenRef.current = open
-  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile])
+  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile, activeFileType, roundTripAvailable])
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
   // AQU-437: Filename control state. Default changes with scope/format.
@@ -1167,13 +1174,18 @@ export function ExportDialog({
     if (format === "sdbh-xml" && !hasSdbhFiles) setFormat("tsv")
   }, [format, hasSdbhFiles])
 
-  // Web page comes and goes per file inside one project (a migrated project can
-  // hold Bible books beside Pilgrim's Progress), while the remembered fold
-  // format is restored per project — so a page remembered from Ruth must not
-  // stay selected, unseen, on a file that is not offered it.
+  // The fold format is remembered per project. A choice that this file does
+  // not offer — a Web page remembered from Ruth, or InDesign remembered from
+  // another file — must not stay selected unseen, where the footer Export
+  // button would still run it.
   useEffect(() => {
-    if (format === "html" && !offersHtmlPage) setFormat(nativeFormatId ?? "tsv")
-  }, [format, offersHtmlPage, nativeFormatId])
+    const roundTripOnly = format === "usfm" || format === "docx" || format === "pptx"
+      || format === "idml" || format === "json"
+    const hiddenRoundTrip = roundTripOnly && (format !== activeFileType || !roundTripAvailable)
+    if (hiddenRoundTrip || (format === "html" && !offersHtmlPage)) {
+      setFormat(nativeFormatId ?? "tsv")
+    }
+  }, [format, activeFileType, roundTripAvailable, offersHtmlPage, nativeFormatId])
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {

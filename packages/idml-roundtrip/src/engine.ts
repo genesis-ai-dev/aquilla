@@ -1047,6 +1047,9 @@ function discoverStoryMembers(
   const seen = new Set<string>()
   const orderedLayoutMembers: string[] = []
   const seenLayoutMembers = new Set<string>()
+  // designmap lists every story, newest object id first. That list is the
+  // inventory, not the reading order. Spreads are the reading order: pages
+  // from the front of the document, frames top to bottom then left to right.
   for (const element of elementDescendants(
     designmap.root,
     (candidate) =>
@@ -1065,7 +1068,11 @@ function discoverStoryMembers(
       continue
     }
     if (!STORY_MEMBER_PATTERN.test(source)) continue
-    addStoryMember(source, loaded, diagnostics, ordered, seen)
+    if (!loaded.members.has(source)) {
+      diagnostics.push(
+        diagnostic("MISSING_STORY", `designmap.xml references missing story ${source}`, source),
+      )
+    }
   }
 
   const storyPathsById = new Map<string, string[]>()
@@ -1084,6 +1091,24 @@ function discoverStoryMembers(
     }
   }
 
+  const addStoryTree = (storyId: string): void => {
+    const paths = storyPathsById.get(storyId)
+    if (paths?.length !== 1) return
+    const path = paths[0]!
+    if (seen.has(path)) return
+    const before = ordered.length
+    addStoryMember(path, loaded, diagnostics, ordered, seen)
+    if (ordered.length === before) return
+    const storyXml = loaded.members.get(path)?.xml
+    if (!storyXml) return
+    for (const nested of elementDescendants(
+      storyXml.root,
+      (candidate) => Boolean(getAttribute(candidate, "ParentStory")),
+    )) {
+      addStoryTree(getAttribute(nested, "ParentStory")!)
+    }
+  }
+
   const remainingLayoutMembers = [...loaded.members.keys()]
     .filter((memberPath) =>
       LAYOUT_MEMBER_PATTERN.test(memberPath) && !seenLayoutMembers.has(memberPath),
@@ -1092,15 +1117,9 @@ function discoverStoryMembers(
   for (const layoutPath of [...orderedLayoutMembers, ...remainingLayoutMembers]) {
     const layout = loaded.members.get(layoutPath)?.xml
     if (!layout) continue
-    for (const element of elementDescendants(
-      layout.root,
-      (candidate) => Boolean(getAttribute(candidate, "ParentStory")),
-    )) {
-      const storyId = getAttribute(element, "ParentStory")!
-      const paths = storyPathsById.get(storyId)
-      if (paths?.length !== 1) continue
-      addStoryMember(paths[0]!, loaded, diagnostics, ordered, seen)
-    }
+    const frames = placedStoryFrames(layout.root)
+    frames.sort(comparePlacedFrames)
+    for (const frame of frames) addStoryTree(frame.storyId)
   }
 
   const remaining = [...loaded.members.keys()]
@@ -1108,6 +1127,111 @@ function discoverStoryMembers(
     .sort(codeUnitCompare)
   ordered.push(...remaining)
   return ordered
+}
+
+interface ItemTransform {
+  readonly a: number
+  readonly b: number
+  readonly c: number
+  readonly d: number
+  readonly tx: number
+  readonly ty: number
+}
+
+const IDENTITY_TRANSFORM: ItemTransform = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
+
+interface PlacedStoryFrame {
+  readonly storyId: string
+  readonly pageIndex: number
+  readonly x: number
+  readonly y: number
+  readonly documentOrder: number
+}
+
+/** Spread coordinates of every text frame, ordered for reading once sorted. */
+function placedStoryFrames(root: XmlElement): PlacedStoryFrame[] {
+  const pages = elementDescendants(root, (element) => element.localName === "Page")
+    .map((page) => pageSpreadBox(page))
+    .sort((left, right) => left.minX - right.minX || left.minY - right.minY)
+  const frames = elementDescendants(root, (element) => Boolean(getAttribute(element, "ParentStory")))
+  return frames.map((frame, documentOrder) => {
+    const point = absoluteTransform(frame)
+    const pageIndex = pages.findIndex((page) =>
+      point.tx >= page.minX && point.tx <= page.maxX && point.ty >= page.minY && point.ty <= page.maxY,
+    )
+    return {
+      storyId: getAttribute(frame, "ParentStory")!,
+      pageIndex: pageIndex === -1 ? pages.length : pageIndex,
+      x: point.tx,
+      y: point.ty,
+      documentOrder,
+    }
+  })
+}
+
+function comparePlacedFrames(left: PlacedStoryFrame, right: PlacedStoryFrame): number {
+  return left.pageIndex - right.pageIndex
+    || left.y - right.y
+    || left.x - right.x
+    || left.documentOrder - right.documentOrder
+}
+
+/** `GeometricBounds` is top, left, bottom, right, then moved by `ItemTransform`. */
+function pageSpreadBox(page: XmlElement): { minX: number; minY: number; maxX: number; maxY: number } {
+  const transform = absoluteTransform(page)
+  const [y1, x1, y2, x2] = (getAttribute(page, "GeometricBounds") ?? "0 0 0 0")
+    .trim()
+    .split(/\s+/)
+    .map(Number)
+  const corners = [applyTransform(transform, x1, y1), applyTransform(transform, x2, y1), applyTransform(transform, x1, y2), applyTransform(transform, x2, y2)]
+    .filter((corner) => Number.isFinite(corner.x) && Number.isFinite(corner.y))
+  if (corners.length === 0) return { minX: transform.tx, minY: transform.ty, maxX: transform.tx, maxY: transform.ty }
+  return {
+    minX: Math.min(...corners.map((corner) => corner.x)),
+    minY: Math.min(...corners.map((corner) => corner.y)),
+    maxX: Math.max(...corners.map((corner) => corner.x)),
+    maxY: Math.max(...corners.map((corner) => corner.y)),
+  }
+}
+
+function absoluteTransform(element: XmlElement): ItemTransform {
+  const chain: XmlElement[] = []
+  let current: XmlElement | null = element
+  while (current) {
+    chain.push(current)
+    current = current.parent
+  }
+  let transform = IDENTITY_TRANSFORM
+  for (let index = chain.length - 1; index >= 0; index -= 1) {
+    transform = multiplyTransforms(transform, parseItemTransform(getAttribute(chain[index]!, "ItemTransform")))
+  }
+  return transform
+}
+
+function parseItemTransform(value: string | undefined): ItemTransform {
+  if (!value) return IDENTITY_TRANSFORM
+  const parts = value.trim().split(/\s+/).map(Number)
+  if (parts.length !== 6 || parts.some((part) => !Number.isFinite(part))) return IDENTITY_TRANSFORM
+  const [a, b, c, d, tx, ty] = parts
+  return { a: a!, b: b!, c: c!, d: d!, tx: tx!, ty: ty! }
+}
+
+function multiplyTransforms(parent: ItemTransform, child: ItemTransform): ItemTransform {
+  return {
+    a: parent.a * child.a + parent.c * child.b,
+    b: parent.b * child.a + parent.d * child.b,
+    c: parent.a * child.c + parent.c * child.d,
+    d: parent.b * child.c + parent.d * child.d,
+    tx: parent.a * child.tx + parent.c * child.ty + parent.tx,
+    ty: parent.b * child.tx + parent.d * child.ty + parent.ty,
+  }
+}
+
+function applyTransform(transform: ItemTransform, x: number, y: number): { x: number; y: number } {
+  return {
+    x: transform.a * x + transform.c * y + transform.tx,
+    y: transform.b * x + transform.d * y + transform.ty,
+  }
 }
 
 function addStoryMember(

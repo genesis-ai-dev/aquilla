@@ -83,7 +83,7 @@ it("opens the browser and accepts only this attempt's bounded, one-use PKCE hand
   await startGoogleLogin("/preferences/login-methods", false)
   const attempt = readGoogleAttempt()!
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ challenge: attempt.desktopChallenge, desktop: true })
-  expect(native.invoke).toHaveBeenCalledWith("open_auth_browser", { authUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=server-state" })
+  expect(native.invoke).toHaveBeenCalledWith("open_auth_browser", { privateSession: false, attempt: attempt.desktopChallenge, authUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=server-state" })
   const callback = `aquilla://auth/google#code=${"c".repeat(64)}&state=${attempt.desktopChallenge}`
   for (const value of [callback.replace("aquilla:", "https:"), callback.replace("state=", "state=wrong"), callback + "&token=jwt", "aquilla://auth/callback?token=jwt&refresh=r"]) expect(acceptDesktopGoogleReturn(value)).toBeNull()
   expect(acceptDesktopGoogleReturn(callback)?.get("code")).toBe("c".repeat(64))
@@ -111,4 +111,21 @@ it("does not open the browser or leave an attempt when cancelled during startup"
   await starting
   expect(readGoogleAttempt()).toBeNull()
   expect(native.invoke).not.toHaveBeenCalledWith("open_auth_browser", expect.anything())
+})
+
+it("invalidates a cancelled browser return and keeps an accepted handoff across unmount", async () => {
+  vi.stubGlobal("__TAURI__", {})
+  native.invoke.mockResolvedValue(true)
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({
+    desktop: true, authorization_url: "https://accounts.google.com/o/oauth2/v2/auth",
+  }))))
+  for (const acceptFirst of [false, true]) {
+    const controller = new AbortController()
+    await startGoogleLogin("/app", false, undefined, false, controller.signal)
+    const callback = `aquilla://auth/google#code=${"c".repeat(64)}&state=${readGoogleAttempt()!.desktopChallenge}`
+    if (acceptFirst) expect(acceptDesktopGoogleReturn(callback)).not.toBeNull()
+    controller.abort()
+    expect(acceptDesktopGoogleReturn(callback)).toBeNull()
+    expect(Boolean(readGoogleAttempt()?.desktopReturned)).toBe(acceptFirst)
+  }
 })

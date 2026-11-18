@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import { schema, events, tables } from "./schema"
@@ -377,7 +377,7 @@ describe("removeOfflineProject", () => {
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 
-  it("removes the whole copy in one commit and leaves other projects alone", async () => {
+  it("removes the copy (cells in chunks, then one sweep) and leaves other projects alone", async () => {
     await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     store.commit(
       events.syncCursorSet({ projectId: "proj1", fileId: "file1", serverSeq: 9, projectEpoch: 1 }),
@@ -409,9 +409,9 @@ describe("removeOfflineProject", () => {
     expect(store.query(tables.cells.select().where({ projectId: "proj1" })).length).toBeGreaterThan(0)
 
     const commit = store.commit
-    let commits = 0
+    const names: string[] = []
     store.commit = ((...args: Parameters<typeof commit>) => {
-      commits += 1
+      for (const e of args) names.push((e as { name: string }).name)
       return commit(...args)
     }) as typeof commit
     try {
@@ -420,7 +420,7 @@ describe("removeOfflineProject", () => {
       store.commit = commit
     }
 
-    expect(commits).toBe(1)
+    expect(names).toEqual(["v2.CellsRemoved", "v1.OfflineCopyRemoved"])
     expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.syncCursors.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.cells.select().where({ projectId: "proj2" }))).toHaveLength(1)
@@ -428,6 +428,37 @@ describe("removeOfflineProject", () => {
     expect(store.query(tables.projects.select().where({ id: "proj2" }))).toHaveLength(1)
     expect(store.query(tables.syncCursors.select().where({ projectId: "proj2" }))).toHaveLength(1)
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj2" }))).toHaveLength(1)
+  })
+
+  it("removes a big file's cells 500 rows per event, not in one huge delete", async () => {
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+    const rows = Array.from({ length: 1200 }, (_, i) => ({
+      cellId: `big${i}`,
+      side: "target" as const,
+      value: `v${i}`,
+      valueHtml: null,
+      eventId: `e${i}`,
+      sourceEventId: null,
+      validated: false,
+      aiDrafted: false,
+      sequenceIndex: i,
+      canonicalRef: null,
+      targetLang: "",
+      laneId: null,
+    }))
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "big", rows }))
+    const total = store.query(tables.cells.select().where({ projectId: "proj1" })).length
+
+    const commit = vi.spyOn(store, "commit")
+    expect(removeOfflineProject(store, "proj1")).toEqual({ ok: true })
+
+    const removed = commit.mock.calls
+      .flat()
+      .filter((e) => (e as { name: string }).name === "v2.CellsRemoved")
+      .map((e) => (e as { args: { cells: unknown[] } }).args.cells.length)
+    expect(removed.every((n) => n <= 500)).toBe(true)
+    expect(removed.reduce((a, b) => a + b, 0)).toBe(total)
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 
   it("blocks removal when a pending write is queued, and reports the depth", async () => {

@@ -6,6 +6,12 @@ import { createOfflineSyncAdapter, MAX_FLUSH_BATCH, type MintToken } from "./syn
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
 import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
+import {
+  forgetStallRescueForTests,
+  holdJournalUntilPersisted,
+  rescueUnpersistedOfflineWrites,
+} from "@/lib/sync/offline-stall-rescue"
+import type { OutboxRecord } from "@/lib/sync/outbox"
 
 // The catch-up pull reads over real HTTP; these tests are about the socket and
 // the flush, so stub it (catch-up.test.ts covers it). The row-mapping helpers
@@ -555,6 +561,40 @@ describe("flush triggering", () => {
     })
 
     adapter.close()
+  })
+
+  it("leaves rows rescued into IndexedDB to the HTTP flusher, without spinning on them", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    queueCommit("q2")
+    // The leader stalled before persisting q1, so it was copied to IndexedDB.
+    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [{ id: "q2" }] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+    try {
+      await waitFor(() => fetchImpl.mock.calls.length > 0)
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+      const body = JSON.parse(init.body as string) as { events: Array<{ id: string }> }
+      expect(body.events.map((e) => e.id)).toEqual(["q2"])
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
   })
 
   it("stops flushing once closed", async () => {

@@ -11,6 +11,9 @@ import { rescueUnpersistedOfflineWrites } from "@/lib/sync/outbox"
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
 const SLOW_BOOT_TOAST_ID = "offline-slow-boot"
 const PREPARING_TOAST_ID = "offline-preparing"
+// A rescue that couldn't write to IndexedDB (a full disk) tries again this
+// often while the leader stays stalled.
+const DEFAULT_RESCUE_RETRY_MS = 10_000
 // The store only exists once the leader has booted (store.ts disables the
 // fast path), which includes rebuilding the state db after a schema change —
 // minutes on a big store. The rebuild reports progress (boot-progress.ts), so
@@ -60,6 +63,7 @@ type Props = {
   checkEveryMs?: number
   restart?: () => void
   rescue?: () => Promise<boolean>
+  rescueRetryMs?: number
 }
 
 /**
@@ -85,6 +89,7 @@ export function OfflineLeaderWatchdog({
   checkEveryMs,
   restart = restartApp,
   rescue = rescueUnpersistedOfflineWrites,
+  rescueRetryMs = DEFAULT_RESCUE_RETRY_MS,
 }: Props): null {
   const { store, loading } = useOfflineStore()
   const t = useT()
@@ -182,7 +187,22 @@ export function OfflineLeaderWatchdog({
   useEffect(() => {
     if (!store) return
     let stalled = false
-    return watchLeaderLiveness(store, {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    // Copy what the leader never saved to IndexedDB; once that's done the
+    // edits are safe, so the toast stops saying they may be lost. Retried
+    // until it succeeds or the leader recovers. Later edits skip the offline
+    // queue until the leader recovers, so nothing new needs saving after this.
+    const rescueUntilSafe = () => {
+      void rescue().then((safe) => {
+        if (!stalled) return
+        if (safe) {
+          toast.update(LEADER_STALLED_TOAST_ID, { type: "warning", title: t("workspace.offline.leaderStalledBackedUpToast") })
+        } else {
+          retryTimer = setTimeout(rescueUntilSafe, rescueRetryMs)
+        }
+      })
+    }
+    const stopWatching = watchLeaderLiveness(store, {
       stallMs,
       checkEveryMs,
       onStall: (stall) => {
@@ -204,20 +224,21 @@ export function OfflineLeaderWatchdog({
             onClick: restart,
           },
         })
-        // Copy what the leader never saved to IndexedDB; once that's done the
-        // edits are safe, so the toast stops saying they may be lost. Later
-        // edits skip the offline queue until the leader recovers.
-        void rescue().then((rescued) => {
-          if (rescued && stalled) toast.update(LEADER_STALLED_TOAST_ID, { title: t("workspace.offline.leaderStalledBackedUpToast") })
-        })
+        rescueUntilSafe()
       },
       onRecover: () => {
         stalled = false
+        clearTimeout(retryTimer)
         setLeaderStalled(false)
         toast.close(LEADER_STALLED_TOAST_ID)
       },
     })
-  }, [store, stallMs, checkEveryMs, restart, rescue, t])
+    return () => {
+      stalled = false
+      clearTimeout(retryTimer)
+      stopWatching()
+    }
+  }, [store, stallMs, checkEveryMs, restart, rescue, rescueRetryMs, t])
 
   return null
 }

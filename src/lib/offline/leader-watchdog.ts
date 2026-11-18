@@ -9,7 +9,7 @@
 // Polls rather than subscribing: a dead leader produces no sync-status
 // changes, which is exactly the condition to detect.
 import { useSyncExternalStore } from "react"
-import type { Store } from "@livestore/livestore"
+import type { Store, SyncStatus } from "@livestore/livestore"
 import type { schema } from "./schema"
 
 // App-wide "leader is stalled" flag, set by OfflineLeaderWatchdog and read by
@@ -64,53 +64,116 @@ export type LeaderWatchdogOptions = {
 }
 
 // LiveStore's sequence number strings: e{global}[.{client}][r{rebaseGeneration}].
-const SEQ_NUM = /^e(\d+)(?:\.(\d+))?(?:r\d+)?$/
+const SEQ_NUM = /^e(\d+)(?:\.(\d+))?(?:r(\d+))?$/
+
+function parseSeqNum(seqNum: string): { global: number; client: number; rebase: number } | null {
+  const match = SEQ_NUM.exec(seqNum)
+  if (!match) return null
+  return { global: Number(match[1]), client: Number(match[2] ?? 0), rebase: Number(match[3] ?? 0) }
+}
 
 /**
- * True once `upstreamHead` (what the leader has confirmed) has reached `head`
- * (a session's `localHead` right after a commit), i.e. the leader has written
- * that commit to its eventlog. Every offline event is client-only, so the
- * rebase generation never moves and is ignored. An unreadable head counts as
- * not persisted: the caller keeps its backup.
+ * True once `upstreamHead` (what the leader has confirmed) has reached `head`,
+ * comparing global then client sequence numbers. Only meaningful while `head`
+ * is from the session's current rebase generation: a rebase renumbers the
+ * session's pending events, so an older head may now name another session's
+ * event (`watchLeaderPersisted` moves its waiters on when that happens). An
+ * unreadable head counts as not persisted: the caller keeps its backup.
  */
 export function leaderHasPersisted(upstreamHead: string, head: string): boolean {
-  const upstream = SEQ_NUM.exec(upstreamHead)
-  const target = SEQ_NUM.exec(head)
+  const upstream = parseSeqNum(upstreamHead)
+  const target = parseSeqNum(head)
   if (!upstream || !target) return false
-  const [upGlobal, upClient] = [Number(upstream[1]), Number(upstream[2] ?? 0)]
-  const [global, client] = [Number(target[1]), Number(target[2] ?? 0)]
-  return upGlobal > global || (upGlobal === global && upClient >= client)
+  return upstream.global > target.global || (upstream.global === target.global && upstream.client >= target.client)
 }
 
 type SyncStatusFeed = Pick<Store<typeof schema>, "syncStatus" | "subscribeSyncStatus">
+type PersistStatus = Pick<SyncStatus, "localHead" | "upstreamHead" | "isSynced">
+
+interface PersistWaiter {
+  /** The session's `localHead` just after the commit: the commit or later. */
+  head: string
+  onPersisted: () => void
+}
 
 /**
- * Calls `onPersisted` once the leader has persisted everything up to `head`
- * (see `leaderHasPersisted`); returns a function that stops waiting. A dead
- * leader never calls back — the stall watchdog covers that.
+ * Every commit waiting on one store's leader, oldest first, behind ONE
+ * sync-status subscription. Heads only grow along the queue (commits are
+ * sequential, and a rebase moves every waiter to the same new head), so a
+ * status change settles waiters from the front and stops at the first that's
+ * still unpersisted.
+ */
+interface PersistQueue {
+  waiters: PersistWaiter[]
+  unsubscribe: (() => void) | null
+}
+const persistQueues = new WeakMap<SyncStatusFeed, PersistQueue>()
+
+function settlePersisted(store: SyncStatusFeed, queue: PersistQueue, status: PersistStatus): void {
+  const local = parseSeqNum(String(status.localHead))
+  // A rebase renumbered this session's pending events: the old heads may now
+  // name another session's events. Wait for the new head instead, which is
+  // at or past every renumbered commit (later than needed, never earlier).
+  if (local) {
+    for (const waiter of queue.waiters) {
+      if (parseSeqNum(waiter.head)?.rebase !== local.rebase) waiter.head = String(status.localHead)
+    }
+  }
+  const upstreamHead = String(status.upstreamHead)
+  const settled: PersistWaiter[] = []
+  while (queue.waiters.length > 0 && (status.isSynced || leaderHasPersisted(upstreamHead, queue.waiters[0].head))) {
+    settled.push(queue.waiters.shift()!)
+  }
+  if (queue.waiters.length === 0) stopPersistFeed(store, queue)
+  for (const waiter of settled) waiter.onPersisted()
+}
+
+function stopPersistFeed(store: SyncStatusFeed, queue: PersistQueue): void {
+  queue.unsubscribe?.()
+  queue.unsubscribe = null
+  persistQueues.delete(store)
+}
+
+/**
+ * Calls `onPersisted` once the leader has persisted the commit that left the
+ * session at `head` (its `localHead` right after committing); returns a
+ * function that stops waiting. A dead leader never calls back, and neither
+ * does a store that has shut down — the stall watchdog covers that.
  */
 export function watchLeaderPersisted(store: SyncStatusFeed, head: string, onPersisted: () => void): () => void {
-  let done = false
-  let unsubscribe: (() => void) | undefined
-  const check = (upstreamHead: string) => {
-    if (done || !leaderHasPersisted(upstreamHead, head)) return
-    done = true
-    unsubscribe?.()
-    onPersisted()
-  }
+  const waiter: PersistWaiter = { head, onPersisted }
+  let queue = persistQueues.get(store)
   try {
-    check(store.syncStatus().upstreamHead)
-    if (done) return () => {}
-    unsubscribe = store.subscribeSyncStatus((status) => check(status.upstreamHead))
-    if (done) unsubscribe()
+    if (!queue) {
+      const fresh: PersistQueue = { waiters: [waiter], unsubscribe: null }
+      persistQueues.set(store, fresh)
+      queue = fresh
+      settlePersisted(store, fresh, store.syncStatus())
+      if (fresh.waiters.length > 0) {
+        const unsubscribe = store.subscribeSyncStatus((status) => settlePersisted(store, fresh, status))
+        // The subscription may have settled everything as it started.
+        if (persistQueues.get(store) === fresh) fresh.unsubscribe = unsubscribe
+        else unsubscribe()
+      }
+    } else {
+      queue.waiters.push(waiter)
+      settlePersisted(store, queue, store.syncStatus())
+    }
   } catch (error) {
     // A store that shut down can't confirm anything; the caller's backup stays.
     console.warn("[offline] Couldn't watch the leader persist a commit", error)
+    stopWaiting(store, waiter)
+    return () => {}
   }
-  return () => {
-    done = true
-    unsubscribe?.()
-  }
+  return () => stopWaiting(store, waiter)
+}
+
+function stopWaiting(store: SyncStatusFeed, waiter: PersistWaiter): void {
+  const queue = persistQueues.get(store)
+  if (!queue) return
+  const at = queue.waiters.indexOf(waiter)
+  if (at >= 0) queue.waiters.splice(at, 1)
+  if (queue.waiters.length === 0) stopPersistFeed(store, queue)
 }
 
 const DEFAULT_STALL_MS = 15_000

@@ -90,6 +90,21 @@ describe("OfflineLeaderWatchdog", () => {
     expect(screen.queryByText(/kept in the upload queue/)).toBeNull()
   })
 
+  it("retries a failed rescue while the leader stays stalled", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    status = stuck
+    const rescue = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    render(
+      <>
+        <Toaster />
+        <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} restart={vi.fn()} rescue={rescue} rescueRetryMs={20} />
+      </>,
+    )
+
+    expect(await screen.findByText(/kept in the upload queue/)).toBeInTheDocument()
+    expect(rescue).toHaveBeenCalledTimes(2)
+  })
+
   it("closes the warning if the leader catches up on its own", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     status = stuck

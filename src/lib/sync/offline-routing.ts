@@ -15,6 +15,7 @@
 
 import { isLeaderStalled, watchLeaderPersisted } from "@/lib/offline/leader-watchdog"
 import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
+import { isRescuedFromOfflineQueue, nothingToPersist, type WhenPersisted } from "./offline-stall-rescue"
 
 /**
  * The three event kinds that make sense to keep working entirely offline.
@@ -33,23 +34,6 @@ let warnedOfflineStoreUnavailable = false
 let warnedOfflineStoreShutDown = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
-
-/**
- * Ids copied from LiveStore's queue into IndexedDB after the leader stalled
- * (see `rescueUnpersistedOfflineWrites` in outbox.ts). They stay in the
- * page's in-memory queue, which a dead leader never flushes, so the HTTP
- * flusher must not hold their dependents back waiting on them there.
- */
-const rescuedIds = new Set<string>()
-
-export function markRescuedFromOfflineQueue(ids: readonly string[]): void {
-  for (const id of ids) rescuedIds.add(id)
-}
-
-/** Test-only reset. */
-export function forgetRescuedIdsForTests(): void {
-  rescuedIds.clear()
-}
 
 // Rows per v1.EventsQueued. One commit for a whole replace-all would put every
 // edit's payload in one eventlog row, re-parsed whole on every rebuild.
@@ -105,8 +89,12 @@ async function openOfflineQueue() {
     waitingIds: (): ReadonlySet<string> => new Set([
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "pending" })),
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "flushing" })),
-    ].filter((id) => !rescuedIds.has(id))),
+    // A rescued edit is IndexedDB's to send now (offline-stall-rescue.ts).
+    ].filter((id) => !isRescuedFromOfflineQueue(id))),
     commit: (run: (booted: typeof liveStore) => void): WhenPersisted => {
+      // The stall may have been reported while routing waited on the store:
+      // refuse, and the caller sends the batch to IndexedDB instead.
+      if (isLeaderStalled()) throw new Error("offline store's leader has stalled")
       commitOrThrow(liveStore, () => run(liveStore))
       // The commit is the newest pending event, so the leader has persisted
       // it once its confirmed head reaches the session's head.
@@ -132,14 +120,6 @@ function toQueuedRow(event: CqrsRawEvent) {
   }
 }
 
-/** Calls back once the leader has written a commit to disk; returns a stop function. */
-export type WhenPersisted = (onPersisted: () => void) => () => void
-
-const nothingToPersist: WhenPersisted = (onPersisted) => {
-  onPersisted()
-  return () => {}
-}
-
 /** Where `planOfflineRouting` sends a batch. */
 export interface OfflineRouting {
   /** The events for IndexedDB, in order. */
@@ -149,7 +129,7 @@ export interface OfflineRouting {
   /** Commits the others to LiveStore's queue, or throws having queued none of
    *  them (the store shut down before or during the commit). Synchronous, so
    *  a caller can clear their journal entries with nothing able to land in
-   *  between. A commit that returns is applied in memory only; the leader
+   *  between. Also throws, queuing none, once the leader has stalled. A commit that returns is applied in memory only; the leader
    *  persists it to disk shortly after — the returned `WhenPersisted` says
    *  when, and never calls back if the leader has died. */
   commit: () => WhenPersisted

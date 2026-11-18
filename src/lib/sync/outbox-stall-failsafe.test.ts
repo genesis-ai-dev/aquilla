@@ -13,13 +13,27 @@ import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 // A dead leader: commits apply in the page's memory but are never confirmed
 // as persisted. The in-memory adapter's leader is always healthy, so the
 // confirmation is what this switches off.
+// `reviveLeader` confirms everything a dead leader was sitting on.
 let leaderDead = false
+let deadLeaderWaiters: Array<() => void> = []
+const reviveLeader = () => {
+  leaderDead = false
+  const waiters = deadLeaderWaiters
+  deadLeaderWaiters = []
+  for (const onPersisted of waiters) onPersisted()
+}
 vi.mock("@/lib/offline/leader-watchdog", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/offline/leader-watchdog")>()
   return {
     ...actual,
-    watchLeaderPersisted: (...args: Parameters<typeof actual.watchLeaderPersisted>) =>
-      leaderDead ? () => {} : actual.watchLeaderPersisted(...args),
+    watchLeaderPersisted: (...args: Parameters<typeof actual.watchLeaderPersisted>) => {
+      if (!leaderDead) return actual.watchLeaderPersisted(...args)
+      const onPersisted = args[2]
+      deadLeaderWaiters.push(onPersisted)
+      return () => {
+        deadLeaderWaiters = deadLeaderWaiters.filter((waiter) => waiter !== onPersisted)
+      }
+    },
   }
 })
 
@@ -48,13 +62,13 @@ vi.mock("@/lib/offline/store", () => ({
 const {
   enqueueOutboxEvent,
   enqueueOutboxEvents,
-  forgetAwaitingPersistForTests,
   peekOutboxBatch,
   rescueUnpersistedOfflineWrites,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
 } = await import("./outbox")
-const { forgetRescuedIdsForTests, offlineQueueWaitingIds } = await import("./offline-routing")
+const { offlineQueueWaitingIds } = await import("./offline-routing")
+const { forgetStallRescueForTests, isRescuedFromOfflineQueue } = await import("./offline-stall-rescue")
 const { forgetInFlightJournalForTests } = await import("./outbox-recovery")
 const { setLeaderStalled, __resetLeaderStalledForTests } = await import("@/lib/offline/leader-watchdog")
 
@@ -102,10 +116,10 @@ describe("offline queue fail-safe when the leader stalls", () => {
 
   afterEach(() => {
     leaderDead = false
+    deadLeaderWaiters = []
     failIndexedDbWrites = false
     onGetOfflineStore = undefined
-    forgetAwaitingPersistForTests()
-    forgetRescuedIdsForTests()
+    forgetStallRescueForTests()
     __resetLeaderStalledForTests()
     delete (window as unknown as { __TAURI__?: object }).__TAURI__
     currentOfflineStore = undefined
@@ -157,13 +171,14 @@ describe("offline queue fail-safe when the leader stalls", () => {
     expect(journalLeft()).toEqual([])
   })
 
-  it("rescues an edit committed just as the stall was reported", async () => {
+  it("sends an edit to IndexedDB when the stall is reported while routing waits on the store", async () => {
     leaderDead = true
     // Routing has already decided on the offline queue when the stall lands.
     onGetOfflineStore = () => setLeaderStalled(true)
     await enqueueOutboxEvent(commit("tc1", "p0"))
 
-    await vi.waitFor(async () => expect(await inIndexedDb()).toEqual(["tc1"]))
+    expect(queuedOffline()).toEqual([])
+    expect(await inIndexedDb()).toEqual(["tc1"])
     expect(journalLeft()).toEqual([])
   })
 
@@ -174,6 +189,46 @@ describe("offline queue fail-safe when the leader stalls", () => {
 
     setLeaderStalled(true)
     expect(await rescueUnpersistedOfflineWrites()).toBe(false)
+    expect(journalLeft()).toEqual(["aquilla:outbox-recovery:v1:tc1"])
+    expect(isRescuedFromOfflineQueue("tc1")).toBe(false)
+  })
+
+  it("rescues on a later try after a failed copy", async () => {
+    leaderDead = true
+    await enqueueOutboxEvent(commit("tc1", "p0"))
+    setLeaderStalled(true)
+    failIndexedDbWrites = true
+    expect(await rescueUnpersistedOfflineWrites()).toBe(false)
+
+    failIndexedDbWrites = false
+    expect(await rescueUnpersistedOfflineWrites()).toBe(true)
+    expect(await inIndexedDb()).toEqual(["tc1"])
+    expect(journalLeft()).toEqual([])
+  })
+
+  it("still lets a leader that recovers after a failed copy clear the journal", async () => {
+    leaderDead = true
+    await enqueueOutboxEvent(commit("tc1", "p0"))
+    setLeaderStalled(true)
+    failIndexedDbWrites = true
+    expect(await rescueUnpersistedOfflineWrites()).toBe(false)
+
+    // Otherwise the next launch would replay an edit the leader already has.
+    reviveLeader()
+    expect(journalLeft()).toEqual([])
+    failIndexedDbWrites = false
+    expect(await rescueUnpersistedOfflineWrites()).toBe(true)
+    expect(await inIndexedDb()).toEqual([])
+  })
+
+  it("doesn't report everything safe while another rescue's copy is still failing", async () => {
+    leaderDead = true
+    await enqueueOutboxEvent(commit("tc1", "p0"))
+    setLeaderStalled(true)
+    failIndexedDbWrites = true
+
+    const [first, second] = await Promise.all([rescueUnpersistedOfflineWrites(), rescueUnpersistedOfflineWrites()])
+    expect([first, second]).toEqual([false, false])
     expect(journalLeft()).toEqual(["aquilla:outbox-recovery:v1:tc1"])
   })
 })

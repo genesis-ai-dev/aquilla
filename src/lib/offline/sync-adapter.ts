@@ -47,6 +47,7 @@ import {
   type WsReconciler,
 } from "@/lib/sync/ws-reconciler"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { anyRescuedFromOfflineQueue, isRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
 import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
@@ -368,9 +369,12 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     // Nothing is written to the store until the server answers: a queue that
     // sits through weeks of failed attempts must not grow the eventlog with
     // each one. An in-flight row is simply one a running flush holds.
+    // A row rescued into IndexedDB when the leader stalled is the HTTP
+    // flusher's to send (offline-stall-rescue.ts); sending it here too would
+    // upload it twice and handle its result twice.
     const pending = (
       store.query(tables.eventQueue.select().where({ projectId, status: "pending" })) as readonly EventQueueRow[]
-    ).toSorted(byQueueOrder)
+    ).filter((row) => !isRescuedFromOfflineQueue(row.id)).toSorted(byQueueOrder)
     if (pending.length === 0) return "idle"
 
     const file = store.query(tables.files.select().where({ projectId }).first())
@@ -504,10 +508,15 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return "ok"
   }
 
+  // Rescued rows don't count: flushQueue skips them, and counting them would
+  // re-arm an "idle" flush forever.
   function hasPending(): boolean {
-    return (
-      store.query(tables.eventQueue.select().where({ projectId, status: "pending" }).first()) != null
-    )
+    if (!anyRescuedFromOfflineQueue()) {
+      return store.query(tables.eventQueue.select().where({ projectId, status: "pending" }).first()) != null
+    }
+    return store
+      .query(tables.eventQueue.select("id").where({ projectId, status: "pending" }))
+      .some((id) => !isRescuedFromOfflineQueue(id))
   }
 
   function cancelFlushTimer(): void {

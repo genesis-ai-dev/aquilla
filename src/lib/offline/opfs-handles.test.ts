@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { dirname, join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { opfsStoreDirPrefix, waitForOpfsFilesFree, type OpfsDir, type OpfsFile } from "./opfs-handles"
 
@@ -31,6 +34,12 @@ const noSleep = () => Promise.resolve()
 
 describe("waitForOpfsFilesFree", () => {
   it("names LiveStore's directory for the store", () => {
+    // Read from the installed LiveStore rather than restated: if a version bump
+    // renames the directory, the wait would match nothing and silently pass.
+    const dist = dirname(createRequire(import.meta.url).resolve("@livestore/adapter-web"))
+    const source = readFileSync(join(dist, "web-worker/common/persisted-sqlite.js"), "utf8")
+    // Just the template, so a reformat or renamed const upstream doesn't fail this.
+    expect(source).toContain("`livestore-${storeId}@${liveStoreStorageFormatVersion}`")
     expect(opfsStoreDirPrefix("aquilla-offline")).toBe("livestore-aquilla-offline@")
   })
 

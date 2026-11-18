@@ -11,13 +11,29 @@ export interface LeaderWarning {
   text: string
 }
 
-/** Worker side: log `text` here and on the page. */
+/** One line for a detail the page can't receive as-is (an Error doesn't survive every structured clone). */
+function describeDetail(detail: unknown): string {
+  if (detail instanceof Error) return `${detail.name}: ${detail.message}`
+  if (typeof detail === "string") return detail
+  try {
+    return JSON.stringify(detail) ?? String(detail)
+  } catch {
+    return String(detail)
+  }
+}
+
+/**
+ * Worker side: log `text` here and on the page. `details` (an error, say) are
+ * folded into the page's copy as text, since the worker's own console is out
+ * of reach in a shipped build.
+ */
 export function warnLeader(level: LeaderWarning["level"], text: string, ...details: unknown[]): void {
   console[level](text, ...details)
   if (typeof BroadcastChannel === "undefined") return
   try {
+    const relayed = details.length === 0 ? text : `${text}: ${details.map(describeDetail).join(" ")}`
     const channel = new BroadcastChannel(CHANNEL)
-    channel.postMessage({ level, text } satisfies LeaderWarning)
+    channel.postMessage({ level, text: relayed } satisfies LeaderWarning)
     channel.close()
   } catch {
     // Diagnostics must never break the leader.

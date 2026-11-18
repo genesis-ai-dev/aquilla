@@ -4,7 +4,7 @@ import { lookOf, steadyScreen } from "../../e2e/recordings/tutorials/look"
 import { INTRO_MS, OUTRO_MS } from "./brand"
 import { buildVtt, composeArgs, totalMs, type Take } from "./compose"
 import { plan, whyPublish, type Filmed, type VideoEntry } from "./manifest"
-import { pcmToWav, unsaidLines } from "./voice"
+import { pcmToWav, speechToWav, unsaidLines } from "./voice"
 
 const take: Take = {
   id: "translate-a-verse",
@@ -113,5 +113,18 @@ describe("tutorial videos", () => {
     expect(wav.readUInt32LE(28)).toBe(48_000) // bytes a second
     expect(wav.readUInt32LE(40)).toBe(48_000)
     expect(wav.length).toBe(44 + 48_000)
+  })
+
+  it("a Gemini reply that is already a WAV gives up its sound and nothing else", () => {
+    const sound = Buffer.from([1, 0, 2, 0, 3, 0, 4, 0])
+    // What a real reply was: a whole WAV at another rate, then a C2PA chunk.
+    const credentials = Buffer.concat([Buffer.from("C2PA"), Buffer.from([5, 0, 0, 0]), Buffer.from("junk!"), Buffer.from([0])])
+    const reply = Buffer.concat([pcmToWav(sound, 22_050), credentials])
+
+    const clean = speechToWav(reply, 24_000)
+    expect(clean.readUInt32LE(24)).toBe(22_050) // the file's own rate, not the label's
+    expect(clean.subarray(44)).toEqual(sound) // no header played as sound, no C2PA after it
+    // Raw PCM, as the label says, is only given a header.
+    expect(speechToWav(sound, 24_000)).toEqual(pcmToWav(sound, 24_000))
   })
 })

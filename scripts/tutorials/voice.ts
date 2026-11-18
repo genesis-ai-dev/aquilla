@@ -48,6 +48,35 @@ export function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
   return Buffer.concat([head, pcm])
 }
 
+/**
+ * What Gemini sends as speech, as a WAV holding the sound and nothing else.
+ *
+ * It is not always the raw PCM its `audio/L16` label promises: a reply can be
+ * a whole WAV file, with a C2PA (content credentials) chunk after the sound.
+ * Wrapped in a second header, that file's own header plays as a click before
+ * every line and its C2PA chunk as a crackle after it.
+ */
+export function speechToWav(bytes: Buffer, labelledRate: number): Buffer {
+  if (bytes.subarray(0, 4).toString("latin1") !== "RIFF") return pcmToWav(bytes, labelledRate)
+  let rate = labelledRate
+  let pcm: Buffer | null = null
+  for (let at = 12; at + 8 <= bytes.length; ) {
+    const id = bytes.subarray(at, at + 4).toString("latin1")
+    const size = bytes.readUInt32LE(at + 4)
+    const body = bytes.subarray(at + 8, at + 8 + size)
+    if (id === "fmt ") {
+      if (body.readUInt16LE(0) !== 1 || body.readUInt16LE(2) !== 1 || body.readUInt16LE(14) !== 16) {
+        throw new Error("Gemini sent a WAV that is not 16-bit mono PCM; speechToWav needs to learn it")
+      }
+      rate = body.readUInt32LE(4)
+    }
+    if (id === "data") pcm = body
+    at += 8 + size + (size % 2)
+  }
+  if (!pcm) throw new Error("Gemini sent a WAV with no sound in it")
+  return pcmToWav(pcm, rate)
+}
+
 function gemini(key: string): Speaker {
   const model = process.env.TUTORIAL_TTS_MODEL ?? "gemini-3.8-flash-tts"
   const voice = process.env.TUTORIAL_TTS_VOICE ?? "Sulafat"
@@ -83,11 +112,13 @@ function gemini(key: string): Speaker {
         if (!audio) throw new Error(`Gemini sent no audio for "${text}"`)
         const rate = Number(/rate=(\d+)/.exec(audio.mimeType ?? "")?.[1] ?? 24000)
         const raw = `${file}.raw.wav`
-        writeFileSync(raw, pcmToWav(Buffer.from(audio.data, "base64"), rate))
+        writeFileSync(raw, speechToWav(Buffer.from(audio.data, "base64"), rate))
         // Gemini leaves quiet before and after what it says. Left in, each
-        // line starts late and the take holds longer than the words last.
-        const trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05"
-        const run = spawnSync("ffmpeg", ["-y", "-loglevel", "error", "-i", raw, "-af", `${trim},areverse,${trim.replace("0.05", "0.12")},areverse`, file], { encoding: "utf8" })
+        // line starts late and the take holds longer than the words last. A
+        // short fade at each cut, so a line never starts or stops on a click.
+        const trim = (keep: string, fade: string): string =>
+          `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=${keep},afade=t=in:d=${fade}`
+        const run = spawnSync("ffmpeg", ["-y", "-loglevel", "error", "-i", raw, "-af", `${trim("0.05", "0.008")},areverse,${trim("0.12", "0.03")},areverse`, file], { encoding: "utf8" })
         rmSync(raw, { force: true })
         if (run.status !== 0) throw new Error(`Could not trim the quiet off "${text}": ${run.stderr}`)
         return

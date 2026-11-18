@@ -192,9 +192,9 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         setProject(null)
         setRoleLevel(null)
         setPm(null)
-        // AQU-346: "forbidden" (403 — access revoked / never granted) renders
-        // a clean "you no longer have access" state, distinct from a
-        // genuinely missing project.
+        // AQU-346 / AQU-2452: "forbidden" (403 — access revoked / never granted)
+        // and a missing project share one screen. A removal while this project
+        // was already open is AQU-2455, handled by the workspace.
         setStatus(
           result.reason === "unreachable"
             ? "unreachable"

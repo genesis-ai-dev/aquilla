@@ -413,7 +413,11 @@ describe("makeSyncTokenMinter — OPS-44 elevation required", () => {
     global.fetch = mockFetch({ status: 403, body: NO_ACCESS_BODY }) as unknown as typeof fetch
     const onForbidden = vi.fn()
     const mint = makeSyncTokenMinter(() => "jwt-admin", "p", "f", {}, API, { onForbidden })
-    expect(await mint()).toEqual({ token: null, status: 403 })
+    expect(await mint()).toEqual({
+      token: null,
+      status: 403,
+      error: "No access to project",
+    })
     expect(onForbidden).toHaveBeenCalledTimes(1)
     expect(isElevationRequired()).toBe(false)
   })

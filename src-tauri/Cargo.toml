@@ -66,3 +66,6 @@ tempfile = "3"
 # Embedded WebDriver server for the e2e smoke suite (e2e/tauri/smoke.spec.ts). Debug-build-only
 # test harness — must never be enabled for the signed release binary tauri-action publishes.
 e2e-webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+
+[target.'cfg(target_os = "macos")'.build-dependencies]
+cc = "1"

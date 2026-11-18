@@ -1,5 +1,9 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+#[path = "mac_google.rs"]
+mod mac_google;
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
@@ -20,13 +24,31 @@ fn valid_authorization_url(value: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String) -> Result<(), String> {
+pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String, attempt: Option<String>, private_session: Option<bool>) -> Result<(), String> {
     if !valid_authorization_url(&auth_url) {
         return Err("invalid_authorization_url".into());
     }
+    #[cfg(target_os = "macos")]
+    return mac_google::open(app, auth_url, attempt.unwrap_or_default(), private_session.unwrap_or(false)).await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = (attempt, private_session);
+    #[cfg(not(target_os = "macos"))]
     app.opener()
         .open_url(auth_url, None::<&str>)
         .map_err(|_| "browser_open_failed".into())
+}
+
+#[tauri::command]
+pub fn cancel_auth_browser(app: tauri::AppHandle, attempt: String) {
+    #[cfg(target_os = "macos")]
+    mac_google::cancel(app, attempt);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, attempt);
+}
+
+#[tauri::command]
+pub fn google_private_session_supported() -> bool {
+    cfg!(target_os = "macos")
 }
 
 #[tauri::command]

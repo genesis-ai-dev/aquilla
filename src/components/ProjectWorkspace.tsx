@@ -20,6 +20,7 @@ import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
   PARALLEL_BIBLES_EDIT_ROLE_FLOOR,
+  SETTINGS_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -634,7 +635,9 @@ import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
-import { createLiveBtQueue, needsLiveBacktranslation } from "@/lib/completion/live-bt"
+import { createLiveBtQueue, needsLiveBacktranslation, type LiveBtQueue } from "@/lib/completion/live-bt"
+import type { EditorBacktranslationConfig } from "@/components/backtranslation/BacktranslationColumn"
+import { readDraftingSettings } from "../../db/shared/drafting-settings"
 // FRO-192: assignment work-pickup UI
 import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -790,6 +793,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 let _lastImportWrite: Promise<ProjectRecord | undefined> = Promise.resolve(undefined)
 const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_BT_QUEUE_STATE: { waiting: ReadonlySet<string>; pending: number } = { waiting: new Set<string>(), pending: 0 }
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
@@ -2507,7 +2511,9 @@ export function ProjectWorkspace() {
     const { refetchCell, refetchStats } = flushAppliedTracker.confirm(cellId, eventId)
     if (refetchStats) revalidateCellStats(cellId)
     if (refetchCell) revalidateCell(cellId)
-    liveBtNotifyRef.current(cellId, eventId)
+    // Only a save of the TEXT carries its event id here; a validate or a waive
+    // confirms without one, and neither is a reason to back-translate.
+    if (eventId) liveBtNotifyRef.current(cellId, eventId)
   }, [flushAppliedTracker, revalidateCellStats, revalidateCell])
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
@@ -7834,7 +7840,11 @@ export function ProjectWorkspace() {
       await refreshOutboxPending()
       // Targeted: the agent only touched cellIds — confirm each from the
       // POST response, refetching only what it did not land.
-      for (const cellId of cellIds) confirmCommitted(cellId)
+      for (const cellId of cellIds) {
+        confirmCommitted(cellId)
+        // The agent's edits are text changes with no event id in this scope.
+        liveBtNotifyRef.current(cellId)
+      }
     },
     [getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
   )
@@ -8280,10 +8290,11 @@ export function ProjectWorkspace() {
     }
   }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser, getActiveCell])
 
-  // Live back-translation (off unless the project turns it on): each save
-  // this browser confirms queues a reading of that cell. The queue reads
-  // through refs so it is built once per file and always sees the newest
-  // cache and settings.
+  // The back-translation queue. Two things feed it: a save this browser
+  // confirms, when the project back-translates live (`notify`, debounced),
+  // and the Back-translation column's "Back-translate N rows" (`request`).
+  // Either way readings run two at a time. The queue reads through refs so it
+  // is built once per file and always sees the newest cache and settings.
   const liveBacktranslationOn = Boolean(project?.completionSettings?.liveBacktranslation) && isBacktranslationConfigured
   const runBacktranslationRef = useRef(runBacktranslation)
   runBacktranslationRef.current = runBacktranslation
@@ -8291,30 +8302,72 @@ export function ProjectWorkspace() {
   backtranslationCacheRef.current = backtranslationCache
   const getActiveCellRef = useRef(getActiveCell)
   getActiveCellRef.current = getActiveCell
+  const btQueueRef = useRef<LiveBtQueue | null>(null)
+  const [btQueueState, setBtQueueState] = useState<{ waiting: ReadonlySet<string>; pending: number }>(EMPTY_BT_QUEUE_STATE)
   useEffect(() => {
-    if (!liveBacktranslationOn) {
-      liveBtNotifyRef.current = () => {}
-      return
-    }
     const queue = createLiveBtQueue({
-      run: async (cellId, committedEventId) => {
+      run: async (cellId, committedEventId, reason) => {
         const cell = getActiveCellRef.current(cellId)
         if (!cell) return
+        const record = backtranslationCacheRef.current.get(cellId)
         const needed = needsLiveBacktranslation({
           translated: cell.translated ?? "",
           targetEventId: committedEventId || cell.targetEventId,
-          record: backtranslationCacheRef.current.get(cellId),
+          record,
         })
         if (!needed) return
-        await runBacktranslationRef.current(cell, "live", committedEventId)
+        const source: BacktranslationActionSource =
+          reason === "live" ? "live" : record?.btText.trim() ? "refresh" : "read-back"
+        await runBacktranslationRef.current(cell, source, committedEventId)
       },
+      onChange: (state) => setBtQueueState(
+        state.waiting.length + state.running.length === 0
+          ? EMPTY_BT_QUEUE_STATE
+          : { waiting: new Set(state.waiting), pending: state.waiting.length + state.running.length },
+      ),
     })
-    liveBtNotifyRef.current = (cellId, committedEventId) => queue.notify(cellId, committedEventId)
+    btQueueRef.current = queue
     return () => {
-      liveBtNotifyRef.current = () => {}
+      btQueueRef.current = null
       queue.cancelAll()
     }
+  }, [activeFileId, activeLane])
+  useEffect(() => {
+    if (!liveBacktranslationOn) return
+    liveBtNotifyRef.current = (cellId, committedEventId) => btQueueRef.current?.notify(cellId, committedEventId)
+    return () => {
+      liveBtNotifyRef.current = () => {}
+    }
   }, [liveBacktranslationOn, activeFileId, activeLane])
+
+  // The editor's Back-translation column: its queue, and the project's live
+  // switch (a team drafting setting, so maintainers only).
+  const backtranslateMany = useCallback((cellIds: string[]) => {
+    for (const cellId of cellIds) btQueueRef.current?.request(cellId)
+  }, [])
+  const stopBacktranslations = useCallback(() => btQueueRef.current?.cancelAll(), [])
+  const canSetLiveBacktranslation = (serverRoleLevel ?? 0) >= SETTINGS_EDIT_ROLE_FLOOR
+  const sharedDraftingSettings = projectSettings?.settings?.draftingSettings
+  const setLiveBacktranslation = useCallback((on: boolean) => {
+    const current = readDraftingSettings(sharedDraftingSettings) ?? {}
+    void patchSettings({ draftingSettings: { ...current, liveBacktranslation: on } })
+  }, [sharedDraftingSettings, patchSettings])
+  const projectLiveBacktranslation = Boolean(project?.completionSettings?.liveBacktranslation)
+  const editorBacktranslationColumn = useMemo<EditorBacktranslationConfig | undefined>(
+    () => projectId
+      ? {
+          projectId,
+          live: projectLiveBacktranslation,
+          canSetLive: canSetLiveBacktranslation,
+          onSetLive: setLiveBacktranslation,
+          waiting: btQueueState.waiting,
+          pending: btQueueState.pending,
+          onBacktranslateMany: backtranslateMany,
+          onStop: stopBacktranslations,
+        }
+      : undefined,
+    [projectId, projectLiveBacktranslation, canSetLiveBacktranslation, setLiveBacktranslation, btQueueState, backtranslateMany, stopBacktranslations],
+  )
 
   // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
   // hydrated from the server carries no `forText`, so the only way to tell
@@ -19788,6 +19841,7 @@ export function ProjectWorkspace() {
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
             parallelBibles={editorParallelBibles}
+            backtranslationColumn={editorBacktranslationColumn}
             onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
             onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}

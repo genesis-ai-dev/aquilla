@@ -12241,7 +12241,10 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
-    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells) ? activeFileId : null,
+    // `exportOpen`: the export dialog reads its takes from this map, so opened
+    // from the Text lens it used to say "nothing is recorded" about a fully
+    // recorded episode.
+    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells || exportOpen) ? activeFileId : null,
     activeLane, // AQU-1591: takes belong to a lane.
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId

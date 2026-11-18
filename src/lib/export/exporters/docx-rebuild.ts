@@ -188,10 +188,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
 
   // Match, then open up what did not match, until nothing changes.
   let matches: Map<RNode, Match>
+  let lost: { text: string; look: string }[] = []
   for (;;) {
-    const lost: { text: string; look: string }[] = []
+    lost = []
     matches = matchAnchors(nodes, masked, input.baseRpr, io, lost, input.lineOf, input.textLines)
-    result.lostLooks = lost.filter((l) => seenDifferently(l.look, input.baseRpr)).map((l) => l.text)
     let changed = false
     const next: RNode[] = []
     for (const node of nodes) {
@@ -234,6 +234,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     nodes = next
     if (!changed) break
   }
+  result.lostLooks = lostLooksOf(lost, input, matches)
 
   // Placement: front / translation / back.
   const firstWord = nodes.findIndex((node) => holdsWord(node))
@@ -406,6 +407,40 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
 
   result.xml = renderLeaves(front, io) + stream + leftover + renderLeaves(back, io)
   return result
+}
+
+/** The mark kinds a translator can give words (bold, italic, underline,
+ *  strike), as `Mark`s, that a run look turns on. */
+const KIND_OF: readonly [string, Mark][] = [["b", "b"], ["i", "i"], ["u", "u"], ["strike", "s"], ["dstrike", "s"]]
+function kindsOf(rPr: string): Set<Mark> {
+  const kinds = new Set<Mark>()
+  for (const [name, kind] of KIND_OF) {
+    const el = rPr ? directRprChild(rPr, name) : null
+    if (el !== null && !OFF.test(el)) kinds.add(kind)
+  }
+  return kinds
+}
+
+/**
+ * The source words reported as having lost their look (see `lostLooks`).
+ * AQU-2539: when the translation carries formatting of its own (the
+ * translator's bold, italic, underline or strike), the translator placed the
+ * looks on their own words, so a source stretch the translation does not hold
+ * is reported only for a kind of mark it had that the written paragraph does
+ * not carry on any of its words.
+ */
+function lostLooksOf(
+  lost: readonly { text: string; look: string }[],
+  input: RebuildInput,
+  matches: ReadonlyMap<RNode, Match>,
+): string[] {
+  const seen = lost.filter((l) => seenDifferently(l.look, input.baseRpr))
+  const written = new Set<Mark>()
+  for (const set of input.marks) for (const mark of set) if (mark === "b" || mark === "i" || mark === "u" || mark === "s") written.add(mark)
+  if (written.size === 0) return seen.map((l) => l.text)
+  for (const kind of kindsOf(input.baseRpr)) written.add(kind)
+  for (const match of matches.values()) for (const look of match.looks ?? []) for (const kind of kindsOf(look)) written.add(kind)
+  return seen.filter((l) => [...kindsOf(l.look)].some((kind) => !written.has(kind))).map((l) => l.text)
 }
 
 function lookFor(input: RebuildInput, marks: ReadonlySet<Mark>): string {

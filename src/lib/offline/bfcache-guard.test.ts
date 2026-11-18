@@ -11,10 +11,9 @@ const setup = () => {
   const target = new EventTarget() as unknown as Window
   const reload = vi.fn()
   const worker = { terminate: vi.fn() }
-  const onTerminated = vi.fn()
-  trackLeaderWorker(worker as unknown as Worker, onTerminated)
+  trackLeaderWorker(worker as unknown as Worker)
   installBfcacheGuard({ target, reload })
-  return { target, reload, worker, onTerminated }
+  return { target, reload, worker }
 }
 
 beforeEach(() => {
@@ -28,18 +27,10 @@ describe("installBfcacheGuard", () => {
     expect(worker.terminate).toHaveBeenCalledOnce()
   })
 
-  it("releases the leader lock after terminating, so the next page's leader can boot", () => {
-    const { target, worker, onTerminated } = setup()
-    target.dispatchEvent(pageEvent("pagehide", true))
-    expect(onTerminated).toHaveBeenCalledOnce()
-    expect(worker.terminate.mock.invocationCallOrder[0]).toBeLessThan(onTerminated.mock.invocationCallOrder[0])
-  })
-
   it("leaves the leader alone on an ordinary pagehide (reload, quit)", () => {
-    const { target, worker, onTerminated } = setup()
+    const { target, worker } = setup()
     target.dispatchEvent(pageEvent("pagehide", false))
     expect(worker.terminate).not.toHaveBeenCalled()
-    expect(onTerminated).not.toHaveBeenCalled()
   })
 
   it("reloads a page restored from the bfcache after its leader was terminated", () => {

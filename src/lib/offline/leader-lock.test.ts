@@ -1,12 +1,9 @@
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
-import { makeInMemoryAdapter } from "@livestore/adapter-web"
-import { createStorePromise } from "@livestore/livestore"
 import { describe, expect, it, vi } from "vitest"
-import { leaderLockName, releaseLockOnShutdown, requestLeaderLock } from "./leader-lock"
-import { schema } from "./schema"
-import { STORE_ID } from "./store"
+import { holdLeaderLock, leaderLockName } from "./leader-lock"
+import { STORE_ID } from "./store-id"
 
 /** Exclusive-only LockManager: grants in request order, one holder per name. */
 function fakeLocks() {
@@ -20,16 +17,20 @@ function fakeLocks() {
     }
   }
   const request = (name: string, callback: () => Promise<void>) =>
-    new Promise<void>((done) => {
+    new Promise<void>((resolve, reject) => {
       queue.push({
         name,
         grant: () => {
           held.add(name)
-          void callback().then(() => {
-            held.delete(name)
-            done()
-            pump()
-          })
+          // Like the real LockManager: held until the callback settles, which
+          // the request then settles with.
+          const run = Promise.resolve().then(callback)
+          void run
+            .finally(() => {
+              held.delete(name)
+              pump()
+            })
+            .then(resolve, reject)
         },
       })
       pump()
@@ -38,6 +39,20 @@ function fakeLocks() {
 }
 
 const settled = () => new Promise((r) => setTimeout(r, 0))
+
+/** A leader whose run the test ends by hand. */
+function controllableLeader() {
+  let stop: () => void = () => {}
+  let crash: (error: unknown) => void = () => {}
+  const run = vi.fn(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        stop = resolve
+        crash = reject
+      }),
+  )
+  return { run, stop: () => stop(), crash: (error: unknown) => crash(error) }
+}
 
 describe("leaderLockName", () => {
   it("is the lock makePersistedAdapter takes, so old and new builds still exclude each other", () => {
@@ -50,47 +65,77 @@ describe("leaderLockName", () => {
   })
 })
 
-describe("requestLeaderLock", () => {
-  it("waits for the previous holder, and hands over when it releases", async () => {
+describe("holdLeaderLock", () => {
+  it("doesn't start a leader until the previous one has stopped", async () => {
     const { locks, isHeld } = fakeLocks()
-    const oldPage = requestLeaderLock("l", locks)
-    await oldPage.acquired
-    const newPage = requestLeaderLock("l", locks)
-    const granted = vi.fn()
-    void newPage.acquired.then(granted)
+    const oldLeader = controllableLeader()
+    const newLeader = controllableLeader()
+    const oldDone = holdLeaderLock("l", oldLeader.run, { locks })
+    const newDone = holdLeaderLock("l", newLeader.run, { locks })
     await settled()
-    expect(granted).not.toHaveBeenCalled()
+    expect(oldLeader.run).toHaveBeenCalledOnce()
+    expect(newLeader.run).not.toHaveBeenCalled()
 
-    oldPage.release()
-    await newPage.acquired
-    expect(isHeld("l")).toBe(true)
-    newPage.release()
+    oldLeader.stop()
+    await oldDone
     await settled()
+    expect(newLeader.run).toHaveBeenCalledOnce()
+    expect(isHeld("l")).toBe(true)
+
+    newLeader.stop()
+    await newDone
     expect(isHeld("l")).toBe(false)
+  })
+
+  it("lets go of the lock when the leader crashes, and passes the error on", async () => {
+    const { locks, isHeld } = fakeLocks()
+    const leader = controllableLeader()
+    const done = holdLeaderLock("l", leader.run, { locks })
+    await settled()
+    const error = new Error("boom")
+    leader.crash(error)
+    await expect(done).rejects.toBe(error)
+    expect(isHeld("l")).toBe(false)
+  })
+
+  it("says so when the wait drags on, and not when it doesn't", async () => {
+    vi.useFakeTimers()
+    try {
+      const { locks } = fakeLocks()
+      const blocker = controllableLeader()
+      const waiter = controllableLeader()
+      const blockerSlow = vi.fn()
+      const onSlow = vi.fn()
+      void holdLeaderLock("l", blocker.run, { locks, slowAfterMs: 1000, onSlow: blockerSlow })
+      const done = holdLeaderLock("l", waiter.run, { locks, slowAfterMs: 1000, onSlow })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(onSlow).toHaveBeenCalledWith(1000)
+      expect(blockerSlow).not.toHaveBeenCalled()
+
+      blocker.stop()
+      await vi.advanceTimersByTimeAsync(0)
+      waiter.stop()
+      await done
+      expect(onSlow).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("rejects when the lock request fails, instead of hanging", async () => {
     const error = new DOMException("denied", "SecurityError")
     const locks = { request: () => Promise.reject(error) } as unknown as LockManager
-    await expect(requestLeaderLock("l", locks).acquired).rejects.toBe(error)
+    await expect(holdLeaderLock("l", vi.fn(), { locks })).rejects.toBe(error)
   })
 
-  it("throws without Web Locks", () => {
-    expect(() => requestLeaderLock("l", undefined)).toThrow(/navigator\.locks/)
-  })
-})
-
-describe("releaseLockOnShutdown", () => {
-  it("releases the lock when the store shuts down, not before", async () => {
-    const release = vi.fn()
-    const store = await createStorePromise({
-      schema,
-      storeId: `leader-lock-test-${crypto.randomUUID()}`,
-      adapter: releaseLockOnShutdown(makeInMemoryAdapter(), release),
-    })
-    expect(release).not.toHaveBeenCalled()
-    await store.shutdownPromise()
-    // The adapter's scope closes just after shutdownPromise() settles.
-    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
+  it("rejects without Web Locks", async () => {
+    vi.stubGlobal("navigator", {})
+    try {
+      const leader = vi.fn()
+      await expect(holdLeaderLock("l", leader)).rejects.toThrow(/navigator\.locks/)
+      expect(leader).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

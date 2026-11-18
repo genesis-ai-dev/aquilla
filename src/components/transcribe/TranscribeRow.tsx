@@ -37,7 +37,8 @@ export type RowStatus = { kind: "idle" } | { kind: "working"; progress: RowProgr
 /** What a run has produced that the row's own data does not show yet: the
  *  save is queued and the cell is being read back. Shown in the meantime. */
 export interface RowLive {
-  heard?: string
+  /** `null`: nothing heard — a clear that the row's data does not show yet. */
+  heard?: string | null
   transcript?: string
   /** The transcript shown is a cleanup that has just landed. */
   aiCleaned?: boolean
@@ -101,7 +102,10 @@ export function TranscribeRow({
   const progress = status.kind === "working" ? status.progress : null
   const working = progress !== null
   // What the run has in hand wins over the row until the row catches up.
-  const heard = (progress && progress.stage !== "listening" ? progress.heard : live?.heard) ?? row.heard
+  // `live.heard` may be null (a clear), so only an absent one falls back.
+  const heard = progress && progress.stage !== "listening"
+    ? progress.heard ?? row.heard
+    : live?.heard !== undefined ? live.heard : row.heard
   const transcript = (progress?.stage === "heard" ? progress.transcript : live?.transcript) ?? row.transcript
   // Typed out only when it has just arrived: a row that already had its text
   // when the view opened is not replayed.

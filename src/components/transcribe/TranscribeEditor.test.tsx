@@ -75,6 +75,7 @@ vi.mock("@/lib/transcript-cleanup/save", () => ({
 
 import { TranscribeEditor, type TranscribeEditorHandle } from "./TranscribeEditor"
 import { setTranscribeSpeed } from "./transcribe-speed"
+import { clearTranscript } from "@/lib/transcript-cleanup/save"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -200,6 +201,26 @@ describe("TranscribeEditor", () => {
     fireEvent.click(screen.getByTestId("transcribe-clear"))
     await waitFor(() => expect(clears).toEqual(["c1"]))
     expect(saves).toEqual([])
+  })
+
+  // Reported 2026-11-18: the clear landed, but the row kept its words until a
+  // page refresh. The row must not wait on the file's audio being read back —
+  // `cells` here is never updated, which is that read arriving late (or stale).
+  it("shows the row cleared at once, before the cleared take is read back", async () => {
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "Yesu" })]} session={session} concepts={[]} editable />)
+    fireEvent.click(screen.getByTestId("transcribe-clear"))
+    expect(await screen.findByText("Not transcribed yet")).toBeTruthy()
+    expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("")
+    expect(screen.queryByTestId("transcribe-clear")).toBeNull()
+  })
+
+  it("puts the words back when the clear could not be saved", async () => {
+    vi.mocked(clearTranscript).mockRejectedValueOnce(new Error("outbox closed"))
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "Yesu" })]} session={session} concepts={[]} editable />)
+    fireEvent.click(screen.getByTestId("transcribe-clear"))
+    await waitFor(() => expect(screen.getByTestId("transcribe-status")).toBeTruthy())
+    expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("Yesu")
+    expect(screen.queryByText("Not transcribed yet")).toBeNull()
   })
 
   it("saves a hand edit as a correction, without the AI mark", async () => {

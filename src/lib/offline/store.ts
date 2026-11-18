@@ -11,6 +11,7 @@ import { checkClientSessionHead } from "./head-check"
 import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 import { listenForOfflineRebuildProgress } from "./boot-progress"
+import { leaderLockName, releaseLockOnShutdown, requestLeaderLock } from "./leader-lock"
 
 // Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
@@ -21,67 +22,61 @@ export const STORE_ID = "aquilla-offline"
 // should import it from ./is-tauri directly to avoid the heavier bundle.
 export { isTauriRuntime }
 
-/** Injection seam for tests — production boots the real worker + shared worker pair. */
+/** Injection seam for tests — production boots the real leader worker (single-tab adapter). */
 export type CreateOfflineAdapter = () => Adapter | Promise<Adapter>
 
 const defaultCreateAdapter: CreateOfflineAdapter = async () => {
-  // AQU-2091: imported here, not at the top. Importing @livestore/adapter-web
-  // starts downloading and compiling its 605 KB SQLite engine immediately
-  // (sqlite-loader.js kicks it off at module load), and a top-level import put
-  // that on every browser visit, though only the desktop app ever boots a store.
-  const [{ makeSingleTabAdapter }, { default: LiveStoreWorker }] = await Promise.all([
-    import("@livestore/adapter-web"),
-    import("./livestore.worker?worker"),
-  ])
-  const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
-  devBridge?.installLeaderLogCollector()
-  installBfcacheGuard()
-  // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
-  listenForOfflineRebuildProgress()
-  await holdLeaderLock()
-  // Single-tab, not makePersistedAdapter: that one relays every session ↔
-  // leader message through a SharedWorker, and WKWebView hosts SharedWorkers
-  // in a separate WebContent process that it kills under memory pressure
-  // ("Suspended WebProcess is exiting due to memory pressure", 2026-11-17,
-  // during a project download). It starts a fresh SharedWorker that no
-  // leader is attached to, so every later write lands only in the page's
-  // memory — lost on restart. The desktop app has one window, so the page
-  // talks to its own leader worker directly. Same worker, OPFS files and
-  // clientId as before.
-  return makeSingleTabAdapter({
-    worker: (options: { name: string }) => {
-      const worker = new LiveStoreWorker(options)
-      trackLeaderWorker(worker)
-      devBridge?.watchLeaderWorker(worker, options.name)
-      return worker
-    },
-    storage: { type: "opfs" },
-    // The fast path reads the state db straight from OPFS, in parallel with
-    // the leader's boot. After an offline schema change the leader is
-    // rebuilding that file from the eventlog (minutes on a big store), and a
-    // session booted from the half-built file saw a ready project as
-    // `downloading` — recoverInterruptedDownloads then deleted it (found
-    // 2026-10-15). Taking the snapshot from the leader waits for its boot,
-    // rebuild included. A leader that never boots now never hands out a
-    // store either; OfflineLeaderWatchdog prompts a restart if boot drags on.
-    experimental: { disableFastPath: true },
-  })
-}
-
-// The lock makePersistedAdapter took before spawning a leader (same name). A
-// reloaded page (head-check, bfcache guard, bundle update) must not start its
-// leader while the old page's still holds the OPFS access handles; the lock
-// is released when the old page goes away. Held for the life of the page.
-const LEADER_LOCK = `livestore-tab-lock-${STORE_ID}`
-
-function holdLeaderLock(): Promise<void> {
-  if (typeof navigator === "undefined" || !navigator.locks) return Promise.resolve()
-  return new Promise<void>((granted) => {
-    void navigator.locks.request(LEADER_LOCK, () => {
-      granted()
-      return new Promise<never>(() => {})
+  // Asked for first, so waiting out a departing page overlaps the imports below.
+  const lock = requestLeaderLock(leaderLockName(STORE_ID))
+  try {
+    // AQU-2091: imported here, not at the top. Importing @livestore/adapter-web
+    // starts downloading and compiling its 605 KB SQLite engine immediately
+    // (sqlite-loader.js kicks it off at module load), and a top-level import put
+    // that on every browser visit, though only the desktop app ever boots a store.
+    const [{ makeSingleTabAdapter }, { default: LiveStoreWorker }] = await Promise.all([
+      import("@livestore/adapter-web"),
+      import("./livestore.worker?worker"),
+    ])
+    const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
+    devBridge?.installLeaderLogCollector()
+    installBfcacheGuard()
+    // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
+    listenForOfflineRebuildProgress()
+    // No leader until the previous page's has let go of the OPFS files (see leader-lock.ts).
+    await lock.acquired
+    // Single-tab, not makePersistedAdapter: that one relays every session ↔
+    // leader message through a SharedWorker, and WKWebView hosts SharedWorkers
+    // in a separate WebContent process that it kills under memory pressure
+    // ("Suspended WebProcess is exiting due to memory pressure", 2026-11-17,
+    // during a project download). It starts a fresh SharedWorker that no
+    // leader is attached to, so every later write lands only in the page's
+    // memory — lost on restart. The desktop app has one window, so the page
+    // talks to its own leader worker directly. Same worker, OPFS files and
+    // clientId as before. Cost: the LiveStore devtools need the SharedWorker,
+    // so they don't connect in dev builds either (the adapter forces them off).
+    const adapter = makeSingleTabAdapter({
+      worker: (options: { name: string }) => {
+        const worker = new LiveStoreWorker(options)
+        trackLeaderWorker(worker, lock.release)
+        devBridge?.watchLeaderWorker(worker, options.name)
+        return worker
+      },
+      storage: { type: "opfs" },
+      // The fast path reads the state db straight from OPFS, in parallel with
+      // the leader's boot. After an offline schema change the leader is
+      // rebuilding that file from the eventlog (minutes on a big store), and a
+      // session booted from the half-built file saw a ready project as
+      // `downloading` — recoverInterruptedDownloads then deleted it (found
+      // 2026-10-15). Taking the snapshot from the leader waits for its boot,
+      // rebuild included. A leader that never boots now never hands out a
+      // store either; OfflineLeaderWatchdog prompts a restart if boot drags on.
+      experimental: { disableFastPath: true },
     })
-  })
+    return releaseLockOnShutdown(adapter, lock.release)
+  } catch (error) {
+    lock.release()
+    throw error
+  }
 }
 
 let storePromise: Promise<Store<typeof schema>> | undefined

@@ -129,8 +129,8 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ],
-  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
-  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
+  // format: "es" is required by LiveStore's web adapter (its leader worker entry
+  // is an ES module, imported via the `?worker` suffix in src/lib/offline/store.ts).
   worker: {
     format: "es",
   },

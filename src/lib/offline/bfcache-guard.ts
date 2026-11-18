@@ -18,13 +18,19 @@
 // Commits that haven't reached the leader at that instant are lost, but the
 // alternative is a dead leader for the rest of the process, which loses
 // everything after it.
+//
+// The frozen page also still holds the leader lock (leader-lock.ts), and a
+// held lock outlives the freeze, so the next page would wait for it forever.
+// `onTerminated` lets store.ts release it along with the worker.
 
 let leaderWorker: Worker | undefined
+let onLeaderTerminated: (() => void) | undefined
 let installed = false
 
 /** Records the leader worker the adapter just spawned (see store.ts). */
-export function trackLeaderWorker(worker: Worker): void {
+export function trackLeaderWorker(worker: Worker, onTerminated?: () => void): void {
   leaderWorker = worker
+  onLeaderTerminated = onTerminated
 }
 
 export interface BfcacheGuardOptions {
@@ -40,7 +46,9 @@ export function installBfcacheGuard({ target = window, reload = () => target.loc
   target.addEventListener("pagehide", (event) => {
     if (!(event as PageTransitionEvent).persisted || !leaderWorker) return
     leaderWorker.terminate()
+    onLeaderTerminated?.()
     leaderWorker = undefined
+    onLeaderTerminated = undefined
     terminated = true
     if (import.meta.env.DEV) console.info("[offline] page entering bfcache — terminated LiveStore leader")
   })
@@ -54,5 +62,6 @@ export function installBfcacheGuard({ target = window, reload = () => target.loc
 /** Test seam. */
 export function __resetBfcacheGuardForTests(): void {
   leaderWorker = undefined
+  onLeaderTerminated = undefined
   installed = false
 }

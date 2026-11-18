@@ -292,6 +292,11 @@ async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<stri
   return found
 }
 
+/** Which of `ids` are in the IndexedDB outbox, in any status (any owner). */
+export function outboxHasIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
+  return lookupOutboxIds(ids)
+}
+
 /**
  * Writes still running in this page, by event id: each resolves to the ids
  * that write put (or is putting) in IndexedDB, once it has decided — so a

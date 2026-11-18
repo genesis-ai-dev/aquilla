@@ -8,6 +8,7 @@ import { catchUpProject } from "./catch-up"
 import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
 import {
   forgetStallRescueForTests,
+  isRescuedFromOfflineQueue,
   holdJournalUntilPersisted,
   rescueUnpersistedOfflineWrites,
 } from "@/lib/sync/offline-stall-rescue"
@@ -581,6 +582,8 @@ describe("flush triggering", () => {
       webSocketCtor: FakeWsCtor,
       fetchImpl: fetchImpl as unknown as typeof fetch,
       flushDebounceMs: 1,
+      // q1's IndexedDB copy hasn't uploaded yet.
+      outbox: { has: async (ids) => new Set(ids.filter((id) => id === "q1")), subscribe: () => () => {} },
     })
     try {
       await waitFor(() => fetchImpl.mock.calls.length > 0)
@@ -595,6 +598,77 @@ describe("flush triggering", () => {
       adapter.close()
       forgetStallRescueForTests()
     }
+  })
+
+  it("dequeues a rescued row once its IndexedDB copy has uploaded, and not before", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    // A fake outbox: q1 sits in IndexedDB until the HTTP flusher "uploads" it.
+    const inOutbox = new Set(["q1"])
+    const listeners = new Set<() => void>()
+    const outbox = {
+      has: vi.fn(async (ids: readonly string[]) => new Set(ids.filter((id) => inOutbox.has(id)))),
+      subscribe: (cb: () => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    }
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox,
+    })
+    try {
+      await waitFor(() => outbox.has.mock.calls.length > 0)
+      await new Promise((r) => setTimeout(r, 30))
+      // Still in IndexedDB: the row stays, so the edit still counts as unsynced.
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+      expect(isRescuedFromOfflineQueue("q1")).toBe(true)
+
+      inOutbox.delete("q1")
+      for (const cb of listeners) cb()
+      await waitFor(() => store.query(tables.eventQueue.select("id")).length === 0)
+      expect(isRescuedFromOfflineQueue("q1")).toBe(false)
+      // Never sent from the offline queue.
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("stops watching the outbox once closed", async () => {
+    let subscribed = 0
+    const outbox = {
+      has: async () => new Set<string>(),
+      subscribe: () => {
+        subscribed += 1
+        return () => {
+          subscribed -= 1
+        }
+      },
+    }
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      outbox,
+    })
+    expect(subscribed).toBe(1)
+    adapter.close()
+    expect(subscribed).toBe(0)
   })
 
   it("stops flushing once closed", async () => {

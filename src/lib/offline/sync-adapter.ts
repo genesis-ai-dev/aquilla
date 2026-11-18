@@ -47,7 +47,12 @@ import {
   type WsReconciler,
 } from "@/lib/sync/ws-reconciler"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
-import { anyRescuedFromOfflineQueue, isRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
+import {
+  anyRescuedFromOfflineQueue,
+  forgetRescuedFromOfflineQueue,
+  isRescuedFromOfflineQueue,
+} from "@/lib/sync/offline-stall-rescue"
+import { outboxHasIds, subscribeToOutbox } from "@/lib/sync/outbox"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
 import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
@@ -98,7 +103,19 @@ export interface OfflineSyncAdapterOptions {
   catchUpDeps?: CatchUpDeps
   /** While this reports offline, nothing is attempted; coming online flushes. Defaults to the Rust probe. */
   connectivity?: ConnectivitySource
+  /** Test seam for the IndexedDB outbox, which owns rows rescued from a stalled leader. */
+  outbox?: RescueOutbox
 }
+
+/** The slice of the IndexedDB outbox (src/lib/sync/outbox.ts) the adapter reads. */
+export interface RescueOutbox {
+  /** Which of `ids` are still in the outbox, in any status. */
+  has(ids: readonly string[]): Promise<ReadonlySet<string>>
+  /** Called after any outbox change; returns an unsubscribe. */
+  subscribe(cb: () => void): () => void
+}
+
+const indexedDbOutbox: RescueOutbox = { has: outboxHasIds, subscribe: subscribeToOutbox }
 
 export interface OfflineSyncAdapter {
   isConnected(): boolean
@@ -163,6 +180,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const minFlushRetryMs = options.minFlushRetryMs ?? 2_000
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
   const frameCoalesceMs = options.frameCoalesceMs ?? 100
+  const outbox = options.outbox ?? indexedDbOutbox
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -519,6 +537,53 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       .some((id) => !isRescuedFromOfflineQueue(id))
   }
 
+  // A row rescued into IndexedDB (offline-stall-rescue.ts) isn't sent from
+  // here, but it stays queued while IndexedDB's copy waits to upload, so the
+  // quit guard, update gate and catch-up keep treating the edit as unsynced.
+  // Once that copy has left the outbox (uploaded, or discarded) the row goes
+  // too. Otherwise a leader that recovers after a rescue would persist rows
+  // nothing ever dequeues: "unsynced" forever, and sent again on next launch.
+  let releaseRunning: Promise<void> | null = null
+  let releaseAgain = false
+
+  async function releaseRescuedRowsOnce(): Promise<void> {
+    if (closed || !anyRescuedFromOfflineQueue()) return
+    const rescued = store
+      .query(tables.eventQueue.select("id", "status").where({ projectId }))
+      // A flushing row is a POST that started before the rescue; it settles itself.
+      .filter((row) => row.status !== "flushing" && isRescuedFromOfflineQueue(row.id))
+      .map((row) => row.id)
+    if (rescued.length === 0) return
+    const stillInOutbox = await outbox.has(rescued)
+    if (closed) return
+    const uploaded = rescued.filter(
+      (id) => !stillInOutbox.has(id) && store.query(tables.eventQueue.select("id").where({ id }).first()) !== undefined,
+    )
+    if (uploaded.length === 0) return
+    store.commit(...uploaded.map((id) => events.eventDequeued({ id })))
+    forgetRescuedFromOfflineQueue(uploaded)
+  }
+
+  function releaseRescuedRows(): void {
+    if (closed || !anyRescuedFromOfflineQueue()) return
+    if (releaseRunning) {
+      releaseAgain = true
+      return
+    }
+    releaseRunning = releaseRescuedRowsOnce()
+      .catch((err: unknown) => {
+        // The next outbox change tries again.
+        console.warn("[offline] Couldn't release rows rescued to IndexedDB", err)
+      })
+      .finally(() => {
+        releaseRunning = null
+        if (releaseAgain) {
+          releaseAgain = false
+          releaseRescuedRows()
+        }
+      })
+  }
+
   function cancelFlushTimer(): void {
     if (flushTimer === null) return
     clearTimeout(flushTimer)
@@ -638,9 +703,14 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     void flushNow()
   })
 
+  // IndexedDB's copy of a rescued row uploading (or being discarded) is what
+  // lets the row go.
+  const unsubscribeOutbox = outbox.subscribe(releaseRescuedRows)
+
   // Anything already queued from a previous session (the app was closed with
   // unsynced work) goes out without waiting for the socket.
   armFlush(flushDebounceMs)
+  releaseRescuedRows()
 
   return {
     isConnected: () => reconciler.isConnected(),
@@ -657,6 +727,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       bufferedFrames = []
       unsubscribeQueue()
       unsubscribeConnectivity()
+      unsubscribeOutbox()
       reconciler.close()
     },
   }

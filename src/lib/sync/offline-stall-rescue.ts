@@ -8,7 +8,9 @@
  * `rescueUnpersistedOfflineWrites` copies them to the IndexedDB outbox, and
  * from then on IndexedDB owns them: the HTTP flusher stops waiting on their
  * offline-queue copies, and the offline sync adapter stops sending those, so
- * each rescued edit is uploaded once, by one queue. A healthy leader confirms
+ * each rescued edit is uploaded once, by one queue. The adapter dequeues a
+ * rescued row once IndexedDB's copy has left the outbox; until then it still
+ * counts as unsynced (quit guard, update gate, catch-up). A healthy leader confirms
  * within milliseconds and none of this comes into play.
  *
  * New edits can't join the set once a stall is reported: `planOfflineRouting`
@@ -38,6 +40,11 @@ const rescuedIds = new Set<string>()
 
 export function isRescuedFromOfflineQueue(id: string): boolean {
   return rescuedIds.has(id)
+}
+
+/** The offline queue's copies of `ids` are gone (offline sync adapter): nothing left to leave alone. */
+export function forgetRescuedFromOfflineQueue(ids: readonly string[]): void {
+  for (const id of ids) rescuedIds.delete(id)
 }
 
 /** Cheap check before scanning a queue for rescued ids. */

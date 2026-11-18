@@ -35,6 +35,10 @@ describe("inherited settings vocabulary (AQU-1075)", () => {
     // copy would let an upstream maintainer lock another project's people out
     // of their imports.
     expect(INHERIT_NEVER_KEYS).toContain("importMinRole")
+    // AQU-2309: and never the milestone floor. It is a permission of this
+    // project; copying it would let an upstream maintainer decide who may
+    // divide the next project's files.
+    expect(INHERIT_NEVER_KEYS).toContain("milestoneFloor")
     expect(copied.has("validationNamedUsers")).toBe(false)
     expect(copied.has("rules")).toBe(false)
   })

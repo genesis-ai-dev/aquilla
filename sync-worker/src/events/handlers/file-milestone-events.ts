@@ -8,8 +8,9 @@
 // table either one touches besides `events` is `file_milestones`. That is what
 // makes setting a division free — no cell's head advances, so no lane's
 // translation goes stale and no "source changed" marker appears anywhere.
-// Maintainer floor (role-policy), the file.track.set rationale: a division
-// relayouts the navigator for every collaborator who opens the file.
+// The static floor is project lead (role-policy); the events route applies
+// the project's milestoneFloor on top (db/shared/milestone-floor.ts). A
+// division relayouts the navigator for every collaborator who opens the file.
 //
 // Every refusal below is RETURNED, never thrown — see DispatchOutcome in
 // ./types. A throw here 500s the whole POST, and the client reads 5xx as

@@ -493,6 +493,8 @@ export const ha: Catalog = {
   "editor.panel.resizeParallelBibles": "Ku sauya girman fannin Littattafai masu tsarki a gefe",
   "editor.panel.resizeVerseResources": "Ku sauya girman fannin kayan taimakon aya",
   "editor.translationNotes.loadFailed": "An kasa loda bayanan fassara",
+  "editor.bookHealth.showFewerCells": "Ku nuna ƙwayoyi kaɗan",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"Ku nuna ƙarin ƙwaya {count}","other":"Ku nuna ƙarin ƙwayoyi {count}"},"countVar":"count"},
   "editor.ai.copyError": "Ku kwafi kuskure",
   "editor.ai.copyErrorDone": "An kwafa",
   "editor.audio.record": "Ku naɗa sauti",

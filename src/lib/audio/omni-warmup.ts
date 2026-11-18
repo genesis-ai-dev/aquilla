@@ -40,8 +40,8 @@ function headers(jwt: string): HeadersInit {
   return { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }
 }
 
-/** The two Omnilingual models, by the server's short names. */
-export type OmniModelName = "ctc" | "zs"
+/** The Omnilingual models, by the server's short names. */
+export type OmniModelName = "ctc" | "zs" | "fast"
 
 export async function fetchOmniStatus(jwt: string, projectId: string, model: OmniModelName): Promise<ZsStatus> {
   const params = new URLSearchParams({ projectId, model })

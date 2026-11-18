@@ -459,7 +459,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
-      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      '"omni-zs" | "omni-fast". "omni-fast" is the fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot; "auto" never picks it. ' +
+      '"omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
       'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
       'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
       'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
@@ -469,7 +470,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
-      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+      'only go to omni-ctc / omni-zs / omni-fast, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -484,7 +485,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           required: ['data', 'format'],
           additionalProperties: false,
         },
-        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs', 'omni-fast'], description: 'Default "auto". "omni-fast": fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.' },
         language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
         exampleCellIds: {
           type: 'array', items: { type: 'string' },
@@ -509,7 +510,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       type: 'object',
       properties: {
         ...projectIdProp,
-        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc', 'omni-fast'], description: 'Default "omni-zs". "omni-fast" starts in seconds and needs no warm-up.' },
         warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
       },
       required: ['projectId'],

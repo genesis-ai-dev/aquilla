@@ -79,7 +79,7 @@ export class AsrWarmingError extends Error {
  */
 export function hostedWindowSeconds(model: TranscriptionModel, language?: string): number {
   if (model === "whisper" || model === "qwen3-asr") return 60
-  if (model === "omni-ctc" || model === "omni-zs") return 30
+  if (model === "omni-ctc" || model === "omni-zs" || model === "omni-fast") return 30
   return autoRouteIsOpenRouter(language) ? 60 : 30
 }
 
@@ -256,7 +256,8 @@ export function __resetHostedTranscriptionForTests(): void {
  * take on a cell (`zeroShot`), with at least one example, once the model is
  * warm. Without examples it offers Omnilingual standard; when the org has
  * turned ZS off, or the person picks it at the warm-up timeout, it runs the
- * automatic model.
+ * automatic model. With `quietFallback`, each of those cases runs that model
+ * instead, with no prompt and no toast.
  */
 export async function transcribeHosted(
   pcm: Float32Array,
@@ -265,6 +266,16 @@ export async function transcribeHosted(
     projectId: string
     username?: string
     language?: string
+    /** This run's model, in place of the account's Preferences choice — the
+     *  Transcribe lens's Fast/Smart picker. */
+    model?: TranscriptionModel
+    /**
+     * When the chosen model is zero-shot and it cannot run (no cell, no
+     * examples, the org turned it off, or the person gave up on the warm-up),
+     * run this model instead, without asking and without a toast. Absent, the
+     * prompts and toasts are as they always were.
+     */
+    quietFallback?: TranscriptionModel
     zeroShot?: ZeroShotCellContext
     /** The take is waiting for the model to start (true), or no longer (false). */
     onWaitingForModel?: (waiting: boolean) => void
@@ -278,13 +289,15 @@ export async function transcribeHosted(
     transcribeHostedPcm(pcm, args.jwt, args.projectId, {
       language, model, ...(args.onRateLimited ? { onRateLimited: args.onRateLimited } : {}), ...extra,
     })
-  const chosen = getTranscriptionModel(args.username)
+  const chosen = args.model ?? getTranscriptionModel(args.username)
+  const quiet = args.quietFallback
   const cell = args.zeroShot
   // Zero-shot learns from this lane's takes; a source clip has none to use.
   if (chosen !== "omni-zs") return run(chosen)
-  if (!cell) return run("auto")
+  if (!cell) return run(quiet ?? "auto")
 
   const withoutExamples = async () => {
+    if (quiet) return run(quiet)
     if (await noExamplesChoiceFor(args.projectId) === "omni-ctc") return run("omni-ctc")
     throw new ZeroShotNoExamplesError()
   }
@@ -303,7 +316,7 @@ export async function transcribeHosted(
     try { return await ensureZsReady(args.jwt, args.projectId, ui) }
     finally { args.onWaitingForModel?.(false) }
   }
-  if ((await waitForModel()).kind === "use-auto") return run("auto")
+  if ((await waitForModel()).kind === "use-auto") return run(quiet ?? "auto")
 
   let switchToAuto = false
   try {
@@ -315,9 +328,10 @@ export async function transcribeHosted(
       },
     })
   } catch (error) {
-    if (error instanceof AsrWarmingError && switchToAuto) return run("auto")
+    if (error instanceof AsrWarmingError && switchToAuto) return run(quiet ?? "auto")
     if (error instanceof ZeroShotNoExamplesError) return withoutExamples()
     if (!(error instanceof ZeroShotDisabledError)) throw error
+    if (quiet) return run(quiet)
     toastZeroShotDisabled()
     return run("auto")
   }

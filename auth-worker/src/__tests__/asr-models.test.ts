@@ -1,7 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { pickAsrModel, toOmniCode, toQwenCode, toWhisperCode } from "../../../db/shared/asr-models"
 import {
-  OMNI_GPU_CENTS_PER_SEC, omniAmortization, omniCostBoundCents, omniRawCostCents,
+  ASR_MODEL_CHOICES, ASR_WINDOW_SECONDS, isOmniModel, pickAsrModel, toOmniCode, toQwenCode, toWhisperCode,
+} from "../../../db/shared/asr-models"
+import {
+  OMNI_GPU_CENTS_PER_SEC, OMNI_MODEL_GPU, omniAmortization, omniCostBoundCents, omniRawCostCents,
+  omniWarmCostCents,
 } from "../../../db/shared/omni-asr-cost"
 
 type Mapper = (tag: string | undefined | null) => string | undefined
@@ -81,5 +84,33 @@ describe("Omnilingual cost", () => {
     expect(omniAmortization(undefined)).toBe(1.5)
     expect(omniAmortization("2")).toBe(2)
     for (const bad of ["0", "0.5", "abc", "-1"]) expect(() => omniAmortization(bad)).toThrow()
+  })
+})
+
+describe("omni-fast (CTC 300M on CPU)", () => {
+  it("is an explicit choice that automatic routing never makes", () => {
+    // Fast is less accurate than what auto picks. It must be asked for.
+    expect(ASR_MODEL_CHOICES).toContain("omni-fast")
+    expect(isOmniModel("omni-fast")).toBe(true)
+    for (const tag of ["tpi", "luo", "fr", "yue", undefined]) expect(pickAsrModel(tag), String(tag)).not.toBe("omni-fast")
+  })
+  it("is windowed at 30 s like the other Omnilingual models", () => {
+    // The service rejects 40 s and up, so a 60 s window would fail every long take.
+    expect(ASR_WINDOW_SECONDS["omni-fast"]).toBe(30)
+  })
+  it("reserves at least the CTC bound, because an old service runs it as CTC", () => {
+    // A refused `fast` call is retried on the CTC GPU under the reservation
+    // taken for `fast`. A CPU-priced bound would let that run settle above it.
+    for (const seconds of [1, 30, 39]) {
+      expect(omniCostBoundCents("fast", seconds, 1.5)).toBeGreaterThanOrEqual(omniCostBoundCents("ctc", seconds, 1.5))
+    }
+    // And it covers the CPU run itself at twice the benchmark's slowest speed
+    // (2.4 s per 30 s clip, docs/benchmarks/omni-asr-cpu.md).
+    expect(omniRawCostCents(30 * 0.16, "modal-cpu", 1.5)).toBeLessThan(omniCostBoundCents("fast", 30, 1.5))
+  })
+  it("prices the CPU container, so fast is not billed at the dearest GPU rate", () => {
+    // An unlisted `gpu` name bills at the top rate (L40S): 7× too much here.
+    expect(OMNI_GPU_CENTS_PER_SEC[OMNI_MODEL_GPU.fast]).toBeCloseTo(4 * 0.00131 + 8 * 0.000222, 4)
+    expect(omniWarmCostCents("fast")).toBeLessThan(omniWarmCostCents("ctc"))
   })
 })

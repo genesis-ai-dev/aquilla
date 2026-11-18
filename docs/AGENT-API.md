@@ -1271,10 +1271,14 @@ Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.
 `{ text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }`.
 Times are seconds from the start of the whole clip.
 
-**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs`.
+**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs` | `omni-fast`.
 `auto` picks Whisper for its 99 languages, Qwen3-ASR for Chinese varieties, and
-Omnilingual CTC for any other language code. It never picks zero-shot. `language`
+Omnilingual CTC for any other language code. It never picks zero-shot or fast. `language`
 (BCP-47) defaults to the lane's language code.
+
+**Fast (`omni-fast`).** A fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.
+It needs no warm-up. A service that does not have it yet runs the call as `omni-ctc`,
+and the reply's `model` says so.
 
 **Zero-shot (`omni-zs`).** It learns the language from up to 10 of the lane's own
 takes that have a transcript (2–30 s each). By default the examples are ranked by
@@ -1300,7 +1304,7 @@ and project credit admission still apply.
 **Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
 Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
 a word is not split. A stored compressed take (webm/ogg) cannot be decoded in a
-Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`, because
+Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`/`omni-fast`, because
 OpenRouter does not document webm input.
 
 **Errors.**

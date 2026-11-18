@@ -24,6 +24,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
+import { RestoreProjectDialog } from "@/components/RestoreProjectDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
@@ -416,6 +417,7 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
   // The portfolio row the list this page was opened from was already showing.
   // `loadRow` below still reads the org's portfolio and replaces it.
   const [audio, setAudio] = useState<PortfolioProject | null>(() => readPortfolioRowSeed(jwt, id))
@@ -1951,7 +1953,12 @@ export function ProjectOverview() {
                       </Link>
                     )}
                     {canManage && isArchived && (
-                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setRestoreConfirmOpen(true)}
+                        disabled={busy}
+                      >
                         {t("common.restore")}
                       </Button>
                     )}
@@ -2272,6 +2279,14 @@ export function ProjectOverview() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+
+                <RestoreProjectDialog
+                  open={restoreConfirmOpen}
+                  onOpenChange={setRestoreConfirmOpen}
+                  onConfirm={() => {
+                    void handleRestore()
+                  }}
+                />
 
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}

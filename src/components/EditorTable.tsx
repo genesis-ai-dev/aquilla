@@ -106,7 +106,16 @@ import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
-import { InlineBacktranslation } from "./cell/InlineBacktranslation"
+import {
+  BacktranslationColumnHeader,
+  BacktranslationColumnProvider,
+  BacktranslationColumnToggle,
+  BacktranslationRowCell,
+  BacktranslationRowStack,
+  useEditorBacktranslationColumn,
+  type EditorBacktranslationConfig,
+} from "./backtranslation/BacktranslationColumn"
+import { needsLiveBacktranslation } from "@/lib/completion/live-bt"
 import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
@@ -1294,6 +1303,8 @@ interface EditorTableProps {
    * translator's chosen versions, else the project defaults). Absent: none.
    */
   parallelBibles?: EditorParallelBiblesConfig
+  /** The Back-translation column: absent ⇒ the column is not offered here. */
+  backtranslationColumn?: EditorBacktranslationConfig
   /**
    * AQU-1692: saves a maintainer's voice correction. Without it (or below
    * maintainer) the voice details offer no "Correct…".
@@ -1411,6 +1422,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onChapterPicked,
   bibleOpen = false,
   parallelBibles,
+  backtranslationColumn,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
 }, ref) {
@@ -2792,7 +2804,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       return row ? [row] : []
     }))
   }, [parallelBibles, viewableIndexes, firstVisibleIndex, cellStoreVersion, displayCellIds, cellStore, versePartByCellId])
+  // The Back-translation column is decided before the Bible columns, so on a
+  // tight window it keeps its track and the Bibles stack under the source.
+  const collectMissingBacktranslations = useCallback(() => displayCellIds.filter((id) => {
+    const view = cellStore.getCellView(id)
+    return Boolean(view) && needsLiveBacktranslation({
+      translated: view?.translated ?? "",
+      targetEventId: view?.targetEventId,
+      record: backtranslationByCellId?.get(id),
+    })
+  }), [displayCellIds, cellStore, backtranslationByCellId])
+  const btColumn = useEditorBacktranslationColumn({
+    config: backtranslationColumn,
+    // A language that delivers audio and no text has nothing to read back.
+    enabled: Boolean(onBacktranslate) && !audioOnlyLane,
+    configured: Boolean(isBacktranslationConfigured),
+    canWrite: canEdit,
+    sourceLanguage: project.sourceLanguage || undefined,
+    widthRef: tableRootRef,
+    gutterPx: editorGutterPx(castGutter),
+    collectMissing: collectMissingBacktranslations,
+  })
+  const btTrack = btColumn?.layout === "column" ? 1 : 0
   const bibleColumns = useEditorBibleColumns({
+    extraTracks: btTrack,
     config: parallelBibles,
     // A scripture file: chapters, and nothing but chapters. (scriptureNumbering
     // alone is also true for a file with no milestones at all.)
@@ -2802,7 +2837,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     gutterPx: editorGutterPx(castGutter),
   })
   const bibleTrackCount = bibleColumns?.layout === "columns" ? bibleColumns.columns.length : 0
-  const gridCols: EditorGridCols = editorGridCols(castGutter, bibleTrackCount)
+  const extraTrackCount = bibleTrackCount + btTrack
+  const gridCols: EditorGridCols = editorGridCols(castGutter, extraTrackCount)
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
@@ -3645,10 +3681,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <PlayingCueContext.Provider value={cueStore}>
     <SmartEditsProvider value={smartEditsContext}>
     <BibleColumnsProvider value={bibleColumns}>
+    <BacktranslationColumnProvider value={btColumn}>
     <div
       ref={tableRootRef}
       className="flex h-full min-h-0 flex-col"
-      style={editorGridStyle(castGutter, bibleTrackCount)}
+      style={editorGridStyle(castGutter, extraTrackCount, btTrack > 0)}
       onMouseUp={handleMouseUp}
     >
       {showStripNav && stripNavSlot
@@ -3711,8 +3748,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
-              ? editorHeaderGridCols(true, bibleTrackCount)
-              : editorHeaderGridCols(false, bibleTrackCount),
+              ? editorHeaderGridCols(true, extraTrackCount)
+              : editorHeaderGridCols(false, extraTrackCount),
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
@@ -3859,7 +3896,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 {activeLaneLabel}
               </Badge>
             )}
+            <BacktranslationColumnToggle />
           </div>
+          <BacktranslationColumnHeader />
         </div>
         )}
       </div>
@@ -3949,6 +3988,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </BacktranslationColumnProvider>
     </BibleColumnsProvider>
     </SmartEditsProvider>
     </PlayingCueContext.Provider>
@@ -8210,6 +8250,10 @@ function EditorRow({
   const isBtStale = Boolean(
     cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
+  const openBacktranslationDetails = useCallback(() => {
+    setExpansionTab("backtranslation")
+    setExpanded(true)
+  }, [])
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
     return cellAudioTimings.map((t) => t.word).join(" ")
@@ -9753,17 +9797,14 @@ function EditorRow({
               )}
             </EditorTargetCellWell>
             </div>
-            {/* The back-translation, one quiet line under the translation —
-                live readings land here moments after a save. */}
-            <InlineBacktranslation
-              reading={cell.backtranslation}
+            {/* The back-translation under the translation: only when its
+                column is open but has no room (a narrow window, a phone). */}
+            <BacktranslationRowStack
+              cell={cell}
               stale={isBtStale}
               generating={Boolean(isBacktranslating)}
               error={backtranslationError}
-              onOpen={() => {
-                setExpansionTab("backtranslation")
-                setExpanded(true)
-              }}
+              onOpenDetails={openBacktranslationDetails}
             />
             {hasInlineFootnotes && (
               <FootnoteInline
@@ -9863,6 +9904,22 @@ function EditorRow({
           </div>
         </EditorTargetCellColumn>
 
+        {/* Back-translation column: the last track, after Target. */}
+        <BacktranslationRowCell
+          key={cell.id}
+          cell={cell}
+          visibleTranslated={visibleTranslated ?? ""}
+          stale={isBtStale}
+          generating={Boolean(isBacktranslating)}
+          error={backtranslationError}
+          editable={editable}
+          dir={sourceCellDirection}
+          fontSize={sourceFontSize}
+          onBacktranslate={onBacktranslate}
+          onSave={onSaveBacktranslation}
+          onOpenDetails={openBacktranslationDetails}
+        />
+
         {/* Floating action rail — anchored to the row's right edge, aligned
             with the target column's header lane so it never covers the target
             text. z-20 so it sits above the sticky column header (z-10).
@@ -9870,7 +9927,9 @@ function EditorRow({
             scroll container, the sticky header's stacking context wins (rows
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
-        <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-2 md:top-0.5">
+        {/* With the Back-translation column open the rail is no longer at the
+            row's end: `--editor-rail-end` (editor-grid.ts) keeps it over Target. */}
+        <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-[var(--editor-rail-end,0.5rem)] md:top-0.5">
           <div
             className="pointer-events-auto"
             // AQU-354: track focus landing on / leaving a rail control so the

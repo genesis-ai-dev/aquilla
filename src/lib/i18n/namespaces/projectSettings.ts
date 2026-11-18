@@ -532,7 +532,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.validationBatchSizeZeroNote": "0 validates all eligible cells (default);",
     "projectSettings.ai.liveBacktranslationLabel": "Live back-translation",
     "projectSettings.ai.liveBacktranslationDescription":
-      "Back-translate each translation as soon as it is drafted or edited, and show the reading under the row. " +
+      "Back-translate each translation as soon as it is drafted or edited. It shows in the editor's Back-translation column. " +
       "Uses AI credits for every save. Hand-corrected back-translations are never replaced.",
     "projectSettings.ai.backtranslationModelLabel": "Back-translation model",
     "projectSettings.ai.backtranslationModelDescription":

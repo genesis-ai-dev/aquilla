@@ -112,9 +112,24 @@ function authHeaders(jwt: string): HeadersInit {
   };
 }
 
-export async function lookupUser(jwt: string, username: string): Promise<LookedUpUser | null> {
+/**
+ * Exact identifier -> account resolution for the add-member surfaces.
+ *
+ * AQU-2576: pass `projectId` to let the identifier be an EMAIL as well as a
+ * username. The server resolves an email only for callers who already hold
+ * `role >= project_lead` on that project — the same bar as adding a member —
+ * because an email -> account answer is exactly the oracle we do not want to
+ * hand to every signed-in account. Without `projectId` this is username-only,
+ * as it has always been.
+ */
+export async function lookupUser(
+  jwt: string,
+  identifier: string,
+  projectId?: string | null,
+): Promise<LookedUpUser | null> {
+  const scope = projectId ? `&projectId=${encodeURIComponent(projectId)}` : "";
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/users/lookup?username=${encodeURIComponent(username)}`,
+    `${FRONTIER_BASE}/api/v2/users/lookup?username=${encodeURIComponent(identifier)}${scope}`,
     { headers: authHeaders(jwt) }
   );
   if (res.status === 404) return null;

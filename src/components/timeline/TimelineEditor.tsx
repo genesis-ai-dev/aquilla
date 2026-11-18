@@ -570,6 +570,10 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
+  /** AQU-2577: pick a line for Make speech from its ghost clip on the dub row. */
+  onPickGhost?(cellId: string, opts: { additive: boolean }): void
+  pickedGhostIds?: ReadonlySet<string>
+  makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-1684: the slot the recorder is recording into while it is open, else
    *  null — that track may not be hidden from under the take. */
   recordingSlot?: string | null
@@ -1135,9 +1139,11 @@ function LaneLabel({
       {/* The indent is on the CONTENT, not the row, so the row's background
           still spans the full gutter. A member steps in past the folder's
           own name, which is what makes the nest readable. It eases on the
-          rows' slide curve, so a track dragged over a folder steps in with
-          the gap opening for it. */}
+          rows' slide curve while this node stays mounted (a drag). A menu
+          move remounts the row in its new folder, so that transition never
+          runs; playTrackMove eases this element's padding instead. */}
       <div
+        data-tl-track-indent=""
         className={cn(
           "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
           indented && !collapsed && "pl-6",
@@ -1375,6 +1381,9 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
+  onPickGhost,
+  pickedGhostIds,
+  makingSpeechCellIds,
   recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
@@ -4700,6 +4709,9 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
+            onPickGhost={onPickGhost}
+            pickedGhostIds={pickedGhostIds}
+            makingSpeechCellIds={makingSpeechCellIds}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"

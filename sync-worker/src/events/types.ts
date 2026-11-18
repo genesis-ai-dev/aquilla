@@ -287,6 +287,14 @@ export interface AiDraftProvenance {
     evidenceCoverage?: number
     evidenceWeight?: number
   }
+  /**
+   * AQU-2628 / AQU-2642: set when the lane's orthography rewrote a drafted
+   * cell on its way to the changeset — how many words the rules changed and
+   * how many approved exceptions protected a word from them. Absent when the
+   * project records no orthography, or the draft was already written in it.
+   * Mirrors the field the app path stamps (src/lib/sync/outbox-types.ts).
+   */
+  orthography?: { wordsConverted: number; exceptionsApplied: number }
 }
 
 /** AQU-1673: where an imported proposal's text came from. Stamped on the

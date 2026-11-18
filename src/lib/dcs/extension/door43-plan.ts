@@ -95,7 +95,9 @@ export function specForPlanned(entry: DcsCatalogEntry, p: PlannedDcsFile, bookTi
     format: p.fileType,
     ...(file.bookCode ? { bookCode: file.bookCode } : {}),
     cells: file.cells.map((c) => ({
-      key: c.cellId,
+      // The built-in import's unit key: on a file whose source side is a
+      // revision chain, files.upsert pairs by this key (AQU-2459).
+      key: c.unitKey,
       cellId: c.cellId,
       value: c.value,
       ...(c.valueHtml !== undefined ? { html: c.valueHtml } : {}),

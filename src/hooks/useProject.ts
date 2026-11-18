@@ -21,7 +21,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { overlaySettings } from "@/hooks/project-settings-overlay"
 import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
-import { readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
+import { readListedProject, readResolvedProjectSeed, rememberResolvedProject } from "@/lib/sync/project-record-seed"
 import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { clearProjectTargetLanes, setProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
@@ -107,8 +107,18 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // AQU-1325: fall back to the record a previous resolve of this project
   // produced in this tab, so overview → editor (and back) paints the chrome
   // and name immediately and revalidates instead of blanking on a cold fetch.
-  const initialProject = options?.initialProject ?? readResolvedProjectSeed(projectId)
+  // Failing that, what the account's project directory already says about it:
+  // the list the user clicked through held its name, org, role, PM and files.
+  // That record is `provisional` until this hook's own resolve lands.
+  const [initial] = useState(() => {
+    const resolved = options?.initialProject ?? readResolvedProjectSeed(projectId)
+    if (resolved) return { project: resolved, listed: null }
+    const listed = enabled ? readListedProject(projectId) : null
+    return { project: listed ? minimalProjectRecord(listed) : null, listed }
+  })
+  const initialProject = initial.project
   const [project, setProject] = useState<ProjectRecord | null>(initialProject)
+  const [provisional, setProvisional] = useState(initial.listed != null)
   const [status, setStatus] = useState<ProjectLoadStatus>(initialProject ? "ready" : "loading")
   // AQU-334: the caller's role as returned by THIS load's GET /:projectId (or
   // its list-endpoint fallback) — always populated together with `project` on
@@ -125,7 +135,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // AQU-507: the project's designated PM from THIS load's resolve. null =
   // unassigned or not-yet-resolved; the overview's PM card reads it and
   // refresh()es after an assignment.
-  const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
+  const [pm, setPm] = useState<{ id: number; username: string } | null>(initial.listed?.pm ?? null)
   // Desktop: the last resolve gave up waiting for the offline store, so the
   // downloaded copy was never consulted. Retried once the store opens.
   const [offlineCopyPending, setOfflineCopyPending] = useState(false)
@@ -163,6 +173,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     ;(async () => {
       if (!session?.jwt) {
         if (cancelled) return
+        setProvisional(false)
         setProject(null)
         setRoleLevel(null)
         setStatus("no-session")
@@ -173,6 +184,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       const result = await resolveProjectForRead(projectId, session.jwt)
       if (cancelled) return
       setOfflineCopyPending(result.offlineCopyPending === true)
+      setProvisional(false)
       if (!result.ok) {
         if (result.reason === "unauthenticated") {
           void notifySessionExpiredIfCurrent(session.jwt)
@@ -357,6 +369,11 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     project: overlaid,
     status,
     loading: status === "loading",
+    /** True while `project` is what the account's project directory said, and
+     *  this hook's own read has not answered yet. Paint from it; do not decide
+     *  on it — its file list and role are as old as the session, and the org
+     *  floors the single-project read carries are absent. */
+    provisional,
     /** True when the project is not accessible (403/404). Use `status === "unreachable"`
      *  to distinguish server-down from a genuinely missing/forbidden project. */
     isError: status === "not-found" || status === "forbidden",

@@ -6,6 +6,7 @@ import {
   PORTFOLIO_PAGE_SIZE,
   type PortfolioProject,
 } from "@/lib/frontier/portfolio"
+import { readDirectoryPageSeed, rememberDirectoryPage } from "@/lib/frontier/portfolio-seed"
 
 export const PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS = 200
 
@@ -44,11 +45,17 @@ export function useProjectDirectory(opts: {
   )
   const debouncedQuery = useDebouncedValue(query, PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS)
   const fetchKey = `${enabled}:${jwt}:${orgKey}:${debouncedQuery}:${refreshKey}`
-  const [projects, setProjects] = useState<DirectoryProject[]>([])
-  const [settledKey, setSettledKey] = useState<string | null>(null)
+  // The unfiltered first page this tab last saw for these orgs: coming back
+  // from a project paints the list at once and replaces it when the read lands.
+  const seedKey = enabled && jwt && orgKey && debouncedQuery.trim() === "" ? `${jwt}:${orgKey}` : null
+  const [seed] = useState(() => (seedKey ? readDirectoryPageSeed(jwt, orgKey) : null))
+  const [projects, setProjects] = useState<DirectoryProject[]>(() => seed?.projects ?? [])
+  const [settledKey, setSettledKey] = useState<string | null>(seed ? fetchKey : null)
+  // Once per scope: a refresh of the same list must not repaint an older page.
+  const seededKeyRef = useRef<string | null>(seed ? seedKey : null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(seed?.nextCursor ?? null)
   const requestIdRef = useRef(0)
   const nextCursorRef = useRef<string | null>(null)
   const loadingMoreRef = useRef(false)
@@ -71,6 +78,16 @@ export function useProjectDirectory(opts: {
     setError(null)
     setLoadingMore(false)
     loadingMoreRef.current = false
+    // An org switch keeps this hook mounted: paint the new scope's last page.
+    if (seedKey && seededKeyRef.current !== seedKey) {
+      const switched = readDirectoryPageSeed(jwt, orgKey)
+      if (switched) {
+        setProjects(switched.projects)
+        setNextCursor(switched.nextCursor)
+        setSettledKey(fetchKey)
+      }
+    }
+    seededKeyRef.current = seedKey
 
     void (async () => {
       try {
@@ -79,6 +96,7 @@ export function useProjectDirectory(opts: {
           signal: controller.signal,
         })
         if (requestIdRef.current !== requestId) return
+        if (seedKey) rememberDirectoryPage(jwt, orgKey, page)
         setProjects(page.projects)
         setNextCursor(page.nextCursor)
         setSettledKey(fetchKey)
@@ -95,7 +113,7 @@ export function useProjectDirectory(opts: {
     return () => {
       controller.abort()
     }
-  }, [enabled, jwt, scopedIds, debouncedQuery, refreshKey, fetchKey])
+  }, [enabled, jwt, scopedIds, debouncedQuery, refreshKey, fetchKey, seedKey, orgKey])
 
   const loadMore = useCallback(() => {
     if (!enabled || !jwt || scopedIds.length === 0) return

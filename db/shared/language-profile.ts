@@ -50,6 +50,27 @@ import {
   type TextualVariantPolicy,
 } from './language-profile-slots'
 
+import {
+  ORTHOGRAPHY_TYPE_NAME,
+  orthographyProblem,
+  type OrthographyProfile,
+} from './orthography'
+
+export type { OrthographyException, OrthographyProfile } from './orthography'
+export {
+  APOSTROPHE_VARIANTS,
+  CANONICAL_APOSTROPHE,
+  LEGACY_APOSTROPHE,
+  approvedExceptions,
+  convertOrthography,
+  convertOrthographyText,
+  exceptionWordProblem,
+  findOldOrthography,
+  foldExceptionWord,
+  hasOrthography,
+  normalizeExceptionWord,
+} from './orthography'
+
 export type {
   DivineNamesProfile,
   HeadingPolicy,
@@ -94,6 +115,14 @@ export interface LanguageProfile {
   quoteMarks?: QuoteMarksProfile
   /** AQU-1906: the target language's own terminal and clause marks. */
   punctuation?: PunctuationProfile
+  /**
+   * AQU-2628: the spelling rules the lane writes in — the digraphs the
+   * alphabet replaced, its canonical apostrophe, and the words those rules
+   * must leave alone. Filled, it converts on import and after AI drafting,
+   * reverses on a legacy export and wakes the `old-orthography` check; empty,
+   * every one of those is a no-op.
+   */
+  orthography?: OrthographyProfile
   questionMarkers?: QuestionMarkersProfile
   pronouns?: PronounsProfile
   negators?: string[]
@@ -146,6 +175,7 @@ function quoteMarksProblem(value: unknown): string | null {
 const SLOT_PROBLEMS: Readonly<Record<LanguageProfileSlot, (value: unknown) => string | null>> = {
   quoteMarks: quoteMarksProblem,
   punctuation: punctuationProblem,
+  orthography: orthographyProblem,
   questionMarkers: questionMarkersProblem,
   pronouns: pronounsProblem,
   negators: negatorsProblem,
@@ -175,9 +205,16 @@ const QUOTE_MARKS_TYPE_NAME =
   '{ levels: { open: string, close: string }[] (1–3 levels, one character each), ' +
   `continuation: ${QUOTE_CONTINUATION_STYLES.map((s) => `"${s}"`).join(' | ')} }`
 
+/** Slots whose shape is spelled out here rather than in ./language-profile-slots.ts. */
+const LOCAL_TYPE_NAMES: Partial<Record<LanguageProfileSlot, string>> = {
+  quoteMarks: QUOTE_MARKS_TYPE_NAME,
+  orthography: ORTHOGRAPHY_TYPE_NAME,
+}
+
 /** Shown by describe_command("PatchSettings") and in validation errors. */
 export const LANGUAGE_PROFILE_TYPE_NAME = `{ ${LANGUAGE_PROFILE_SLOTS.map(
-  (slot) => `${slot}?: ${slot === 'quoteMarks' ? QUOTE_MARKS_TYPE_NAME : SLOT_TYPE_NAMES[slot]}`,
+  (slot) =>
+    `${slot}?: ${LOCAL_TYPE_NAMES[slot] ?? SLOT_TYPE_NAMES[slot as keyof typeof SLOT_TYPE_NAMES]}`,
 ).join(', ')} }`
 
 /** Null when `value` is a valid profile, else what is wrong with it. Unknown slots are rejected. */

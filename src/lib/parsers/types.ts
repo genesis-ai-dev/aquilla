@@ -524,6 +524,21 @@ export interface ProjectTtsSettings {
    * this is a note about a judgement, not a change to the script.
    */
   characterResolutions?: Record<string, CharacterResolution>
+  /**
+   * AQU-2577: how ONE line is delivered, by cell id, over its voice's own
+   * settings: a different speed or expressiveness for this line, and the
+   * audio tags it is spoken with. Read at generation time only
+   * (src/lib/audio/line-delivery.ts); never part of the text or an export.
+   */
+  lineDelivery?: Record<string, LineDelivery>
+}
+
+/** One line's delivery over its voice's settings (AQU-2577). ElevenLabs voices only. */
+export interface LineDelivery {
+  /** Knobs this line sets itself; the rest are the voice's. */
+  settings?: Partial<ElevenLabsVoiceSettings>
+  /** Audio tags spoken with the line, without brackets ("whispers"). */
+  tags?: string[]
 }
 
 export interface CharacterResolutionChoice<T> {
@@ -1334,6 +1349,18 @@ export interface CompletionSettings {
    * reviewer can approve in bounded batches. Clamped 0–500 at the UI.
    */
   validationBatchSize?: number
+
+  /**
+   * Live back-translation: read each translation back as soon as this browser
+   * drafts or saves it, instead of waiting for Read back. Off unless set.
+   */
+  liveBacktranslation?: boolean
+
+  /**
+   * The model back-translations are read with. Blank = the drafting `model`,
+   * through the same provider and endpoint.
+   */
+  backtranslationModel?: string
 }
 
 export interface WeightedExample {

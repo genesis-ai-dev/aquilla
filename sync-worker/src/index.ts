@@ -11,6 +11,7 @@ import { handleCheckingRequest } from "./checking/route"
 
 import { handleAdminRequest } from "./admin"
 import { handleDbTimeoutsRequest } from "./db-timeouts-route"
+import { handleDbStuckSessionsRequest } from "./db-stuck-sessions-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -454,6 +455,8 @@ const worker = {
     // and 404s anything it does not recognise.
     const dbTimeoutsResponse = await handleDbTimeoutsRequest(request, env)
     if (dbTimeoutsResponse) return dbTimeoutsResponse
+    const dbStuckSessionsResponse = await handleDbStuckSessionsRequest(request, env)
+    if (dbStuckSessionsResponse) return dbStuckSessionsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const checkingResponse = await handleCheckingRequest(request, env, ctx)

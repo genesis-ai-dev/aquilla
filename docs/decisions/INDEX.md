@@ -64,6 +64,8 @@ pinned symbol gets renamed and the check goes red.
 | 0008 | [File revisions and derived source cells](0008-file-revisions-and-derived-source-cells.md) | a file is an artifact + a filter stamp + a revision chain; alignment assigns cell ids |
 | 0009 | [Connector support access](0009-connector-support-access.md) | how a platform admin's cross-tenant reach gets onto a connector token, and what expires it |
 | 0010 | [USFM target layout](0010-usfm-target-layout.md) | a translation keeps the paragraph lines after its verse; breaks and headings the translator adds ride the next verse's value; one serializer for export and preview |
+| 0011 | [In-flight statement cap](0011-in-flight-statement-cap.md) | a request handle never gives the driver more statements at once than its pool has connections |
+| 0012 | [A desktop release is a draft until it is verified](0012-desktop-release-is-a-draft-until-verified.md) | the shell release line cuts itself, and installed apps are offered a build only after its signed files pass verification |
 
 ## Adding a record
 

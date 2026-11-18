@@ -184,6 +184,12 @@ export interface AiDraftProvenance {
    *  person chose this one — which option it was, out of how many. Absent on
    *  an ordinary single draft. */
   alternative?: { index: number; of: number }
+  /** AQU-2628: set when the lane's orthography rewrote the model's output on
+   *  its way to the cell — how many words the rules changed and how many
+   *  approved exceptions protected a word from them. Absent when the project
+   *  records no orthography, or when the draft was already in it. The model's
+   *  own text stays readable through `interventionId`. */
+  orthography?: { wordsConverted: number; exceptionsApplied: number }
   projectState: {
     sourceLanguage: string
     targetLanguage: string

@@ -19,7 +19,9 @@ and required checks are green. `ci.yml` is that check: lint (including
 `pnpm neon:check`. The base is `dev`, the label is not `on hold`, and the
 pull request is not stacked on an open parent. GitHub Actions does not click
 merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
-merges. A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
+merges. (One exception: `desktop-release-cut.yml` merges the version-bump pull
+request it opened itself, and only when the diff is the four version files;
+`docs/DESKTOP-RELEASES.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
 again. `scripts/release-plan.mjs` reads the same comment later and keeps the
 PR off the hourly release line unless the walk is `PASS` or `none` — as it
 does for a PR whose files touch a holding risk area (`risk:*` labels,

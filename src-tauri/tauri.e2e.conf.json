@@ -5,10 +5,19 @@
         "default",
         {
           "identifier": "e2e-webdriver",
-          "windows": ["main"],
-          "permissions": ["wdio-webdriver:default"]
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "wdio-webdriver:default"
+          ]
         }
       ]
     }
+  },
+  "identifier": "app.aquilla.e2e",
+  "productName": "Aquilla E2E",
+  "build": {
+    "beforeBuildCommand": "node scripts/build-desktop-e2e.mjs"
   }
 }

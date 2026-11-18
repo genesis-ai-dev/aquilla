@@ -358,6 +358,10 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
   const clear = useCallback(async (row: TranscriptRow) => {
     const attachment = row.cell.attachments?.[row.audioId]
     if (!attachment || !window.confirm(t("transcribe.confirmClear"))) return
+    // Empty at once, and kept empty until the read-back shows it: the row used
+    // to wait on that read, and kept its words until a page refresh when the
+    // read came back before the clear (reported 2026-11-18).
+    setLive(row.cell.id, { heard: null, transcript: "", aiCleaned: false })
     try {
       await clearTranscript({
         projectId: project.id,
@@ -367,10 +371,12 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
         ...(targetLang && !row.isSourceSegment ? { targetLang } : {}),
         author: session?.username ?? "local",
       })
-      setLive(row.cell.id, null)
       setStatus(row.cell.id, { kind: "idle" })
       await refresh(row)
+      setTimeout(() => setLive(row.cell.id, null), LIVE_TEXT_MAX_MS)
     } catch (err) {
+      // Not saved: the words are still there, so show them again.
+      setLive(row.cell.id, null)
       setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
     }
   }, [project.id, targetLang, session, setStatus, setLive, refresh, t])

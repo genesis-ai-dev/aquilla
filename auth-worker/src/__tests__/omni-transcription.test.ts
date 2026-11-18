@@ -470,3 +470,127 @@ describe("internal route for Agent API tools", () => {
     expect(calls.modal.map(call => call.url)).toEqual([`${MODAL}/warm`, `${MODAL}/status?model=zs`])
   })
 })
+
+// `omni-fast` is the Transcribe lens's "Fast" choice: CTC 300M on a CPU
+// container. This worker ships before the Modal redeploy (and a self-hosted box
+// may be older still), so a service that has never heard of `fast` must cost
+// the user nothing but accuracy: the run falls back to CTC and says so.
+describe("omni-fast", () => {
+  const OLD_SERVICE_REFUSAL = { detail: "model must be ctc or zs" }
+  const ctcReply = {
+    text: "ami", words: [{ text: "ami", start: 0, end: 1 }], gpuSeconds: 4, gpu: "NVIDIA L4",
+  }
+  /** The Modal app deployed 2026-10-19: knows only ctc and zs. */
+  function stubOldService(): Calls {
+    const calls: Calls = { whisper: [], modal: [] }
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (!url.startsWith(MODAL)) throw new Error(`unexpected fetch ${url}`)
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+      calls.modal.push({ url, headers: new Headers(init?.headers), body })
+      if (body.model === "fast" || url.endsWith("model=fast")) return Response.json(OLD_SERVICE_REFUSAL, { status: 400 })
+      return Response.json(url.includes("/status") ? { state: "cold" } : ctcReply)
+    })
+    return calls
+  }
+  const creditRow = () => env.AQUILLA_PG.prepare("SELECT raw_cost_cents FROM org_credit_usage_daily")
+    .first<{ raw_cost_cents: number }>()
+
+  it("sends the service model `fast` and bills the CPU container's rate", async () => {
+    // The CPU rate is a quarter of the cheapest GPU's: billing `fast` at a GPU
+    // rate would overcharge every Fast run.
+    const jwt = await owner()
+    const calls = stubProviders({ ...ctcReply, gpu: "modal-cpu" })
+    const request = { ...(await audio(2, "tpi")), model: "omni-fast" }
+    const response = await post(jwt, request)
+    expect(response.status).toBe(200)
+    expect(calls.modal.map(call => call.body)).toEqual([{ model: "fast", audio: request.input_audio.data, lang: "tpi_Latn" }])
+    expect(await response.json()).toMatchObject({ text: "ami", model: "omni-fast", granularity: "word" })
+    expect((await creditRow())?.raw_cost_cents).toBeCloseTo(4 * OMNI_GPU_CENTS_PER_SEC["modal-cpu"] * 1.5, 9)
+  })
+
+  it("runs once as CTC when the service does not know `fast`, and reports omni-ctc", async () => {
+    // Without the fallback, Fast would be a 502 until the redeploy. The reply
+    // must name the model that really ran, and the charge must be for the GPU
+    // that answered, not for the CPU container that never ran.
+    const jwt = await owner()
+    const calls = stubOldService()
+    const request = { ...(await audio(2, "tpi")), model: "omni-fast" }
+    const response = await post(jwt, request)
+    expect(response.status).toBe(200)
+    expect(calls.modal.map(call => call.body.model)).toEqual(["fast", "ctc"])
+    expect(calls.modal[1].body).toEqual({ model: "ctc", audio: request.input_audio.data, lang: "tpi_Latn" })
+    expect(await response.json()).toMatchObject({ text: "ami", model: "omni-ctc" })
+    expect((await creditRow())?.raw_cost_cents).toBeCloseTo(4 * OMNI_GPU_CENTS_PER_SEC["NVIDIA L4"] * 1.5, 9)
+  })
+
+  it("does not retry a 400 that is about the audio, not the model", async () => {
+    // Only "unknown model" means an old service. Retrying every 400 as CTC
+    // would send bad audio twice and hide the real error.
+    const jwt = await owner()
+    const calls: Calls = { whisper: [], modal: [] }
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      calls.modal.push({ url: String(input), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) })
+      return Response.json({ detail: "could not decode audio" }, { status: 400 })
+    })
+    const response = await post(jwt, { ...(await audio(2, "tpi")), model: "omni-fast" })
+    expect(response.status).toBe(502)
+    expect(calls.modal).toHaveLength(1)
+    expect(await creditRow()).toBeNull()
+  })
+
+  // The Transcribe lens runs omni-fast by default. A deployment without the
+  // Omnilingual service (self-hosted, local dev) must still transcribe there,
+  // so fast degrades to Whisper like Automatic does, and says which model ran.
+  it("falls back to Whisper, and says so, when Omnilingual is not configured", async () => {
+    const jwt = await owner()
+    const calls = stubProviders()
+    const response = await post(jwt, { ...(await audio(1, "tpi")), model: "omni-fast" }, { OMNI_ASR_MODAL_URL: undefined })
+    expect(response.status).toBe(200)
+    expect(calls.modal).toHaveLength(0)
+    expect(calls.whisper).toHaveLength(1)
+    expect(((await response.json()) as { model: string }).model).toBe("whisper")
+  })
+
+  it("reports `ready` for fast when the service is too old to know it", async () => {
+    // The client polls status before a run. A 502 here would block a run that
+    // the CTC fallback can serve at once.
+    const jwt = await owner()
+    const calls = stubOldService()
+    for (const model of ["fast", "omni-fast"]) {
+      const response = await app.request(`/api/v1/audio/transcriptions/status?projectId=${projectId}&model=${model}`,
+        { headers: authHeader(jwt) }, settings())
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ state: "ready" })
+    }
+    expect(calls.modal.map(call => call.url)).toEqual([`${MODAL}/status?model=fast`, `${MODAL}/status?model=fast`])
+  })
+
+  it("passes a newer service's fast status through", async () => {
+    const jwt = await owner()
+    stubProviders({ state: "starting", estGpuSecPerAudioSec: 0.1 })
+    const response = await app.request(`/api/v1/audio/transcriptions/status?projectId=${projectId}&model=fast`,
+      { headers: authHeader(jwt) }, settings())
+    expect(await response.json()).toEqual({ state: "starting", estGpuSecPerAudioSec: 0.1 })
+  })
+
+  it("answers 202 and holds no reservation when an old service refuses a fast warm-up", async () => {
+    // Nothing started, so nothing is owed, and the lens must not show a
+    // warm-up error for a model whose runs will fall back.
+    const paid = await completedPayment("team", "month", undefined, "personal")
+    expect((await paid.send()).status).toBe(200)
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
+      .bind(projectId).run()
+    const calls = stubOldService()
+    const response = await app.request("http://127.0.0.1/api/v1/audio/transcriptions/warm", {
+      method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ projectId, model: "omni-fast" }),
+    }, { ...config(), ...settings(), OPENROUTER_BASE_URL: "http://127.0.0.1:9999/v1", BILLING_CHAT_USAGE_REHEARSAL: "true" })
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ ok: true })
+    expect(calls.modal).toHaveLength(1)
+    expect(calls.modal[0]).toMatchObject({ url: `${MODAL}/warm`, body: { model: "fast" } })
+    const plan = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
+    const totals = await readUsageTotals(env.AQUILLA_PG, 1, { start: plan.usagePeriodStart, end: plan.usagePeriodEnd })
+    expect(totals).toEqual({ reserved: 0, settled: 0, committed: 0 })
+  })
+})

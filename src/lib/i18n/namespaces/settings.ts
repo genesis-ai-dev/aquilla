@@ -123,6 +123,9 @@ export const settings = defineNamespace({
     "settings.transcription.model.omni": "Omnilingual",
     "settings.transcription.model.omniDescription":
       "Meta's model for more than 1,600 languages, including many that no other model knows.",
+    "settings.transcription.model.omniFast": "Omnilingual fast",
+    "settings.transcription.model.omniFastDescription":
+      "Fastest. A rough phonetic first pass in 1,600+ languages; best followed by the AI cleanup.",
     "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
     "settings.transcription.model.zeroShotDescription":
       "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
@@ -746,6 +749,16 @@ export const settings = defineNamespace({
         placeholders: {
           where: "The setting's new home as a path of already-translated page names joined by ' → ', e.g. 'Preferences → General'.",
         },
+      },
+      "settings.transcription.model.omniFast": {
+        description:
+          "Radio label for a hosted transcription model: the small, quick version of Meta's " +
+          "'Omnilingual' model. 'Omnilingual' is a product name and stays as it is; translate 'fast'.",
+      },
+      "settings.transcription.model.omniFastDescription": {
+        description:
+          "One line under the 'Omnilingual fast' model choice. It answers in seconds but writes what it " +
+          "hears sound by sound, so the text is rough. 'AI cleanup' is the step that corrects a transcript afterwards.",
       },
       "settings.transcription.model.supports": {
         description: "Tick line on a transcription model's row: the model knows the project's language.",

@@ -106,6 +106,96 @@ describe("POST /api/v1/ai/transcript-cleanup", () => {
     expect(sent.reasoning?.effort).toBe("none")
   })
 
+  // A new project has no corrected transcript to learn from. The lines the
+  // team has written are then the only evidence of how the language is spelled.
+  it("shows the model the team's written lines as spelling evidence", async () => {
+    const jwt = await seedLead()
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({ text: "Ni Yesu akaenda mjini Kapernaumu." }))
+    await app.request("/api/v1/ai/transcript-cleanup", {
+      method: "POST", headers: authHeader(jwt), body: body({ pairs: [], terms: [], samples: ["Yesu akawaambia, Njoni mnifuate."] }),
+    }, cleanupEnv())
+    const sent = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as { messages: { content: string }[] }
+    expect(sent.messages[1].content).toContain("<written-in-this-language>\nYesu akawaambia, Njoni mnifuate.\n</written-in-this-language>")
+    expect(sent.messages[0].content).toMatch(/Never copy a word from them that was not spoken/)
+  })
+
+  // Capital letters and punctuation are orthography. A CTC model writes lower
+  // case with none, and a cleanup that only restored them used to come back
+  // as "nothing to clean up".
+  it("returns a cleanup that only restores capitals and punctuation as a cleanup", async () => {
+    const jwt = await seedLead()
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({ text: "Ni eema akaenda kwa mji Kapernaumu." }))
+    const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body() }, cleanupEnv())
+    expect(((await res.json()) as CleanupBody).result).toEqual(expect.objectContaining({ kind: "ok", changes: 2 }))
+  })
+
+  describe("stream: true", () => {
+    const sse = (frames: unknown[]) => new Response(
+      frames.map((f) => `data: ${typeof f === "string" ? f : JSON.stringify(f)}\n\n`).join(""),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    )
+    const delta = (content: string) => ({ id: "gen-1", choices: [{ delta: { content } }] })
+    const events = (text: string) => text.trim().split("\n\n").map((block) => {
+      const [event, data] = block.split("\n")
+      return { event: event.replace("event: ", ""), data: JSON.parse(data.replace("data: ", "")) as Record<string, unknown> }
+    })
+
+    // The point of streaming: the row shows the cleanup as it is written. The
+    // deltas must be the transcript's own characters (JSON syntax and escapes
+    // removed), and the last frame must be what the JSON reply would have been.
+    it("streams the transcript as it is written, then the same result the JSON reply carries", async () => {
+      const jwt = await seedLead()
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([
+        delta('{"te'), delta('xt":"ni Ye'), delta('su \\"aka'), delta('enda\\" mjini kapernaumu","notes":[]}'),
+        { id: "gen-1", choices: [{ delta: {}, finish_reason: "stop" }], usage: { cost: 0.0004 } },
+        "[DONE]",
+      ]))
+      const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body({ stream: true }) }, cleanupEnv())
+      expect(res.status).toBe(200)
+      expect(res.headers.get("Content-Type")).toContain("text/event-stream")
+      expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)).stream).toBe(true)
+      const got = events(await res.text())
+      const written = got.filter((e) => e.event === "delta").map((e) => e.data.add).join("")
+      expect(written).toBe('ni Yesu "akaenda" mjini kapernaumu')
+      expect(got.at(-1)).toEqual({
+        event: "result",
+        data: { model: expect.any(String), result: expect.objectContaining({ kind: "ok", text: 'ni Yesu "akaenda" mjini kapernaumu' }) },
+      })
+    })
+
+    // A stream that stops without [DONE] is not a reply. Saving what it had
+    // written so far would store half a transcript as the cleanup.
+    it("ends with an error frame, never a result, when the model's stream breaks off", async () => {
+      const jwt = await seedLead()
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([delta('{"text":"ni Yesu aka')]))
+      const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body({ stream: true }) }, cleanupEnv())
+      const got = events(await res.text())
+      expect(got.at(-1)?.event).toBe("error")
+      expect(got.some((e) => e.event === "result")).toBe(false)
+    })
+
+    it("keeps the cut-off rule: a streamed reply that hit max_tokens is invalid", async () => {
+      const jwt = await seedLead()
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(sse([
+        delta('{"text":"ni eema akaenda kwa mji kapernaumu","notes":[]}'),
+        { choices: [{ delta: {}, finish_reason: "length" }], usage: { cost: 0.0004 } },
+        "[DONE]",
+      ]))
+      const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body({ stream: true }) }, cleanupEnv())
+      expect(events(await res.text()).at(-1)?.data.result).toEqual({ kind: "invalid" })
+    })
+
+    it("answers a refused call as plain JSON, before any stream starts", async () => {
+      const jwt = await seedLead()
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }))
+      const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body({ stream: true }) }, cleanupEnv())
+      expect(res.status).toBe(502)
+      expect(res.headers.get("Content-Type")).toContain("application/json")
+    })
+  })
+
   it("passes an upstream failure through as a 502, not a cleanup", async () => {
     const jwt = await seedLead()
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }))

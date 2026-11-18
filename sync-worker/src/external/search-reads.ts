@@ -104,7 +104,7 @@ async function runOneProjectSearch(
   })
 }
 
-/** Map an FTS failure to the external error envelope. */
+/** Map a search failure to the external error envelope. */
 function searchFailure(err: unknown): Response {
   const message = err instanceof Error ? err.message : String(err)
   console.error("external search failed:", err)

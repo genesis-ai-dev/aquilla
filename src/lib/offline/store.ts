@@ -11,6 +11,7 @@ import { checkClientSessionHead } from "./head-check"
 import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 import { listenForOfflineRebuildProgress } from "./boot-progress"
+import { listenForLeaderWarnings } from "./leader-warnings"
 import { STORE_ID } from "./store-id"
 
 export { STORE_ID }
@@ -36,6 +37,7 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
   installBfcacheGuard()
+  listenForLeaderWarnings()
   // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
   listenForOfflineRebuildProgress()
   // Single-tab, not makePersistedAdapter: that one relays every session ↔

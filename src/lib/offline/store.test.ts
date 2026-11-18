@@ -84,3 +84,13 @@ describe("getOfflineStore", () => {
     await expect(whenOfflineStoreVerified()).resolves.toBeUndefined()
   })
 })
+
+describe("the LiveStore adapter the desktop app boots", () => {
+  // LiveStore documents makeSingleTabAdapter as a fallback it means to remove;
+  // the offline store's persistence depends on it (see store.ts). Fail here,
+  // not on a device, if a LiveStore bump drops it.
+  it("is still exported by @livestore/adapter-web", async () => {
+    const adapterWeb = await import("@livestore/adapter-web")
+    expect(typeof adapterWeb.makeSingleTabAdapter).toBe("function")
+  })
+})

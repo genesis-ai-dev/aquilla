@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from "vitest"
 import { holdLeaderLock, leaderLockName } from "./leader-lock"
 import { STORE_ID } from "./store-id"
 
-/** Exclusive-only LockManager: grants in request order, one holder per name. */
+/** Exclusive-only LockManager: grants in request order, one holder per name; supports `signal` and `steal`. */
 function fakeLocks() {
-  const held = new Set<string>()
+  const held = new Map<string, () => void>()
   const queue: Array<{ name: string; grant: () => void }> = []
   const pump = () => {
     for (const waiter of [...queue]) {
@@ -16,25 +16,47 @@ function fakeLocks() {
       waiter.grant()
     }
   }
-  const request = (name: string, callback: () => Promise<void>) =>
-    new Promise<void>((resolve, reject) => {
-      queue.push({
+  const request = (name: string, ...args: unknown[]) => {
+    const [options, callback] = (args.length === 1 ? [{}, args[0]] : args) as [
+      { signal?: AbortSignal; steal?: boolean },
+      () => Promise<void>,
+    ]
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
         name,
         grant: () => {
-          held.add(name)
+          let stolen = false
+          held.set(name, () => {
+            stolen = true
+            reject(new DOMException("stolen", "AbortError"))
+          })
           // Like the real LockManager: held until the callback settles, which
           // the request then settles with.
           const run = Promise.resolve().then(callback)
           void run
             .finally(() => {
+              if (stolen) return
               held.delete(name)
               pump()
             })
             .then(resolve, reject)
         },
+      }
+      if (options.steal) {
+        held.get(name)?.()
+        held.delete(name)
+        waiter.grant()
+        return
+      }
+      options.signal?.addEventListener("abort", () => {
+        if (!queue.includes(waiter)) return
+        queue.splice(queue.indexOf(waiter), 1)
+        reject(new DOMException("aborted", "AbortError"))
       })
+      queue.push(waiter)
       pump()
     })
+  }
   return { locks: { request } as unknown as LockManager, isHeld: (name: string) => held.has(name) }
 }
 
@@ -60,7 +82,8 @@ describe("leaderLockName", () => {
     // bump that renames its lock fails here instead of racing two leaders.
     const dist = dirname(createRequire(import.meta.url).resolve("@livestore/adapter-web"))
     const source = readFileSync(join(dist, "web-worker/client-session/persisted-adapter.js"), "utf8")
-    expect(source).toContain("const LIVESTORE_TAB_LOCK = `livestore-tab-lock-${storeId}`;")
+    // Just the template, so a reformat or renamed const upstream doesn't fail this.
+    expect(source).toContain("`livestore-tab-lock-${storeId}`")
     expect(leaderLockName(STORE_ID)).toBe("livestore-tab-lock-aquilla-offline")
   })
 })
@@ -117,6 +140,48 @@ describe("holdLeaderLock", () => {
       waiter.stop()
       await done
       expect(onSlow).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("takes the lock from a holder that never lets go, and says so", async () => {
+    vi.useFakeTimers()
+    try {
+      const { locks } = fakeLocks()
+      const stuck = controllableLeader()
+      const leader = controllableLeader()
+      const onSteal = vi.fn()
+      const stuckDone = holdLeaderLock("l", stuck.run, { locks, onSlow: () => {} })
+      const stuckSettled = stuckDone.catch((error: unknown) => error)
+      const done = holdLeaderLock("l", leader.run, { locks, slowAfterMs: 1000, stealAfterMs: 5000, onSlow: () => {}, onSteal })
+      await vi.advanceTimersByTimeAsync(4999)
+      expect(leader.run).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(onSteal).toHaveBeenCalledWith(5000)
+      expect(leader.run).toHaveBeenCalledOnce()
+      expect(await stuckSettled).toMatchObject({ name: "AbortError" })
+
+      leader.stop()
+      await done
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("doesn't steal once it has the lock, and passes a late leader error on", async () => {
+    vi.useFakeTimers()
+    try {
+      const { locks } = fakeLocks()
+      const leader = controllableLeader()
+      const onSteal = vi.fn()
+      const done = holdLeaderLock("l", leader.run, { locks, stealAfterMs: 1000, onSteal })
+      await vi.advanceTimersByTimeAsync(5000)
+      const error = new DOMException("leader gave up", "AbortError")
+      leader.crash(error)
+      await expect(done).rejects.toBe(error)
+      expect(onSteal).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

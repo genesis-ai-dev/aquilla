@@ -189,6 +189,11 @@ export default defineConfig(({ mode }) => ({
       "@livestore/livestore",
       "@livestore/adapter-web",
       "@livestore/react",
+      // Imported only by the leader worker (livestore.worker.ts), which the
+      // crawler doesn't reach either. Pre-bundled with the rest so the first
+      // boot doesn't re-optimize, and so Effect resolves to one shared chunk.
+      "@livestore/adapter-web/worker",
+      "@livestore/utils/effect",
     ],
   },
   build: {

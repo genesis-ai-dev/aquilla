@@ -8,6 +8,8 @@ import { installLeaderLogForwarder } from "./leader-log-bridge"
 import { installRebuildProgressForwarder } from "./boot-progress"
 import { installReplaySkip } from "./replay-skip"
 import { holdLeaderLock, leaderLockName } from "./leader-lock"
+import { warnLeader } from "./leader-warnings"
+import { waitForOpfsFilesFree } from "./opfs-handles"
 import { makeLocalSyncBackend } from "./local-sync-backend"
 import { schema } from "./schema"
 import { STORE_ID } from "./store-id"
@@ -16,10 +18,31 @@ if (import.meta.env.DEV) installLeaderLogForwarder()
 installRebuildProgressForwarder()
 installReplaySkip()
 
-// What makeWorker() does, run under the leader lock (see leader-lock.ts). The
+// What makeWorker() does, run under the leader lock (see leader-lock.ts), and
+// only once no other leader has the OPFS files open (opfs-handles.ts). The
 // lock is held until the runner exits, which is after the leader has closed
 // its databases. Waiting before the runner starts loses no messages: the
 // session sends nothing until the runner has said it's ready.
-void holdLeaderLock(leaderLockName(STORE_ID), () =>
-  Effect.runPromise(makeWorkerEffect({ schema, sync: { backend: makeLocalSyncBackend } })),
-).catch((error: unknown) => console.error("[offline] leader worker stopped", error))
+const lockName = leaderLockName(STORE_ID)
+void holdLeaderLock(
+  lockName,
+  async () => {
+    await waitForOpfsFilesFree(STORE_ID, {
+      onBusy: (file) => warnLeader("warn", `waiting for another leader to close ${file}`),
+    })
+    await Effect.runPromise(makeWorkerEffect({ schema, sync: { backend: makeLocalSyncBackend } }))
+  },
+  {
+    onSlow: (ms) => warnLeader("warn", `still waiting for '${lockName}' after ${ms} ms — another leader holds it`),
+    onSteal: (ms) => warnLeader("warn", `took '${lockName}' after waiting ${ms} ms — its holder never let go`),
+  },
+).catch((error: unknown) => {
+  warnLeader("error", "leader worker stopped", error)
+  // Rethrown uncaught, so it fires `error` on the page's Worker object. That's
+  // the only failure the adapter listens for before the leader says it's
+  // ready (a rejection here would leave the page's boot waiting forever), and
+  // it shuts the session down so getOfflineStore() rejects with it.
+  setTimeout(() => {
+    throw error
+  })
+})

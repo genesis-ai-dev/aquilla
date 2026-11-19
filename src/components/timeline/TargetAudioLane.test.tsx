@@ -1801,6 +1801,16 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
           expect(one()).toHaveAttribute("data-hot", "true")
         })
 
+        // Review N2: hidden, the box catches no pointer (the line itself is
+        // the hover zone), so it cannot light or block what is beside it.
+        it("at rest its box catches no pointer; revealed, it does", () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: [tight[0]] })} />)
+          expect(box().className.split(" ")).toContain("pointer-events-none")
+          expect(slot().className).not.toMatch(/pointer-events-none/)
+          fireEvent.pointerEnter(slot())
+          expect(box().className.split(" ")).not.toContain("pointer-events-none")
+        })
+
         it("on hover, appears over the line and empty space at 16px, unclipped when there is room", () => {
           render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: [tight[0]] })} />)
           fireEvent.pointerEnter(slot())

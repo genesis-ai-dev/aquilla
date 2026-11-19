@@ -2629,7 +2629,14 @@ export function TargetAudioLane({
                 )}
                 <div
                   data-testid={`tl-target-${key}-box`}
-                  className={cn("absolute inset-y-0 flex items-center justify-center", fit.clipped && "overflow-hidden")}
+                  // Hidden, it catches no pointer: the line itself is the
+                  // hover zone that reveals it, and a click on the line does
+                  // what it always did.
+                  className={cn(
+                    "absolute inset-y-0 flex items-center justify-center",
+                    fit.clipped && "overflow-hidden",
+                    !pointerHere && "pointer-events-none",
+                  )}
                   style={{ left: `${fit.boxLeftPx}px`, width: `${fit.boxWidthPx}px` }}
                 >
                   {button}

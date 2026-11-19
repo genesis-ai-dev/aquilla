@@ -3571,7 +3571,7 @@ describe("imported originals on the overview (AQU-656)", () => {
 
   function useFiles(
     files: import("@/lib/sync/cells-read").FileSummary[],
-    level = ROLE.MAINTAINER,
+    level: number = ROLE.MAINTAINER,
   ) {
     fetchProjectFiles.mockResolvedValue(files)
     useProject.mockReturnValue({

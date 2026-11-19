@@ -87,3 +87,54 @@ describe("extractTextFromPdf — memory (AQU-2594)", () => {
     expect(added).toBeLessThan(4 * 1024 * 1024)
   })
 })
+
+// A global regex replace holds every match of the whole subject at once: a
+// 4 MB string of a million escapes took ~160 MB of heap in one call, from a
+// 4 KB upload. This records the longest subject any global regex replace was
+// given during a run.
+function longestGlobalReplaceDuring(run: () => void): number {
+  const original = RegExp.prototype[Symbol.replace]
+  let longest = 0
+  RegExp.prototype[Symbol.replace] = function (this: RegExp, subject: string, replacement: unknown) {
+    if (this.global) longest = Math.max(longest, String(subject).length)
+    // @ts-expect-error -- forwarding either replacement overload
+    return original.call(this, subject, replacement)
+  }
+  try {
+    run()
+  } finally {
+    RegExp.prototype[Symbol.replace] = original
+  }
+  return longest
+}
+
+function onePagePdf(content: string): Uint8Array {
+  const parts = [
+    strToU8("%PDF-1.4\n<</Filter/FlateDecode>>stream\n"),
+    zlibSync(strToU8(content)),
+    strToU8("\nendstream\n%%EOF"),
+  ]
+  const pdf = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  parts.reduce((at, p) => (pdf.set(p, at), at + p.length), 0)
+  return pdf
+}
+
+describe("extractTextFromPdf — string memory (AQU-2594)", () => {
+  it("decodes a 4 MB string of escapes without a regex replace over all of it", () => {
+    const count = 1_000_000
+    const pdf = onePagePdf(`BT (${"\\101".repeat(count)}) Tj ET`)
+    let text = ""
+    const longest = longestGlobalReplaceDuring(() => (text = extractTextFromPdf(pdf)))
+    expect(text).toBe("A".repeat(count))
+    expect(longest).toBeLessThanOrEqual(64 * 1024)
+  })
+
+  it("collapses a million blank-line runs without a regex replace over all the text", () => {
+    const count = 300_000
+    const pdf = onePagePdf(`BT ${"(a\\n\\n\\n)'".repeat(count)} ET`)
+    let text = ""
+    const longest = longestGlobalReplaceDuring(() => (text = extractTextFromPdf(pdf)))
+    expect(text).toBe(Array.from({ length: count }, () => "a").join("\n\n"))
+    expect(longest).toBeLessThanOrEqual(64 * 1024)
+  })
+})

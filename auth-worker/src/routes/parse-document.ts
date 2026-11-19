@@ -705,25 +705,50 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
     scanTextOperators(haystack, chunks)
   }
 
-  return chunks
-    .text()
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+  return replaceEach(chunks.text(), BLANK_LINE_RUN, () => "\n\n").trim()
 }
+
+const BLANK_LINE_RUN = /\n{3,}/g
+
+// Unescape PDF string escape sequences: one pass per escape, in this order.
+const PDF_STRING_ESCAPES: readonly [RegExp, (match: RegExpExecArray) => string][] = [
+  [/\\(\d{1,3})/g, (m) => String.fromCharCode(parseInt(m[1], 8))],
+  [/\\n/g, () => "\n"],
+  [/\\r/g, () => "\r"],
+  [/\\t/g, () => "\t"],
+  [/\\\\/g, () => "\\"],
+  [/\\\(/g, () => "("],
+  [/\\\)/g, () => ")"],
+]
 
 function decodePdfString(s: string): string {
   // AQU-2594: every escape starts with a backslash; most strings have none,
   // and seven regex passes over each of millions of short strings added up.
   if (!s.includes("\\")) return s
-  // Unescape PDF string escape sequences
-  return s
-    .replace(/\\(\d{1,3})/g, (_m, oct) => String.fromCharCode(parseInt(oct, 8)))
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
+  let out = s
+  for (const [pattern, replacement] of PDF_STRING_ESCAPES) out = replaceEach(out, pattern, replacement)
+  return out
+}
+
+/**
+ * AQU-2594: `s.replace(pattern, …)` with the global `pattern`, in pieces. A
+ * global replace holds every match of the subject at once, so one 4 MB string
+ * of a million escapes took ~160 MB from a 4 KB upload; this keeps one match
+ * at a time and joins the pieces as TextPieces does.
+ */
+function replaceEach(s: string, pattern: RegExp, replacement: (match: RegExpExecArray) => string): string {
+  pattern.lastIndex = 0
+  let match = pattern.exec(s)
+  if (match === null) return s
+  const pieces = new TextPieces()
+  let last = 0
+  for (; match !== null; match = pattern.exec(s)) {
+    pieces.push(s.slice(last, match.index))
+    pieces.push(replacement(match))
+    last = pattern.lastIndex
+  }
+  pieces.push(s.slice(last))
+  return pieces.text()
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────

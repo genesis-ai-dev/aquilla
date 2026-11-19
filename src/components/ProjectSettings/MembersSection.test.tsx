@@ -188,7 +188,10 @@ describe("MembersSection", () => {
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-dialog-mode", "add")
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
     // AQU-1352 §3.9 rule 2: the header names the scope people are added to.
-    expect(screen.getByRole("heading", { name: /^Add people to .*Pattani Malay Bible$/ })).toBeTruthy()
+    const title = screen.getByTestId("settings-members-scope").textContent
+    expect(title).toBe("Pattani Malay Bible")
+    expect(screen.getByRole("heading", { name: `Add people to ${title}` })).toBeTruthy()
+    expect(screen.getAllByTestId("scope-grant-scope").every((el) => el.textContent === title)).toBe(true)
     expect(screen.getByRole("tab", { name: /add members/i })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /invite link/i })).toBeTruthy()
   })

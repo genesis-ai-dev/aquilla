@@ -505,7 +505,10 @@ describe("MembersPage — Teams-style roster table", () => {
     renderMembers()
     await waitFor(() => expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
-    expect(screen.getByRole("dialog", { name: /add a member/i })).toBeInTheDocument()
+    const title = screen.getByTestId("scope-breadcrumb").textContent
+    expect(title).toBe("Come and See")
+    expect(screen.getByRole("dialog", { name: `Add people to ${title}` })).toBeInTheDocument()
+    expect(screen.getByTestId("scope-grant-scope").textContent).toBe(title)
     expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
     // AQU-1107: default org-add is Contributor, and the dialog states that

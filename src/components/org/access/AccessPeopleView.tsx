@@ -1,5 +1,5 @@
 import { RoleBadge } from "@/components/access/RoleBadge"
-import { PlaceBreadcrumb } from "@/components/access/PlaceBreadcrumb"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { UserChip } from "@/components/UserChip"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { scopePathKey } from "@/lib/access/scope-path"
@@ -35,7 +35,7 @@ export function AccessPeopleView({ people, org }: { people: OrgAccessPerson[]; o
                 data-testid="access-chip"
               >
                 <RoleBadge roleLevel={g.roleLevel} origin={g.origin} hrefFor={accessNodeHref} />
-                <PlaceBreadcrumb path={g.scopePath} className="text-xs" />
+                <ScopeBreadcrumb path={g.scopePath} className="text-xs" icons />
               </li>
             ))}
           </ul>

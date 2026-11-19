@@ -115,6 +115,13 @@ export interface CodexCellAttachment {
   gainDb?: number | null;
   fadeInMs?: number | null;
   fadeOutMs?: number | null;
+  /** AQU-2664: the recording's measured loudness (LUFS) and true peak (dBTP),
+   *  once (cell.audio.measure); absent = not measured yet. */
+  loudnessLufs?: number | null;
+  truePeakDb?: number | null;
+  /** AQU-2664: the loudness this take is evened out to (cell.audio.gain);
+   *  absent = not evened out. lib/audio/take-gain.ts turns it into a gain. */
+  evenTargetLufs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;

@@ -2,27 +2,33 @@
 // the playback mixer applies (lib/audio/mixer.ts), so an export sounds like
 // the timeline. Applied to a clip's KEPT part (after its trim), whose start and
 // end are where the fades run from and to.
+//
+// AQU-2664: the volume is the take's GAIN as lib/audio/take-gain.ts works it
+// out — its own volume plus its evening-out correction — the one rule the
+// mixer reads too.
 
-export interface ClipLevelFields {
-  gainDb?: number | null
+import { takeGainDb, type TakeGainFields } from "@/lib/audio/take-gain"
+
+export interface ClipLevelFields extends TakeGainFields {
   fadeInMs?: number | null
   fadeOutMs?: number | null
 }
 
 /** Does this take play at anything other than its recorded level? */
 export function hasClipLevel(att: ClipLevelFields | null | undefined): boolean {
-  return Boolean(att && ((att.gainDb ?? 0) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
+  return Boolean(att && (takeGainDb(att) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
 }
 
-/** Just the level fields, for carrying on an export's own clip records. */
+/** Just the level fields, for carrying on an export's own clip records: the
+ *  gain as it plays (evening out already in it), and the fades. */
 export function levelFields(att: ClipLevelFields | null | undefined): ClipLevelFields {
-  return hasClipLevel(att) ? { gainDb: att!.gainDb ?? null, fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
+  return hasClipLevel(att) ? { gainDb: takeGainDb(att), fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
 }
 
 /** The kept part with its volume and fades applied (a copy); untouched when flat. */
 export function applyClipLevelPcm(kept: Float32Array, rate: number, att: ClipLevelFields | null | undefined): Float32Array {
   if (!hasClipLevel(att)) return kept
-  const g = Math.pow(10, (att!.gainDb ?? 0) / 20)
+  const g = Math.pow(10, takeGainDb(att) / 20)
   const fin = Math.round(((att!.fadeInMs ?? 0) / 1000) * rate)
   const fout = Math.round(((att!.fadeOutMs ?? 0) / 1000) * rate)
   const n = kept.length

@@ -45,6 +45,8 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store's leader stopped before it opened (src/lib/offline/store.ts).
+    "workspace.offline.bootFailedToast": "Your offline projects couldn't be opened. Restart the app to try again.",
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
     "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
     "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
@@ -639,6 +641,15 @@ export const workspace = defineNamespace({
           "stuck. Paired with a 'Restart app' action " +
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
+      },
+      "workspace.offline.bootFailedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when the " +
+          "on-device storage for offline projects failed to open (for example, " +
+          "the files were still in use). Paired with a 'Restart app' action " +
+          "(workspace.offline.leaderStalledRestart); a restart usually fixes it. " +
+          "Two short sentences with periods. Plain language — no 'worker', " +
+          "'store' or 'sync' jargon.",
       },
       "workspace.offline.preparingToast": {
         description:

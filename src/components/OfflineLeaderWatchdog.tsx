@@ -6,8 +6,10 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { LeaderLogEntry } from "@/lib/offline/leader-log-bridge"
 import { setLeaderStalled, watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
 import { getOfflineBootProgress } from "@/lib/offline/boot-progress"
+import { OfflineLeaderBootError } from "@/lib/offline/leader-boot-error"
 
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
+const BOOT_FAILED_TOAST_ID = "offline-boot-failed"
 const SLOW_BOOT_TOAST_ID = "offline-slow-boot"
 const PREPARING_TOAST_ID = "offline-preparing"
 // The store only exists once the leader has booted (store.ts disables the
@@ -83,8 +85,29 @@ export function OfflineLeaderWatchdog({
   checkEveryMs,
   restart = restartApp,
 }: Props): null {
-  const { store, loading } = useOfflineStore()
+  const { store, loading, error } = useOfflineStore()
   const t = useT()
+  const leaderFailed = error instanceof OfflineLeaderBootError
+
+  // A leader that stopped before the store opened ends the boot (loading goes
+  // false, so the slow-boot check below stands down); only a restart gets a
+  // fresh one. A newer build's data is NewerOfflineDataNotice's to explain.
+  useEffect(() => {
+    if (!leaderFailed) return
+    const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
+    console.error("[offline] LiveStore store failed to open", { error, leaderLogs: leaderLogs?.slice(-LOG_TAIL) })
+    toast.add({
+      id: BOOT_FAILED_TOAST_ID,
+      type: "error",
+      timeout: 0,
+      title: t("workspace.offline.bootFailedToast"),
+      actionProps: {
+        children: t("workspace.offline.leaderStalledRestart"),
+        onClick: restart,
+      },
+    })
+    return () => toast.close(BOOT_FAILED_TOAST_ID)
+  }, [leaderFailed, error, restart, t])
 
   useEffect(() => {
     if (!loading) return

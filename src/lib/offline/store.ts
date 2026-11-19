@@ -12,6 +12,7 @@ import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 import { listenForOfflineRebuildProgress } from "./boot-progress"
 import { listenForLeaderWarnings } from "./leader-warnings"
+import { OfflineLeaderBootError } from "./leader-boot-error"
 import { STORE_ID } from "./store-id"
 
 export { STORE_ID }
@@ -58,6 +59,7 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
     worker: (options: { name: string }) => {
       const worker = new LiveStoreWorker(options)
       trackLeaderWorker(worker)
+      failBootOnLeaderError(worker)
       devBridge?.watchLeaderWorker(worker, options.name)
       return worker
     },
@@ -75,6 +77,26 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
 }
 
 let storePromise: Promise<Store<typeof schema>> | undefined
+
+// A leader that stops before the store opens (livestore.worker.ts) fires
+// `error` on its Worker, and the adapter calls LiveStore's shutdown, but in
+// LiveStore 0.4.0 that never fails createStorePromise: shutdown closes the
+// store's lifetime scope while the boot runs in another one, so the boot
+// waited forever (seen on device, 2026-11-18). So the boot watches the
+// leader's `error` event itself. Set only while a boot is in flight.
+let failBoot: ((error: OfflineLeaderBootError) => void) | undefined
+
+/**
+ * Fails the boot in flight, if any, when `worker` reports an uncaught error.
+ * Every such error is fatal to the leader: the runner closes on it. After the
+ * store is out, a dead leader is the stall watchdog's to report instead.
+ */
+export function failBootOnLeaderError(worker: EventTarget): void {
+  worker.addEventListener("error", (event) => {
+    const reason = event instanceof ErrorEvent && event.message ? event.message : "unknown error"
+    failBoot?.(new OfflineLeaderBootError(`[offline] the leader stopped before the store opened: ${reason}`))
+  })
+}
 
 let markVerified: () => void = () => {}
 let verified = new Promise<void>((resolve) => {
@@ -100,9 +122,24 @@ export function getOfflineStore(
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
+  if (storePromise === undefined) {
+    const leaderFailed = new Promise<never>((_, reject) => {
+      failBoot = reject
+    })
+    storePromise = Promise.race([bootOfflineStore(createAdapter, generationMarker), leaderFailed]).finally(() => {
+      failBoot = undefined
+    })
+  }
+  return storePromise
+}
+
+function bootOfflineStore(
+  createAdapter: CreateOfflineAdapter,
+  generationMarker: GenerationMarker,
+): Promise<Store<typeof schema>> {
   const bootStartedAt = performance.now()
   // Claim before boot: a newer build that crashes mid-boot may already have written.
-  storePromise ??= claimOfflineGeneration(generationMarker)
+  return claimOfflineGeneration(generationMarker)
     .then(() => createAdapter())
     .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
     .then(async (store) => {
@@ -118,12 +155,12 @@ export function getOfflineStore(
       if (import.meta.env.DEV) console.info(`[offline] store ready in ${Math.round(performance.now() - bootStartedAt)} ms`)
       return store
     })
-  return storePromise
 }
 
 /** Test seam — reset the memoized store between tests. */
 export function __resetOfflineStoreForTests(): void {
   storePromise = undefined
+  failBoot = undefined
   verified = new Promise<void>((resolve) => {
     markVerified = resolve
   })

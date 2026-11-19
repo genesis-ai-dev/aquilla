@@ -48,10 +48,11 @@ void holdLeaderLock(
   // Rethrown uncaught, so it fires `error` here first: the runner
   // (BrowserWorkerRunner) listens for that on `self` and closes, which closes
   // the databases and their OPFS handles without waiting on the page. It then
-  // fires on the page's Worker object. That's the only failure the adapter
-  // listens for before the leader says it's ready (a rejection here would
-  // leave the page's boot waiting forever), and it shuts the session down so
-  // getOfflineStore() rejects with it.
+  // fires on the page's Worker object, the only failure the page can hear
+  // before the leader says it's ready (a rejection here would go nowhere).
+  // The adapter shuts the session down on it, but that doesn't fail the boot
+  // in LiveStore 0.4.0, so store.ts (failBootOnLeaderError) rejects
+  // getOfflineStore() with it, and OfflineLeaderWatchdog offers a restart.
   setTimeout(() => {
     throw error
   })

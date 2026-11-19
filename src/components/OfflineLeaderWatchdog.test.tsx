@@ -6,12 +6,14 @@ import { OfflineLeaderWatchdog } from "./OfflineLeaderWatchdog"
 import { Toaster, toast } from "@/components/ui/toast"
 import { __resetLeaderStalledForTests, isLeaderStalled } from "@/lib/offline/leader-watchdog"
 import { __resetOfflineBootProgressForTests, reportOfflineRebuildProgress } from "@/lib/offline/boot-progress"
+import { OfflineLeaderBootError } from "@/lib/offline/leader-boot-error"
+import { NewerOfflineDataError } from "@/lib/offline/generation-guard"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
 let status: Status
 const fakeStore = { syncStatus: () => status }
-let offlineStore: { store: typeof fakeStore | null; loading: boolean; error: null } = {
+let offlineStore: { store: typeof fakeStore | null; loading: boolean; error: Error | null } = {
   store: fakeStore,
   loading: false,
   error: null,
@@ -65,6 +67,28 @@ describe("OfflineLeaderWatchdog", () => {
 
     await user.click(screen.getByRole("button", { name: /restart app/i }))
     expect(restart).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers a restart when the leader stopped before the store opened", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    offlineStore = { store: null, loading: false, error: new OfflineLeaderBootError("[offline] the leader stopped") }
+    const user = userEvent.setup()
+    const restart = renderWatchdog()
+
+    expect(await screen.findByText(/couldn't be opened/)).toBeInTheDocument()
+    expect(console.error).toHaveBeenCalledWith(
+      "[offline] LiveStore store failed to open",
+      expect.objectContaining({ error: offlineStore.error }),
+    )
+    await user.click(screen.getByRole("button", { name: /restart app/i }))
+    expect(restart).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves a newer build's data to its own notice", async () => {
+    offlineStore = { store: null, loading: false, error: new NewerOfflineDataError(9, 8) }
+    renderWatchdog()
+    await act(() => new Promise((r) => setTimeout(r, 60)))
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
   })
 
   it("closes the warning if the leader catches up on its own", async () => {

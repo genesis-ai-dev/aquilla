@@ -6,6 +6,7 @@ import {
   applyTrackVolumes,
   settledPendingVolumes,
   withoutPendingVolume,
+  nextPendingVolume,
   type PendingVolume,
   formatOwnVolume,
   trackVolumeForSlot,
@@ -106,7 +107,7 @@ describe("exports: every clip carries its track's volume", () => {
 })
 
 describe("a volume written here, before the read shows it", () => {
-  const w = (db: number, readBefore: number, id = 1): PendingVolume => ({ db, readBefore, id })
+  const w = (db: number, readBefore: number, id = 1, mine: number[] = []): PendingVolume => ({ db, readBefore, id, mine })
 
   it("is drawn at once", () => {
     const tracks = [track("target-audio", "target-audio", -9), track("trk-music", "audio")]
@@ -126,6 +127,16 @@ describe("a volume written here, before the read shows it", () => {
   it("settles when the read shows a value that is neither the one before nor yours", () => {
     const pending = new Map([["trk-music", w(-3, 0)]])
     expect(settledPendingVolumes(pending, [track("trk-music", "audio", -6)])).toEqual(["trk-music"])
+  })
+
+  // Re-check S1: two of your own quick writes; the read shows the first.
+  it("stays pending while the read shows one of your own earlier writes", () => {
+    const pending = new Map([["trk-music", nextPendingVolume(nextPendingVolume(undefined, -0.5, 0, 1), -1, -0.5, 2)]])
+    expect(pending.get("trk-music")).toMatchObject({ db: -1, readBefore: 0, mine: [-0.5] })
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio", -0.5)])).toEqual([])
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio", -1)])).toEqual(["trk-music"])
+    // …and still gives way to a colleague's newer value.
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio", -9)])).toEqual(["trk-music"])
   })
 
   it("settles when the track is gone", () => {

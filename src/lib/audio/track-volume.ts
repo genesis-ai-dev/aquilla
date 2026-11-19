@@ -84,6 +84,17 @@ export interface PendingVolume {
   db: number
   readBefore: number
   id: number
+  /** Re-check S1: the values this tab wrote on the track before this one,
+   *  while they were still pending. A read showing one of them is your own
+   *  earlier write landing, not a colleague's. */
+  mine?: number[]
+}
+
+/** A new write on a track: it keeps the first write's `readBefore` and
+ *  remembers the values written since, so two quick writes don't spring back. */
+export function nextPendingVolume(prev: PendingVolume | undefined, db: number, readNow: number, id: number): PendingVolume {
+  if (!prev) return { db, readBefore: readNow, id, mine: [] }
+  return { db, readBefore: prev.readBefore, id, mine: [...(prev.mine ?? []), prev.db] }
 }
 
 export function applyPendingVolumes(tracks: TimelineTrack[], pending: ReadonlyMap<string, PendingVolume>): TimelineTrack[] {
@@ -108,7 +119,9 @@ export function settledPendingVolumes(pending: ReadonlyMap<string, PendingVolume
   for (const [id, p] of pending) {
     const tr = tracks.find((t) => t.id === id)
     const read = tr?.volumeDb ?? 0
-    if (!tr || read === p.db || read !== p.readBefore) out.push(id)
+    // Yours landed, or a value that is neither the one before nor one of
+    // your own earlier writes: a colleague's, newer than yours.
+    if (!tr || read === p.db || (read !== p.readBefore && !(p.mine ?? []).includes(read))) out.push(id)
   }
   return out
 }

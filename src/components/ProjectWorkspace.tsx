@@ -381,7 +381,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
-import { applyPendingVolumes, applyTrackVolumes, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
+import { applyPendingVolumes, applyTrackVolumes, nextPendingVolume, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
 import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
@@ -16425,7 +16425,9 @@ export function ProjectWorkspace() {
       const id = ++trackVolumeWriteId.current
       setPendingTrackVolumes((current) => {
         const volumes = new Map(current?.fileId === fileId ? current.volumes : [])
-        volumes.set(trackId, { db, readBefore, id })
+        // Re-check S1: a second quick write keeps the first's read-before and
+        // remembers the first, so its landing doesn't spring the fader back.
+        volumes.set(trackId, nextPendingVolume(volumes.get(trackId), db, readBefore, id))
         return { fileId, volumes }
       })
       // A refused write takes back only itself, never a newer one.

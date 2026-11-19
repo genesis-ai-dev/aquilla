@@ -225,6 +225,8 @@ const KEYS = {
     "recordingsUpload.banner.stoppedSummary": "Stopped. {done} of {total} recordings uploaded, and {notStarted} were not.",
     "recordingsUpload.banner.showFailures": "Show which",
     "recordingsUpload.banner.tryAgain": "Try them again",
+    // AQU-2664 re-check S2: the takes landed on an evened track.
+    "recordingsUpload.banner.evenOutTrack": "Even out the track to match",
     "recordingsUpload.failures.title": "Recordings that couldn't upload",
     "recordingsUpload.failures.description": "Each was meant for the line shown. Nothing else in the upload was affected.",
     "recordingsUpload.failures.offline": "You went offline before it uploaded.",

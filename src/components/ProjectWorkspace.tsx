@@ -285,7 +285,7 @@ import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { AUTO_EVEN_CHANGED_TAKES, clearEvenOut, createEvenOutQueue, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
+import { AUTO_EVEN_CHANGED_TAKES, clearEvenOut, createEvenOutQueue, evenedTakesIn, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
 import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
 import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
 import { createAutoEvenQueue } from "@/lib/audio/auto-even-queue"
@@ -19594,7 +19594,13 @@ export function ProjectWorkspace() {
             </div>
             {/* AQU-981: bulk recordings upload — progress, then its summary. */}
             <div className="px-3 py-1 empty:hidden">
-              <RecordingsUploadBanner />
+              {/* AQU-2664 re-check S2: a bulk upload lands on the main track;
+                  when that track is evened, its finish offers to even it. */}
+              <RecordingsUploadBanner
+                evenOutTrack={canEvenOut && evenOutStates.has("target-audio") && evenedTakesIn(evenOutCells, { slots: ["recording", "generatedVoice"] }).length > 0
+                  ? () => openEvenOut(["target-audio"])
+                  : undefined}
+              />
             </div>
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where

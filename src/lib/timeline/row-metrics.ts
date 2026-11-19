@@ -120,6 +120,10 @@ export const SLOT_BUTTON_MIN_PX = 16
  * chip beneath — and it is what this function's comment claimed all along
  * while the code did something else.
  *
+ * AQU-2663 (Sam, Nov 19) ends that overhang for an empty line on the Target
+ * audio track: `emptySlotFit` (empty-slot-fit.ts) keeps what the line offers
+ * inside it, shrinking one button to fit, down to SLOT_BUTTON_MIN_PX.
+ *
  * Nothing changes at the default row: 46px of chip gives back exactly the 28px
  * the button was hard-coded to before the vertical zoom existed.
  */

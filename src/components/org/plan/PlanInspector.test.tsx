@@ -175,6 +175,26 @@ describe("marking done", () => {
     expect(screen.queryByTestId("plan-done-nudge")).toBeNull()
   })
 
+  it("judges an audio-only unit on its recordings, not on text nobody will write", async () => {
+    // Partner report, 2026-11-19: Leviticus, every take recorded and validated,
+    // paused on "Validated is at 0%" under a line saying "Nothing left".
+    const { onPatch } = renderInspector(
+      unit({ filledCount: 0, validatedCount: 0, audioCount: 100, audioValidatedCount: 100 }), true, true,
+    )
+    fireEvent.click(screen.getByTestId("plan-mark-done"))
+    await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ fileId: "f1", sectionKey: "", done: true }))
+    expect(screen.queryByTestId("plan-done-nudge")).toBeNull()
+  })
+
+  it("pauses an audio-only unit on its recordings' validated share", () => {
+    const { onPatch } = renderInspector(
+      unit({ filledCount: 0, validatedCount: 0, audioCount: 100, audioValidatedCount: 80 }), true, true,
+    )
+    fireEvent.click(screen.getByTestId("plan-mark-done"))
+    expect(screen.getByTestId("plan-done-nudge")).toHaveTextContent("80%")
+    expect(onPatch).not.toHaveBeenCalled()
+  })
+
   it("lets the nudge be cancelled", () => {
     const { onPatch } = renderInspector(unit())
     fireEvent.click(screen.getByTestId("plan-mark-done"))

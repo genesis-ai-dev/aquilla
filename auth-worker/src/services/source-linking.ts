@@ -655,6 +655,9 @@ export interface LinkedFileCopy {
  * name, for the reason `loadStoppedUpstreamFileIds` gives. Not a copy: a file
  * the link already follows INTO (adopted). An own file that already follows
  * an upstream file is not offered either — one file follows one upstream file.
+ * Nor is the copy of a file the lead stopped following (left out of the
+ * link's selection): a stopped file stays stopped. It is still a copy, so it
+ * is not offered as a file to join into either.
  */
 export async function loadLinkedFileCopies(
   env: Env,
@@ -663,10 +666,15 @@ export async function loadLinkedFileCopies(
   adoptedFileIdOf: Readonly<Record<string, string>> | null,
 ): Promise<{ copies: LinkedFileCopy[]; ownFiles: Array<{ id: string; name: string }> }> {
   const adopted = adoptedFileIdOf ?? {}
+  const followed = await loadLinkFileIds(env, projectId)
+  const followedSet = followed ? new Set(followed) : null
   const upstreamOfCopy = new Map<string, string>()
+  const stoppedCopies = new Set<string>()
   for (const upstreamFileId of await loadUpstreamFileIds(env, upstreamProjectId)) {
     if (adopted[upstreamFileId]) continue
-    upstreamOfCopy.set(deterministicDownstreamFileId(projectId, upstreamFileId), upstreamFileId)
+    const copyId = deterministicDownstreamFileId(projectId, upstreamFileId)
+    if (followedSet && !followedSet.has(upstreamFileId)) stoppedCopies.add(copyId)
+    else upstreamOfCopy.set(copyId, upstreamFileId)
   }
   const { results } = await env.AQUILLA_PG.prepare(
     `SELECT f.id, f.name,
@@ -683,6 +691,7 @@ export async function loadLinkedFileCopies(
   const ownFiles: Array<{ id: string; name: string }> = []
   const copyRows: Array<{ id: string; name: string; translated: boolean }> = []
   for (const row of results ?? []) {
+    if (stoppedCopies.has(row.id)) continue
     if (upstreamOfCopy.has(row.id)) copyRows.push(row)
     else if (!adoptedOwn.has(row.id)) ownFiles.push({ id: row.id, name: row.name })
   }

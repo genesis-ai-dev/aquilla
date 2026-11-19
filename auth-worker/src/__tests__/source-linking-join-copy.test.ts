@@ -29,9 +29,19 @@ const LINES = [
   "So Abram departed, as the LORD had directed him.",
 ]
 
+/** Each project's real source and target lane; the test lane filler is off. */
+const sourceLane = (projectId: string): string => `${projectId}-src`
+const targetLane = (projectId: string): string => `${projectId}-tgt`
+
 async function seedProjectWithLead(projectId: string, name: string): Promise<void> {
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, 1)")
     .bind(projectId, name)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+     VALUES (?, ?, 'source', 'English', NULL, 0), (?, ?, 'target', 'Portuguese', '', 1)`,
+  )
+    .bind(sourceLane(projectId), projectId, targetLane(projectId), projectId)
     .run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 500, 1)",
@@ -55,10 +65,13 @@ async function seedFile(
     .run()
   for (let i = 0; i < lines.length; i++) {
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, anchor_cell_id, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'source', ?, ?, ?, 2000)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, anchor_cell_id, event_id, last_edit_at, lane_id)
+       VALUES (?, ?, ?, 'source', ?, ?, ?, 2000, ?)`,
     )
-      .bind(projectId, fileId, `${cellPrefix}-${i + 1}`, lines[i], i === 0 ? null : `${cellPrefix}-${i}`, `e-${fileId}-${i + 1}`)
+      .bind(
+        projectId, fileId, `${cellPrefix}-${i + 1}`, lines[i], i === 0 ? null : `${cellPrefix}-${i}`,
+        `e-${fileId}-${i + 1}`, sourceLane(projectId),
+      )
       .run()
   }
 }
@@ -101,6 +114,7 @@ async function match(): Promise<Record<string, unknown>> {
 
 beforeEach(async () => {
   seq = 0
+  await env.AQUILLA_PG.prepare("SELECT set_config('aquilla.test_lane_fill', 'off', false)").first()
   await seedUser(1, "lead")
   await seedProjectWithLead(DOWN, "BSB Portuguese")
   await seedProjectWithLead(UP, "BSB source")
@@ -191,10 +205,10 @@ describe("Join into my existing file (AQU-2549 part 1)", () => {
   it("refuses a copy that has translations of its own", async () => {
     await linkedWithCopy()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at)
-       VALUES (?, ?, 'up-2', 'target', 'No princípio', 'e-t-1', 3000)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id)
+       VALUES (?, ?, 'up-2', 'target', 'No princípio', 'e-t-1', 3000, ?)`,
     )
-      .bind(DOWN, COPY_GD)
+      .bind(DOWN, COPY_GD, targetLane(DOWN))
       .run()
 
     const res = await post("/link-source/join", { copyFileId: COPY_GD, fileId: OWN_GD })
@@ -220,6 +234,25 @@ describe("Join into my existing file (AQU-2549 part 1)", () => {
   it("refuses a file that is not a copy from the source project", async () => {
     await linkedWithCopy()
     const res = await post("/link-source/join", { copyFileId: OWN_GD, fileId: COPY_GD })
+    expect(res.status).toBe(404)
+    expect(await adoptRaw()).toBeNull()
+  })
+
+  // WHY (review finding 4, pick: a stopped file stays stopped): a copy of a file
+  // the lead stopped following no longer gets the source's updates, and
+  // joining it would quietly start following the file again.
+  it("does not offer the copy of a file the lead stopped following", async () => {
+    await linkedWithCopy()
+    await env.AQUILLA_PG.prepare("UPDATE projects SET source_link_file_ids = ? WHERE id = ?")
+      .bind(JSON.stringify(["file-2549-up-other"]), DOWN)
+      .run()
+    const listed = await copies()
+    expect(listed.status).toBe(200)
+    const body = (await listed.json()) as { copies: unknown[]; ownFiles: Array<{ id: string }> }
+    expect(body.copies).toEqual([])
+    expect(body.ownFiles.map((f) => f.id)).toEqual([OWN_GD])
+
+    const res = await post("/link-source/join", { copyFileId: COPY_GD, fileId: OWN_GD })
     expect(res.status).toBe(404)
     expect(await adoptRaw()).toBeNull()
   })

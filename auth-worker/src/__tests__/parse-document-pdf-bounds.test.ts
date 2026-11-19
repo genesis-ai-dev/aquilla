@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest"
 import { zlibSync, strToU8 } from "fflate"
-import { DocumentExtractionError, extractTextFromPdf } from "../routes/parse-document"
+import { DocumentExtractionError, extractPdfText, extractTextFromPdf } from "../routes/parse-document"
 import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 /** Just under the 2 MB upload cap both routes apply before extracting. */
@@ -231,6 +231,16 @@ describe("extractTextFromPdf — work bounds on crafted files (AQU-2594)", () =>
     const { ms, value } = timed(() => extractTextFromPdf(pdf))
     expect(value).toBe("a".repeat(MAX_KB_TEXT_CHARS))
     expect(ms).toBeLessThan(FAST_MS)
+    expect(extractPdfText(pdf).truncated).toBe(true)
+    expect(extractPdfText(concat([strToU8("%PDF-1.4\n"), page, strToU8("%%EOF")]))).toEqual({
+      text: "a".repeat(4 * 1024 * 1024 - 20).slice(0, MAX_KB_TEXT_CHARS),
+      truncated: true,
+    })
+    const short = flateStreamObject(zlibSync(strToU8("BT (short) Tj ET")))
+    expect(extractPdfText(concat([strToU8("%PDF-1.4\n"), short, strToU8("%%EOF")]))).toEqual({
+      text: "short",
+      truncated: false,
+    })
   })
 
   it("examines at most 10,000 streams", () => {

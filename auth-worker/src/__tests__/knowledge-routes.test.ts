@@ -8,7 +8,7 @@ import { zipSync, strToU8 } from "fflate"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
-import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_KB_ORIGINAL_BYTES, MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -164,6 +164,7 @@ describe("knowledge routes — project upload floor", () => {
     expect(res.status).toBe(201)
     const out = (await res.json()) as { doc: { id: string; indexStatus: string; r2Key: string } }
     expect(out.doc.indexStatus).toBe("pending")
+    expect(out).not.toHaveProperty("textTruncated")
 
     const row = await env.AQUILLA_PG.prepare("SELECT id, r2_key FROM knowledge_docs WHERE id = ?")
       .bind(out.doc.id)
@@ -171,6 +172,20 @@ describe("knowledge routes — project upload floor", () => {
     expect(row).not.toBeNull()
     expect(row!.r2_key).toBe(out.doc.r2Key)
     expect(bucket.store.has(out.doc.r2Key)).toBe(true)
+  })
+
+  it("says so when only the first part of a document's text was kept (AQU-2594)", async () => {
+    await seedUser(1, "owner")
+    await seedUser(2, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 2, ROLE.PROJECT_LEAD)
+    const jwt = await jwtFor("lead")
+    stubIndexingFetch()
+
+    const long = new TextEncoder().encode("a".repeat(MAX_KB_TEXT_CHARS + 1))
+    const res = await uploadDoc(PROJECT, jwt, long, "long.md", new FakeBucket(), { OPENROUTER_API_KEY: "k" })
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as { textTruncated?: boolean }).textTruncated).toBe(true)
   })
 
   it("ignores a spoofed Content-Type header; stored/served type derives from the extension", async () => {

@@ -543,17 +543,24 @@ class TextPieces {
   private pending: string[] = []
   private readonly joined: string[] = []
   private length = 0
+  /** Whether text past `limit` was dropped; whitespace alone does not count. */
+  private cut = false
 
-  /** Pieces past `limit` characters are dropped. */
+  /** Text past `limit` characters is dropped. */
   constructor(private readonly limit = Infinity) {}
 
+  /** True once text has been dropped: there is no use reading further. */
   get full(): boolean {
-    return this.length >= this.limit
+    return this.cut
   }
 
   push(piece: string): void {
-    if (this.full) return
-    if (piece.length > this.limit - this.length) piece = piece.slice(0, this.limit - this.length)
+    if (this.cut) return
+    const room = this.limit - this.length
+    if (piece.length > room) {
+      if (piece.slice(room).trim()) this.cut = true
+      piece = piece.slice(0, room)
+    }
     this.length += piece.length
     this.pending.push(piece)
     if (this.pending.length >= TEXT_PIECES_PER_JOIN) {
@@ -708,6 +715,14 @@ function isLineTerminator(code: number): boolean {
 }
 
 export function extractTextFromPdf(bytes: Uint8Array): string {
+  return extractPdfText(bytes).text
+}
+
+/**
+ * The text of a PDF, and whether it was cut at MAX_PDF_TEXT_CHARS (AQU-2594),
+ * so the caller can say that only the first part was read.
+ */
+export function extractPdfText(bytes: Uint8Array): { text: string; truncated: boolean } {
   // SWARM-TODO(AQU-197-pdf): this is a minimal best-effort extractor.
   // It decodes the raw byte stream looking for PDF text operators (Tj, TJ, ')
   // inside BT…ET blocks. It handles ISO-8859-1 literals and octal escapes
@@ -726,7 +741,8 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
     scanTextOperators(haystack, chunks)
   }
 
-  return replaceEach(chunks.text(), BLANK_LINE_RUN, () => "\n\n").trim()
+  const text = replaceEach(chunks.text(), BLANK_LINE_RUN, () => "\n\n").trim()
+  return { text, truncated: chunks.full }
 }
 
 const BLANK_LINE_RUN = /\n{3,}/g

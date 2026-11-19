@@ -15,13 +15,33 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createRef } from "react"
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+/** How often each row's component function ran, by the clip it plays (every
+ *  render of a row calls its audio hook once). */
+const rowRenders = vi.hoisted(() => ({ count: {} as Record<string, number> }))
 vi.mock("@/hooks/useCellAudio", () => ({
-  useCellAudio: () => ({
-    state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 3,
-    peaks: null, peaksState: "idle",
-    play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
-    setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
-  }),
+  useCellAudio: (_project: unknown, cell: { metadata: { selectedAudioId: string } }) => {
+    const clip = cell.metadata.selectedAudioId
+    rowRenders.count[clip] = (rowRenders.count[clip] ?? 0) + 1
+    return {
+      state: "ready", error: null, isPlaying: false, currentTime: 0, duration: 3,
+      peaks: null, peaksState: "idle",
+      play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
+      setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
+    }
+  },
+}))
+
+/** The view's watch on its own saves (save-watch.ts): what it was told, and
+ *  the way to say one of them failed. */
+const saveWatch = vi.hoisted(() => ({
+  noted: [] as string[],
+  fail: (() => {}) as (cellId: string, detail?: string) => void,
+}))
+vi.mock("./save-watch", () => ({
+  watchTranscriptWrites: (opts: { onFailed: (cellId: string, detail?: string) => void }) => {
+    saveWatch.fail = opts.onFailed
+    return { note: (_fileId: string, cellId: string) => { saveWatch.noted.push(cellId) }, stop: () => {} }
+  },
 }))
 
 // The lens asks the server about the speech model as it opens; no test here
@@ -75,7 +95,8 @@ vi.mock("@/lib/transcript-cleanup/save", () => ({
 
 import { TranscribeEditor, type TranscribeEditorHandle } from "./TranscribeEditor"
 import { setTranscribeSpeed } from "./transcribe-speed"
-import { clearTranscript } from "@/lib/transcript-cleanup/save"
+import { clearTranscript, saveTranscript } from "@/lib/transcript-cleanup/save"
+import { subscribeAudioAttachments } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -122,7 +143,32 @@ function voice(id: string): CellData {
   } as unknown as CellData
 }
 
+/** How often the row of cell `id` (a `take`) has rendered. */
+const rendersOf = (id: string) => rowRenders.count[`audio-${id}-1700000000-take.webm`] ?? 0
+
+/** A line of an imported recording: its selected clip is the FILE's (seeded
+ *  with the file id), so its transcript is also the line's own text. */
+function sourceSegment(id: string, opts: { heard?: string; transcript?: string } = {}): CellData {
+  const audioId = "audio-f1-1700000000-source.webm"
+  return {
+    ...take(id, opts),
+    medium: "media",
+    selectedAudioId: audioId,
+    attachments: {
+      [audioId]: {
+        url: `frontier-audio://${audioId}`, type: "audio", isDeleted: false, createdAt: 0, updatedAt: 0,
+        slot: "recording", ...(opts.heard ? { asrText: opts.heard } : {}),
+      },
+    },
+    audioTimings: opts.transcript
+      ? { [audioId]: opts.transcript.split(" ").map((word, i) => ({ word, t0: i, t1: i + 1, start: 0, end: 0 })) }
+      : {},
+  } as unknown as CellData
+}
+
 beforeEach(() => {
+  rowRenders.count = {}
+  saveWatch.noted.length = 0
   runCalls.length = 0
   asrCalls.length = 0
   saves.length = 0
@@ -448,5 +494,160 @@ describe("TranscribeEditor", () => {
     expect(screen.queryByTestId("transcribe-empty")).toBeNull()
     rerender(<TranscribeEditor project={project} cells={[]} session={session} concepts={[]} editable audioLoaded />)
     expect(screen.getByTestId("transcribe-empty")).toBeTruthy()
+  })
+
+  // ── AQU-2654: the list stays responsive ─────────────────────────────────
+  // docs/decisions/0013. Each of these was measured before it was fixed: one
+  // row's step rendered all thirty, a save waited on a flush and two reads of
+  // the whole file's audio, and a pass moved at the pace of those flushes.
+  describe("responsiveness (AQU-2654)", () => {
+    const three = () => ["a", "b", "c"].map((id) => take(id, { heard: "eema akasema", transcript: "eema akasema" }))
+
+    it("a row's run, token by token, renders that row and no other", async () => {
+      let step: (value?: unknown) => void = () => {}
+      const next = () => new Promise((resolve) => { step = resolve })
+      let report: (p: unknown) => void = () => {}
+      script = async (onProgress) => {
+        report = onProgress
+        onProgress({ stage: "cleaning", heard: "eema akasema", text: "" })
+        await next()
+        return { kind: "cleaned", changes: 1, text: "Yesu akasema" }
+      }
+      render(<TranscribeEditor project={project} cells={three()} session={session} concepts={[]} editable />)
+      const before = { b: rendersOf("b"), c: rendersOf("c") }
+      fireEvent.click(screen.getAllByTestId("transcribe-run")[0])
+      await waitFor(() => expect(screen.getByTestId("transcribe-writing")).toBeTruthy())
+      const streaming = rendersOf("a")
+      // The reply arrives a token at a time.
+      act(() => {
+        for (const text of ["Yesu", "Yesu ", "Yesu aka", "Yesu akasema"]) report({ stage: "cleaning", heard: "eema akasema", text })
+      })
+      await waitFor(() => expect(screen.getByTestId("transcribe-writing").textContent).toBe("Yesu akasema"))
+      // Four tokens in one frame: the row took the newest text in one render.
+      expect(rendersOf("a")).toBe(streaming + 1)
+      await act(async () => { step() })
+      await waitFor(() => expect(screen.getByTestId("transcribe-cleaned")).toBeTruthy())
+      expect({ b: rendersOf("b"), c: rendersOf("c") }).toEqual(before)
+    })
+
+    it("does not render a row whose line says the same in a new list of cells", () => {
+      const { rerender } = render(<TranscribeEditor project={project} cells={three()} session={session} concepts={[]} editable />)
+      const before = { a: rendersOf("a"), b: rendersOf("b"), c: rendersOf("c") }
+      // The file's audio was read again: every cell object is new, none changed.
+      rerender(<TranscribeEditor project={project} cells={three()} session={session} concepts={[]} editable />)
+      expect({ a: rendersOf("a"), b: rendersOf("b"), c: rendersOf("c") }).toEqual(before)
+
+      // One line's transcript changed: that row renders, the others do not.
+      const changed = three()
+      changed[1] = take("b", { heard: "eema akasema", transcript: "Yesu akasema" })
+      rerender(<TranscribeEditor project={project} cells={changed} session={session} concepts={[]} editable />)
+      expect(rendersOf("b")).toBeGreaterThan(before.b)
+      expect((screen.getAllByTestId("transcribe-transcript")[1] as HTMLTextAreaElement).value).toBe("Yesu akasema")
+      expect({ a: rendersOf("a"), c: rendersOf("c") }).toEqual({ a: before.a, c: before.c })
+    })
+
+    it("ticking a row renders that row, not the list", () => {
+      render(<TranscribeEditor project={project} cells={three()} session={session} concepts={[]} editable />)
+      const before = { a: rendersOf("a"), b: rendersOf("b"), c: rendersOf("c") }
+      fireEvent.click(screen.getAllByTestId("transcribe-select")[1])
+      expect(rendersOf("b")).toBe(before.b + 1)
+      expect({ a: rendersOf("a"), c: rendersOf("c") }).toEqual({ a: before.a, c: before.c })
+    })
+
+    it("shows a saved edit at once, without flushing or reading the file's audio again", async () => {
+      const onCommitted = vi.fn(async () => {})
+      const reads = vi.fn()
+      const stop = subscribeAudioAttachments("f1", reads)
+      // `cells` never changes here: nothing the row shows comes from a read-back.
+      render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "eema" })]} session={session} concepts={[]} editable onCommitted={onCommitted} />)
+      const field = screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement
+      fireEvent.change(field, { target: { value: "Yesu" } })
+      fireEvent.blur(field)
+      await waitFor(() => expect(saves).toHaveLength(1))
+      expect(field.value).toBe("Yesu")
+      expect(screen.getByTestId("transcribe-edited").textContent).toContain("1")
+      stop()
+      // A take's words change nothing on its cell: no flush-and-read-back of
+      // it, and no poke to read the whole file's audio.
+      expect(onCommitted).not.toHaveBeenCalled()
+      expect(reads).not.toHaveBeenCalled()
+      // The save is watched instead, so a failure can still be shown.
+      expect(saveWatch.noted).toEqual(["c1"])
+    })
+
+    it("puts the stored text back and says so when a queued save fails later", async () => {
+      render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "eema" })]} session={session} concepts={[]} editable />)
+      const field = screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement
+      fireEvent.change(field, { target: { value: "Yesu" } })
+      fireEvent.blur(field)
+      await waitFor(() => expect(saveWatch.noted).toEqual(["c1"]))
+      expect(field.value).toBe("Yesu")
+      // The outbox gave up on the write (refused, or out of attempts).
+      act(() => saveWatch.fail("c1", "403 forbidden"))
+      expect(screen.getByTestId("transcribe-status").textContent).toBe("Couldn't save")
+      expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("eema")
+    })
+
+    it("puts the stored text back when the edit could not be queued at all", async () => {
+      vi.mocked(saveTranscript).mockRejectedValueOnce(new Error("outbox closed"))
+      render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "eema" })]} session={session} concepts={[]} editable />)
+      const field = screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement
+      fireEvent.change(field, { target: { value: "Yesu" } })
+      fireEvent.blur(field)
+      await waitFor(() => expect(screen.getByTestId("transcribe-status").textContent).toBe("Couldn't save"))
+      expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("eema")
+    })
+
+    // A source segment's transcript is its line's text too, so its cell IS
+    // read back — in the background. Here that read-back never finishes.
+    it("reads a source segment's cell back without waiting for it", async () => {
+      const onCommitted = vi.fn(() => new Promise<void>(() => {}))
+      render(<TranscribeEditor project={project} cells={[sourceSegment("s1", { heard: "eema", transcript: "eema" })]} session={session} concepts={[]} editable onCommitted={onCommitted} />)
+      const field = screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement
+      fireEvent.change(field, { target: { value: "Yesu" } })
+      fireEvent.blur(field)
+      await waitFor(() => expect(onCommitted).toHaveBeenCalledWith("s1"))
+      expect(field.value).toBe("Yesu")
+      expect(screen.queryByTestId("transcribe-status")).toBeNull()
+    })
+
+    it("starts the next row of a pass without waiting for the row before it to be flushed", async () => {
+      // No flush ever completes. The pass used to stop after its first three
+      // rows (one per worker), each waiting on its flush.
+      const onCommitted = vi.fn(() => new Promise<void>(() => {}))
+      const cells = ["s1", "s2", "s3", "s4", "s5", "s6", "s7"].map((id) => sourceSegment(id))
+      render(<TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable onCommitted={onCommitted} />)
+      await waitFor(() => expect([...asrCalls].sort()).toEqual(["s1", "s2", "s3", "s4", "s5", "s6", "s7"]))
+      // And the pass ends: the button is back.
+      await screen.findByTestId("transcribe-run-all")
+      expect(onCommitted).toHaveBeenCalledTimes(7)
+    })
+
+    it("counts a pass's progress without rendering the rows it is not working on", async () => {
+      let release: (value?: unknown) => void = () => {}
+      const held = new Promise((resolve) => { release = resolve })
+      const { transcribeRow } = await import("@/lib/transcript-cleanup/run")
+      vi.mocked(transcribeRow).mockImplementation(async ({ row }) => {
+        asrCalls.push(row.cell.id)
+        await held
+        return { kind: "transcribed" }
+      })
+      try {
+        const cells = [take("done", { heard: "x", transcript: "x" }), take("fresh"), take("fresh2")]
+        render(<TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable />)
+        await waitFor(() => expect(screen.getByTestId("transcribe-progress").textContent).toContain("0"))
+        const before = rendersOf("done")
+        await act(async () => { release() })
+        await screen.findByTestId("transcribe-run-all")
+        // The row the pass never touched did not render for its progress.
+        expect(rendersOf("done")).toBe(before)
+      } finally {
+        vi.mocked(transcribeRow).mockImplementation(async ({ row, speech }) => {
+          asrCalls.push(row.cell.id)
+          runSpeech[row.cell.id] = speech
+          return { kind: "transcribed" }
+        })
+      }
+    })
   })
 })

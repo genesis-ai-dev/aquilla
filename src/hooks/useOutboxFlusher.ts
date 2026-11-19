@@ -245,16 +245,41 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   // Last observed queue size, so an outbox notification can tell "new work
   // arrived" (wake) from "a record was acked / stamped / quarantined" (don't).
   const lastTotalRef = useRef(0)
-  const refreshRequestRef = useRef(0)
+  // AQU-2654: one count read at a time. A call that arrives while a read is
+  // in flight shares it, and asks for one more read after it (the in-flight
+  // one may predate what the caller just did), so every caller still resolves
+  // with a count taken after its call. Before, a later call superseded the
+  // earlier read and DROPPED its result: one acked commit told the provider
+  // "0 pending" through the last of three overlapping reads, a render after
+  // the records list had already said the same.
+  const refreshInFlightRef = useRef<Promise<number> | null>(null)
+  const refreshAgainRef = useRef(false)
 
-  const refreshPending = useCallback(async () => {
-    const request = ++refreshRequestRef.current
-    const [total, failedN] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
-    if (request !== refreshRequestRef.current) return lastTotalRef.current
-    setPending(total)
-    setFailed(failedN)
-    lastTotalRef.current = total
-    return total
+  const refreshPending = useCallback((): Promise<number> => {
+    if (refreshInFlightRef.current) {
+      refreshAgainRef.current = true
+      return refreshInFlightRef.current
+    }
+    const run = (async () => {
+      try {
+        let total = lastTotalRef.current
+        do {
+          refreshAgainRef.current = false
+          const [count, failedN] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
+          total = count
+          setPending(total)
+          setFailed(failedN)
+          lastTotalRef.current = total
+        } while (refreshAgainRef.current)
+        return total
+      } finally {
+        // Cleared in the same turn the loop decides to stop, so no caller can
+        // join a read that will not run again for it.
+        refreshInFlightRef.current = null
+      }
+    })()
+    refreshInFlightRef.current = run
+    return run
   }, [])
 
   const flushNow = useCallback(() => {

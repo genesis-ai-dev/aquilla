@@ -13,8 +13,14 @@
 // on, so clearing it clears both. Emptying the transcript on the right goes
 // back to what ASR heard — an empty transcript over a heard text is not a state
 // the row can hold.
+//
+// AQU-2654 (docs/decisions/0013): a row renders for its own changes only. It is
+// memoized, its props keep their identity unless its own line changed (the
+// handlers are the list's, told which line by its cell id), and what it is
+// doing right now — the step it is on, the reply being written — it reads from
+// its own entry in the row store rather than from the list's state.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { Eraser, Loader2, Pause, Play, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -28,20 +34,17 @@ import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { countChangedWords } from "@/lib/transcript-cleanup/prompt"
 import type { TranscriptRow } from "@/lib/transcript-cleanup/rows"
-import type { RowProgress, SparkleOutcome } from "@/lib/transcript-cleanup/run"
 import { cn } from "@/lib/utils"
 import { TranscriptDiff, TypedText } from "./TranscriptDiff"
+import { useRowLive, type RowLive, type RowLiveStore } from "./row-live-store"
 
-export type RowStatus = { kind: "idle" } | { kind: "working"; progress: RowProgress } | SparkleOutcome
+export type { RowLive, RowStatus } from "./row-live-store"
 
-/** What a run has produced that the row's own data does not show yet: the
- *  save is queued and the cell is being read back. Shown in the meantime. */
-export interface RowLive {
-  /** `null`: nothing heard — a clear that the row's data does not show yet. */
-  heard?: string | null
-  transcript?: string
-  /** The transcript shown is a cleanup that has just landed. */
-  aiCleaned?: boolean
+/** A row has caught up once its own data shows what the run produced. */
+function caughtUp(row: TranscriptRow, live: RowLive): boolean {
+  return (live.heard === undefined || row.heard === live.heard)
+    && (live.transcript === undefined || row.transcript === live.transcript)
+    && (live.aiCleaned === undefined || row.aiCleaned === live.aiCleaned)
 }
 
 const STATUS_KEY = {
@@ -65,27 +68,34 @@ interface Props {
   label: string
   editable: boolean
   canRun: boolean
-  status: RowStatus
-  live?: RowLive
+  /** Where the row's status and the text a run has in hand are kept. */
+  store: RowLiveStore
   /** The speech model is still waking up: a row waiting on it says so. */
   modelWaking?: boolean
   selected: boolean
+  // The handlers are the same functions for every row and every render; each
+  // is told which line by its cell id.
   /** `range`: the Shift key was held, to select every row since the last pick. */
-  onToggleSelect: (range: boolean) => void
-  onRun: (forceAsr: boolean) => void
-  onSave: (text: string) => void
+  onToggleSelect: (cellId: string, range: boolean) => void
+  onRun: (cellId: string, forceAsr: boolean) => void
+  onSave: (cellId: string, text: string) => void
   /** The transcript was emptied: go back to what ASR heard. */
-  onRevert: () => void
+  onRevert: (cellId: string) => void
   /** Clear what ASR heard and the transcript built on it. */
-  onClear: () => void
+  onClear: (cellId: string) => void
 }
 
 const TRANSCRIPT_BOX = "w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
 
-export function TranscribeRow({
-  project, row, label, editable, canRun, status, live, modelWaking = false, selected, onToggleSelect, onRun, onSave, onRevert, onClear,
+export const TranscribeRow = memo(function TranscribeRow({
+  project, row, label, editable, canRun, store, modelWaking = false, selected, onToggleSelect, onRun, onSave, onRevert, onClear,
 }: Props) {
   const t = useT()
+  const cellId = row.cell.id
+  const shown = useRowLive(store, cellId)
+  const status = shown.status
+  // What a run produced is shown only until the row's own data has it.
+  const live = shown.live && !caughtUp(row, shown.live) ? shown.live : undefined
   const attachment = row.cell.attachments?.[row.audioId]
   const cellForAudio = useMemo(
     () => ({ metadata: { attachments: row.cell.attachments, selectedAudioId: row.audioId } }) as unknown as CodexCell,
@@ -108,8 +118,14 @@ export function TranscribeRow({
     : live?.heard !== undefined ? live.heard : row.heard
   const transcript = (progress?.stage === "heard" ? progress.transcript : live?.transcript) ?? row.transcript
   // Typed out only when it has just arrived: a row that already had its text
-  // when the view opened is not replayed.
-  const justHeard = heard !== null && heard !== row.heard
+  // when the view opened is not replayed. "Just arrived" is what a run in this
+  // view reported hearing — remembered here, because the row's own data now
+  // has the words in the same breath (the write hands them to the file's audio
+  // read as it is queued), where it used to trail by a flush and a read.
+  const [arrived, setArrived] = useState<string | null>(null)
+  const reported = progress?.stage === "heard" ? progress.heard : null
+  if (reported !== null && reported !== arrived) setArrived(reported)
+  const justHeard = heard !== null && (heard !== row.heard || heard === arrived)
 
   // The draft follows the transcript whenever that changes (a save, a cleanup,
   // a refetch) — adjusted during render, not in an effect.
@@ -131,9 +147,9 @@ export function TranscribeRow({
     if (!next && heard) {
       // Back to the stored text now; a revert that changes it re-renders anyway.
       setDraft(transcript)
-      onRevert()
+      onRevert(cellId)
     }
-    else if (next && next !== transcript) onSave(next)
+    else if (next && next !== transcript) onSave(cellId, next)
     else setDraft(transcript)
   }
 
@@ -148,7 +164,9 @@ export function TranscribeRow({
         : null
   const canClear = editable && !working && !row.validated && Boolean(heard || transcript)
   // Counted from what is on the row, so the number and the marks never disagree.
-  const changes = heard && draft ? countChangedWords(heard, draft) : 0
+  // A word-level comparison of the two texts: redone when one of them changes,
+  // not on every render of the row.
+  const changes = useMemo(() => (heard && draft ? countChangedWords(heard, draft) : 0), [heard, draft])
   const aiCleaned = live?.aiCleaned ?? row.aiCleaned
 
   return (
@@ -167,7 +185,7 @@ export function TranscribeRow({
             onClick={(e) => {
               // The click, not onCheckedChange: only the click knows about Shift.
               e.preventDefault()
-              onToggleSelect(e.shiftKey)
+              onToggleSelect(cellId, e.shiftKey)
             }}
             data-testid="transcribe-select"
           />
@@ -211,7 +229,7 @@ export function TranscribeRow({
               variant="ghost"
               size="icon-sm"
               aria-label={t("transcribe.clear")}
-              onClick={onClear}
+              onClick={() => onClear(cellId)}
               data-testid="transcribe-clear"
             >
               <Eraser />
@@ -299,7 +317,7 @@ export function TranscribeRow({
               size="icon-sm"
               aria-label={t("transcribe.run")}
               disabled={working || row.validated}
-              onClick={(e) => onRun(e.altKey)}
+              onClick={(e) => onRun(cellId, e.altKey)}
               data-testid="transcribe-run"
             >
               {working ? <Loader2 className="animate-spin" aria-label={t("transcribe.status.working")} /> : <Sparkles />}
@@ -309,4 +327,4 @@ export function TranscribeRow({
       </div>
     </div>
   )
-}
+})

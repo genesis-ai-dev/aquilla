@@ -1,4 +1,4 @@
-import { startTransition, type ComponentProps, type MouseEvent } from "react"
+import { memo, startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 import { KeyRound, MessageSquare, ScrollText, type LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -45,7 +45,15 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
   return <NavLink {...props} onClick={handleClick} />
 }
 
-export function OrgSidebar() {
+/**
+ * Memoized (AQU-2654). It takes no props: everything it shows comes from the
+ * org context, the router and its own permission reads. Every org page hands
+ * `<OrgSidebar />` to its AppShell from its own render, so without this each
+ * state change of the PAGE — a portfolio landing, a plan read, a letter typed
+ * in a filter — re-rendered the switcher and every nav link too (7 times to
+ * open a project overview). Context and router updates still reach it.
+ */
+export const OrgSidebar = memo(function OrgSidebar() {
   const t = useT()
   const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, isLoading: orgsLoading } = useActiveOrg()
   // AQU-790: in a guest org the caller has project-level access only — no org
@@ -227,4 +235,4 @@ export function OrgSidebar() {
       </div>
     </div>
   )
-}
+})

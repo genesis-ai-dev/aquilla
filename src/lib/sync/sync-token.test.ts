@@ -626,3 +626,92 @@ it("retries a timed-out mint without treating it as expired credentials", async 
     expect(vi.getTimerCount()).toBe(0)
   } finally { global.fetch = originalFetch; vi.useRealTimers() }
 })
+
+// AQU-2654: opening one file minted one token per closure that needed the
+// file (workspace fetcher, outbox minter, route-scoped fetcher, read hooks).
+describe("one mint per (identity, project, file) for the tab", () => {
+  const originalFetch = global.fetch
+  afterEach(() => { global.fetch = originalFetch })
+  const role = { level: 400, name: "contributor", source: "override" }
+  const numbered = () => {
+    let n = 0
+    return vi.fn(async () => new Response(JSON.stringify({ token: `tok-${++n}`, expiresIn: 900, role })))
+  }
+
+  it("two minters for the same file send one request, while it is in flight and after", async () => {
+    const fetchMock = numbered()
+    global.fetch = fetchMock as unknown as typeof fetch
+    const onRole = vi.fn()
+    const a = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)
+    const b = makeSyncTokenMinter(() => "jwt", "p", "f", { projectName: "ignored" }, API, { onRole })
+    expect(await Promise.all([a(), b()])).toEqual([
+      { token: "tok-1", status: 200 },
+      { token: "tok-1", status: 200 },
+    ])
+    // A closure built later (a hook mounting after the file opened) reuses it.
+    const late = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)
+    expect(await late()).toEqual({ token: "tok-1", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Each closure still learns the role the token carries.
+    expect(onRole).toHaveBeenCalledWith(role)
+  })
+
+  it("keeps identities, projects and files apart", async () => {
+    const fetchMock = numbered()
+    global.fetch = fetchMock as unknown as typeof fetch
+    await makeSyncTokenMinter(() => "jwt-a", "p", "f", {}, API)()
+    expect(await makeSyncTokenMinter(() => "jwt-b", "p", "f", {}, API)()).toMatchObject({ token: "tok-2" })
+    expect(await makeSyncTokenMinter(() => "jwt-a", "p2", "f", {}, API)()).toMatchObject({ token: "tok-3" })
+    expect(await makeSyncTokenMinter(() => "jwt-a", "p", "f2", {}, API)()).toMatchObject({ token: "tok-4" })
+  })
+
+  it("a forced mint replaces the shared token, so no other closure is handed the stale role (AQU-1788)", async () => {
+    const fetchMock = numbered()
+    global.fetch = fetchMock as unknown as typeof fetch
+    const flusher = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)
+    expect(await flusher()).toMatchObject({ token: "tok-1" })
+    expect(await flusher({ forceRefresh: true })).toMatchObject({ token: "tok-2" })
+    const other = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)
+    expect(await other()).toMatchObject({ token: "tok-2" })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("mints again once the shared token nears expiry", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2026-11-19T12:00:00Z"))
+      const fetchMock = numbered()
+      global.fetch = fetchMock as unknown as typeof fetch
+      await makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)()
+      vi.setSystemTime(new Date("2026-11-19T12:14:45Z"))
+      expect(await makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)()).toMatchObject({ token: "tok-2" })
+    } finally { vi.useRealTimers() }
+  })
+
+  it("hands out nothing minted before an admin step-up (AQU-2003)", async () => {
+    const fetchMock = numbered()
+    global.fetch = fetchMock as unknown as typeof fetch
+    await makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)()
+    notifyElevationGranted()
+    expect(await makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)()).toMatchObject({ token: "tok-2" })
+  })
+
+  it("a failed mint is shared by those who joined it and is not kept", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("nope", { status: 403 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "tok-ok", expiresIn: 900, role })))
+    global.fetch = fetchMock as unknown as typeof fetch
+    const forbiddenA = vi.fn(), forbiddenB = vi.fn()
+    const a = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API, { onForbidden: forbiddenA })
+    const b = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API, { onForbidden: forbiddenB })
+    // AQU-2455: a refusal carries the server's sentence, and both joiners get it.
+    expect(await Promise.all([a(), b()])).toEqual([
+      { token: null, status: 403, error: "nope" },
+      { token: null, status: 403, error: "nope" },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(forbiddenA).toHaveBeenCalledTimes(1)
+    expect(forbiddenB).toHaveBeenCalledTimes(1)
+    expect(await b()).toEqual({ token: "tok-ok", status: 200 })
+  })
+})

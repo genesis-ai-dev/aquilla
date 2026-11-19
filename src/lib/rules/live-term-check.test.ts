@@ -4,6 +4,7 @@ import {
   selectSourceApplicableTermRules,
   computeLiveTermInfractions,
   mergeBlotInfractions,
+  termRulesOf,
 } from "./live-term-check"
 import { checkRulesForCell } from "./rule-engine"
 import { compileConceptsToRulesCore } from "@/lib/terminology/compile-core"
@@ -282,4 +283,20 @@ describe("selectSourceApplicableTermRules (AQU-2654)", () => {
     const fullSweepMs = time(rules, 10)
     expect(narrowedMs * 20).toBeLessThan(fullSweepMs)
   }, 120_000)
+})
+
+describe("termRulesOf (AQU-2654)", () => {
+  it("is selectTermRules of the map's rules, as one array per map", () => {
+    const rule = (id: string, enabled = true): TranslationRule => ({
+      id, name: id, description: "", severity: "minor", source: "user", scope: "project", enabled,
+      createdAt: "2026-01-01T00:00:00Z",
+      check: { type: "target-forbids", targetPattern: "x" },
+    })
+    const map = new Map([rule("term:a:approved"), rule("user-1"), rule("term:b:approved", false), rule("term:c:approved")].map((r) => [r.id, r]))
+    const rules = termRulesOf(map)
+    expect(rules).toEqual(selectTermRules(map.values()))
+    expect(rules.map((r) => r.id)).toEqual(["term:a:approved", "term:c:approved"])
+    // Shared by every row that holds the same rule map.
+    expect(termRulesOf(map)).toBe(rules)
+  })
 })

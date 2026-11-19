@@ -8,7 +8,9 @@ import {
   neighbourTranscripts,
   pickCleanupPairs,
   pickCorrectedOnly,
+  NO_TRANSCRIPT_ROWS,
   pickWritingSamples,
+  stableTranscriptRows,
   transcriptRowOf,
   type TranscriptRow,
 } from "./rows"
@@ -217,5 +219,76 @@ describe("pickWritingSamples", () => {
 
   it("offers none for a source segment: its lane's writing is its own transcripts", () => {
     expect(pickWritingSamples(cells, { ...row(cells[2]), isSourceSegment: true })).toEqual([])
+  })
+})
+
+// AQU-2654: the list of cells is rebuilt, a new object per cell, whenever any
+// cell of the file changes or its audio is read again. A row made afresh from
+// it every time is a new prop for every row of the list.
+describe("stableTranscriptRows", () => {
+  const file = () => [
+    take("c0", { heard: "eema akasema", transcript: "eema akasema" }),
+    { id: "c1", fileId: "f1" } as CellData, // no audio: not a row
+    take("c2", { heard: "amina", transcript: "amina" }),
+  ]
+
+  it("lists the same rows a fresh build would, labelled by the line's place among the cells", () => {
+    const cells = file()
+    const { rows, labels } = stableTranscriptRows(cells, NO_TRANSCRIPT_ROWS)
+    expect(rows).toEqual([transcriptRowOf(cells[0]), transcriptRowOf(cells[2])])
+    expect([...labels]).toEqual([["c0", "1"], ["c2", "3"]])
+    const named = stableTranscriptRows([{ ...cells[0], cellLabel: "GEN 1:1" } as CellData], NO_TRANSCRIPT_ROWS)
+    expect(named.labels.get("c0")).toBe("GEN 1:1")
+  })
+
+  it("hands back the very same rows when new cell objects say the same", () => {
+    const first = stableTranscriptRows(file(), NO_TRANSCRIPT_ROWS)
+    expect(stableTranscriptRows(file(), first)).toBe(first)
+  })
+
+  it("replaces only the row whose line changed, whatever the change", () => {
+    const first = stableTranscriptRows(file(), NO_TRANSCRIPT_ROWS)
+    const cases: Array<(cell: CellData) => CellData> = [
+      // the transcript
+      () => take("c2", { heard: "amina", transcript: "Amina" }),
+      // what ASR heard
+      () => take("c2", { heard: "amin", transcript: "amina" }),
+      // the AI mark
+      () => take("c2", { heard: "amina", transcript: "amina", ai: true }),
+      // a validation vote
+      () => take("c2", { heard: "amina", transcript: "amina", validated: true }),
+      // the line's own text, which a take's timings are aligned to
+      (cell) => ({ ...cell, translated: "Amina." }) as CellData,
+      // a word's timing, with the words unchanged
+      (cell) => ({ ...cell, audioTimings: { "c2-take1": [{ word: "amina", t0: 0.5, t1: 1, start: 0, end: 0 }] } }) as CellData,
+      // another take appearing on the line
+      (cell) => ({ ...cell, attachments: { ...cell.attachments, extra: { url: "frontier-audio://extra", type: "audio" } } }) as CellData,
+    ]
+    for (const change of cases) {
+      const cells = file()
+      cells[2] = change(cells[2])
+      const next = stableTranscriptRows(cells, first)
+      expect(next.rows[0]).toBe(first.rows[0])
+      expect(next.rows[1]).not.toBe(first.rows[1])
+      expect(next.rows[1]).toEqual(transcriptRowOf(cells[2]))
+    }
+  })
+
+  it("follows rows that come, go and move", () => {
+    const first = stableTranscriptRows(file(), NO_TRANSCRIPT_ROWS)
+    const grown = [...file(), take("c3")]
+    const more = stableTranscriptRows(grown, first)
+    expect(more.rows.map((r) => r.cell.id)).toEqual(["c0", "c2", "c3"])
+    expect(more.rows.slice(0, 2)).toEqual([first.rows[0], first.rows[1]])
+    expect(more.rows[0]).toBe(first.rows[0])
+
+    const fewer = stableTranscriptRows(file().slice(1), more)
+    expect(fewer.rows).toEqual([first.rows[1]])
+    // c2 is now the second cell of the file, and is labelled so.
+    expect(fewer.labels.get("c2")).toBe("2")
+
+    const swapped = stableTranscriptRows([file()[2], file()[0]], first)
+    expect(swapped).not.toBe(first)
+    expect(swapped.rows).toEqual([first.rows[1], first.rows[0]])
   })
 })

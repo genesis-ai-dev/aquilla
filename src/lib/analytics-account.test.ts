@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest"
-import { AnalyticsAccount } from "./analytics-account"
+import { AnalyticsAccount, periodicCheckIsDue } from "./analytics-account"
 import { ANALYTICS_DISCLOSURE_VERSION } from "../../shared/analytics-consent"
 import type { FrontierSession } from "./frontier/types"
 vi.mock("@/lib/frontier/auth", () => ({ AUTH_BASE: "https://test.invalid", isJwtExpired: () => false }))
@@ -63,6 +63,35 @@ it("keeps a verified lease without restarting, but closes it on expiry or refres
   expect(state.getSnapshot().error).toBe(true)
 })
 
+// AQU-2654: coming back to the tab activated the account, and the 1 s timer's
+// revalidate() found it "not ready" and activated it again, aborting the first
+// consent read and sending a second.
+it("a revalidation does not restart an activation that is still in flight, and retries one that failed", async () => {
+  let release!: (v: { accountId: string; decision: ReturnType<typeof decision> }) => void
+  const request = vi.fn((_jwt: string, _signal: AbortSignal) =>
+    new Promise<{ accountId: string; decision: ReturnType<typeof decision> }>((resolve) => { release = resolve }))
+  const state = new AnalyticsAccount(request)
+  const activating = state.activate(session("a"))
+  expect(state.verifying()).toBe(true)
+  await state.revalidate()
+  await state.revalidate()
+  expect(request).toHaveBeenCalledTimes(1)
+  expect(request.mock.calls[0][1].aborted).toBe(false)
+  release({ accountId: "a", decision: decision(true) })
+  await activating
+  expect(state.eligible()).toBe(true)
+  expect(state.verifying()).toBe(false)
+
+  // A failed activation leaves nothing in flight, so the next tick retries it.
+  request.mockRejectedValueOnce(new Error("unavailable"))
+  await state.refresh()
+  expect(state.getSnapshot().error).toBe(true)
+  expect(state.verifying()).toBe(false)
+  request.mockResolvedValueOnce({ accountId: "a", decision: decision(true) })
+  await state.revalidate()
+  expect(state.eligible()).toBe(true)
+})
+
 it("immediately suppresses a cross-tab refusal and never applies another account's hint", async () => {
   const state = new AnalyticsAccount(async jwt => ({ accountId: jwt, decision: decision(true) }))
   await state.activate(session("a"))
@@ -87,4 +116,25 @@ it("cannot collect offline, hidden, or when persisted consent storage is unreada
   vi.spyOn(localStorage, "getItem").mockImplementation(() => { throw new DOMException("denied", "SecurityError") })
   await state.refresh()
   expect(state.eligible()).toBe(false)
+})
+
+// AQU-2654: coming back to the tab activated the account, and the periodic
+// check (overdue, because the timer does not tick in a hidden tab) re-read the
+// same decision a second later.
+it("a decision the server just confirmed counts as the periodic check", async () => {
+  const state = new AnalyticsAccount(async () => ({ accountId: "a", decision: decision(true) }))
+  expect(state.lastVerifiedAt()).toBe(0)
+  const before = Date.now()
+  await state.activate(session("a"))
+  expect(state.lastVerifiedAt()).toBeGreaterThanOrEqual(before)
+
+  const lastCheck = 1_000_000
+  // Hidden for a while: the last timer check is over a minute old…
+  const now = lastCheck + 95_000
+  // …with no confirmation since, the check is due;
+  expect(periodicCheckIsDue(now, lastCheck, 0)).toBe(true)
+  // …but not when the return's activation confirmed the decision a second ago,
+  expect(periodicCheckIsDue(now, lastCheck, now - 1_000)).toBe(false)
+  // and it is due again a minute after that confirmation, inside the 75 s lease.
+  expect(periodicCheckIsDue(now + 59_000, lastCheck, now - 1_000)).toBe(true)
 })

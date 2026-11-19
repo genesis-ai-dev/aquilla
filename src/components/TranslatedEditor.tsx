@@ -20,12 +20,10 @@
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import { Fragment, type Node as ProseMirrorNode, type ResolvedPos } from "@tiptap/pm/model"
-import { TextSelection, type Transaction } from "@tiptap/pm/state"
+import { TextSelection } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
-import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code, Sparkles } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
-import { Button } from "@/components/ui/button"
+import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
@@ -50,7 +48,7 @@ import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKey
 import posthog from "@/lib/posthog"
 import type { ForecastClient } from "@/lib/forecast/forecast-client"
 import { useForecast } from "@/context/ForecastContext"
-import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
+import { FormattingBubbleToolbar } from "@/components/FormattingBubbleToolbar"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
@@ -1881,20 +1879,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     onGestureEnd: () => commitEditorSnapshot.current(),
   })
 
-  const [, forceEditorStateUpdate] = useState(0)
-  useEffect(() => {
-    if (!editor) return
-    const refresh = ({ transaction }: { transaction?: Transaction } = {}) => {
-      if (transaction && !transaction.docChanged && !transaction.selectionSet) return
-      forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
-    }
-    editor.on("transaction", refresh)
-    editor.on("selectionUpdate", refresh)
-    return () => {
-      editor.off("transaction", refresh)
-      editor.off("selectionUpdate", refresh)
-    }
-  }, [editor])
+  // AQU-2654: no per-transaction re-render of this component. The one thing
+  // drawn from live editor state is the selection bubble's pressed marks, and
+  // `FormattingBubbleToolbar` subscribes to exactly that.
 
   const handleEditorKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return
@@ -2107,79 +2094,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
-        {/* `relative z-30`: the row's floating action rail is z-20 and, since
-            round 5 made the mic/upload/TTS buttons permanent rather than
-            appearing only on an empty untranslated line, it is wide enough to
-            reach across this toolbar. Without a higher layer the rail's
-            buttons sit on top and swallow clicks meant for Bold/Inline
-            code/… — a formatting button that simply would not take. */}
-        <div
-          data-testid="formatting-bubble-menu"
-          className="relative z-30 flex gap-0.5 rounded-lg bg-card p-0.5"
+        <FormattingBubbleToolbar
+          editor={editor}
           onMouseDown={handleFormattingToolbarMouseDown}
-        >
-          <AppTooltip content={t("editor.format.boldTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              aria-label={t("editor.format.bold")}
-              className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
-            >
-              <Bold className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.italicTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              aria-label={t("editor.format.italic")}
-              className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
-            >
-              <Italic className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.underlineTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleUnderline().run()}
-              aria-label={t("editor.format.underline")}
-              className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
-            >
-              <UnderlineIcon className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.strikethrough")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleStrike().run()}
-              aria-label={t("editor.format.strikethrough")}
-              className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
-            >
-              <Strikethrough className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.code")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleCode().run()}
-              aria-label={t("editor.format.code")}
-              className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
-            >
-              <Code className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          {forecast && <WordsThatFitMenu editor={editor} client={forecast.client} cellId={cellId} />}
-        </div>
+          forecastClient={forecast?.client}
+          cellId={cellId}
+        />
       </BubbleMenu>}
       {idmlError && (
         <div

@@ -34,7 +34,7 @@
  * same list so an exclusion can never be undone by the lexical path.
  */
 
-import { matchesConcept, stripMarks } from "./match"
+import { matchesConcept, stripMarks, termMatchingKey } from "./match"
 import { resolveMatchOptions } from "./match-options"
 import type { Concept, TermMatchingSettings } from "./types"
 
@@ -59,8 +59,43 @@ function foldForFragment(value: string): string {
  * The active concepts a source-side surface string should offer a lookup for,
  * in the order they were given. `project` carries the affix inventory and fold
  * defaults, exactly as it does for every other `match.ts` caller.
+ *
+ * Memoized per (concepts array, project settings, surface) — AQU-2654. The
+ * editor calls this from render, once per highlighted term per row, and every
+ * call tests the whole glossary. The termbase array is replaced, never edited
+ * in place, when a term changes, so its identity is the cache key and a new
+ * array starts a new cache. The returned array is shared: do not mutate it.
  */
 export function conceptsForSourceSurface(
+  surface: string,
+  concepts: readonly Concept[],
+  project?: TermMatchingSettings,
+): Concept[] {
+  let byProject = lookupCache.get(concepts)
+  if (!byProject) {
+    byProject = new Map()
+    lookupCache.set(concepts, byProject)
+  }
+  const projectKey = termMatchingKey(project)
+  let bySurface = byProject.get(projectKey)
+  if (!bySurface) {
+    bySurface = new Map()
+    byProject.set(projectKey, bySurface)
+  }
+  const hit = bySurface.get(surface)
+  if (hit) return hit
+  const found = lookUpConcepts(surface, concepts, project)
+  // A file has a few thousand distinct highlighted surfaces at most; the cap
+  // only bounds a pathological caller.
+  if (bySurface.size >= MAX_CACHED_SURFACES) bySurface.clear()
+  bySurface.set(surface, found)
+  return found
+}
+
+const MAX_CACHED_SURFACES = 5000
+const lookupCache = new WeakMap<readonly Concept[], Map<string, Map<string, Concept[]>>>()
+
+function lookUpConcepts(
   surface: string,
   concepts: readonly Concept[],
   project?: TermMatchingSettings,

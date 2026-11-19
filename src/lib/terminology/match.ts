@@ -269,11 +269,33 @@ export interface ConceptRegexOpts {
  * One regex source for a whole concept: sourceTerm + match.forms as
  * alternates, each with boundaries and affix groups; excludedForms as a
  * leading negative lookahead anchored at the same word start.
+ *
+ * Memoized per concept object (AQU-2654). Building this source walks every
+ * character of every form through escaping, mark folding and affix expansion.
+ * Callers ask for it once per concept per text they test, and the editor asks
+ * from render, so an uncached build made a 664-term glossary cost seconds per
+ * row render. The entry is checked against the fields it was built from, so a
+ * concept edited in place is rebuilt rather than served stale.
  */
 export function conceptToRegexSource(
   concept: ConceptLike,
   project?: TermMatchingSettings,
   opts: ConceptRegexOpts = {},
+): string | null {
+  const cached = compiledFor(concept, project)
+  const includeExcluded = !!opts.includeExcluded
+  const hit = includeExcluded ? cached.withExcluded : cached.source
+  if (hit !== undefined) return hit
+  const built = buildConceptRegexSource(concept, project, opts)
+  if (includeExcluded) cached.withExcluded = built
+  else cached.source = built
+  return built
+}
+
+function buildConceptRegexSource(
+  concept: ConceptLike,
+  project: TermMatchingSettings | undefined,
+  opts: ConceptRegexOpts,
 ): string | null {
   const r = resolveMatchOptions(concept, project)
   const termOpts: TermRegexOptions = {
@@ -297,6 +319,73 @@ export function conceptToRegexSource(
   return `(?!(?:${excl})${TRAIL_BOUNDARY})${body}`
 }
 
+interface CompiledConcept {
+  /** The fields the entry was built from — a mismatch means rebuild. */
+  sourceTerm: string
+  match: ConceptLike["match"]
+  /** `undefined` = not built yet; `null` = the concept has no usable term. */
+  source?: string | null
+  withExcluded?: string | null
+  /** Compiled regexes by flags, for this module's own callers only. */
+  regex: Map<string, RegExp | null>
+}
+
+const compiledConcepts = new WeakMap<object, Map<string, CompiledConcept>>()
+const settingsKeys = new WeakMap<object, string>()
+
+/**
+ * A cache key for the project's matching settings, by content. Callers build
+ * the settings object in render, so its identity changes while its content
+ * does not; keying on identity would miss every time.
+ */
+export function termMatchingKey(project?: TermMatchingSettings): string {
+  if (!project) return ""
+  let key = settingsKeys.get(project)
+  if (key === undefined) {
+    key = JSON.stringify([project.prefixes, project.suffixes, project.maxAffixes ?? null, project.foldMarksDefault ?? null])
+    settingsKeys.set(project, key)
+  }
+  return key
+}
+
+function compiledFor(concept: ConceptLike, project?: TermMatchingSettings): CompiledConcept {
+  let byProject = compiledConcepts.get(concept)
+  if (!byProject) {
+    byProject = new Map()
+    compiledConcepts.set(concept, byProject)
+  }
+  const key = termMatchingKey(project)
+  let entry = byProject.get(key)
+  if (!entry || entry.sourceTerm !== concept.sourceTerm || entry.match !== concept.match) {
+    entry = { sourceTerm: concept.sourceTerm, match: concept.match, regex: new Map() }
+    byProject.set(key, entry)
+  }
+  return entry
+}
+
+/**
+ * The cached compiled regex. A `g` regex carries `lastIndex`, so it is only
+ * handed to the synchronous loops below, which reset it first; exported
+ * callers of `buildConceptRegex` still get a regex of their own.
+ */
+function sharedConceptRegex(
+  concept: ConceptLike,
+  project: TermMatchingSettings | undefined,
+  flags: string,
+  opts?: ConceptRegexOpts,
+): RegExp | null {
+  const cached = compiledFor(concept, project)
+  const key = opts?.includeExcluded ? `${flags}+excluded` : flags
+  let re = cached.regex.get(key)
+  if (re === undefined) {
+    const src = conceptToRegexSource(concept, project, opts)
+    re = src === null ? null : new RegExp(src, flags)
+    cached.regex.set(key, re)
+  }
+  if (re) re.lastIndex = 0
+  return re
+}
+
 export function buildConceptRegex(
   concept: ConceptLike,
   project?: TermMatchingSettings,
@@ -309,7 +398,7 @@ export function buildConceptRegex(
 
 export function matchesConcept(haystack: string, concept: ConceptLike, project?: TermMatchingSettings): boolean {
   if (!haystack) return false
-  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "u" : "iu")
+  const re = sharedConceptRegex(concept, project, concept.caseSensitive ? "u" : "iu")
   return re !== null && re.test(haystack)
 }
 
@@ -327,7 +416,7 @@ export function findConceptMatches(
   opts?: ConceptRegexOpts,
 ): ConceptMatch[] {
   if (!haystack) return []
-  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "gu" : "giu", opts)
+  const re = sharedConceptRegex(concept, project, concept.caseSensitive ? "gu" : "giu", opts)
   if (!re) return []
   const out: ConceptMatch[] = []
   let m: RegExpExecArray | null

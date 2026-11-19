@@ -102,3 +102,19 @@ describe("hasSourceTermMatch", () => {
     expect(hasSourceTermMatch("unrelated", [concept()], HEBREW_INVENTORY)).toBe(false)
   })
 })
+
+describe("conceptsForSourceSurface memo (AQU-2654)", () => {
+  it("answers a repeated lookup from the cache, and keys the cache on what can change the answer", () => {
+    const concepts = [concept()]
+    const first = conceptsForSourceSurface(PREFIXED, concepts, HEBREW_INVENTORY)
+    // Same termbase array, settings equal by content but a new object — the
+    // shape of a caller that builds the settings in render.
+    expect(conceptsForSourceSurface(PREFIXED, concepts, { ...HEBREW_INVENTORY })).toBe(first)
+    // Different settings: the prefix is no longer in the inventory.
+    expect(conceptsForSourceSurface(PREFIXED, concepts, { prefixes: [], suffixes: [] })).toHaveLength(0)
+    // A replaced termbase array is a new cache: the term was excluded.
+    const edited = [concept({ match: { excludedForms: [PREFIXED] } })]
+    expect(conceptsForSourceSurface(PREFIXED, edited, HEBREW_INVENTORY)).toHaveLength(0)
+    expect(conceptsForSourceSurface(PREFIXED, concepts, HEBREW_INVENTORY)).toBe(first)
+  })
+})

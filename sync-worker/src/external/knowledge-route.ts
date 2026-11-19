@@ -1,7 +1,7 @@
 // Agent API knowledge-base (reference document) upload + list — AQU-1762.
 //
 //   POST /api/v1/external/projects/:projectId/knowledge
-//     Body = raw bytes. Headers: x-doc-name (required). → { doc }
+//     Body = raw bytes. Headers: x-doc-name (required). → { doc, textTruncated? }
 //   GET  /api/v1/external/projects/:projectId/knowledge  → { docs }
 //
 // Setting up reference material (a published Bible, approved prior translations,

@@ -4026,7 +4026,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
           </BibleDataProvider>
           {/* AQU-2678: the draggable line before Target (with a grip in the
               column headings). */}
-          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} gridCols={gridCols} bibleTracks={bibleTrackCount} />
+          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} scrollRef={parentRef} gridCols={gridCols} bibleTracks={bibleTrackCount} />
         </div>
       ) : isTimeOrdered ? (
         // Shared with the Smart Extensions editor surface (AQU-1565/1566).

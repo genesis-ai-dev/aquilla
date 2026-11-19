@@ -9,9 +9,11 @@
 // Target leaves (editor-split.ts).
 //
 // Two grips, one control:
-//   - in the rows, a thin 6px handle in the gap: the focusable separator. It
-//     lets vertical swipes through (`touch-pan-y`) so the list still scrolls
-//     over it, and is too thin to sit over anything in the rows.
+//   - in the rows, a thin 6px handle in the gap: the focusable separator, for
+//     the mouse and the keyboard. Its layer sits beside the list's scroller,
+//     not inside it, so a wheel turn over it is passed on to the scroller,
+//     and on touch screens it takes no pointer input at all: a swipe over the
+//     line scrolls the list as anywhere else.
 //   - in the column-header row, portalled into the header grid, a grip that
 //     widens to a finger-sized strip on touch screens. Nothing there scrolls
 //     and nothing there is cut through.
@@ -31,6 +33,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
   type RefObject,
 } from "react"
 import { createPortal } from "react-dom"
@@ -63,6 +66,7 @@ const LINE_CLASS =
 export function EditorSplitDivider({
   rootRef,
   headerRef,
+  scrollRef,
   gridCols,
   bibleTracks = 0,
 }: {
@@ -70,6 +74,8 @@ export function EditorSplitDivider({
   rootRef: RefObject<HTMLElement | null>
   /** The column-header grid, which gets the header grip. */
   headerRef?: RefObject<HTMLElement | null>
+  /** The list's scroll element, which a wheel turn over the line scrolls. */
+  scrollRef?: RefObject<HTMLElement | null>
   gridCols: EditorGridCols | string
   /** Bible columns between Source and Target. */
   bibleTracks?: number
@@ -227,6 +233,17 @@ export function EditorSplitDivider({
     [commit, effective, reset, textWidth, tracks],
   )
 
+  const onWheel = useCallback(
+    (e: ReactWheelEvent<HTMLDivElement>) => {
+      const scroller = scrollRef?.current
+      if (!scroller || typeof scroller.scrollBy !== "function") return
+      // deltaMode: 0 pixels, 1 lines, 2 pages.
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
+      scroller.scrollBy({ top: e.deltaY * unit, left: e.deltaX * unit })
+    },
+    [scrollRef],
+  )
+
   const shares = editorSplitShares(effective, tracks)
   const percent = (n: number) => Math.round(n * 100)
 
@@ -262,11 +279,14 @@ export function EditorSplitDivider({
             className={cn(
               // Centred in the 8px gap before Target: -start-[7px] + w-1.5.
               "group/split pointer-events-auto absolute inset-y-0 -start-[7px] flex w-1.5 cursor-col-resize touch-pan-y items-stretch justify-center outline-none",
+              // Touch drags use the header grip; a finger here scrolls the list.
+              "pointer-coarse:pointer-events-none",
               "focus-visible:ring-1 focus-visible:ring-ring",
             )}
             onPointerDown={onPointerDown}
             onDoubleClick={reset}
             onKeyDown={onKeyDown}
+            onWheel={onWheel}
           >
             <span
               aria-hidden

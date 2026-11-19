@@ -23,13 +23,16 @@ function rect(left: number, width: number): DOMRect {
 function Harness({ dir, bibleTracks = 0 }: { dir?: "rtl" | "ltr"; bibleTracks?: number }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const headerRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLElement | null>(null)
   return (
     <div dir={dir}>
       <div ref={rootRef} data-testid="root">
         <div ref={headerRef} data-testid="header" />
+        <div ref={(el) => { scrollRef.current = el }} data-testid="scroller" />
         <EditorSplitDivider
           rootRef={rootRef}
           headerRef={headerRef}
+          scrollRef={scrollRef}
           bibleTracks={bibleTracks}
           gridCols="md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
         />
@@ -87,6 +90,29 @@ describe("EditorSplitDivider", () => {
     expect(handle.className).not.toMatch(/before:-inset/)
     expect(screen.getByTestId("header").contains(headerGrip())).toBe(true)
     expect(headerGrip().className).toContain("pointer-coarse:w-[26px]")
+  })
+
+  // Browser pass on 1fd9ed676: the line's layer is beside the list's
+  // scroller, not inside it, so nothing scrolled under it.
+  it("passes a wheel turn over the row line on to the list", () => {
+    render(<Harness />)
+    const scroller = screen.getByTestId("scroller")
+    const scrollBy = vi.fn()
+    scroller.scrollBy = scrollBy as never
+    Object.defineProperty(scroller, "clientHeight", { value: 600, configurable: true })
+    fireEvent.wheel(separator(), { deltaY: 120, deltaX: 0, deltaMode: 0 })
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: 120, left: 0 })
+    // Lines and pages are turned into pixels.
+    fireEvent.wheel(separator(), { deltaY: 3, deltaMode: 1 })
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: 48, left: 0 })
+    fireEvent.wheel(separator(), { deltaY: 1, deltaMode: 2 })
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: 600, left: 0 })
+  })
+
+  it("leaves touches on the row line to the list (touch drags use the header grip)", () => {
+    render(<Harness />)
+    expect(separator().className).toContain("pointer-coarse:pointer-events-none")
+    expect(headerGrip().className).not.toContain("pointer-events-none")
   })
 
   it("moves with the arrow keys (Shift for bigger steps), saving as it goes", () => {

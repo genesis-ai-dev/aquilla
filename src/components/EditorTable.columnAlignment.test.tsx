@@ -38,7 +38,9 @@ vi.mock("@legendapp/list/react", async () => {
       data,
       renderItem,
       keyExtractor,
+      refScrollView,
     }: {
+      refScrollView?: (node: unknown) => void
       data: string[]
       renderItem: (props: { item: string; index: number }) => ReactNode
       keyExtractor?: (item: string, index: number) => string
@@ -50,7 +52,7 @@ vi.mock("@legendapp/list/react", async () => {
       }))
       return React.createElement(
         "div",
-        null,
+        { ref: refScrollView, "data-testid": "list-scroller" },
         data.map((item, index) =>
           React.createElement(
             React.Fragment,
@@ -579,6 +581,19 @@ describe("EditorTable — Bible columns", () => {
     expect(root.style.getPropertyValue("--editor-rest-fr")).not.toBe("")
     // The row element itself is untouched: same class, nothing per-row to update.
     expect(row.className).toContain(template)
+  })
+
+  // Browser pass on 1fd9ed676: the line's layer is beside the scroller, so a
+  // wheel turn over it scrolled nothing.
+  it("scrolls the list when the mouse wheel turns over the row line", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: [] })
+    await screen.findByText("hello")
+    const scroller = screen.getByTestId("list-scroller")
+    const scrollBy = vi.fn()
+    scroller.scrollBy = scrollBy as never
+    fireEvent.wheel(screen.getByRole("separator", { name: "Resize the Source and Target columns" }), { deltaY: 100 })
+    expect(scrollBy).toHaveBeenCalledWith({ top: 100, left: 0 })
   })
 
   it("keeps the divider before Target while Bible columns are shown, with its grip in the headings", async () => {

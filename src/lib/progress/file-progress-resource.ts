@@ -155,8 +155,22 @@ interface ResourceRecord extends FileProgressResourceState {
   getToken: (() => Promise<string | null>) | null
   /** AQU-1832: armed while this record is living off pushed frames. */
   repairTimer: ReturnType<typeof setTimeout> | null
+  /**
+   * AQU-2654: the server said it is pushing the post-commit numbers for a
+   * write of this client's own that the pending overlay covers
+   * (`expectPushedFileProgress`); `'merged'` once that push has landed. When
+   * the overlay drains, a merged push IS the answer the read after it used to
+   * fetch, and an expected one is on its way.
+   */
+  ownPush: 'none' | 'expected' | 'merged'
+  /** Bounds the wait for an expected push that never arrives (dead socket). */
+  ownPushTimer: ReturnType<typeof setTimeout> | null
   listeners: Set<() => void>
 }
+
+/** How long a drained overlay waits for the push the server announced before
+ *  it reads the numbers itself. A watchdog for a lost frame, not a target. */
+const OWN_PUSH_WAIT_MS = 5_000
 
 let dbPromise: Promise<IDBDatabase> | null = null
 const resources = new Map<string, ResourceRecord>()
@@ -171,6 +185,7 @@ export function setFileProgressCacheOwner(ownerKey: string | null): void {
   // it has to die with that record rather than wake up against the new owner.
   for (const record of resources.values()) {
     if (record.repairTimer !== null) clearTimeout(record.repairTimer)
+    if (record.ownPushTimer !== null) clearTimeout(record.ownPushTimer)
   }
   resources.clear()
   // A queued job also closes over the prior account's token fetcher. Active
@@ -222,6 +237,8 @@ function resourceFor(projectId: string, fileId: string, lane = ''): ResourceReco
       refreshAfterFlight: false,
       getToken: null,
       repairTimer: null,
+      ownPush: 'none',
+      ownPushTimer: null,
       listeners: new Set(),
     }
     resources.set(cacheKey, record)
@@ -350,9 +367,50 @@ async function reconcilePendingOverlay(record: ResourceRecord): Promise<void> {
     // persisted optimistic display keep masking the authoritative snapshot.
     record.local = null
     record.progress = record.server
-    if (record.getToken) void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
+    confirmDrainedOverlay(record)
   }
   emit(record)
+}
+
+/**
+ * AQU-2654: an own write's pending overlay just drained. The numbers that
+ * replace it used to be read back with a forced `/progress` GET — after the
+ * server had already pushed them on the socket. Read only when no push was
+ * announced for the write; wait (bounded) for one that was.
+ */
+function confirmDrainedOverlay(record: ResourceRecord): void {
+  const ownPush = record.ownPush
+  record.ownPush = 'none'
+  if (record.ownPushTimer !== null) {
+    clearTimeout(record.ownPushTimer)
+    record.ownPushTimer = null
+  }
+  if (ownPush === 'merged') return
+  if (ownPush === 'expected') {
+    const serverAtDrain = record.server
+    record.ownPushTimer = setTimeout(() => {
+      record.ownPushTimer = null
+      // Any newer server body — the push, or a read — settled it.
+      if (record.server !== serverAtDrain || record.listeners.size === 0 || !record.getToken) return
+      void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
+    }, OWN_PUSH_WAIT_MS)
+    return
+  }
+  if (record.getToken) void loadResource(record.projectId, record.fileId, record.getToken, true, record.lane)
+}
+
+/**
+ * AQU-2654: an applied frame for one of this client's own writes carried
+ * `progressPushed` — the post-commit numbers for `fileId` ride the socket.
+ * Marks every lane record of the file that is showing a pending overlay, so
+ * the overlay's drain does not read back what is being pushed.
+ */
+export function expectPushedFileProgress(projectId: string, fileId: string): void {
+  for (const record of resources.values()) {
+    if (record.projectId !== projectId || record.fileId !== fileId) continue
+    if (record.pendingEventIds.length === 0 || record.ownPush !== 'none') continue
+    record.ownPush = 'expected'
+  }
 }
 
 async function fetchProgress(
@@ -517,8 +575,16 @@ export function setLocalFileProgress(
     : (record.server ?? progress)
   emit(record)
   void writeCache(record)
-  if (hadPendingEvents && record.pendingEventIds.length === 0 && record.getToken) {
-    void loadResource(projectId, fileId, record.getToken, true, lane)
+  if (hadPendingEvents && record.pendingEventIds.length === 0) {
+    // A push that already landed is the server's post-commit answer: show it
+    // now, as the read this used to trigger would have.
+    if (record.ownPush === 'merged' && record.server) {
+      record.local = null
+      record.progress = record.server
+      emit(record)
+      void writeCache(record)
+    }
+    confirmDrainedOverlay(record)
   }
 }
 
@@ -606,6 +672,7 @@ export function applyPushedFileProgress(projectId: string, push: PushedFileProgr
     source: 'projection',
   }
   record.server = next
+  if (record.ownPush === 'expected') record.ownPush = 'merged'
   // An optimistic overlay for this client's own un-flushed writes still wins,
   // exactly as it does over a server read (see loadResource).
   if (record.pendingEventIds.length === 0) {
@@ -735,6 +802,7 @@ export async function resetFileProgressResourceForTests(): Promise<void> {
   activeOwnerKey = undefined
   for (const record of resources.values()) {
     if (record.repairTimer !== null) clearTimeout(record.repairTimer)
+    if (record.ownPushTimer !== null) clearTimeout(record.ownPushTimer)
   }
   resources.clear()
   prefetchQueue.length = 0

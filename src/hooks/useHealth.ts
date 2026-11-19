@@ -1,9 +1,32 @@
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { computeDecayHealth, resolveDecayConfig, type HealthStats } from "@/lib/health/decay-engine"
 import { checkRulesForCell, type CellCheckContext } from "@/lib/rules/rule-engine"
 import type { CellData } from "./useCells"
 import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 import { perfMark, memMark } from "@/lib/perf-log"
+import { conceptPatternsCompiled } from "@/lib/terminology/match"
+import { scheduleSlice } from "./useProjectInfractions"
+
+/**
+ * How many glossary-term regexes one synchronous rule pass may compile for the
+ * first time before the rest of the file is checked in the background
+ * (AQU-2654).
+ *
+ * Checking a cell is cheap once its patterns are compiled; compiling one is
+ * not — a glossary term with mark folding and affixes costs V8 around 8 ms at
+ * 1x CPU. A file that mentions a couple of hundred glossary terms would hold
+ * the main thread for seconds the first time it is opened, inside render.
+ * The budget counts the expensive thing itself, so it does not depend on the
+ * machine: a pass that stays under it (every edit, and a file that mentions
+ * up to a few dozen terms not seen before) is synchronous exactly as before.
+ */
+const SYNC_PATTERN_BUDGET = 32
+
+/** Milliseconds of background checking per idle slice. */
+const BACKGROUND_SLICE_MS = 8
+
+/** A partial infractions map → how many cells it is still waiting for. */
+const pendingCounts = new WeakMap<Map<string, RuleInfraction[]>, number>()
 
 export interface HealthCell {
   id: string
@@ -171,6 +194,7 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
   if (a === b) return true
   if (a.projectHealth !== b.projectHealth) return false
   if (a.projectOpenCommentCount !== b.projectOpenCommentCount) return false
+  if ((a.infractionsPending ?? 0) !== (b.infractionsPending ?? 0)) return false
   if (!primitiveMapsEqual(a.healthMap, b.healthMap)) return false
   if (!primitiveMapsEqual(a.fileHealth, b.fileHealth)) return false
   if (!primitiveMapsEqual(a.openCommentCount, b.openCommentCount)) return false
@@ -258,6 +282,26 @@ function sameHealthInputs(
   return true
 }
 
+/** Check one cell and record the fields the result depends on. */
+function checkedEntry(
+  cell: HealthCell,
+  fileId: string,
+  enabledRules: TranslationRule[],
+  rulesForCell: HealthDispatchOptions["rulesForCell"],
+  cellCheckContext: HealthDispatchOptions["cellCheckContext"],
+): RuleCacheEntry {
+  return {
+    fileId, status: cell.status, original: cell.original, translated: cell.translated,
+    medium: cell.medium, transcription: cell.transcription, hasOwnTake: cell.hasOwnTake,
+    infractions: checkRulesForCell(
+      cell as CellData,
+      fileId,
+      rulesForCell ? rulesForCell(cell, fileId, enabledRules) : enabledRules,
+      cellCheckContext?.(cell, fileId),
+    ),
+  }
+}
+
 export function useHealth(
   inputFileCells: Map<string, readonly HealthCell[]>,
   rules: TranslationRule[] = [],
@@ -333,7 +377,13 @@ export function useHealth(
     }
   }, [rules, librarySig, contextSig])
 
+  // AQU-2654: cells the pass below left for the background, and a counter the
+  // background bumps when it has filled the cache in for them.
+  const deferredRef = useRef<{ rulesSig: string; cells: Array<{ fileId: string; cell: HealthCell }> } | null>(null)
+  const [backgroundPasses, setBackgroundPasses] = useState(0)
+
   const infractions = useMemo(() => {
+    deferredRef.current = null
     if (!enabled) {
       infractionsCacheRef.current = { rulesSig: "", byCell: new Map() }
       return EMPTY_INFRACTIONS
@@ -354,6 +404,10 @@ export function useHealth(
 
     const rulesForCell = rulesForCellRef.current
     const cellCheckContext = cellCheckContextRef.current
+    // Cells are checked in file order, so what is left for the background when
+    // the budget runs out is the far end of the file, not the top of it.
+    const compiledBefore = conceptPatternsCompiled()
+    const deferred: Array<{ fileId: string; cell: HealthCell }> = []
     for (const [fileId, cells] of fileCells) {
       for (const cell of cells) {
         visited++
@@ -361,24 +415,27 @@ export function useHealth(
         // Resolve the cell's rule set only on a MISS — `rulesForCell` walks the
         // applicability graph, which is exactly the cost this cache exists to
         // keep off the keystroke path.
-        const entry = prev && prev.fileId === fileId
+        const hit = prev && prev.fileId === fileId
           && prev.status === cell.status && prev.original === cell.original
           && prev.translated === cell.translated && prev.medium === cell.medium
           && prev.transcription === cell.transcription && prev.hasOwnTake === cell.hasOwnTake
+        if (!hit && conceptPatternsCompiled() - compiledBefore > SYNC_PATTERN_BUDGET) {
+          // Over budget: this cell is checked in the background. Whatever the
+          // cache holds for it belongs to other content or other rules.
+          byCell.delete(cell.id)
+          deferred.push({ fileId, cell })
+          continue
+        }
+        const entry = hit
           ? prev
-          : {
-              fileId, status: cell.status, original: cell.original, translated: cell.translated,
-              medium: cell.medium, transcription: cell.transcription, hasOwnTake: cell.hasOwnTake,
-              infractions: checkRulesForCell(
-                cell as CellData,
-                fileId,
-                rulesForCell ? rulesForCell(cell, fileId, enabledRules) : enabledRules,
-                cellCheckContext?.(cell, fileId),
-              ),
-            }
+          : checkedEntry(cell, fileId, enabledRules, rulesForCell, cellCheckContext)
         if (entry !== prev) byCell.set(cell.id, entry)
         if (entry.infractions.length > 0) result.set(cell.id, entry.infractions)
       }
+    }
+    if (deferred.length > 0) {
+      deferredRef.current = { rulesSig, cells: deferred }
+      pendingCounts.set(result, deferred.length)
     }
 
     // Insertions/updates are already reflected in byCell. A size mismatch
@@ -393,7 +450,46 @@ export function useHealth(
     end()
     memMark("useHealth.checkRules")
     return result
-  }, [fileCells, enabledRules, rulesSig, enabled, libraryMayLint])
+    // `backgroundPasses`: the background filled the cache in; read it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileCells, enabledRules, rulesSig, enabled, libraryMayLint, backgroundPasses])
+  const infractionsPending = pendingCounts.get(infractions) ?? 0
+
+  // AQU-2654: check the deferred cells in idle slices, straight into the cache
+  // the pass above reads, then run that pass once more — it finds every cell
+  // cached and publishes the complete map. One extra commit, at the end, not
+  // one per slice: each publish re-renders the workspace.
+  useEffect(() => {
+    const job = deferredRef.current
+    if (!job) return
+    let next = 0
+    let disposed = false
+    let cancel: (() => void) | null = null
+    const runSlice = () => {
+      cancel = null
+      if (disposed) return
+      const cache = infractionsCacheRef.current
+      // Superseded: a newer pass owns the cache and has its own deferred list.
+      if (cache.rulesSig !== job.rulesSig || deferredRef.current !== job) return
+      const deadline = performance.now() + BACKGROUND_SLICE_MS
+      do {
+        const { fileId, cell } = job.cells[next++]
+        cache.byCell.set(
+          cell.id,
+          checkedEntry(cell, fileId, enabledRules, rulesForCellRef.current, cellCheckContextRef.current),
+        )
+      } while (next < job.cells.length && performance.now() < deadline)
+      if (next < job.cells.length) cancel = scheduleSlice(runSlice)
+      else setBackgroundPasses((n) => n + 1)
+    }
+    cancel = scheduleSlice(runSlice)
+    return () => {
+      disposed = true
+      cancel?.()
+    }
+    // Keyed on the pass's own output: a new pass is a new deferred list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [infractions])
 
   // File progress + open-comment counts.
   const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])
@@ -416,11 +512,12 @@ export function useHealth(
       projectHealth: effectiveProjectHealth,
       fileProgress: aux.fileProgress,
       infractions,
+      ...(infractionsPending > 0 ? { infractionsPending } : {}),
       openCommentCount: aux.openCommentCount,
       projectOpenCommentCount: aux.projectOpenCommentCount,
       cellOpenCommentCount: aux.cellOpenCommentCount,
     }),
-    [decay, infractions, aux, effectiveProjectHealth, effectiveFileHealth],
+    [decay, infractions, infractionsPending, aux, effectiveProjectHealth, effectiveFileHealth],
   )
 
   // Structural stability: if the raw result is semantically unchanged from

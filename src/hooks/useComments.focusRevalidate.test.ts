@@ -116,3 +116,68 @@ describe("useComments — window-regained-focus re-arm (AQU-817)", () => {
     expect(mockFetchComments).not.toHaveBeenCalled()
   })
 })
+
+// AQU-2654 — the focus read is a revalidation: it must not flip the list's
+// loading flags, replace the list with an equal one, or ask twice.
+describe("useComments — a focus revalidation is quiet (AQU-2654)", () => {
+  function mountWithPriorityFile() {
+    const seen: Array<{ isLoading: boolean; isLoadingRest: boolean }> = []
+    let renders = 0
+    const hook = renderHook(() => {
+      const api = useComments({
+        projectId: "proj-1",
+        getToken: GET_TOKEN,
+        author: "joel",
+        priorityFileId: "file-1",
+      })
+      renders += 1
+      seen.push({ isLoading: api.isLoading, isLoadingRest: api.isLoadingRest })
+      return api
+    })
+    return { ...hook, seen, renders: () => renders }
+  }
+
+  it("sends one list read, shows no loading state and keeps the list's identity when nothing changed", async () => {
+    // A new, equal array of new, equal rows per read, as the network gives.
+    mockFetchComments.mockImplementation(async () => [peerThread()])
+    const { result, seen, renders } = mountWithPriorityFile()
+    await waitFor(() => expect(result.current.comments).toHaveLength(1))
+    await waitFor(() => expect(result.current.isLoadingRest).toBe(false))
+    // Open: the open file's threads first, then the project (two reads).
+    expect(mockFetchComments).toHaveBeenCalledTimes(2)
+    const listBefore = result.current.comments
+    const countsBefore = result.current.counts
+    const rendersBefore = renders()
+    seen.length = 0
+
+    window.dispatchEvent(new Event("focus"))
+    await waitFor(() => expect(mockFetchComments).toHaveBeenCalledTimes(3))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(mockFetchComments).toHaveBeenCalledTimes(3)
+    expect(result.current.comments).toBe(listBefore)
+    expect(result.current.counts).toBe(countsBefore)
+    expect(seen.some((flags) => flags.isLoading || flags.isLoadingRest)).toBe(false)
+    expect(renders()).toBe(rendersBefore)
+  })
+
+  it("keeps every thread on screen until the whole new answer is in", async () => {
+    const second = { ...peerThread(), commentId: "cmt-2", createdAt: 2000, updatedAt: 2000 }
+    mockFetchComments.mockResolvedValue([peerThread(), second])
+    const { result, seen } = mountWithPriorityFile()
+    await waitFor(() => expect(result.current.comments).toHaveLength(2))
+    await waitFor(() => expect(result.current.isLoadingRest).toBe(false))
+    seen.length = 0
+
+    let release!: (rows: CommentRecord[]) => void
+    mockFetchComments.mockImplementationOnce(() => new Promise<CommentRecord[]>((resolve) => { release = resolve }))
+    window.dispatchEvent(new Event("focus"))
+    await waitFor(() => expect(mockFetchComments).toHaveBeenCalledTimes(3))
+    expect(result.current.comments).toHaveLength(2)
+
+    const third = { ...peerThread(), commentId: "cmt-3", createdAt: 3000, updatedAt: 3000 }
+    release([peerThread(), second, third])
+    await waitFor(() => expect(result.current.comments).toHaveLength(3))
+    expect(seen.some((flags) => flags.isLoading || flags.isLoadingRest)).toBe(false)
+  })
+})

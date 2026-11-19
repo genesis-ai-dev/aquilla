@@ -178,13 +178,18 @@ vi.mock("@/lib/store/user-api-keys", () => ({
   useUserApiKey: vi.fn(() => null),
 }))
 
+// AQU-2654: records whether the per-file post-edit read is switched on.
+const postEditMetricsEnabled = vi.hoisted(() => ({ calls: [] as boolean[] }))
 vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
-  usePostEditMetrics: () => ({
-    metrics: null,
-    isLoading: false,
-    isError: false,
-    revalidate: vi.fn(),
-  }),
+  usePostEditMetrics: (opts: { enabled?: boolean }) => {
+    postEditMetricsEnabled.calls.push(opts.enabled !== false)
+    return {
+      metrics: null,
+      isLoading: false,
+      isError: false,
+      revalidate: vi.fn(),
+    }
+  },
 }))
 
 vi.mock("@/hooks/useProjectMembers", () => ({
@@ -571,6 +576,20 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // rules / memory / system-prompt are NOT panes anymore — their legacy URLs
     // redirect to the Living Memory surface (covered by the redirect tests).
+  })
+
+  it("reads the per-file post-edit figures only on the pane that shows them (AQU-2654)", () => {
+    // The read is a sync-token and an /events request per file: it must not
+    // ride along with every other settings pane (or the index).
+    postEditMetricsEnabled.calls.length = 0
+    renderAt(`/project/${PROJECT_ID}/settings`)
+    renderAt(`/project/${PROJECT_ID}/settings/audio-media`)
+    expect(postEditMetricsEnabled.calls.length).toBeGreaterThan(0)
+    expect(postEditMetricsEnabled.calls.some((enabled) => enabled)).toBe(false)
+
+    postEditMetricsEnabled.calls.length = 0
+    renderAt(`/project/${PROJECT_ID}/settings/metrics`)
+    expect(postEditMetricsEnabled.calls.at(-1)).toBe(true)
   })
 
   // Living Memory extraction: legacy section URLs must keep working — deep

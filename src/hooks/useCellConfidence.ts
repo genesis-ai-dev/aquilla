@@ -152,6 +152,17 @@ export function useCellConfidence(args: {
       for (const c of cellsRef.current) {
         if (c.status === "validated") next.set(c.id, 100)
       }
+      // AQU-2654: this effect re-runs on every focus change and every edit,
+      // and almost always writes back what the map already holds. A fresh Map
+      // with the same entries is a full workspace render (and every visible
+      // row with it) for nothing.
+      if (next.size === prev.size) {
+        let same = true
+        for (const [id, score] of next) {
+          if (prev.get(id) !== score) { same = false; break }
+        }
+        if (same) return prev
+      }
       return next
     })
 

@@ -147,29 +147,63 @@ export interface StreamingDiff {
   pending: string
 }
 
+/** One more written word against every heard word: the next row of the
+ *  edit-distance table, from the row before it. */
+function nextCoverageRow(
+  prev: Float64Array, written: string, heard: readonly string[], detailed: boolean, at: number,
+): Float64Array {
+  const row = new Float64Array(heard.length + 1)
+  row[0] = at
+  for (let j = 1; j <= heard.length; j++) {
+    const cost = detailed ? 1 - similarity(written, heard[j - 1]) : written === heard[j - 1] ? 0 : 1
+    row[j] = Math.min(prev[j - 1] + cost, prev[j] + 1, row[j - 1] + 1)
+  }
+  return row
+}
+
+/** Where the table for one heard text had got to: its last row, and the
+ *  written words that row accounts for. */
+interface Coverage {
+  heard: readonly string[]
+  detailed: boolean
+  written: string[]
+  row: Float64Array
+}
+
+/** Kept per heard text, so a reply that grows by a word costs one row of the
+ *  table instead of the whole table again. A handful: "Clean up selected"
+ *  streams a few rows at once. */
+const COVERAGE_KEPT = 8
+const coverageByHeard = new Map<string, Coverage>()
+
 /**
  * How many heard words the reply so far has covered: the prefix of the heard
  * text that is cheapest to turn into what has been written (edit distance,
  * where a respelled word costs less than an unrelated one). A tie goes to the
  * prefix closest in length to the reply, so a reply that has only repeated the
  * heard words so far covers exactly that many.
+ *
+ * `key` names the heard text. A streaming reply only ever grows by whole
+ * words, and row i of the table depends on row i − 1 alone, so the last row is
+ * kept under that key and each call computes only the rows for the words that
+ * are new (AQU-2654: it used to redo every pair of words, with a letter-level
+ * comparison inside each, on every token). A reply that is not a continuation
+ * of the kept one, or that crosses DETAILED_PAIRS_MAX, starts over.
  */
-function coveredWords(heard: readonly string[], written: readonly string[]): number {
+function coveredWords(key: string, heard: readonly string[], written: readonly string[]): number {
   if (written.length === 0) return 0
   // Comparing letters for every pair of words is fine for a take (a sentence
-  // or two, redone on every token) and too much for a long recording.
+  // or two) and too much for a long recording.
   const detailed = heard.length * written.length <= DETAILED_PAIRS_MAX
-  const cost = (a: string, b: string) => (detailed ? 1 - similarity(a, b) : a === b ? 0 : 1)
-  let prev = Float64Array.from({ length: heard.length + 1 }, (_, j) => j)
-  for (let i = 1; i <= written.length; i++) {
-    const row = new Float64Array(heard.length + 1)
-    row[0] = i
-    for (let j = 1; j <= heard.length; j++) {
-      const swap = prev[j - 1] + cost(written[i - 1], heard[j - 1])
-      row[j] = Math.min(swap, prev[j] + 1, row[j - 1] + 1)
-    }
-    prev = row
-  }
+  const kept = coverageByHeard.get(key)
+  const resumes = kept !== undefined && kept.detailed === detailed && kept.heard.length === heard.length
+    && kept.written.length <= written.length && kept.written.every((word, i) => word === written[i])
+  let from = resumes ? kept.written.length : 0
+  let prev = resumes ? kept.row : Float64Array.from({ length: heard.length + 1 }, (_, j) => j)
+  for (; from < written.length; from++) prev = nextCoverageRow(prev, written[from], heard, detailed, from + 1)
+  coverageByHeard.delete(key)
+  coverageByHeard.set(key, { heard, detailed, written: [...written], row: prev })
+  if (coverageByHeard.size > COVERAGE_KEPT) coverageByHeard.delete(coverageByHeard.keys().next().value as string)
   let best = 0
   for (let j = 1; j <= heard.length; j++) {
     const better = prev[j] < prev[best] - 1e-9
@@ -177,6 +211,11 @@ function coveredWords(heard: readonly string[], written: readonly string[]): num
     if (better || (tied && Math.abs(j - written.length) < Math.abs(best - written.length))) best = j
   }
   return best
+}
+
+/** @internal — tests: forget every kept table. */
+export function __resetStreamingDiffForTests(): void {
+  coverageByHeard.clear()
 }
 
 /**
@@ -188,7 +227,7 @@ export function diffWhileWriting(heard: string, written: string): StreamingDiff 
   const heardWords = wordsOf(heard)
   const writtenWords = wordsOf(written)
   if (writtenWords.length > 0 && !/\s$/.test(written)) writtenWords.pop()
-  const covered = coveredWords(heardWords, writtenWords)
+  const covered = coveredWords(heard, heardWords, writtenWords)
   return {
     chunks: diffWordLists(heardWords.slice(0, covered), writtenWords),
     pending: heardWords.slice(covered).join(" "),

@@ -20,6 +20,7 @@ vi.mock("@/lib/store/transcript-corrections-store", () => ({
 }))
 
 import { clearTranscript, saveTranscript } from "./save"
+import { clearOptimisticShadows, getOptimisticShadows, subscribeAudioAttachments } from "@/lib/audio/audio-attachments-bus"
 
 const attachment = { url: "frontier-audio://a", type: "audio" } as unknown as CodexCellAttachment
 
@@ -114,5 +115,48 @@ describe("a transcript write chooses nothing (AQU-2491)", () => {
     const owner = ownTake()
     await clearTranscript({ projectId: "p1", owner, audioId: owner.selectedAudioId!, attachment, author: "u" })
     expect(attaches[0]).toMatchObject({ timings: [], wordsOnly: true })
+  })
+})
+
+// AQU-2654: a save used to be seen only after the outbox was flushed and the
+// whole file's audio read back. The write itself now tells the audio read what
+// changed on the one take, bound to the event that carries it.
+describe("a transcript write is shown from the write itself (AQU-2654)", () => {
+  const shadowsOf = () => getOptimisticShadows("f1").get("c1") ?? []
+
+  beforeEach(() => {
+    clearOptimisticShadows("f1")
+  })
+
+  it("hands the take's new words to the file's audio read, bound to the queued event", async () => {
+    const seen: string[] = []
+    const stop = subscribeAudioAttachments("f1", () => seen.push("re-read"))
+    const attach = await save(ownTake(), "the household")
+    stop()
+    expect(shadowsOf()).toMatchObject([{
+      kind: "words", audioId: "audio-c1-1700000000-abc", eventId: "evt-1", phase: "queued",
+      words: { timings: attach.timings, transcriptAi: { model: "m", at: 0, changes: 1 } },
+    }])
+    // Nothing asked for the file to be read again.
+    expect(seen).toEqual([])
+  })
+
+  it("a human correction takes the AI mark off, as the server does", async () => {
+    const owner = ownTake()
+    await saveTranscript({ projectId: "p1", owner, audioId: owner.selectedAudioId!, attachment, timings, text: "the house", author: "u" })
+    expect(shadowsOf()).toMatchObject([{ kind: "words", words: { transcriptAi: null } }])
+    expect(shadowsOf()[0]).not.toHaveProperty("words.asrText")
+  })
+
+  it("a clear empties what was heard and the transcript", async () => {
+    const owner = ownTake()
+    await clearTranscript({ projectId: "p1", owner, audioId: owner.selectedAudioId!, attachment, author: "u" })
+    expect(shadowsOf()).toMatchObject([{ kind: "words", eventId: "evt-1", words: { timings: [], asrText: "", transcriptAi: null } }])
+  })
+
+  it("shows nothing when there was nothing to save onto", async () => {
+    const owner = ownTake()
+    expect(await saveTranscript({ projectId: "p1", owner, audioId: owner.selectedAudioId!, attachment, timings: [], text: "x", author: "u" })).toBe(false)
+    expect(shadowsOf()).toEqual([])
   })
 })

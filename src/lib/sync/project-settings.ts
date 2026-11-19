@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { noteProjectSettingsWrite } from "./project-settings-write-signal"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "./project-org-policy"
 import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
@@ -1013,6 +1014,23 @@ export async function patchProjectSettings(
   settings: ProjectWideSettings,
   ifMatchVersion: number,
   apiUrl: string = FRONTIER_API_URL,
+): Promise<PatchResult> {
+  // Before the request and after it: a read in flight across this write may
+  // hold the row from before it (project-settings-shared-read.ts).
+  noteProjectSettingsWrite(projectId)
+  try {
+    return await sendProjectSettingsPatch(jwt, projectId, settings, ifMatchVersion, apiUrl)
+  } finally {
+    noteProjectSettingsWrite(projectId)
+  }
+}
+
+async function sendProjectSettingsPatch(
+  jwt: string,
+  projectId: string,
+  settings: ProjectWideSettings,
+  ifMatchVersion: number,
+  apiUrl: string,
 ): Promise<PatchResult> {
   let res: Response
   try {

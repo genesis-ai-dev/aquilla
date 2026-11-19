@@ -50,7 +50,10 @@ export function useCellMorph(opts: UseCellMorphOptions): UseCellMorphResult {
     if (!enabledRef.current || !pid || !fid || !cid) {
       // Drop stale words on disable so a collapsed panel cannot reopen showing
       // the previous cell's original-language words.
-      setWords([])
+      // AQU-2654: keep the empty list it already has. A fresh `[]` is a state
+      // change, and every editor row calls this hook disabled — so each row
+      // re-rendered once, right after it mounted, to show the same nothing.
+      setWords((current) => (current.length === 0 ? current : []))
       setIsLoading(false)
       setIsError(false)
       return

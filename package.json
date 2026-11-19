@@ -147,6 +147,7 @@
     "perf:seed": "tsx scripts/perf/seed-big-bible.ts",
     "perf:measure": "tsx scripts/perf/measure.ts",
     "perf:presence": "tsx scripts/perf/presence-load.ts",
+    "perf:interaction": "tsx scripts/perf/interaction.ts",
     "test:neon:comments": "tsx --test --test-concurrency=1 scripts/comments-key-migration.integration.ts",
     "neon:check": "tsx scripts/check-schema-migrations.ts",
     "db:check:comments": "tsx scripts/check-comment-projection.ts",

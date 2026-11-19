@@ -64,6 +64,7 @@ import {
 import { importTermbaseFile, termsNotAlreadyListed } from "@/lib/terminology/import-format"
 import { GlossaryAddTermDialog } from "@/components/GlossaryAddTermDialog"
 import { GlossaryRow } from "@/components/GlossaryRow"
+import { useProgressiveCount } from "@/hooks/useProgressiveCount"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
@@ -263,6 +264,14 @@ export function GlossaryEditor({
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(visibleConcepts),
     [visibleConcepts],
+  )
+  // AQU-2654: a long glossary draws its first screen at once and the rest in a
+  // transition, so opening 664 terms no longer freezes the click. Every row
+  // still ends up in the DOM — find-in-page is how a glossary gets searched.
+  const activeRowCount = useProgressiveCount(active.length)
+  const drawnActive = useMemo(
+    () => (activeRowCount >= active.length ? active : active.slice(0, activeRowCount)),
+    [active, activeRowCount],
   )
 
   const [showArchived, setShowArchived] = useState(false)
@@ -939,7 +948,7 @@ export function GlossaryEditor({
         ))}
 
         {/* Active rows */}
-        {active.map((c) => (
+        {drawnActive.map((c) => (
           <GlossaryRow
             key={c.id}
             concept={c}

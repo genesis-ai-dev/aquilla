@@ -712,6 +712,16 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     }
   })
 
+  it("a long glossary ends up with every term in the document (AQU-2654)", async () => {
+    // Drawn in two steps (first screen, then the rest) so opening it does not
+    // freeze — but all of it must land: the list is searched with find-in-page.
+    const many = Array.from({ length: 200 }, (_, i) => concept({ id: `c${i}`, sourceTerm: `term-${i}` }))
+    renderAs({ ...hydrated(500, "project_lead"), terminology: many })
+    await waitFor(() => expect(screen.getAllByTestId("glossary-row")).toHaveLength(200))
+    expect(screen.getByRole("button", { name: "term-0" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "term-199" })).toBeInTheDocument()
+  })
+
   it("names the org's configured floor in the lock line, not the default", async () => {
     renderAs(hydrated(500, "project_lead", 600))
 

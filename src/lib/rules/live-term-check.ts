@@ -17,6 +17,23 @@ export function selectTermRules(rules: Iterable<TranslationRule>): TranslationRu
   return [...rules].filter((r) => r.enabled && r.id.startsWith("term:"))
 }
 
+const termRulesByMap = new WeakMap<ReadonlyMap<string, TranslationRule>, TranslationRule[]>()
+
+/**
+ * `selectTermRules` of a rule map, as ONE array per map (AQU-2654). Every
+ * editor row asks for the same list; a filter per row walked the whole
+ * glossary's rules once per row and gave each row an array of its own, so the
+ * rule engine's per-array plan could never be shared between them.
+ */
+export function termRulesOf(ruleMap: ReadonlyMap<string, TranslationRule>): TranslationRule[] {
+  let rules = termRulesByMap.get(ruleMap)
+  if (!rules) {
+    rules = selectTermRules(ruleMap.values())
+    termRulesByMap.set(ruleMap, rules)
+  }
+  return rules
+}
+
 /**
  * AQU-2654: the term rules that can possibly infract on THIS cell, narrowed by
  * the source-side gate every terminology rule carries.

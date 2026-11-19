@@ -107,6 +107,59 @@ export const editor = defineNamespace({
       },
       "total",
     ),
+    // AQU-2654: a run is honest about itself — which file, how long, and a
+    // terminal state for every way it can end.
+    "editor.completion.translatingFile": "Translating {file}",
+    "editor.completion.elapsed": "{time} elapsed",
+    "editor.completion.stalled":
+      "No progress for {minutes} minutes. The AI service or your connection may have stopped responding.",
+    "editor.completion.done": plural(
+      {
+        one: "{done} cell drafted in {time}.",
+        other: "{done} cells drafted in {time}.",
+      },
+      "done",
+    ),
+    "editor.completion.stopped": plural(
+      {
+        one: "Stopped — {done} of {total} cell drafted.",
+        other: "Stopped — {done} of {total} cells drafted.",
+      },
+      "total",
+    ),
+    "editor.completion.interrupted": plural(
+      {
+        one: "Drafting was interrupted when this page reloaded or was suspended — {done} of {total} cell drafted.",
+        other: "Drafting was interrupted when this page reloaded or was suspended — {done} of {total} cells drafted.",
+      },
+      "total",
+    ),
+    "editor.completion.runFailed": "Drafting stopped unexpectedly: {reason}",
+    "editor.completion.failedCells": "Not drafted: {cells}",
+    "editor.completion.failedCellsMore": plural(
+      {
+        one: "Not drafted: {cells} and {count} more",
+        other: "Not drafted: {cells} and {count} more",
+      },
+      "count",
+    ),
+    "editor.completion.failedReason": "Reason: {reason}",
+    "editor.completion.retryRemaining": plural(
+      {
+        one: "Retry {count} cell",
+        other: "Retry {count} cells",
+      },
+      "count",
+    ),
+    "editor.completion.resumeRemaining": plural(
+      {
+        one: "Draft the remaining {count} cell",
+        other: "Draft the remaining {count} cells",
+      },
+      "count",
+    ),
+    "editor.completion.openFileToRetry": "Open {file} in the editor, then try again.",
+    "editor.completion.openFile": "Open file",
 
     // — Health / decay breakdown popover ——————————————————————————
     "editor.health.needsAttention": "{percent}% of cells need attention",
@@ -1744,7 +1797,6 @@ export const editor = defineNamespace({
       "This row is a piece of the original recording, so it can\u2019t be removed.",
     "editor.row.idmlReason":
       "IDML files keep their original layout, so cells can\u2019t be added or removed.",
-    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
     // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
     // fragments below — a resolved-and-concatenated list, the house idiom (see
     // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,
@@ -4194,6 +4246,126 @@ export const editor = defineNamespace({
           failed: "Number of cells that could not be translated.",
           total: "Number of cells the run attempted in total.",
           done: "Number of cells that were translated successfully.",
+        },
+      },
+      "editor.completion.translatingFile": {
+        description:
+          "Label at the left of the batch AI-translation progress bar when the " +
+          "file being drafted is known. Same status word as " +
+          "editor.completion.translating followed by the file name; shown app-wide, " +
+          "including on pages other than the editor, so the user can tell which " +
+          "file the run belongs to.",
+        placeholders: {
+          file: "Name of the file whose cells are being drafted, e.g. 'Guide.docx'.",
+        },
+      },
+      "editor.completion.elapsed": {
+        description:
+          "Accessible name and tooltip of the running clock beside the batch " +
+          "progress counter: how long the run has been going.",
+        placeholders: {
+          time: "Elapsed time as m:ss or h:mm:ss, e.g. '3:42'.",
+        },
+      },
+      "editor.completion.stalled": {
+        description:
+          "Warning shown on the batch AI-translation banner when the run has made " +
+          "no progress at all for several minutes. Two full sentences. It is " +
+          "followed by Retry and Stop buttons. State the fact plainly; do not " +
+          "soften it or promise that it will recover.",
+        placeholders: {
+          minutes: "Whole number of minutes without progress, at least 5.",
+        },
+      },
+      "editor.completion.done": {
+        description:
+          "Completion sentence replacing the progress bar when a batch AI " +
+          "translation finished and every cell was drafted. Full sentence with a " +
+          "period. The counted noun is 'cells', governed by {done}.",
+        placeholders: {
+          done: "Number of cells that were drafted.",
+          time: "How long the run took, as m:ss or h:mm:ss.",
+        },
+      },
+      "editor.completion.stopped": {
+        description:
+          "Sentence replacing the progress bar after the user pressed Stop on a " +
+          "batch AI translation. The cells already drafted are kept. The counted " +
+          "noun is 'cells', governed by {total}.",
+        placeholders: {
+          done: "Number of cells drafted before the run was stopped.",
+          total: "Number of cells the run was asked to draft.",
+        },
+      },
+      "editor.completion.interrupted": {
+        description:
+          "Sentence shown after a page reload when a batch AI translation was " +
+          "still running in this browser tab and was cut off (the page was " +
+          "reloaded, or the browser put the tab to sleep). Nothing is running any " +
+          "more. Followed by a button that drafts the remaining cells. The counted " +
+          "noun is 'cells', governed by {total}.",
+        placeholders: {
+          done: "Number of cells drafted before the interruption.",
+          total: "Number of cells the run was asked to draft.",
+        },
+      },
+      "editor.completion.runFailed": {
+        description:
+          "Line in the batch AI-translation failure summary when the run itself " +
+          "broke off (as opposed to individual cells failing). Honest failure " +
+          "reporting, so do not soften it.",
+        placeholders: {
+          reason: "The technical error message, shown verbatim (usually English).",
+        },
+      },
+      "editor.completion.failedCells": {
+        description:
+          "Line in the batch AI-translation failure summary naming the cells that " +
+          "were not drafted, when all of them fit.",
+        placeholders: {
+          cells: "Comma-separated cell labels, e.g. 'GEN 1:3, GEN 1:4'.",
+        },
+      },
+      "editor.completion.failedCellsMore": {
+        description:
+          "Same line as editor.completion.failedCells when the list was cut short: " +
+          "the first few cell labels, then how many more failed.",
+        placeholders: {
+          cells: "Comma-separated cell labels, e.g. 'GEN 1:3, GEN 1:4'.",
+          count: "Number of further failed cells that are not listed.",
+        },
+      },
+      "editor.completion.failedReason": {
+        description:
+          "Line in the batch AI-translation failure summary giving the error the " +
+          "first failed cell reported.",
+        placeholders: {
+          reason: "The technical error message, shown verbatim (usually English).",
+        },
+      },
+      "editor.completion.retryRemaining": {
+        description:
+          "Button on the batch AI-translation banner that drafts again the cells " +
+          "the run did not draft (failed, or never reached). Imperative.",
+        placeholders: {
+          count: "Number of cells that will be drafted.",
+        },
+      },
+      "editor.completion.resumeRemaining": {
+        description:
+          "Button on the batch AI-translation banner after a run was stopped or " +
+          "interrupted: drafts the cells the run never reached. Imperative.",
+        placeholders: {
+          count: "Number of cells that will be drafted.",
+        },
+      },
+      "editor.completion.openFileToRetry": {
+        description:
+          "Hint shown when the user pressed Retry on the batch AI-translation " +
+          "banner while a different file (or page) is open, so the remaining " +
+          "cells are not loaded. Followed by an 'Open file' link.",
+        placeholders: {
+          file: "Name of the file the run was drafting.",
         },
       },
       "editor.health.needsAttention": {

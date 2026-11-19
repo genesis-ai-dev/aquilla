@@ -48,6 +48,7 @@ import {
   humanPassageLabel,
 } from "../../../shared/span-label"
 import { DecisionCard } from "@/components/contextual/DecisionCard"
+import { startVisibleInterval } from "@/lib/visible-interval"
 import {
   splitPendingActions,
   type PendingPassageGroup,
@@ -1111,11 +1112,11 @@ export function AutopilotActivityInspector({
 
   useEffect(() => {
     if (!open || !selectedRun || (!WORKING_STATUSES.has(selectedRun.status) && !runHasQueuedWork(selectedRun))) return
-    const timer = setInterval(() => {
+    // Two reads every tick; none while the tab is hidden (AQU-2654).
+    return startVisibleInterval(() => {
       void loadRuns()
       void loadActivity(selectedRun.runId)
     }, POLL_MS)
-    return () => clearInterval(timer)
   }, [loadActivity, loadRuns, open, selectedRun])
 
   const handleCommand = async (command: ContextualRunCommand) => {

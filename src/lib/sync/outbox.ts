@@ -164,7 +164,42 @@ export function subscribeToOutbox(cb: OutboxListener): () => void {
   }
 }
 
+let notifyHolds = 0
+let notifyWhileHeld = false
+
+/** Upper bound on one hold. A hold is released by its owner; this only keeps
+ *  a write that never settles from silencing the outbox for the session. */
+const NOTIFY_HOLD_MAX_MS = 2_000
+
+/**
+ * AQU-2654: hold change notifications until the returned function is called,
+ * then fire ONE if anything changed meanwhile. For a gesture that queues
+ * several events back to back — an edit and the validation it casts for
+ * itself — so subscribers see the outbox go from "nothing pending" to "both
+ * pending" in one step, not through an intermediate state they each re-read
+ * and re-render for. Only the in-process notification is held: every write
+ * reaches IndexedDB exactly as it would have. The release is idempotent.
+ */
+export function holdOutboxNotifications(): () => void {
+  notifyHolds++
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    clearTimeout(watchdog)
+    if (--notifyHolds > 0 || !notifyWhileHeld) return
+    notifyWhileHeld = false
+    notifyOutboxChanged()
+  }
+  const watchdog = setTimeout(release, NOTIFY_HOLD_MAX_MS)
+  return release
+}
+
 function notifyOutboxChanged(): void {
+  if (notifyHolds > 0) {
+    notifyWhileHeld = true
+    return
+  }
   for (const cb of listeners) {
     try {
       cb()
@@ -189,6 +224,8 @@ export async function resetOutboxConnectionForTests(): Promise<void> {
   activeOwnerKey = undefined
   activeOwnerVersion = 0
   listeners.clear()
+  notifyHolds = 0
+  notifyWhileHeld = false
 }
 
 async function openDb(): Promise<IDBDatabase> {

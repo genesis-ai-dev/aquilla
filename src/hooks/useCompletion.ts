@@ -7,7 +7,7 @@ import posthog from "@/lib/posthog"
 // Tab/Esc accept/reject step. The streaming preview is shown only while
 // generating.
 
-import { useState, useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from "react"
+import { useState, useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react"
 
 /** AQU-1025: examples/previews/errors/completing are per (cell, lane). The
  *  source cell id is shared across lanes, so a cell-id-only map kept showing
@@ -95,9 +95,13 @@ import { isMeaningUnitDraftingEnabled } from "@/lib/completion/seams-flag"
 import type { PrecedingContextEntry } from "@/lib/completion/prompt-build"
 import {
   resetBatchCompletionState,
-  clearBatchCompletionProgress,
-  incrementBatchCompletionDone,
-  incrementBatchCompletionFailed,
+  finishBatchCompletion,
+  recordBatchCompletionDone,
+  recordBatchCompletionFailed,
+  noteBatchCompletionActivity,
+  registerBatchCompletionResumer,
+  getCurrentBatchRunId,
+  getCompletionBatchProgress,
   isBatchCompletionCancelled,
   getBatchCompletionSignal,
   cancelBatchCompletion,
@@ -165,6 +169,36 @@ const EVIDENCE_PREFETCH_TTL_MS = 30_000
 // the same "project settings else Frontier default" precedence. Aliases the
 // single definition in completion-service so the two cannot drift (AQU-1671).
 export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = DEFAULT_COMPLETION_SETTINGS
+
+// AQU-2654: few-shot retrieval is an optimisation, not a dependency — the
+// batch already drafts without it when the request fails. The fetch behind it
+// carries no timeout (unlike the model call, the sync-token mint and the
+// events POST), so a connection that died without closing used to park the
+// whole run on this await with the progress bar frozen and nothing to say
+// why. Past this bound the chunk proceeds exactly as for a retrieval error.
+const BATCH_RETRIEVAL_TIMEOUT_MS = 45_000
+
+async function settleWithin<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000}s`)), ms)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** The project a batch runs in — lets the progress surface name the file and
+ *  link back to it from outside the editor, and resume a run's remainder
+ *  through the workspace that is mounted (AQU-2654). */
+export interface CompletionBatchProject {
+  id: string
+  files?: ReadonlyArray<{ id: string; name: string }>
+}
 
 export type CommitCompletedCell = (
   cell: CellData,
@@ -352,13 +386,18 @@ export function useCompletion(
   /** AQU-2342: the Language profile — its filled slots join every prompt's
    *  checks hint (db/shared/prompt-blocks.ts). */
   languageProfile?: import("../../db/shared/language-profile").LanguageProfile,
-  /** AQU-2654 follow-up: the project these drafts belong to. Every model call
-   *  carries it for spend attribution, so a batch that outlives the editor
-   *  route stays billed to the project it started in (a run keeps the
-   *  callbacks, and so the id, it started with). Omitted → complete() falls
-   *  back to the URL. */
-  projectId?: string,
+  /** AQU-2654: project + file naming for the batch progress surface. Its id
+   *  also rides on every model call for spend attribution, so a batch that
+   *  outlives the editor route stays billed to the project it started in (a
+   *  run keeps the callbacks, and so the id, it started with). Omitted →
+   *  complete() falls back to the URL. */
+  batchProject?: CompletionBatchProject | null,
 ) {
+  const batchProjectId = batchProject?.id
+  // Read at run start only, so a refreshed project object (new `files`
+  // identity) does not rebuild completeBatch and everything keyed on it.
+  const batchFilesRef = useRef(batchProject?.files)
+  useEffect(() => { batchFilesRef.current = batchProject?.files })
   const analytics = useAccountAnalytics()
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -606,7 +645,7 @@ export function useCompletion(
         }),
       })
       const result = await complete({
-        settings: generationSettings, session, projectId,
+        settings: generationSettings, session, projectId: batchProjectId,
         messages,
         // Protected IDML markup is committed only after whole-response anchor
         // validation; never flash partial HTML as a translator-visible draft.
@@ -709,7 +748,7 @@ export function useCompletion(
         finalText,
         async (messages) => complete({
           settings: generationSettings,
-          session, projectId,
+          session, projectId: batchProjectId,
           messages: [...messages],
           stream: false,
           signal,
@@ -769,7 +808,7 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile, analytics, projectId])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile, analytics, batchProjectId])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -822,7 +861,7 @@ export function useCompletion(
         sentMessages = messages
         rawOutput = await complete({
           settings: { ...effectiveSettings, temperature: 0 },
-          session, projectId,
+          session, projectId: batchProjectId,
           messages: [...messages],
           stream: false,
           signal,
@@ -894,18 +933,18 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics, projectId])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics, batchProjectId])
 
   const askAlignStyles = useCallback(async (
     messages: readonly IdmlRepairMessage[],
     signal?: AbortSignal,
   ) => complete({
     settings: { ...effectiveSettings, temperature: 0 },
-    session, projectId,
+    session, projectId: batchProjectId,
     messages: [...messages],
     stream: false,
     signal,
-  }), [effectiveSettings, session, projectId])
+  }), [effectiveSettings, session, batchProjectId])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -1020,8 +1059,27 @@ export function useCompletion(
     // AQU-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
     // and returns a fresh run ID. Every flag check, increment, and the
     // finally-clear pass this ID so a stale run cannot affect us.
-    const runId = resetBatchCompletionState(cells.length)
+    const batchFileId = cells[0].fileId
+    const runId = resetBatchCompletionState(cells.length, {
+      cellIds: cells.map((c) => c.id),
+      scope: {
+        projectId: batchProjectId,
+        fileId: batchFileId,
+        fileName: batchFilesRef.current?.find((f) => f.id === batchFileId)?.name,
+      },
+    })
     memMark(`completeBatch.start(${cells.length}c)`)
+
+    // AQU-2654: failures are recorded BY CELL, with the reason, in one store
+    // transition per group — the end-of-run summary names what to retry.
+    const failCells = (failed: CellData[], reason: string) => {
+      recordBatchCompletionFailed(runId, failed.map((c) => ({
+        cellId: c.id,
+        ...(c.cellLabel ? { label: c.cellLabel } : {}),
+        reason,
+      })))
+    }
+    let runError: unknown
 
     const fallbackQueue: CellData[] = []
     // AQU-1386 §3: this run's own drafts, carried into the NEXT call's
@@ -1034,6 +1092,7 @@ export function useCompletion(
       for (const chunk of chunks) {
         // Stop starting new sub-batches if cancelled between chunks.
         if (isBatchCompletionCancelled(runId)) break
+        noteBatchCompletionActivity(runId)
 
         // A new attempt supersedes prior errors for these cells (see the
         // matching completeSingle note).
@@ -1047,10 +1106,15 @@ export function useCompletion(
         const concatenated = chunk.map((c) => effectiveSourceText(c)).join(" ")
         let passages: PassageHit[] = []
         try {
-          passages = await searchPassages(concatenated, 3, 2)
+          passages = await settleWithin(
+            searchPassages(concatenated, 3, 2),
+            BATCH_RETRIEVAL_TIMEOUT_MS,
+            "Example retrieval",
+          )
         } catch (err) {
           console.warn("[useCompletion] passage retrieval failed:", err)
         }
+        noteBatchCompletionActivity(runId)
 
         // If we were superseded while awaiting searchPassages, bail out cleanly.
         if (isBatchCompletionCancelled(runId)) {
@@ -1174,9 +1238,13 @@ export function useCompletion(
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             result = await complete({
-              settings: effectiveSettings, session, projectId, messages,
+              settings: effectiveSettings, session, projectId: batchProjectId, messages,
               stream: true,
-              onChunk: (full) => consumeFull(full),
+              onChunk: (full) => {
+                // Every delta proves the stream is alive (stall watchdog).
+                noteBatchCompletionActivity(runId)
+                consumeFull(full)
+              },
               // AQU-235 fix: getBatchCompletionSignal(runId) returns an
               // already-aborted signal when this run has been superseded.
               signal: getBatchCompletionSignal(runId),
@@ -1215,23 +1283,37 @@ export function useCompletion(
           // chunk — mark its still-uncommitted cells as errored — and CONTINUE
           // to the next chunk rather than abandoning the rest of the file.
           // The overall run reports the failure via the progress summary
-          // (see incrementBatchCompletionFailed below) instead of going quiet.
+          // (see failCells below) instead of going quiet.
+          //
+          // AQU-2654: EVERY cell of the chunk is failed, including the ones
+          // whose <vN> had already streamed in before the request died. This
+          // branch saves nothing, so a cell it skipped here was left with a
+          // spinner and a preview forever and was counted neither done nor
+          // failed — the run then "finished" short with no account of it.
           const msg = lastErr instanceof Error ? lastErr.message : "Failed"
-          let skippedCount = 0
-          for (let i = 0; i < chunk.length; i++) {
-            if (filledText.has(i + 1)) continue
-            const c = chunk[i]
-            putLaneEntry(setCompleting, lk(c.id), "error")
-            putLaneEntry(setErrors, lk(c.id), msg)
-            skippedCount += 1
-          }
-          if (skippedCount > 0) incrementBatchCompletionFailed(runId, skippedCount)
+          setPreviews((p) => {
+            const m = new Map(p)
+            for (const c of chunk) m.delete(lk(c.id))
+            return m
+          })
+          setCompleting((p) => {
+            const m = new Map(p)
+            for (const c of chunk) m.set(lk(c.id), "error")
+            return m
+          })
+          setErrors((p) => {
+            const m = new Map(p)
+            for (const c of chunk) m.set(lk(c.id), msg)
+            return m
+          })
+          failCells(chunk, msg)
           analytics.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
           chunkFailed = true
         }
 
         if (chunkFailed) continue
 
+        noteBatchCompletionActivity(runId)
         consumeFull(result)
 
         // AQU-235 fix: only commit and increment done when this run is still
@@ -1265,7 +1347,7 @@ export function useCompletion(
                 ladder.value,
                 async (messages) => complete({
                   settings: effectiveSettings,
-                  session, projectId,
+                  session, projectId: batchProjectId,
                   messages: [...messages],
                   stream: false,
                   signal: getBatchCompletionSignal(runId),
@@ -1289,7 +1371,7 @@ export function useCompletion(
               dropLaneEntry(setPreviews, lk(cell.id))
               putLaneEntry(setCompleting, lk(cell.id), "error")
               putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
-              incrementBatchCompletionFailed(runId, 1)
+              failCells([cell], err instanceof Error ? err.message : "Failed")
             }
           } else {
             fallbackQueue.push(cell)
@@ -1359,25 +1441,50 @@ export function useCompletion(
           break
         }
 
+        // AQU-2654: the chunk's outcome is ONE transition — one update per
+        // per-cell map and one progress-store emit for all ten cells, instead
+        // of a setState and a store notify per cell.
+        const savedIds: string[] = []
+        const rejected: Array<{ cell: CellData; message: string }> = []
         for (let i = 0; i < preparedDrafts.length; i++) {
           const cell = preparedDrafts[i].cell
           const outcome = commitResults[i] ?? {
             status: "rejected" as const,
             reason: new Error("Batch commit returned no result for this cell"),
           }
-          dropLaneEntry(setPreviews, lk(cell.id))
           if (outcome.status === "fulfilled") {
-            dropLaneEntry(setCompleting, lk(cell.id))
-            incrementBatchCompletionDone(runId)
+            savedIds.push(cell.id)
             continue
           }
           const err = outcome.reason
           analytics.captureException(err instanceof Error ? err : new Error(String(err)))
           captureIdmlDraftRejection(analytics, [cell], err, "batch")
-          putLaneEntry(setCompleting, lk(cell.id), "error")
-          putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
-          incrementBatchCompletionFailed(runId, 1)
+          rejected.push({ cell, message: err instanceof Error ? err.message : "Failed" })
         }
+        setPreviews((p) => {
+          const m = new Map(p)
+          for (const draft of preparedDrafts) m.delete(lk(draft.cell.id))
+          return m
+        })
+        setCompleting((p) => {
+          const m = new Map(p)
+          for (const id of savedIds) m.delete(lk(id))
+          for (const { cell } of rejected) m.set(lk(cell.id), "error")
+          return m
+        })
+        if (rejected.length > 0) {
+          setErrors((p) => {
+            const m = new Map(p)
+            for (const { cell, message } of rejected) m.set(lk(cell.id), message)
+            return m
+          })
+        }
+        recordBatchCompletionDone(runId, savedIds)
+        recordBatchCompletionFailed(runId, rejected.map(({ cell, message }) => ({
+          cellId: cell.id,
+          ...(cell.cellLabel ? { label: cell.cellLabel } : {}),
+          reason: message,
+        })))
 
         // AQU-1656: one trail record per model call, covering only the cells
         // that actually committed.
@@ -1424,13 +1531,14 @@ export function useCompletion(
           // AQU-235 fix: thread the batch signal into completeSingle so it is
           // visible to Stop during a batch. getBatchCompletionSignal(runId)
           // returns an already-aborted signal if this run has been superseded.
+          noteBatchCompletionActivity(runId)
           const committed = await completeSingle(cell, getBatchCompletionSignal(runId))
           // Only count if the run is still live after the await — and count it
           // where it actually landed: a fallback that failed (empty draft,
           // enqueue rejection) must not inflate the "done" tally.
           if (!isBatchCompletionCancelled(runId)) {
-            if (committed) incrementBatchCompletionDone(runId)
-            else incrementBatchCompletionFailed(runId, 1)
+            if (committed) recordBatchCompletionDone(runId, [cell.id])
+            else failCells([cell], "The model returned no usable translation for this cell")
           }
         }
       } else {
@@ -1440,13 +1548,61 @@ export function useCompletion(
           dropLaneEntry(setCompleting, lk(cell.id))
         }
       }
+    } catch (err) {
+      // AQU-2654: nothing may leave this loop without a terminal state. An
+      // AbortError is the user's Stop (or a superseding run) and ends as
+      // "stopped"; anything else is the loop itself dying — it used to escape
+      // as an unhandled rejection while `finally` wiped the banner, so the
+      // run looked finished. Record it and say so.
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        runError = err
+        analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+      }
     } finally {
-      // AQU-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
-      // !== _currentRunId — a finishing run A cannot null run B's banner.
-      clearBatchCompletionProgress(runId)
+      // No cell of this run may keep a spinner or a preview once the loop is
+      // over, whichever way it ended ("error" entries are kept: they carry
+      // the per-cell message). The exception is a run that was superseded by
+      // one that is drafting right now (retry / resume): those cells' state
+      // belongs to the new run.
+      const supersededByLiveRun =
+        getCurrentBatchRunId() !== runId && getCompletionBatchProgress()?.finished === false
+      if (!supersededByLiveRun) setPreviews((p) => {
+        if (!cells.some((c) => p.has(lk(c.id)))) return p
+        const m = new Map(p)
+        for (const c of cells) m.delete(lk(c.id))
+        return m
+      })
+      if (!supersededByLiveRun) setCompleting((p) => {
+        const live = cells.filter((c) => {
+          const state = p.get(lk(c.id))
+          return state !== undefined && state !== "error"
+        })
+        if (live.length === 0) return p
+        const m = new Map(p)
+        for (const c of live) m.delete(lk(c.id))
+        return m
+      })
+      // The ONE exit: done / stopped / failed, kept on screen until dismissed.
+      // No-op for a superseded run — run A cannot end run B's progress.
+      finishBatchCompletion(runId, runError !== undefined ? { error: runError } : {})
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics, projectId])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics, batchProjectId])
+
+  // AQU-2654: "retry the remainder" / "resume" run through the driver of the
+  // workspace that is mounted NOW. The status surface only knows cell ids; the
+  // live cells — and whether they still need a draft — are resolved here, so a
+  // cell that was drafted meanwhile is never drafted twice.
+  useEffect(() => {
+    if (!batchProjectId) return
+    return registerBatchCompletionResumer(batchProjectId, (cellIds) => {
+      const wanted = new Set(cellIds)
+      const pending = getAllCells().filter((c) => wanted.has(c.id) && !c.translated.trim())
+      if (pending.length === 0) return false
+      void completeBatch(pending)
+      return true
+    })
+  }, [batchProjectId, getAllCells, completeBatch])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1586,7 +1742,7 @@ export function useCompletion(
       // 4. Call model (on-complete; progressive streaming disabled for Frontier per spec).
       const result = await complete({
         settings: effectiveSettings,
-        session, projectId,
+        session, projectId: batchProjectId,
         messages,
         // SWARM-TODO(p1-draft): enable progressive streaming here once Frontier SSE fix ships
         // (the tag format already supports it — see paragraph-protocol.ts).
@@ -1679,7 +1835,7 @@ export function useCompletion(
           settledText,
           async (messages) => complete({
             settings: effectiveSettings,
-            session, projectId,
+            session, projectId: batchProjectId,
             messages: [...messages],
             stream: false,
             signal,
@@ -1754,7 +1910,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics, projectId])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics, batchProjectId])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

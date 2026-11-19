@@ -15,6 +15,7 @@
 
 import type { AuthUser, Env } from "../../types"
 import { mintSyncTokenForUser, type SyncTokenMintFailure } from "../../services/sync-token-mint"
+import { syncWorkerFetch } from "../sync-worker-fetch"
 import {
   catalogForRole,
   describeCommand,
@@ -229,15 +230,6 @@ function externalErrorText(status: number, body: unknown): string {
     default:
       return `error: staging failed (HTTP ${status}): ${message}`
   }
-}
-
-/** Reach sync-worker for changeset staging. Prefers the SYNC_WORKER service
- *  binding: a same-zone global fetch to SYNC_WORKER_URL is answered by the zone
- *  origin instead of the Worker (AQU-2216), so staging never arrived and the
- *  agent saw a failure. Falls back to the URL where no binding is configured
- *  (local dev). */
-function syncWorkerFetch(env: Env, url: string, init: RequestInit): Promise<Response> {
-  return env.SYNC_WORKER ? env.SYNC_WORKER.fetch(url, init) : fetch(url, init)
 }
 
 export async function proposeCommandTool(

@@ -5,17 +5,23 @@
 // (AQU-2306), so there is one reader of the route rather than two copies of
 // this effect. Each section passes the floors ITS count depends on and re-reads
 // only when those move: the roster rows on the two visibility floors, the
-// import row on the org's import floor. That is why the page reads the route
-// once per section instead of sharing one response — the triggers genuinely
-// differ, and the alternative (hoisting the state to the page and threading it
-// through every section's props) buys one saved request with a prop on every
-// row.
+// import row on the org's import floor. The triggers genuinely differ, so the
+// state stays per section rather than hoisted to the page.
+//
+// AQU-2654: the REQUEST is shared, though. Both sections mount in the same
+// frame and the server answers for the whole org either way, so two sections
+// asking together send one request. A section that asks later — because a
+// floor it depends on moved — never joins an older request: it waits for it
+// and reads again, so a count is never computed from before the change.
 //
 // Plain useState + a race-guarded useEffect, per AD-3 — never useQuery.
 
 import { useEffect, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { createRequestCoalescer } from "@/lib/request-coalescer"
 import { fetchVisibilityOverrideCounts, type VisibilityOverrideCounts } from "@/lib/sync/org-settings"
+
+const countsCoalescer = createRequestCoalescer<VisibilityOverrideCounts | null>({ joinWindowMs: 250 })
 
 /**
  * Null until known — and on a server without the route, where the line says
@@ -35,9 +41,11 @@ export function useStricterProjectCounts(
   useEffect(() => {
     if (!jwt || orgId == null) return
     let cancelled = false
-    void fetchVisibilityOverrideCounts(jwt, orgId).then((value) => {
-      if (!cancelled) setCounts({ key, value })
-    })
+    void countsCoalescer
+      .run(`${jwt}:${orgId}`, () => fetchVisibilityOverrideCounts(jwt, orgId))
+      .then((value) => {
+        if (!cancelled) setCounts({ key, value })
+      })
     return () => { cancelled = true }
   }, [jwt, orgId, key])
   return counts?.key === key ? counts.value : null

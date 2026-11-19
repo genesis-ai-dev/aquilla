@@ -1,4 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { useStableCallback, useChangeSignal, useChangeSignalVersion, type ChangeSignal } from "@/hooks/useStableCallback"
+import { memoizedRowPropsEqual } from "@/components/editor-row-memo"
+import { mountOnFirstOpen } from "@/components/memoWhileClosed"
 import { createPlayingCueStore, PlayingCueContext, useIsPlayingCue, type PlayingCueStore } from "./editor-playing-cue"
 import { recordStep } from "@/lib/history/history"
 import { markedPreviewText } from "@/lib/completion/docx-marks"
@@ -80,6 +83,7 @@ import { canSetMilestones } from "@/lib/milestone-gate"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
+import { holdOutboxNotifications } from "@/lib/sync/outbox"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
 import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
@@ -109,9 +113,9 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
-  BacktranslationColumnHeader,
+  BacktranslationColumnHeader as BacktranslationColumnHeaderImpl,
   BacktranslationColumnProvider,
-  BacktranslationColumnToggle,
+  BacktranslationColumnToggle as BacktranslationColumnToggleImpl,
   BacktranslationRowCell,
   BacktranslationRowStack,
   useEditorBacktranslationColumn,
@@ -241,7 +245,7 @@ import {
   type MilestoneNavigatorEditing,
 } from "./ChapterNavigator"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
-import { PericopeSuggestions } from "./PericopeSuggestions"
+import { PericopeSuggestions as PericopeSuggestionsImpl } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
 import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
@@ -254,7 +258,7 @@ import {
   useVisibleStyleSegments,
 } from "@/lib/store/visible-style-segments-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
-import { CheckMarks, GutterMarks } from "./table-header-marks"
+import { CheckMarks as CheckMarksImpl, GutterMarks as GutterMarksImpl } from "./table-header-marks"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -281,8 +285,8 @@ import {
 } from "@/lib/editor/editor-grid"
 import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
 import {
-  AddBibleMenu,
-  BibleColumnHeaders,
+  AddBibleMenu as AddBibleMenuImpl,
+  BibleColumnHeaders as BibleColumnHeadersImpl,
   BibleColumnsProvider,
   BibleRowCells,
   BibleRowStack,
@@ -315,13 +319,14 @@ import {
   waivedKeys as waivedKeysOf,
 } from "@/lib/rules/waivers"
 import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
-import { selectTermRules, selectSourceApplicableTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
+import { termRulesOf, selectSourceApplicableTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
-import { findConceptMatches } from "@/lib/terminology/match"
+import { candidateConcepts, findConceptMatches } from "@/lib/terminology/match"
+import { activeConceptsOf } from "@/lib/terminology/source-lookup"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -379,7 +384,7 @@ import {
   idmlPointerSelectionFromPoint,
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
-import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import { findApprovedRenderingMatches } from "@/lib/richtext/terminology-chip-plugin"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import { readLanguageProfile } from "../../db/shared/language-profile"
@@ -849,6 +854,23 @@ const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
 const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+// AQU-2654: the table's column-heading row. The table function is not compiled
+// by the React Compiler, so each of its renders (one per cell activation, one
+// per store emit) re-ran these although their props had not changed.
+const AddBibleMenu = React.memo(AddBibleMenuImpl)
+const BibleColumnHeaders = React.memo(BibleColumnHeadersImpl)
+const BacktranslationColumnHeader = React.memo(BacktranslationColumnHeaderImpl)
+const BacktranslationColumnToggle = React.memo(BacktranslationColumnToggleImpl)
+const PericopeSuggestions = React.memo(PericopeSuggestionsImpl)
+const CheckMarks = React.memo(CheckMarksImpl)
+const GutterMarks = React.memo(GutterMarksImpl)
+
+// AQU-2654: the list's constant props, built once — an inline object or
+// arrow here is a new prop on every table render.
+const cellIdKeyExtractor = (cellId: string) => cellId
+const LIST_VIEWABILITY_CONFIG = { viewAreaCoveragePercentThreshold: 0 }
+const LIST_STYLE: React.CSSProperties = { flex: 1, minHeight: 0, scrollbarGutter: "stable" }
+const LIST_CONTENT_CONTAINER_STYLE: React.CSSProperties = { width: "100%" }
 // AQU-777: stable identity for a cell with no attachments, so a row's
 // derived list doesn't change identity on every render.
 const EMPTY_ATTACHMENTS: readonly CellAttachmentRecord[] = []
@@ -1370,7 +1392,11 @@ function namedSubsectionsOf(entry: CellNavigationEntry): Pick<MilestoneNavigatio
   }
 }
 
-export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
+// AQU-2654 (decision 0013): memoized, because the workspace component that
+// renders it is one 21k-line component that re-renders for any of its state.
+// A prop that is a new object, map, element or closure on every workspace
+// render defeats this for the whole table — keep such values stable upstream.
+export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, fileType, username, activeLane = "", activeLaneId = null, audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
@@ -3159,6 +3185,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     [cellStore],
   )
 
+  // AQU-2654 (decision 0013, "a row's props are stable"): these five are
+  // rebuilt by the workspace whenever the data they close over changes (the
+  // corpus, the BT cache, the focus lock), and a new identity on a row prop
+  // re-rendered every rendered row for a function no row calls until the user
+  // acts. Rows get identity-stable versions that run the newest one. The two
+  // getters are also read from row memos, so a row that is SHOWING their
+  // answer (an open Back-translation tab) subscribes to `btGettersSignal`
+  // and recomputes when either changes — see `useChangeSignalVersion` in
+  // EditorRow.
+  const onBacktranslateStable = useStableCallback(onBacktranslate)
+  const onClaimCellStable = useStableCallback(onClaimCell)
+  const onSetUpAffixesStable = useStableCallback(onSetUpAffixes)
+  const getStatisticalBtStable = useStableCallback(getStatisticalBt)
+  const getAlignmentModelStable = useStableCallback(getAlignmentModel)
+  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel])
+  const rowUiState = useMemo<RowUiState>(
+    () => ({ activeEditorCellId, focusedRailCellId, detailCellId }),
+    [activeEditorCellId, focusedRailCellId, detailCellId],
+  )
+
   const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
     const audioEntry = audioByCellId.get(cellId)
     const backtranslation = backtranslationByCellId?.get(cellId)
@@ -3318,16 +3364,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             </div>
           </div>
         )}
-        <MemoizedRow
+        <RowWithUiState
           key={cell.id}
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
           audioColumn={audioColumn}
           audioOnlyLane={audioOnlyLane}
-          isEditorActive={activeEditorCellId === cell.id}
-          isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
-          detailOpen={detailCellId === cell.id}
           detailHasPrev={index > 0}
           detailHasNext={index < displayCellIds.length - 1}
           onOpenCellDetail={openCellDetail}
@@ -3349,14 +3392,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
           onValidated={onValidated}
-          repetitionCounts={repetitionCounts}
+          repetitionCount={repetitionCounts?.get(cell.id)}
           getPendingTargetEventId={getPendingTargetEventId}
           reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={lockHolderForCell(cellLockHolders, cell.id, activeLane)}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
-          onClaimCell={onClaimCell}
+          onClaimCell={onClaimCellStable}
           onReleaseCell={onReleaseCell}
           onTargetPresenceSelection={onTargetPresenceSelection}
           onAckRemoteChange={onAckRemoteChange}
@@ -3368,7 +3411,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cellError={errors.get(cell.id)}
           previewText={markedPreviewText(cell, previews.get(cell.id))}
           healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
-          infractions={infractions}
+          cellInfractions={infractions.get(cell.id) ?? EMPTY_INFRACTIONS}
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
           onCompleteParagraph={onCompleteParagraph}
@@ -3389,15 +3432,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           nextStartSec={neighbourTimes.nextStartSec}
           timedFile={isTimeOrdered}
           isBacktranslationConfigured={isBacktranslationConfigured}
-          backtranslating={backtranslating}
-          backtranslationErrors={backtranslationErrors}
-          onBacktranslate={onBacktranslate}
+          isBacktranslating={backtranslating?.has(cell.id)}
+          backtranslationError={backtranslationErrors?.get(cell.id)}
+          onBacktranslate={onBacktranslateStable}
           onSaveBacktranslation={onSaveBacktranslation}
           onSaveGloss={onSaveGloss}
           onSaveCellLabel={onSaveCellLabel}
-          getStatisticalBt={getStatisticalBt}
+          getStatisticalBt={getStatisticalBtStable}
+          btGettersSignal={btGettersSignal}
           getFootnoteDetails={getFootnoteDetails}
-          cellOpenCommentCount={cellOpenCommentCount}
+          openCommentCount={cellOpenCommentCount?.get(cell.id) ?? 0}
           onSeekToCue={onSeekToCue}
           onPauseCue={onPauseCue}
           rowIndex={index}
@@ -3422,7 +3466,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
           canApproveConcept={canApproveConcept}
-          onSetUpAffixes={onSetUpAffixes}
+          onSetUpAffixes={onSetUpAffixesStable}
           onAskAiFromSelection={onAskAiFromSelection}
           onDragStart={handleDragStart}
           onDragEnter={handleDragEnter}
@@ -3432,7 +3476,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onGridRowKeyNav={handleGridRowKeyNav}
           getVoiceTakeCells={getVoiceTakeCells}
           getTokenForFile={getTokenForFile}
-          getAlignmentModel={getAlignmentModel}
+          getAlignmentModel={getAlignmentModelStable}
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
@@ -3476,15 +3520,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }, [
     sourceLineEditing,
-    activeEditorCellId,
     castGutter,
     ttsSettings,
-    focusedRailCellId,
-    // AQU-2021: which cell's detail modal is open has to be a dependency for
-    // the same reason `activeEditorCellId` is — the rendered rows carry it as
-    // a prop, so a stale `renderItem` would leave LegendList showing the old
-    // answer. The three handlers beside it are stable.
-    detailCellId,
+    // AQU-2654: which cell is being edited, holds the rail pin, or has its
+    // detail modal open is NOT a dependency. Rows read those three ids from
+    // `RowUiStateContext` (see `RowWithUiState`), so a click into another
+    // cell re-renders the two rows it moves between instead of handing
+    // LegendList a new `renderItem` and re-running every rendered row.
     openCellDetail,
     closeCellDetail,
     stepCellDetail,
@@ -3515,8 +3557,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     footnoteViewMode,
     targetKeyTermHighlightMode,
     getTokenForFile,
-    getAlignmentModel,
-    getStatisticalBt,
+    getAlignmentModelStable,
+    getStatisticalBtStable,
+    btGettersSignal,
+    onBacktranslateStable,
     getVoiceTakeCells,
     gridCols,
     handleDragEnter,
@@ -3545,11 +3589,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onAddConceptFromSelection,
     onAlignmentSeedChange,
     onAskAiFromSelection,
-    onBacktranslate,
     onCellCommitted,
     onValidated,
     repetitionCounts,
-    onClaimCell,
+    onClaimCellStable,
+    onSetUpAffixesStable,
     onCompleteSingle,
     onCompleteParagraph,
     onAlignStyles,
@@ -3950,6 +3994,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             />
           )}
           <BibleDataProvider data={bibleData} termActions={bibleTermActions}>
+            <RowUiStateContext.Provider value={rowUiState}>
             <LegendList
               ref={listRef}
               refScrollView={setListScrollElement}
@@ -3957,7 +4002,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               dataVersion={cellStoreVersion}
               renderItem={renderListItem}
               extraData={listExtraData}
-              keyExtractor={(cellId) => cellId}
+              keyExtractor={cellIdKeyExtractor}
               estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
               drawDistance={lowMemoryActive ? LOW_MEMORY_DRAW_DISTANCE_PX : LEGEND_LIST_DRAW_DISTANCE_PX}
               recycleItems
@@ -3965,12 +4010,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onScroll={handleListScroll}
               onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
               onViewableItemsChanged={handleViewableItemsChanged}
-              viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
+              viewabilityConfig={LIST_VIEWABILITY_CONFIG}
               // AQU-2288: the column headings above reserve this same gutter,
               // so the two grids share widths whether or not the rows overflow.
-              style={{ flex: 1, minHeight: 0, scrollbarGutter: "stable" }}
-              contentContainerStyle={{ width: "100%" }}
+              style={LIST_STYLE}
+              contentContainerStyle={LIST_CONTENT_CONTAINER_STYLE}
             />
+            </RowUiStateContext.Provider>
           </BibleDataProvider>
         </div>
       ) : isTimeOrdered ? (
@@ -3995,7 +4041,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     </SmartEditsProvider>
     </PlayingCueContext.Provider>
   )
-})
+}))
 
 /**
  * AQU-646: the row's structural controls — "add a line into the silence here"
@@ -4629,6 +4675,8 @@ interface MemoizedRowProps {
   audioColumn: AudioColumn
   /** Media redesign slice 2: see `audioOnlyLane` on the table. */
   audioOnlyLane: boolean
+  /** AQU-2654: the next three are resolved per row by `RowWithUiState` from
+   *  `RowUiStateContext`, never by the list's `renderItem`. */
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -4682,9 +4730,10 @@ interface MemoizedRowProps {
    *  (AQU-1484) a settled auto-validated edit; the workspace auto-propagates
    *  the confirmed text to repeated source segments. */
   onValidated?: (cellId: string, gesture: RepetitionGesture) => void | Promise<void>
-  /** AQU-1391: cellId -> count of cells in this file sharing its normalized
-   *  source. Only repeated cells appear. */
-  repetitionCounts?: ReadonlyMap<string, number>
+  /** AQU-1391: how many cells in this file share this cell's normalized
+   *  source; undefined unless it repeats. AQU-2654: the row's own number, not
+   *  the file's map — the map is rebuilt on every store emit. */
+  repetitionCount?: number
   getPendingTargetEventId?: (cellId: string) => string | null
   reservePendingTargetCommit?: (cellId: string, eventId: string, parentId: string | null) => () => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
@@ -4709,7 +4758,8 @@ interface MemoizedRowProps {
   cellError?: string
   previewText?: string
   healthRibbonPoint: HealthRibbonPoint
-  infractions: Map<string, RuleInfraction[]>
+  /** AQU-2654: this cell's slice of the table's `infractions` map. */
+  cellInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
   // AQU-670: resolves whether the draft actually committed — the rail's
   // "Saved" confirmation reads it (matches the top-level props contract).
@@ -4759,15 +4809,19 @@ interface MemoizedRowProps {
   /** True when this file runs on a clock, so timestamps can be typed at all. */
   timedFile?: boolean
   isBacktranslationConfigured?: boolean
-  backtranslating?: Set<string>
-  backtranslationErrors?: Map<string, string>
+  /** AQU-2654: this cell's membership / entry / count, not the table's maps. */
+  isBacktranslating?: boolean
+  backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onSaveGloss?: (cell: CellData, glossText: string) => void
   onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
+  /** AQU-2654: bumps when the workspace replaces `getStatisticalBt` or
+   *  `getAlignmentModel` (both identity-stable here). */
+  btGettersSignal?: ChangeSignal
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
-  cellOpenCommentCount?: Map<string, number>
+  openCommentCount: number
   onSeekToCue?: (cellId: string) => void
   onPauseCue?: () => void
   rowIndex: number
@@ -4865,10 +4919,53 @@ function PlayingCueRow({ cellId, className, ...rest }: React.ComponentProps<"div
   )
 }
 
+/**
+ * AQU-2654: which cell is being edited, which holds the rail's focus pin and
+ * which has its detail modal open. One table-wide value read by a one-line
+ * wrapper per row, so those three ids stay out of the list's `renderItem`
+ * identity: a click into another cell re-renders the wrappers (one component
+ * each) and `MemoizedRow`'s compare then lets through only the rows whose
+ * answer changed.
+ */
+interface RowUiState {
+  activeEditorCellId: string | null
+  focusedRailCellId: string | null
+  detailCellId: string | null
+}
+// AQU-2654 ("closed is unmounted"): every row owns these two dialogs and almost
+// no row ever opens them. Not mounted until first opened, and not re-rendered
+// while closed after that — see `mountOnFirstOpen`.
+const RowParagraphDraftConfirmDialog = mountOnFirstOpen(ParagraphDraftConfirmDialog)
+const RowAddFootnoteDialog = mountOnFirstOpen(AddFootnoteDialog)
+
+// EditorRow is not compiled by the React Compiler (the compiler bails out on it), so
+// every child element it builds is new on each of its renders. These two are
+// handed props that are already stable; memoizing them is all it takes for a
+// row render to stop re-rendering the ribbon (and its popover) and the
+// validation control (and its popover and tooltip).
+const RowHealthRibbon = React.memo(HealthRibbon)
+const RowTargetValidationControl = React.memo(TargetValidationControl)
+
+const NO_ROW_UI_STATE: RowUiState = { activeEditorCellId: null, focusedRailCellId: null, detailCellId: null }
+const RowUiStateContext = React.createContext<RowUiState>(NO_ROW_UI_STATE)
+
+function RowWithUiState(props: Omit<MemoizedRowProps, "isEditorActive" | "isRowFocused" | "detailOpen">) {
+  const ui = React.useContext(RowUiStateContext)
+  const cellId = props.cell.id
+  return (
+    <MemoizedRow
+      {...props}
+      isEditorActive={ui.activeEditorCellId === cellId}
+      isRowFocused={isRailFocusPinned(ui.focusedRailCellId, cellId)}
+      detailOpen={ui.detailCellId === cellId}
+    />
+  )
+}
+
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, audioColumn, audioOnlyLane, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
-    backtranslating, backtranslationErrors, cellOpenCommentCount,
+    cell, linkedTakes, audioColumn, audioOnlyLane, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, cellInfractions,
+    isBacktranslating, backtranslationError, openCommentCount,
     rowIndex, contentNumber, versePart, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
@@ -4902,13 +4999,13 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
     prevStartSec, nextStartSec, timedFile,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt, btGettersSignal,
     getFootnoteDetails,
     onSeekToCue, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onRevealForPlayback, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     onOpenAudioSetup,
-    onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -4930,7 +5027,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     rowRenders.set(cellId, (rowRenders.get(cellId) ?? 0) + 1)
   }
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
-  const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
 
   const { active: activeInfractions, waived: waivedInfractions } = useMemo(
     () => partitionInfractions(cellInfractions, cell.waivers),
@@ -4959,9 +5055,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
           ? "aligning"
           : null
   const error = cellError
-  const isBacktranslating = backtranslating?.has(cellId)
-  const backtranslationError = backtranslationErrors?.get(cellId)
-  const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
   // Stable per-row because both parent callbacks and cellId are stable.
@@ -5054,6 +5147,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onSaveGloss={onSaveGloss}
         onSaveCellLabel={onSaveCellLabel}
         getStatisticalBt={getStatisticalBt}
+        btGettersSignal={btGettersSignal}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         onSeekToCue={onSeekToCue}
@@ -5094,7 +5188,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
         onValidated={onValidated}
-        repetitionCount={repetitionCounts?.get(cell.id)}
+        repetitionCount={repetitionCount}
         getPendingTargetEventId={getPendingTargetEventId}
         reservePendingTargetCommit={reservePendingTargetCommit}
         onOptimisticEdit={onOptimisticEdit}
@@ -5124,7 +5218,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
       />
     </div>
   )
-})
+}, memoizedRowPropsEqual)
 
 interface EditorRowProps {
   project: ProjectRecord
@@ -5258,6 +5352,8 @@ interface EditorRowProps {
   onSaveGloss?: (cell: CellData, glossText: string) => void
   onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
+  /** AQU-2654: see `MemoizedRowProps.btGettersSignal`. */
+  btGettersSignal?: ChangeSignal
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -5371,10 +5467,9 @@ export function SourceWithTermLookup({
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
-  const activeConcepts = useMemo(
-    () => concepts.filter((c) => c.status === "active"),
-    [concepts],
-  )
+  // AQU-2654: one active list per termbase array, shared by every row — a
+  // filter per row gave each row its own array, and so its own empty caches.
+  const activeConcepts = activeConceptsOf(concepts)
 
   // Match whole terms over the full text with the shared matcher, not
   // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
@@ -5383,19 +5478,32 @@ export function SourceWithTermLookup({
   // popover lights up on the same occurrences as the chips, enforcement and the
   // per-term stats — wildcards (`grac*` → grace/graced), mark folding, the
   // project's affix inventory, extra `match.forms` and `excludedForms` included.
+  //
+  // AQU-2654: only the concepts that CAN match this text are run — the
+  // matcher's candidate index answers that in one pass over the text, so a row
+  // costs what its own terms cost, not the size of the glossary. Each kept
+  // span remembers the concepts that matched exactly it, so the popover knows
+  // it has something to show without looking the surface up again.
   const matches = useMemo(() => {
-    const found: Array<{ start: number; end: number }> = []
-    for (const concept of activeConcepts) {
-      for (const m of findConceptMatches(text, concept, termMatching)) found.push(m)
+    const found: Array<{ start: number; end: number; concept: Concept }> = []
+    for (const concept of candidateConcepts(text, activeConcepts, termMatching)) {
+      for (const m of findConceptMatches(text, concept, termMatching)) {
+        found.push({ start: m.start, end: m.end, concept })
+      }
     }
     // Longest-first at each offset, then drop anything overlapping an already
     // taken span — a highlight may not start inside another one.
     found.sort((a, b) => a.start - b.start || b.end - a.end)
-    const kept: Array<{ start: number; end: number }> = []
+    const kept: Array<{ start: number; end: number; concepts: Concept[] }> = []
     let taken = -1
     for (const m of found) {
+      const last = kept[kept.length - 1]
+      if (last && last.start === m.start && last.end === m.end) {
+        last.concepts.push(m.concept)
+        continue
+      }
       if (m.start < taken) continue
-      kept.push(m)
+      kept.push({ start: m.start, end: m.end, concepts: [m.concept] })
       taken = m.end
     }
     return kept
@@ -5424,7 +5532,7 @@ export function SourceWithTermLookup({
   const parts: React.ReactNode[] = []
   let cursor = 0
   for (let i = 0; i < matches.length; i++) {
-    const { start, end } = matches[i]
+    const { start, end, concepts: matchedConcepts } = matches[i]
     if (start > cursor) {
       parts.push(
         <HighlightedText
@@ -5443,6 +5551,7 @@ export function SourceWithTermLookup({
         key={`term-${i}`}
         sourceTerm={matchedText}
         concepts={activeConcepts}
+        knownConcepts={matchedConcepts}
         termMatching={termMatching}
         onViewConcept={onViewConcept}
       >
@@ -5920,20 +6029,9 @@ export function TargetDecoratedText({
 }) {
   const t = useT()
   const matches = useMemo(() => {
-    const activeConcepts = concepts.filter((concept) => concept.status === "active")
-    if (activeConcepts.length === 0 || !text) return []
-
-    const out: Array<{ start: number; end: number; term: string }> = []
-    for (const concept of activeConcepts) {
-      const approvedRenderings = concept.renderings.filter(
-        (rendering) => rendering.status === "preferred" || rendering.status === "admitted",
-      )
-      for (const rendering of approvedRenderings) {
-        for (const match of findTermMatches(text, rendering.rendering)) {
-          out.push({ ...match, term: concept.sourceTerm })
-        }
-      }
-    }
+    // AQU-2654: every approved rendering of every active concept, but only the
+    // ones that can occur in this text are run (and none is compiled per row).
+    const out = findApprovedRenderingMatches(text, concepts)
     out.sort((a, b) => a.start - b.start || b.end - a.end)
 
     const nonOverlapping: Array<{ start: number; end: number; term: string }> = []
@@ -6203,7 +6301,7 @@ function EditorRow({
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   onSaveGloss,
   onSaveCellLabel,
-  getStatisticalBt,
+  getStatisticalBt, btGettersSignal,
   getFootnoteDetails,
   openCommentCount,
   onSeekToCue,
@@ -6858,7 +6956,8 @@ function EditorRow({
   // AQU-664: terminology-only rules, extracted from the shared ruleMap. Used to
   // recompute term violations off the live editor buffer so the inline blot
   // lights up as-you-type instead of after the ~1.2s commit-idle debounce.
-  const enabledTermRules = useMemo(() => selectTermRules(ruleMap.values()), [ruleMap])
+  // AQU-2654: one list per rule map, shared by every row (see termRulesOf).
+  const enabledTermRules = termRulesOf(ruleMap)
 
   // AQU-2654: the term rules that can possibly fire on THIS cell, narrowed by
   // their source-side gate. The gate reads the cell's SOURCE, which does not
@@ -7140,6 +7239,18 @@ function EditorRow({
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
+    // AQU-2654: an edit that validates itself queues two events back to back.
+    // Subscribers are told once, when both are queued — otherwise every one of
+    // them re-reads and re-renders for the half-way state (edit pending,
+    // approvals cleared) a few milliseconds before the real one.
+    const autoValidate = !tmInsert && shouldAutoValidateHumanEdit({
+      value,
+      canValidate,
+      allowSelfValidation: project.allowSelfValidation,
+      roleLevel: project.syncRole?.level ?? null,
+      scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
+    })
+    const releaseOutboxNotify = autoValidate ? holdOutboxNotifications() : null
     try {
       const eventId = await emitTargetCellCommit({
         id: reservedEventId,
@@ -7180,13 +7291,7 @@ function EditorRow({
       // dropped in whole. It still lands as an ordinary edit (and so clears any
       // prior validators), but it stays unvalidated until the translator
       // validates it or edits it; that later edit commits without the flag.
-      if (!tmInsert && shouldAutoValidateHumanEdit({
-        value,
-        canValidate,
-        allowSelfValidation: project.allowSelfValidation,
-        roleLevel: project.syncRole?.level ?? null,
-        scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
-      })) {
+      if (autoValidate) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
@@ -7210,7 +7315,7 @@ function EditorRow({
         }).catch((err) => {
           // Telemetry-adjacent, non-blocking: the commit already landed.
           console.warn("[auto-validate] emit failed:", err)
-        })
+        }).finally(() => releaseOutboxNotify?.())
       }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
@@ -7221,6 +7326,7 @@ function EditorRow({
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
+      releaseOutboxNotify?.()
       // AQU-1578: the reserved head exists nowhere durable — undo it, unless a
       // newer commit has already reserved over it.
       releaseReservation?.()
@@ -8325,11 +8431,20 @@ function EditorRow({
   const [railOverflowOpen, setRailOverflowOpen] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
+  // AQU-2654: `getAlignmentModel` and `getStatisticalBt` are identity-stable
+  // (a new corpus no longer re-renders every row), so the two memos that read
+  // them list this version instead. It is live only while this row's
+  // Back-translation tab is open — the only time either getter is called —
+  // and a constant 0 with no subscription otherwise.
+  const btGettersVersion = useChangeSignalVersion(
+    btGettersSignal,
+    detailPanelOpen && expansionTab === "backtranslation",
+  )
   const alignmentModelForExpansion = useMemo(() => {
     if (!btAlignmentOpen || !detailPanelOpen || expansionTab !== "backtranslation") return null
     if (!cell.original.trim() || !visibleTranslated.trim()) return null
-    return getAlignmentModel?.() ?? null
-  }, [btAlignmentOpen, cell.original, visibleTranslated, detailPanelOpen, expansionTab, getAlignmentModel])
+    return readAtVersion(btGettersVersion, () => getAlignmentModel?.() ?? null)
+  }, [btAlignmentOpen, cell.original, visibleTranslated, detailPanelOpen, expansionTab, getAlignmentModel, btGettersVersion])
 
   // AQU-462: original-language morphology for the Macula Hebrew/Greek source
   // behind this row. Gated on the same open-alignment condition as the model
@@ -8456,8 +8571,8 @@ function EditorRow({
     if (!detailPanelOpen || expansionTab !== "backtranslation" || !visibleTranslated.trim()) {
       return EMPTY_GLOSS_READING
     }
-    return getStatisticalBt?.(visibleTranslated, cell.id) ?? EMPTY_GLOSS_READING
-  }, [detailPanelOpen, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
+    return readAtVersion(btGettersVersion, () => getStatisticalBt?.(visibleTranslated, cell.id) ?? EMPTY_GLOSS_READING)
+  }, [detailPanelOpen, expansionTab, visibleTranslated, getStatisticalBt, cell.id, btGettersVersion])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -8660,7 +8775,7 @@ function EditorRow({
   const bibleRow: RowScripture | null = rowScripture(cell, versePart)
   // Media redesign slice 2 (P2.3): an Audio language has no text to validate.
   const validationControl = audioOnlyLane ? null : (
-    <TargetValidationControl
+    <RowTargetValidationControl
       cellRef={cellRef}
       hasContent={hasContent}
       validationStatus={cell.validationStatus}
@@ -8993,7 +9108,7 @@ function EditorRow({
             in the row's start padding. No cross-row overlay. */}
         {cellVoices && <SpeechRails view={cellVoices} />}
         {healthCalculationsEnabled && (
-          <HealthRibbon
+          <RowHealthRibbon
             point={healthRibbonPoint}
             hasMajorIssue={hasMajorInfraction}
             hasIssue={hasAnyIssue}
@@ -9513,7 +9628,7 @@ function EditorRow({
           fontSize={targetFontSize}
           busy={isSynthBusy}
           leading={healthCalculationsEnabled ? (
-            <HealthRibbon
+            <RowHealthRibbon
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
@@ -10694,7 +10809,7 @@ function EditorRow({
           opt-out exists for this action (unlike the single-cell Replace
           confirm above). */}
       {onCompleteParagraph && (
-        <ParagraphDraftConfirmDialog
+        <RowParagraphDraftConfirmDialog
           open={showParagraphConfirm}
           totalCount={paragraphGroupSize ?? 0}
           draftableCount={paragraphDraftableCount ?? paragraphGroupSize ?? 0}
@@ -10706,7 +10821,7 @@ function EditorRow({
         />
       )}
 
-      <AddFootnoteDialog
+      <RowAddFootnoteDialog
         open={addFootnoteOpen}
         defaults={addFootnoteDefaults}
         onOpenChange={(open) => {

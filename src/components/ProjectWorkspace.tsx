@@ -7,7 +7,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
@@ -30,14 +30,14 @@ import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
-import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
+import { CellAreaPlaceholder, CellRowsLoadStatus as CellRowsLoadStatusImpl } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
 import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
-import { TabStrip } from "./TabStrip"
+import { TabStrip as TabStripImpl } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
@@ -203,12 +203,13 @@ import {
   archivedProjectNotice,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
-import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
-import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { useWorkspaceSearchController } from "@/hooks/useWorkspaceSearch"
+import { WorkspaceSearchState } from "./search/WorkspaceSearchState"
+import { ParallelPassagesPanel as ParallelPassagesPanelImpl, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
-import { StatusBar, statusBarFigure } from "./StatusBar"
+import { StatusBar as StatusBarImpl, statusBarFigure } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
@@ -265,7 +266,7 @@ import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import type { FixPreview, ProposalKind } from "@/lib/rules/autofix"
 import { CommentsDrawer } from "./CommentsDrawer"
-import { NotificationsInbox } from "./NotificationsInbox"
+import { NotificationsInbox as NotificationsInboxImpl } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -298,7 +299,7 @@ import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
-import { HistoryPanel } from "./history/HistoryPanel"
+import { HistoryPanel as HistoryPanelImpl } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
 import { TrackWriteNotes, trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
@@ -347,13 +348,11 @@ import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow } from "@/lib/c
 import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
+import { SplitAtQuotesDialog as SplitAtQuotesDialogImpl } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
-  canRemoveImportedCells as canRemoveImportedCellsGate,
   cellPlacement,
-  isImportedRow,
   rowActionAvailability,
   type RowActionReason,
 } from "@/lib/cell-editing-gate"
@@ -405,7 +404,7 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
 import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
-import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
+import { confirmCommittedBatch, createFlushAppliedTracker, type FlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -464,7 +463,7 @@ import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-st
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
-import { OfflineBanner } from "./OfflineBanner"
+import { OfflineBanner as OfflineBannerImpl } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
@@ -472,35 +471,35 @@ import { AppShell, useIsLgUp } from "./AppShell"
 import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
 import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
-import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
-import { ParatextBridgeBadge } from "@/components/paratext/ParatextBridgeBadge"
+import { DcsSyncBadgeMount as DcsSyncBadgeMountImpl } from "@/components/dcs/DcsSyncBadge"
+import { LangQuestLinkBadge as LangQuestLinkBadgeImpl } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextBridgeBadge as ParatextBridgeBadgeImpl } from "@/components/paratext/ParatextBridgeBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
-import { EditorLayoutSwitch } from "@/components/bible-document/EditorLayoutSwitch"
+import { EditorLayoutSwitch as EditorLayoutSwitchImpl } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { ExpandableFileList } from "./ExpandableFileList"
+import { ExpandableFileList as ExpandableFileListImpl } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
-import { FileDetailsModal } from "./FileDetailsModal"
-import { RenameDialog } from "./RenameDialog"
-import { FileSegmentationDialog } from "./FileSegmentationDialog"
-import { AnalysisReportDialog } from "./analysis/AnalysisReportDialog"
+import { FileDetailsModal as FileDetailsModalImpl } from "./FileDetailsModal"
+import { RenameDialog as RenameDialogImpl } from "./RenameDialog"
+import { FileSegmentationDialog as FileSegmentationDialogImpl } from "./FileSegmentationDialog"
+import { AnalysisReportDialog as AnalysisReportDialogImpl } from "./analysis/AnalysisReportDialog"
 import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
-import { ConfirmActionDialog } from "./ConfirmActionDialog"
-import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
-import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
-import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
+import { ConfirmActionDialog as ConfirmActionDialogImpl } from "./ConfirmActionDialog"
+import { LinkVideoTimingDialog as LinkVideoTimingDialogImpl } from "./timeline/LinkVideoTimingDialog"
+import { LinkVideoUrlDialog as LinkVideoUrlDialogImpl } from "./timeline/LinkVideoUrlDialog"
+import { ImportAudioVttDialog as ImportAudioVttDialogImpl } from "./timeline/ImportAudioVttDialog"
 import { captionTrackDestinations } from "@/lib/import/caption-destinations"
 import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
 import type { MediaTextSource } from "@/lib/import/media-cues"
-import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
+import { ImportSubtitlesDialog as ImportSubtitlesDialogImpl } from "./timeline/ImportSubtitlesDialog"
 // Media redesign, layout: the panels' constraints, sizes, folds and full
 // screen all come from `useMediaDock`; the gate for the film stays here.
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
@@ -533,7 +532,7 @@ import { PanelMenuItemsContext, regionControls } from "@/components/timeline/Med
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
-import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
+import { ViewSettingsMenu as ViewSettingsMenuImpl, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
 import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
@@ -565,7 +564,7 @@ import {
 } from "@/lib/progress/editor-lane-progress"
 import { laneCountsAudio, laneRowDelivers } from "@/lib/lanes/lane-delivers"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyPushedFileProgress, expectPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
@@ -588,12 +587,12 @@ import {
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
+import { SystemPromptNudge as SystemPromptNudgeImpl } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
-import { AiSetupDialog } from "./AiSetupDialog"
+import { AiSetupDialog as AiSetupDialogImpl } from "./AiSetupDialog"
 import {
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
@@ -641,8 +640,8 @@ import { createLiveBtQueue, needsLiveBacktranslation, type LiveBtQueue } from "@
 import type { EditorBacktranslationConfig } from "@/components/backtranslation/BacktranslationColumn"
 import { readDraftingSettings } from "../../db/shared/drafting-settings"
 // FRO-192: assignment work-pickup UI
-import { AssignModal } from "./AssignModal"
-import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
+import { AssignModal as AssignModalImpl } from "./AssignModal"
+import { ProjectAssignedToMe as ProjectAssignedToMeImpl } from "./ProjectAssignedToMe"
 import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { assignedFileIds } from "@/lib/assignments/assigned-files"
@@ -652,6 +651,10 @@ import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
+import { useStableCallback, useChangeSignal } from "@/hooks/useStableCallback"
+import { memoWhileClosed } from "@/components/memoWhileClosed"
+import { useStableValue, mapsEqual, shallowEqualObjects } from "@/hooks/useStableValue"
+import { ChapterNavTrailingContext, CHAPTER_NAV_TRAILING_OUTLET } from "@/components/ChapterNavTrailingSlot"
 import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import {
   batchValidateChunkSize,
@@ -736,10 +739,18 @@ const TranscribeEditor = lazy(() =>
   import("@/components/transcribe/TranscribeEditor").then((m) => ({ default: m.TranscribeEditor })),
 )
 const SetupChecklistDrawer = lazy(() =>
-  import("./onboarding/SetupChecklistDrawer").then((m) => ({ default: m.SetupChecklistDrawer })),
+  import("./onboarding/SetupChecklistDrawer").then((m) => ({
+    // AQU-2654: not re-rendered while closed — except when the project or the
+    // checklist's counts change, which its "setup completed" analytics effect
+    // reads whether or not the drawer is open.
+    default: memoWhileClosed(m.SetupChecklistDrawer, undefined, (previous, next) =>
+      previous.project.id === next.project.id
+      && previous.state.completedCount === next.state.completedCount
+      && previous.state.totalCount === next.state.totalCount),
+  })),
 )
 const ImportCharactersDialog = lazy(() =>
-  import("./timeline/ImportCharactersDialog").then((m) => ({ default: m.ImportCharactersDialog })),
+  import("./timeline/ImportCharactersDialog").then((m) => ({ default: memoWhileClosed(m.ImportCharactersDialog) })),
 )
 const ImportTimelineTextDialog = lazy(() =>
   import("./import/ImportTimelineTextDialog").then((m) => ({ default: m.ImportTimelineTextDialog })),
@@ -907,6 +918,57 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
     /* storage unavailable — tab open-state stays in-memory only */
   }
 }
+
+// AQU-2654 (decision 0013, "closed is unmounted"): the dialogs the workspace
+// renders with `open={false}` for the whole session. Each stays mounted — its
+// exit animation and any state it keeps between opens are untouched — but is
+// not re-rendered while it stays closed. Every one here was checked to do
+// nothing while closed; see `memoWhileClosed` for the rule and for the four
+// that are deliberately left as they were.
+const AiSetupDialog = memoWhileClosed(AiSetupDialogImpl)
+const AssignModal = memoWhileClosed(AssignModalImpl)
+const ParallelPassagesPanel = memoWhileClosed(ParallelPassagesPanelImpl)
+const FileSegmentationDialog = memoWhileClosed(FileSegmentationDialogImpl)
+const AnalysisReportDialog = memoWhileClosed(AnalysisReportDialogImpl)
+const FileDetailsModal = memoWhileClosed(FileDetailsModalImpl)
+const RenameDialog = memoWhileClosed(RenameDialogImpl)
+const ConfirmActionDialog = memoWhileClosed(ConfirmActionDialogImpl)
+const SplitAtQuotesDialog = memoWhileClosed(SplitAtQuotesDialogImpl, (props) => props.pieces !== null)
+const LinkVideoUrlDialog = memoWhileClosed(LinkVideoUrlDialogImpl)
+const ImportAudioVttDialog = memoWhileClosed(ImportAudioVttDialogImpl)
+const ImportSubtitlesDialog = memoWhileClosed(ImportSubtitlesDialogImpl)
+const LinkVideoTimingDialog = memoWhileClosed(LinkVideoTimingDialogImpl)
+
+// The sidebar's file list: ~100 components, re-rendered by every workspace
+// render until its props were made stable (see the `handleFileList*` handlers).
+const ExpandableFileList = memo(ExpandableFileListImpl)
+
+// Small children of the workspace whose props are stable (or were made so
+// below): memoized so a workspace render does not re-run them. The workspace
+// itself is not compiled by the React Compiler, so nothing else would.
+const CellRowsLoadStatus = memo(CellRowsLoadStatusImpl)
+const StatusBar = memo(StatusBarImpl)
+const NotificationsInbox = memo(NotificationsInboxImpl)
+const HistoryPanel = memo(HistoryPanelImpl)
+const OfflineBanner = memo(OfflineBannerImpl)
+const DcsSyncBadgeMount = memo(DcsSyncBadgeMountImpl)
+const LangQuestLinkBadge = memo(LangQuestLinkBadgeImpl)
+const ParatextBridgeBadge = memo(ParatextBridgeBadgeImpl)
+const EditorLayoutSwitch = memo(EditorLayoutSwitchImpl)
+const ViewSettingsMenu = memo(ViewSettingsMenuImpl)
+const SystemPromptNudge = memo(SystemPromptNudgeImpl)
+const TabStrip = memo(TabStripImpl)
+const ProjectAssignedToMe = memo(ProjectAssignedToMeImpl)
+// The "Recently deleted" dialog is inline JSX below; its root skips rendering
+// (children and all) while it stays closed.
+const TrashDialog = memoWhileClosed(Dialog)
+
+const fileProgressMapsEqual = (a: Map<string, FileStats>, b: Map<string, FileStats>): boolean =>
+  mapsEqual(a, b, shallowEqualObjects)
+
+type CellAssignmentMap = ReadonlyMap<string, { username: string; scopeLabel: string }>
+const assignmentMapsEqual = (a: CellAssignmentMap, b: CellAssignmentMap): boolean =>
+  mapsEqual(a, b, (x, y) => x.username === y.username && x.scopeLabel === y.scopeLabel)
 
 export function ProjectWorkspace() {
   const analytics = useAccountAnalytics()
@@ -2160,6 +2222,7 @@ export function ProjectWorkspace() {
     revalidate: revalidateAuditStats,
     revalidateCellStats,
     applyCommittedCellStats,
+    applyValidationCellStats,
   } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
@@ -2398,14 +2461,34 @@ export function ProjectWorkspace() {
   // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
   // to the server, do ONE soft refetch to reconcile the read model and clear the
   // optimistic shadows an import left behind (no per-cell fan-out).
-  const activeFilePendingCommits = useMemo(
+  const activeFilePendingCommitIds = useMemo(
     () =>
-      outboxRecords.filter(
-        (r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit",
-      ).length,
+      outboxRecords
+        .filter((r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit")
+        .map((r) => r.event.id),
     [outboxRecords, activeFileId],
   )
-  useReconcileOnDrain(activeFilePendingCommits, activeFileId, revalidateCells)
+  const activeFilePendingCommits = activeFilePendingCommitIds.length
+  // AQU-2654: the commits that drained are remembered by id, because a commit
+  // whose applied frame already landed its rows (the POST response, or its
+  // own echo) has nothing left to reconcile — the refetch after it was a
+  // read-back of what the write had just returned. Only a drain that includes
+  // a commit NOT landed that way (an import past the frame cap, an older
+  // worker, a flush another tab ran) still does the one soft refetch.
+  const flushAppliedTrackerRef = useRef<FlushAppliedTracker | null>(null)
+  const drainingCommitIdsRef = useRef<{ fileId: string | null; ids: Set<string> }>({ fileId: null, ids: new Set() })
+  useEffect(() => {
+    const draining = drainingCommitIdsRef.current
+    if (draining.fileId !== activeFileId) drainingCommitIdsRef.current = { fileId: activeFileId, ids: new Set(activeFilePendingCommitIds) }
+    else for (const id of activeFilePendingCommitIds) draining.ids.add(id)
+  }, [activeFileId, activeFilePendingCommitIds])
+  const reconcileDrainedCommits = useCallback(() => {
+    const drained = drainingCommitIdsRef.current.ids
+    drainingCommitIdsRef.current = { fileId: drainingCommitIdsRef.current.fileId, ids: new Set() }
+    if (drained.size > 0 && flushAppliedTrackerRef.current?.landed(drained)) return
+    revalidateCells()
+  }, [revalidateCells])
+  useReconcileOnDrain(activeFilePendingCommits, activeFileId, reconcileDrainedCommits)
 
   // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
   // trigger in useStaleSourceCells only fires once a FILE is open — a
@@ -2518,13 +2601,27 @@ export function ProjectWorkspace() {
       liveApplier,
       isActive: (pid, fid) => pid === project?.id && fid === activeFileIdRef.current,
       applyCommittedCellStats,
+      // AQU-2654: a validation is settled from the event that was sent, so
+      // the commit + self-validation of one edit costs no stats read either.
+      applyValidationCellStats,
+      revalidateCellStats,
+      lookupSentEvent: async (eventId) => (await getOutboxRecords([eventId]))[0] ?? null,
     }),
-    [liveApplier, project?.id, applyCommittedCellStats],
+    [liveApplier, project?.id, applyCommittedCellStats, applyValidationCellStats, revalidateCellStats],
   )
+  flushAppliedTrackerRef.current = flushAppliedTracker
   useEffect(() => { flushAppliedTracker.reset() }, [flushAppliedTracker, activeFileId])
   useEffect(
-    () => subscribeAppliedEvents((frames) => flushAppliedTracker.onFrames(frames)),
-    [flushAppliedTracker],
+    () => subscribeAppliedEvents((frames, sent) => {
+      // One response is one announcement, however many frames it carries.
+      cellStore.batch(() => flushAppliedTracker.onFrames(frames, sent))
+      // AQU-2654: the server is pushing these writes' progress numbers; the
+      // pending overlay's drain must not read them back.
+      for (const frame of frames) {
+        if (frame.progressPushed && frame.file) expectPushedFileProgress(frame.project, frame.file)
+      }
+    }),
+    [cellStore, flushAppliedTracker],
   )
   /** Post-flush confirmation for a single committed cell: refetch only what
    *  the POST response did not already land (older server, >cap batch,
@@ -6732,15 +6829,15 @@ export function ProjectWorkspace() {
     search: runSearch,
     searchParallelPassages: runSearchPassages,
     clear: clearSearchResults,
-    results: searchResults,
-    loading: searchLoading,
-    ready: searchReady,
+    // AQU-2654: the results live in this store, not in workspace state — a
+    // search redraws the surfaces under <WorkspaceSearchState>, not this.
+    store: searchStore,
     // AQU-646 stage 2: the UNFILTERED list, unlike everything else fed from
     // `project.files`. The server's FTS index has the audio-cue siblings'
     // transcripts in it whether or not this client lists the files, so the
     // hook has to be able to RECOGNISE a sibling to drop its hits — hand it
     // the already-hidden list and it would only see an unknown file id.
-  } = useWorkspaceSearch({ projectId: project?.id ?? null, getToken: getTokenForFile, files: hydratedProject?.files || [] })
+  } = useWorkspaceSearchController({ projectId: project?.id ?? null, getToken: getTokenForFile, files: hydratedProject?.files || [] })
 
   // Merge: AD-14 (this branch) retired the composite-health `penalties` path.
   // Comments handlers take main's Phase 2c-gamma rip — threads/messages lived
@@ -7632,12 +7729,12 @@ export function ProjectWorkspace() {
       }
     }
 
-    // One file-level delta consumes the complete server sequence range and
-    // applies every confirmed draft with one replaceRows/emit cycle. Refresh
-    // audit stats as one projection read too; N targeted reads would feed N
-    // successive audit maps back through CellStore.setRuntime.
-    revalidateCells()
-    revalidateAuditStats()
+    // AQU-2654: a write does not read back what it just wrote — the POST response
+    // landed every accepted draft's row and stats, so each file-level read (never N
+    // targeted ones) goes out at most once, and only for what it did not land.
+    const unconfirmed = confirmCommittedBatch(flushAppliedTracker, prepared.map((item, i) => ({ cellId: item.draft.cell.id, eventId: staleIndexes.has(i) ? undefined : eventIds[i], saved: results[item.index]?.status === "fulfilled" })))
+    if (unconfirmed.refetchCell) revalidateCells()
+    if (unconfirmed.refetchStats) revalidateAuditStats()
     // Live back-translation: this path confirms the whole batch with one file
     // read instead of `confirmCommitted` per cell, so report each saved draft
     // here. A draft that was retried onto a newer head has a new event id this
@@ -7651,7 +7748,7 @@ export function ProjectWorkspace() {
   }, [
     activeLane,
     applyOptimisticTargetEdits,
-    cellStore,
+    cellStore, flushAppliedTracker,
     getActiveCell,
     getTokenForProjectFile,
     laneCellKey,
@@ -7748,8 +7845,7 @@ export function ProjectWorkspace() {
     commitCompletedCells,
     styleInstructionsFor,
     recordAiModelCall,
-    project?.languageProfile,
-    project?.id,
+    project?.languageProfile, project,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so
@@ -7973,11 +8069,17 @@ export function ProjectWorkspace() {
   hydrateBacktranslationsRef.current = hydrateBacktranslations
 
   // Hydrate persisted BTs on file/project load. Keep local in-flight edits.
+  //
+  // AQU-2654: behind the paint gate, like the file's other secondary reads
+  // (AQU-1326). It used to start on the first commit, before the project's
+  // lanes had loaded, so every open read the default lane's back-translations
+  // and then, once the lane resolved, read the open lane's and threw the first
+  // answer away. By the first cell page the lane is the one being shown.
   useEffect(() => {
-    if (!project?.id || !activeFileId) return
+    if (!project?.id || !activeFileId || !editorFirstPaint) return
     locallyTouchedBtRef.current = new Set()
     void hydrateBacktranslations(activeFileId, "replace")
-  }, [project?.id, activeFileId, activeLane, hydrateBacktranslations])
+  }, [project?.id, activeFileId, activeLane, hydrateBacktranslations, editorFirstPaint])
 
   /**
    * AQU-1408 §1: fetch this file's hand-corrected glosses.
@@ -8041,11 +8143,13 @@ export function ProjectWorkspace() {
   }, [project?.id, getTokenForFile, activeLane])
   hydrateGlossesRef.current = hydrateGlosses
 
+  // AQU-2654: behind the paint gate for the same reason as the BT hydration
+  // above (one read, for the lane that is open, instead of two).
   useEffect(() => {
-    if (!project?.id || !activeFileId) return
+    if (!project?.id || !activeFileId || !editorFirstPaint) return
     locallyTouchedGlossRef.current = new Set()
     void hydrateGlosses(activeFileId, "replace")
-  }, [project?.id, activeFileId, activeLane, hydrateGlosses])
+  }, [project?.id, activeFileId, activeLane, hydrateGlosses, editorFirstPaint])
 
   // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
   // custom endpoint+model (project settings or per-device override) counts as
@@ -8690,7 +8794,7 @@ export function ProjectWorkspace() {
   // Build a cellId → {username, scopeLabel} map for the EditorTable gutter.
   // Strategy: match each cell against the active assignments using fileId and
   // globalReferences prefix (chapter LIKE 'BOOK CH:%').
-  const assignmentsByCellId = useMemo((): ReadonlyMap<string, { username: string; scopeLabel: string }> => {
+  const assignmentsByCellIdNow = useMemo((): ReadonlyMap<string, { username: string; scopeLabel: string }> => {
     const map = new Map<string, { username: string; scopeLabel: string }>()
     if (myAssignments.length === 0 || !activeFileId) return map
     for (const a of myAssignments) {
@@ -8728,6 +8832,9 @@ export function ProjectWorkspace() {
     }
     return map
   }, [myAssignments, cellSummaries, activeFileId, project?.id, currentUsername])
+  // AQU-2654: rebuilt whenever the cell summaries are (every commit), nearly
+  // always to the same answer. The memoized table takes it as a prop.
+  const assignmentsByCellId = useStableValue(assignmentsByCellIdNow, assignmentMapsEqual)
 
   const backtranslating = backtranslatingState
   const backtranslationErrors = backtranslationErrorsState
@@ -9891,6 +9998,7 @@ export function ProjectWorkspace() {
                 // already on their way in this same batch — the refetch would
                 // only race them to the same answer.
                 if (!msg.progressPushed) invalidateFileProgress(pid, msg.file, activeLaneRef.current)
+                else if (isOwnWriteEcho(msg, currentUsername)) expectPushedFileProgress(pid, msg.file)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -9951,7 +10059,11 @@ export function ProjectWorkspace() {
               // remain visually stale after the progress count turns green.
               // The committing handler's earlier refresh can race the app-shell
               // outbox drain; this frame only arrives after projection commits.
+              // AQU-2654: the echo of this user's OWN validation is settled
+              // below by `flushAppliedTracker.onOwnEcho`, which shares one
+              // answer with the POST response instead of each reading.
               if (
+                !ownWrite &&
                 msg.file === activeFileIdRef.current &&
                 (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate")
               ) {
@@ -9984,6 +10096,9 @@ export function ProjectWorkspace() {
               const liveResult = msg.file === activeFileIdRef.current
                 ? liveApplier.apply(msg)
                 : "refetch"
+              if (ownWrite && msg.file === activeFileIdRef.current) {
+                flushAppliedTrackerRef.current?.onOwnEcho(msg, liveResult)
+              }
               if (liveResult !== "applied" && (!ownWrite || !alreadyApplied)) {
                 // A model response or collaborator burst arrives as several
                 // frames. Consume the file's server-sequence range once so
@@ -10196,6 +10311,11 @@ export function ProjectWorkspace() {
               // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
               // Prevents the bail-out that left cells visually locked after a
               // lease-expiry sweep (which broadcasts a lone lock.released frame).
+              // AQU-2654: a release of a cell this map never held — every one
+              // of this user's OWN releases, since own claims are not entered
+              // above — changes nothing anyone sees, and must not cost a
+              // workspace render on each cell switch.
+              if (!cellLockHoldersRef.current.has(msg.cellId)) return
               const next = applyLockReleased(cellLockHoldersRef.current, msg.cellId)
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
@@ -14542,7 +14662,6 @@ export function ProjectWorkspace() {
       project?.sourceLinkMode === "live" || dcsCursorLoading || dcsCursor !== null,
   }
   const canEditLines = canEditCells(cellEditingSubject)
-  const canRemoveImportedCells = canRemoveImportedCellsGate(cellEditingSubject)
   /**
    * WHERE can a cell go in this file? Answered from the FILE, never from which
    * panel happens to be open — see cell-editing-gate.ts for why that
@@ -14609,11 +14728,6 @@ export function ProjectWorkspace() {
         isIdmlCell: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) != null,
         gapAbove: gaps.gapAbove,
         gapBelow: gaps.gapBelow,
-        // A line somebody added here is theirs to take back at any rank;
-        // anything else is the client's own content. One shared definition —
-        // see `isImportedRow` for why it no longer asks about emptiness.
-        isImported: isImportedRow(cell),
-        canRemoveImported: canRemoveImportedCells,
       })
       // The label answers the ACTION the user reached for, not the row's
       // nature — a dead insert is a question about a NEW cell, so the media
@@ -14627,16 +14741,14 @@ export function ProjectWorkspace() {
               : t("editor.row.mediaRemoveReason")
             : reason === "idml"
               ? t("editor.row.idmlReason")
-              : reason === "noRoom"
-                ? t("editor.row.noRoomReason")
-                : t("editor.row.maintainerOnlyReason")
+              : t("editor.row.noRoomReason")
       return {
         above: label("insert", out.above),
         below: label("insert", out.below),
         remove: label("remove", out.remove),
       }
     },
-    [placement, canRemoveImportedCells, t],
+    [placement, t],
   )
 
   /**
@@ -17477,13 +17589,17 @@ export function ProjectWorkspace() {
   // chrome. `readAtVersion` because the React Compiler otherwise memoizes away
   // a version-only dependency and the badge would freeze at the first render's
   // counts (see the compiler note in CLAUDE.md).
-  const repetitionCounts = useMemo(
+  const repetitionCountsNow = useMemo(
     () =>
       autoPropagateRepetitions
         ? readAtVersion(cellStoreVersion, () => buildRepetitionCounts(cellStore.getAllCellViews()))
         : undefined,
     [autoPropagateRepetitions, cellStore, cellStoreVersion],
   )
+  // AQU-2654: rebuilt on every store emit, and nearly always to the same
+  // counts. The table is memoized on this prop, so keep the map's identity
+  // until a count really changes.
+  const repetitionCounts = useStableValue(repetitionCountsNow, mapsEqual)
 
   const isRepetitionWritable = useCallback(
     (cell: { id: string; fileId: string }) =>
@@ -18185,6 +18301,145 @@ export function ProjectWorkspace() {
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
 
+  // AQU-2654 (decision 0013, "a row's props are stable"): the editor table is
+  // memoized, so the handlers it is given must not be new closures per
+  // workspace render. These four were inline arrows in the JSX below; each
+  // runs only from a click, so an identity-stable wrapper around the newest
+  // closure changes nothing but the identity.
+  const handleEditTargetLanguage = useStableCallback(() => {
+    // AQU-583: the TARGET tag is the discoverable entry point to change
+    // the target language (the lane dropdown's "Change target language…",
+    // the single-lane pill, and the "Set target language" prompt all land
+    // here), where the field is edited (server enforces the role floor).
+    // AQU-2031: it opens the General PANE with the Languages card in
+    // view, not a `?q=target language` search — the search pre-fill
+    // always showed the search box and mixed in Project Info, which has
+    // no target-language field, so the person landed on what looked like
+    // a search they never ran.
+    if (!projectId) return
+    navigate(projectLanguageSettingsPath(projectId, "languages"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  })
+  // AQU-1601: "Add lane…" opens Languages too, scrolled to its "Add a
+  // target lane" field (AQU-2031). EditorTable withholds the item from
+  // anyone below maintainer.
+  const handleAddLane = useStableCallback(() => {
+    if (!projectId) return
+    navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  })
+  // AQU-1271: the add-to-terminology popover offers this when the
+  // project has no prefix/suffix inventory for its matcher yet.
+  const handleSetUpAffixes = useStableCallback(() =>
+    navigate(`/project/${projectId}/settings?q=terminology`, {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    }),
+  )
+  const handlePlaceChange = useStableCallback((cellId: string) => rememberCell(cellId, "top"))
+  // The sidebar file list is memoized for the same reason. Its progress map is
+  // rebuilt on every store emit, mostly to the same figures; and the active
+  // file's chapter-health getter is rebuilt on every emit by design (its
+  // identity said "re-read"), which re-rendered the whole list for a grid that
+  // only an EXPANDED file shows. The getter is stable now and the grid
+  // subscribes to `activeChapterHealthSignal` instead.
+  const fileListProgress = useStableValue(editorFileProgress, fileProgressMapsEqual)
+  const getActiveChapterHealthForList = useStableCallback(getActiveChapterHealth)
+  const activeChapterHealthSignal = useChangeSignal([getActiveChapterHealth])
+  // These seven were its inline arrows, each run only from a click or a
+  // finished drag.
+  const handleFileListMove = useStableCallback((fileId: string) => {
+    setMoveTargetId(fileId)
+    setMoveCorpus(project?.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+  })
+  const handleFileListExport = useStableCallback((fileId: string) => {
+    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
+    openExportFlow()
+  })
+  const handleFileListAssignWork = useStableCallback((fileId: string) => {
+    setAssignTargetFileId(fileId)
+    setAssignModalOpen(true)
+  })
+  const handleFileListReimport = useStableCallback((fileId: string) => {
+    const file = project?.files.find((entry) => entry.id === fileId)
+    if (!file) return
+    setReimportTarget({
+      fileId,
+      name: file.name,
+      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
+      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
+    })
+    setImportOpen(true)
+  })
+  const handleFileListUploadRecordings = useStableCallback((fileId: string) => {
+    const file = project?.files.find((entry) => entry.id === fileId)
+    if (!file) return
+    setReimportTarget(null)
+    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
+    setImportOpen(true)
+  })
+  const handleFileListReorder = useStableCallback((writes: Parameters<typeof handleReorderFiles>[0]) => { void handleReorderFiles(writes) })
+  const handleFileListMoveToGroup = useStableCallback((move: Parameters<typeof handleMoveFileToGroup>[0]) => { void handleMoveFileToGroup(move) })
+  // The chapter-row toolbar, the view-settings menu and the layout switch are
+  // memoized children too; these were their inline arrows.
+  const handleToolbarLensChange = useStableCallback((l: EditorLens) => {
+    switchLens(l)
+    if (l === "audio") selectDockTab("voices")
+  })
+  const handleToolbarAgentSelect = useStableCallback(() => openAgentTab("editor"))
+  const handleLayoutSwitchChange = useStableCallback((document: boolean) => {
+    if (activeFileId) setBibleDocumentViewForFile(activeFileId, document)
+  })
+  const handleSourceFontSizeChange = useStableCallback((v: number) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) })
+  const handleTargetFontSizeChange = useStableCallback((v: number) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) })
+  const handleSourceFontSizeReset = useStableCallback(() => { if (activeFileId) clearFileFontSize(activeFileId, "source") })
+  const handleTargetFontSizeReset = useStableCallback(() => { if (activeFileId) clearFileFontSize(activeFileId, "target") })
+  const handleTnSidebarChange = useStableCallback((v: boolean) => {
+    setTnSidebarVisible(v)
+    if (projectId) writeTnSidebarVisible(projectId, v)
+  })
+  const handleNudgeCustomize = useStableCallback(() => setChecklistOpen(true))
+  // The tab strip above the editor, and the left dock's tab rail.
+  const handleCloseTabForStrip = useStableCallback(handleCloseTab)
+  const tabStripSurfaceTabs = useMemo(
+    () => [
+      ...(agentTabOpen && projectId
+        ? [{
+            id: "agent",
+            label: t("nav.dock.agentTab"),
+            active: centerSurface === "agent",
+            onActivate: () => openOverlay("agent"),
+            onClose: closeAgentTab,
+          }]
+        : []),
+    ],
+    [agentTabOpen, projectId, t, centerSurface, openOverlay, closeAgentTab],
+  )
+  const handleDockSurfaceTabToggle = useStableCallback(() => closeAgentTab())
+  const handleDockActiveTabChange = useStableCallback((tab: Parameters<typeof setDockTab>[0]) => {
+    // The Agent rail opens the conversations panel everywhere (v2.2):
+    // beside the workbench it is the conversation list, so no
+    // special case re-focuses the workbench instead.
+    setDockTab(tab)
+    // Opening the Voices tab puts the editor into the Audio lens so
+    // the per-line voice controls show alongside the panel.
+    if (tab === "voices" && lens !== "audio") switchLens("audio")
+  })
+  const notificationFiles = useMemo(
+    () => (project?.files ?? []).map((file) => ({ id: file.id, name: file.name })),
+    [project?.files],
+  )
+  // What the table is handed. `handleClaimCell` is rebuilt whenever the focus
+  // lock is, and the two maps are rebuilt by every health pass, usually with
+  // the entries they already had; the table (and every row's render closure)
+  // re-rendered each time. Only the table's props are stabilised here — every
+  // other reader keeps the live values.
+  const handleClaimCellForTable = useStableCallback(handleClaimCell)
+  const tableInfractions = useStableValue(infractions, mapsEqual)
+  const tableHealthMap = useStableValue(effectiveHealthMap, mapsEqual)
+  // (Hooks: these sit above the early returns below. What they call is
+  // declared further down, which is fine — each runs from a later click.)
   // AQU-2455: the project was open and then refused (a save, a member.removed
   // frame, or the follow-up 403). One blocking screen — the AQU-2452 sentence —
   // and the way out is the org project list, which refetches. The editor does
@@ -18536,15 +18791,12 @@ export function ProjectWorkspace() {
       layoutSwitch={documentLayoutOffered ? (
         <EditorLayoutSwitch
           document={documentLayoutActive}
-          onChange={(document) => { if (activeFileId) setBibleDocumentViewForFile(activeFileId, document) }}
+          onChange={handleLayoutSwitchChange}
         />
       ) : undefined}
       lens={lens}
-      onLensChange={(l) => {
-        switchLens(l)
-        if (l === "audio") selectDockTab("voices")
-      }}
-      onAgentSelect={() => openAgentTab("editor")}
+      onLensChange={handleToolbarLensChange}
+      onAgentSelect={handleToolbarAgentSelect}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
       checkResult={checkResult}
@@ -18602,14 +18854,11 @@ export function ProjectWorkspace() {
           onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
           onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
           onCellLabelsChange={setCellLabelsEnabled}
-          onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
-          onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
-          onSourceFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "source") }}
-          onTargetFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "target") }}
-          onTnSidebarChange={(v) => {
-            setTnSidebarVisible(v)
-            if (projectId) writeTnSidebarVisible(projectId, v)
-          }}
+          onSourceFontSizeChange={handleSourceFontSizeChange}
+          onTargetFontSizeChange={handleTargetFontSizeChange}
+          onSourceFontSizeReset={handleSourceFontSizeReset}
+          onTargetFontSizeReset={handleTargetFontSizeReset}
+          onTnSidebarChange={handleTnSidebarChange}
         />
       )}
       translateAsReadEnabled={translateAsReadEnabled}
@@ -18699,16 +18948,8 @@ export function ProjectWorkspace() {
             // its rail icon active while it is up; clicking it then (with the
             // conversations panel hidden) closes the workbench.
             surfaceTab={centerSurface === "agent" ? "agent" : null}
-            onSurfaceTabToggle={() => closeAgentTab()}
-            onActiveTabChange={(t) => {
-              // The Agent rail opens the conversations panel everywhere (v2.2):
-              // beside the workbench it is the conversation list, so no
-              // special case re-focuses the workbench instead.
-              setDockTab(t)
-              // Opening the Voices tab puts the editor into the Audio lens so
-              // the per-line voice controls show alongside the panel.
-              if (t === "voices" && lens !== "audio") switchLens("audio")
-            }}
+            onSurfaceTabToggle={handleDockSurfaceTabToggle}
+            onActiveTabChange={handleDockActiveTabChange}
             toolsPanel={extensionsOn ? <ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: fileDisplayName(activeFile) } : undefined} /> : undefined}
             voicesPanel={
               project ? (
@@ -18746,10 +18987,11 @@ export function ProjectWorkspace() {
                   projectId={projectId!}
                   files={project.files}
                   activeFileId={activeFileId}
-                  fileProgress={editorFileProgress}
+                  fileProgress={fileListProgress}
                   lane={activeLane}
                   hasActiveChapters={hasActiveChapters}
-                  getActiveChapterHealth={getActiveChapterHealth}
+                  getActiveChapterHealth={getActiveChapterHealthForList}
+                  activeChapterHealthSignal={activeChapterHealthSignal}
                   // AQU-1326: the sidebar's per-file /progress reads wait for
                   // the editor's first cell page, same gate as the other
                   // secondary reads above.
@@ -18762,38 +19004,13 @@ export function ProjectWorkspace() {
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}
-                  onMove={(fileId) => {
-                    setMoveTargetId(fileId)
-                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-                  }}
-                  onExport={(fileId) => {
-                    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
-                    openExportFlow()
-                  }}
-                  onAssignWork={canAssignWork ? (fileId) => {
-                    setAssignTargetFileId(fileId)
-                    setAssignModalOpen(true)
-                  } : undefined}
+                  onMove={handleFileListMove}
+                  onExport={handleFileListExport}
+                  onAssignWork={canAssignWork ? handleFileListAssignWork : undefined}
                   onSegmentation={setSegmentationFileId}
-                  onReimport={canImportSource ? (fileId) => {
-                    const file = project.files.find((entry) => entry.id === fileId)
-                    if (!file) return
-                    setReimportTarget({
-                      fileId,
-                      name: file.name,
-                      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
-                      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
-                    })
-                    setImportOpen(true)
-                  } : undefined}
-                  onUploadRecordings={canUploadRecordings ? (fileId) => {
-                    const file = project.files.find((entry) => entry.id === fileId)
-                    if (!file) return
-                    setReimportTarget(null)
-                    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
-                    setImportOpen(true)
-                  } : undefined}
-                  onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
+                  onReimport={canImportSource ? handleFileListReimport : undefined}
+                  onUploadRecordings={canUploadRecordings ? handleFileListUploadRecordings : undefined}
+                  onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? setPendingDeleteId : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
@@ -18803,8 +19020,8 @@ export function ProjectWorkspace() {
                   // `file.reorder`. Below it the affordances are absent rather
                   // than present-and-403ing.
                   canReorderFiles={canPerform("file.reorder", project?.syncRole?.level ?? null)}
-                  onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
-                  onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
+                  onReorderFiles={handleFileListReorder}
+                  onMoveFileToGroup={handleFileListMoveToGroup}
                 />
                 <SidebarProjectSection items={projectNavItems}>
                   {/* FRO-192: member's per-project assignment pickup — a sidebar button that opens a popover. */}
@@ -18889,6 +19106,7 @@ export function ProjectWorkspace() {
               />
             }
             searchPanel={
+              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
               <SearchDockPanel
                 activeFileId={activeFileId}
                 activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
@@ -18919,6 +19137,7 @@ export function ProjectWorkspace() {
                 getJwt={() => jwtRef.current}
                 canonicalRef={focusedCellCanonicalRef}
               />
+              )}</WorkspaceSearchState>
             }
           />
         }
@@ -18937,7 +19156,7 @@ export function ProjectWorkspace() {
                 projectId={project.id}
                 readerUsername={currentUsername}
                 comments={allProjectComments}
-                files={project.files.map((file) => ({ id: file.id, name: file.name }))}
+                files={notificationFiles}
               />
             )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
@@ -18981,18 +19200,8 @@ export function ProjectWorkspace() {
             activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
             files={projectFiles}
             onActivate={workspaceTabs.activateTab}
-            onClose={handleCloseTab}
-            surfaceTabs={[
-              ...(agentTabOpen && projectId
-                ? [{
-                    id: "agent",
-                    label: t("nav.dock.agentTab"),
-                    active: centerSurface === "agent",
-                    onActivate: () => openOverlay("agent"),
-                    onClose: closeAgentTab,
-                  }]
-                : []),
-            ]}
+            onClose={handleCloseTabForStrip}
+            surfaceTabs={tabStripSurfaceTabs}
           />
         }
         beforeMain={
@@ -19062,7 +19271,7 @@ export function ProjectWorkspace() {
               <SystemPromptNudge
                 project={project}
                 onProjectUpdated={handleProjectUpdated}
-                onCustomize={() => setChecklistOpen(true)}
+                onCustomize={handleNudgeCustomize}
               />
             )}
             {/* FRO-214 (orchestrator glue): frozen-project banner — surfaces the
@@ -19371,6 +19580,7 @@ export function ProjectWorkspace() {
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
+                <WorkspaceSearchState store={searchStore}>{({ results: searchResults }) => (
                 <SearchResultsView
                   query={searchExpandedQuery}
                   results={searchResults}
@@ -19380,6 +19590,7 @@ export function ProjectWorkspace() {
                   }}
                   onClose={() => setSearchExpandedQuery(null)}
                 />
+                )}</WorkspaceSearchState>
               </div>
             )}
             {/* Contextual drafting pill (flag-gated, discourse files only) —
@@ -19576,10 +19787,6 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canEditLines}
-                    // The second gate: an imported line is the client's own
-                    // work, so taking one back is maintainer-only whatever
-                    // tier the project runs.
-                    canRemoveImportedCells={canRemoveImportedCells}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     // AQU-646 stage 2: the audio VTT. The import writes cells,
                     // so it sits behind the SAME source.* floor as the add-line
@@ -19881,6 +20088,7 @@ export function ProjectWorkspace() {
                 // bottom strip is playing is marked.
                 enabled={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered)}
               />
+              <ChapterNavTrailingContext.Provider value={fileChapterToolbar}>
               <EditorTable
             ref={bindEditorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -19919,28 +20127,14 @@ export function ProjectWorkspace() {
             // always showed the search box and mixed in Project Info, which has
             // no target-language field, so the person landed on what looked like
             // a search they never ran.
-            onEditTargetLanguage={() => {
-              if (!projectId) return
-              navigate(projectLanguageSettingsPath(projectId, "languages"), {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }}
+            onEditTargetLanguage={handleEditTargetLanguage}
             // AQU-1601: "Add lane…" opens Languages too, scrolled to its "Add a
             // target lane" field (AQU-2031). EditorTable withholds the item from
             // anyone below maintainer.
-            onAddLane={() => {
-              if (!projectId) return
-              navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }}
+            onAddLane={handleAddLane}
             // AQU-1271: the add-to-terminology popover offers this when the
             // project has no prefix/suffix inventory for its matcher yet.
-            onSetUpAffixes={() =>
-              navigate(`/project/${projectId}/settings?q=terminology`, {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }
+            onSetUpAffixes={handleSetUpAffixes}
             isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             exampleOriginFor={exampleOriginFor}
@@ -19948,7 +20142,7 @@ export function ProjectWorkspace() {
             onCompleteSingle={handleCompleteSingle} onPrefetchCompletion={prefetchSingleEvidence} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
             onAlignStyles={handleAlignStyles}
-            healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
+            healthMap={tableHealthMap} infractions={tableInfractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
@@ -20010,11 +20204,11 @@ export function ProjectWorkspace() {
             cellLockHolders={cellLockHolders}
             presenceStore={presenceStore}
             cellsWithRemoteChange={cellsWithRemoteChange}
-            onClaimCell={handleClaimCell}
+            onClaimCell={handleClaimCellForTable}
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
             onNavigateToCell={handleNavigatorCell}
-            onPlaceChange={(cellId) => rememberCell(cellId, "top")}
+            onPlaceChange={handlePlaceChange}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}
@@ -20033,13 +20227,17 @@ export function ProjectWorkspace() {
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
-            chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            // AQU-2654: the toolbar element is new on every workspace render,
+            // so it reaches the table through context and the prop is one
+            // constant outlet — see ChapterNavTrailingSlot.
+            chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
             // AQU-1758: a book's timeline shows the chapter the table is on.
             onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
+              </ChapterNavTrailingContext.Provider>
               </>
               )}
               </div>
@@ -20863,6 +21061,7 @@ export function ProjectWorkspace() {
           onAcknowledge={acknowledgeLaneArchived}
         />
       )}
+      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -20888,6 +21087,7 @@ export function ProjectWorkspace() {
         initialQuery={parallelSeedQuery}
         initialFind={parallelSeedFind}
       />
+      )}</WorkspaceSearchState>
       {project && (
         <CloneVoiceModalHost
           open={makeCharacterOpen}
@@ -21345,7 +21545,7 @@ export function ProjectWorkspace() {
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned
           sidebar row (project_lead+); was an inline expander in the files panel. */}
-      <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
+      <TrashDialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{t("nav.sidebarSection.trash")}</DialogTitle></DialogHeader>
           <div className="space-y-0.5">
@@ -21378,7 +21578,7 @@ export function ProjectWorkspace() {
             </p>
           </div>
         </DialogContent>
-      </Dialog>
+      </TrashDialog>
       {moveTargetId !== null && (
         <MoveToCorpusDialog
           // Remount per-open so internal state resets cleanly without an effect.

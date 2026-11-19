@@ -146,7 +146,14 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const statusRef = useRef(status)
   useEffect(() => { statusRef.current = status }, [status])
 
+  // AQU-2654: set by the mount effect just before its read, and taken by that
+  // read. Only a mount read may share a request with a sibling instance that
+  // mounted in the same commit (project-resolve.ts); a refresh or a recovery
+  // always sends its own.
+  const mountReadRef = useRef(false)
   const refresh = useCallback(() => {
+    const shareWithSiblings = mountReadRef.current
+    mountReadRef.current = false
     // Every trigger shares one current read; an older result must never win.
     cancelActiveResolve.current?.()
     if (!enabled) return () => {}
@@ -181,7 +188,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         return
       }
       // Desktop: falls back to the downloaded copy when the server is unreachable.
-      const result = await resolveProjectForRead(projectId, session.jwt)
+      const result = await resolveProjectForRead(projectId, session.jwt, { shareWithSiblings })
       if (cancelled) return
       setOfflineCopyPending(result.offlineCopyPending === true)
       setProvisional(false)
@@ -223,6 +230,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
+    mountReadRef.current = true
     refresh()
     // Account switching can mount this hook while offline. Revalidate using
     // the current session on reconnect, including when the offline request

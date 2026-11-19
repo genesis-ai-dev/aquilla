@@ -33,6 +33,16 @@
 // that file. Those are counted apart (`laneRows=N`), because they are not the
 // write-path regression `repaired=N` is the alarm for; an import that adds a
 // language is expected to leave some.
+//
+// The two kinds share the cap, and the audio kind is taken FIRST. The order
+// used to be project id alone, which let the lane-only backlog decide when an
+// audio-stale file was repaired: on the 2026-11-19 copy of production the queue
+// held 8,688 lane-only files and 195 audio-stale ones, the sweep ran at its cap
+// every night, and a migrated book late in the id order had read "0% recorded"
+// for 13 nights with about 34 still to wait. Audio first keeps this sweep's
+// bound ("one morning") for the kind it is the alarm for, as long as a night's
+// audio-stale files fit the cap; the lane-only files take what is left of it,
+// in the same project order as before.
 
 import { makePostgres, withLongOperationTimeout } from "../../db/shim/postgres"
 import { scheduledDeploymentEnvironmentError } from "./environment-guard"
@@ -142,9 +152,12 @@ export async function sweepStaleAudioProgress(
   // counting the whole set on a healthy night. The exact count comes later, and
   // only when this tells us it is worth asking for.
   const binds: unknown[] = byProject ? [options.onlyProjectId, options.onlyProjectId] : []
+  // `audio DESC` puts the audio-stale files ahead of the lane-only ones (see
+  // the header); within each kind the order is stable, so a capped run's
+  // leftovers are still the next run's first results.
   const { results } = await db
     .prepare(`SELECT project_id, id, audio FROM (${selector}) stale
-               ORDER BY project_id, id LIMIT ?`)
+               ORDER BY audio DESC, project_id, id LIMIT ?`)
     .bind(...binds, maxRepairs + 1)
     .all<StaleFileRow>()
   const selected = (results ?? []).slice(0, maxRepairs)

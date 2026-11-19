@@ -175,3 +175,57 @@ export function neighbourTranscripts(rows: readonly TranscriptRow[], target: Tra
     .filter((r) => r !== target && r.isSourceSegment && r.transcript)
     .map((r) => r.transcript)
 }
+
+/** Whether two pieces of plain data (a cell and what hangs off it) say the same. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameData(a[i], b[i])) return false
+    return true
+  }
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.hasOwn(b, key) || !sameData((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false
+  }
+  return true
+}
+
+/** The rows of a file, and the label each one is listed under. */
+export interface TranscriptRows {
+  rows: readonly TranscriptRow[]
+  /** By cell id: the line's own label, else its place among the file's cells. */
+  labels: ReadonlyMap<string, string>
+}
+
+export const NO_TRANSCRIPT_ROWS: TranscriptRows = { rows: [], labels: new Map() }
+
+/**
+ * The file's rows, keeping every row OBJECT whose line did not change.
+ *
+ * `cells` is rebuilt — a new object per cell — whenever any cell of the file
+ * changes or the file's audio is read again, so rows made afresh from it are
+ * all new every time and every row of the list re-renders for one line's
+ * change (AQU-2654, docs/decisions/0013: a row's props are stable). A row is
+ * therefore reused when its cell says what it said before, compared by
+ * content; the row keeps the cell object it was made from, which is equal to
+ * the new one. When no row changed, `previous` itself is returned.
+ */
+export function stableTranscriptRows(cells: readonly CellData[], previous: TranscriptRows): TranscriptRows {
+  const before = new Map(previous.rows.map((row) => [row.cell.id, row]))
+  const rows: TranscriptRow[] = []
+  const labels = new Map<string, string>()
+  let same = true
+  cells.forEach((cell, index) => {
+    const kept = before.get(cell.id)
+    const row = kept && (kept.cell === cell || sameData(kept.cell, cell)) ? kept : transcriptRowOf(cell)
+    if (!row) return
+    const label = cell.cellLabel ?? String(index + 1)
+    if (row !== previous.rows[rows.length] || previous.labels.get(cell.id) !== label) same = false
+    rows.push(row)
+    labels.set(cell.id, label)
+  })
+  return same && rows.length === previous.rows.length ? previous : { rows, labels }
+}

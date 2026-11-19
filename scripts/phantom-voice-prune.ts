@@ -35,10 +35,17 @@ export interface PruneGateInput {
   localUrl: string | undefined
   /** The package script the operator should have run, for the refusal text. */
   applyCommand: string
+  /** What an apply does to the database, for the refusal text. The other
+   *  maintenance scripts that share this gate say their own (AQU-2658). */
+  action?: string
+  /** What the operator is told once production is named. */
+  productionNote?: string
 }
 
 export function decidePruneGate(input: PruneGateInput): PruneGateDecision {
   const { apply, target, production, localUrl, applyCommand } = input
+  const action = input.action ?? "rewrite TTS settings"
+  const productionNote = input.productionNote ?? "A settings backup is written per project before each write."
 
   if (!apply) {
     if (production) {
@@ -57,12 +64,12 @@ export function decidePruneGate(input: PruneGateInput): PruneGateDecision {
       return {
         kind: "refuse",
         message:
-          `✗ Refusing to rewrite TTS settings on Neon production without ${PRODUCTION_FLAG}.\n` +
+          `✗ Refusing to ${action} on Neon production without ${PRODUCTION_FLAG}.\n` +
           `  Read the dry-run report first, then name production out loud:\n\n` +
           `      ${applyCommand} -- --apply ${PRODUCTION_FLAG} --only <projectId>\n`,
       }
     }
-    return { kind: "proceed", note: `⚠ applying to Neon PRODUCTION. A settings backup is written per project before each write.` }
+    return { kind: "proceed", note: `⚠ applying to Neon PRODUCTION. ${productionNote}` }
   }
 
   if (production) {
@@ -80,7 +87,7 @@ export function decidePruneGate(input: PruneGateInput): PruneGateDecision {
   return {
     kind: "refuse",
     message:
-      `✗ Refusing to rewrite TTS settings on an unidentified database.\n` +
+      `✗ Refusing to ${action} on an unidentified database.\n` +
       `  This entry point cannot tell which Neon branch NEON_PG_HOST points at. Use the\n` +
       `  target-aware commands, which name the branch for it:\n\n` +
       `      ${applyCommand}:dev -- --apply --only <projectId>\n` +

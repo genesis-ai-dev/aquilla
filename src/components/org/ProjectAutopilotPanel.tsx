@@ -43,6 +43,7 @@ import {
   type StartBlockerId,
 } from "@/lib/contextual/transport"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
+import { startVisibleInterval } from "@/lib/visible-interval"
 
 const POLL_MS = 4_000
 const WORKING_STATUSES = new Set(["running", "pausing"])
@@ -510,8 +511,8 @@ export function ProjectAutopilotPanel({
 
   useEffect(() => {
     if (!shouldPoll) return
-    const timer = setInterval(() => void load(), POLL_MS)
-    return () => clearInterval(timer)
+    // Not while the tab is hidden: nobody is watching the run (AQU-2654).
+    return startVisibleInterval(() => void load(), POLL_MS)
   }, [load, shouldPoll])
 
   const openInspector = (section: AutopilotInspectorSection) => {

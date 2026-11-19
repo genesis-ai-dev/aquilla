@@ -74,6 +74,8 @@ export class AnalyticsAccount {
   refresh = () => this.activate(this.session)
   /** A consent read for the current session is on its way. */
   verifying = () => this.request !== null
+  /** When the server last confirmed this account's decision (0 = never). */
+  lastVerifiedAt = () => this.verifiedAt
   async revalidate(): Promise<void> {
     if (this.state.saving) return
     // AQU-2654: an activation already in flight will answer this. Restarting
@@ -219,11 +221,25 @@ if (typeof window !== "undefined") {
     // A queued callback may outlive its browser environment during teardown.
     if (typeof document === "undefined" || typeof navigator === "undefined") return
     if (analyticsAccount.getSnapshot().ready && analyticsAccount.getSnapshot().decision?.allowed && !analyticsAccount.eligible()) analyticsAccount.suspend()
-    if (!document.hidden && navigator.onLine && Date.now() - lastCheck >= 60_000) {
+    if (!document.hidden && navigator.onLine && periodicCheckIsDue(Date.now(), lastCheck, analyticsAccount.lastVerifiedAt())) {
       lastCheck = Date.now()
       void analyticsAccount.revalidate()
     }
   }, 1_000)
+}
+
+/**
+ * Is the once-a-minute consent revalidation due?
+ *
+ * AQU-2654: a decision the server confirmed in the meantime counts as the
+ * check. The timer skips ticks while the tab is hidden, so on every return it
+ * found a minute had passed and re-read the decision that the return's own
+ * activation had read a second earlier. Counting from the last confirmation
+ * keeps the cadence (a read at most 60 s after the previous one, inside the
+ * 75 s lease `eligible()` allows) without the duplicate.
+ */
+export function periodicCheckIsDue(now: number, lastCheck: number, lastVerifiedAt: number): boolean {
+  return now - Math.max(lastCheck, lastVerifiedAt) >= 60_000
 }
 
 /** The draft is bound to the JWT returned by registration, never whichever

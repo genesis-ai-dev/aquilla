@@ -113,6 +113,17 @@ beforeEach(() => {
 })
 
 describe("ExportDialog — Web page export by file type (AQU-2210)", () => {
+  // AQU-2680: a lane names its language ("Spanish"); the page records the code.
+  it("marks the page with the lane's language code, never its name", async () => {
+    render(<ExportDialog {...BASE_PROPS} activeFileType="codex" targetLanguage="Spanish" targetLanguageCode="es" />)
+    openFoldIfClosed()
+    fireEvent.click(webPageRadio()!)
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
+    const page = await (mockDownload.mock.calls[0] as [Blob, string])[0].text()
+    expect(page).toContain('<html lang="es">')
+  })
+
   it("offers Web page for a Codex book and exports it as a readable page", async () => {
     render(<ExportDialog {...BASE_PROPS} activeFileType="codex" />)
     openFoldIfClosed()

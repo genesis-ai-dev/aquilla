@@ -2218,7 +2218,7 @@ export function ExportDialog({
             })),
             title: projectName,
             validatedOnly,
-            lang: targetLanguage,
+            lang: targetLanguageCode ?? undefined,
           })
           const htmlName = buildExportStem(true)
           downloadBlob(htmlZip.blob, `${htmlName}.zip`)
@@ -2332,7 +2332,7 @@ export function ExportDialog({
             blob = exportHtml(filteredCells, {
               fileName: activeFileName,
               validatedOnly,
-              lang: targetLanguage,
+              lang: targetLanguageCode ?? undefined,
             })
             break
           case "tsv":

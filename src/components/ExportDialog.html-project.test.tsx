@@ -69,6 +69,21 @@ beforeEach(() => {
 })
 
 describe("ExportDialog — whole-project HTML (AQU-2183)", () => {
+  // AQU-2680: a lane names its language ("French"); every page records the code.
+  it("marks each page with the lane's language code, never its name", async () => {
+    render(<ExportDialog {...BASE_PROPS} targetLanguage="French" targetLanguageCode="fr" />)
+    openFoldAsWebPage()
+    fireEvent.click(screen.getByRole("tab", { name: /whole project/i }))
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /whole project/i })).toHaveAttribute("aria-selected", "true"),
+    )
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
+    const zip = await JSZip.loadAsync(await (mockDownload.mock.calls[0] as [Blob, string])[0].arrayBuffer())
+    expect(await zip.file("index.html")!.async("string")).toContain('<html lang="fr">')
+    expect(await zip.file("01-GEN.html")!.async("string")).toContain('<html lang="fr">')
+  })
+
   it("offers whole-project scope for Web page", () => {
     render(<ExportDialog {...BASE_PROPS} />)
     openFoldAsWebPage()

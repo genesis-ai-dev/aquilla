@@ -42,6 +42,9 @@ function openInFrame(html: string, timeoutMs: number): Promise<{ win: PrintableW
   lastFrame?.remove()
   const frame = document.createElement("iframe")
   frame.setAttribute("aria-hidden", "true")
+  // AQU-2680 re-check finding 6: nothing in the page runs. Same origin, so
+  // the app can reach the frame's window to print it; modals, so it may print.
+  frame.setAttribute("sandbox", "allow-same-origin allow-modals")
   frame.tabIndex = -1
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden"
   lastFrame = frame

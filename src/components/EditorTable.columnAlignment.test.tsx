@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { render, screen, cleanup, within } from "@testing-library/react"
+import { render, screen, cleanup, within, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -523,7 +523,7 @@ describe("EditorTable — Bible columns", () => {
     expect(await within(stack).findByText("In the beginning God created")).toBeInTheDocument()
     expect(stack.closest("[data-showcase='editor.source']")).not.toBeNull()
     expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
-    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
   })
 
   it("offers no Bible columns without versions chosen, beyond the Add Bible control", async () => {
@@ -532,7 +532,7 @@ describe("EditorTable — Bible columns", () => {
     await screen.findByText("hello")
     expect(screen.getByRole("button", { name: "Add Bible" })).toBeInTheDocument()
     expect(screen.queryByTestId("bible-stack")).toBeNull()
-    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
   })
 
   it.each([
@@ -556,5 +556,35 @@ describe("EditorTable — Bible columns", () => {
     expect(screen.queryByRole("button", { name: "Add Bible" })).toBeNull()
     expect(screen.queryByTestId("bible-cell-BSB")).toBeNull()
     expect(screen.queryByTestId("bible-stack")).toBeNull()
+  })
+  // AQU-2678: the draggable Source/Target line lies over the rows in a grid
+  // with the rows' own template, padding and scrollbar gutter, and moving it
+  // only rewrites two variables on the table root that the rows and headers
+  // both read — so the two cannot drift apart.
+  it("lays the Source/Target divider over the rows on their template, and keeps headers and rows on the same split", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: [] })
+    const row = (await screen.findByText("hello")).closest("[data-grid-row]") as HTMLElement
+    const headers = screen.getByTestId("table-column-headers")
+    const overlay = screen.getByTestId("editor-split-overlay")
+    const template = "md:grid-cols-[84px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
+    for (const el of [row, headers, overlay]) expect(el.className).toContain(template)
+    for (const cls of ["ps-2.5", "md:pe-4"]) expect(row.className).toContain(cls)
+    for (const cls of ["ps-2.5", "pe-4", "[scrollbar-gutter:stable]"]) expect(overlay.className).toContain(cls)
+
+    const root = headers.parentElement!.parentElement as HTMLElement
+    expect(root.contains(row) && root.contains(overlay)).toBe(true)
+    expect(root.style.getPropertyValue("--editor-src-fr")).toBe("")
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the Source and Target columns" }), { key: "ArrowLeft" })
+    expect(root.style.getPropertyValue("--editor-src-fr")).not.toBe("")
+    // The row element itself is untouched: same class, nothing per-row to update.
+    expect(row.className).toContain(template)
+  })
+
+  it("has no Source/Target divider while Bible columns sit between the two", async () => {
+    tableWidth(1400)
+    renderTable({ bibles: ["BSB"] })
+    await screen.findByTestId("bible-cell-BSB")
+    expect(screen.queryByTestId("editor-split-overlay")).toBeNull()
   })
 })

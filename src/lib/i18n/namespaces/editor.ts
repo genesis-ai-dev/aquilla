@@ -557,6 +557,7 @@ export const editor = defineNamespace({
     // — Column names, reused wherever the two sides are named ——————————
     "editor.column.source": "Source",
     "editor.column.target": "Target",
+    "editor.column.resizeSplit": "Resize the Source and Target columns",
 
     // — View-settings popover ————————————————————————————————————————
     "editor.view.settings": "Editor settings",
@@ -6163,6 +6164,12 @@ export const editor = defineNamespace({
           "search filter that looks only at translated text, as the badge marking a search " +
           "hit as target-language, and interpolated into other strings. Must pair " +
           "contrastively with editor.column.source.",
+      },
+      "editor.column.resizeSplit": {
+        description:
+          "Screen-reader name of the drag handle on the line between the editing table's " +
+          "Source and Target columns; dragging it widens one column and narrows the other. " +
+          "Imperative. Source and Target should match editor.column.source and editor.column.target.",
       },
       "editor.view.settings": {
         description:

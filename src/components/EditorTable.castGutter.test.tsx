@@ -214,12 +214,12 @@ describe("EditorTable — character gutter", () => {
     await screen.findByText("Mary's line")
     // AQU-1101: only the GUTTER track changes width here — the two text tracks
     // are `minmax(0,1fr)` in both shapes so content can never widen them.
-    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[132px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
     unmount()
     renderTable({ castGutter: false })
     await screen.findByText("Mary's line")
     expect(screen.queryAllByTestId("gutter-voice")).toHaveLength(0)
-    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[84px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
   })
 
   it("picking a character reaches the context's PURE assignment handler with the cell", async () => {

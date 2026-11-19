@@ -158,7 +158,7 @@ describe("EditorTable — source/target columns stay equal in width", () => {
     const rail = row.querySelector<HTMLElement>(".pointer-events-none.relative.col-start-2")!
 
     expect(row.className).toContain("grid-cols-[48px_minmax(0,1fr)]")
-    expect(row.className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
+    expect(row.className).toContain("md:grid-cols-[84px_minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]")
     expect(row.querySelector<HTMLElement>(".row-span-2")?.className).toContain("flex-col")
     expect(source.className).toContain("col-start-2")
     expect(target.className).toContain("col-start-2")
@@ -196,9 +196,10 @@ describe("EditorTable — source/target columns stay equal in width", () => {
     const grids = gridClassNames(container)
     expect(grids.length).toBeGreaterThan(0)
     for (const className of grids) {
-      // Two `minmax(0,1fr)` tracks — equal fractions of whatever is left after
-      // the fixed gutter, regardless of what the cells hold.
-      expect(className).toContain("minmax(0,1fr)_minmax(0,1fr)")
+      // Two `minmax(0,…fr)` tracks — fractions of whatever is left after the
+      // fixed gutter (even unless the Source/Target line was dragged,
+      // AQU-2678), regardless of what the cells hold.
+      expect(className).toContain("minmax(0,var(--editor-src-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))")
       // A bare `1fr` track is the bug. Its implicit `min-width: auto` is what
       // let the unbreakable token size the track to min-content.
       expect(className).not.toMatch(/grid-cols-\[\d+px_1fr_1fr\]/)

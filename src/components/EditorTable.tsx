@@ -283,6 +283,7 @@ import {
   editorHeaderGridCols,
   type EditorGridCols,
 } from "@/lib/editor/editor-grid"
+import { EditorSplitDivider } from "./EditorSplitDivider"
 import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
 import {
   AddBibleMenu as AddBibleMenuImpl,
@@ -3975,7 +3976,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       {displayCellIds.length > 0 ? (
         <div
           ref={listRootRef}
-          className="flex min-h-0 flex-1"
+          // relative: the Source/Target divider's overlay (AQU-2678) fills it.
+          className="relative flex min-h-0 flex-1"
           onPointerDownCapture={handleChapterListPointerDownCapture}
           onWheelCapture={() => {
             userScrolledRef.current = true
@@ -4018,6 +4020,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             />
             </RowUiStateContext.Provider>
           </BibleDataProvider>
+          {/* AQU-2678: the draggable Source/Target line. Only while the two
+              columns sit side by side — Bible columns go between them. */}
+          {bibleTrackCount === 0 && <EditorSplitDivider rootRef={tableRootRef} gridCols={gridCols} />}
         </div>
       ) : isTimeOrdered ? (
         // Shared with the Smart Extensions editor surface (AQU-1565/1566).

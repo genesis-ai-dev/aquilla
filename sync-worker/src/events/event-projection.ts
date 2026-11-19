@@ -2170,6 +2170,12 @@ case 'cell.audio.attach': {
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
+              -- AQU-2664: a re-attach that swaps the audio is a new recording,
+              -- so the old one's reading goes (the evened-out target stays
+              -- and waits for the next measure: an unmeasured take plays at
+              -- its own volume). The same url keeps it.
+              loudness_lufs      = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_lufs END,
+              true_peak_db       = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.true_peak_db END,
               mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
               voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),

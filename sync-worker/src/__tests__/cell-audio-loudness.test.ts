@@ -113,6 +113,20 @@ describe('a take\'s loudness (cell.audio.measure)', () => {
     expect((await read())['take-b'].loudnessLufs).toBeUndefined()
   })
 
+  // Review M4: a re-attach that swaps the audio is a new recording; the old
+  // reading must not stay on it (the target waits for the next measure).
+  it('a re-attach with a new url clears the reading and keeps the target; the same url keeps both', async () => {
+    await attach('take-a')
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -27.4, truePeakDb: -9.2 })
+    await project('cell.audio.even', { audioId: 'take-a', evenTargetLufs: -16 })
+    await attach('take-a') // the same url (a trim heal, word timings)
+    expect(await stored('take-a')).toMatchObject({ loudness: -27.4, peak: -9.2, target: -16 })
+    await project('cell.audio.attach', { audioId: 'take-a', url: 'https://r2.invalid/swapped', slot: 'recording', durationMs: 4_600 })
+    expect(await stored('take-a')).toMatchObject({ loudness: null, peak: null, target: -16 })
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -12, truePeakDb: -1.5 })
+    expect(await stored('take-a')).toMatchObject({ loudness: -12, peak: -1.5 })
+  })
+
   it('refuses a reading that is not a finite number', () => {
     const stmts: AquillaStatement[] = []
     expect(() => buildEventProjectionStmts(h.db, event('cell.audio.measure', { audioId: 'a', durationMs: 1, loudnessLufs: 'loud', truePeakDb: -3 }), stmts)).toThrow(/malformed/)

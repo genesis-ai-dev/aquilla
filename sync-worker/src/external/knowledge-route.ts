@@ -34,6 +34,7 @@ import {
   kbExtension,
 } from '../../../db/shared/knowledge'
 import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
+import { readBytesWithLimit } from '../../../shared/http-body-limit'
 
 const ROUTE_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/knowledge$/
 
@@ -122,15 +123,17 @@ async function handleUpload(
     })
   }
 
-  const bytes = new Uint8Array(await request.arrayBuffer())
-  if (bytes.byteLength === 0) {
-    return errorResponse('validation_failed', 'knowledge document body is empty')
-  }
-  if (bytes.byteLength > MAX_KB_ORIGINAL_BYTES) {
+  // AQU-2594: read through the cap, not whole and then measured. A chunked
+  // body declares no length, so the check above cannot stop it.
+  const upload = await readBytesWithLimit(request.headers, request.body, MAX_KB_ORIGINAL_BYTES)
+  if (!upload.ok) {
     return errorResponse('validation_failed', 'knowledge document exceeds maximum size', {
-      sizeBytes: bytes.byteLength,
       maxBytes: MAX_KB_ORIGINAL_BYTES,
     })
+  }
+  const bytes = upload.bytes
+  if (bytes.byteLength === 0) {
+    return errorResponse('validation_failed', 'knowledge document body is empty')
   }
 
   const result = await uploadKnowledgeDoc(env, {

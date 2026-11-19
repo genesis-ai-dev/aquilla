@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest"
 import { zlibSync, strToU8 } from "fflate"
 import { DocumentExtractionError, extractTextFromPdf } from "../routes/parse-document"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 /** Just under the 2 MB upload cap both routes apply before extracting. */
 const UPLOAD_BYTES = 2_000_000
@@ -173,9 +174,8 @@ describe("extractTextFromPdf — work bounds on crafted files (AQU-2594)", () =>
     const run = timed(() => extractTextFromPdf(pdf))
     expect(run.error).toBeUndefined()
     expect(run.ms).toBeLessThan(FAST_MS)
-    const blocks = (run.value ?? "").split("\n")
-    expect(blocks).toHaveLength(5)
-    for (const block of blocks) expect(block.length > 0 && block.replaceAll("ab", "") === "").toBe(true)
+    // Read up to the text cap: the first block whole, then part of the next.
+    expect(run.value).toBe(`${"ab".repeat(838_000)}\n`.repeat(5).slice(0, MAX_KB_TEXT_CHARS))
   })
 
   it("scans an unclosed run of `(` inside a text block in one pass", () => {
@@ -221,6 +221,16 @@ describe("extractTextFromPdf — work bounds on crafted files (AQU-2594)", () =>
     expect(run.error).toBeInstanceOf(DocumentExtractionError)
     // routes/knowledge.ts shows this message to the uploader verbatim.
     expect((run.error as Error).message).toMatch(/^the document is too complex to read: /)
+  })
+
+  it("keeps at most as much text as the knowledge base stores", () => {
+    // Five ~4 MB streams of shown text from a 20 KB file: 20 M characters,
+    // which the parse-document route then turned into a ~40 MB JSON reply.
+    const page = flateStreamObject(zlibSync(strToU8(`BT (${"a".repeat(4 * 1024 * 1024 - 20)}) Tj ET`)))
+    const pdf = concat([strToU8("%PDF-1.4\n"), page, page, page, page, page, strToU8("%%EOF")])
+    const { ms, value } = timed(() => extractTextFromPdf(pdf))
+    expect(value).toBe("a".repeat(MAX_KB_TEXT_CHARS))
+    expect(ms).toBeLessThan(FAST_MS)
   })
 
   it("examines at most 10,000 streams", () => {

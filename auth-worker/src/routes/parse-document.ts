@@ -21,6 +21,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { unzipSync, inflateSync, Inflate } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
+import { MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
 // Ceiling on the whole multipart envelope (AQU-1858). The form used to be
@@ -81,6 +82,10 @@ const MAX_DEFLATE_RATIO = 1032
 // ~1 MB and inflation stops within a step of the per-stream cap instead of
 // decoding the whole stream.
 const INFLATE_STEP_BYTES = 1024
+// AQU-2594: the most text one PDF yields, the most the knowledge base stores.
+// Five 4 MB streams of shown text from a 20 KB file came to 20 M characters,
+// which the parse-document route then sent back as a ~40 MB JSON reply.
+const MAX_PDF_TEXT_CHARS = MAX_KB_TEXT_CHARS
 
 const parseDocument = new Hono<AuthHonoEnv>()
 
@@ -533,8 +538,19 @@ function deflateEnded(inflater: Inflate): boolean {
 class TextPieces {
   private pending: string[] = []
   private readonly joined: string[] = []
+  private length = 0
+
+  /** Pieces past `limit` characters are dropped. */
+  constructor(private readonly limit = Infinity) {}
+
+  get full(): boolean {
+    return this.length >= this.limit
+  }
 
   push(piece: string): void {
+    if (this.full) return
+    if (piece.length > this.limit - this.length) piece = piece.slice(0, this.limit - this.length)
+    this.length += piece.length
     this.pending.push(piece)
     if (this.pending.length >= TEXT_PIECES_PER_JOIN) {
       this.joined.push(this.pending.join(""))
@@ -558,7 +574,7 @@ const TEXT_PIECES_PER_JOIN = 8192
 // hours. The scan below finds the same matches; parse-document-pdf-bounds
 // .test.ts checks it against those regexes.
 function scanTextOperators(haystack: string, chunks: TextPieces): void {
-  for (let from = 0; ; ) {
+  for (let from = 0; !chunks.full; ) {
     const bt = textBlockStart(haystack, from)
     if (bt === -1) return
     const et = haystack.indexOf("ET", bt + 3)
@@ -699,8 +715,9 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
   // real-world (compressed) and uncompressed PDFs extract.
   const haystacks = [...inflatePdfStreams(bytes, raw, work), raw]
 
-  const chunks = new TextPieces()
+  const chunks = new TextPieces(MAX_PDF_TEXT_CHARS)
   for (const haystack of haystacks) {
+    if (chunks.full) break
     work.charge(haystack.length)
     scanTextOperators(haystack, chunks)
   }

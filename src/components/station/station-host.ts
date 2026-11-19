@@ -7,7 +7,7 @@ import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { HistoryResult } from "@/lib/history/history"
 import type { TakeLevel } from "@/lib/history/take-steps"
-import type { EvenOutOptions, EvenOutResult, TakeRef } from "@/lib/audio/even-out"
+import type { ClearResult, EvenOutOptions, EvenOutResult, TakeRef } from "@/lib/audio/even-out"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { InsertChoice } from "./StationEdits"
 
@@ -42,7 +42,7 @@ export interface StationHost {
    *  Build the list with `takesToEvenOut` (a file, a track, tracks). */
   evenOut?(takes: readonly TakeRef[], opts?: EvenOutOptions): Promise<EvenOutResult | null>
   /** AQU-2664: take evening out off these takes, as one Undo step. */
-  clearEvenOut?(takes: readonly TakeRef[]): Promise<{ cleared: number; gone: number } | null>
+  clearEvenOut?(takes: readonly TakeRef[]): Promise<ClearResult | null>
   /** Item 2 / slice 9: clean the take's noise into a new version (the Remove
    *  noise action, keeping its track, kept part and places); its new id. */
   removeNoise(cellId: string, audioId: string): Promise<string | null>

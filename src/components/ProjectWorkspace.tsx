@@ -4579,12 +4579,14 @@ export function ProjectWorkspace() {
 
   // AQU-2664: a take's evened-out target, alone — the trim's order again.
   // Never its volume or fades: evening out is the stage before them.
+  // `flush: false` (the Even out action) queues the write and leaves the one
+  // outbox flush to the action, so 300 takes are not 300 round trips.
   const applyTakeEven = useCallback(
-    async (cellId: string, audioId: string, targetLufs: number | null) => {
-      if (!project?.id) return
+    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<string | null> => {
+      if (!project?.id) return null
       const owner = resolveTakeCellRef.current(cellId)
       const att = owner?.cell.attachments?.[audioId]
-      if (!owner || !att) return
+      if (!owner || !att) return null
       const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
       const p = emitCellAudioEven({
         projectId: project.id, fileId: owner.fileId, cellId, audioId, evenTargetLufs: targetLufs,
@@ -4593,8 +4595,10 @@ export function ProjectWorkspace() {
       })
       injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), evenTargetLufs: targetLufs }, p)
       await p
+      if (opts?.flush === false) return owner.fileId
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(owner.fileId)
+      return owner.fileId
     },
     [project?.id, currentUsername, getTokenForProjectFile, activeLane],
   )
@@ -4607,19 +4611,32 @@ export function ProjectWorkspace() {
     if (!project?.id) return null
     const projectId = project.id
     const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
+    const touched = new Set<string>()
     return {
       readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
-      applyEven: applyTakeEven,
+      applyEven: async (cellId, audioId, target) => {
+        const fileId = await applyTakeEven(cellId, audioId, target, { flush: false })
+        if (!fileId) throw new Error("even out: the take is gone")
+        touched.add(fileId)
+      },
+      flush: async () => {
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        for (const f of touched) notifyAudioAttachmentsChanged(f)
+        touched.clear()
+      },
+      // Refused up front, before any download, below the event's role.
+      allowed: canPerform("cell.audio.even", project.syncRole?.level ?? null),
       fileId: activeFileId,
       fileName: activeFileNameRef.current,
       measure: makeTakeMeasurer({
-        fetchBytes: async (att, where) => {
+        fetchBytes: async (att, where, signal) => {
           const ref = parseFrontierAudioUrl(att.url)
           const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
           if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
-          return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken })
+          return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
         },
         decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
+        decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
         emit: async (cellId, audioId, reading, durationMs) => {
           const owner = resolveTakeCellRef.current(cellId)
           const att = owner?.cell.attachments?.[audioId]
@@ -4635,7 +4652,7 @@ export function ProjectWorkspace() {
         },
       }),
     }
-  }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername])
+  }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername, getTokenForProjectFile])
   const handleEvenOut = useCallback(
     (takes: readonly TakeRef[], opts?: EvenOutOptions) => (evenOutHost ? evenOutTakes(evenOutHost, takes, opts) : Promise.resolve(null)),
     [evenOutHost],
@@ -17078,7 +17095,7 @@ export function ProjectWorkspace() {
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
-        applyEven: (cellId, audioId, target) => applyTakeEven(cellId, audioId, target),
+        applyEven: async (cellId, audioId, target) => { await applyTakeEven(cellId, audioId, target) },
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId, c.pieceVoters),
         uncut: applyTakeUncut,

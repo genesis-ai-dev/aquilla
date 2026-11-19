@@ -29,14 +29,18 @@ function workspace(takes: Record<string, Record<string, Partial<Att>>>) {
   const applyGain = vi.fn(async () => {
     throw new Error("evening out wrote the take's own volume")
   })
+  const failOn = new Set<string>()
   const applyEven = vi.fn(async (cellId: string, audioId: string, target: number | null) => {
+    if (failOn.has(audioId)) throw new Error("outbox refused it")
     store[cellId][audioId].evenTargetLufs = target
   })
+  const flush = vi.fn(async () => {})
   const measured: string[] = []
   const readings: Record<string, { loudnessLufs: number; truePeakDb: number } | null> = {}
   const host: EvenOutHost = {
     readTake,
     applyEven,
+    flush,
     measure: async (cellId, audioId) => {
       measured.push(audioId)
       const r = readings[audioId]
@@ -49,7 +53,7 @@ function workspace(takes: Record<string, Record<string, Partial<Att>>>) {
     readTake, selectedIn: () => null, applyTrim: async () => {}, applyGain, applyEven, applyPlace: async () => {},
     cut: async () => true, uncut: async () => {}, select: async () => {}, remove: async () => {}, rename: async () => {},
   } as unknown as TakeStepContext
-  return { store, host, ctx, applyGain, applyEven, measured, readings }
+  return { store, host, ctx, applyGain, applyEven, flush, failOn, measured, readings }
 }
 
 let unregister: (() => void) | null = null
@@ -199,6 +203,46 @@ describe("evening out is its own stage, before every volume the person sets", ()
   })
 })
 
+describe("SHOULD: writes, roles and the network", () => {
+  it("writes every take, then flushes the outbox ONCE", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } }, c3: { c: { loudnessLufs: -22, truePeakDb: -8 } } })
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }, { cellId: "c3", audioId: "c" }])
+    expect(w.applyEven).toHaveBeenCalledTimes(3)
+    expect(w.flush).toHaveBeenCalledTimes(1)
+  })
+
+  it("a write that fails partway keeps an undo step for the takes that were written, and says how many failed", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } }, c3: { c: { loudnessLufs: -22, truePeakDb: -8 } } })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    w.failOn.add("b")
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }, { cellId: "c3", audioId: "c" }])
+    expect(r).toMatchObject({ evened: 2, failed: 1 })
+    expect(historyView().undoSteps).toHaveLength(1)
+    await undoLast()
+    expect(w.store.c1.a.evenTargetLufs).toBeNull()
+    expect(w.store.c3.c.evenTargetLufs).toBeNull()
+  })
+
+  it("nothing landed: no undo step, and no throw", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } } })
+    w.failOn.add("a")
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(r).toMatchObject({ evened: 0, failed: 1 })
+    expect(historyView().undoSteps).toHaveLength(0)
+  })
+
+  it("someone below Contributor is refused up front, before anything is downloaded", async () => {
+    const w = workspace({ c1: { a: {} } })
+    w.readings.a = { loudnessLufs: -20, truePeakDb: -8 }
+    w.host.allowed = false
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(r).toMatchObject({ notAllowed: true, evened: 0 })
+    expect(w.measured).toEqual([])
+    expect(w.applyEven).not.toHaveBeenCalled()
+    expect(await clearEvenOut(w.host, [{ cellId: "c1", audioId: "a" }])).toMatchObject({ notAllowed: true, cleared: 0 })
+  })
+})
+
 describe("clear", () => {
   it("takes evening out off every take as ONE step, and undo puts it back", async () => {
     const w = workspace({
@@ -248,8 +292,10 @@ describe("which takes", () => {
 })
 
 describe("measuring a take", () => {
+  // A mono take counts as heard on both speakers (dual mono, +3 LU), so a
+  // mono sine whose peak is at X dBFS reads X LUFS.
   const sine = (lufs: number, seconds: number) => {
-    const a = Math.pow(10, (lufs + 10 * Math.log10(2)) / 20)
+    const a = Math.pow(10, lufs / 20)
     return Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => a * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
   }
   const att = { url: "frontier-audio://take-1.wav", type: "audio", durationMs: 2000 } as CodexCellAttachment
@@ -262,12 +308,103 @@ describe("measuring a take", () => {
     expect(emit).toHaveBeenCalledWith("c1", "take-1", expect.objectContaining({ loudnessLufs: r!.loudnessLufs, truePeakDb: r!.truePeakDb }), 2000)
   })
 
-  it("measures a recording shared by several takes once", async () => {
+  it("decodes a recording shared by several takes once", async () => {
     const decode = vi.fn(async () => sine(-24, 1))
-    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode, emit: async () => {} })
+    const fetchBytes = vi.fn(async () => new Uint8Array([1]))
+    const measure = makeTakeMeasurer({ fetchBytes, decode, emit: async () => {} })
     await measure("c1", "p1", att)
-    await measure("c2", "p2", att)
+    await measure("c2", "p2", { ...att, trimStartMs: 200 })
     expect(decode).toHaveBeenCalledTimes(1)
+    expect(fetchBytes).toHaveBeenCalledTimes(1)
+  })
+
+  // Sam, Nov 19: pieces of a cut take and sections of a shared import are
+  // each measured on their own window of the recording.
+  it("measures each piece or section over its own window of the recording", async () => {
+    const quietThenLoud = new Float32Array(4 * TARGET_RATE)
+    quietThenLoud.set(sine(-30, 2), 0)
+    quietThenLoud.set(sine(-12, 2), 2 * TARGET_RATE)
+    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => quietThenLoud.slice(), emit: async () => {} })
+    const shared = { url: "frontier-audio://import.mp3", type: "audio", durationMs: 4000 } as CodexCellAttachment
+    const first = await measure("c1", "s1", { ...shared, trimEndMs: 2000 })
+    const second = await measure("c2", "s2", { ...shared, trimStartMs: 2000 })
+    expect(Math.abs(first!.loudnessLufs - -30)).toBeLessThan(0.5)
+    expect(Math.abs(second!.loudnessLufs - -12)).toBeLessThan(0.5)
+    expect(second!.truePeakDb).toBeCloseTo(-12, 0)
+    expect(first!.truePeakDb).toBeCloseTo(-30, 0)
+  })
+
+  it("a long import over the memory budget is measured section by section, not skipped", async () => {
+    // 10 minutes of "MP3" whose sections decode a chunk at a time.
+    const decodeWindow = vi.fn(async (_bytes: Uint8Array, startSec: number, endSec: number) => sine(-20, Math.round(endSec - startSec)))
+    const decode = vi.fn(async () => { throw new Error("the whole recording must never be decoded") })
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]), decode, decodeWindow, emit: async () => {},
+      pcmBudgetBytes: 50 * TARGET_RATE * 4, // 50 s of PCM
+    })
+    const long = { url: "frontier-audio://sermon.mp3", type: "audio", durationMs: 600_000 } as CodexCellAttachment
+    const r = await measure("c9", "s9", { ...long, trimStartMs: 300_000, trimEndMs: 304_000 })
+    expect(Math.abs(r!.loudnessLufs - -20)).toBeLessThan(0.5)
+    expect(decode).not.toHaveBeenCalled()
+    expect(decodeWindow).toHaveBeenCalledWith(expect.anything(), 300, 304)
+  })
+
+  it("FALLBACK: a section too long for the budget, or a long recording that can't be decoded in parts, is unmeasured", async () => {
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]), decode: async () => sine(-20, 1),
+      decodeWindow: async () => null, // not an MP3: no way to decode a part
+      emit: async () => {}, pcmBudgetBytes: 50 * TARGET_RATE * 4,
+    })
+    const long = { url: "frontier-audio://film.webm", type: "audio", durationMs: 600_000 } as CodexCellAttachment
+    expect(await measure("c1", "a", { ...long, trimStartMs: 0, trimEndMs: 4000 })).toBeNull()
+    expect(await measure("c1", "b", { ...long, trimStartMs: 0, trimEndMs: 120_000 })).toBeNull()
+  })
+
+  it("SHOULD: a take with no known length is still held to the memory budget", async () => {
+    const decode = vi.fn(async () => sine(-20, 1))
+    const measure = makeTakeMeasurer({
+      // ~200 KB of compressed audio could decode to far more than 1 MB of PCM.
+      fetchBytes: async () => new Uint8Array(200_000), decode, decodeWindow: async () => null,
+      emit: async () => {}, pcmBudgetBytes: 1_000_000,
+    })
+    expect(await measure("c1", "a", { url: "frontier-audio://x.webm", type: "audio" } as CodexCellAttachment)).toBeNull()
+    expect(decode).not.toHaveBeenCalled()
+  })
+
+  it("SHOULD: the timeout really stops the download (and nothing is decoded after it)", async () => {
+    vi.useFakeTimers()
+    try {
+      let aborted = false
+      const decode = vi.fn(async () => sine(-24, 1))
+      const measure = makeTakeMeasurer({
+        fetchBytes: (_a, _w, signal) => new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")) })
+        }),
+        decode, emit: async () => {}, timeoutMs: 1000,
+      })
+      const p = measure("c1", "a", att)
+      await vi.advanceTimersByTimeAsync(1001)
+      expect(await p).toBeNull()
+      expect(aborted).toBe(true)
+      expect(decode).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("SHOULD: Cancel reaches the download", async () => {
+    let aborted = false
+    const ac = new AbortController()
+    const measure = makeTakeMeasurer({
+      fetchBytes: (_a, _w, signal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")) })
+      }),
+      decode: async () => sine(-24, 1), emit: async () => {},
+    })
+    const p = measure("c1", "a", att, ac.signal)
+    ac.abort()
+    expect(await p).toBeNull()
+    expect(aborted).toBe(true)
   })
 
   it("FALLBACK: no reading when the bytes can't be fetched or decoded", async () => {

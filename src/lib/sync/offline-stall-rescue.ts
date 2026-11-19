@@ -18,6 +18,7 @@
  * while it was waiting on the store.
  */
 
+import { isLeaderStalled, subscribeLeaderStalled } from "@/lib/offline/leader-watchdog"
 import type { OutboxRecord } from "./outbox"
 
 /** Calls back once the leader has written a commit to disk; returns a stop function. */
@@ -43,8 +44,22 @@ export function isRescuedFromOfflineQueue(id: string): boolean {
 }
 
 /** The offline queue's copies of `ids` are gone (offline sync adapter): nothing left to leave alone. */
-export function forgetRescuedFromOfflineQueue(ids: readonly string[]): void {
+export function forgetRescuedFromOfflineQueue(ids: Iterable<string>): void {
   for (const id of ids) rescuedIds.delete(id)
+}
+
+/**
+ * Marks `ids` as IndexedDB's. A rescue does this itself; the offline sync
+ * adapter does it on launch for queued rows that also have an IndexedDB copy,
+ * since this set doesn't survive a restart.
+ */
+export function markRescuedFromOfflineQueue(ids: Iterable<string>): void {
+  for (const id of ids) rescuedIds.add(id)
+}
+
+/** Every id currently marked rescued, in no particular order. */
+export function rescuedFromOfflineQueue(): readonly string[] {
+  return [...rescuedIds]
 }
 
 /** Cheap check before scanning a queue for rescued ids. */
@@ -66,6 +81,35 @@ export function holdJournalUntilPersisted(
   awaitingPersist.add(entry)
   entry.stopWatching = whenPersisted(() => {
     if (awaitingPersist.delete(entry)) entry.clearJournal()
+  })
+}
+
+// Backstop for a store that shut down: its commits never confirm, and their
+// journal entries stay for the next launch either way.
+const MAX_JOURNAL_WAIT_MS = 30_000
+
+/**
+ * Resolves once `cleared` does (a held journal entry has gone), the leader is
+ * reported stalled (later writes go to IndexedDB, whose entries clear at
+ * once), or `maxWaitMs` has passed. A batch split into runs waits on each
+ * before journaling the next, so held entries can't pile up in localStorage.
+ */
+export function untilJournalClearedOrStalled(
+  cleared: Promise<void>,
+  maxWaitMs = MAX_JOURNAL_WAIT_MS,
+): Promise<void> {
+  if (isLeaderStalled()) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      unsubscribe()
+      clearTimeout(timer)
+      resolve()
+    }
+    const unsubscribe = subscribeLeaderStalled(() => {
+      if (isLeaderStalled()) done()
+    })
+    const timer = setTimeout(done, maxWaitMs)
+    void cleared.then(done)
   })
 }
 
@@ -91,15 +135,20 @@ async function rescueOnce(copy: CopyToOutbox): Promise<boolean> {
   const entries = [...awaitingPersist]
   if (entries.length === 0) return true
   const records = entries.flatMap((entry) => entry.records)
+  // Marked before the copy, not after: once a row lands in IndexedDB the HTTP
+  // flusher may send it straight away, and the offline adapter must already
+  // be leaving its queue copy alone by then.
+  const marked = records.map((record) => record.id).filter((id) => !rescuedIds.has(id))
+  markRescuedFromOfflineQueue(marked)
   try {
     await copy(records)
   } catch (error) {
+    forgetRescuedFromOfflineQueue(marked)
     console.error("[outbox] Couldn't copy unsaved offline edits to IndexedDB; they stay in the restart journal", error)
     return false
   }
   // Every copy is in IndexedDB now, including any the leader confirmed during
   // the write (their journal entries have already gone).
-  for (const record of records) rescuedIds.add(record.id)
   for (const entry of entries) {
     if (!awaitingPersist.delete(entry)) continue
     entry.stopWatching()

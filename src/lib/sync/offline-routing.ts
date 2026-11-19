@@ -96,9 +96,19 @@ async function openOfflineQueue() {
       // refuse, and the caller sends the batch to IndexedDB instead.
       if (isLeaderStalled()) throw new Error("offline store's leader has stalled")
       commitOrThrow(liveStore, () => run(liveStore))
-      // The commit is the newest pending event, so the leader has persisted
-      // it once its confirmed head reaches the session's head.
-      const head = liveStore.syncStatus().localHead
+      // Queued from here on: nothing below may throw, or the caller would
+      // send the batch to IndexedDB too. The commit is the newest pending
+      // event, so the leader has persisted it once its confirmed head reaches
+      // the session's head.
+      let head: string
+      try {
+        head = String(liveStore.syncStatus().localHead)
+      } catch (error) {
+        // A store shutting down can't confirm anything: the journal entry
+        // stays for the next launch, which replays it (idempotent on id).
+        console.warn("[offline] Couldn't read the offline store's head after a commit", error)
+        return () => () => {}
+      }
       return (onPersisted) => watchLeaderPersisted(liveStore, head, onPersisted)
     },
   }

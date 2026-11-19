@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useEffectEvent } from "react"
 import { toast } from "@/components/ui/toast"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -184,6 +184,23 @@ export function OfflineLeaderWatchdog({
     }
   }, [loading, bootStallMs, showRebuildAfterMs, slowRebuildMs, hungRebuildMs, bootCheckEveryMs, restart, t])
 
+  // Effect events, so a language switch doesn't restart the liveness watch
+  // (a fresh watcher would forget a stall it hadn't seen begin).
+  const showStalledToast = useEffectEvent((safe: boolean) => {
+    // Add, not update: an update to a toast the user closed is a no-op, and
+    // "your edits are safe" is news worth showing again.
+    toast.add({
+      id: LEADER_STALLED_TOAST_ID,
+      type: safe ? "warning" : "error",
+      timeout: 0,
+      title: t(safe ? "workspace.offline.leaderStalledBackedUpToast" : "workspace.offline.leaderStalledToast"),
+      actionProps: {
+        children: t("workspace.offline.leaderStalledRestart"),
+        onClick: restart,
+      },
+    })
+  })
+
   useEffect(() => {
     if (!store) return
     let stalled = false
@@ -196,7 +213,7 @@ export function OfflineLeaderWatchdog({
       void rescue().then((safe) => {
         if (!stalled) return
         if (safe) {
-          toast.update(LEADER_STALLED_TOAST_ID, { type: "warning", title: t("workspace.offline.leaderStalledBackedUpToast") })
+          showStalledToast(true)
         } else {
           retryTimer = setTimeout(rescueUntilSafe, rescueRetryMs)
         }
@@ -214,16 +231,7 @@ export function OfflineLeaderWatchdog({
           ...stall,
           leaderLogs: leaderLogs?.slice(-LOG_TAIL),
         })
-        toast.add({
-          id: LEADER_STALLED_TOAST_ID,
-          type: "error",
-          timeout: 0,
-          title: t("workspace.offline.leaderStalledToast"),
-          actionProps: {
-            children: t("workspace.offline.leaderStalledRestart"),
-            onClick: restart,
-          },
-        })
+        showStalledToast(false)
         rescueUntilSafe()
       },
       onRecover: () => {
@@ -234,11 +242,19 @@ export function OfflineLeaderWatchdog({
       },
     })
     return () => {
-      stalled = false
       clearTimeout(retryTimer)
       stopWatching()
+      // The next watcher starts unaware of this stall, so it would never
+      // report a recovery: the flag would stay set, and every offline edit
+      // would go to IndexedDB for the rest of the session. A store that is
+      // still stalled is reported again by the next watcher.
+      if (stalled) {
+        stalled = false
+        setLeaderStalled(false)
+        toast.close(LEADER_STALLED_TOAST_ID)
+      }
     }
-  }, [store, stallMs, checkEveryMs, restart, rescue, rescueRetryMs, t])
+  }, [store, stallMs, checkEveryMs, rescue, rescueRetryMs])
 
   return null
 }

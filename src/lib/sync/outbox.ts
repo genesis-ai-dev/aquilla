@@ -34,6 +34,7 @@ import { planOfflineRouting } from "./offline-routing"
 import {
   holdJournalUntilPersisted,
   rescueUnpersistedOfflineWrites as rescueStalledOfflineWrites,
+  untilJournalClearedOrStalled,
   type WhenPersisted,
 } from "./offline-stall-rescue"
 import { purgeCellsCacheForQuota } from "./cells-cache"
@@ -480,8 +481,13 @@ export async function enqueueOutboxEvents(
     return
   }
   // In order, each run its own transaction, offline commit and journal
-  // entry, so at most one run's worth sits in localStorage at a time.
-  for (const run of splitForJournal(records)) await writeJournaledBatch(run, ownerKey)
+  // entry, so at most one run's worth sits in localStorage at a time: an
+  // offline run's entry is held until the leader persists it, so the next
+  // run waits for that.
+  for (const run of splitForJournal(records)) {
+    const { journalCleared } = await writeJournaledBatch(run, ownerKey)
+    await untilJournalClearedOrStalled(journalCleared)
+  }
 }
 
 export interface EnqueueBatchOptions {
@@ -496,8 +502,16 @@ export interface EnqueueBatchOptions {
 }
 
 /** One batch write, journaled whole when it fits (or, for a lone target
- *  commit too big for a batch entry, under its own per-commit entry). */
-async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxRecord["ownerKey"] | undefined): Promise<void> {
+ *  commit too big for a batch entry, under its own per-commit entry).
+ *  Resolves once written, with a promise of the journal entry clearing. */
+async function writeJournaledBatch(
+  records: OutboxRecord[],
+  ownerKey: OutboxRecord["ownerKey"] | undefined,
+): Promise<{ journalCleared: Promise<void> }> {
+  let markCleared = () => {}
+  const cleared = new Promise<void>((resolve) => {
+    markCleared = resolve
+  })
   let clearEntry = () => {}
   if (ownerKey !== undefined) {
     const journalKey = journalBatch(records)
@@ -508,7 +522,14 @@ async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxReco
       clearEntry = () => clearJournalRecord(records[0].id)
     }
   }
-  await writeOutboxRecords(records, { routeOffline: isTauriRuntime(), clearJournal: clearEntry })
+  await writeOutboxRecords(records, {
+    routeOffline: isTauriRuntime(),
+    clearJournal: () => {
+      clearEntry()
+      markCleared()
+    },
+  })
+  return { journalCleared: cleared }
 }
 
 /**

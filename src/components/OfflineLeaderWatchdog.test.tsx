@@ -105,6 +105,46 @@ describe("OfflineLeaderWatchdog", () => {
     expect(rescue).toHaveBeenCalledTimes(2)
   })
 
+  it("shows the edits are safe even after the warning was closed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    status = stuck
+    let finishRescue: (safe: boolean) => void = () => {}
+    renderWatchdog(vi.fn(), vi.fn(() => new Promise<boolean>((resolve) => (finishRescue = resolve))))
+
+    await screen.findByText(/aren't being saved on this device/)
+    act(() => toast.close("offline-leader-stalled"))
+    await waitFor(() => expect(screen.queryByText(/aren't being saved on this device/)).toBeNull())
+
+    await act(async () => finishRescue(true))
+    expect(await screen.findByText(/kept in the upload queue/)).toBeInTheDocument()
+  })
+
+  it("clears the stall when the watch restarts, so a healthy store isn't bypassed for the session", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    status = stuck
+    const restart = vi.fn()
+    const rescue = vi.fn(() => new Promise<boolean>(() => {}))
+    const { rerender } = render(
+      <>
+        <Toaster />
+        <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} restart={restart} rescue={rescue} />
+      </>,
+    )
+    await waitFor(() => expect(isLeaderStalled()).toBe(true))
+
+    // The leader recovers just as the watch restarts with new settings.
+    status = synced
+    rerender(
+      <>
+        <Toaster />
+        <OfflineLeaderWatchdog stallMs={50} checkEveryMs={10} restart={restart} rescue={rescue} />
+      </>,
+    )
+    expect(isLeaderStalled()).toBe(false)
+    await act(() => new Promise((r) => setTimeout(r, 60)))
+    expect(isLeaderStalled()).toBe(false)
+  })
+
   it("closes the warning if the leader catches up on its own", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     status = stuck

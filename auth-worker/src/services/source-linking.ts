@@ -524,6 +524,47 @@ export interface ReplaceFilePair {
 export interface ReplaceFileMatch extends ReplaceFilePair, LinkFileMatchSummary {
   /** One of the two files does not exist (or is in Recently deleted). */
   missing: boolean
+  /**
+   * AQU-2549: the upstream file is missing only because the source project is
+   * still importing it (staged, hidden until the import publishes). Present
+   * only when true.
+   */
+  importing?: true
+}
+
+/**
+ * AQU-2549: which of `fileIds` are staged imports — created and hidden in the
+ * same request (sync-worker import-route: `file.create` + the stage
+ * `file.delete`, same client time) and not published or deleted since. A file
+ * someone deleted later is not one: its delete came on its own.
+ */
+async function loadStagedImportFileIds(
+  env: Env,
+  projectId: string,
+  fileIds: readonly string[],
+): Promise<Set<string>> {
+  const staged = new Set<string>()
+  if (fileIds.length === 0) return staged
+  try {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT d.file_id AS id FROM events d
+         JOIN events c ON c.project_id = d.project_id AND c.file_id = d.file_id
+                      AND c.kind = 'file.create' AND c.client_ts = d.client_ts
+        WHERE d.project_id = ? AND d.kind = 'file.delete'
+          AND d.file_id IN (${fileIds.map(() => "?").join(", ")})
+          AND NOT EXISTS (
+            SELECT 1 FROM events l
+             WHERE l.project_id = d.project_id AND l.file_id = d.file_id
+               AND l.kind IN ('file.restore', 'file.delete') AND l.server_seq > d.server_seq)`,
+    )
+      .bind(projectId, ...fileIds)
+      .all<{ id: string }>()
+    for (const row of results ?? []) staged.add(row.id)
+  } catch {
+    // An unreadable log answers "not importing": the row then says the plain
+    // "missing", as before.
+  }
+  return staged
 }
 
 /**
@@ -558,12 +599,19 @@ export async function matchFilesForReplace(
   const liveUpstream = await live(args.sourceProjectId, args.pairs.map((p) => p.upstreamFileId))
   const liveOwn = await live(args.projectId, args.pairs.map((p) => p.fileId))
 
+  const staged = await loadStagedImportFileIds(
+    env,
+    args.sourceProjectId,
+    [...new Set(args.pairs.map((p) => p.upstreamFileId).filter((id) => !liveUpstream.has(id)))].slice(0, 200),
+  )
+
   const matches: ReplaceFileMatch[] = []
   for (const pair of args.pairs) {
     if (!liveUpstream.has(pair.upstreamFileId) || !liveOwn.has(pair.fileId)) {
       matches.push({
         ...pair,
         missing: true,
+        ...(staged.has(pair.upstreamFileId) ? { importing: true as const } : {}),
         upstreamLines: 0,
         localLines: 0,
         same: 0,

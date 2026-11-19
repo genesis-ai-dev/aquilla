@@ -148,6 +148,14 @@ export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefin
     )
   }
   const { match } = state
+  // AQU-2549: a staged import is a wait, not "only 0 of 0 lines match".
+  if (match.importing) {
+    return (
+      <p className="text-xs text-muted-foreground" role="status">
+        {t("projectSettings.linkSource.replaceStillImporting")}
+      </p>
+    )
+  }
   const lines = Math.max(match.upstreamLines, match.localLines)
   if (!match.canReplace) {
     return (

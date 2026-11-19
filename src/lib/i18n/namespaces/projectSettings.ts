@@ -1033,6 +1033,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.replaceOption":
       "Replace the source in my existing {name} and keep its translations",
     "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    // AQU-2549: the source project's import of the file has not finished.
+    "projectSettings.linkSource.replaceStillImporting":
+      "This file is still importing in the source project. Try again when the import finishes.",
     "projectSettings.linkSource.replaceCompareFailed":
       "Couldn't compare the two files. Turn this off and on to try again, or " +
       "leave it off to add the file as a separate copy.",
@@ -3123,6 +3126,12 @@ export const projectSettings = defineNamespace({
         placeholders: {
           name: "The file's name as the user named it \u2014 never translated.",
         },
+      },
+      "projectSettings.linkSource.replaceStillImporting": {
+        description:
+          "Shown under replaceOption instead of the comparison when the source " +
+          "project is still importing the file, so there is nothing to compare yet. " +
+          "It is a wait, not a mismatch.",
       },
       "projectSettings.linkSource.replaceComparing": {
         description:

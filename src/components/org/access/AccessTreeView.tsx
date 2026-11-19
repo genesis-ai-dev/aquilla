@@ -1,5 +1,5 @@
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
-import { PlaceBreadcrumb } from "@/components/access/PlaceBreadcrumb"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { RoleBadge } from "@/components/access/RoleBadge"
 import { UserChip } from "@/components/UserChip"
 import type { ScopePath } from "@/lib/access/types"
@@ -30,7 +30,7 @@ function TreeNode({ node, path }: { node: AccessTreeNode; path: ScopePath }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-card px-3 py-2">
         {/* Every place on this page is named by the breadcrumb helper, with its
             own icon — one crumb here, since the tree already shows ancestry. */}
-        <PlaceBreadcrumb path={[node.scope]} className="font-medium" />
+        <ScopeBreadcrumb path={[node.scope]} className="font-medium" icons />
         <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           {node.directGrantees.length === 0 ? (
             <span className="text-muted-foreground">{t("org.access.page.noDirect")}</span>

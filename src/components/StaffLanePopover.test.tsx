@@ -231,6 +231,7 @@ describe("StaffLanePopover", () => {
   it("happy path: POSTs membership at the picked role then PUTs merged scopes", async () => {
     renderPopover()
     openPopover()
+    expect(screen.getByTestId("staff-lane-scope-title")).toHaveTextContent("Add people to Mark › Spanish")
     pickMaria()
 
     fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))

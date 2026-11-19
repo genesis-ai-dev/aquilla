@@ -1161,7 +1161,8 @@ CREATE TABLE cell_audio (
     fade_out_ms        BIGINT,
     -- AQU-2664 (0206): the recording's loudness (LUFS, -70 = silent) and true
     -- peak (dBTP), measured once by cell.audio.measure (fill-only); and the
-    -- loudness it is evened out to, by cell.audio.gain (NULL = not evened).
+    -- loudness it is evened out to, only by cell.audio.even (NULL = not evened;
+    -- its own stage before gain_db and the fades, which it never writes).
     -- The correction is worked out from these; the recording never changes.
     loudness_lufs      REAL,
     true_peak_db       REAL,

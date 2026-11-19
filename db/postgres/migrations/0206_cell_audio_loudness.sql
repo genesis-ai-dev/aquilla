@@ -10,8 +10,9 @@
 --                     Both written only by cell.audio.measure, fill-only:
 --                     the bytes of an audio id never change.
 --   even_target_lufs  the loudness this take is evened out to; NULL = not
---                     evened out. Written by cell.audio.gain when it states
---                     `evenTargetLufs` (absent keeps it; null clears it).
+--                     evened out. Written only by cell.audio.even: evening
+--                     out is its own stage, BEFORE the take's own volume and
+--                     fades, and never writes gain_db or the fades (Sam).
 --
 -- The correction itself is never stored: the app works it out from these
 -- (src/lib/audio/take-gain.ts) for playback and for every export, so the

@@ -96,6 +96,9 @@ export type EventKind =
   | 'cell.audio.trim'
   // AQU-2327: a take's volume and fades — data on the clip, like the trim.
   | 'cell.audio.gain'
+  // AQU-2664: the loudness a take is evened out to — its OWN stage, before
+  // the take's volume and fades; it never writes them.
+  | 'cell.audio.even'
   | 'cell.audio.place'
   // AQU-1767: cut one dub piece in two at a point in its own audio. Both
   // pieces share the bytes, stay on the same row, and start unvalidated.
@@ -736,18 +739,28 @@ export interface EventPayloads {
    * for the reason `cell.audio.trim` states both ends. Like a trim they never
    * change the recording, set nothing else, and keep the take's approvals.
    */
+  /**
+   * AQU-2664: the loudness (LUFS) this take is evened out to, null = not
+   * evened out — always stated. Its own stage, BEFORE the take's own volume
+   * and fades (Sam, Nov 19: "I do not want normalization to override volume
+   * automation"): it sets `even_target_lufs` and nothing else, so running,
+   * re-running or clearing evening out never touches `gain_db`, the fades,
+   * the track volume or the votes. The correction itself is worked out from
+   * the target and the stored reading (src/lib/audio/take-gain.ts).
+   */
+  'cell.audio.even': {
+    audioId: string
+    evenTargetLufs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
   'cell.audio.gain': {
     audioId: string
     gainDb: number | null
     fadeInMs: number | null
     fadeOutMs: number | null
-    /**
-     * AQU-2664: the loudness (LUFS) this take is evened out to; null clears
-     * it. ABSENT = this event has no say about it and it is kept: every
-     * client before AQU-2664, and the Station's volume line, which sets the
-     * take's own volume ON TOP of the evening out.
-     */
-    evenTargetLufs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

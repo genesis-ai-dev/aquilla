@@ -1128,6 +1128,39 @@ export async function emitCellLinkSet(input: CellLinkSetInput): Promise<string> 
   return eventId
 }
 
+export interface CellAudioEvenInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The loudness (LUFS) to even the take out to; null = clear. */
+  evenTargetLufs: number | null
+  /** AQU-1462: lane the member was working in. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.even` (AQU-2664) — the loudness a take is evened out to,
+ * ONLY: never its volume, fades or the recording (they are a later stage).
+ */
+export async function emitCellAudioEven(input: CellAudioEvenInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.even",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, evenTargetLufs: input.evenTargetLufs, ...targetLaneFields(input) },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioMeasureInput {
   projectId: string
   fileId: string
@@ -1135,6 +1168,9 @@ export interface CellAudioMeasureInput {
   audioId: string
   /** The clip's decoded length. The server fills only a NULL duration. */
   durationMs: number
+  /** AQU-2664: the recording's loudness (LUFS) and true peak (dBTP), both or
+   *  neither; the server fills them only when NULL. */
+  loudness?: { loudnessLufs: number; truePeakDb: number }
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -1156,7 +1192,12 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...targetLaneFields(input) },
+    payload: {
+      audioId: input.audioId,
+      durationMs: intMs(input.durationMs),
+      ...(input.loudness ? { loudnessLufs: input.loudness.loudnessLufs, truePeakDb: input.loudness.truePeakDb } : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId

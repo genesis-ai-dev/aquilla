@@ -4,11 +4,11 @@
 //   - its recording's loudness and true peak, measured once in the browser and
 //     sent on `cell.audio.measure` (fill-only, like its duration: the bytes of
 //     an audio id never change, so a second reading has nothing to add);
-//   - the target it is evened out to, sent on `cell.audio.gain` beside its
-//     volume and fades. Absent = this event has no say about it (every client
-//     before AQU-2664, and the Station's own volume line), so it is kept;
-//     null clears it.
-// The recording itself, its votes and everything else are untouched.
+//   - the target it is evened out to, sent on its OWN event, `cell.audio.even`
+//     (always stated, null clears). Sam, Nov 19: "I do not want normalization
+//     to override volume automation" — evening out is a stage before the
+//     take's own volume and fades, so it never writes them, nor the votes.
+// The recording itself and everything else are untouched.
 //
 // Asserted on the ROWS and on the read route (real Postgres via PGlite).
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
@@ -120,38 +120,50 @@ describe('a take\'s loudness (cell.audio.measure)', () => {
   })
 })
 
-describe('evening a take out (cell.audio.gain evenTargetLufs)', () => {
-  it('stores the target beside its volume, and every device reads it back', async () => {
+describe('evening a take out (cell.audio.even)', () => {
+  const even = (audioId: string, evenTargetLufs: number | null) => project('cell.audio.even', { audioId, evenTargetLufs })
+
+  it('stores the target, and every device reads it back', async () => {
     await attach('take-a')
-    await gain('take-a', { gainDb: -2, evenTargetLufs: -16 })
-    expect(await stored('take-a')).toMatchObject({ target: -16, gain: -2 })
-    expect((await read())['take-a']).toMatchObject({ evenTargetLufs: -16, gainDb: -2 })
+    await even('take-a', -16)
+    expect((await stored('take-a')).target).toBe(-16)
+    expect((await read())['take-a']).toMatchObject({ evenTargetLufs: -16 })
   })
 
-  it('a gain without the field (the Station\'s volume line, older clients) keeps the target', async () => {
+  it("a run, a re-run and a clear never touch the take's own volume and fades, or its votes", async () => {
     await attach('take-a')
-    await gain('take-a', { evenTargetLufs: -16 })
-    await gain('take-a', { gainDb: 3 })
-    expect(await stored('take-a')).toMatchObject({ target: -16, gain: 3 })
-  })
-
-  it('null clears it (Clear, and the Undo of an even out)', async () => {
-    await attach('take-a')
-    await gain('take-a', { evenTargetLufs: -16 })
-    await gain('take-a', { evenTargetLufs: null })
+    await gain('take-a', { gainDb: -3, fadeInMs: 200, fadeOutMs: 400 })
+    await project('cell.audio.validate', { audioId: 'take-a' })
+    const level = async () => (await h.pg.query<Record<string, unknown>>(
+      `SELECT gain_db, fade_in_ms, fade_out_ms, validator_count FROM cell_audio WHERE audio_id = 'take-a'`)).rows[0]
+    const before = await level()
+    await even('take-a', -16)
+    expect(await level()).toEqual(before)
+    await even('take-a', -23)
+    expect(await level()).toEqual(before)
+    expect((await stored('take-a')).target).toBe(-23)
+    await even('take-a', null)
+    expect(await level()).toEqual(before)
     expect((await stored('take-a')).target).toBeNull()
     expect((await read())['take-a'].evenTargetLufs).toBeUndefined()
   })
 
-  it('refuses a target that is not a finite number', () => {
-    const stmts: AquillaStatement[] = []
-    expect(() => buildEventProjectionStmts(h.db, event('cell.audio.gain', { audioId: 'a', gainDb: null, fadeInMs: null, fadeOutMs: null, evenTargetLufs: '-16' }), stmts)).toThrow(/malformed/)
+  it("the Station's volume line keeps the target", async () => {
+    await attach('take-a')
+    await even('take-a', -16)
+    await gain('take-a', { gainDb: 3 })
+    expect(await stored('take-a')).toMatchObject({ target: -16, gain: 3 })
   })
 
-  it('a cut gives the second piece the take\'s reading and target (the same bytes)', async () => {
+  it('refuses a target that is not a finite number', () => {
+    const stmts: AquillaStatement[] = []
+    expect(() => buildEventProjectionStmts(h.db, event('cell.audio.even', { audioId: 'a', evenTargetLufs: '-16' }), stmts)).toThrow(/malformed/)
+  })
+
+  it("a cut gives the second piece the take's reading and target (the same bytes)", async () => {
     await attach('take-a')
     await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -27.4, truePeakDb: -9.2 })
-    await gain('take-a', { evenTargetLufs: -16 })
+    await even('take-a', -16)
     await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' })
     expect(await stored('take-b')).toMatchObject({ loudness: -27.4, peak: -9.2, target: -16 })
   })

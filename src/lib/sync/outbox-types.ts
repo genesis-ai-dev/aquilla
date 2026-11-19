@@ -59,6 +59,8 @@ export type OutboxEventKind =
   | "cell.audio.trim"
   // AQU-2327: a take's volume and fades — data on the clip, like the trim.
   | "cell.audio.gain"
+  // AQU-2664: a take's evened-out loudness — its own stage, before its volume.
+  | "cell.audio.even"
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
@@ -526,6 +528,17 @@ export interface OutboxEventPayloads {
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
   }
+  /** AQU-2664: the loudness this take is evened out to (null = not evened
+   *  out), always stated. Its own stage BEFORE the take's volume and fades,
+   *  which it never writes. */
+  "cell.audio.even": {
+    audioId: string
+    evenTargetLufs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
   "cell.audio.trim": {
     audioId: string
     trimStartMs: number | null
@@ -612,6 +625,9 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+    /** AQU-2664: the recording's loudness and true peak, both or neither. */
+    loudnessLufs?: number
+    truePeakDb?: number
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

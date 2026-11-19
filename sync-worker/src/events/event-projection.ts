@@ -2446,23 +2446,29 @@ case 'cell.audio.attach': {
             p.audioId,
           ),
       )
-      // AQU-2664: the loudness it is evened out to, only when the event
-      // states it (absent = no say, kept; null clears). Its own statement so
-      // an event without it is exactly the statement above.
-      if (p.evenTargetLufs !== undefined) {
-        const t = p.evenTargetLufs
-        if (t !== null && (typeof t !== 'number' || !Number.isFinite(t))) {
-          throw new Error(`cell.audio.gain event ${event.id} has a malformed evenTargetLufs`)
-        }
-        stmts.push(
-          db
-            .prepare(
-              `UPDATE cell_audio SET even_target_lufs = ?
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
-            )
-            .bind(t, event.projectId, event.fileId, event.cellId, p.audioId),
-        )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.even': {
+      // AQU-2664: the loudness this take is evened out to, and nothing else —
+      // its own stage before the take's volume and fades, which it never
+      // writes (nor the votes). Always stated; null clears it.
+      const p = event.payload as EventPayloads['cell.audio.even']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.even event ${event.id} is missing fileId or cellId`)
       }
+      const t = p.evenTargetLufs
+      if (typeof p.audioId !== 'string' || (t !== null && (typeof t !== 'number' || !Number.isFinite(t)))) {
+        throw new Error(`cell.audio.even event ${event.id} has a malformed payload`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET even_target_lufs = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(t, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
       return ['cell_audio']
     }
 

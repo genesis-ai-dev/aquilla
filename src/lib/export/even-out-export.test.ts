@@ -21,7 +21,7 @@ function sineAt(lufs: number, seconds = 3): Float32Array {
   return out
 }
 
-const QUIET = -30
+const QUIET = -26
 const LOUD = -10
 const pcmOf: Record<string, Float32Array> = { quiet: sineAt(QUIET), loud: sineAt(LOUD) }
 const reading = (lufs: number) => measureLoudness([sineAt(lufs)], TARGET_RATE)

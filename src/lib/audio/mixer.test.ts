@@ -65,7 +65,8 @@ describe("a take's level in an export", () => {
 })
 
 // AQU-2664: an evened-out take plays at the target — the mixer reads the same
-// take-gain rule the exports do.
+// take-gain rule the exports do. The stages: correction, then the take's own
+// volume and fades (its gain node), then the track, main and peak guard.
 describe("an evened-out take on playback", () => {
   const evened = { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 }
 
@@ -114,6 +115,19 @@ describe("an evened-out take in an export", () => {
     expect(hasClipLevel(att)).toBe(true)
     expect(applyClipLevelPcm(kept, 100, att)[5]).toBeCloseTo(0.1 * Math.pow(10, 10 / 20), 5)
     expect(hasClipLevel({ loudnessLufs: -28, truePeakDb: -14 })).toBe(false)
+  })
+
+  it("guards the SUM of the stages: a take turned up past full scale is held under it, not clipped", () => {
+    // Evened to its -1 dBTP ceiling, then turned up +6 dB by hand.
+    const kept = new Float32Array(10).fill(Math.pow(10, -13 / 20))
+    const out = applyClipLevelPcm(kept, 100, { loudnessLufs: -28, truePeakDb: -13, evenTargetLufs: -16, gainDb: 6 })
+    expect(out[5]).toBeLessThanOrEqual(1) // never past full scale
+    expect(out[5]).toBeGreaterThan(0.891)
+    // A modest over is bent under full scale rather than clipped flat.
+    const near = applyClipLevelPcm(new Float32Array(4).fill(Math.pow(10, -13 / 20)), 100, { loudnessLufs: -28, truePeakDb: -13, evenTargetLufs: -16, gainDb: 0.5 })
+    expect(near[0]).toBeLessThan(1)
+    expect(near[0]).toBeGreaterThan(0.891)
+    expect(out[5]).toBe(Math.fround(guardPeak(Math.pow(10, 5 / 20))))
   })
 })
 

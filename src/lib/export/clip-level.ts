@@ -4,8 +4,9 @@
 // end are where the fades run from and to.
 //
 // AQU-2664: the volume is the take's GAIN as lib/audio/take-gain.ts works it
-// out — its own volume plus its evening-out correction — the one rule the
-// mixer reads too.
+// out, in its stage order — the evening-out correction, then its own volume —
+// the one rule the mixer reads too; then its fades; and the peak guard holds
+// the sum under full scale, as the mixer's limiter does on playback.
 
 import { takeGainDb, type TakeGainFields } from "@/lib/audio/take-gain"
 
@@ -37,7 +38,7 @@ export function applyClipLevelPcm(kept: Float32Array, rate: number, att: ClipLev
     let f = g
     if (fin > 0 && i < fin) f *= i / fin
     if (fout > 0 && i > n - fout) f *= Math.max(0, (n - i) / fout)
-    out[i] = kept[i] * f
+    out[i] = guardPeak(kept[i] * f)
   }
   return out
 }

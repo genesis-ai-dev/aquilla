@@ -65,7 +65,7 @@ interface VoiceSidebarProps {
     lines: MakeSpeechLine[]
     selectedCellId: string | null
     actions: MakeSpeechActions
-    /** The lines picked on the timeline (their ghost clips). */
+    /** The lines picked on the timeline (their sparkles). */
     picked: readonly string[]
     onClearPicked: () => void
     onLineState: (cellId: string, state: MakeSpeechLineState) => void

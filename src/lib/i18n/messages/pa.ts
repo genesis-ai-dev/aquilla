@@ -2388,7 +2388,7 @@ export const pa: Catalog = {
   "audio.batchVoice.title": "ਆਵਾਜ਼ ਬਣਾਓ",
   "audio.batchVoice.tooltip": "ਚੁਣੀਆਂ {count} ਲਾਈਨਾਂ ਵਿੱਚੋਂ ਹਰ ਇੱਕ ਲਈ ਇੱਕ ਆਵਾਜ਼ ਵਿੱਚ ਟੇਕ ਬਣਾਓ",
   "audio.batchVoice.needTranslated": "ਘੱਟੋ-ਘੱਟ ਇੱਕ ਅਨੁਵਾਦ ਹੋਈ ਲਾਈਨ ਚੁਣੋ",
-  "audio.batchVoice.rowName": "ਕਤਾਰ {number}",
+  "editor.line.rowName": "ਕਤਾਰ {number}",
   "audio.batchVoice.voiceLabel": "ਵਰਤਣ ਵਾਲੀ ਆਵਾਜ਼",
   "audio.batchVoice.existingLabel": "ਜਿਨ੍ਹਾਂ ਲਾਈਨਾਂ ਕੋਲ ਪਹਿਲਾਂ ਹੀ ਬਣਾਇਆ ਆਡੀਓ ਹੈ",
   "audio.batchVoice.existingSkip": "ਉਨ੍ਹਾਂ ਨੂੰ ਜਿਵੇਂ ਹਨ ਛੱਡੋ",

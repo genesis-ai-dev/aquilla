@@ -492,7 +492,6 @@ export const audio = defineNamespace({
     "audio.batchVoice.title": "Generate voice",
     "audio.batchVoice.tooltip": "Generate a take for each of {count} selected lines, in one voice",
     "audio.batchVoice.needTranslated": "Select at least one translated line",
-    "audio.batchVoice.rowName": "row {number}",
     "audio.batchVoice.voiceLabel": "Voice to use",
     "audio.batchVoice.existingLabel": "Lines that already have generated audio",
     "audio.batchVoice.existingSkip": "Leave them as they are",
@@ -2894,14 +2893,6 @@ export const audio = defineNamespace({
           "Tooltip when the generate-voice button is disabled because none of the " +
           "selected lines has a translation to speak. Imperative: tells the reader " +
           "what to do.",
-      },
-      "audio.batchVoice.rowName": {
-        description:
-          "How a line with no scripture reference is named in the generate-voice " +
-          "plan and summary: by the number in the editor table's # column. Appears " +
-          "inside a list of such names, so keep it short and lowercase.",
-        maxLength: 12,
-        placeholders: { number: "The line's number in the editor table's # column." },
       },
       "audio.batchVoice.voiceLabel": {
         description:

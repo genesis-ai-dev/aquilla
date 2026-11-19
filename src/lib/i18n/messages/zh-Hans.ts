@@ -1249,7 +1249,7 @@ export const zh_Hans: Catalog = {
   "editor.row.newParagraph": "新段落",
   "editor.row.lineAria": "第 {number} 行",
   "editor.row.cellAria": "{ref} 单元格",
-  "editor.row.rowFallbackRef": "第 {index} 列",
+  "editor.row.rowFallbackRef": "第 {index} 行",
   "editor.row.translationAria": "{ref} 的译文：{source} — {state}",
   "editor.row.lockedBy": "已锁定 — {name} 正在编辑此单元格",
   "editor.presence.viewing": "查看中",

@@ -1,13 +1,14 @@
 // Audio stage for the Codex → Aquilla daemon. The checkout contains only LFS
 // pointer text; bytes are copied directly between the source and destination
-// R2 buckets, then deterministic audio events are ingested.
+// R2 buckets, then deterministic audio events are ingested, then the files
+// those events touched are finalized so their progress rows count the takes.
 import fs from "node:fs"
 import path from "node:path"
 import { parseCodexNotebook } from "../../../src/lib/codex-editor/parse-codex"
 import type { CodexNotebookFile } from "../../../src/lib/codex-editor/types"
 import { fileIdFor } from "../../../src/lib/migrate/ids"
 import { audioDestKey, gitlabLfsKey } from "../../../src/lib/migrate/r2-s3"
-import { buildCellAudioEvents, buildOidIndex, planCellAudio } from "../../../src/lib/migrate/audio-copy"
+import { buildCellAudioEvents, buildOidIndex, planCellAudio, touchedFileIds } from "../../../src/lib/migrate/audio-copy"
 import { discoverPointers } from "../../../src/lib/migrate/gitlab/lfs"
 import type { AudioImport } from "../../../src/lib/migrate/audio"
 import type { ProjectRow } from "../db"
@@ -18,7 +19,7 @@ export const AUDIO_BUCKET = "aquilla-snapshots"
 
 export interface AudioDeps {
   copyObject: (sourceBucket: string, sourceKey: string, targetBucket: string, targetKey: string) => Promise<void>
-  sync: Pick<SyncClient, "ingest">
+  sync: Pick<SyncClient, "ingest" | "finalize">
   copyConcurrency: number
   dryRun: boolean
   onProgress?: (progress: { copied: number; total: number; missing: number; failed: number }) => void
@@ -196,6 +197,18 @@ export async function migrateProjectAudio(
     await deps.sync.ingest(projectId, events.slice(offset, offset + 300))
   }
   result.events = events.length
+  // `ingest` defers every counter (SyncClient.ingest always sends
+  // deferFileCounters) and /migrate/ingest never writes a progress row, so
+  // without this the takes are attached, play in the editor, and the book still
+  // reads "0% recorded" in the sidebar and on the dashboard until something
+  // else re-projects the file. The push stage finalizes its own files; an audio
+  // job runs on its own, often hours after the push, so it finalizes too.
+  // Scoped to the files that got events (AQU-557) and never called with an
+  // empty list, which the route reads as "the whole project". Ahead of the
+  // shortfall check below for the same reason the ingest is: what landed should
+  // read right even when the job is about to be marked incomplete and retried.
+  const fileIds = touchedFileIds(events)
+  if (fileIds.length > 0) await deps.sync.finalize(projectId, fileIds)
   // Everything that DID land is ingested first (the events are deterministic, so
   // a retry is a no-op) — but any shortfall still fails the stage. A book whose
   // takes all failed oid resolution contributes zero CopyUnits, so it used to

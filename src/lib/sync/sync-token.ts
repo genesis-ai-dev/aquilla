@@ -9,8 +9,13 @@
 
 import { isElevationRequiredBody } from "@/lib/errors/user-error"
 import { notifyElevationRequiredIfCurrent } from "@/lib/frontier/elevation"
-import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
-import { registerSharedStateResetForTests } from "@/lib/request-coalescer"
+import {
+  SYNC_TOKEN_REFRESH_SAFETY_MS,
+  hasSharedMint,
+  joinSharedMint,
+  sharedMintKey,
+  startSharedMint,
+} from "./shared-sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 
 // Phase D: default points at aquilla-identity (aquilla-identity).
@@ -148,65 +153,12 @@ interface CachedToken {
   role?: SyncTokenResponse["role"]
 }
 
-const REFRESH_SAFETY_MS = 30_000
+const REFRESH_SAFETY_MS = SYNC_TOKEN_REFRESH_SAFETY_MS
 
-/**
- * One mint per (identity, project, file) for the whole tab (AQU-2654).
- *
- * Every `makeSyncTokenMinter` closure used to keep its own token, so opening
- * one file POSTed /sync-token once per closure that needed the file: the
- * workspace's file fetcher, its outbox minter, the route-scoped fetcher, each
- * read hook's own fetcher. They are all the same credential. A mint is now
- * shared by key while it is in flight and reused until it nears expiry; the
- * closures keep their own fast path and their own callbacks.
- *
- * The session JWT is part of the key, so an account switch cannot pick up the
- * previous account's token (AQU-616). A failed mint is not kept: everyone who
- * joined it sees the failure, and the next call tries again.
- */
-type SharedMint =
-  | { ok: true; resp: SyncTokenResponse; mintedAt: number }
-  | { ok: false; err: unknown }
-
-const sharedMints = new Map<string, Promise<SharedMint>>()
-
-function mintKey(apiUrl: string, jwt: string, projectId: string, fileId: string): string {
-  return `${apiUrl}\n${jwt}\n${projectId}\n${fileId}`
+/** The shared-mint key for this host; the default host is keyed as "default". */
+function mintKey(apiUrl: string | undefined, jwt: string, projectId: string, fileId: string): string {
+  return sharedMintKey(apiUrl === AUTH_API_URL ? undefined : apiUrl, jwt, projectId, fileId)
 }
-
-function startSharedMint(
-  key: string,
-  jwt: string,
-  projectId: string,
-  fileId: string,
-  bootstrap: ProjectBootstrap,
-  apiUrl: string,
-): Promise<SharedMint> {
-  // Counted from before the request, so a slow mint never looks younger than
-  // it is.
-  const mintedAt = Date.now()
-  const slot: Promise<SharedMint> = fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl).then(
-    (resp): SharedMint => ({ ok: true, resp, mintedAt }),
-    (err: unknown): SharedMint => {
-      if (sharedMints.get(key) === slot) sharedMints.delete(key)
-      return { ok: false, err }
-    },
-  )
-  sharedMints.set(key, slot)
-  return slot
-}
-
-function sharedMintIsUsable(mint: SharedMint): boolean {
-  return mint.ok && mint.mintedAt + mint.resp.expiresIn * 1000 > Date.now() + REFRESH_SAFETY_MS
-}
-
-// AQU-2003: an un-elevated platform admin is minted a Viewer token for a
-// foreign project. Once they step up, the next mint must carry the elevated
-// role, so nothing minted before the grant is handed out again (the audio
-// fetcher's cache does the same).
-onElevationGranted(() => sharedMints.clear())
-
-registerSharedStateResetForTests(() => sharedMints.clear())
 
 /**
  * Start the file's sync-token mint now: a file route can do this while the
@@ -219,8 +171,8 @@ export function warmSyncToken(
   apiUrl: string = AUTH_API_URL,
 ): void {
   const key = mintKey(apiUrl, jwt, projectId, fileId)
-  if (sharedMints.has(key)) return
-  void startSharedMint(key, jwt, projectId, fileId, {}, apiUrl)
+  if (hasSharedMint(key)) return
+  void startSharedMint(key, () => fetchSyncToken(jwt, projectId, fileId, {}, apiUrl))
 }
 
 /**
@@ -330,26 +282,14 @@ export function makeSyncTokenMinter(
     if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200, ...platformRole(cached.role) }
     }
-    const resolvedApiUrl = apiUrl ?? AUTH_API_URL
-    const key = mintKey(resolvedApiUrl, jwt, projectId, fileId)
-    // AQU-1788: a forced mint joins nothing (a mint already in flight may
-    // carry the same stale role) and replaces the shared one, so no other
-    // closure is handed the stale-role token after it.
-    let outcome: SharedMint | null = forceRefresh
-      ? await startSharedMint(key, jwt, projectId, fileId, bootstrap, resolvedApiUrl)
-      : null
-    while (!outcome) {
-      const existing = sharedMints.get(key)
-      if (!existing) {
-        outcome = await startSharedMint(key, jwt, projectId, fileId, bootstrap, resolvedApiUrl)
-        break
-      }
-      const settled = await existing
-      // A failure is shared by everyone who joined it; a token near expiry is
-      // replaced by whoever notices first.
-      if (!settled.ok || sharedMintIsUsable(settled)) outcome = settled
-      else if (sharedMints.get(key) === existing) sharedMints.delete(key)
-    }
+    // AQU-2654: the mint is the tab's one for this (identity, project, file),
+    // shared with every other closure and the audio fetcher
+    // (shared-sync-token.ts). AQU-1788: a forced mint joins nothing (a mint
+    // already in flight may carry the same stale role) and replaces the shared
+    // one, so no other closure is handed the stale-role token after it.
+    const key = mintKey(apiUrl, jwt, projectId, fileId)
+    const mint = () => fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
+    const outcome = forceRefresh ? await startSharedMint(key, mint) : await joinSharedMint(key, mint)
     if (outcome.ok) {
       const resp = outcome.resp
       if (getJwt() === jwt) cached = {

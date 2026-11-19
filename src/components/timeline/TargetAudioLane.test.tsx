@@ -1427,11 +1427,16 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       })
       render(<TargetAudioLane {...props} />)
       const btn = (id: string, kind: "record" | "speech") => screen.getByTestId(`tl-target-empty-${id}-${kind}`)
-      const noBtn = (id: string, kind: "record" | "speech") => screen.queryByTestId(`tl-target-empty-${id}-${kind}`)
+      // Folded: the mic is still in the DOM (so Tab can reach it) but out of
+      // flow, 0×0, taking no room.
+      const folded = (id: string) => {
+        const b = screen.getByTestId(`tl-target-empty-${id}-record`)
+        return b.getAttribute("data-folded") === "true" && b.style.width === "0px" && /(^| )absolute( |$)/.test(b.className)
+      }
       const rowOf = (id: string) => btn(id, "speech").parentElement!
       for (const id of ["c9", "c11"]) {
         expect(btn(id, "speech")).toHaveAttribute("data-hot", "true")
-        expect(noBtn(id, "record")).toBeNull()
+        expect(folded(id)).toBe(true)
         expect(rowOf(id).style.marginInlineStart).toBe("")
       }
       expect(btn("c9", "speech")).toHaveAttribute("aria-pressed", "true")
@@ -1444,11 +1449,12 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       // Hovering the picked line brings the mic back beside it, mic centred.
       fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
       expect(btn("c9", "record")).toHaveAttribute("data-hot", "true")
+      expect(folded("c9")).toBe(false)
       expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
       expect(rowOf("c9").style.marginInlineStart).toBe("32px")
-      expect(noBtn("c11", "record")).toBeNull()
+      expect(folded("c11")).toBe(true)
       fireEvent.pointerLeave(screen.getByTestId("tl-target-empty-c9"))
-      expect(noBtn("c9", "record")).toBeNull()
+      expect(folded("c9")).toBe(true)
       expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
 
       // Hovering an unpicked line lights its pair and leaves the picked ✨ lit.
@@ -1456,7 +1462,41 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(btn("c10", "record")).toHaveAttribute("data-hot", "true")
       expect(btn("c10", "speech")).toHaveAttribute("data-hot", "true")
       expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
-      expect(noBtn("c9", "record")).toBeNull()
+      expect(folded("c9")).toBe(true)
+    })
+
+    // Keyboard focus counts as hover: focus on the line (its ✨, or the
+    // folded mic Tab lands on first) unfolds the mic beside it, lit, mic
+    // centred — so Tab reaches it. Focus leaving the line folds it again.
+    it("on a picked line, keyboard focus brings the mic back, and Tab can reach it", () => {
+      render(<TargetAudioLane {...wired({ pickedGhostIds: new Set(["c9"]) })} />)
+      const row = () => speech().parentElement!
+      expect(rec().getAttribute("data-folded")).toBe("true")
+      // The folded mic is still a focusable button, first in the line.
+      expect(rec().tabIndex).toBe(0)
+      expect(rec().compareDocumentPosition(speech()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+      act(() => speech().focus())
+      expect(rec()).not.toHaveAttribute("data-folded")
+      expect(rec()).toHaveAttribute("data-hot", "true")
+      expect(row().style.marginInlineStart).toBe("32px")
+      expect(Number(screen.getByTestId("tl-target-empty-c9").style.zIndex)).toBeGreaterThan(1000)
+
+      // Focus moving within the line keeps it open.
+      act(() => rec().focus())
+      expect(document.activeElement).toBe(rec())
+      expect(rec()).not.toHaveAttribute("data-folded")
+
+      // Focus leaving the line folds the mic again; the ✨ stays lit.
+      act(() => rec().blur())
+      expect(rec().getAttribute("data-folded")).toBe("true")
+      expect(row().style.marginInlineStart).toBe("")
+      expect(speech()).toHaveAttribute("data-hot", "true")
+
+      // Tab landing on the folded mic itself unfolds it too.
+      act(() => rec().focus())
+      expect(document.activeElement).toBe(rec())
+      expect(rec()).not.toHaveAttribute("data-folded")
     })
 
     // The zoomed-out case that overlapped (shot 3d): 25px lines 40px apart,
@@ -1476,7 +1516,8 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(slotW).toBeCloseTo(25)
         const sp = screen.getByTestId(`tl-target-empty-${id}-speech`)
         const row = sp.parentElement!
-        const buttons = Array.from(row.querySelectorAll("button"))
+        // A folded mic is out of flow and 0×0: it draws nothing.
+        const buttons = Array.from(row.querySelectorAll("button")).filter((b) => b.getAttribute("data-folded") !== "true")
         const m = parseFloat(row.style.marginInlineStart || "0")
         const widths = buttons.map((b) => parseFloat(b.style.width))
         const rowW = m + widths.reduce((a, b) => a + b, 0) + 4 * (buttons.length - 1)

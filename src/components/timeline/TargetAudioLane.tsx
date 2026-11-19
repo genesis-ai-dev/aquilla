@@ -2241,6 +2241,10 @@ export function TargetAudioLane({
   // add-and-record slot and an empty-section slot can never both be lit. Keys
   // are prefixed because a span start and a cell id share no namespace.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+  // AQU-2663: keyboard focus counts as hover for an empty line's pair — the
+  // line whose buttons hold focus unfolds its mic and is lifted, like the
+  // line under the pointer.
+  const [focusSlotKey, setFocusSlotKey] = useState<string | null>(null)
   // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
   // draws over the lanes above and below on a short row. Stage 3 hid it there;
   // it shrinks with the ROW HEIGHT instead, because a compact timeline is
@@ -2408,10 +2412,17 @@ export function TargetAudioLane({
             // selected or hovered — so a narrow line's overhanging pair stays
             // reachable. Under a dragged clip's 2000. At rest (picked or not)
             // nothing is lifted: real clips keep the pointer.
-            ...(hotKey === `empty-${cell.id}` ? { zIndex: SLOT_LIFT_Z } : {}),
+            ...(hotKey === `empty-${cell.id}` || focusSlotKey === `empty-${cell.id}` ? { zIndex: SLOT_LIFT_Z } : {}),
           }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
+          onFocus={() => setFocusSlotKey(`empty-${cell.id}`)}
+          onBlur={(e) => {
+            // Focus moving between this line's own buttons keeps it open.
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return
+            const key = `empty-${cell.id}`
+            setFocusSlotKey((cur) => (cur === key ? null : cur))
+          }}
         >
           {/* AQU-2663 (Sam, Nov 19): Make speech is the record button's
               SIBLING — the same slot button, size and hot slot, side by side
@@ -2425,12 +2436,13 @@ export function TargetAudioLane({
             const offersSpeech = Boolean(onPickGhost) && Boolean(cell.translated?.trim() || cell.original?.trim())
             const busy = offersSpeech && makingSpeechCellIds?.has(cell.id) === true
             const picked = offersSpeech && pickedGhostIds?.has(cell.id) === true
-            const pointerHere = hotKey === `empty-${cell.id}`
+            // Keyboard focus on the line counts as the pointer being on it.
+            const pointerHere = hotKey === `empty-${cell.id}` || focusSlotKey === `empty-${cell.id}`
             // A line picked for Make speech, or being made, keeps its ✨
             // showing with the pointer elsewhere — ALONE, centred on the line,
             // so picked neighbours never pile up when zoomed out. The mic is
-            // not drawn and takes no room until the pointer is on the line;
-            // then the pair is back, mic centred. Every other line shows its
+            // folded (0×0, out of flow, still Tab-reachable) until the pointer
+            // or focus is on the line; then the pair is back, mic centred. Every other line shows its
             // pair only on hover. (AQU-2663, agreed Nov 19.)
             const hot = pointerHere || picked || busy
             const showMic = Boolean(onOpenRecording) && (pointerHere || !(picked || busy))
@@ -2442,12 +2454,13 @@ export function TargetAudioLane({
                 // sat; the ✨ hangs off to its right. The canvas is forced LTR.
                 style={showMic && offersSpeech ? { marginInlineStart: `${buttonPx + SLOT_PAIR_GAP_PX}px` } : undefined}
               >
-                {showMic && (
+                {onOpenRecording && (
                   <TimelineSlotButton
                     testId={`tl-target-empty-${cell.id}-record`}
                     label={t("workspace.targetAudioLane.recordAudio")}
                     hot={hot}
                     sizePx={buttonPx}
+                    folded={!showMic}
                     onClick={() => {
                       onSelect(cell.id)
                       onOpenRecording?.(cell.id)

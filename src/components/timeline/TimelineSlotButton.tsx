@@ -32,6 +32,7 @@ export function TimelineSlotButton({
   sizePx = SLOT_BUTTON_MAX_PX,
   pressed,
   busy = false,
+  folded = false,
   onClick,
   children,
 }: {
@@ -52,6 +53,10 @@ export function TimelineSlotButton({
    *  NOT native `disabled`: AppTooltip turns a disabled child into its "why is
    *  this unavailable" note. The caller swaps the glyph and the label. */
   busy?: boolean
+  /** AQU-2663: out of flow and 0×0 — draws nothing and takes no room, but
+   *  stays in the DOM and in the Tab order, so focus can reach it and the
+   *  lane can unfold it. */
+  folded?: boolean
   /** Handed the click, for callers that read Shift/Ctrl/⌘. */
   onClick(e: MouseEvent<HTMLButtonElement>): void
   children: ReactNode
@@ -64,6 +69,7 @@ export function TimelineSlotButton({
         data-testid={testId}
         data-hot={hot ? "true" : undefined}
         data-busy={busy ? "true" : undefined}
+        data-folded={folded ? "true" : undefined}
         aria-pressed={pressed}
         aria-disabled={busy ? true : undefined}
         onPointerDown={(e) => e.stopPropagation()}
@@ -72,9 +78,10 @@ export function TimelineSlotButton({
           if (busy) return
           onClick(e)
         }}
-        style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
+        style={folded ? { width: "0px", height: "0px" } : { width: `${sizePx}px`, height: `${sizePx}px` }}
         className={[
           "flex shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0",
+          folded ? "absolute overflow-hidden" : "",
           // The button arrives with the pointer, not before. No fade: the
           // slot is already under the pointer, so a transition only lags it.
           hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",

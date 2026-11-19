@@ -3914,6 +3914,8 @@ export const zh_Hans: Catalog = {
   "importExport.format.usfm.description": "USFM 来回转换，会把译文写回原本的标记中。需要服务器上留有源文件案数据（较旧的文件请重新导入以激活）。",
   "importExport.format.docx.label": "Word（.docx）",
   "importExport.format.docx.description": "把译文写回原本的 Word 文档中。段落／标题结构会保留；已翻译段落内逐段的粗体／斜体则不会保留。需要源文件案是在支持来回导出之后才导入的 — 在此之前导入的文件可能没有保存源文件（请重新导入以激活）。",
+  "importExport.format.docxLines.label": "新的 Word 文档 (.docx)",
+  "importExport.format.docxLines.description": "根据各行写成的新 Word 文档：标题仍是标题，每个段落的各行合为一个段落，注释成为 Word 脚注。不保留原文件的页面版式。",
   "importExport.format.pdfPrint.description": "版式与新的 Word 文档相同，并在浏览器的打印窗口中打开，您可在其中选择“另存为 PDF”。注释列在末尾。",
   "importExport.format.pptx.label": "PowerPoint（.pptx）",
   "importExport.format.pptx.description": "把译文写回原本的演示文稿中。投视频／图形／段落结构会保留；已翻译段落内混用的逐段格式会统一采用第一段的样式。需要源文件案是在支持来回导出之后才导入的 — 较旧的文件请重新导入以激活。",

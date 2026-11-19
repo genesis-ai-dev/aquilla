@@ -4983,7 +4983,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9951,7 +9953,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14906,7 +14910,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19887,7 +19893,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26143,7 +26151,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32401,7 +32411,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38730,7 +38742,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45106,7 +45120,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51396,7 +51412,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59633,7 +59651,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67875,7 +67895,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76526,7 +76548,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84822,7 +84846,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93493,7 +93519,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102157,7 +102185,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110858,7 +110888,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119544,7 +119576,9 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128222,6 +128256,8 @@
     "importExport.htmlPage.backToText": "15b71d3fab74024f",
     "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
     "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
-    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6",
+    "importExport.format.docxLines.label": "0a693907065fc883",
+    "importExport.format.docxLines.description": "cea5a2502f40d799"
   }
 }

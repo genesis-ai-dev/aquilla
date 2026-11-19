@@ -1722,6 +1722,26 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(one()).not.toHaveAttribute("data-hot")
       })
 
+      // Review N3: the menu is portalled, but React still bubbles its events
+      // up the lane; a right-click or press in it must not reach the track.
+      it("right-clicks and presses in its menu do not reach the track", async () => {
+        const user = userEvent.setup()
+        const onTrackPointerDown = vi.fn()
+        const onTrackContextMenu = vi.fn()
+        render(
+          <div onPointerDown={onTrackPointerDown} onContextMenu={onTrackContextMenu}>
+            <TargetAudioLane {...wired({ emptyCells: [narrow()] })} />
+          </div>,
+        )
+        await user.click(one())
+        const item = await screen.findByRole("menuitem", { name: "Record" })
+        onTrackPointerDown.mockClear()
+        fireEvent.pointerDown(item)
+        fireEvent.contextMenu(item)
+        expect(onTrackPointerDown).not.toHaveBeenCalled()
+        expect(onTrackContextMenu).not.toHaveBeenCalled()
+      })
+
       it("Shift+Enter on Make speech adds or removes from the keyboard too", async () => {
         const user = userEvent.setup()
         const props = wired({ emptyCells: [narrow()] })

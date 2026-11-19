@@ -115,7 +115,15 @@ export function TimelineSlotButton({
       <AppTooltip content={label} disabled={menu.open}>
         <DropdownMenuTrigger render={button} />
       </AppTooltip>
-      <DropdownMenuContent align="center" className="w-auto">
+      {/* Portalled, but React still bubbles its events up the component
+          tree: a press or right-click in the menu must not reach the track
+          (its press handler, its own context menu). */}
+      <DropdownMenuContent
+        align="center"
+        className="w-auto"
+        onPointerDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
+      >
         {menu.content}
       </DropdownMenuContent>
     </DropdownMenu>

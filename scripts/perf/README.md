@@ -196,3 +196,48 @@ The report says *what* rendered. To see *why*, in order of cost:
    component body is factor 3 (work in render).
 
 Name the mechanism in one sentence before changing code.
+
+---
+
+# Surfaces probe (AQU-2654)
+
+`pnpm perf:interaction` covers the editor's cell rows. `scripts/perf/surfaces-probe.ts` asks the
+same three questions (commits per action × tree per commit × work in render) of **everything
+else**: first load, the shell and route changes, the projects list, org pages, the project
+overview and settings, the workspace's dialogs and docks (import, export, search, comments,
+history, timeline), the comments / glossary / Living Memory pages, the voice studio.
+
+It has no budgets and does not gate anything: it produces a ranking for a person (or the nightly
+routine) to work down.
+
+```bash
+pnpm exec tsx scripts/perf/seed-big-bible.ts --books 2 --cells 400 --handle .perf/surfaces.json
+pnpm exec tsx scripts/perf/surfaces-probe.ts                  # build → serve (:4180) → measure → rank
+pnpm exec tsx scripts/perf/surfaces-probe.ts --no-build --label after --compare perf-report/surfaces-before.json
+pnpm exec tsx scripts/perf/surfaces-probe.ts --no-build --only search,projects-list
+pnpm exec tsx scripts/perf/surfaces-probe.ts --no-build --handle .perf/interaction-glossary.json --only glossary-page
+```
+
+A **surface** is a list of **actions**; an action is one gesture (a route change, a click, a few
+keystrokes). The probe is reset before the action and read once the network has been quiet for
+1.5 s, so a row is the whole cost of that gesture, the reads it triggers included. Output: the
+table, ranked by blocked main-thread time at `--throttle 4`, then commits, then repeated routes;
+and `perf-report/surfaces-<label>.json`, which also has `topRenders` and every request URL per
+action.
+
+Some surfaces end with an **`idle 6 s`** action: nobody touches anything. A screen at rest should
+commit nothing, so a count there is a ticker or a poll re-rendering the page for as long as it
+stays open.
+
+Three flags answer "why":
+
+| Flag | Says |
+| --- | --- |
+| `--why A,B,C` | For each named component, which props changed identity each time it rendered — `(mount)`, a prop name, or `(no prop changed)` (its own state, a context, or an un-memoized parent). "The rows re-render on every keystroke" becomes "because `onLanesChanged` is a new function each time". |
+| `--profile "<surface / action>"` | CPU self time by function for the matching actions — where a long task with few renders actually went. |
+| `--explore` | Writes each action's accessibility tree to `.perf/surfaces-explore/`, for writing or fixing a scenario's selectors. |
+
+Fixtures: the small project is enough for everything that does not scale with data. Use the
+interaction benchmark's `glossary` handle for the glossary page (664 terms) and a larger seed
+(`--books 20 --cells 6000`) for list-shaped surfaces, where cost that grows with the number of
+files is the finding. Counts are comparable across machines; timings are indicative only.

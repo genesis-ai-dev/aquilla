@@ -73,7 +73,7 @@ export function ScreenshotCropper({ imageUrl, onConfirm, onDiscard, busy = false
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-col gap-3">
       <p className="text-sm text-muted-foreground">{t("nav.report.cropHint")}</p>
       <div
         className="relative mx-auto w-fit max-w-full cursor-crosshair touch-none select-none overflow-hidden rounded-md border"
@@ -88,7 +88,7 @@ export function ScreenshotCropper({ imageUrl, onConfirm, onDiscard, busy = false
           src={imageUrl}
           alt={t("nav.report.cropAlt")}
           draggable={false}
-          className="block max-h-[55vh] max-w-full"
+          className="block max-h-[calc(94dvh-13rem)] max-w-full max-sm:max-h-[calc(94dvh-18rem)]"
         />
         {box && (
           <div
@@ -97,7 +97,7 @@ export function ScreenshotCropper({ imageUrl, onConfirm, onDiscard, busy = false
           />
         )}
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
         <Button type="button" onClick={() => onConfirm(null)} disabled={busy}>
           {t("nav.report.keepWholeImage")}
         </Button>

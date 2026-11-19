@@ -30,8 +30,10 @@ vi.mock("@/lib/audio/upload", () => ({
 }))
 
 const emitCellAudioAttach = vi.fn()
+const emitCellAudioPlace = vi.fn(async () => "event-place")
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: (...args: unknown[]) => emitCellAudioAttach(...args),
+  emitCellAudioPlace: (...args: unknown[]) => emitCellAudioPlace(...(args as [])),
 }))
 
 const injectOptimisticAudioAttachment = vi.fn()
@@ -80,6 +82,25 @@ beforeEach(() => {
 })
 
 describe("CellAudioUploadButton", () => {
+  // AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+  // recorder's pre-roll as its place. The uploaded take is given its own place
+  // on the line's start, so it never reads that one and starts early.
+  it("an upload onto a line with times gives the take its own place on the line's start", async () => {
+    render(<CellAudioUploadButton {...PROPS} lineStartTime={12.5} />)
+    selectFile(screen.getByLabelText("Upload audio file", { selector: "input" }), new File(["wav-bytes"], "recording.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitCellAudioPlace).toHaveBeenCalledTimes(1))
+    expect(emitCellAudioPlace).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "file-1", cellId: "cell-1", audioId: "audio-cell-1-123-abc.wav", targetOffsetMs: 0, recordingsOffsetMs: null,
+    }))
+  })
+
+  it("an upload onto a line with no times places nothing, as before", async () => {
+    render(<CellAudioUploadButton {...PROPS} lineStartTime={null} />)
+    selectFile(screen.getByLabelText("Upload audio file", { selector: "input" }), new File(["wav-bytes"], "recording.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(injectOptimisticAudioAttachment).toHaveBeenCalled())
+    expect(emitCellAudioPlace).not.toHaveBeenCalled()
+  })
+
   it("selecting a wav file uploads then attaches with slot recording and injects the optimistic attachment", async () => {
     render(<CellAudioUploadButton {...PROPS} />)
     const input = screen.getByLabelText("Upload audio file", { selector: "input" })

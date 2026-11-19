@@ -127,7 +127,7 @@ describe("signed in", () => {
       commentEmails: "all",
       "recorder.countdown": "slow",
       "recorder.countdownBeep": true,
-      "recorder.moveOnAfterSaving": true,
+      "recorder.moveOnAfterSaving.v2": false,
       "recorder.keepTakesDrawerOpen": true,
       "recorder.format": "webm",
       "recorder.filmAudible": false,
@@ -194,12 +194,12 @@ describe("signed in", () => {
     const before = patches().length
     vi.useFakeTimers()
     recorderCountdownPref.set("fast")
-    recorderMoveOnAfterSavingPref.set(false)
+    recorderMoveOnAfterSavingPref.set(true)
     recorderFilmAudiblePref.set(true)
     await vi.advanceTimersByTimeAsync(PERSON_PREFS_FLUSH_DELAY_MS + 50)
     expect(patches().length).toBe(before + 1)
     expect(patches().at(-1)?.body).toEqual({
-      set: { "recorder.countdown": "fast", "recorder.moveOnAfterSaving": false, "recorder.filmAudible": true },
+      set: { "recorder.countdown": "fast", "recorder.moveOnAfterSaving.v2": true, "recorder.filmAudible": true },
     })
     expect(server.record.commentEmails).toBe("all")
   })
@@ -348,5 +348,90 @@ describe("two people on one browser", () => {
     // Signed out: the device's own value, which neither of them changed.
     signOut()
     expect(recorderCountdownPref.get()).toBe("normal")
+  })
+})
+
+// AQU-2620 (Matthew, 2026-11-16): "Move on after saving a recording" starts
+// OFF — and it had to reach the people it was already on for, not only new
+// accounts. AQU-2264's first sync wrote `recorder.moveOnAfterSaving: true`
+// into virtually every active person's record, and a stored value beats a
+// default, so a plain default change would have reached almost nobody.
+// Reading a fresh key (`…moveOnAfterSaving.v2`, device `…auto-advance.v2`)
+// resets everyone exactly once; these pin that it happens, and that it cannot
+// happen twice.
+describe("the move-on default (AQU-2620)", () => {
+  /** A person's record as it stands today: the old key, written for them. */
+  const recordWithOldKey = () => createFakePreferencesServer({
+    commentEmails: "all",
+    "recorder.countdown": "fast",
+    "recorder.moveOnAfterSaving": true,
+  })
+
+  it("is off for a brand-new account that has never touched it", async () => {
+    signIn("ana")
+    await refreshPersonPrefs()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+  })
+
+  it("is off, signed out, on a device that never stored anything", () => {
+    signOut()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+  })
+
+  it("is off, signed out, on a device that had turned it off before the release", () => {
+    localStorage.setItem("aq.recording-auto-advance.v1", "off")
+    signOut()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+  })
+
+  it("turns off for a person whose record says on, at once, and tells the record", async () => {
+    server = recordWithOldKey()
+    globalThis.fetch = server.fetch
+    signIn("ana")
+    // Off before any network: the record has no .v2 key, so the device decides.
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+    await refreshPersonPrefs()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+    expect(server.record["recorder.moveOnAfterSaving.v2"]).toBe(false)
+    // The other recorder preferences are untouched by the reset.
+    expect(server.record["recorder.countdown"]).toBe("fast")
+    expect(recorderCountdownPref.get()).toBe("fast")
+  })
+
+  it("stays off on a second device last used before the release", async () => {
+    server = recordWithOldKey()
+    globalThis.fetch = server.fetch
+    signIn("ana")
+    await refreshPersonPrefs()
+
+    useDevice("studio")
+    globalThis.fetch = server.fetch
+    signIn("ana")
+    await refreshPersonPrefs()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(false)
+    // Opening the older browser did not switch it back on for anyone.
+    expect(server.record["recorder.moveOnAfterSaving.v2"]).toBe(false)
+  })
+
+  it("once switched on after the release, stays on everywhere — the reset never runs again", async () => {
+    server = recordWithOldKey()
+    globalThis.fetch = server.fetch
+    signIn("ana")
+    await refreshPersonPrefs()
+    recorderMoveOnAfterSavingPref.set(true)
+    await flushPersonPrefs()
+    expect(server.record["recorder.moveOnAfterSaving.v2"]).toBe(true)
+
+    // A reload on this device.
+    resetPersonPrefCachesForTests()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(true)
+
+    // Another browser, which has never seen the switch.
+    useDevice("studio")
+    globalThis.fetch = server.fetch
+    signIn("ana")
+    await refreshPersonPrefs()
+    expect(recorderMoveOnAfterSavingPref.get()).toBe(true)
+    expect(server.record["recorder.moveOnAfterSaving.v2"]).toBe(true)
   })
 })

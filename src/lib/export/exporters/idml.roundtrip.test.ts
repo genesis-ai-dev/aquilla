@@ -9,6 +9,7 @@ import {
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
 import type { CellData } from "@/hooks/useCells"
+import { scopeRoundTripCells } from "../validation-scope"
 import {
   exportIdml,
   IdmlWebExportError,
@@ -333,3 +334,42 @@ async function buildFixture(extraParagraphs = ""): Promise<ArrayBuffer> {
     compression: "DEFLATE",
   })
 }
+
+// AQU-2545: what a "validated only" export, and a hidden line in any export,
+// must not bring into the file. An IDML cell always carries its translation as
+// protected HTML, so clearing only the plain translation clears nothing.
+describe("strict web IDML export adapter — validated only and hidden lines (AQU-2545)", () => {
+  async function storyOf(raw: ArrayBuffer, cells: CellData[]): Promise<string> {
+    const result = await exportIdml(raw.slice(0), cells, directExecutor)
+    return (await JSZip.loadAsync(await result.blob.arrayBuffer())).file(STORY)!.async("string")
+  }
+
+  it("leaves an unvalidated translation out of a validated-only export and writes a validated one", async () => {
+    const raw = await buildFixture()
+    const parsed = await parseIdml(raw)
+    const cells = parsed.units.map((unit) => cellFor(unit))
+    replaceCell(cells, unitById(parsed.units, "heading"), ["Brouillon non validé"])
+    replaceCell(cells, unitById(parsed.units, "footnote"), ["note validée"])
+    for (const cell of cells) {
+      cell.status = cell.translated === "note validée" ? "validated" : cell.translated ? "unvalidated" : "empty"
+    }
+    const story = await storyOf(raw, scopeRoundTripCells(cells, "validated-only"))
+    expect(story).toContain("<Content>note validée</Content>")
+    expect(story).not.toContain("Brouillon")
+    expect(story).toContain("<Content>Chapter One</Content>")
+  })
+
+  it("leaves a hidden line's translation out of an ordinary export", async () => {
+    const raw = await buildFixture()
+    const parsed = await parseIdml(raw)
+    const cells = parsed.units.map((unit) => cellFor(unit))
+    replaceCell(cells, unitById(parsed.units, "heading"), ["Ligne masquée"])
+    replaceCell(cells, unitById(parsed.units, "footnote"), ["note traduite"])
+    for (const cell of cells) cell.status = cell.translated ? "validated" : "empty"
+    Object.assign(cells.find((cell) => cell.translated === "Ligne masquée")!, { hidden: true })
+    const story = await storyOf(raw, scopeRoundTripCells(cells, "current"))
+    expect(story).toContain("<Content>note traduite</Content>")
+    expect(story).not.toContain("Ligne masquée")
+    expect(story).toContain("<Content>Chapter One</Content>")
+  })
+})

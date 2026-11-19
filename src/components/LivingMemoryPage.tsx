@@ -34,11 +34,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
-import { NoteOnClick } from "@/components/ui/info-note"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
-import { useLiveness } from "@/hooks/useLiveness"
+import { LivenessDot } from "@/components/LivenessDot"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings, type UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -218,7 +217,6 @@ export function LivingMemoryPage({
       .map((cell) => cell.translated)
   }, [cells, quoteSampleEnabled])
 
-  const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
 
   // Role-aware edit gate: mirrors the AQU-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
@@ -319,20 +317,9 @@ export function LivingMemoryPage({
 
   const statusAndActions = (
     <>
-      {/* AQU-2260: a coloured mark, so its state opens on click, not hover. */}
-      <NoteOnClick note={livenessLabel} label={livenessLabel} className="shrink-0 p-1">
-        <span
-          aria-hidden
-          className={[
-            "h-2 w-2 shrink-0 rounded-full transition-colors",
-            livenessState === "offline"
-              ? "bg-red-500"
-              : livenessState === "updating"
-                ? "bg-amber-400 animate-pulse"
-                : "bg-emerald-500",
-          ].join(" ")}
-        />
-      </NoteOnClick>
+      {/* AQU-2260: a coloured mark, so its state opens on click, not hover.
+          AQU-2654: its once-a-second tick lives in the dot, not in this page. */}
+      <LivenessDot bumpedAt={cells.length} />
       {validatedExamplesEnabled ? (
         isLoading ? (
           <span

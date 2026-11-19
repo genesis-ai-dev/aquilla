@@ -84,7 +84,7 @@ function addBook(root: string, relPath: string, cellId: string, ...clips: string
 function deps(over: Partial<AudioDeps> = {}): AudioDeps {
   return {
     copyObject: async () => {},
-    sync: { ingest: async () => ({ status: 200, ms: 1, accepted: 0 }) } as never,
+    sync: { ingest: async () => ({ status: 200, ms: 1, accepted: 0 }), finalize: async () => {} } as never,
     copyConcurrency: 2,
     dryRun: false,
     ...over,
@@ -92,15 +92,25 @@ function deps(over: Partial<AudioDeps> = {}): AudioDeps {
 }
 
 describe("migrateProjectAudio", () => {
-  it("copies pointer objects R2-to-R2 and ingests deterministic attach/select events", async () => {
+  it("copies pointer objects R2-to-R2, ingests deterministic attach/select events, then finalizes the files they touched", async () => {
     const copies: string[][] = []
-    const ingests: Array<{ projectId: string; events: Array<{ kind: string }> }> = []
+    const ingests: Array<{ projectId: string; events: Array<{ kind: string; fileId?: string | null }> }> = []
+    // One log for both calls: the finalize must come AFTER the ingest it counts.
+    const calls: string[] = []
+    const finalizes: Array<{ projectId: string; fileIds: string[] }> = []
     const result = await migrateProjectAudio(deps({
       copyObject: async (...args) => { copies.push(args) },
-      sync: { ingest: async (projectId: string, events: Array<{ kind: string }>) => {
-        ingests.push({ projectId, events })
-        return { status: 200, ms: 1, accepted: events.length }
-      } } as never,
+      sync: {
+        ingest: async (projectId: string, events: Array<{ kind: string; fileId?: string | null }>) => {
+          calls.push("ingest")
+          ingests.push({ projectId, events })
+          return { status: 200, ms: 1, accepted: events.length }
+        },
+        finalize: async (projectId: string, fileIds: string[]) => {
+          calls.push("finalize")
+          finalizes.push({ projectId, fileIds })
+        },
+      } as never,
     }), { project: PROJECT, dir: repoWithAudio() })
 
     expect(copies).toHaveLength(1)
@@ -117,19 +127,30 @@ describe("migrateProjectAudio", () => {
       "cell.audio.select",
     ])
     expect(result).toMatchObject({ total: 1, copied: 1, events: 2, missingOid: 0, lfsMiss: 0, failed: 0 })
+    // The ingest defers every counter, so without a finalize the takes play in
+    // the editor while the book reads "0% recorded". Scoped to the one file the
+    // events named, never the empty list the route reads as the whole project.
+    expect(calls).toEqual(["ingest", "finalize"])
+    expect(finalizes).toEqual([{ projectId: PROJECT.aquilla_id, fileIds: [ingests[0].events[0].fileId] }])
+    expect(finalizes[0].fileIds[0]).toBeTruthy()
   })
 
-  it("dry-run reads the manifest but does not copy or ingest audio", async () => {
+  it("dry-run reads the manifest but does not copy, ingest or finalize audio", async () => {
     let copies = 0
     let ingests = 0
+    let finalizes = 0
     const result = await migrateProjectAudio(deps({
       dryRun: true,
       copyObject: async () => { copies++ },
-      sync: { ingest: async () => { ingests++; return { status: 200, ms: 1, accepted: 0 } } } as never,
+      sync: {
+        ingest: async () => { ingests++; return { status: 200, ms: 1, accepted: 0 } },
+        finalize: async () => { finalizes++ },
+      } as never,
     }), { project: PROJECT, dir: repoWithAudio() })
     expect(result.total).toBe(1)
     expect(copies).toBe(0)
     expect(ingests).toBe(0)
+    expect(finalizes).toBe(0)
   })
 
   it("does not mark an audio migration complete when every attachment lacks an LFS pointer", async () => {

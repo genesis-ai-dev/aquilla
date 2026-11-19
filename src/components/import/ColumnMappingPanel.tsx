@@ -43,6 +43,12 @@ export interface ColumnMappingPanelProps {
   /** Called when the user cancels — return to file selection. */
   onCancel: () => void
   /**
+   * AQU-2487 (import sweep, Nov 2): why the last "Map columns" went nowhere
+   * (no rows left after the mapping, or the upload failed). Drawn above the
+   * buttons; it used to be set by the spreadsheet import and never shown.
+   */
+  error?: string | null
+  /**
    * "create" (default): full mapping for importing a new file — source required.
    * "target": populate an existing file's target column — target is required
    * instead; ref is optional (no ref → rows match cells by order), and so are
@@ -106,7 +112,7 @@ function ColSelect({
   )
 }
 
-export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create" }: ColumnMappingPanelProps) {
+export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create", error = null }: ColumnMappingPanelProps) {
   const t = useT()
   const targetMode = mode === "target"
   const rows = sheet.rows
@@ -267,6 +273,8 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
           </ScrollArea>
         </div>
       )}
+
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
 
       {/* Actions */}
       <div className="flex justify-end gap-2">

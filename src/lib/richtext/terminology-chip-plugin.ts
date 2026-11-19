@@ -14,7 +14,8 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
-import { buildTermRegex, findConceptMatches } from "@/lib/terminology/match"
+import { candidateConcepts, findConceptMatches, findPlainTermMatches } from "@/lib/terminology/match"
+import { AnchorIndex, prefilterForTerms } from "@/lib/terminology/prefilter"
 import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
 export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminologyChipDecorations")
@@ -28,20 +29,57 @@ export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminolog
  * Exported so the match logic can be unit-tested independently of ProseMirror.
  */
 export function findTermMatches(text: string, term: string): Array<{ start: number; end: number }> {
-  if (!term || !text) return []
-  const pattern = buildTermRegex(term, "giu")
-  if (!pattern) return []
-  const results: Array<{ start: number; end: number }> = []
-  let m: RegExpExecArray | null
-  while ((m = pattern.exec(text)) !== null) {
-    // Zero-width matches (defensive: a term that is only `*`) would loop forever.
-    if (m[0].length === 0) {
-      pattern.lastIndex += 1
-      continue
+  // AQU-2654: the pattern is cached by the term and compiled once, and a text
+  // the term cannot occur in is turned away before any regex runs.
+  return findPlainTermMatches(text, term)
+}
+
+interface ApprovedRenderings {
+  /** Approved renderings of active concepts, in concept then rendering order. */
+  entries: Array<{ rendering: string; term: string }>
+  index: AnchorIndex
+}
+
+const approvedRenderings = new WeakMap<readonly Concept[], ApprovedRenderings>()
+
+/**
+ * Every match of an approved (preferred or admitted) rendering of an active
+ * concept in `text`, tagged with the concept's source term — in concept order,
+ * then rendering order, then position, which is the order the nested loop over
+ * `findTermMatches` produced.
+ *
+ * AQU-2654: the read-mode target column asks this for every row. Looping over
+ * the glossary there cost two regex builds per concept per row; here the
+ * renderings are indexed once per termbase array and a row runs only the ones
+ * that can occur in its text. The array must be replaced, not edited in place,
+ * when a term changes (the matcher's caches rely on the same contract).
+ */
+export function findApprovedRenderingMatches(
+  text: string,
+  concepts: readonly Concept[],
+): Array<{ start: number; end: number; term: string }> {
+  if (!text || concepts.length === 0) return []
+  let approved = approvedRenderings.get(concepts)
+  if (!approved) {
+    approved = { entries: [], index: new AnchorIndex() }
+    for (const concept of concepts) {
+      if (concept.status !== "active") continue
+      for (const rendering of concept.renderings) {
+        if (rendering.status !== "preferred" && rendering.status !== "admitted") continue
+        // A blank rendering has no pattern and can never match.
+        if (!rendering.rendering.trim()) continue
+        approved.index.add(approved.entries.length, prefilterForTerms([rendering.rendering]))
+        approved.entries.push({ rendering: rendering.rendering, term: concept.sourceTerm })
+      }
     }
-    results.push({ start: m.index, end: m.index + m[0].length })
+    approvedRenderings.set(concepts, approved)
   }
-  return results
+  const out: Array<{ start: number; end: number; term: string }> = []
+  for (const i of approved.index.candidates(text)) {
+    const { rendering, term } = approved.entries[i]
+    for (const match of findPlainTermMatches(text, rendering)) out.push({ ...match, term })
+  }
+  return out
 }
 
 /**
@@ -66,9 +104,7 @@ export function buildTerminologyChipDecorationSet(
   concepts: Concept[],
   termMatching?: TermMatchingSettings,
 ): DecorationSet {
-  // Only active concepts participate
-  const activeConcepts = concepts.filter(c => c.status === "active")
-  if (activeConcepts.length === 0) return DecorationSet.empty
+  if (concepts.length === 0) return DecorationSet.empty
 
   // Build plain-text → PM position map (footnote nodes expand to their raw
   // `\f...\f*` so matches stay aligned with the plain `value`).
@@ -76,7 +112,13 @@ export function buildTerminologyChipDecorationSet(
 
   const decorations: Decoration[] = []
 
-  for (const concept of activeConcepts) {
+  // AQU-2654: this runs on every keystroke in the open cell. Only the concepts
+  // that can match the text as it now stands are visited — the matcher's
+  // candidate index finds them in one pass over the text — so typing costs the
+  // same with a 600-term glossary as with none.
+  for (const concept of candidateConcepts(plainText, concepts, termMatching)) {
+    // Only active concepts participate
+    if (concept.status !== "active") continue
     const matches = findConceptMatchRanges(plainText, concept, termMatching)
     for (const match of matches) {
       const from = plainToPm[match.start]

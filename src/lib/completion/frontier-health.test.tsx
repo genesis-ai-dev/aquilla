@@ -16,8 +16,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
+// The hook's session listener, so a test can raise the store's notification.
+const sessionListeners = vi.hoisted(() => new Set<() => void>())
 vi.mock("@/lib/frontier/session-store", () => ({
-  subscribeSession: () => () => {},
+  subscribeSession: (listener: () => void) => {
+    sessionListeners.add(listener)
+    return () => { sessionListeners.delete(listener) }
+  },
 }))
 vi.mock("@/lib/frontier/auth", () => ({ AUTH_BASE: "https://auth.test" }))
 
@@ -38,6 +43,7 @@ function setOnLine(value: boolean) {
 describe("frontier-health — reconnect recovery (AQU-1377)", () => {
   beforeEach(() => {
     setOnLine(true)
+    sessionListeners.clear()
     vi.restoreAllMocks()
   })
 
@@ -96,6 +102,48 @@ describe("frontier-health — reconnect recovery (AQU-1377)", () => {
 
     await waitFor(() => expect(result.current.available).toBe(true))
     expect(fetchMock).toHaveBeenCalled()
+  })
+
+  // AQU-2654: the session store notifies on every return to the tab.
+  it("re-probes quietly behind an available answer, and still applies a change", async () => {
+    const { useFrontierHealth } = await loadModule()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true } as Response)
+    vi.stubGlobal("fetch", fetchMock)
+    const seen: boolean[] = []
+    const { result } = renderHook(() => {
+      const state = useFrontierHealth()
+      seen.push(state.checking)
+      return state
+    })
+    await waitFor(() => expect(result.current.available).toBe(true))
+    await waitFor(() => expect(result.current.checking).toBe(false))
+    seen.length = 0
+
+    await act(async () => {
+      for (const listener of sessionListeners) listener()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+    // Nothing to say: no "checking" render, no render at all.
+    expect(seen).toEqual([])
+
+    // The service went away while the tab was hidden: the quiet probe says so.
+    fetchMock.mockResolvedValue({ ok: false } as Response)
+    await act(async () => {
+      for (const listener of sessionListeners) listener()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.available).toBe(false))
+    // And from "unavailable" the re-probe shows itself again, as before.
+    fetchMock.mockResolvedValue({ ok: true } as Response)
+    seen.length = 0
+    await act(async () => {
+      for (const listener of sessionListeners) listener()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.available).toBe(true))
+    expect(seen).toContain(true)
   })
 
   it("removes the `online` listener on unmount", async () => {

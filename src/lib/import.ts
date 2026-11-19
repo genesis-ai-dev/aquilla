@@ -76,11 +76,9 @@ import {
   isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
-import {
-  fetchTranslationText,
-  parseEBibleCorpus,
-  type EBibleTranslation,
-} from "./parsers/ebible"
+// The eBible parser bundles the full 31k-line vref list (~420 KB); it loads
+// only when an eBible import runs, not with every module that imports this one.
+import type { EBibleTranslation } from "./parsers/ebible"
 import {
   fetchHelloaoComplete,
   parseHelloaoComplete,
@@ -278,6 +276,7 @@ export async function prepareEBibleTargetImport(
 ): Promise<EBibleMatchResult> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  const { fetchTranslationText, parseEBibleCorpus } = await import("./parsers/ebible")
   const corpusText = await fetchTranslationText(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),
@@ -976,6 +975,7 @@ export async function importEBible(
 ): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  const { fetchTranslationText, parseEBibleCorpus } = await import("./parsers/ebible")
   const corpusText = await fetchTranslationText(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),
@@ -1427,13 +1427,22 @@ export async function importTranslationNotes(
   assertSourceUploadByteLength(file.size)
   const rawBytes = await file.arrayBuffer()
   const text = decodeImportText(rawBytes, file.name)
-  const { strings, skippedCount } = parseTnTsv(text)
+  const { strings, skippedCount, fileNameBooks } = parseTnTsv(text, file.name)
 
   if (strings.length === 0) {
+    // AQU-2487 (browser pass, Nov 12): when the file name is why the rows have
+    // no book, say so; the columns sentence sent people to the wrong place.
     throw new Error(
-      skippedCount > 0
-        ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
-        : t("importExport.errors.tnNoValidRows"),
+      fileNameBooks
+        ? fileNameBooks.length > 1
+          ? t("importExport.errors.tnFileNameHoldsBooks", {
+              books: fileNameBooks.join(", "),
+              example: `tn_${fileNameBooks[0]}.tsv`,
+            })
+          : t("importExport.errors.tnFileNameNoBook")
+        : skippedCount > 0
+          ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
+          : t("importExport.errors.tnNoValidRows"),
     )
   }
 

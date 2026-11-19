@@ -113,4 +113,37 @@ describe("countReimportDiff", () => {
       if (entry.updatedCells) expect(diff.updatedCells, entry.name).toEqual(entry.updatedCells)
     }
   })
+
+  // AQU-2487 (import sweep, Nov 2): "Update this file" hides every line the
+  // new file no longer has, and the Analysis counted only added and updated
+  // lines, so a file that only dropped lines read "Nothing in this file has
+  // changed."
+  it("counts the lines the new file no longer has", () => {
+    const key = (unitKey: string) => ({ aquillaImport: { unitKey } })
+    const existing = [
+      cell({ cellId: "a", value: "First line", metadata: key("k1") }),
+      cell({ cellId: "b", value: "Second line", metadata: key("k2"), anchorCellId: "a" }),
+      cell({ cellId: "c", value: "Third line", metadata: key("k3"), anchorCellId: "b" }),
+    ]
+    const diff = countReimportDiff(
+      [
+        cell({ cellId: "n1", value: "First line", metadata: key("k1") }),
+        cell({ cellId: "n3", value: "Third line", metadata: key("k3") }),
+      ],
+      existing,
+    )
+    expect(diff).toMatchObject({ added: 0, updated: 0, removed: 1 })
+    expect(diff.removedCells).toEqual([{ text: "Second line", number: 2 }])
+  })
+
+  it("leaves out a line an earlier re-import already hid", () => {
+    const diff = countReimportDiff(
+      [cell({ cellId: "n1", value: "First line" })],
+      [
+        cell({ cellId: "n1", value: "First line" }),
+        { cellId: "gone", value: "Hidden last time", hidden: true },
+      ],
+    )
+    expect(diff).toMatchObject({ added: 0, updated: 0, removed: 0, removedCells: [] })
+  })
 })

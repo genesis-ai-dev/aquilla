@@ -1,9 +1,4 @@
 {
-  "src/components/AiModelDownloadChip.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
   "src/components/AppShell.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1

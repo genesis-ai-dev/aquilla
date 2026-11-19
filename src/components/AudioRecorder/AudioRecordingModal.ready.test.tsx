@@ -50,7 +50,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
 vi.mock("@/lib/sync/events-emit", () => ({
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioValidate: vi.fn(async () => "evt"),
@@ -526,8 +526,9 @@ describe("AudioRecordingModal — what each recorder setting does", () => {
       expect(line, name).toHaveAttribute("data-open", "true")
       expect(line, name).toHaveTextContent(text)
     }
-    // The (i) only opens its line; the switch beside it is untouched.
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    // The (i) only opens its line; the switch beside it is untouched — and at
+    // rest that is off (AQU-2620).
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
     await userEvent.setup().hover(screen.getByText("Countdown beep"))
     expect(screen.queryByRole("tooltip")).toBeNull()
   })

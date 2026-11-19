@@ -30,11 +30,14 @@
 // An older client never sends the flag and gets the full answer.
 
 import { verifyTokenForFile } from '../auth'
+import { grantedLaneIds, targetVisibilityClause, visibleLanesForRead } from './lane-read-wall'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 export interface CellsAuditReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" or "true" turns the lane read wall on. */
+  LANE_READ_WALL?: string
 }
 
 export async function handleCellsAuditReadRequest(
@@ -71,6 +74,18 @@ export async function handleCellsAuditReadRequest(
   const scopeSql = cellId ? ' AND cell_id = ?' : ''
   const binds = cellId ? [projectId, fileId, cellId] : [projectId, fileId]
 
+  // AQU-730 read wall: a row here is one lane's content hash, edit time and
+  // validators. A walled caller gets the source rows and the lanes they were
+  // granted, the same rows `/cells` gives them. Waivers have no lane column
+  // (a waiver is on the cell), so they are not narrowed.
+  const laneIds = await grantedLaneIds(
+    env.AQUILLA_PG,
+    projectId,
+    visibleLanesForRead(env.LANE_READ_WALL, auth.claims),
+  )
+  const cellsWall = targetVisibilityClause({ laneIds, sideExpr: 'side', laneIdExpr: 'lane_id' })
+  const validatorsWall = targetVisibilityClause({ laneIds, laneIdExpr: 'lane_id' })
+
   // `event_id` is the chain head (AD-2); `source_event_id` is the AD-9
   // staleness pin. `last_edit_event_id` in the response keeps the old
   // field name for client compatibility but reads from `event_id`.
@@ -86,6 +101,7 @@ export async function handleCellsAuditReadRequest(
       source_event_id
     FROM cells
     WHERE project_id = ? AND file_id = ?${scopeSql}
+      ${cellsWall?.sql ?? ''}
   `
 
   // DELETE-on-unvalidate: every row is active (no is_active filter needed).
@@ -93,6 +109,7 @@ export async function handleCellsAuditReadRequest(
     SELECT cell_id, event_id, username, decided_ts
     FROM cell_validators
     WHERE project_id = ? AND file_id = ?${scopeSql}
+      ${validatorsWall?.sql ?? ''}
   `
 
   // DELETE-on-unwaive: every row present is an active waiver.
@@ -132,8 +149,8 @@ export async function handleCellsAuditReadRequest(
   }
 
   const [cellsRes, validatorsRes, waiversRes] = await Promise.all([
-    env.AQUILLA_PG.prepare(cellsSql).bind(...binds).all<CellRow>(),
-    env.AQUILLA_PG.prepare(validatorsSql).bind(...binds).all<ValidatorRow>(),
+    env.AQUILLA_PG.prepare(cellsSql).bind(...binds, ...(cellsWall?.binds ?? [])).all<CellRow>(),
+    env.AQUILLA_PG.prepare(validatorsSql).bind(...binds, ...(validatorsWall?.binds ?? [])).all<ValidatorRow>(),
     env.AQUILLA_PG.prepare(waiversSql).bind(...binds).all<WaiverRow>(),
   ])
 

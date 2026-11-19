@@ -27,7 +27,9 @@ import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
+import { cellMetadataMergeBaseSql } from '../../../db/shared/cell-metadata-sql'
 import { usableSortIndex } from './sort-index'
+import { lineRoomToStore } from './line-room-authority'
 import { commentAuthorLabel } from './comment-authorship'
 import {
   audioLaneDualReadBinds,
@@ -48,6 +50,15 @@ import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
+import {
+  CUT_LEVEL_UNCHANGED_SQL,
+  cutLevelRestoreStmt,
+  cutLevelUnchangedBinds,
+  cutVoteArchiveStmt,
+  cutVoteRestoreStmt,
+  RECORDED_CUT_PAIR_SQL,
+  recordedCutPairBinds,
+} from './cut-vote-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { buildFileRevisionIndexStmts } from './file-revision-sql'
@@ -279,6 +290,17 @@ export function laneOfAudioEvent(payload: unknown): string {
 }
 
 /**
+ * AQU-2432 (Sam, Nov 9): the `cells.metadata` key an unrecorded line's room is
+ * stored under for a language — `recordings_room_ms` for the project's default
+ * one (tag `''`), `recordings_room_ms:<tag>` for any other. The client reads
+ * the same key (src/lib/timeline/line-room.ts, `lineRoomKey`); the two must
+ * agree.
+ */
+export function lineRoomMetadataKey(laneTag: string): string {
+  return laneTag ? `recordings_room_ms:${laneTag}` : 'recordings_room_ms'
+}
+
+/**
  * AQU-1589: the lane tag a `cell.backtranslation.set` event names.
  *
  * Its own function for the same reason as {@link laneOfAudioEvent}: a
@@ -306,9 +328,9 @@ export function laneOfGlossEvent(payload: unknown): string {
   return typeof lang === 'string' ? lang : ''
 }
 
-// FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
-// generated column + GIN index on every cells write, so the projection emits no
-// FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
+// Full-text index maintenance: none. Postgres auto-maintains the
+// cells.value_tsv generated column + its GIN index on every cells write, so the
+// projection emits no index statements of its own.
 
 /**
  * Recompute the denormalized `files` rollup counters from the live `cells`
@@ -655,6 +677,8 @@ const INTEGER_MS_PAYLOAD_KEYS = [
   'subtitleStartMs',
   'subtitleEndMs',
   'targetStartMs',
+  // AQU-2432 (review, Nov 9): an unrecorded line's room.
+  'recordingsRoomMs',
 ] as const
 
 /**
@@ -733,6 +757,13 @@ export function buildEventProjectionStmts(
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
     validationCount?: number
+    /**
+     * AQU-2492 (review, Nov 9), finding 12: this is a projection rebuild's
+     * replay (rebuild.ts) — the event happened live already, over the rows as
+     * they were then. What only its live write may keep (a cut's vote archive,
+     * cut-vote-archive.ts) is not written again from today's rows.
+     */
+    rebuild?: boolean
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -839,10 +870,6 @@ export function buildEventProjectionStmts(
       // NOTE: buildBulkSourceCellCreateStmt (above) mirrors this insert for
       // the bulk-import path — change them together.
 
-      // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
-      // row already exists for this key. No-op when this is a genuine first
-      // insert.
-
       // The lane is part of the row key via lane_id. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
       // own row beside its siblings. The projection target_lang column is not filled.
@@ -907,9 +934,6 @@ export function buildEventProjectionStmts(
           ),
       )
 
-      // FTS5 maintenance (post-DML): insert the new value now that the cells
-      // row reflects the post-create/update state.
-
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
@@ -928,25 +952,50 @@ export function buildEventProjectionStmts(
       if (!p.metadata || typeof p.metadata !== 'object' || Array.isArray(p.metadata)) {
         throw new Error(`${event.kind} event ${event.id} has invalid metadata`)
       }
-      const metadataJson = JSON.stringify(p.metadata)
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cells SET
-               metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
-               value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
-             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source'`,
-          )
-          .bind(
-            metadataJson,
-            p.valueHtml ?? null,
-            p.valueHtml ?? null,
-            event.projectId,
-            event.fileId,
-            event.cellId,
-          ),
-      )
+      // The source row is written only for what the patch carries.
+      //
+      // A patch with no keys changes none, so the row's metadata is not
+      // assigned at all: whatever shape it is stored in, it stays byte for
+      // byte what it was. That is the "markup only" save of an IDML
+      // translation (`emitIdmlTargetMarkup`), which sends `{}` beside the
+      // target HTML. It used to run the merge anyway, and on a row a source
+      // link mirrored — whose envelope is stored as a JSON string — `||`
+      // answered with the array `["<envelope>", {}]`. Each line placed that
+      // way lost its IDML locator, and the export it was placed for stopped
+      // on "has no supported IDML v2 locator".
+      //
+      // A patch that does carry keys merges onto the stored value read as an
+      // object (`cellMetadataMergeBaseSql`), for the same reason.
+      if (Object.keys(p.metadata).length > 0) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET
+                 metadata = (${cellMetadataMergeBaseSql()} || ?::text::jsonb),
+                 value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'source'`,
+            )
+            .bind(
+              JSON.stringify(p.metadata),
+              p.valueHtml ?? null,
+              p.valueHtml ?? null,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+            ),
+        )
+      } else if (p.valueHtml != null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET value_html = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'source'`,
+            )
+            .bind(p.valueHtml, event.projectId, event.fileId, event.cellId),
+        )
+      }
       if (p.targetHtml !== undefined) {
         stmts.push(
           db
@@ -1044,10 +1093,6 @@ export function buildEventProjectionStmts(
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
-
-      // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
-      // overwrite the cells row. Must run first so the old value is still
-      // readable from `cells`.
 
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
@@ -1286,9 +1331,6 @@ export function buildEventProjectionStmts(
         }
       }
 
-      // FTS5 maintenance (post-DML): insert the new indexed value now that
-      // the cells row has been updated/upserted.
-
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
@@ -1307,10 +1349,6 @@ export function buildEventProjectionStmts(
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
       const lane = laneOfEvent(event.kind, event.payload)
       const dependentGateBinds = dependentGateBindsFor(side, lane)
-
-      // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
-      // the cells row so the OLD value is still readable for the 'delete'
-      // command.
 
       // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
       //
@@ -2468,6 +2506,10 @@ case 'cell.audio.attach': {
       //   2-4. ONLY IF step 1's row exists with THIS event's id: shorten the
       //      original to [old start, atMs], drop its votes, recount them.
       //      Gating on the new row means a refused cut changes nothing at all.
+      // AQU-2492 (review, Nov 9): the votes are ARCHIVED, not thrown away
+      // (cut-vote-archive.ts), and a cut naming the piece an undo of it
+      // removed is that cut's Redo: the piece comes back (step 0) and the
+      // first piece gets back the votes it had when the cut was undone.
       const p = event.payload as EventPayloads['cell.audio.cut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
@@ -2483,6 +2525,36 @@ case 'cell.audio.attach': {
         throw new Error(`cell.audio.cut event ${event.id} has a malformed payload`)
       }
       const atMs = Math.round(p.atMs)
+      const cutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      // 0. AQU-2492: the Redo. The piece is a removed piece of this take,
+      //    over the same bytes, starting at the cut and running to the take's
+      //    end — exactly as the undo left it — and the cut is one this take
+      //    can take now. It comes back as it was (name, places, level, its
+      //    own votes), chosen as the take is, and owned by this event, so
+      //    the gate below reads it as landed.
+      //    Finding 7 (review, Nov 9): and the take still has the volume and
+      //    fades the Undo gave it back. A level changed on the joined take
+      //    since is work the Redo would split wrongly (the second piece would
+      //    come back at the old level), so the Redo changes nothing.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio b SET deleted = 0, selected = a.selected, event_id = ?
+               FROM cell_audio a
+              WHERE b.project_id = ? AND b.file_id = ? AND b.cell_id = ? AND b.audio_id = ?
+                AND b.deleted = 1
+                AND a.project_id = b.project_id AND a.file_id = b.file_id AND a.cell_id = b.cell_id
+                AND a.audio_id = ? AND a.deleted = 0 AND a.role = 'dub'
+                AND b.piece_of = COALESCE(a.piece_of, a.audio_id)
+                AND b.url = a.url
+                AND b.trim_start_ms = ?
+                AND b.trim_end_ms IS NOT DISTINCT FROM a.trim_end_ms
+                AND ? >= COALESCE(a.trim_start_ms, 0) + ${CUT_MIN_PIECE_MS}
+                AND ? <= COALESCE(a.trim_end_ms, a.duration_ms) - ${CUT_MIN_PIECE_MS}
+                AND ${CUT_LEVEL_UNCHANGED_SQL}`,
+          )
+          .bind(event.id, event.projectId, event.fileId, event.cellId, p.newAudioId, p.audioId, atMs, atMs, atMs, ...cutLevelUnchangedBinds(cutEvent)),
+      )
       stmts.push(
         db
           .prepare(
@@ -2522,6 +2594,18 @@ case 'cell.audio.attach': {
                           WHERE n.project_id = ? AND n.file_id = ? AND n.cell_id = ?
                             AND n.audio_id = ? AND n.event_id = ?)`
       const cutLandedBinds = [event.projectId, event.fileId, event.cellId, p.newAudioId, event.id]
+      // AQU-2492: the take's votes are kept with the cut, for its Undo, and
+      // (finding 7) its volume and fades with them — read here, before any
+      // statement below changes the take (AQU-2494 moves its fade-out to the
+      // second piece in the next one).
+      // Finding 12 (same review): never on a rebuild. A cut the live write
+      // archived has its row already; a cut made before this worker archived
+      // nothing, and archiving it now would keep TODAY's votes on the first
+      // piece (its first half's among them) as the take's from before the
+      // cut. Its Undo then gives back nothing, which is what was kept.
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'whole', gate: cutLanded, gateBinds: cutLandedBinds }))
+      }
       stmts.push(
         db
           .prepare(
@@ -2541,6 +2625,7 @@ case 'cell.audio.attach': {
       )
       // Both halves start unvalidated (Sam, 2026-10-12): what a reviewer
       // approved was the whole take, and neither half is that any more.
+      // AQU-2492: kept with the cut (above), for its Undo — then taken off.
       stmts.push(
         db
           .prepare(
@@ -2550,6 +2635,98 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...cutLandedBinds),
       )
+      // AQU-2492: a Redo gives the first piece the votes it had when the cut
+      // was undone. A new cut has no such archive, so its halves start bare.
+      stmts.push(cutVoteRestoreStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'first', gate: cutLanded, gateBinds: cutLandedBinds }))
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
+    }
+
+    case 'cell.audio.uncut': {
+      // AQU-2492 (review, Nov 9; Sam's call the same day): undo a cut, as ONE
+      // event. See the payload doc in types.ts and cut-vote-archive.ts.
+      //   1-3. Keep the first piece's votes with this undo (for a Redo), take
+      //        them off, and give the take back the votes the cut archived.
+      //   4.   Remove the piece (soft: its votes stay on it, for a Redo).
+      //   5-6. Give the first piece its whole window (and name) back.
+      // AQU-2492 (review, Nov 9), finding 16: all of it only when the two are
+      // the halves of one recorded cut of this take (RECORDED_CUT_PAIR_SQL);
+      // any other pair changes nothing.
+      const p = event.payload as EventPayloads['cell.audio.uncut']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.uncut event ${event.id} is missing fileId or cellId`)
+      }
+      if (
+        typeof p.audioId !== 'string' ||
+        typeof p.pieceAudioId !== 'string' ||
+        p.pieceAudioId === '' ||
+        p.pieceAudioId === p.audioId
+      ) {
+        throw new Error(`cell.audio.uncut event ${event.id} has a malformed payload`)
+      }
+      const uncutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      // AQU-2492 (review, Nov 9), finding 16: every statement below runs only
+      // when the two are the halves of one recorded cut of this take. Checked
+      // afresh by each statement; none of them changes what it reads (the
+      // piece may be removed, and the take stays live).
+      // Finding 3: and the approvals move whenever the window does. They used
+      // to move only while the piece was live, so a colleague's delete of it
+      // just before the Undo landed joined the take with its FIRST HALF's
+      // approval on it and none of its own back. The joined take is the audio
+      // the whole take's reviewers heard: it gets their approvals back, and
+      // the first half's are kept with this undo, for a Redo.
+      const cutPair = RECORDED_CUT_PAIR_SQL
+      const cutPairBinds = recordedCutPairBinds(uncutEvent, p.audioId, p.pieceAudioId)
+      const votesGate = cutPair
+      const votesGateBinds = cutPairBinds
+      // Finding 12: the live write's archive only, never a rebuild's (see the cut).
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
+      }
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cell_audio_validators
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${votesGate}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...votesGateBinds),
+      )
+      stmts.push(cutVoteRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: votesGate, gateBinds: votesGateBinds }))
+      // Finding 7 (same review): and the volume and fades it had before the
+      // cut, kept with the same archive (AQU-2494 moves the fade-out to the
+      // second piece, so the first piece's level is not the take's). A cut
+      // that kept none leaves the level as it is.
+      stmts.push(cutLevelRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: cutPair, gateBinds: cutPairBinds }))
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET deleted = 1, selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.pieceAudioId, ...cutPairBinds),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
+          )
+          .bind(p.trimStartMs ?? null, p.trimEndMs ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
+      )
+      if (p.rename) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET label = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND ${cutPair}`,
+            )
+            .bind(p.rename.label ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
+        )
+      }
       stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
       return ['cell_audio', 'cell_audio_validators']
     }
@@ -3496,6 +3673,50 @@ case 'cell.audio.attach': {
           )
         }
         // Non-number, non-null values (corrupt replay data) are skipped.
+      }
+      // AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+      // recordings — how long the line lasts while it has no take, made
+      // smaller than its natural length by dragging the next take earlier
+      // against it. It is the LINE's (nothing is stored on the dragged take),
+      // and it is PER LANGUAGE, because whether a line is recorded is: so the
+      // key carries the language the event names — plain for the default one,
+      // `recordings_room_ms:<tag>` for any other. The same per-key merge as
+      // the keys above, so two people closing two lines' rooms, or a room and
+      // a subtitle span, never clobber each other. The key is BOUND, never
+      // written into the SQL: a language tag is a string someone chose.
+      // Number (≥ 0, 0 included: "no room" is not "no room stored") sets;
+      // null clears, back to the natural length; anything else is skipped.
+      // AQU-2432 (review, Nov 9): refused for that field only — negative, not
+      // a number, or above a day (which failed the bigint cast, and with it the
+      // whole batch) is skipped, and the keys above still land
+      // (line-room-authority.ts).
+      const room = lineRoomToStore(p.recordingsRoomMs)
+      if (room !== undefined) {
+        const roomKey = lineRoomMetadataKey(laneOfAudioEvent(event.payload))
+        if (room !== null) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(?::text, ?::bigint)
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, room, event.projectId, event.fileId, event.cellId),
+          )
+        } else {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = CASE
+                   WHEN metadata IS NULL THEN NULL
+                   ELSE metadata - ?::text
+                 END
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
       return ['cells']
     }

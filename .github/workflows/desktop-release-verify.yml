@@ -1,0 +1,110 @@
+name: desktop-release-verify
+
+# Proves a desktop release is safe to offer to installed apps:
+# scripts/desktop-release-verify.ts checks that the update feed carries every
+# platform, that every update file is signed by the key the shell trusts, and
+# that this OS's build installs and starts. docs/DESKTOP-RELEASES.md says what
+# each check is for.
+#
+# Three callers:
+# - tauri-release.yml, between building a release and promoting it. It passes
+#   `staged_run`: the release is still a draft, which only a token with write
+#   access can read, so that workflow stages the files as a run artifact and
+#   this one never holds such a token.
+# - A pull request that changes the verifier. It checks the latest published
+#   release, so a verifier that would wrongly fail (or wrongly pass) the next
+#   release shows up on the PR that broke it, on all three operating systems.
+# - "Run workflow", to check any published tag by hand.
+#
+# No signing secret is reachable here, and no job enters an Environment.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      staged_run:
+        description: Run id whose `desktop-release-assets` artifact holds the draft's files
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to verify (default, the latest)
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - "scripts/desktop-release-verify.ts"
+      - "scripts/lib/desktop-release.ts"
+      - ".github/workflows/desktop-release-verify.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    # Fork PRs are skipped, as in tauri-build.yml: this job starts a downloaded app.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15 is Apple Silicon: it starts the arm64 build and checks the
+        # Intel build's signatures.
+        os: [macos-15, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # What an AppImage needs from the host to open a window, plus a display.
+      - name: Install Linux runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2 libfuse2
+
+      - name: Pick the release
+        id: pick
+        shell: bash
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          tag="$TAG_INPUT"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --json tagName -q .tagName)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Verifying $tag"
+
+      - name: Fetch the staged draft
+        if: inputs.staged_run != ''
+        shell: bash
+        env:
+          STAGED_RUN: ${{ inputs.staged_run }}
+        run: gh run download "$STAGED_RUN" -n desktop-release-assets -D "$RUNNER_TEMP/release"
+
+      - name: Verify
+        shell: bash
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+          STAGED_RUN: ${{ inputs.staged_run }}
+        run: |
+          if [ -n "$STAGED_RUN" ]; then
+            pnpm exec tsx scripts/desktop-release-verify.ts "$TAG" --launch --dir "$RUNNER_TEMP/release"
+          else
+            pnpm exec tsx scripts/desktop-release-verify.ts "$TAG" --launch
+          fi

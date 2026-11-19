@@ -22,6 +22,7 @@ import {
   pauseQueue,
   resumeQueue,
   seekQueueToTime,
+  setProgrammeFilm,
   setQueueTimingMode,
   skipBack,
   skipForward,
@@ -439,5 +440,170 @@ describe("a line with only its original is never skipped (Sam, Nov 9)", () => {
     expect(linesPlaybackStopsAt([bookLine("b1"), bookLine("b2")], queuePlaybackAsk()).size).toBe(0)
     expect(linesPlaybackStopsAt([bookLine("b1"), bookLine("b2")], { ...queuePlaybackAsk(), film: null }).size > 0).toBe(false)
     expect(linesHaveAnythingOfTheirOwnToPlay([bookLine("b1"), bookLine("b2")])).toBe(false)
+  })
+})
+
+// AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM. Dragging the next take
+// earlier against a line nobody has recorded makes that line's room smaller,
+// down to nothing (lib/timeline/line-room). Playback follows the room: the
+// line lasts its room, and a line with no room has no time to play at all.
+describe("an unrecorded line's room, following the recordings (AQU-2432)", () => {
+  // b1 recorded 2 s → [0, 2); b2 unrecorded, given `roomMs` of its 1.5 s; b3 recorded 3 s.
+  const withRoom = (roomMs: number) => [
+    bookLine("b1", 2_000),
+    { ...bookLine("b2"), recordingsRoomMs: roomMs } as CellData,
+    bookLine("b3", 3_000),
+  ]
+
+  describe("with Skip lines with nothing to play ON", () => {
+    it("a line with a smaller room is stepped over as always, and the next take starts where its room ends", async () => {
+      startQueue(ctxFor(withRoom(500)), 0)
+      await wait()
+      expect(getQueueProgress().duration).toBe(5.5)
+      dubEl("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBe(2.5)
+    })
+
+    it("a line with no room: the next take follows the one before it at once", async () => {
+      startQueue(ctxFor(withRoom(0)), 0)
+      await wait()
+      expect(getQueueProgress().duration).toBe(5)
+      dubEl("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBe(2)
+      expect(dubEl("b3")!.paused).toBe(false)
+    })
+  })
+
+  describe("with Skip lines with nothing to play OFF", () => {
+    beforeEach(() => {
+      setSkipSilentLinesPref(false)
+    })
+
+    it("the line plays through in silence for its ROOM, not its natural length", async () => {
+      startQueue(ctxFor(withRoom(500)), 0)
+      await wait()
+      dubEl("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().currentTime).toBe(2)
+      await wait(300)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      await wait(250)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBe(2.5)
+    })
+
+    it("a line with no room has no time to play: it is never the line playing, and the next take follows at once", async () => {
+      const playing: string[] = []
+      startQueue(ctxFor(withRoom(0)), 0)
+      await wait()
+      dubEl("b1")!.tick(2)
+      // Every state on the way, not only where it settles.
+      for (let i = 0; i < 6; i++) {
+        await Promise.resolve()
+        const s = getQueueState()
+        if (s.kind === "playing") playing.push(s.cellId)
+      }
+      await wait()
+      const s = getQueueState()
+      if (s.kind === "playing") playing.push(s.cellId)
+      expect(playing).not.toContain("b2")
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBe(2)
+      expect(dubEl("b3")!.paused).toBe(false)
+    })
+
+    it("next and previous line step over a line with no room", async () => {
+      startQueue(ctxFor(withRoom(0)), 0)
+      await wait()
+      skipForward()
+      await wait()
+      expect(getQueueState()).toMatchObject({ cellId: "b3" })
+      skipBack()
+      await wait()
+      expect(getQueueState()).toMatchObject({ cellId: "b1" })
+    })
+
+    it("Play all from the top passes a first line with no room", async () => {
+      startQueue(ctxFor([{ ...bookLine("b0"), recordingsRoomMs: 0 } as CellData, bookLine("b1", 2_000)]), 0)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+      expect(getQueueProgress().currentTime).toBe(0)
+    })
+  })
+})
+
+// The merge of dev into the film bundle (Nov 19): dev's AQU-2432 rule, "a line
+// squeezed to no room is never a stop", holds with the bundle's own rules for
+// what playback stops at: "Play selected" (`PlayContext.only`) and a linked
+// film behind the lines (a line the film plays behind is played whatever Skip
+// says). A line with no room has no time of its own, film or no film.
+describe("a line with no room, in Play selected and under a linked film (the merge, Nov 19)", () => {
+  const withRoom = (roomMs: number) => [
+    bookLine("b1", 2_000),
+    { ...bookLine("b2"), recordingsRoomMs: roomMs } as CellData,
+    bookLine("b3", 3_000),
+  ]
+  const filmOver = (cells: CellData[]) => ({ endSec: 60, cellIds: new Set(cells.map((c) => c.id)) })
+
+  afterEach(() => {
+    setProgrammeFilm(null)
+  })
+
+  it("Play selected with the line chosen: next line steps over it, Skip off", async () => {
+    setSkipSilentLinesPref(false)
+    const cells = withRoom(0)
+    startQueue({ ...ctxFor(cells), only: new Set(["b1", "b2", "b3"]) }, 0)
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b1" })
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b3" })
+    skipBack()
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b1" })
+  })
+
+  it("Play selected still stops only at the chosen lines", async () => {
+    setSkipSilentLinesPref(false)
+    const cells = withRoom(500)
+    startQueue({ ...ctxFor(cells), only: new Set(["b1", "b3"]) }, 0)
+    await wait()
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b3" })
+  })
+
+  it("under a linked film, next line steps over it, Skip on", async () => {
+    const cells = withRoom(0)
+    setProgrammeFilm(filmOver(cells))
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b3" })
+  })
+
+  it("under a linked film, a line WITH room is still a stop, Skip on", async () => {
+    const cells = withRoom(500)
+    setProgrammeFilm(filmOver(cells))
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b2" })
+  })
+
+  it("the stops the Play buttons count leave it out, film or Skip off", () => {
+    const cells = withRoom(0)
+    const film = filmOver(cells)
+    expect([...linesPlaybackStopsAt(cells, { ...queuePlaybackAsk(), film, skipSilent: true })]).toEqual(["b1", "b3"])
+    expect([...linesPlaybackStopsAt(cells, { ...queuePlaybackAsk(), film: null, skipSilent: false })]).toEqual(["b1", "b3"])
+    // With room it is counted, as before.
+    expect(linesPlaybackStopsAt(withRoom(500), { ...queuePlaybackAsk(), film, skipSilent: true }).has("b2")).toBe(true)
   })
 })

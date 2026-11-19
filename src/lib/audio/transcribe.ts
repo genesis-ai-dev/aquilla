@@ -21,10 +21,12 @@ import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { emitCellAudioAttach, InsufficientRoleError } from "@/lib/sync/events-emit"
 import { denialMessage } from "@/lib/permissions/denial"
+import { injectOptimisticAudioWords } from "@/lib/audio/audio-attachments-bus"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
+import type { TranscriptionModel } from "./transcription-model"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -66,6 +68,12 @@ export interface TranscriptionOptions {
   /** A hosted zero-shot run is waiting for the model to start. */
   onWaitingForModel?: (waiting: boolean) => void
   model?: string
+  /** Hosted only: this run's hosted model, in place of the account's
+   *  Preferences choice (`model` above is the on-device model id). */
+  hostedModel?: TranscriptionModel
+  /** Hosted only: what runs, silently, when a zero-shot `hostedModel` cannot
+   *  (see `transcribeHosted`'s `quietFallback`). */
+  hostedQuietFallback?: TranscriptionModel
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
@@ -271,6 +279,8 @@ export async function transcribeAudio(
       language: opts.languageTag ?? opts.language,
       zeroShot: opts.zeroShot,
       onWaitingForModel: opts.onWaitingForModel,
+      ...(opts.hostedModel ? { model: opts.hostedModel } : {}),
+      ...(opts.hostedQuietFallback ? { quietFallback: opts.hostedQuietFallback } : {}),
       ...(opts.onRateLimited ? { onRateLimited: opts.onRateLimited } : {}),
     }), kept.toWindowSec)
   }
@@ -399,6 +409,12 @@ export interface TranscribeCellArgs {
   /** The batch's "Use automatic": this run skips zero-shot whatever the
    *  account chose. */
   forceAutoModel?: boolean
+  /** Hosted only: this run's model, in place of the account's Preferences
+   *  choice — the Transcribe lens's Fast/Smart picker. */
+  hostedModel?: TranscriptionModel
+  /** Hosted only: what a zero-shot `hostedModel` falls back to, with no
+   *  prompt or toast (see `transcribeHosted`'s `quietFallback`). */
+  hostedQuietFallback?: TranscriptionModel
   /** Two-step transcription: what ASR heard (before learned corrections), the
    *  transcript that was stored, and the model that ran. Called once, after
    *  the attach is queued. */
@@ -592,6 +608,8 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         setTranscribeStatus(audioId, waiting ? { kind: "transcribing", waiting: "model" } : { kind: "transcribing" })
       },
       askAgain,
+      ...(args.hostedModel ? { hostedModel: args.hostedModel } : {}),
+      ...(args.hostedQuietFallback ? { hostedQuietFallback: args.hostedQuietFallback } : {}),
       trim,
       ...(split ? { keep: split.keep } : {}),
       // Read only if the held clip went away in the meantime.
@@ -659,6 +677,7 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
       // Decision 11: the take was undone while it was being transcribed. A
       // re-attach would bring it back (see undone-takes.ts), so the timings
       // stay in memory only.
+      const asrHeard = raw.text.trim()
       if (!wasTakeUndone(audioId)) await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
@@ -673,6 +692,13 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         // why the inference cannot be trusted once a third slot exists.
         slot: slotArg ?? (audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings,
+        // AQU-2491 (review, Nov 9): the words land on the take that was chosen
+        // when this run STARTED, and a run can take a while (a cold model, a
+        // long take, a rate-limit wait, a place in "Transcribe all"). By now
+        // the person may have recorded a newer take or deleted this one, so
+        // the write adds the words and chooses nothing: the line keeps
+        // playing what it plays, and a deleted take stays deleted.
+        wordsOnly: true,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them
         // too (SUB-49).
@@ -703,6 +729,15 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         // the re-attach can never deselect another language's take.
         ...(!isSourceSegment && targetLang ? { targetLang } : {}),
         author: session?.username ?? "local",
+      }).then((eventId) => {
+        // AQU-2654: the take's words, on every surface showing it, from the
+        // write just queued — not from a flush and a re-read of the file. A
+        // fresh transcription is never an AI cleanup, so the mark goes.
+        injectOptimisticAudioWords(cell.fileId, cell.id, audioId, {
+          timings,
+          ...(asrHeard ? { asrText: asrHeard, asrModel: raw.model ?? "unknown" } : {}),
+          transcriptAi: null,
+        }, eventId)
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
         // The review (Nov 12): a role refusal in the app's plain role

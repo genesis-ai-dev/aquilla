@@ -45,6 +45,8 @@ import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 /** Coalescing window for outbox-driven refetches (the outbox notifies on every
  *  mutation app-wide; we only care that OUR file's events moved). */
 const OUTBOX_REFETCH_DEBOUNCE_MS = 300
+/** AQU-2654: the longest a gathered re-read waits while requests keep coming. */
+const CONFIRM_READ_MAX_WAIT_MS = 2_000
 
 /**
  * AQU-2132: backoff for a read that could not answer — a sync-token mint that
@@ -103,6 +105,26 @@ function applyShadow(
     const selectedBySlot = { ...slotSelections(base) }
     delete selectedBySlot[shadow.slot]
     return withProjections({ ...base, selectedBySlot })
+  }
+  if (shadow.kind === "words") {
+    // AQU-2654: a patch over a clip the read holds. With no such clip (deleted
+    // meanwhile, or another lane's take) there is nothing to put words on.
+    const att = base.attachments[shadow.audioId]
+    if (!att) return base
+    const { timings, asrText, asrModel, transcriptAi } = shadow.words
+    return {
+      ...base,
+      attachments: {
+        ...base.attachments,
+        [shadow.audioId]: {
+          ...att,
+          ...(asrText !== undefined ? { asrText } : {}),
+          ...(asrModel !== undefined ? { asrModel } : {}),
+          transcriptAi,
+        },
+      },
+      audioTimings: { ...(base.audioTimings as Record<string, unknown>), [shadow.audioId]: timings },
+    }
   }
   if (shadow.kind === "remove") {
     const attachments = { ...base.attachments }
@@ -164,6 +186,17 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   if (shadow.kind === "remove") {
     // The read omits deleted rows, so absence IS the confirmation.
     return !entry?.attachments[shadow.audioId]
+  }
+  if (shadow.kind === "words") {
+    const server = entry?.attachments[shadow.audioId]
+    // No such clip on the read: nothing is being asserted any more.
+    if (!entry || !server) return true
+    const { timings, asrText, transcriptAi } = shadow.words
+    if (asrText !== undefined && (server.asrText ?? "") !== asrText) return false
+    if ((server.transcriptAi?.at ?? null) !== (transcriptAi?.at ?? null)) return false
+    const read = (entry.audioTimings as Record<string, unknown>)[shadow.audioId]
+    const words = Array.isArray(read) ? (read as Array<{ word?: unknown }>) : []
+    return words.length === timings.length && words.every((w, i) => w.word === timings[i].word)
   }
   if (!entry) return false
   const att = shadow.att
@@ -249,6 +282,11 @@ function keepShadow(
     // server), so continuing to hide it would assert a deletion that never
     // happened — and unlike an attach there is no attachment to badge, so the
     // lie would be silent. Letting the clip reappear IS the honest signal.
+    //
+    // AQU-2654: a failed WORDS write keeps the old rule too. The take is on the
+    // server with the words it had; painting the unsaved ones on would show a
+    // transcript nobody else can see. The Transcribe row reports the failure
+    // itself (TranscribeEditor watches its own writes in the outbox).
     if (status === "failed") return shadow.kind === "attach"
   }
   if (inLane && shadowConfirmed(entry, shadow)) return false
@@ -480,7 +518,11 @@ export function useFileAudioAttachments(
         // this lane's read; another lane's stay registered for that lane.
         let entry = map.get(cellId)
         for (const s of live) {
-          if (shadowInLane(s, lane)) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
+          if (!shadowInLane(s, lane)) continue
+          // Words for a clip this read does not hold add nothing, not even an
+          // empty entry for the cell.
+          if (s.kind === "words" && !entry?.attachments[s.audioId]) continue
+          entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
         }
         if (entry) map.set(cellId, entry)
       }
@@ -542,33 +584,101 @@ export function useFileAudioAttachments(
     [cancelRetry],
   )
 
-  // Refetch when a producer pokes this file's bus channel.
+  // ── When to read the file again ──────────────────────────────────────────
+  // Two things ask for it: a producer poking this file's bus channel (a local
+  // emit, or the echo of any `cell.audio.*` event applied on the server), and
+  // the outbox moving while this file has live overlays (an event of theirs
+  // was delivered, retried, or quarantined — the subscription fires on every
+  // outbox mutation app-wide).
+  //
+  // AQU-2654: both used to read at once, every time. Transcribing thirty rows
+  // re-read the whole file 46 times: once per enqueue ~300 ms later, once per
+  // echo. Now:
+  //   - An outbox move is only news when one of this file's overlay events has
+  //     LEFT the queue or failed. While they are all still queued the server
+  //     has nothing to say about them, so the read is skipped (the check is
+  //     one local IndexedDB read). An overlay not yet bound to its event
+  //     cannot be checked this way, so it still reads.
+  //   - While the only overlays in flight are WORDS on takes (transcript
+  //     writes — they paint themselves, and their echo carries nothing this
+  //     device does not already show), pokes are gathered with those outbox
+  //     moves into ONE read once things have been quiet for
+  //     OUTBOX_REFETCH_DEBOUNCE_MS, and at least every CONFIRM_READ_MAX_WAIT_MS
+  //     so somebody else's change is never held up for long. Any other poke
+  //     still reads at once, as before.
+  const confirmRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null
+    firstAt: number | null
+    poked: boolean
+  }>({ timer: null, firstAt: null, poked: false })
   useEffect(() => {
     if (!fileId) return
-    return subscribeAudioAttachments(fileId, () => {
-      void doFetch()
-    })
-  }, [fileId, doFetch])
+    const pending = confirmRef.current
+    let live = true
 
-  // The outbox moved (an event was delivered, retried, or quarantined). Only
-  // our own live overlays care, so gate on that and coalesce — this fires on
-  // every outbox mutation app-wide.
-  useEffect(() => {
-    if (!fileId) return
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const unsub = subscribeToOutbox(() => {
-      if (timer !== null) return
-      if (!fileHasLiveShadowEvents(fileId)) return
-      timer = setTimeout(() => {
-        timer = null
-        void doFetch()
-      }, OUTBOX_REFETCH_DEBOUNCE_MS)
+    /** Has an overlay's event left the queue or failed — or can it not be told? */
+    const overlayEventMoved = async (): Promise<boolean> => {
+      const queued: string[] = []
+      for (const list of getOptimisticShadows(fileId).values()) {
+        for (const s of list) {
+          if (s.phase === "queued" && s.eventId) queued.push(s.eventId)
+          else if (s.phase === "binding") return true
+        }
+      }
+      if (queued.length === 0) return true
+      const records = await getOutboxRecords(queued).catch(() => null)
+      return records === null || records.length !== queued.length || records.some((r) => r.status !== "pending")
+    }
+
+    const fire = () => {
+      const poked = pending.poked
+      pending.timer = null
+      pending.firstAt = null
+      pending.poked = false
+      void (async () => {
+        if (!poked && !(await overlayEventMoved())) return
+        if (live) void doFetchRef.current?.()
+      })()
+    }
+    const request = (poked: boolean) => {
+      const now = Date.now()
+      pending.firstAt ??= now
+      pending.poked ||= poked
+      if (pending.timer !== null) clearTimeout(pending.timer)
+      const wait = Math.min(OUTBOX_REFETCH_DEBOUNCE_MS, pending.firstAt + CONFIRM_READ_MAX_WAIT_MS - now)
+      pending.timer = setTimeout(fire, Math.max(0, wait))
+    }
+
+    /** Every overlay still in flight is words on a take (and there is one). */
+    const onlyWordsInFlight = (): boolean => {
+      let any = false
+      for (const list of getOptimisticShadows(fileId).values()) {
+        for (const s of list) {
+          if (s.phase === "settled") continue
+          if (s.kind !== "words") return false
+          any = true
+        }
+      }
+      return any
+    }
+
+    const unsubBus = subscribeAudioAttachments(fileId, () => {
+      if (onlyWordsInFlight()) request(true)
+      else void doFetchRef.current?.()
+    })
+    const unsubOutbox = subscribeToOutbox(() => {
+      if (fileHasLiveShadowEvents(fileId)) request(false)
     })
     return () => {
-      unsub()
-      if (timer !== null) clearTimeout(timer)
+      live = false
+      unsubBus()
+      unsubOutbox()
+      if (pending.timer !== null) clearTimeout(pending.timer)
+      pending.timer = null
+      pending.firstAt = null
+      pending.poked = false
     }
-  }, [fileId, doFetch])
+  }, [fileId])
 
   // Optimistic overlays: a local producer (recording / TTS / take select /
   // trim / delete) just changed something. The bus records the overlay; here we
@@ -579,6 +689,8 @@ export function useFileAudioAttachments(
       // AQU-1978: another lane's overlay is not painted on this lane's read.
       if (!shadowInLane(shadow, lane)) return
       setByCellId((prev) => {
+        // Words for a clip this read does not hold: nothing to paint.
+        if (shadow.kind === "words" && !prev.get(cellId)?.attachments[shadow.audioId]) return prev
         const next = new Map(prev)
         // A just-injected overlay is always in flight; the next fetch re-derives
         // its real state (including AQU-924's failed case) from the outbox.

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { useState } from "react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSidebar } from "./OrgSidebar"
@@ -7,7 +8,14 @@ import { OrgSidebar } from "./OrgSidebar"
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))
-vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
+// Counts sidebar renders: the sidebar draws the switcher on every render.
+const sidebarRendered = vi.hoisted(() => vi.fn())
+vi.mock("./OrgSwitcher", () => ({
+  OrgSwitcher: () => {
+    sidebarRendered()
+    return null
+  },
+}))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
@@ -160,6 +168,39 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
         "/orgs/2/assigned",
       ),
     )
+  })
+})
+
+describe("OrgSidebar is not redrawn by the page that holds it (AQU-2654)", () => {
+  it("a state change of the page re-renders the page, not the sidebar", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    // Every org page does this: builds <OrgSidebar /> in its own render.
+    function Page() {
+      const [typed, setTyped] = useState("")
+      return (
+        <>
+          <input aria-label="filter" value={typed} onChange={(event) => setTyped(event.target.value)} />
+          <OrgSidebar />
+        </>
+      )
+    }
+    render(
+      <MemoryRouter initialEntries={["/orgs/1/projects"]}>
+        <OrgProvider>
+          <Page />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole("link", { name: "Projects" })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId("org-sidebar-pending")).not.toBeInTheDocument())
+
+    sidebarRendered.mockClear()
+    for (const value of ["p", "pe", "per", "perf"]) {
+      fireEvent.change(screen.getByLabelText("filter"), { target: { value } })
+    }
+    expect(screen.getByLabelText("filter")).toHaveValue("perf")
+    expect(sidebarRendered).not.toHaveBeenCalled()
   })
 })
 

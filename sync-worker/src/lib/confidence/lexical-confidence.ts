@@ -4,7 +4,7 @@
 // validated?" — a confidence score derived from how closely a cell resembles
 // the project's *already-validated* cells. This module is the pure scoring
 // primitive; candidate retrieval (which validated cells to compare against)
-// is the caller's job (FTS5, see scoped-search.ts).
+// is the caller's job (Postgres full-text, see scoped-search.ts).
 //
 // One hop: confidence is measured against ground-truth validated cells only,
 // never against other cells' (predicted) confidence — so there is no recursion
@@ -13,8 +13,9 @@
 /**
  * Split text into comparable terms: lowercased maximal runs of Unicode letters
  * or digits. Drops punctuation (incl. the Devanagari danda ॥ / ।) and folds
- * case, approximating FTS5's unicode61 tokenizer closely enough for coverage
- * scoring (FTS only does candidate retrieval; the score is computed here).
+ * case, approximating the retrieval tokenizer closely enough for coverage
+ * scoring (full-text only does candidate retrieval; the score is computed
+ * here).
  */
 export function tokenizeForConfidence(raw: string): string[] {
   if (!raw) return []

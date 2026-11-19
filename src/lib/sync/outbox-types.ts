@@ -62,6 +62,8 @@ export type OutboxEventKind =
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
+  // AQU-2492: undo a cut, keeping the approvals (contributor, like the cut).
+  | "cell.audio.uncut"
   | "cell.audio.measure"
   // AQU-777: per-cell file attachments (screenshots / reference images).
   // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
@@ -182,6 +184,12 @@ export interface AiDraftProvenance {
    *  person chose this one — which option it was, out of how many. Absent on
    *  an ordinary single draft. */
   alternative?: { index: number; of: number }
+  /** AQU-2628: set when the lane's orthography rewrote the model's output on
+   *  its way to the cell — how many words the rules changed and how many
+   *  approved exceptions protected a word from them. Absent when the project
+   *  records no orthography, or when the draft was already in it. The model's
+   *  own text stays readable through `interventionId`. */
+  orthography?: { wordsConverted: number; exceptionsApplied: number }
   projectState: {
     sourceLanguage: string
     targetLanguage: string
@@ -579,6 +587,25 @@ export interface OutboxEventPayloads {
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
   }
+  /**
+   * AQU-2492 (review, Nov 9): UNDO a cut, as one event. The server removes
+   * `pieceAudioId` (the piece the cut made; it keeps its approvals, for a
+   * Redo), gives `audioId` its whole window and, with `rename`, its old name
+   * back, keeps the first piece's approvals with this undo, and gives the take
+   * back the approvals it had before the cut. A Redo is a `cell.audio.cut`
+   * naming the same `pieceAudioId` again. See sync-worker/src/events/types.ts.
+   */
+  "cell.audio.uncut": {
+    audioId: string
+    pieceAudioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+    rename?: { label: string | null }
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so
   // measuring an arbitrary take can never change which take is active.
@@ -729,7 +756,9 @@ export interface OutboxEventPayloads {
   // in the payload — only the two anchors are, and the navigator resolves the
   // run between them from the file's live cell order, so a cell inserted
   // inside the range is covered without a second write. Non-chain-mutating
-  // (parentId omitted).
+  // (parentId omitted). Changing who may do this (`milestoneFloor`) is a
+  // settings patch, not one of these events, so it does not rewrite a
+  // milestone or mark a translation stale.
   "file.milestone.set": {
     milestoneId: string
     name: string
@@ -876,6 +905,10 @@ export interface OutboxEventPayloads {
     /** Legacy absolute dub anchor. Still projected so historical events replay
      *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
+    /** AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+     *  recordings, in ms (≥ 0; 0 is "no room"), for the language `targetLang`
+     *  names. Null clears it (its natural length). See lib/timeline/line-room. */
+    recordingsRoomMs?: number | null
     /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

@@ -5,7 +5,7 @@ import {
 } from "./transcribe-hosted"
 import { categorizeAiError } from "./ai-error"
 import { setTranscriptionModel } from "./transcription-model"
-import { __resetZsWarmupForTests, type WarmupUi } from "./omni-warmup"
+import { __resetZsWarmupForTests, WARMUP_CAP_MS, WARMUP_POLL_MS, type WarmupUi } from "./omni-warmup"
 
 vi.mock("@/lib/frontier/auth", () => ({ AUTH_BASE: "http://identity" }))
 vi.mock("@/lib/sync/sync-worker-url", () => ({ syncWorkerHttpOrigin: () => "http://sync" }))
@@ -142,6 +142,8 @@ describe("hosted routing", () => {
     expect(hostedWindowSeconds("qwen3-asr", "yue")).toBe(60)
     expect(hostedWindowSeconds("omni-ctc", "en")).toBe(30)
     expect(hostedWindowSeconds("omni-zs", "en")).toBe(30)
+    // Fast is CTC 300M behind the same 40 s service limit.
+    expect(hostedWindowSeconds("omni-fast", "en")).toBe(30)
     // Automatic: whatever the server's routing will pick.
     expect(hostedWindowSeconds("auto", "es")).toBe(60) // Whisper
     expect(hostedWindowSeconds("auto", "yue")).toBe(60) // Qwen
@@ -283,6 +285,119 @@ describe("hosted routing", () => {
       await transcribeHosted(new Float32Array(16000), { jwt: "j", projectId: "p", username: "alice", language: "tpi" })
       expect(spy.mock.calls.some(([url]) => String(url).includes("/transcription-examples"))).toBe(false)
       expect(bodies(spy)[0]).not.toHaveProperty("model")
+    })
+  })
+
+  // The Transcribe lens has its own Fast/Smart picker. Its choice is for that
+  // run only: it must not be overruled by, or written into, the Preferences
+  // choice. And the lens transcribes on its own schedule, so a "Smart"
+  // (zero-shot) run that cannot happen must fall back without stopping to ask.
+  describe("a run's own model and quiet fallback", () => {
+    const cell = { cellId: "c1", fileId: "f1", lane: "tpi", getSyncToken: async () => "sync-token" }
+    const example = { cellId: "e1", fileId: "f1", text: "ahu", durationMs: 9000, audioUrl: "http://sync/a1" }
+    const ui = (): WarmupUi => ({ starting: vi.fn(), ready: vi.fn(), timedOut: vi.fn(async () => "auto" as const) })
+    afterEach(() => vi.useRealTimers())
+
+    function server(opts: {
+      examples?: unknown[]
+      status?: () => string
+      transcribe?: (model: string | undefined) => Response
+    } = {}) {
+      return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input)
+        if (url.includes("/transcription-examples")) return Response.json(opts.examples ?? [example])
+        if (url.includes("/status")) return Response.json({ state: opts.status?.() ?? "ready" })
+        if (url.endsWith("/warm")) return Response.json({ ok: true }, { status: 202 })
+        const model = (JSON.parse(String(init?.body)) as { model?: string }).model
+        return opts.transcribe?.(model) ?? transcript()
+      })
+    }
+    const smart = (extra: Partial<Parameters<typeof transcribeHosted>[1]> = {}) =>
+      transcribeHosted(new Float32Array(16000), {
+        jwt: "j", projectId: "p", username: "alice", language: "tpi", zeroShot: cell,
+        model: "omni-zs", quietFallback: "omni-fast", warmupUi: ui(), ...extra,
+      })
+    const expectQuiet = () => {
+      expect(toasts.noExamples).not.toHaveBeenCalled()
+      expect(toasts.disabled).not.toHaveBeenCalled()
+    }
+
+    it("the run's model wins over the stored preference, and leaves it alone", async () => {
+      setTranscriptionModel("alice", "whisper")
+      const spy = server()
+      await transcribeHosted(new Float32Array(16000), {
+        jwt: "j", projectId: "p", username: "alice", language: "tpi", model: "omni-fast",
+      })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-fast"])
+      // The next run without an override is Preferences' choice again.
+      await transcribeHosted(new Float32Array(16000), { jwt: "j", projectId: "p", username: "alice", language: "tpi" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-fast", "whisper"])
+    })
+
+    it("runs zero-shot when it can: the fallback is not a replacement", async () => {
+      setTranscriptionModel("alice", "whisper")
+      const spy = server()
+      await smart()
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-zs"])
+    })
+
+    it("with no cell to learn from, runs the fallback instead of the automatic model", async () => {
+      const spy = server()
+      await smart({ zeroShot: undefined })
+      expect(spy.mock.calls.some(([url]) => String(url).includes("/transcription-examples"))).toBe(false)
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-fast"])
+      expectQuiet()
+    })
+
+    it("with no examples, runs the fallback without asking", async () => {
+      const spy = server({ examples: [] })
+      await expect(smart()).resolves.toMatchObject({ text: "w" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-fast"])
+      expectQuiet()
+    })
+
+    it("when the server finds no examples, runs the fallback without asking", async () => {
+      const spy = server({
+        transcribe: model => model === "omni-zs" ? Response.json({ error: "zs_no_examples" }, { status: 400 }) : transcript(),
+      })
+      await expect(smart()).resolves.toMatchObject({ text: "w" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-zs", "omni-fast"])
+      expectQuiet()
+    })
+
+    it("when the org has turned zero-shot off, runs the fallback with no toast", async () => {
+      const spy = server({
+        transcribe: model => model === "omni-zs" ? Response.json({ error: "zero_shot_disabled" }, { status: 403 }) : transcript(),
+      })
+      await expect(smart()).resolves.toMatchObject({ text: "w" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-zs", "omni-fast"])
+      expectQuiet()
+    })
+
+    it("when the person gives up on the warm-up, runs the fallback, not the automatic model", async () => {
+      vi.useFakeTimers()
+      const spy = server({ status: () => "cold" })
+      const result = smart()
+      await vi.advanceTimersByTimeAsync(WARMUP_CAP_MS + WARMUP_POLL_MS)
+      await expect(result).resolves.toMatchObject({ text: "w" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-fast"])
+      expectQuiet()
+    })
+
+    it("when the model goes cold mid-run and the person gives up, runs the fallback", async () => {
+      vi.useFakeTimers()
+      // Ready at the first check, then the server answers asr_warming and the
+      // model never comes back.
+      let checks = 0
+      const spy = server({
+        status: () => (checks++ === 0 ? "ready" : "cold"),
+        transcribe: model => model === "omni-zs" ? Response.json({ error: "asr_warming" }, { status: 503 }) : transcript(),
+      })
+      const result = smart()
+      await vi.advanceTimersByTimeAsync(WARMUP_CAP_MS + WARMUP_POLL_MS)
+      await expect(result).resolves.toMatchObject({ text: "w" })
+      expect(bodies(spy).map(body => body.model)).toEqual(["omni-zs", "omni-fast"])
+      expectQuiet()
     })
   })
 })

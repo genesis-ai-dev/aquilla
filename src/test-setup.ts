@@ -8,6 +8,7 @@ import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
 import { resetLoadedPersonPrefsForTests } from "@/lib/prefs/person-prefs-reset"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { setPrefilterMode } from "@/lib/terminology/prefilter"
 import {
   createOffMachineFetchGuard,
   takeOffMachineRequestViolations,
@@ -18,6 +19,12 @@ import {
 // failed correct tests on a loaded machine. The default onTimeout stays, so a
 // stalled wait still prints the DOM.
 configure({ asyncUtilTimeout: STALL_WATCHDOG_MS })
+
+// AQU-2654: the terminology matcher skips the regex of a concept its prefilter
+// says cannot match. Under test, every such skip is checked against the regex
+// and throws if the regex would have matched — so each matcher, rule-engine
+// and editor test in the suite is also a parity test for the prefilter.
+setPrefilterMode("verify")
 
 // English ships with the app, so a test that renders English needs no catalog.
 // Installing every catalog here (AQU-2090) was 47% of the CI unit job: 15 MB of

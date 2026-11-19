@@ -32,6 +32,7 @@ export default defineConfig({
       "lib/listening-pids.test.ts",
       // node:crypto generateKeyPairSync (ed25519) — the browser shim has none.
       "lib/desktop-bundle.test.ts",
+      "lib/desktop-release.test.ts",
     ],
     passWithNoTests: false,
   },

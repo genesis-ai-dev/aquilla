@@ -3,20 +3,21 @@ import { events } from "../schema"
 
 const at = new Date("2026-10-05T12:00:00Z")
 
-const queued = (id: string, cellId: string, text: string) =>
-  events.eventQueued({
-    id,
-    projectId: "proj1",
-    fileId: "file1",
-    cellId,
-    kind: "target.cell.commit",
-    payload: { html: `<p>${text}</p>`, text },
-    parentId: `srv-${cellId}`,
-    author: "translator@example.test",
-    schemaVersion: 1,
-    clientTs: at,
-    createdAt: at,
-  })
+const queuedRow = (id: string, cellId: string, text: string) => ({
+  id,
+  projectId: "proj1",
+  fileId: "file1",
+  cellId,
+  kind: "target.cell.commit",
+  payload: { html: `<p>${text}</p>`, text },
+  parentId: `srv-${cellId}`,
+  author: "translator@example.test",
+  schemaVersion: 1,
+  clientTs: at,
+  createdAt: at,
+})
+
+const queued = (id: string, cellId: string, text: string) => events.eventQueued(queuedRow(id, cellId, text))
 
 const sourceRow = (cellId: string, sequenceIndex: number) => ({
   cellId,
@@ -68,7 +69,7 @@ export function buildSampleSession() {
     events.syncCursorSet({ projectId: "proj1", fileId: "file2", serverSeq: 17, projectEpoch: 1 }),
     events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: at, queueDepth: 0 }),
 
-    // q1, q5, q6 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
+    // q1, q5, q6, q7 sent, q2 mid-flush, q3 refused (403), q4 and q8 waiting; q2–q4 and q8 must survive every later build.
     queued("q1", "GEN 1:1", "En el principio creó Dios"),
     queued("q2", "GEN 1:2", "Y la tierra estaba desordenada"),
     queued("q3", "EXO 1:1", "Estos son los nombres"),
@@ -78,6 +79,8 @@ export function buildSampleSession() {
     events.eventQueueStatusSet({ id: "q1", status: "flushing" }),
     events.eventDequeued({ id: "q1" }),
     events.eventsDequeued({ ids: ["q5", "q6"] }),
+    events.eventsQueued({ rows: [queuedRow("q7", "GEN 1:2", "y el Espíritu"), queuedRow("q8", "EXO 1:1", "Estos son los nombres de")] }),
+    events.eventDequeued({ id: "q7" }),
     events.eventQueueStatusSet({ id: "q2", status: "flushing" }),
     events.eventQueueStatusSet({ id: "q3", status: "failed" }),
 

@@ -29,6 +29,11 @@ export interface UseExactUserLookup {
  * visibility scope" from "truly no such user" — instead of falsely asserting
  * the account doesn't exist and steering the operator away.
  *
+ * AQU-2576: with a `projectId`, the typed text may also be an email address —
+ * the common case when a project owner has been given a reviewer's address and
+ * not their handle. The resolved record is just `{ id, username }`, so a hit
+ * reveals the account's name and nothing else about it.
+ *
  * Pass `enabled=false` (e.g. while the scoped search is still running, has
  * hits, or the input is too short) to skip the round-trip entirely. This keeps
  * the scoped dropdown's enumeration surface unchanged (AQU-321/AQU-625): the
@@ -37,6 +42,13 @@ export interface UseExactUserLookup {
 export function useExactUserLookup(
   username: string,
   enabled: boolean,
+  /**
+   * AQU-2576: the project the caller is staffing. When set, the typed text may
+   * be an EMAIL and the server resolves it to the matching account — gated to
+   * callers who can already add members to that project. Omit on surfaces with
+   * no single project in hand (the lookup stays username-only there).
+   */
+  projectId?: string | null,
 ): UseExactUserLookup {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -58,7 +70,7 @@ export function useExactUserLookup(
     const seq = ++seqRef.current
     let alive = true
     setState({ status: "checking", user: null, forUsername: trimmed })
-    lookupUser(jwt, trimmed)
+    lookupUser(jwt, trimmed, projectId ?? null)
       .then((user) => {
         if (!alive || seq !== seqRef.current) return
         setState({
@@ -76,7 +88,7 @@ export function useExactUserLookup(
     return () => {
       alive = false
     }
-  }, [enabled, jwt, trimmed])
+  }, [enabled, jwt, trimmed, projectId])
 
   return state
 }

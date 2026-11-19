@@ -1,5 +1,5 @@
 // The hosted model picker (spec §2/§6): Automatic, Whisper, Qwen3-ASR,
-// Omnilingual, and the opt-in Omnilingual Zero-Shot. Each named model says
+// Omnilingual, Omnilingual fast, and the opt-in Omnilingual Zero-Shot. Each named model says
 // whether it knows the project's language and lists every language it knows.
 //
 // Preferences is not inside a project, so the project comes from `?project=`
@@ -39,6 +39,7 @@ const ROWS: ReadonlyArray<{ model: TranscriptionModel; label: MessageKey; descri
   { model: "whisper", label: "settings.transcription.model.whisper", description: "settings.transcription.model.whisperDescription" },
   { model: "qwen3-asr", label: "settings.transcription.model.qwen", description: "settings.transcription.model.qwenDescription" },
   { model: "omni-ctc", label: "settings.transcription.model.omni", description: "settings.transcription.model.omniDescription" },
+  { model: "omni-fast", label: "settings.transcription.model.omniFast", description: "settings.transcription.model.omniFastDescription" },
   { model: "omni-zs", label: "settings.transcription.model.zeroShot", description: "settings.transcription.model.zeroShotDescription" },
 ]
 
@@ -107,7 +108,9 @@ export function TranscriptionModelPicker() {
     if (!tag) return null
     if (row === "whisper") return toWhisperCode(tag) !== undefined
     if (row === "qwen3-asr") return toQwenCode(tag) !== undefined
-    if (row === "omni-ctc") return omniCodes ? toOmniCode(tag, omniCodes) !== undefined : null
+    // Fast is the small model of the same Omnilingual CTC family: the same
+    // languages. Its row has the support line but not a second 1,600-row list.
+    if (row === "omni-ctc" || row === "omni-fast") return omniCodes ? toOmniCode(tag, omniCodes) !== undefined : null
     return null
   }
 

@@ -211,3 +211,21 @@ describe("ExportDialog — the hidden-cell note (AQU-1423)", () => {
     expect(screen.queryByText(/keep their original text/i)).toBeNull()
   })
 })
+
+describe("ExportDialog — the Word export's target language (AQU-2539)", () => {
+  it("hands the lane's language code to the Word exporter", async () => {
+    render(<ExportDialog {...BASE} targetLanguageCode="fr-FR" />)
+    clickPrimaryDownload()
+    await waitFor(() => expect(mockDocx).toHaveBeenCalledTimes(1))
+    const [, , options] = mockDocx.mock.calls[0] as [unknown, unknown, { targetLanguage?: string | null }]
+    expect(options.targetLanguage).toBe("fr-FR")
+  })
+
+  it("hands no language when the lane names no code", async () => {
+    render(<ExportDialog {...BASE} />)
+    clickPrimaryDownload()
+    await waitFor(() => expect(mockDocx).toHaveBeenCalledTimes(1))
+    const [, , options] = mockDocx.mock.calls[0] as [unknown, unknown, { targetLanguage?: string | null }]
+    expect(options.targetLanguage ?? null).toBeNull()
+  })
+})

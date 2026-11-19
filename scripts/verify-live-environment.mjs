@@ -139,6 +139,23 @@ async function verifyAuth(config, options) {
     options,
   )
 
+  // Exercise the real deployed routing table without credentials or mutations.
+  // A healthy /health endpoint cannot detect an omitted email-change router.
+  for (const action of ["request", "confirm"]) {
+    await requestWithRetry(
+      `https://${config.apiHost}/identity/api/v2/auth/email-change/${action}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      async response => {
+        assertResponse(response, 401, `email-change ${action} auth guard`)
+        const body = await response.json()
+        if (body?.error !== "Authorization header required") {
+          throw new Error(`email-change ${action} did not reach the authentication guard`)
+        }
+      },
+      options,
+    )
+  }
+
   const chatUrl = `https://${config.apiHost}/chat/api/v1/chat/completions`
   await requestWithRetry(
     chatUrl,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { playTrackMove, snapshotTrackMove, trackMoveLanded } from "./track-move-flip"
+import { trackSlideMotion } from "./track-gutter-dnd"
 
 let started = 0
 
@@ -65,5 +66,38 @@ describe("track-move-flip", () => {
     lane.node.style.top = "41px"
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(lane.animate).toHaveBeenCalledTimes(1)
+  })
+
+  it("eases a menu move's indent from where the row was, and leaves an unchanged indent alone", () => {
+    const root = document.createElement("div")
+    document.body.appendChild(root)
+    const moved = row(root, "a", 100)
+    const content = document.createElement("div")
+    content.setAttribute("data-tl-track-indent", "")
+    content.style.paddingLeft = "0px"
+    const contentAnimate = vi.fn(() => Object.assign(new EventTarget(), { startTime: 1 }) as unknown as Animation)
+    content.animate = contentAnimate
+    moved.node.appendChild(content)
+
+    const still = row(root, "b", 140)
+    const stillContent = document.createElement("div")
+    stillContent.setAttribute("data-tl-track-indent", "")
+    stillContent.style.paddingLeft = "24px"
+    const stillAnimate = vi.fn()
+    stillContent.animate = stillAnimate
+    still.node.appendChild(stillContent)
+
+    const snapshot = snapshotTrackMove(root, [{ id: "a", groupId: null }])
+    content.style.paddingLeft = "24px"
+    moved.moveTo(40)
+    playTrackMove(root, snapshot)
+
+    expect(contentAnimate).toHaveBeenCalledTimes(1)
+    const [frames, options] = contentAnimate.mock.calls[0] as unknown as [Keyframe[], { duration: number }]
+    expect(frames[0].paddingLeft).toBe("0px")
+    expect(frames[1].paddingLeft).toBe("24px")
+    expect(options).toMatchObject(trackSlideMotion(60))
+    expect(stillAnimate).not.toHaveBeenCalled()
+    root.remove()
   })
 })

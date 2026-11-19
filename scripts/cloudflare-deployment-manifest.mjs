@@ -26,6 +26,12 @@ export function deploymentExpectation(surface, environment) {
     surface,
     environment,
     directory: resolve(REPO_ROOT, surfaceConfig.directory),
+    // Feature configuration blocks promotion, but must not make the runtime
+    // environment guard reject every API route if one feature is unavailable.
+    plainText: {
+      ...environmentConfig.plainText,
+      ...(environmentConfig.deploymentOnlyPlainText ?? {}),
+    },
     requiredSecrets: [
       ...surfaceConfig.requiredSecrets,
       ...(environmentConfig.requiredSecrets ?? []),

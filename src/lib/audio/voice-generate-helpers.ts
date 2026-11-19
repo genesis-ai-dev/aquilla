@@ -4,6 +4,7 @@
 // and "Generate all" flows so every cell synthesizes identically.
 
 import { generateAndAttachCellVoice } from "./generate-voice"
+import { bornTakePlace } from "./new-take-place"
 import { laneVoiceSettings, withVoiceAvailable } from "./lane-voice-view"
 import { resolveCastVoice } from "./voices"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -11,7 +12,7 @@ import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-languag
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"
 import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { LineDelivery, ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
@@ -52,6 +53,8 @@ export interface GenerateCellVoiceArgs {
    * own id, as before.
    */
   voiceCellId?: string
+  /** AQU-2577: see `GenerateAndAttachArgs.lineDelivery`. */
+  lineDelivery?: LineDelivery
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
@@ -115,6 +118,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       cellId: cell.id,
       text,
       projectTtsSettings: ttsSettings,
+      ...(args.lineDelivery ? { lineDelivery: args.lineDelivery } : {}),
       // AQU-646: an explicit caller override wins; otherwise honor persisted
       // cast assignments (diarization's Speaker N → cell mapping) before the
       // cell's own voice, so batch + Voice Studio speak in the assigned voice.
@@ -149,6 +153,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       onProgress,
       ...(args.surface ? { surface: args.surface } : {}),
       ...(args.history ? { history: args.history } : {}),
+      // AQU-2491 (review, Nov 9): its own place, the line's start.
+      place: bornTakePlace(cell),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

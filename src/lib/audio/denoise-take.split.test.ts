@@ -83,6 +83,25 @@ describe("denoiseSplitTake — a piece's place in both timings (AQU-2267)", () =
     ])
   })
 
+  // AQU-2432 (Sam, Nov 6): a piece dragged over the end of the piece in front
+  // has a place below the take's following the recordings; cleaning keeps it.
+  it("a piece over the end of the piece in front keeps its place there", async () => {
+    emitted.events = []
+    await denoiseSplitTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "sam",
+      session: { jwt: "j", username: "sam", createdAt: "" },
+      pieces: [
+        piece("audio-c1-1.webm", { trimEndMs: 1500, label: "Take 1 · 1", targetOffsetMs: 0, recordingsOffsetMs: -400 }),
+        piece("audio-c1-2.webm", { trimStartMs: 1500, pieceOf: "audio-c1-1.webm", targetOffsetMs: -1000, recordingsOffsetMs: -1400 }),
+      ],
+    })
+    const places = emitted.events.filter((e) => e.kind === "place").map((e) => e.input)
+    expect(places).toEqual([
+      expect.objectContaining({ targetOffsetMs: 0, recordingsOffsetMs: -400 }),
+      expect.objectContaining({ targetOffsetMs: -1000, recordingsOffsetMs: -1400 }),
+    ])
+  })
+
   it("a piece placed only following the recordings is re-placed too", async () => {
     emitted.events = []
     await denoiseSplitTake({

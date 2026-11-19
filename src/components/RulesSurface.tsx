@@ -24,7 +24,13 @@ import { RuleEditor } from "./RuleEditor"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { rulesForLane, ruleLaneScope } from "@/lib/rules/rule-engine"
 import { withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
-import { laneCheckOverrides, laneLanguageForChecks, laneLanguageLabel, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
+import {
+  laneCheckOverrides,
+  laneLanguageForChecks,
+  laneLanguageLabel,
+  laneOrthography,
+  lanePunctuation,
+} from "@/lib/lqa/lane-builtin-checks"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
@@ -178,6 +184,12 @@ export function RulesSurface({
     builtinRules,
     laneCheckOverrides(checkOverrides ?? project, viewLane),
     lanePunctuationResolved.conventions,
+    // AQU-2628: the old-orthography check needs the project's spelling rules
+    // here too, or this page would count zero findings for a check the editor
+    // is underlining. `bookNames`/`numberFormat` stay unstamped as before.
+    undefined,
+    undefined,
+    laneOrthography(project),
   )
   const punctuationOrigin = lanePunctuationResolved.origin
   // AQU-2000: a source-relative origin means either the lane records no

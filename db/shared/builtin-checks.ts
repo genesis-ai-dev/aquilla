@@ -39,6 +39,7 @@ export const TEXT_CHECK_IDS = [
   'length-ratio',
   'scripture-reference',
   'number-format',
+  'old-orthography',
 ] as const
 export type TextCheckId = (typeof TEXT_CHECK_IDS)[number]
 
@@ -89,6 +90,11 @@ export const TEXT_CHECK_META: Readonly<Record<TextCheckId, TextCheckMeta>> = {
   // writing Western ones instead is an editorial choice (Arabic and Burmese
   // publications use both), so this is a check a project turns on.
   "number-format": { id: "number-format", name: "Number format", defaultSeverity: "minor", defaultEnabled: false },
+  // AQU-2628: Major, and ON by default — unlike the two checks above it needs
+  // no table and infers nothing. It is silent until the project fills the
+  // Language profile's `orthography` slot, and the moment a project fills that
+  // slot it means the spelling, so there is no second switch to find.
+  "old-orthography": { id: "old-orthography", name: "Old orthography", defaultSeverity: "major", defaultEnabled: true },
 }
 
 /** English names of the Bible data checks. Severity comes from db/shared/bible-checks/types.ts. */

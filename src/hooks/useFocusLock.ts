@@ -131,7 +131,11 @@ export function useFocusLock(
   // exactly the cellId, so no on-wire behaviour changes with N=1.
   const lockKey = cellId != null ? focusLockKey(cellId, lane) : null
 
-  const [isHeld, setIsHeld] = useState(false)
+  // AQU-2654: `isHeld` is a ref, read through a getter on the result. No
+  // surface draws the claimant's OWN lease — what is drawn is `heldBy`,
+  // someone else's — but as state it re-rendered the hook's host (the whole
+  // workspace) on every blur and again on every focus.
+  const isHeldRef = useRef(false)
   const [heldBy, setHeldBy] = useState<LockHolder | null>(null)
   const renewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const claimedCellRef = useRef<string | null>(null)
@@ -161,7 +165,7 @@ export function useFocusLock(
     const targetCellId = rawCellId != null ? focusLockKey(rawCellId, lane) : null
     if (!reconciler || !targetCellId) return
     claimedCellRef.current = targetCellId
-    setIsHeld(true)
+    isHeldRef.current = true
     reconciler.send({ t: "focus.claim", cellId: targetCellId, leaseMs })
     stopRenewal()
     // Half-period renewal — a single dropped frame shouldn't expire the lease.
@@ -176,7 +180,7 @@ export function useFocusLock(
     stopRenewal()
     const target = claimedCellRef.current
     claimedCellRef.current = null
-    setIsHeld(false)
+    isHeldRef.current = false
     if (!reconciler || !target) return
     reconciler.send({ t: "focus.release", cellId: target })
   }, [reconciler, stopRenewal])
@@ -184,7 +188,7 @@ export function useFocusLock(
   // Auto-release when the focused cell changes — otherwise the previous
   // claim's renewal timer keeps firing against the wrong cell. The effect
   // synchronizes the *external* WS lease lifetime to the cellId prop;
-  // setIsHeld inside release() is the only React state and it's reflecting
+  // release() only flips the isHeld ref, which is reflecting
   // the WS state, not deriving new state from props.
   useEffect(() => {
     // Compare against the composed key: switching cell OR lane must release
@@ -211,11 +215,11 @@ export function useFocusLock(
       if (msg.t === "lock.claimed") {
         if (msg.cellId !== cur) return
         if (msg.by.userId === currentUserId) {
-          setIsHeld(true)
+          isHeldRef.current = true
           setHeldBy(null)
           return
         }
-        setIsHeld(false)
+        isHeldRef.current = false
         setHeldBy({ userId: msg.by.userId, ts: msg.by.ts })
         if (claimedCellRef.current === cur) {
           claimedCellRef.current = null
@@ -242,7 +246,7 @@ export function useFocusLock(
             claimedCellRef.current = null
             stopRenewal()
           }
-          setIsHeld(false)
+          isHeldRef.current = false
         }
         return
       }
@@ -254,7 +258,7 @@ export function useFocusLock(
         for (const u of msg.users) {
           if (u.focusedCell !== cur) continue
           if (u.userId === currentUserId) continue
-          setIsHeld(false)
+          isHeldRef.current = false
           setHeldBy({ userId: u.userId, ts: u.ts })
           if (claimedCellRef.current === cur) {
             claimedCellRef.current = null
@@ -269,5 +273,5 @@ export function useFocusLock(
     [currentUserId, stopRenewal, reconciler, leaseMs],
   )
 
-  return [{ isHeld, heldBy, claim, release }, feedFrame]
+  return [{ get isHeld() { return isHeldRef.current }, heldBy, claim, release }, feedFrame]
 }

@@ -17,14 +17,20 @@ import {
   canCarryTargetLead,
   fileSpanToProgrammeSpan,
   leadSecForMove,
+  naturalStartSec,
   pieceLeadSecForMove,
+  pullFloorSec,
+  roomFloorSec,
+  roomsForMove,
   type BuildProgrammeOptions,
   type Programme,
   type ProgrammeLayer,
   type ProgrammeSlot,
+  type RoomMove,
 } from "./programme"
 import { isDefaultTrackSlot } from "./track-slots"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 
@@ -91,6 +97,40 @@ export interface TimelineLayout {
    * does not lay in.
    */
   takeRole(cell: CellData, audioId: string): TakeRole | null
+  /**
+   * AQU-2432 (Sam, Nov 6): where a MOVE may take this take's audible start
+   * while the file follows its recordings, on this layout's clock — `floorSec`
+   * the start of the take before it on its track (up to it, never past: the
+   * two may overlap but never swap order), `ceilSec` the start of the piece
+   * after it for a piece of a cut take (null: none — a take's line grows to
+   * hold it, carrying the later lines along). Null following the source and
+   * for a take on a track made a layer, which keep their own rules.
+   */
+  moveBounds(cell: CellData, att: Att, audioId: string): MoveBounds | null
+  /**
+   * AQU-2432 (Sam, Nov 9): what a move of this take from `fromStartSec` to
+   * `toStartSec` (its audible start, on this layout's clock) does to the ROOM
+   * of the unrecorded lines directly before its line — a drag against a line
+   * nobody has recorded sets that line's room, never the take's place
+   * (`roomsForMove`). Null when it changes no room: following the source, on
+   * a track made a layer, for a later piece of a cut take, or when the line
+   * before is recorded.
+   */
+  roomsForMove(cell: CellData, att: Att, audioId: string, fromStartSec: number, toStartSec: number): RoomMove | null
+}
+
+/** AQU-2432: see `TimelineLayout.moveBounds`. */
+export interface MoveBounds {
+  floorSec: number
+  ceilSec: number | null
+  /**
+   * AQU-2432 (Sam, Nov 9): how far earlier than `floorSec` the take may be
+   * DRAGGED when the line before it is unrecorded — by closing that line's
+   * room, and the rooms of the unrecorded lines before it, to nothing: the end
+   * of the nearest recorded line before it (`roomFloorSec`). The take's own
+   * place still stops at `floorSec`. Absent when there is no room to close.
+   */
+  roomFloorSec?: number
 }
 
 /** AQU-2252: see `TimelineLayout.takeRole`. */
@@ -140,6 +180,9 @@ function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | n
       return geom ? audibleStartSec - geom.trimStartSec : null
     },
     takeRole: () => null,
+    moveBounds: () => null,
+    // AQU-2432 (Sam, Nov 9): following the source, nothing changes.
+    roomsForMove: () => null,
   }
 }
 
@@ -150,6 +193,16 @@ function audioFirstLayout(
 ): TimelineLayout {
   const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
+  /** AQU-2432 (review, Nov 9): the hidden lines, which a drag never narrows. */
+  let hiddenIds: ReadonlySet<string> | null = null
+  const hiddenOf = (): ReadonlySet<string> => (hiddenIds ??= new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
+  /** AQU-2432: the line before a line, for the start of the take before it. */
+  let indexById: Map<string, number> | null = null
+  const prevSlotOf = (slot: ProgrammeSlot): ProgrammeSlot | null => {
+    indexById ??= new Map(programme.slots.map((s, i) => [s.cellId, i]))
+    const i = indexById.get(slot.cellId) ?? 0
+    return i > 0 ? programme.slots[i - 1] : null
+  }
   /** AQU-2252: the take as a layer of its line, or null for the main take. */
   const layerOf = (slot: ProgrammeSlot, audioId: string | undefined): ProgrammeLayer | null =>
     audioId != null ? (slot.layers?.find((l) => l.audioId === audioId) ?? null) : null
@@ -300,9 +353,11 @@ function audioFirstLayout(
       if (layerOf(slot, audioId)?.setsLength === false) {
         return { start: slot.startSec, end: slot.startSec + slot.slotLenSec }
       }
+      // AQU-2432: a take the line after it was pulled back over plays on past
+      // its line's end, and is trimmed as the whole of it.
       return {
         start: geom?.anchor ?? slot.startSec,
-        end: slot.startSec + slot.slotLenSec,
+        end: Math.max(slot.startSec + slot.slotLenSec, geom && !geom.usingFallback ? geom.end : -Infinity),
       }
     },
     seekSecFor: (cell) => programme.byCellId.get(cell.id)?.startSec ?? null,
@@ -335,7 +390,8 @@ function audioFirstLayout(
       const layer = layerOf(slot, audioId)
       if (layer && !layer.setsLength) {
         const trimStartSec = layer.window?.start ?? (att?.trimStartMs != null && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0)
-        return lineStartOf(cell) + (audibleStartSec - slot.startSec) - trimStartSec
+        // AQU-2432: from where its line would start, as its place is read.
+        return lineStartOf(cell) + (audibleStartSec - naturalStartSec(slot)) - trimStartSec
       }
       if (layer) {
         if (!layer.window) return null
@@ -363,6 +419,37 @@ function audioFirstLayout(
       // is the main track's only if it is stored on it.
       const stored = cell.attachments?.[audioId]?.slot
       return stored == null || isDefaultTrackSlot(stored) ? "main" : null
+    },
+    moveBounds: (cell, att, audioId) => {
+      const slot = slotOf(cell)
+      if (!slot) return null
+      const layer = layerOf(slot, audioId)
+      if (layer && !layer.setsLength) return null
+      // A piece of a cut take: between the pieces either side of it (AQU-1758
+      // pieces keep their clip order); the first, against the take before it.
+      const placed: readonly { atSec: number }[] = layer ? trackPiecesOf(slot, layer) : (slot.targetPieces ?? [])
+      const at = layer ? placed.indexOf(layer) : pieceIndexOf(slot, trimStartOf(att))
+      const after = at >= 0 && placed[at + 1] ? slot.startSec + placed[at + 1].atSec : null
+      if (at > 0) return { floorSec: slot.startSec + placed[at - 1].atSec, ceilSec: after }
+      // AQU-2432 (Sam, Nov 9): against an unrecorded line the take's own place
+      // stops at its line's start; the drag may go on, closing that line's room.
+      const roomFloor = roomFloorSec(programme, slot, hiddenOf())
+      return {
+        floorSec: pullFloorSec(prevSlotOf(slot), layer ? layer.slot : null),
+        ceilSec: after,
+        ...(roomFloor != null ? { roomFloorSec: roomFloor } : {}),
+      }
+    },
+    roomsForMove: (cell, att, audioId, fromStartSec, toStartSec) => {
+      const slot = slotOf(cell)
+      if (!slot) return null
+      const layer = layerOf(slot, audioId)
+      if (layer && !layer.setsLength) return null
+      // Only a take, or a cut take's first piece: a later piece moves between
+      // the pieces either side of it, inside its own line.
+      const at = layer ? trackPiecesOf(slot, layer).indexOf(layer) : pieceIndexOf(slot, trimStartOf(att))
+      if (at > 0) return null
+      return roomsForMove(programme, slot, fromStartSec, toStartSec, hiddenOf())
     },
   }
 }

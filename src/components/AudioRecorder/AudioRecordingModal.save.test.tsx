@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { targetChipGeom } from "@/lib/timeline/lane-timing"
 
 const onlineState = vi.hoisted(() => ({ value: true }))
 vi.mock("@/hooks/useOnline", () => ({ useOnline: () => onlineState.value }))
@@ -53,8 +54,10 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
 const emitRetime = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-retime"))
+const emitPlace = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-place"))
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellLaneRetime: (...args: unknown[]) => emitRetime(...args),
+  emitCellAudioPlace: (...args: unknown[]) => emitPlace(...args),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioValidate: vi.fn(async () => "evt"),
@@ -128,6 +131,8 @@ beforeEach(() => {
   attachmentsState.byCellId = new Map()
   emitAttach.mockClear()
   emitRetime.mockClear()
+  emitPlace.mockClear()
+  injectAttach.mockClear()
 })
 
 describe("Save, untouched", () => {
@@ -143,14 +148,19 @@ describe("Save, untouched", () => {
     fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ durationMs: 3600, trimStartMs: 200, trimEndMs: 3360 })
-    await waitFor(() => expect(emitRetime).toHaveBeenCalledTimes(1))
-    expect(emitRetime.mock.calls[0][0]).toMatchObject({ cellId: "c1", targetOffsetMs: -200 })
+    // AQU-2491 (review, Nov 9): the place is the new take's own, in the same
+    // write shape a drag on the timeline uses. Nothing is written on the line.
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({
+      cellId: "c1", audioId: "audio-c1-999-new.wav", targetOffsetMs: -200, recordingsOffsetMs: null,
+    })
+    expect(emitRetime).not.toHaveBeenCalled()
     // AQU-1572: the save is ONE attach carrying the recorder's origin, which
     // is what the emit seam counts as one `audio recorded`.
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ audioOrigin: "record", surface: "recorder" })
   })
 
-  it("a compressed take carries no window and no retime", async () => {
+  it("a compressed take carries no window and sits on its line's start", async () => {
     recorderState.value = {
       kind: "stopped", blob: new Blob(["x"], { type: "audio/webm" }), mimeType: "audio/webm", ext: "webm",
       durationSec: 3.6,
@@ -162,8 +172,11 @@ describe("Save, untouched", () => {
     expect(attach.durationMs).toBe(3600)
     expect("trimStartMs" in attach).toBe(false)
     expect("trimEndMs" in attach).toBe(false)
-    // Give any retime a chance to fire; none should.
-    await new Promise((r) => setTimeout(r, 0))
+    // AQU-2491 (review, Nov 9): no pre-roll, so its first sample IS the
+    // line's start. Said on the take, so a place an older take's save left on
+    // the line can't pull this one early.
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({ audioId: "audio-c1-999-new.wav", targetOffsetMs: 0, recordingsOffsetMs: null })
     expect(emitRetime).not.toHaveBeenCalled()
   })
 
@@ -178,5 +191,73 @@ describe("Save, untouched", () => {
     const attach = emitAttach.mock.calls[0][0] as Record<string, unknown>
     expect("trimStartMs" in attach).toBe(false)
     expect(attach.trimEndMs).toBe(3360)
+  })
+})
+
+// AQU-2491 (review, Nov 9): recording a new take never moves the line's other
+// takes. Save used to write the new take's place on the LINE, which every take
+// with no place of its own reads: on the main track, on added tracks and in
+// other languages. Pulling the preview's start in 2.77 s before saving moved
+// Take 1 from 10.00 s to 7.23 s, and Undo took the new take away and left
+// Take 1 shifted. The place is the new take's own now (`cell.audio.place`).
+describe("Save leaves the line's other takes where they are (AQU-2491)", () => {
+  const wav = () => ({
+    kind: "stopped", blob: new Blob(["x"], { type: "audio/wav" }), mimeType: "audio/wav", ext: "wav",
+    durationSec: 3.6, preRollMs: 200, tailGraceMs: 250,
+  })
+
+  /** Take 1's start on the file clock after whatever Save wrote on the line. */
+  function takeOneStartSec(): number {
+    const onLine = emitRetime.mock.calls.map((c) => (c[0] as { targetOffsetMs?: number }).targetOffsetMs).at(-1)
+    const line = { ...cell, metadata: onLine == null ? {} : { target_offset_ms: onLine } } as unknown as CellData
+    return targetChipGeom(line, { durationMs: 2000 })!.start
+  }
+
+  it("on the main track", async () => {
+    recorderState.value = wav()
+    renderModal()
+    fireEvent.click(screen.getByTestId("rec-save"))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(takeOneStartSec()).toBe(10)
+  })
+
+  it("on an added track, in a second language", async () => {
+    recorderState.value = wav()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cell]} activeCellId="c1" username="sam"
+        targetSlot="track-9" laneTag="fr"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("rec-save"))
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({ audioId: "audio-c1-999-new.wav", targetOffsetMs: -200, targetLang: "fr" })
+    expect(takeOneStartSec()).toBe(10)
+  })
+
+  it("the new take is drawn at its own place straight away", async () => {
+    recorderState.value = wav()
+    renderModal()
+    fireEvent.click(screen.getByTestId("rec-save"))
+    await waitFor(() => expect(injectAttach).toHaveBeenCalled())
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ audioId: "audio-c1-999-new.wav", targetOffsetMs: -200 })
+  })
+
+  it("a line with no times gets no place at all", async () => {
+    recorderState.value = wav()
+    const untimed = { ...cell, startTime: undefined, endTime: undefined, medium: undefined } as unknown as CellData
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[untimed]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("rec-save"))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitPlace).not.toHaveBeenCalled()
+    expect(emitRetime).not.toHaveBeenCalled()
   })
 })

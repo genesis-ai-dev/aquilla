@@ -522,3 +522,66 @@ describe("assembleAudioEntries — a book's dragged-open pauses", () => {
   })
 })
 
+
+// AQU-2432 (Sam, Nov 6, rule 7): following the recordings a take can be
+// dragged over the end of the take before it, and playback plays both. The
+// modes that lay a book's lines as playback does lay it there and mix the two.
+describe("assembleAudioEntries — a book's line dragged over the end of the one before it (AQU-2432)", () => {
+  const MS = TARGET_RATE / 1000
+  const A1 = "audio-c1-1700000000-take", A2 = "audio-c2-1700000000-take", A3 = "audio-c3-1700000000-take"
+  // c1 (Mary) and c2 (John): 100 ms takes; c2 pulled 60 ms back over c1's end (more than the 50 ms wobble).
+  const line = (id: string, take: string, recordingsOffsetMs?: number) =>
+    cell({
+      id,
+      selectedAudioId: take,
+      attachments: { [take]: { url: `frontier-audio://${take}.webm`, type: "audio/webm", durationMs: 100, ...(recordingsOffsetMs != null ? { recordingsOffsetMs } : {}) } },
+    })
+  const clips = () => makeFetch({ [`${A1}.webm`]: clipBytes(50, 100 * MS), [`${A2}.webm`]: clipBytes(40, 100 * MS), [`${A3}.webm`]: clipBytes(30, 100 * MS) })
+  const q = (v: number) => Math.round(v * 32767)
+
+  it("file-clip: the later take starts 60 ms before the earlier ends, and the two are summed there", async () => {
+    const { fetchBytes } = clips()
+    const result = await assembleAudioEntries(baseArgs({ mode: "file-clip", cells: [line("c1", A1), line("c2", A2, -60)], fetchBytes }))
+    const s = await wavSamples(result.entries[0].data)
+    expect(s.length).toBe(140 * MS)
+    expect(s[10]).toBe(q(0.5))
+    expect(Math.abs(s[80 * MS] - (q(0.5) + q(0.4)))).toBeLessThanOrEqual(1)
+    expect(s[130 * MS]).toBe(q(0.4))
+  })
+
+  it("voice-timeline: each voice's line where playback starts it", async () => {
+    const { fetchBytes } = clips()
+    const result = await assembleAudioEntries(baseArgs({ mode: "voice-timeline", cells: [line("c1", A1), line("c2", A2, -60)], fetchBytes }))
+    const mary = await wavSamples(result.entries[0].data)
+    const john = await wavSamples(result.entries[1].data)
+    expect(mary.length).toBe(140 * MS)
+    expect(john.length).toBe(140 * MS)
+    expect(mary[99 * MS]).not.toBe(0)
+    expect(mary[110 * MS]).toBe(0)
+    expect(john[30 * MS]).toBe(0)
+    expect(john[50 * MS]).toBe(q(0.4))
+  })
+
+  it("voice-timeline: one voice's lines that overlap are mixed in its stem", async () => {
+    const { fetchBytes } = clips()
+    // c1 and c3 are both Mary's; c3 pulled 60 ms back over c1's end.
+    const result = await assembleAudioEntries(baseArgs({ mode: "voice-timeline", cells: [line("c1", A1), line("c3", A3, -60)], fetchBytes }))
+    expect(result.entries).toHaveLength(1)
+    const mary = await wavSamples(result.entries[0].data)
+    expect(mary.length).toBe(140 * MS)
+    expect(mary[10]).toBe(q(0.5))
+    expect(Math.abs(mary[80 * MS] - (q(0.5) + q(0.3)))).toBeLessThanOrEqual(1)
+    expect(mary[130 * MS]).toBe(q(0.3))
+  })
+
+  it("buildTimeline places a clip with an overlap that far before the end of the one before it", () => {
+    const blob = new Blob([])
+    const t = buildTimeline([
+      { cellId: "a", voiceId: "v", data: blob, samples: 10 },
+      { cellId: "b", voiceId: "w", data: blob, samples: 2, overlap: 8 },
+      { cellId: "c", voiceId: "w", data: blob, samples: 3 },
+    ])
+    expect(t.placements.map((p) => p.offset)).toEqual([0, 2, 4])
+    expect(t.totalSamples).toBe(10)
+  })
+})

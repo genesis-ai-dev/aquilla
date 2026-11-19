@@ -15,7 +15,7 @@
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
+import { enqueueOutboxEvent, enqueueOutboxEvents, type EnqueueBatchOptions } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canAttachSourceAudio, canImportSourceFiles, canPerform, importDenialFloor, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
@@ -300,6 +300,7 @@ export async function enqueueEvent<K extends OutboxEventKind>(
  *  once via enqueueOutboxEvents (one notify → one overlay rebuild). */
 export async function enqueueEvents<K extends OutboxEventKind>(
   inputs: BuildEventInput<K>[],
+  options?: EnqueueBatchOptions,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }[]> {
   if (inputs.length === 0) return []
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
@@ -311,6 +312,7 @@ export async function enqueueEvents<K extends OutboxEventKind>(
   })
   await enqueueOutboxEvents(
     events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
+    options,
   )
   return events.map((event) => ({ event, eventId: event.id }))
 }
@@ -1247,6 +1249,10 @@ export interface CellLaneRetimeInput {
    *  historical events keep projecting. See lane-timing.ts for why the read
    *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
+  /** AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+   *  recordings, in ms, for the language `targetLang` names. null clears it
+   *  (back to its natural length). See lib/timeline/line-room. */
+  recordingsRoomMs?: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -1264,7 +1270,8 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
     input.subtitleStartMs === undefined &&
     input.subtitleEndMs === undefined &&
     input.targetOffsetMs === undefined &&
-    input.targetStartMs === undefined
+    input.targetStartMs === undefined &&
+    input.recordingsRoomMs === undefined
   ) {
     throw new Error("emitCellLaneRetime: at least one timing key is required")
   }
@@ -1280,6 +1287,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
       ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
+      ...(input.recordingsRoomMs !== undefined ? { recordingsRoomMs: intMs(input.recordingsRoomMs) } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -1426,8 +1434,11 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
  * AQU-1767: undo a cut — remove the new piece, give the first piece its old
  * end back, and (when the cut renamed it) its old name — as ONE outbox write.
  * Queued one at a time, a tab closed in between kept the removal and lost the
- * trim, leaving the take's tail missing. Returns the three event ids in order
- * (the rename's only when there is one).
+ * trim, leaving the take's tail missing.
+ *
+ * AQU-2492 (review, Nov 9): as ONE event, `cell.audio.uncut`, so the server
+ * can also give the take back the approvals it had before the cut and keep
+ * the pieces' approvals for a Redo. Returns its event id.
  */
 export async function emitCellAudioUncut(input: {
   projectId: string
@@ -1444,28 +1455,24 @@ export async function emitCellAudioUncut(input: {
   targetLang?: string
   laneId?: string
   author: string
-}): Promise<string[]> {
-  const base = {
+}): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.uncut",
     projectId: input.projectId,
     fileId: input.fileId,
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-  }
-  const lane = targetLaneFields(input)
-  const inputs: BuildEventInput<OutboxEventKind>[] = [
-    { ...base, kind: "cell.audio.remove", payload: { audioId: input.removeAudioId, ...lane } },
-    {
-      ...base,
-      kind: "cell.audio.trim",
-      payload: { audioId: input.audioId, trimStartMs: input.trimStartMs, trimEndMs: input.trimEndMs, ...lane },
+    payload: {
+      audioId: input.audioId,
+      pieceAudioId: input.removeAudioId,
+      trimStartMs: input.trimStartMs,
+      trimEndMs: input.trimEndMs,
+      ...(input.rename ? { rename: { label: input.rename.label } } : {}),
+      ...targetLaneFields(input),
     },
-    ...(input.rename
-      ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
-      : []),
-  ] as BuildEventInput<OutboxEventKind>[]
-  const queued = await enqueueEvents(inputs)
-  return queued.map((q) => q.eventId)
+  })
+  return eventId
 }
 
 // ── Audio validation (AQU-490) ────────────────────────────────────────────

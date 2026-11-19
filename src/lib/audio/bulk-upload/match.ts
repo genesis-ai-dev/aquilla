@@ -63,8 +63,15 @@ export interface TargetLine {
   /** A heading, book title or chapter label — never given a recording by
    *  number or by order, though the person may choose one by hand. */
   structural: boolean
+  /** AQU-2496 (review, Nov 9): its recording (`hasRecording`) is the main
+   *  track's own chosen take, which a bulk upload's new take replaces there
+   *  (every bulk take goes on the main track). False where it plays on an
+   *  added track or a layer. */
+  mainTake?: boolean
   /** The line already has a recording that plays in this language. */
   hasRecording: boolean
+  /** AQU-2491 (review, Nov 9): its start (ms), when it has times. */
+  startMs?: number | null
 }
 
 export interface TargetFile {
@@ -109,6 +116,7 @@ export type UnmatchedReason =
   | { code: "noSuchLine"; line: number; count: number }
   | { code: "noNumber" }
   | { code: "tooManyNumbers" }
+  | { code: "wordBeforeNumber"; word: string }
   | { code: "pastLastLine"; count: number }
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
@@ -538,7 +546,7 @@ export function needsLength(assignments: readonly Assignment[]): number[] {
   return assignments.flatMap((a) => (a.reason?.code === "chapterOrVerse" && a.reason.lengthMs == null ? [a.index] : []))
 }
 
-function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading): Interpreted {
+function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading, onlyChapterHere = singleChapter): Interpreted {
   const reading = r.reading
   const take = reading.numbers.find((n) => n.marker === "take")?.value
   const markedPart = reading.numbers.find((n) => n.marker === "part")
@@ -574,7 +582,7 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
   let rest = plain
   if (chapter == null && verseMark) {
     if (plain.length > 0) { chapter = plain[0].value; rest = plain.slice(1) }
-    else if (singleChapter) chapter = 1
+    else if (onlyChapterHere) chapter = 1
     else return { wanted: { kind: "error", reason: { code: "noVerseChapter", verse: verseMark.value } }, ...base }
   }
   if (chapter == null) {
@@ -670,6 +678,9 @@ interface FileIndex {
   numbered: TargetLine[]
   /** Position of each line in `numbered`. */
   numberedPos: Map<string, number>
+  /** The one book every verse line's reference names ("JON"), when they all
+   *  name the same one: the book of a file that carries no book code. */
+  refBook: string | null
 }
 
 function indexFile(file: TargetFile): FileIndex {
@@ -677,10 +688,12 @@ function indexFile(file: TargetFile): FileIndex {
   const verses = new Map<string, TargetLine>()
   const chapters = new Map<number, TargetLine[]>()
   const verseLines: TargetLine[] = []
+  const refBooks = new Set<string>()
   for (const line of content) {
     const m = line.ref ? VERSE_REF.exec(line.ref) : null
     if (!m) continue
     verseLines.push(line)
+    refBooks.add(m[1])
     const chapter = Number(m[2])
     const from = Number(m[3])
     const to = m[5] ? Number(m[5]) : from
@@ -711,11 +724,15 @@ function indexFile(file: TargetFile): FileIndex {
     position: new Map(content.map((l, i) => [l.cellId, i])),
     numbered,
     numberedPos: new Map(numbered.map((l, i) => [l.cellId, i])),
+    refBook: refBooks.size === 1 ? [...refBooks][0] : null,
   }
 }
 
-function bookLabel(fi: FileIndex): string {
-  return fi.file.bookCode ? englishBookName(fi.file.bookCode) : fi.file.name
+/** What the preview calls the file a recording goes into: a Bible book by its
+ *  name ("Jonah"), any other file by its own name in quotes ("“chapter one”"),
+ *  so a file's name never reads as a book's (AQU-2487, browser pass, Nov 12). */
+function bookLabel({ file }: { file: TargetFile }): string {
+  return file.bookCode ? englishBookName(file.bookCode) : `“${file.name}”`
 }
 
 function refLabel(fi: FileIndex, chapter: number, verse: number | string): string {
@@ -794,7 +811,7 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       const line = fi.numbered[wanted.line - 1]
       if (!line || wanted.line < 1) return { reason: { code: "noSuchLine", line: wanted.line, count: fi.numbered.length } }
       // A verse counted from the top reads as its verse ("Genesis 2:5").
-      return { cellIds: [line.cellId], read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? wanted.line - 1), ...(part ? { part } : {}) }
+      return { cellIds: [line.cellId], read: lineLabel(fi.file, line, fi.position.get(line.cellId) ?? wanted.line - 1), ...(part ? { part } : {}) }
     }
     case "lineRange": {
       if (wanted.toLine < wanted.line) return { reason: { code: "rangeBackwards", from: `line ${wanted.line}`, to: `line ${wanted.toLine}` } }
@@ -833,6 +850,51 @@ export function canChooseLine(a: Assignment): boolean {
 
 /** Reads a name with no book table, for a destination that is not a Bible book. */
 const NO_BOOKS = new BookNameIndex({ builtins: false })
+
+/** No name cut short (`cutShortByWord`): outside a Bible book none is. */
+const NOT_CUT: ReadonlyMap<number, UnmatchedReason> = new Map()
+
+/**
+ * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
+ * the app doesn't know cut short, each with why it isn't read. "Ruthu sura 2
+ * mstari 5" (Swahili: chapter 2, verse 5) was read as far as "2", so a folder
+ * of Ruth's verses landed as four whole-chapter recordings and 81
+ * "duplicates". Such a name is not guessed at: it is listed with the word,
+ * unread, so the assistant is offered and the person can choose its line.
+ *
+ * A name is cut short when it gave ONE number, a word ended the reference,
+ * and a number follows that word. It never lands on the whole chapter:
+ *   - when that number is a verse of the chapter, the name is unread;
+ *   - when it is past the chapter's end but a verse of another chapter could
+ *     be that long ("mstari 23" in Ruth 1, which has 22), it is no such verse.
+ * What was read right stays read:
+ *   - a name that already gave its chapter and verse ("Genesis 1-1 ENGESV
+ *     2023"): two numbers were read;
+ *   - a number no verse of the book has ("Ruth 3 ESV 2023"): a year or an
+ *     edition, so the name is the chapter;
+ *   - a version's code with its number run on ("RVR60"), or a take or a
+ *     version word and its number ("toma 2"): read-name.ts reads those.
+ * A folder of every chapter's verse 1 ends every name with the same number,
+ * so how many names share it says nothing: each is judged alone.
+ */
+function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, UnmatchedReason> {
+  const out = new Map<number, UnmatchedReason>()
+  // AQU-2496 (review, Nov 9): a name with the Digital Bible Platform's shape
+  // that doesn't fit it (read-name.ts `readDbpName`) is unread too, so it is
+  // listed, and the folder's order never places it.
+  for (const r of group) if (r.reading.halfFits) out.set(r.index, { code: "tooManyNumbers" })
+  const longest = Math.max(0, ...fi.chapterLengths.map(([, verses]) => verses))
+  for (const r of group) {
+    const after = r.reading.afterWord
+    const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
+    if (!after || read.length !== 1) continue
+    const chapter = read[0].value
+    const verse = after.numbers[0]
+    if (fi.verses.has(`${chapter}:${verse}`)) out.set(r.index, { code: "wordBeforeNumber", word: after.word })
+    else if (fi.chapters.has(chapter) && verse >= 1 && verse <= longest) out.set(r.index, { code: "noSuchVerse", ref: refLabel(fi, chapter, verse) })
+  }
+  return out
+}
 
 export interface MatchOptions {
   /** Moves an order run's start: +1 starts it one line later, −1 one earlier. */
@@ -893,32 +955,56 @@ export function matchRecordings(
       for (const r of rawGroup) out.set(r.index, { index: r.index, reason: { code: "noBook" } })
       continue
     }
-    const singleChapter = fi.chapters.size === 1 && fi.chapters.has(1)
+    // AQU-2487 (import sweep, Nov 2): a book has one chapter when the BOOK
+    // does (Jude, Obadiah), not when the project happens to hold only its
+    // chapter 1. A project with just Jonah 1 read "Jonah 1.wav" as verse 1:1
+    // and "Jonah 2.wav" as 1:2, against the rule shown to the person: "A name
+    // with a chapter and no verse is one recording for the whole chapter".
+    // The lines decide only for a book whose chapter count isn't known.
+    const onlyChapterHere = fi.chapters.size === 1 && fi.chapters.has(1)
+    // AQU-2487 (review, Nov 9): a file with no book code (a sheet named
+    // "chapter one" whose lines are JON 1:1…) is still that book: its lines'
+    // references all name it, so its chapter count is known without guessing.
+    const chaptersOf = fi.file.bookCode ?? fi.refBook
+    const bookChapters = chaptersOf ? LAST_VERSES[chaptersOf]?.length : undefined
+    const singleChapter = bookChapters != null ? bookChapters === 1 : onlyChapterHere
     // Outside a Bible book a name holds no book: "This is 12" is line 12, not
     // Isaiah. Inside one, a folder's number that is not one of the book's
     // chapters ("2023") is not a chapter folder.
     const group = fi.bible
       ? rawGroup.map((r) => (r.folderChapter && !fi.chapters.has(r.folderChapter.chapter) ? { ...r, folderChapter: undefined } : r))
       : rawGroup.map((r) => (r.reading.book ? { ...r, reading: readName(r.file.name, NO_BOOKS) } : r))
-    const nums = pruneConstants(group, fi.bible, fi.file.bookCode)
+    // AQU-2496 (review, Nov 9): a name an unknown word cut short is not read,
+    // so it takes no part in the folder's numbering or its count either.
+    const cut = fi.bible ? cutShortByWord(fi, group) : NOT_CUT
+    const nums = pruneConstants(cut.size > 0 ? group.filter((r) => !cut.has(r.index)) : group, fi.bible, fi.file.bookCode)
     // A number alone in a Bible book: chapter or verse, by the folder's count.
     const lone = new Map<number, NameNumber>()
     if (fi.bible) {
       for (const r of group) {
-        const n = loneNumber(r, nums.get(r.index)!)
+        const n = cut.has(r.index) ? null : loneNumber(r, nums.get(r.index)!)
         if (n) lone.set(r.index, n)
       }
     }
-    const loneReading = lone.size > 0 ? readLoneNumbers(fi, lone, singleChapter, opts.lengths) : undefined
+    // AQU-2487 (review, Nov 9): the book's own chapter count decides only for
+    // a name that says the book or the chapter ("Jonah 1.wav"). A number alone
+    // ("01.wav", "07.wav") in a project holding one chapter is a verse, as in
+    // a one-chapter book: one file always "fits" one chapter, so the count
+    // would call an 8-second verse the whole chapter without reading its length.
+    const loneReading = lone.size > 0 ? readLoneNumbers(fi, lone, singleChapter || onlyChapterHere, opts.lengths) : undefined
     const byLength = loneReading && loneReading.as !== "unknown" && loneReading.byLengthMs != null
       ? { as: loneReading.as, ms: loneReading.byLengthMs }
       : undefined
     const results = group.map((r) => {
+      const cutReason = cut.get(r.index)
+      if (cutReason != null) {
+        return { r, res: { reason: cutReason } as Resolved, interp: null as Interpreted | null }
+      }
       // In one Bible book, a name of another book is the wrong file.
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {
         return { r, res: { reason: { code: "otherBook", book: englishBookName(r.reading.book.code), fileName: bookLabel(fi) } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }
       }
-      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter, lone.has(r.index) ? loneReading : undefined) : interpretLines(r, nums.get(r.index)!)
+      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter, lone.has(r.index) ? loneReading : undefined, onlyChapterHere) : interpretLines(r, nums.get(r.index)!)
       return { r, res: refuseRangeOnTimed(fi, resolve(fi, interp.wanted, interp.part)), interp }
     })
 
@@ -964,7 +1050,7 @@ export function matchRecordings(
         const at = pos + shift
         const line = at >= 0 ? lines[at] : undefined
         out.set(r.index, line
-          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
+          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineLabel(fi.file, line, fi.position.get(line.cellId) ?? at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
           : { index: r.index, method: "order", orderRun: groupKey, reason: at < 0 ? { code: "beforeFirstLine" } : { code: "pastLastLine", count: lines.length } })
       })
       continue
@@ -1010,7 +1096,7 @@ export function matchRecordings(
       method: prev.method ?? "name",
       fileId: choice.fileId,
       cellIds: [choice.cellId],
-      read: lineReadLabel(fi, line, at ?? -1),
+      read: lineLabel(fi.file, line, at ?? -1),
       chosen: true,
       ...(prev.part && prev.cellIds?.length === 1 && prev.cellIds[0] === choice.cellId ? { part: prev.part } : {}),
     })
@@ -1040,11 +1126,23 @@ function takesOnOneVerse(out: Map<number, Assignment>): void {
   }
 }
 
-/** How a chosen or order-placed line reads in the preview. */
-function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): string {
+/**
+ * How a line reads in the preview ("Genesis 1:3", "“chapter one” 1:3", "line
+ * 12" for a document's line, the file's label for a heading: "Ruth",
+ * "“chapter one”"), in its row and in the line picker alike: the picker had
+ * its own copy, which named a file that isn't a book without its quotes
+ * (AQU-2487, review, Nov 12). `position` is the line's place among the lines
+ * that aren't headings, or -1 for a heading.
+ *
+ * `withFile`: the picker lists every file's lines in one list, so there a
+ * line with no verse reference carries its file's label in front ("“Welcome
+ * letter” · line 3"); a row sits under its file's heading and needs none.
+ */
+export function lineLabel(file: TargetFile, line: TargetLine, position: number, { withFile = false } = {}): string {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
-  if (m) return `${bookLabel(fi)} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
-  return position >= 0 ? `line ${position + 1}` : fi.file.name
+  if (m) return `${bookLabel({ file })} ${m[2]}:${m[3]}${m[4] ?? ""}${m[5] ? `-${m[5]}${m[6] ?? ""}` : ""}`
+  if (position < 0) return bookLabel({ file })
+  return withFile ? `${bookLabel({ file })} · line ${position + 1}` : `line ${position + 1}`
 }
 
 /**

@@ -280,7 +280,7 @@ export function trackMenuItems({
       {/* AQU-2664 (board 71C): first, in its own section. */}
       {evenOut && evenable.length > 0 && (
         <>
-          <ContextMenuItem data-testid="tl-track-even-out" onClick={() => evenOut.open(ids(evenable))}>
+          <ContextMenuItem data-testid="tl-track-even-out" className="whitespace-nowrap" onClick={() => evenOut.open(ids(evenable))}>
             <EqualApproximately className="h-3.5 w-3.5" />
             {evenable.length > 1
               ? t("editor.evenOut.menuItemTracks", { count: evenable.length })

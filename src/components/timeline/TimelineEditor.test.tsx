@@ -3384,6 +3384,21 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.queryByTestId("tl-track-move-to")).toBeNull()
   })
 
+  // Evidence 71C: the track menu is the board's 236 px, and "Even out
+  // loudness (3 tracks)…" stays on one line.
+  it("draws the track menu at the board's width, its Even out item on one line", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        evenOut={{ states: new Map([["target-audio", "none" as const]]), open: () => {} }}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    const item = screen.getByTestId("tl-track-even-out")
+    expect(item.className).toContain("whitespace-nowrap")
+    expect(item.closest("[data-slot=context-menu-content], [role=menu]")?.className).toContain("w-[236px]")
+  })
+
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
   // the fact the person is being asked to accept.
   it("asks before deleting, naming the track", () => {

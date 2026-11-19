@@ -5407,7 +5407,7 @@ export function TimelineEditor({
                       {lane}
                     </ContextMenuTrigger>
                     {!menuEmpty && (
-                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                      <ContextMenuContent className="w-[236px]">{trackMenu(row.track)}</ContextMenuContent>
                     )}
                   </ContextMenu>
                 )
@@ -5939,12 +5939,12 @@ export function TimelineEditor({
                     <ContextMenu onOpenChange={(open) => { if (open) onTrackContextMenu(track.id) }}>
                       <ContextMenuTrigger render={label} />
                       {!menuEmpty && (
-                        <ContextMenuContent className="w-48">{trackMenu(track)}</ContextMenuContent>
+                        <ContextMenuContent className="w-[236px]">{trackMenu(track)}</ContextMenuContent>
                       )}
                     </ContextMenu>
                     {!menuEmpty && (
                       <DropdownMenu handle={menuHandleFor(track.id)}>
-                        <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuContent align="end" className="w-[236px]">
                           {trackMenu(track)}
                         </DropdownMenuContent>
                       </DropdownMenu>

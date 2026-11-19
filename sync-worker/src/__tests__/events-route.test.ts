@@ -1456,6 +1456,35 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     expect(target.eventId).toBe('evt-commit-001')
   })
 
+  it('a lane-walled author gets `applied[]` without rows, while the DO still gets the full frame', async () => {
+    // AQU-730: `rows` is the cell's text in every lane. The DO drops it per
+    // walled socket (stripAppliedRows); the author's HTTP copy drops it here,
+    // and the client refetches by ids through the cells route.
+    const setup = await makeToken({ role: 600, username: 'alice' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([sourceCreate(), targetCreate()], setup), makeEnv(db))
+    const lane = await db
+      .prepare("SELECT lane_id FROM cells WHERE project_id = 'proj-a' AND side = 'target' LIMIT 1")
+      .first<{ lane_id: string }>()
+    const token = await makeToken({
+      role: 500,
+      username: 'alice',
+      laneGrants: [{ lane: lane!.lane_id, level: 500 }],
+    })
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(
+      await makeRequest([targetCommit()], token),
+      { ...env, LANE_READ_WALL: '1' },
+    )
+    const body = (await res!.json()) as { accepted: Array<{ id: string }>; applied: Array<Record<string, unknown>> }
+    expect(body.accepted).toEqual([{ id: 'evt-commit-001' }])
+    expect(body.applied).toHaveLength(1)
+    expect('rows' in body.applied[0]).toBe(false)
+    expect(typeof body.applied[0].serverSeq).toBe('number')
+    expect(Array.isArray(applied()[0].rows)).toBe(true)
+  })
+
   it('`applied[]` is returned even when no ProjectSync DO is bound (HTTP-only deployments)', async () => {
     const token = await makeToken({ role: 500, username: 'alice' })
     const { db } = await makeTestDb()

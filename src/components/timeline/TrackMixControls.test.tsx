@@ -90,7 +90,7 @@ describe("the fader", () => {
     expect(ticks.map((t) => t.getAttribute("data-db"))).toEqual(["+6", "0", "−6", "−20", "−40", "−∞"])
   })
 
-  it("reads −∞ at the bottom, and a drag to the left end silences the track", () => {
+  it("reads −∞ at the bottom, and a drag past the left end silences the track", () => {
     const onCommit = vi.fn()
     render(<TrackFader name="Mu" testKey="t2" db={-Infinity} onLive={() => {}} onCommit={onCommit} />)
     const slider = screen.getByTestId("tl-fader-t2")
@@ -98,7 +98,7 @@ describe("the fader", () => {
     expect(Number.parseFloat(screen.getByTestId("tl-fader-thumb-t2").style.left)).toBe(0)
     slider.getBoundingClientRect = () => ({ left: 0, width: 64, top: 0, height: 16, right: 64, bottom: 16, x: 0, y: 0, toJSON: () => {} })
     fireEvent.pointerDown(slider, { clientX: 30, pointerId: 1, button: 0 })
-    fireEvent.pointerUp(slider, { clientX: 0, pointerId: 1 })
+    fireEvent.pointerUp(slider, { clientX: -100, pointerId: 1 })
     expect(onCommit).toHaveBeenLastCalledWith(-Infinity)
   })
 
@@ -111,22 +111,38 @@ describe("the fader", () => {
     expect(screen.queryByTestId("tl-fader-readout-t1")).toBeNull()
   })
 
-  it("follows a drag live (one frame at a time) and saves once, at the end", () => {
+  it("follows a drag live (one frame at a time) from where it was, and saves once, at the end", () => {
     vi.useFakeTimers()
     const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => setTimeout(() => cb(0), 0) as unknown as number)
     const { slider, onLive, onCommit } = setup(0)
-    fireEvent.pointerDown(slider, { clientX: 5 + faderPos(-12) * 54, pointerId: 1, button: 0 })
-    fireEvent.pointerMove(slider, { clientX: 5 + faderPos(-6) * 54, pointerId: 1 })
-    fireEvent.pointerMove(slider, { clientX: 5 + faderPos(-18) * 54, pointerId: 1 })
+    // Pressed anywhere: the level moves by how far the pointer travels, not to the press.
+    const at = (db: number) => 40 + (faderPos(db) - faderPos(0)) * 54
+    fireEvent.pointerDown(slider, { clientX: 40, pointerId: 1, button: 0 })
+    fireEvent.pointerMove(slider, { clientX: at(-6), pointerId: 1 })
+    fireEvent.pointerMove(slider, { clientX: at(-18), pointerId: 1 })
     act(() => { vi.runAllTimers() })
     // Two moves in one frame: the mixer hears the last of them, once.
     expect(onLive.mock.calls.at(-1)?.[0]).toBeCloseTo(-18, 1)
     expect(screen.getByTestId("tl-fader-readout-t1").textContent).toBe("−18.0 dB")
     expect(onCommit).not.toHaveBeenCalled()
-    fireEvent.pointerUp(slider, { clientX: 5 + faderPos(-18) * 54, pointerId: 1 })
+    fireEvent.pointerUp(slider, { clientX: at(-18), pointerId: 1 })
     expect(onCommit).toHaveBeenCalledTimes(1)
     expect(onCommit.mock.calls[0][0]).toBeCloseTo(-18, 1)
     raf.mockRestore()
+  })
+
+  // Review S4: a click (or the first click of a double-click) moves nothing.
+  it("writes nothing for a press that doesn't travel, and double-click types from the old value", () => {
+    const { slider, onLive, onCommit } = setup(-3)
+    fireEvent.pointerDown(slider, { clientX: 2, pointerId: 1, button: 0 })
+    fireEvent.pointerMove(slider, { clientX: 3, pointerId: 1 })
+    fireEvent.pointerUp(slider, { clientX: 3, pointerId: 1 })
+    fireEvent.pointerDown(slider, { clientX: 2, pointerId: 1, button: 0 })
+    fireEvent.pointerUp(slider, { clientX: 2, pointerId: 1 })
+    fireEvent.doubleClick(slider)
+    expect(onLive).not.toHaveBeenCalled()
+    expect(onCommit).not.toHaveBeenCalled()
+    expect((screen.getByRole("textbox", { name: "Volume of Jesus" }) as HTMLInputElement).value).toBe("−3")
   })
 
   it("goes back to 0 dB on Option-click", () => {

@@ -106,6 +106,8 @@ export function EvenOutButton({ testKey, state, onClick }: { testKey: string; st
 const FADER_W = 64
 const THUMB_W = 10
 const TRAVEL = FADER_W - THUMB_W
+/** How far a press must travel before it is a drag, px. */
+const DRAG_SLOP = 3
 /** The arrow keys' lowest finite step: the scale's lowest stop. */
 const KEY_FLOOR_DB = -60
 /** The ticks drawn on this small fader: +6, 0, −6, −20, −40, −∞. */
@@ -151,9 +153,14 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
   const shown = local ?? db
   const x = faderPos(shown) * TRAVEL
 
-  const dbAt = (el: HTMLElement, clientX: number) => {
-    const box = el.getBoundingClientRect()
-    return clampTrackVolumeDb(faderDb((clientX - box.left - THUMB_W / 2) / TRAVEL))
+  // Review S4: a drag moves the level by how far the pointer travels from
+  // where it was pressed, and only once it has travelled DRAG_SLOP px. A
+  // click, or the first click of a double-click, moves and writes nothing;
+  // an off-centre grab of the thumb doesn't jump the level.
+  const press = useRef<{ x: number; pos: number; moved: boolean } | null>(null)
+  const dbFrom = (clientX: number) => {
+    const p = press.current!
+    return clampTrackVolumeDb(faderDb(p.pos + (clientX - p.x) / TRAVEL))
   }
   const draw = (next: number) => {
     pending.current = next
@@ -181,19 +188,27 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
       return
     }
     e.currentTarget.setPointerCapture?.(e.pointerId)
+    press.current = { x: e.clientX, pos: faderPos(shown), moved: false }
     setDragging(true)
-    draw(dbAt(e.currentTarget, e.clientX))
   }
   const onPointerMove = (e: PointerEvent<HTMLSpanElement>) => {
-    if (dragging) draw(dbAt(e.currentTarget, e.clientX))
+    const p = press.current
+    if (!dragging || !p) return
+    if (!p.moved && Math.abs(e.clientX - p.x) < DRAG_SLOP) return
+    p.moved = true
+    draw(dbFrom(e.clientX))
   }
   const onPointerUp = (e: PointerEvent<HTMLSpanElement>) => {
-    if (!dragging) return
+    const p = press.current
+    if (!dragging || !p) return
     setDragging(false)
     if (frame.current != null) cancelAnimationFrame(frame.current)
     frame.current = null
     pending.current = null
-    commit(dbAt(e.currentTarget, e.clientX))
+    const moved = p.moved || Math.abs(e.clientX - p.x) >= DRAG_SLOP
+    const v = moved ? dbFrom(e.clientX) : null
+    press.current = null
+    if (v != null) commit(v)
   }
   const onKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
     if (disabled) return

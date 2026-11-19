@@ -64,6 +64,30 @@ export function readDirectoryPageSeed(jwt: string | null, orgKey: string): Portf
   return directoryPages.get(orgKey) ?? null
 }
 
+/**
+ * AQU-2455: the open project was refused. Drop it from every in-memory paint
+ * for this account — directory pages, org summaries, and the row the overview
+ * would reuse — so the next list does not show the project or its stats while
+ * its own fetch is still in flight. A different account's seeds are untouched.
+ */
+export function forgetPortfolioProject(jwt: string, projectId: string): void {
+  if (!projectId || scopeJwt !== jwt) return
+  rows.delete(projectId)
+  for (const [orgId, summary] of summaries) {
+    if (!summary.projects.some((project) => project.id === projectId)) continue
+    const projects = summary.projects.filter((project) => project.id !== projectId)
+    summaries.set(orgId, { ...summary, projects })
+    summariesProjectIds.get(orgId)?.delete(projectId)
+  }
+  for (const [key, page] of directoryPages) {
+    if (!page.projects.some((project) => project.id === projectId)) continue
+    directoryPages.set(key, {
+      ...page,
+      projects: page.projects.filter((project) => project.id !== projectId),
+    })
+  }
+}
+
 /** Test-only. */
 export function clearPortfolioSeeds(): void {
   scopeJwt = null

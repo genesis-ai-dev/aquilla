@@ -10,6 +10,7 @@
 import { isElevationRequiredBody } from "@/lib/errors/user-error"
 import { notifyElevationRequiredIfCurrent } from "@/lib/frontier/elevation"
 import { ROLE } from "@/lib/frontier/roles"
+import { syncTokenDenialMessage } from "@/lib/sync/lost-project-access"
 
 // Phase D: default points at aquilla-identity (aquilla-identity).
 // VITE_FRONTIER_BASE is retained as a fallback for E2E test environments that
@@ -227,6 +228,12 @@ export interface SyncTokenMintResult {
   /** AQU-2003: the role the minted token carries, on success. The outbox
    *  flusher reads it to tell a read-only platform view from a writable token. */
   role?: SyncTokenResponse["role"]
+  /**
+   * AQU-2455: the auth-worker's `error` string on a failed mint. The flusher
+   * keeps named denials ("No access to project", "Project is archived",
+   * "Project is frozen") instead of collapsing every 403 into one reason.
+   */
+  error?: string
 }
 
 /** AQU-2003: surface the role only for a read-only platform view (platform
@@ -320,6 +327,7 @@ export function makeSyncTokenMinter(
       } catch (err) {
         let status: number | null = null
         let elevationRequired = false
+        let error: string | undefined
         if (err instanceof SyncTokenError) {
           status = err.status
           if (err.elevationRequired) {
@@ -327,6 +335,8 @@ export function makeSyncTokenMinter(
             elevationRequired = true
           } else if (err.status === 403) {
             callbacks.onForbidden?.()
+            const message = syncTokenDenialMessage(err.body)
+            if (message) error = message
           } else if (err.status === 401) {
             // Session JWT was rejected. Evict the in-memory sync token cache so
             // the next call re-fetches, and notify the caller with the JWT that
@@ -339,7 +349,9 @@ export function makeSyncTokenMinter(
         }
         // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
         console.warn("[sync-token] fetch failed:", err)
-        return elevationRequired ? { token: null, status, elevationRequired } : { token: null, status }
+        return elevationRequired
+          ? { token: null, status, elevationRequired }
+          : { token: null, status, ...(error ? { error } : {}) }
       }
     })()
     pending.set(jwt, request)

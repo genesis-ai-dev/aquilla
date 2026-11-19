@@ -27,6 +27,7 @@ import posthog from "@/lib/posthog"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
+import { mint403QuarantineReason } from "./lost-project-access"
 
 const MAX_BATCH = 100
 
@@ -53,6 +54,8 @@ export interface TokenMintResult {
   elevationRequired?: boolean
   /** AQU-2003: the role the token carries (server `role` field), when known. */
   role?: { level: number; source: string }
+  /** AQU-2455: auth-worker `error` text, when the minter preserved it. */
+  error?: string
 }
 
 interface PostBody {
@@ -550,11 +553,12 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
+      // AQU-2455: keep the server's phrase when we have one. "No access to
+      // project" is lost access; "Project is archived" / "Project is frozen"
+      // are not, and collapsing them made an archive look like a removal.
+      const reason = mint403QuarantineReason(mint.error)
       if (shouldSurface()) {
-        deps.onForbidden?.(forbiddenEntriesFor(
-          batch,
-          "no access to this change's project",
-        ))
+        deps.onForbidden?.(forbiddenEntriesFor(batch, reason))
         analytics.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
@@ -563,7 +567,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       }
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
-        { status: 403, reason: "no access to this change's project" },
+        { status: 403, reason },
         outboxScope,
       )
       return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }

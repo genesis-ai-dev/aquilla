@@ -298,6 +298,41 @@ describe("downloadProjectOffline", () => {
     expect(offlineRow?.status).toBe("ready")
   })
 
+  // Recovery skips a project with a download in flight, so the download itself
+  // must clear what a cut-off removal left behind.
+  it("starts over on a copy a cut-off removal left half-removed", async () => {
+    store.commit(
+      events.offlineProjectStatusSet({ projectId: "proj1", status: "removing", syncedAt: null, queueDepth: 0 }),
+    )
+    store.commit(events.fileSynced({ id: "gone", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
+    store.commit(
+      events.cellSynced({
+        projectId: "proj1",
+        fileId: "gone",
+        cellId: "stale",
+        side: "target",
+        targetLang: "",
+        laneId: null,
+        value: "leftover",
+        valueHtml: null,
+        eventId: "e-old",
+        sourceEventId: null,
+        validated: false,
+        aiDrafted: false,
+        sequenceIndex: 0,
+        canonicalRef: null,
+      }),
+    )
+
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+
+    const files = store.query(tables.files.select().where({ projectId: "proj1" }))
+    expect(files.map((f) => f.id)).toEqual(["file1"])
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", fileId: "gone" }))).toHaveLength(0)
+    const offlineRow = store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())
+    expect(offlineRow?.status).toBe("ready")
+  })
+
   it("rolls back all rows and clears progress on failure", async () => {
     const deps = fakeDeps({
       fetchProjectFiles: async () => {

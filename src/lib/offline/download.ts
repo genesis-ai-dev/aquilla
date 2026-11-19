@@ -172,8 +172,9 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
  * every file, and every cell (both sides) in anchor-chain order. Idempotent —
  * a no-op if the project is `ready` or already downloading in this session.
  * A `downloading` row with no download behind it is one an earlier session
- * left half-done: its partial copy is cleared and the download starts over,
- * so the user can retry without waiting on recoverInterruptedDownloads. Like
+ * left half-done, and a `removing` row is a removal cut off mid-chunks: either
+ * way its partial copy is cleared and the download starts over, so the user
+ * can retry without waiting on recoverInterruptedDownloads. Like
  * recovery, anything short of `ready` waits for the store to be verified
  * first — an unverified store can show a ready project as `downloading`, or
  * not at all, and a failed download's rollback would then wipe a good copy.
@@ -196,7 +197,7 @@ export async function downloadProjectOffline(
   if (getDownloadProgress(projectId) !== null) return
   existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
   if (existing?.status === "ready") return
-  if (existing?.status === "downloading") deleteProjectRows(store, projectId)
+  if (existing?.status === "downloading" || existing?.status === "removing") deleteProjectRows(store, projectId)
 
   store.commit(
     events.offlineProjectStatusSet({ projectId, status: "downloading", syncedAt: null, queueDepth: 0 }),

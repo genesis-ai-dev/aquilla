@@ -184,7 +184,9 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
       port = undefined
     }
   }
-  const pdfWorker = port ? new pdfjs.PDFWorker({ port }) : undefined
+  // AQU-2551: pdf.js's constructor types say `port?: null` (its JSDoc), while
+  // its PDFWorkerParameters, and the code, take a Worker.
+  const pdfWorker = port ? new pdfjs.PDFWorker({ port: port as unknown as null }) : undefined
   /** Set when the read is given up (the budget ran out, or the worker
    *  failed): pdf.js is then not waited for. */
   let abandoned = false

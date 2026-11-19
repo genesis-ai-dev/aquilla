@@ -6,7 +6,11 @@
  * never recomputes inheritance (spec §3.7 rule 1).
  */
 
-/** The four scopes of the hierarchy, outermost first. */
+/**
+ * Org, team, project, lane. The breadcrumb tree is org › project › lane.
+ * Team is a group (AQU-2351), not a crumb — `formatScopePath` omits it
+ * unless the path is only a team.
+ */
 export type ScopeType = "org" | "team" | "project" | "lane"
 
 /** One crumb of a scope path. `name` is the display name the server resolved. */
@@ -21,7 +25,7 @@ export interface ScopeRef {
   hidden?: true
 }
 
-/** Outermost → innermost, e.g. org › team › project › lane. */
+/** Outermost → innermost. The rendered tree is org › project › lane; a team on the path is a "via team" chip, not a crumb. */
 export type ScopePath = ScopeRef[]
 
 /**

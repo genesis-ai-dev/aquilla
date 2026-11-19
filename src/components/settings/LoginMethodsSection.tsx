@@ -13,6 +13,8 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { SettingsGroup, SettingsRow, SettingsBlock } from "@/components/ui/page"
 import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
+import { resendVerificationEmail } from "@/lib/frontier/auth"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export function LoginMethodsSection() {
   const { active } = useAccounts()
@@ -36,21 +38,41 @@ function AccountLoginMethods({
   const t = useT()
   const [offerBackup, setOfferBackup] = useState(true)
   const [changingEmail, setChangingEmail] = useState(false)
-  const [methods, setMethods] = useState<{
-    email: string
-    password: boolean
-    google: boolean
-    google_available: boolean
-  } | null>(null)
-  const [error, setError] = useState(false),
-    [busy, setBusy] = useState(false)
+  const [methods, setMethods] = useState<{ email: string; password: boolean; email_verified: boolean; google: boolean; google_available: boolean } | null>(null)
+  const [error, setError] = useState(false), [busy, setBusy] = useState(false)
   const previousPassword = useRef<boolean | null>(null)
   const [sessionExpired, setSessionExpired] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
-  const [disconnecting, setDisconnecting] = useState(false),
-    [password, setPassword] = useState("")
-  const [recovering, setRecovering] = useState(false),
-    [revision, setRevision] = useState(0)
+  const [disconnecting, setDisconnecting] = useState(false), [password, setPassword] = useState("")
+  const [recovering, setRecovering] = useState(false), [revision, setRevision] = useState(0)
+  // AQU-2636: the account's own verification status, and the one button that
+  // can fix it. `notice` holds either the confirmation naming the address the
+  // link went to, or the reason nothing was sent.
+  const [verifying, setVerifying] = useState(false)
+  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null)
+  const sendVerificationLink = () => {
+    if (verifying) return
+    setVerifying(true); setNotice(null)
+    void resendVerificationEmail(jwt)
+      .then(email => {
+        setNotice({ text: t("auth.verifyEmail.linkSent", { email }), failed: false })
+        // The address may have been verified in another tab while this ran.
+        setRevision(n => n + 1)
+      })
+      .catch(reason => {
+        // The server answers with a stable code (already_verified,
+        // rate_limited, email_delivery_unavailable); anything else is a
+        // transport failure and gets the generic line.
+        const code = reason instanceof Error ? reason.message : ""
+        const known = ["already_verified", "rate_limited", "email_delivery_unavailable"]
+        setNotice({
+          text: t(known.includes(code) ? (`auth.verifyEmail.${code}` as MessageKey) : "auth.verifyEmail.sendFailed"),
+          failed: true,
+        })
+        if (code === "already_verified") setRevision(n => n + 1)
+      })
+      .finally(() => setVerifying(false))
+  }
   useEffect(() => {
     let current = true
     setRefreshing(true)
@@ -59,8 +81,11 @@ function AccountLoginMethods({
     void googleRequest<NonNullable<typeof methods>>("methods", undefined, jwt)
       .then((value) => {
         if (!current) return
-        if (previousPassword.current === false && value.password)
-          setRecovering(false)
+        if (previousPassword.current === false && value.password) setRecovering(false)
+        // AQU-2636: returning from the emailed link refreshes this read, and
+        // the row then says verified — so drop the "link sent" line rather
+        // than leaving it under a status it has already outlived.
+        if (value.email_verified) setNotice(null)
         previousPassword.current = value.password
         setMethods(value)
       })
@@ -151,6 +176,13 @@ function AccountLoginMethods({
               </Button>
             }
           />
+        <SettingsRow
+          className="flex-wrap items-center"
+          label={t(methods.email_verified ? "auth.verifyEmail.statusVerified" : "auth.verifyEmail.statusUnverified")}
+          description={methods.email_verified ? undefined : t("auth.verifyEmail.unverifiedWhy")}
+          control={!methods.email_verified && <Button size="sm" variant="outline" disabled={refreshing || error || verifying} onClick={sendVerificationLink}>{t(verifying ? "auth.verifyEmail.sending" : "auth.verifyEmail.sendLink")}</Button>}
+        />
+        {notice && <SettingsBlock><p role="status" className={notice.failed ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{notice.text}</p></SettingsBlock>}
           {changingEmail && (
             <SettingsBlock>
               <EmailChangeForm

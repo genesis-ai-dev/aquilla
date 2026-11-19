@@ -4351,22 +4351,123 @@ file yet.** Each failure mode looks like a broken suite and is not:
   'auth-worker/.wrangler/tmp/email'` and passed on the next run. The 2026-11-13 entry saw the
   same harness artifact. Not an assertion failure.
 
-### New candidate — FTS5-era vocabulary in a Postgres search path
+---
 
-- **Found**: 2026-11-16, while establishing that `sanitizeFtsAnyTerm`'s `bm25`/FTS5 comment
-  described a dialect the live code no longer speaks.
-- **Friction**: `git grep -in "fts5\|bm25\|cells_fts"` over `sync-worker/src/**/*.ts` returns
-  **125 hits across 15 files** (`events/scoped-search.ts` 19, `lib/branching-search/
-  algorithm.ts` 13, `events/search-route.ts` 6, `events/event-projection.ts` 6, plus test
-  helpers). Some are accurate history, some are live-sounding claims about a datastore that
-  was replaced — e.g. `queryScopedSearch`'s "Throws on FTS5 syntax errors so the route layer
-  can decide 400 vs 500" and "FTS5 JOIN: `cells_fts.rowid` lines up with `cells.rowid` via the
-  virtual table's external-content binding (migration 0003)", both sitting above SQL that now
-  calls `to_tsquery`/`phraseto_tsquery` against a generated `value_tsv` column.
-- **Why deferred**: this run's theme was dead-code deletion, and the routine allows one theme
-  per run. It is also genuinely a judgement call per hit — the `rebuild-fts` admin route and
-  `/admin/projects/:id/rebuild-fts` endpoint keep the FTS name legitimately, and some
-  comments are deliberately historical — so it is a read-every-hit job, not a sweep.
-- **Proof needed**: comments-only, so the ordinary full gate suffices. Worth one doc-drift
-  run scoped to `sync-worker/src/events/` plus `lib/branching-search/`, leaving test helpers
-  and the `rebuild-fts` route names alone.
+## 2026-11-18 run — doc drift: FTS5-era vocabulary in the Postgres search path
+
+**Theme**: comment/doc drift (routine theme 6). This run **completed** the candidate the
+2026-11-16 entry logged at the bottom of this file ("FTS5-era vocabulary in a Postgres search
+path"); that entry is superseded by what follows and should not be picked up again.
+
+**Files touched (7, comments only, zero statements changed)**
+
+| File | What was stale |
+| --- | --- |
+| `sync-worker/src/events/scoped-search.ts` | 17 hits. The choke-point header, the `SearchResultOut.snippet` doc, both sanitizer docs, both query-function docs, and a 10-line block documenting SQLite's `snippet(table, col, start, end, ellipsis, max_tokens)` call directly above SQL that calls `ts_headline`. |
+| `sync-worker/src/events/event-projection.ts` | 5 orphaned `// FTS5 maintenance (pre-DML)/(post-DML)` comments describing index statements that were deleted in the cutover — each was followed by a blank line and then unrelated code. Plus the module-level "FTS statements" note. |
+| `sync-worker/src/events/search-route.ts` | Header claimed "FTS5-backed"; 3 more mentions. |
+| `sync-worker/src/events/rebuild-fts.ts` | Header described "idempotent backfill … delete-then-insert pass in batches of 1000 rows (cursor-paginated by rowid)" for a handler that is a no-op returning zeros. |
+| `sync-worker/src/events/projection-snapshot.ts` | "`cells_fts`/`value_tsv` is a generated column" — `cells_fts` was a virtual table, not a column. |
+| `sync-worker/src/external/search-reads.ts` | One comment on the error mapper. |
+| `sync-worker/src/lib/confidence/lexical-confidence.ts` | Two references to "FTS5's unicode61 tokenizer" as the retrieval tokenizer. |
+
+**Deliberately left alone**, and why — the next doc-drift run should not "finish" these:
+
+- **`sync-worker/src/lib/branching-search/{algorithm,settings}.ts` (22 of the 125 hits).**
+  These implement Okapi BM25 *in TypeScript* (`bm25Score`, `bm25K1`, `bm25B`). The vocabulary
+  is accurate and has nothing to do with SQLite. Not drift.
+- **The two live `fts5` regex arms** — `search-route.ts` `mapSearchError` and
+  `search-reads.ts` `searchFailure`. Changing a pattern that decides 400-vs-500 is a
+  behavior change. `search-route.ts` now carries a one-line note saying the arm is kept for
+  legacy messages and that Postgres does not produce it.
+- **The `rebuild-fts` route path and `handleRebuildFtsRequest`/`RebuildFtsEnv` names.** The
+  endpoint is part of the admin API surface.
+- **The exported names `sanitizeFtsQuery` / `sanitizeFtsExactPhrase`.** Renaming exported
+  symbols across subsystems is explicitly out of scope, and `search-route.ts` re-exports
+  `sanitizeFtsQuery` for the test suite.
+- **`search-reads.ts:250`, the multi-project merge sort comment.** Left untouched on purpose
+  — see the bug below. Rewriting it to the truth would put a correct comment directly above
+  code that contradicts it.
+
+**Something worth knowing that the comments were hiding** — recorded here because the
+sanitizers now say so in their own docs: on Postgres, `sanitizeFtsQuery`'s and
+`sanitizeFtsExactPhrase`'s **return values are only emptiness gates**. `queryScopedSearch`
+and `queryScopedExact` bind the **raw** `q` / `exactText` to `plainto_tsquery` /
+`phraseto_tsquery` and never pass the sanitized string to the database. The quoted output is
+consumed only by `search-read.test.ts` and `scoped-search.test.ts`, which is why the
+functions still have to produce it.
+
+### New candidate — external multi-project search sorts results worst-first (likely bug)
+
+- **Found**: 2026-11-18, while reading `search-reads.ts:250` for the comment sweep above.
+- **The code**: `sync-worker/src/external/search-reads.ts`, the multi-project branch of the
+  external search route:
+
+  ```ts
+  // Rank is FTS5 bm25 (more negative = better), comparable across projects …
+  merged.sort((a, b) => (a.rank === b.rank ? a.projectId.localeCompare(b.projectId) : a.rank - b.rank))
+  ```
+
+  `a.rank - b.rank` sorts **ascending**, which was right under SQLite bm25. The rank these
+  rows actually carry now comes from `queryScopedSearch`, which selects
+  `ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank` and orders by
+  `rank DESC` — **higher is better** under Postgres. So the per-project queries return their
+  best hits first and the merge then reverses them: the least relevant row across all
+  projects lands at offset 0, and a caller paginating the first page gets the worst matches.
+  Single-project search is unaffected (it never reaches this sort).
+- **Why this routine did not fix it**: flipping a sort comparator changes observable output
+  ordering — a behavior change, which this routine forbids, and the fix needs a test that
+  pins the new ordering (also out of scope here). No existing test covers the ordering: the
+  `external-*.test.ts` files contain no assertion on `rank` ordering across projects, which
+  is how it survived the cutover.
+- **Proof a fix would need**: a sync-worker test over two projects asserting the merged
+  ordering is descending by `rank`, plus a check that the `projectId` tiebreak still holds.
+- **Filing status**: this session had **no Linear MCP tooling available**, so it could not be
+  created in `Triage` as the routine requires. **Needs a human to file it** (team Aquilla,
+  status `Triage`, template `Bug Report`).
+
+### Gate results — 2026-11-18
+
+All gates run **serially** (never lint alongside vitest — sandbox note 1 below still holds),
+with `rm -rf packages/*/dist` before both lints so the two are comparable.
+
+| Gate | Baseline (clean `origin/dev`) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1062 problems (0 errors, 1062 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2462 files passed / **1 failed**; 28731 tests passed / **1 failed** | exit 1 — **identical counts, identical single failure** |
+| `cd sync-worker && npm test` | exit 0 — 329 files, 4892 passed / 21 skipped | exit 0 — **identical** |
+| `pnpm test:e2e:smoke` | not re-baselined (see below) | s1 42 passed / 3 failed, s2 33 passed, s3 37 passed / 1 failed |
+
+**The one root-suite failure is pre-existing and environmental.**
+`scripts/release-cut.test.ts` → *"fails loud when the pick cannot commit, and leaves nothing
+in progress"*. The test sets `commit.gpgsign=true` with a deliberately bogus `gpg.program` and
+expects `buildReleaseBranch` to throw; in this container git does not fail on that, so nothing
+is thrown (`expected [Function] to throw an error`). It fails identically before and after the
+diff, and `scripts/` is nowhere near this run's files. Out of scope per the routine — **frozen
+for this run**, not fixed.
+
+**The four e2e failures are the two documented pre-existing sets**, both matched by file, line
+and error text against the 2026-11-13 and 2026-11-16 entries:
+- **s1, 3 failures**, all `editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a
+  15s `locator.click` timeout on `getByRole("button", { name: /Play all/i })` at line 365.
+  That is now **five consecutive runs** failing this way on clean `dev`.
+- **s3, 1 failure**, `projects/admin-console-billing.smoke.spec.ts:51` — the same
+  `ENOENT: no such file or directory, scandir 'auth-worker/.wrangler/tmp/email'` harness
+  artifact at line 77 that the last two entries recorded as passing on a re-run. Not an
+  assertion failure.
+
+A caption-import spec and an email-scandir harness race cannot be reached by rewriting comments
+in `sync-worker`'s search files. The mechanical proof is stronger than the suites anyway:
+`git diff -U0` over the changed `.ts` files, with comment lines filtered out, is **empty** —
+**every changed TypeScript line is a comment**, and sync-worker's own 329-file / 4892-test
+suite is identical before and after.
+
+**Sandbox notes from the 2026-11-16 entry all still hold and were all needed again**: serialize
+lint and vitest; `rm -rf packages/*/dist` before the baseline lint too; worker `node_modules`
+absent in a fresh container (`npm install` in `sync-worker/`, `auth-worker/`, `agent-worker/` —
+**then `git checkout -- */package-lock.json`, because plain `npm install` rewrites them**);
+Playwright browsers one revision off (`ln -sfn /opt/pw-browsers/chromium-1243
+/opt/pw-browsers/chromium-1254`, same for `ffmpeg-1011`→`1013` and
+`chromium_headless_shell-1243`→`1254`); and `bash scripts/e2e-pg-native.sh` for Postgres,
+exporting the single `E2E_PG_ADMIN_URL` line it prints.

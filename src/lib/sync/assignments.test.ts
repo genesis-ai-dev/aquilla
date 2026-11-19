@@ -72,6 +72,19 @@ describe("getMyAssignments", () => {
     expect(out).toHaveLength(1)
     expect(out[0].assignmentId).toBe("a1")
   })
+
+  // AQU-2654: the editor's own read and the assignments panel's, in one commit.
+  it("two readers in the same turn send one request; a later read sends its own", async () => {
+    mockFetchWithTimeout.mockImplementation(async () => jsonRes({ assignments: [] }))
+    await Promise.all([getMyAssignments("jwt", "p1"), getMyAssignments("jwt", "p1")])
+    expect(mockFetchWithTimeout).toHaveBeenCalledTimes(1)
+    // After an assignment changed, the list is read again.
+    await getMyAssignments("jwt", "p1")
+    expect(mockFetchWithTimeout).toHaveBeenCalledTimes(2)
+    // Another project, or another account, is another read.
+    await Promise.all([getMyAssignments("jwt", "p2"), getMyAssignments("other", "p2")])
+    expect(mockFetchWithTimeout).toHaveBeenCalledTimes(4)
+  })
 })
 
 describe("createAssignment", () => {

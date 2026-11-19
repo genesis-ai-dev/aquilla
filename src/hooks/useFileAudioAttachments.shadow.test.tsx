@@ -50,7 +50,9 @@ import {
   SETTLED_GRACE_MS,
   UNBOUND_TTL_MS,
   clearOptimisticShadows,
+  getOptimisticShadows,
   injectOptimisticAudioAttachment,
+  injectOptimisticAudioWords,
   injectOptimisticAudioPlace,
   injectOptimisticAudioRemove,
   injectOptimisticAudioDeselect,
@@ -854,15 +856,203 @@ describe("optimistic overlay — plumbing", () => {
     })
     expect(fetchMock.mock.calls.length).toBe(idle)
 
-    // With a live overlay, the same notification pulls fresh truth.
+    // AQU-2654: a live overlay whose event is STILL queued has nothing to
+    // learn from the server either — other writes joining or leaving the queue
+    // used to re-read the whole file every time.
     queued("evt-select")
     act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
-    const before = fetchMock.mock.calls.length
+    const stillQueued = fetchMock.mock.calls.length
     await act(async () => {
       outbox.subscribers.forEach((cb) => cb())
       await new Promise((r) => setTimeout(r, 400))
     })
-    expect(fetchMock.mock.calls.length).toBeGreaterThan(before)
+    expect(fetchMock.mock.calls.length).toBe(stillQueued)
+
+    // Once its event has left the queue, the same notification pulls fresh truth.
+    delivered("evt-select")
+    await act(async () => {
+      outbox.subscribers.forEach((cb) => cb())
+      await new Promise((r) => setTimeout(r, 400))
+    })
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(stillQueued)
+  })
+
+  it("re-reads when a queued overlay's event fails, so the take can say it is not saved", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    queued("evt-select")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
+    quarantined("evt-select")
+    await act(async () => {
+      outbox.subscribers.forEach((cb) => cb())
+      await new Promise((r) => setTimeout(r, 400))
+    })
+    await waitFor(() => expect(entryOf(result)?.attachments[SHORT.audioId]?.syncFailed).toBe(true))
+  })
+
+  // AQU-2654: the words on a take (speech recognition, a correction, a
+  // cleanup, a clear) are painted from the write itself.
+  describe("words on a take", () => {
+    const TIMED = [{ word: "eema", start: 0, end: 4, t0: 0, t1: 0.4 }]
+    const withWords = (asrText: string, words: string[]) => cells({
+      attachments: { [LONG.audioId]: { ...LONG, asrText } },
+      selectedAudioId: LONG.audioId,
+      audioTimings: { [LONG.audioId]: words.map((word, i) => ({ word, start: 0, end: 0, t0: i, t1: i + 1 })) },
+    })
+
+    it("shows a take's new words at once, without reading the file again", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      const reads = fetchMock.mock.calls.length
+
+      queued("evt-words")
+      act(() => injectOptimisticAudioWords("f1", "c1", LONG.audioId, {
+        timings: TIMED, asrText: "eema", asrModel: "omni-fast", transcriptAi: null,
+      }, "evt-words"))
+      const entry = entryOf(result)
+      expect(entry?.attachments[LONG.audioId]).toMatchObject({ asrText: "eema", asrModel: "omni-fast", url: LONG.url, durationMs: 6000 })
+      expect((entry?.audioTimings as Record<string, unknown>)[LONG.audioId]).toEqual(TIMED)
+      // No selection claimed, no "saving" badge on a take that IS saved.
+      expect(entry?.selectedAudioId).toBe(LONG.audioId)
+      expect(entry?.attachments[LONG.audioId]?.pendingSync).toBeUndefined()
+      expect(fetchMock.mock.calls.length).toBe(reads)
+
+      // And the merged cell the views read carries them.
+      expect(mergeCellsWithAudio([{ id: "c1" } as CellData], result.current.byCellId)[0].attachments?.[LONG.audioId]?.asrText).toBe("eema")
+    })
+
+    it("keeps the words over a read that predates them, and yields once the server has them", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      queued("evt-words")
+      act(() => injectOptimisticAudioWords("f1", "c1", LONG.audioId, { timings: TIMED, asrText: "eema", transcriptAi: null }, "evt-words"))
+
+      // A stale read while the event is queued: the words stay.
+      await act(async () => { notifyAudioAttachmentsChanged("f1") })
+      await waitFor(() => expect(entryOf(result)?.attachments[LONG.audioId]?.asrText).toBe("eema"))
+
+      // Delivered and projected: the read carries them, the overlay is done.
+      delivered("evt-words")
+      fetchMock.mockResolvedValue(withWords("eema", ["eema"]))
+      await act(async () => { notifyAudioAttachmentsChanged("f1") })
+      await waitFor(() => expect(getOptimisticShadows("f1").size).toBe(0))
+      expect(entryOf(result)?.attachments[LONG.audioId]?.asrText).toBe("eema")
+    })
+
+    it("a cleanup queued behind the transcription it cleans up keeps what was heard", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      queued("evt-asr")
+      queued("evt-clean")
+      act(() => {
+        injectOptimisticAudioWords("f1", "c1", LONG.audioId, { timings: TIMED, asrText: "eema", asrModel: "omni-fast", transcriptAi: null }, "evt-asr")
+        injectOptimisticAudioWords("f1", "c1", LONG.audioId, {
+          timings: [{ ...TIMED[0], word: "Yesu" }], transcriptAi: { model: "m", at: 5, changes: 1 },
+        }, "evt-clean")
+      })
+      const entry = entryOf(result)
+      expect(entry?.attachments[LONG.audioId]).toMatchObject({ asrText: "eema", transcriptAi: { model: "m", at: 5, changes: 1 } })
+      expect((entry?.audioTimings as Record<string, Array<{ word: string }>>)[LONG.audioId][0].word).toBe("Yesu")
+    })
+
+    it("drops unsaved words when their write fails, rather than showing a transcript nobody else has", async () => {
+      fetchMock.mockResolvedValue(withWords("eema", ["eema"]))
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      queued("evt-words")
+      act(() => injectOptimisticAudioWords("f1", "c1", LONG.audioId, {
+        timings: [{ ...TIMED[0], word: "Yesu" }], transcriptAi: null,
+      }, "evt-words"))
+      expect((entryOf(result)?.audioTimings as Record<string, Array<{ word: string }>>)[LONG.audioId][0].word).toBe("Yesu")
+      quarantined("evt-words")
+      await act(async () => {
+        outbox.subscribers.forEach((cb) => cb())
+        await new Promise((r) => setTimeout(r, 400))
+      })
+      await waitFor(() => expect((entryOf(result)?.audioTimings as Record<string, Array<{ word: string }>>)[LONG.audioId][0].word).toBe("eema"))
+    })
+
+    // A pass over a file writes a take's words every few hundred ms, and the
+    // server echoes each one back as a poke. Thirty rows used to re-read the
+    // whole file 46 times.
+    it("gathers the pokes and outbox moves of a burst of words writes into one read", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      const reads = fetchMock.mock.calls.length
+
+      // A clock the test owns: how long the burst "takes" must not depend on
+      // how fast this machine is.
+      vi.useFakeTimers()
+      for (const id of ["evt-1", "evt-2", "evt-3"]) {
+        queued(id)
+        act(() => injectOptimisticAudioWords("f1", "c1", LONG.audioId, { timings: TIMED, asrText: "eema", transcriptAi: null }, id))
+        delivered(id)
+        await act(async () => {
+          // The echo of the applied event, and the outbox letting go of it.
+          notifyAudioAttachmentsChanged("f1")
+          outbox.subscribers.forEach((cb) => cb())
+          await vi.advanceTimersByTimeAsync(100)
+        })
+      }
+      // Nothing has been read while the burst was still going.
+      expect(fetchMock.mock.calls.length).toBe(reads)
+      fetchMock.mockResolvedValue(withWords("eema", ["eema"]))
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(fetchMock.mock.calls.length).toBe(reads + 1)
+      // And that one read settled every overlay.
+      expect(getOptimisticShadows("f1").size).toBe(0)
+    })
+
+    it("does not hold a read back for longer than two seconds while the pokes keep coming", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      const reads = fetchMock.mock.calls.length
+      queued("evt-words")
+      act(() => injectOptimisticAudioWords("f1", "c1", LONG.audioId, { timings: TIMED, asrText: "eema", transcriptAi: null }, "evt-words"))
+      vi.useFakeTimers()
+      for (let i = 0; i < 12; i++) {
+        act(() => notifyAudioAttachmentsChanged("f1"))
+        await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+      }
+      // 2.4 s of pokes 200 ms apart: never quiet, read once at the cap.
+      expect(fetchMock.mock.calls.length).toBe(reads + 1)
+    })
+
+    it("still reads at once on a poke when anything but words is in flight", async () => {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      queued("evt-select")
+      queued("evt-words")
+      act(() => {
+        injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select")
+        injectOptimisticAudioWords("f1", "c1", LONG.audioId, { timings: TIMED, transcriptAi: null }, "evt-words")
+      })
+      const reads = fetchMock.mock.calls.length
+      // With the clock stopped: the read is asked for in the poke itself, not
+      // after any wait.
+      vi.useFakeTimers()
+      await act(async () => {
+        notifyAudioAttachmentsChanged("f1")
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(fetchMock.mock.calls.length).toBe(reads + 1)
+    })
+
+    it("paints nothing for a take the read does not hold", async () => {
+      fetchMock.mockResolvedValue(serverEmpty())
+      const { result } = mount()
+      await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      const before = result.current.byCellId
+      act(() => injectOptimisticAudioWords("f1", "c9", "audio-gone", { timings: TIMED, transcriptAi: null }, "evt-x"))
+      expect(result.current.byCellId).toBe(before)
+    })
   })
 
   it("mergeCellsWithAudio carries pendingSync onto the cell attachment", () => {

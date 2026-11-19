@@ -49,6 +49,7 @@ import type {
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { ROLE } from '../events/role-policy'
+import { looksLikeEmail } from '../../../db/shared/mask-email'
 
 /** Add a person to the project at a role. Fails when they already hold a direct
  *  membership row — re-roling an existing member is `SetRole`, so an "invite"
@@ -144,12 +145,25 @@ export function validateMembershipCommand(
     issues.push({ index, message: `${kind}.projectId must be a non-empty string` })
     return null
   }
-  if (!isNonEmptyString(c.username) || c.username.length > 128) {
-    issues.push({ index, message: `${kind}.username must be a non-empty string (max 128 chars)` })
+  // AQU-2576: `email` is an accepted alias for `username`. An agent staffing a
+  // project is handed an email address far more often than a handle, and
+  // guessing the handle (or walking other projects' rosters to find it) is not
+  // a workflow — the account exists either way, only the lookup key differed.
+  // Both land in the same `username` field, and `lookupUser` resolves either.
+  const identifier = isNonEmptyString(c.username)
+    ? c.username
+    : isNonEmptyString(c.email)
+      ? c.email
+      : null
+  if (identifier === null || identifier.length > 128) {
+    issues.push({
+      index,
+      message: `${kind}.username (or .email) must be a non-empty string (max 128 chars)`,
+    })
     return null
   }
   if (kind === 'RemoveMember') {
-    return { kind, projectId: c.projectId, username: c.username }
+    return { kind, projectId: c.projectId, username: identifier }
   }
   if (typeof c.role !== 'number' || !CANONICAL_ROLE_LEVELS.includes(c.role)) {
     issues.push({
@@ -158,7 +172,7 @@ export function validateMembershipCommand(
     })
     return null
   }
-  return { kind, projectId: c.projectId, username: c.username, role: c.role }
+  return { kind, projectId: c.projectId, username: identifier, role: c.role }
 }
 
 /** One plain-language line per command for the /approve page. */
@@ -178,13 +192,37 @@ export interface TargetUser {
 }
 
 /** Look the target up by username, case-insensitively (mirrors auth-worker's
- *  lookupUserByUsername, which the members UI uses). */
+ *  lookupUserByUsername, which the members UI uses).
+ *
+ *  AQU-2576: an identifier containing `@` is also resolved against the account
+ *  email, mirroring auth-worker's `lookupUserByUsernameOrEmail`. Username
+ *  resolution runs first and is unchanged, so an account whose handle contains
+ *  an `@` (none can today — signup rejects it) would still win. `users.email`
+ *  is UNIQUE on LOWER(email), so at most one account can match; the two-row
+ *  ceiling is defense in depth against a database that violates that invariant,
+ *  failing closed rather than handing an agent an arbitrary account.
+ *
+ *  [Pen test] Authorization & access control (2026-11-17): only a VERIFIED
+ *  address resolves, as in auth-worker. Registration never proves the email it
+ *  stores, so an unverified match could be a squatter who registered the
+ *  invitee's address first; a matching string is not proof of control
+ *  (AQU-1579). The account stays reachable by username. */
 export async function lookupUser(db: AquillaDb, username: string): Promise<TargetUser | null> {
   const row = await db
     .prepare(`SELECT id::text AS id, username FROM users WHERE lower(username) = lower(?)`)
     .bind(username)
     .first<{ id: string; username: string }>()
-  return row ? { id: row.id, username: row.username } : null
+  if (row) return { id: row.id, username: row.username }
+
+  if (!looksLikeEmail(username)) return null
+  const byEmail = await db
+    .prepare(
+      `SELECT id::text AS id, username FROM users WHERE lower(email) = lower(?) AND email_verified_at IS NOT NULL ORDER BY id ASC LIMIT 2`,
+    )
+    .bind(username.trim())
+    .all<{ id: string; username: string }>()
+  const rows = byEmail.results ?? []
+  return rows.length === 1 ? { id: rows[0].id, username: rows[0].username } : null
 }
 
 /** The target's DIRECT project_members role level, or null when they hold no

@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn(), rejected: vi.fn() }))
+const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" } as { username: string; jwt: string } | null, request: vi.fn(), start: vi.fn(), rejected: vi.fn(), resend: vi.fn() }))
 vi.mock("@/lib/deployment-environment", () => ({ resolveBackendEnvironment: () => ({ kind: "preview" }) }))
 vi.mock("@/lib/frontier/session-expiry", () => ({ notifySessionExpiredIfCurrent: mocks.rejected }))
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ active: mocks.active }) }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start }))
 vi.mock("./AccountSecurity", () => ({ AccountSecurity: ({children}: {children:import("react").ReactNode}) => <>{children}</>, PasswordManagement: () => <div>password-management</div> }))
+vi.mock("@/lib/frontier/auth", () => ({ resendVerificationEmail: mocks.resend }))
 import { MemoryRouter } from "react-router-dom"
 import { LoginMethodsSection } from "./LoginMethodsSection"
 beforeEach(() => { vi.clearAllMocks(); mocks.active = { username: "alice", jwt: "alice-token" }; mocks.start.mockResolvedValue(undefined) })
@@ -152,4 +153,38 @@ it("shows the preview restriction beside Google and cannot start a disabled conn
   fireEvent.click(connect)
   expect(mocks.start).not.toHaveBeenCalled()
   expect(screen.queryByText("auth.google.privacy")).toBeNull()
+})
+
+
+// AQU-2636: an account could not see that its email was unverified, and had no
+// way to ask for another link once the sign-up one lapsed — while an
+// unverified address stops it resolving in Add members and in email-bound
+// invites. The status and the one button that fixes it live on this row.
+it("shows an unverified email with a way to fix it, and sends the link to the account's own address", async () => {
+  mocks.request.mockResolvedValue({ email: "alice@example.com", password: true, email_verified: false, google: false, google_available: true })
+  mocks.resend.mockResolvedValue("alice@example.com")
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  expect(await screen.findByText("auth.verifyEmail.statusUnverified")).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "auth.verifyEmail.sendLink" }))
+  // No address is ever passed from the client: the server mails only the one
+  // stored on the account.
+  expect(mocks.resend).toHaveBeenCalledWith("alice-token")
+  expect(await screen.findByRole("status")).toHaveTextContent("auth.verifyEmail.linkSent")
+})
+
+it("offers no send button once the address is verified", async () => {
+  mocks.request.mockResolvedValue({ email: "alice@example.com", password: false, email_verified: true, google: true, google_available: true })
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  expect(await screen.findByText("auth.verifyEmail.statusVerified")).toBeVisible()
+  expect(screen.queryByRole("button", { name: "auth.verifyEmail.sendLink" })).toBeNull()
+  expect(screen.queryByText("auth.verifyEmail.statusUnverified")).toBeNull()
+})
+
+it("reports the server's refusal instead of claiming a link was sent", async () => {
+  mocks.request.mockResolvedValue({ email: "alice@example.com", password: true, email_verified: false, google: false, google_available: true })
+  mocks.resend.mockRejectedValue(new Error("rate_limited"))
+  render(<MemoryRouter><LoginMethodsSection /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole("button", { name: "auth.verifyEmail.sendLink" }))
+  expect(await screen.findByRole("status")).toHaveTextContent("auth.verifyEmail.rate_limited")
+  expect(screen.queryByText("auth.verifyEmail.linkSent")).toBeNull()
 })

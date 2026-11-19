@@ -1,6 +1,10 @@
 // AQU-1068: what the /events perimeter still decides about cell structure,
 // and what it deliberately no longer does.
 //
+// AQU-2632 (2026-11-17): the one surviving rule below now reads the project's
+// tier after all, but ONLY to admit: a role the effective tier names may remove
+// an imported cell. It never refuses anything the maintainer rule admitted.
+//
 // THE PROJECT'S `cellEditingFloor` TIER IS NOT CHECKED HERE ANY MORE (Sam,
 // 2026-09-09). It is a PRODUCT rule enforced where the buttons are drawn — the
 // row menu, the timeline's add and remove, and the agent's proposal staging in
@@ -28,16 +32,31 @@ const SECRET = "test-secret-value-for-cell-editing"
 type Tier = "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
 
 /** project_settings -> the tier (now inert here); cells -> the delete guard. */
-function makeDb(options: { tier?: Tier | null; userInserted?: boolean }): AquillaDb {
-  const { tier = null, userInserted = false } = options
+function makeDb(options: {
+  tier?: Tier | null
+  /** The org's default tier, which a project with no tier of its own follows. */
+  orgTier?: Tier | null
+  userInserted?: boolean
+  /** A database without migration 0176: the generated column does not exist. */
+  noTierColumn?: boolean
+}): AquillaDb {
+  const { tier = null, orgTier = null, userInserted = false, noTierColumn = false } = options
   return {
     prepare(sql: string) {
       return {
         bind(..._args: unknown[]) {
           return {
             async first() {
+              if (sql.includes("cell_editing_floor")) {
+                if (noTierColumn) throw new Error('column "cell_editing_floor" does not exist')
+                return { cell_editing_floor: tier }
+              }
               if (sql.includes("FROM project_settings")) {
                 return projectSettingsRow(sql, JSON.stringify(tier ? { cellEditingFloor: tier } : {}))
+              }
+              if (sql.includes("FROM projects")) return { org_id: 1 }
+              if (sql.includes("FROM org_settings")) {
+                return { settings: JSON.stringify(orgTier ? { cellEditingFloor: orgTier } : {}) }
               }
               if (sql.includes("FROM cells")) {
                 return userInserted
@@ -181,7 +200,7 @@ describe("removing an IMPORTED cell needs maintainer", () => {
     expect(result.ok).toBe(true)
   })
 
-  it("refuses a PROJECT LEAD removing an imported cell", async () => {
+  it("refuses a PROJECT LEAD removing an imported cell when the project has no tier", async () => {
     const result = await authorize(
       await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
       makeDb({ userInserted: false }),
@@ -190,15 +209,61 @@ describe("removing an IMPORTED cell needs maintainer", () => {
     if (!result.ok) expect(result.reason).toMatch(/imported cell requires maintainer/)
   })
 
-  it("refuses that lead whatever the tier says — the rule does not depend on it", async () => {
-    // A tier of "project_lead" would once have been the deciding term. It is
-    // not consulted; the cell's own provenance decides.
+  it("refuses that lead at \"No one\" and when the tier names maintainer", async () => {
+    for (const tier of ["none", "maintainer"] as const) {
+      const result = await authorize(
+        await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
+        makeDb({ tier, userInserted: false }),
+      )
+      expect(result.ok, tier).toBe(false)
+    }
+  })
+
+  it("ADMITS a project lead where the project's tier is Project lead (AQU-2632)", async () => {
+    // Biblica ETT, Pattani Malay: the setting said Project lead and the lead was
+    // refused anyway. The setting now decides.
     const result = await authorize(
       await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
       makeDb({ tier: "project_lead", userInserted: false }),
     )
+    expect(result.ok).toBe(true)
+  })
+
+  it("still refuses a contributor where the tier is Project lead", async () => {
+    const result = await authorize(
+      await tokenFor(ROLE.CONTRIBUTOR), ev("source.cell.delete"), SECRET,
+      makeDb({ tier: "project_lead", userInserted: false }),
+    )
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/imported cell requires maintainer/)
+  })
+
+  it("follows the org's default when the project sets no tier", async () => {
+    const result = await authorize(
+      await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
+      makeDb({ orgTier: "project_lead", userInserted: false }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it("lets the project's own tier override the org's, in either direction", async () => {
+    const stricter = await authorize(
+      await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
+      makeDb({ tier: "none", orgTier: "project_lead", userInserted: false }),
+    )
+    expect(stricter.ok).toBe(false)
+    const looser = await authorize(
+      await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
+      makeDb({ tier: "project_lead", orgTier: "maintainer", userInserted: false }),
+    )
+    expect(looser.ok).toBe(true)
+  })
+
+  it("reads the tier from the blob on a database without the generated column", async () => {
+    const result = await authorize(
+      await tokenFor(ROLE.PROJECT_LEAD), ev("source.cell.delete"), SECRET,
+      makeDb({ tier: "project_lead", userInserted: false, noTierColumn: true }),
+    )
+    expect(result.ok).toBe(true)
   })
 
   it("admits a MAINTAINER removing an imported cell, with no tier set", async () => {

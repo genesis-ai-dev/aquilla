@@ -16,7 +16,7 @@ import {
   type MultiInvitePreview,
 } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { isJwtExpired } from "@/lib/frontier/auth"
+import { isJwtExpired, resendVerificationEmail } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -25,6 +25,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { maskEmail } from "../../db/shared/mask-email"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -50,7 +51,7 @@ export function JoinPage() {
   const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, loading: sessionLoading } = useFrontierSession()
+  const { session, loading: sessionLoading, logout } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
   // The KEY of the error to show, not the resolved sentence (AQU-511 finding 7).
   // Resolving with t() at the moment the failure happened froze the message in
@@ -58,6 +59,13 @@ export function JoinPage() {
   // stale-language error on screen. A key in state is resolved at render, so it
   // follows the active locale for free.
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null)
+  // AQU-2576: an email-bound invite redeemed from the wrong account used to
+  // dead-end on "a different email address" — which address, and which account
+  // am I? Neither the recipient nor the owner could act on that. Hold the
+  // server's masked invited address so the rejection can name all three facts:
+  // the address wanted, the account signed in, and the two ways out. `null`
+  // means a mismatch with no address from the server (older deploy).
+  const [mismatchInvitedEmail, setMismatchInvitedEmail] = useState<string | null>(null)
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
@@ -125,6 +133,7 @@ export function JoinPage() {
     if (!token) return
     setPhase("redeeming")
     setErrorKey(null)
+    setMismatchInvitedEmail(null)
     // Prefer the multi-project accept — it also redeems a single-project token
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
@@ -169,7 +178,27 @@ export function JoinPage() {
       setErrorKey("auth.join.networkError")
       return
     }
+    // AQU-2639: AQU-1579 refuses an email-bound invite when the account has
+    // never confirmed the address, with the same 403 as a wrong-account
+    // mismatch — but it is the opposite situation: this IS the right account,
+    // so the way out is to verify, not to sign in as someone else. Either
+    // endpoint may be the one that answered (a single-project token is
+    // redeemed through the multi accept first), so take the verdict from
+    // whichever did.
+    if (
+      single.reason === "email_unverified" ||
+      (!multi.ok && multi.reason === "email_unverified")
+    ) {
+      setPhase("error")
+      setErrorKey("auth.join.emailUnverified")
+      return
+    }
     if (single.reason === "wrong_email") {
+      // Either endpoint may carry the masked address; the multi accept ran
+      // first, so prefer whichever actually answered with one.
+      const invited =
+        single.invitedEmail ?? (multi.ok ? undefined : multi.invitedEmail) ?? null
+      setMismatchInvitedEmail(invited)
       setPhase("error")
       setErrorKey("auth.join.wrongEmail")
       return
@@ -416,10 +445,41 @@ export function JoinPage() {
             </div>
           ) : effectivePhase === "error" ? (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertCircle className="h-5 w-5" />
-                <p className="text-sm">{shownErrorKey ? t(shownErrorKey) : null}</p>
-              </div>
+              {shownErrorKey === "auth.join.wrongEmail" && session ? (
+                // AQU-2576: the one error a person can actually act on, so it
+                // says what it knows: which address the invite wanted (masked
+                // by the server — it is not this account's to read in full),
+                // which account is signed in (username in FULL: that is the
+                // string the project owner needs to add them directly), and
+                // both ways out.
+                <EmailMismatchNotice
+                  invitedEmail={mismatchInvitedEmail}
+                  username={session.username}
+                  signedInEmail={session.email ?? null}
+                  onSignOut={() => {
+                    void logout().then(() => {
+                      setMismatchInvitedEmail(null)
+                      setErrorKey(null)
+                      setPhase("initial")
+                    })
+                  }}
+                />
+              ) : shownErrorKey === "auth.join.emailUnverified" && session?.jwt ? (
+                // AQU-2639: the refusal that used to dead-end. The account is
+                // the invited one — it just has not proven it owns the address
+                // — so the page carries the way out instead of naming a
+                // requirement with nowhere to satisfy it.
+                <EmailUnverifiedNotice
+                  jwt={session.jwt}
+                  accountEmail={session.email ?? null}
+                  onAccept={() => session.jwt && void redeem(session.jwt)}
+                />
+              ) : (
+                <div className="flex items-center gap-2 text-destructive">
+                  <AlertCircle className="h-5 w-5" />
+                  <p className="text-sm">{shownErrorKey ? t(shownErrorKey) : null}</p>
+                </div>
+              )}
               <Button variant="outline" onClick={() => navigate("/")} className="w-full">
                 {t("auth.join.backToProjects")}
               </Button>
@@ -430,6 +490,197 @@ export function JoinPage() {
         </CardContent>
       </AuthPanel>
     </AuthPage>
+  )
+}
+
+/**
+ * AQU-2639: an email-bound invite refused because the signed-in account has
+ * never verified the address it was sent to.
+ *
+ * AQU-1579 made that refusal correct — registration stores whatever address it
+ * is given, so a string match is not proof of control — but the join page
+ * showed the server's sentence and nothing else. The person was signed in to
+ * the right account, holding a valid invite, with no control anywhere in the
+ * app that could send a verification link: on the dev database only 27 of
+ * 1,287 accounts were verified, so this was the common case, not the edge.
+ *
+ * What this screen adds is the action: send the link (AQU-2636's
+ * `POST /auth/me/resend-verification`, which mails only the address already on
+ * the account), say where it went, and let the person accept from this same
+ * page once they have opened it. Accepting is still explicit — verifying grants
+ * nothing on its own (AQU-335).
+ *
+ * The address is masked, as every address on this page is: it is enough to
+ * recognise your own mailbox, and a screenshot pasted into a support thread
+ * does not spread it. The confirmation masks the address the SERVER says it
+ * mailed, not the one in client state, so it cannot claim a send to an address
+ * that never got one.
+ */
+export function EmailUnverifiedNotice({
+  jwt,
+  accountEmail,
+  onAccept,
+}: {
+  jwt: string
+  /** The signed-in account's own email, masked here before display. */
+  accountEmail: string | null
+  /** Retry the accept — offered once a link has been sent. */
+  onAccept: () => void
+}) {
+  const t = useT()
+  const [sending, setSending] = useState(false)
+  // Either the confirmation naming the address the link went to, or the reason
+  // nothing was sent. A key (not a resolved sentence) for the failure so a
+  // language switch re-renders it in the new locale (AQU-511 finding 7); the
+  // confirmation carries the server's address, so it holds its own text.
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [failureKey, setFailureKey] = useState<MessageKey | null>(null)
+
+  function send() {
+    if (sending) return
+    setSending(true)
+    setSentTo(null)
+    setFailureKey(null)
+    void resendVerificationEmail(jwt)
+      .then((email) => setSentTo(email ? maskEmail(email) : ""))
+      .catch((reason: unknown) => {
+        // The server answers with a stable code (already_verified,
+        // rate_limited, email_delivery_unavailable); anything else is a
+        // transport failure and gets the generic line.
+        const code = reason instanceof Error ? reason.message : ""
+        const known = ["already_verified", "rate_limited", "email_delivery_unavailable"]
+        setFailureKey(
+          known.includes(code)
+            ? (`auth.verifyEmail.${code}` as MessageKey)
+            : "auth.verifyEmail.sendFailed",
+        )
+      })
+      .finally(() => setSending(false))
+  }
+
+  const strong = (text: string) => (
+    <span className="font-medium text-foreground">{text}</span>
+  )
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 text-destructive">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <p className="text-sm">{t("auth.join.emailUnverified")}</p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {accountEmail ? (
+          <RichMessage
+            k="auth.join.emailUnverifiedInvited"
+            values={{ email: strong(maskEmail(accountEmail)) }}
+          />
+        ) : (
+          t("auth.join.emailUnverifiedBody")
+        )}
+      </p>
+      <p className="text-sm text-muted-foreground">{t("auth.join.emailUnverifiedNext")}</p>
+      <Button onClick={send} disabled={sending} className="w-full">
+        {t(sending ? "auth.verifyEmail.sending" : "auth.verifyEmail.sendLink")}
+      </Button>
+      {sentTo !== null && (
+        <p className="text-sm text-muted-foreground" role="status">
+          {t("auth.verifyEmail.linkSent", { email: sentTo })}
+        </p>
+      )}
+      {failureKey && (
+        <p className="text-sm text-destructive" role="status">
+          {t(failureKey)}
+        </p>
+      )}
+      {/* Offered only after a link has gone out: before that there is nothing
+          to have opened, and a retry would just repeat the same refusal. */}
+      {sentTo !== null && (
+        <Button variant="outline" onClick={onAccept} className="w-full">
+          {t("auth.join.acceptInvitation")}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * AQU-2576: the email-bound invite rejection, told honestly.
+ *
+ * An invite minted for one address, opened by an account registered under
+ * another, used to render "This invite was sent to a different email address."
+ * and stop. Two of four Biblica reviewers hit exactly that in a single day,
+ * and it cost one of them a working day: the screen named neither the address
+ * the invite wanted nor the account they were signed in as, so the recipient
+ * could not pick the right account and the project owner could not add them
+ * directly either.
+ *
+ * What is safe to say, and why:
+ *   - the INVITED address is masked (`n…a@proton.me`) by the server. Whoever
+ *     holds this link is by definition not the person it was minted for, so
+ *     they do not get to read it in full — but a masked address is enough to
+ *     recognise your own.
+ *   - the signed-in USERNAME is shown in full. It is this account's own name,
+ *     already theirs to see, and it is the exact string the project owner
+ *     needs for "Add members" — the one fact that unblocks the other way out.
+ *   - the signed-in EMAIL is masked too, so a shoulder-surfer or a screenshot
+ *     pasted into a support thread does not spread it.
+ *
+ * Both exits are offered: sign out and come back as the invited address, or
+ * stay and have the owner add this account. Nothing auto-joins — the person
+ * chose which account to sign in with.
+ */
+export function EmailMismatchNotice({
+  invitedEmail,
+  username,
+  signedInEmail,
+  onSignOut,
+}: {
+  /** Masked invited address, or null when the server did not name one. */
+  invitedEmail: string | null
+  /** The signed-in account's username, shown in full. */
+  username: string
+  /** The signed-in account's email, masked here before display. */
+  signedInEmail: string | null
+  onSignOut: () => void
+}) {
+  const t = useT()
+  const strong = (text: string) => (
+    <span className="font-medium text-foreground">{text}</span>
+  )
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 text-destructive">
+        <AlertCircle className="h-5 w-5 shrink-0" />
+        <p className="text-sm">
+          {invitedEmail ? (
+            <RichMessage
+              k="auth.join.wrongEmailInvited"
+              values={{ email: strong(invitedEmail) }}
+            />
+          ) : (
+            t("auth.join.wrongEmail")
+          )}
+        </p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {signedInEmail ? (
+          <RichMessage
+            k="auth.join.wrongEmailSignedInWithEmail"
+            values={{ username: strong(username), email: maskEmail(signedInEmail) }}
+          />
+        ) : (
+          <RichMessage
+            k="auth.join.wrongEmailSignedIn"
+            values={{ username: strong(username) }}
+          />
+        )}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        {t("auth.join.wrongEmailAskOwner", { username })}
+      </p>
+      <Button variant="outline" onClick={onSignOut} className="w-full">
+        {t("auth.join.wrongEmailSignOut")}
+      </Button>
+    </div>
   )
 }
 

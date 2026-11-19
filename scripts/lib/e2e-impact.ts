@@ -6,8 +6,8 @@ const CORE_SENTINELS = [
 ]
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
-  { source: /(?:account-security|AccountSecurity|LoginMethodsSection|0205_login_method_security|auth-worker\/src\/routes\/(?:auth|email-change|oauth-google)\.ts)/, sentinels: ["e2e/specs/auth/account-security.spec.ts"] },
-  { source: /(?:oauth-google|google-login|GoogleLogin|google-return|0194_google_login)/, sentinels: ["e2e/specs/auth/google-login.spec.ts", "e2e/specs/projects/onboarding.smoke.spec.ts"] },
+  { source: /(?:account-security|AccountSecurity|LoginMethodsSection|0206_login_method_security|auth-worker\/src\/routes\/(?:auth|email-change|oauth-google)\.ts)/, sentinels: ["e2e/specs/auth/account-security.spec.ts"] },
+  { source: /(?:oauth-google|desktop-google|DesktopGoogle|google-login|GoogleLogin|google-return|0194_google_login)/, sentinels: ["e2e/specs/auth/google-login.spec.ts", "e2e/specs/projects/onboarding.smoke.spec.ts"] },
   { source: /^src\/(?:pages\/Signup|lib\/navigation\/login-path)/, sentinels: ["e2e/specs/projects/onboarding.smoke.spec.ts"] },
   {
     source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0162_community_checking)/,
@@ -164,7 +164,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:db\/postgres\/migrations\/0205_login_method_security\.sql$|plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
+const PRODUCT_RUNTIME = /^(?:db\/postgres\/migrations\/0206_login_method_security\.sql$|plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

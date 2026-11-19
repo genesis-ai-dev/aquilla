@@ -221,4 +221,61 @@ describe("terminology project scans", () => {
     expect(spanish!.violations.map((row) => row.kind).sort()).toEqual(["missing-approved"])
     expect(spanish!.violations.every((row) => row.cellId === "c1")).toBe(true)
   })
+
+  // AQU-730: violations and suggestions are built from the requested lane's
+  // target text, and the lane is the caller's choice.
+  it("answers a lane the caller was not granted as an empty one", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "aaaaaaaa", project_id: PROJECT, role: "target", legacy_tag: "", position: 0 },
+        { id: "bbbbbbbb", project_id: PROJECT, role: "target", legacy_tag: "es", language: "Spanish", position: 1 },
+      ],
+      cells: [
+        cell({ cell_id: "c1", side: "source", value: "grace" }),
+        { ...cell({ cell_id: "c1", side: "target", value: "a curse", target_lang: "" }), lane_id: "aaaaaaaa" },
+        { ...cell({ cell_id: "c1", side: "target", value: "otra maldicion", target_lang: "es" }), lane_id: "bbbbbbbb" },
+      ],
+      concepts: [
+        {
+          concept_id: "grace",
+          project_id: PROJECT,
+          source_term: "grace",
+          renderings: [
+            { rendering: "favor", status: "preferred" },
+            { rendering: "gracia", status: "preferred", laneId: "bbbbbbbb" },
+          ],
+          status: "active",
+          case_sensitive: 0,
+          match_options: null,
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
+    })
+    const call = async (path: string, claims: Record<string, unknown>, wall: string | undefined) => {
+      const token = await makeTestToken(SECRET, { projectId: PROJECT, ...claims })
+      const req = new Request(`https://w/api/v1/projects/${PROJECT}${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return (await handleTerminologyScanRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
+    }
+    const walled = { role: 400, laneGrants: [{ lane: "aaaaaaaa", level: 400 }] }
+
+    const hidden = await call("/terminology/violations?lane=es", walled, "1")
+    expect(hidden.status).toBe(200)
+    expect(await hidden.json()).toEqual({ violations: [], scanComplete: true, truncated: false })
+    const hiddenSuggestions = await call("/concepts/grace/suggestions?lane=es", walled, "1")
+    expect(await hiddenSuggestions.json()).toEqual({ suggestions: [] })
+
+    // Their own lane still reads, as does every lane for a Maintainer and for
+    // anyone while the wall is off.
+    const count = async (claims: Record<string, unknown>, wall: string | undefined, lane: string) =>
+      parseTerminologyViolationsPage(await (await call(`/terminology/violations?lane=${lane}`, claims, wall)).json())!
+        .violations.length
+    expect(await count(walled, "1", "")).toBeGreaterThan(0)
+    expect(await count({ role: 600 }, "1", "es")).toBeGreaterThan(0)
+    expect(await count(walled, undefined, "es")).toBeGreaterThan(0)
+    // Candidates read source text only, so the wall does not apply.
+    expect((await call("/terminology/candidates", walled, "1")).status).toBe(200)
+  })
 })

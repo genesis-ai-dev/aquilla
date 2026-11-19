@@ -8,6 +8,7 @@ import {
   formatFilterStamp,
   optionsHash,
   parseFilterStamp,
+  rekeyUnits,
   revisionCellId,
   uuidV5,
   type RevisionManifest,
@@ -217,5 +218,55 @@ describe("classifyTargetStaleness", () => {
   })
   it("reports a tombstoned source as source-deleted", () => {
     expect(classifyTargetStaleness(pinned, { revisionN: 4, contentHash: null })).toBe("source-deleted")
+  })
+})
+
+// A provider with its own deterministic ids (Door43) knows the real key of
+// every cell it wrote. Adoption can only guess one from canonical_ref.
+describe("rekeyUnits", () => {
+  const adopted = (cellId: string, unitKey: string) => ({
+    cellId,
+    unitKey,
+    positional: false,
+    text: cellId,
+    sequenceIndex: 0,
+    contentHash: contentHashOf(cellId),
+  })
+  // Two notes on one verse, keyed the only way adoption can: ref + ordinal.
+  const head = [adopted("note-a", "TIT 1:1"), adopted("note-b", "TIT 1:1#2"), adopted("title", "cell:title")]
+
+  it("gives hinted cells the provider's key and leaves the rest alone", () => {
+    const out = rekeyUnits(head, { "note-a": "TIT|a", "note-b": "TIT|b" })
+    expect(out.map((u) => u.unitKey)).toEqual(["TIT|a", "TIT|b", "cell:title"])
+    expect(out.every((u) => !u.positional)).toBe(true)
+  })
+
+  it("keeps keys unique when a hint takes a key another cell holds", () => {
+    // The provider calls note-b by the key adoption happened to give note-a.
+    const out = rekeyUnits(head, { "note-b": "TIT 1:1" })
+    expect(out.map((u) => u.unitKey)).toEqual(["cell:note-a", "TIT 1:1", "cell:title"])
+    expect(new Set(out.map((u) => u.unitKey)).size).toBe(3)
+  })
+
+  it("ignores a hint that repeats an earlier one, and hints for cells the file does not hold", () => {
+    const out = rekeyUnits(head, { "note-a": "K", "note-b": "K", elsewhere: "X" })
+    expect(out.map((u) => u.unitKey)).toEqual(["K", "TIT 1:1#2", "cell:title"])
+  })
+
+  it("is what makes an upstream insert between two same-verse notes shift nothing", () => {
+    const manifest: RevisionManifest = { fileId: FILE_ID, revisionN: 1, parentRevisionN: null, stamp: "s@1", optionsHash: optionsHash({}), artifactSha256: "x", units: rekeyUnits(head, { "note-a": "TIT|a", "note-b": "TIT|b" }) }
+    const next = [
+      { unitKey: "TIT|a", positional: false, text: "note-a", sequenceIndex: 0 },
+      { unitKey: "TIT|new", positional: false, text: "inserted upstream", sequenceIndex: 1 },
+      { unitKey: "TIT|b", positional: false, text: "note-b", sequenceIndex: 2 },
+    ]
+    const delta = alignRevision(manifest, next, { fileId: FILE_ID, revisionN: 2 })
+    expect(delta.units.map((u) => [u.unit.cellId === "note-a" || u.unit.cellId === "note-b" ? u.unit.cellId : "new", u.outcome])).toEqual([
+      ["note-a", "equal"],
+      ["new", "inserted"],
+      ["note-b", "equal"],
+    ])
+    // The untouched title cell had no counterpart in this parse.
+    expect(delta.deleted.map((u) => u.cellId)).toEqual(["title"])
   })
 })

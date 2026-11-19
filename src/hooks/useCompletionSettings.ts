@@ -43,6 +43,10 @@ export function buildCompletionSettings(
     // them. Left `undefined` when never set (consumers fall back to defaults).
     completionBatchSize: overrides.completionBatchSize ?? base?.completionBatchSize,
     validationBatchSize: overrides.validationBatchSize ?? base?.validationBatchSize,
+    // Live back-translation: same rule — kept through unrelated saves, and
+    // `undefined` when never set (off / the drafting model).
+    liveBacktranslation: overrides.liveBacktranslation ?? base?.liveBacktranslation,
+    backtranslationModel: overrides.backtranslationModel ?? base?.backtranslationModel,
   }
 }
 

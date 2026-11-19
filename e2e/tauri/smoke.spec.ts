@@ -73,21 +73,21 @@ describe("Tauri desktop shell", () => {
     expect(online === null || typeof online === "boolean").toBe(true)
   })
 
-  it("wires a simulated aquilla:// deep-link callback into the keychain", async () => {
-    // WebDriver can't trigger a real OS URL-open event, and @wdio/tauri-service's own
-    // triggerDeeplink() only injects a JS-layer event this app has no listener for (see file
-    // header) — so this exercises the same parse -> store -> emit wiring `handle_callback_url`
-    // runs for a real deep link, via the test-only command src-tauri/src/auth.rs adds under
-    // the e2e-webdriver feature.
+  it("rejects credential links and delivers a bound native cancellation to the SPA", async () => {
     await invoke("clear_token")
-
-    await invoke("simulate_deep_link_callback", {
-      url: "aquilla://auth/callback?token=deep-link-jwt&refresh=deep-link-refresh",
+    await invoke("simulate_deep_link_callback", { url: "aquilla://auth/callback?token=untrusted&refresh=untrusted" })
+    expect(await invoke<string | null>("get_token")).toBeNull()
+    expect(await invoke<boolean>("google_login_supported")).toBe(true)
+    // This is a provider-boundary simulation, not a live Google login. The
+    // worker test separately passes a signed provider response through PKCE.
+    await browser.execute(() => {
+      const attempt = { verifier: "a".repeat(64), desktopChallenge: "b".repeat(43), next: "/app", expires: Date.now() + 60_000, choice: null }
+      // Test build uses the local backend; no production account is touched.
+      sessionStorage.setItem("aquilla:google-login:http://127.0.0.1:8788", JSON.stringify(attempt))
     })
-
-    const token = await invoke<string>("get_token")
-    expect(token).toBe("deep-link-jwt")
-
-    await invoke("clear_token")
+    await invoke("simulate_deep_link_callback", { url: `aquilla://auth/google#error=cancelled&state=${"b".repeat(43)}` })
+    await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("Google login was cancelled"), { timeout: 30_000, timeoutMsg: "Native callback did not reach the Google return screen" })
+    expect(await invoke<string | null>("get_token")).toBeNull()
+    expect(await browser.execute(() => location.hash)).toBe("")
   })
 })

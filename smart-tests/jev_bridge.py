@@ -15,6 +15,8 @@ import jev_ultrafast.agent as agent_module
 import jev_ultrafast.browser as browser_module
 import jev_ultrafast.model as model_module
 
+from text_fallback import post_text
+
 
 def exchange(message):
     print(json.dumps(message), flush=True)
@@ -67,9 +69,11 @@ def main():
         kind = "decision" if url == "https://api.typesafe.ai/v1/systemone" else "text"
         if url == "https://api.typesafe.ai/v1/systemone":
             url = os.environ.get("TYPESAFE_URL", url)
+        # Only the text helper has fallback models (see text_fallback.py).
+        send = original_post if kind == "decision" else (lambda *request: post_text(original_post, *request))
         started = time.monotonic()
         try:
-            result = original_post(url, key, body)
+            result = send(url, key, body)
         except RuntimeError as error:
             # Upstream already retries 429/503 three times within ~1.5 s. A
             # provider that is still rate-limiting after that usually clears
@@ -77,7 +81,7 @@ def main():
             if not re.fullmatch(r"Model provider returned HTTP (429|503|529); no action executed\.", str(error)):
                 raise
             time.sleep(3)
-            result = original_post(url, key, body)
+            result = send(url, key, body)
         usage = result.get("usage", {})
         print(json.dumps({"type": "model_call", "call": {
             "kind": kind, "model": result.get("model", body.get("model")),

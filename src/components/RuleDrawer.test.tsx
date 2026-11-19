@@ -295,3 +295,82 @@ describe("RuleDrawer — only cells the rule reaches count as following it (AQU-
     expect(call.passingCells.map((c) => c.id)).toEqual(["c3"])
   })
 })
+
+/**
+ * AQU-2642 §1: the old-orthography check's correction comes from the lane's
+ * own spelling rules, so AI being unconfigured is no reason to grey Fix out.
+ * Before this, a flagged word offered nothing but "Amend rule" — and in a
+ * project with no model configured, not even a button to press.
+ */
+describe("RuleDrawer — the orthography fix needs no model (AQU-2642)", () => {
+  const orthographyRule = {
+    id: "builtin:old-orthography",
+    name: "Old orthography",
+    severity: "major",
+    enabled: true,
+    source: "algorithmic",
+    check: {
+      type: "builtin",
+      checkId: "old-orthography",
+      orthography: {
+        rules: [["sh", "ş"], ["ch", "ç"]],
+        apostrophe: "ʼ",
+      },
+    },
+  } as unknown as TranslationRule
+
+  const flagged = [makeCell("o1", "city", "shahar"), makeCell("o2", "lamp", "chiroq")]
+  const orthographyInfractions = flagged.map(
+    (c) => ({ ruleId: orthographyRule.id, cellId: c.id }) as unknown as RuleInfraction,
+  )
+
+  function renderOrthography(props: Partial<React.ComponentProps<typeof RuleDrawer>> = {}) {
+    return renderDrawer({
+      rule: orthographyRule,
+      infractions: orthographyInfractions,
+      cells: flagged,
+      session: null,
+      ...props,
+    })
+  }
+
+  it("leaves per-cell Fix enabled with AI unconfigured", () => {
+    renderOrthography()
+    expect(screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0]).not.toBeDisabled()
+  })
+
+  it("leaves fix-all enabled with AI unconfigured", () => {
+    renderOrthography()
+    expect(screen.getByRole("button", { name: en("rules.surface.tryToFixAllButton") })).not.toBeDisabled()
+  })
+
+  it("still respects the commit-path permission gate", async () => {
+    renderOrthography({ onApplyFix: undefined })
+    const fix = screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0]
+    expect(fix).toBeDisabled()
+    await expectDisabledNote(fix, en("rules.drawer.fixNotPermitted"))
+  })
+
+  it("greys Fix out again when the lane has no orthography profile", async () => {
+    renderOrthography({
+      rule: { ...orthographyRule, check: { type: "builtin", checkId: "old-orthography" } } as unknown as TranslationRule,
+    })
+    const fix = screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0]
+    expect(fix).toBeDisabled()
+    await expectDisabledNote(fix, en("rules.drawer.aiNotConfigured"))
+  })
+
+  it("proposes for the cell without a completion configured", async () => {
+    vi.mocked(requestSurgicalFix).mockResolvedValue({
+      kind: "per-cell",
+      previews: [{
+        cellId: "o1", fileId: "f1", before: "shahar", after: "şahar",
+        find: "shahar", replace: "şahar", source: "orthography",
+      }],
+    })
+    renderOrthography({ completionSettings: undefined })
+    fireEvent.click(screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0])
+    await waitFor(() => expect(requestSurgicalFix).toHaveBeenCalled())
+    expect(vi.mocked(requestSurgicalFix).mock.calls[0][0].settings).toBeUndefined()
+  })
+})

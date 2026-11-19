@@ -18,12 +18,10 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
 import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
-import { formatScopePath } from "@/lib/access/scope-path"
-import type { GrantOrigin, ScopePath } from "@/lib/access/types"
+import type { GrantOrigin } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -52,6 +50,7 @@ import {
   setTeamProjectLanes,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
+import { readTeamDetailSeed, readTeamNameSeed } from "@/lib/frontier/team-seed"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import {
@@ -134,13 +133,21 @@ export function TeamDetail() {
   // Only org owners (700+) can change org-level member roles (POST /orgs/:id/members upsert).
   const isOwner = (activeOrg?.role.level ?? 0) >= 700
 
-  const [team, setTeam] = useState<TeamDetailType | null>(null)
+  // What this tab already knows about the team: the whole page from a previous
+  // visit, or just its name from the teams list. `refetch` below replaces both.
+  const [team, setTeam] = useState<TeamDetailType | null>(() => readTeamDetailSeed(jwt, activeOrgId, groupIdNum))
+  // `team` can still be the previous team for a moment after the route's id moves.
+  const knownTeamName = (team?.id === groupIdNum ? team.name : null) ?? readTeamNameSeed(jwt, activeOrgId, groupIdNum)
+  const teamRef = useRef(team)
+  teamRef.current = team
+  // The team this component's own read last answered for (not a seed).
+  const confirmedTeamIdRef = useRef<number | null>(null)
   // AQU-1352 P2: org maintainer+, or a team maintainer on this team, may set
   // team roles, capped at their own level (server enforces the same gate).
   const myTeamRole = team?.members.find((m) => m.username === session?.username)?.teamRoleLevel ?? 0
   const teamRoleCap = Math.max(activeOrg?.role.level ?? 0, myTeamRole)
   const canEditTeamRoles = teamRoleCap >= 600
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(team == null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const teamRequestRef = useRef(0)
   const teamScopeKey = jwt && activeOrgId != null && groupIdNum != null
@@ -149,7 +156,7 @@ export function TeamDetail() {
   const teamScopeRef = useRef(teamScopeKey)
   teamScopeRef.current = teamScopeKey
   const [tab, setTab] = useState<TeamTab>("projects")
-  useNavHistoryTitle(team?.name)
+  useNavHistoryTitle(knownTeamName ?? undefined)
 
   // Org members for the add-member picker (admin only)
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
@@ -217,11 +224,24 @@ export function TeamDetail() {
   const refetch = useCallback(async () => {
     const request = ++teamRequestRef.current
     if (!jwt || activeOrgId == null || groupIdNum == null) return
-    setLoading(true)
+    // Arriving at a team this tab has shown before (this component stays
+    // mounted from one team to the next): paint that visit while the read
+    // runs. A re-read of the team already on screen keeps its loader.
+    const onScreen = teamRef.current?.id === groupIdNum
+    let painted = onScreen && confirmedTeamIdRef.current !== groupIdNum
+    if (!onScreen) {
+      const seeded = readTeamDetailSeed(jwt, activeOrgId, groupIdNum)
+      if (seeded) {
+        setTeam(seeded)
+        painted = true
+      }
+    }
+    setLoading(!painted)
     setLoadError(null)
     try {
       const t = await getTeam(jwt, activeOrgId, groupIdNum)
       if (teamRequestRef.current !== request || teamScopeRef.current !== teamScopeKey) return
+      confirmedTeamIdRef.current = groupIdNum
       setTeam(t)
     } catch (error) {
       if (teamRequestRef.current !== request || teamScopeRef.current !== teamScopeKey) return
@@ -677,15 +697,10 @@ export function TeamDetail() {
     activeOrgId != null && groupIdNum != null
       ? orgPath(activeOrgId, `/teams/${groupIdNum}`)
       : null
-  const teamScopePath: ScopePath = [
-    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
-    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
-  ]
-
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
+      header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={knownTeamName ?? "Team"} />}
       statusBar={null}
       main={
         <Page size="full" className="@container/team-detail">
@@ -699,7 +714,13 @@ export function TeamDetail() {
           >
             {loading ? (
               <>
-                <div className="h-10 w-64 animate-pulse rounded-lg border bg-card" />
+                {knownTeamName ? (
+                  <h1 className="flex h-10 items-center font-heading text-xl font-semibold tracking-tight text-foreground">
+                    {knownTeamName}
+                  </h1>
+                ) : (
+                  <div className="h-10 w-64 animate-pulse rounded-lg border bg-card" />
+                )}
                 <div className="h-8 w-72 animate-pulse rounded-lg border bg-card" />
                 <div className="h-40 animate-pulse rounded-lg border bg-card" />
               </>
@@ -814,9 +835,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
+                    {/* A team is a group, not a scope level (AQU-2351). The title is its name. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      <ScopeBreadcrumb path={teamScopePath} />
+                      {team.name}
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -1021,7 +1042,7 @@ export function TeamDetail() {
                       mode="add"
                       level="team"
                       callerLevel={callerOrgLevel}
-                      title={t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
+                      title={t("org.access.addPeopleTo", { path: team.name })}
                       summary={t("org.roleDialog.teamAddSummary")}
                       people={{
                         kind: "custom",

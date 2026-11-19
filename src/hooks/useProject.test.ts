@@ -241,3 +241,32 @@ it.each(["seeded", "manual", "record-change", "session-change"] as const)(
     unmount()
   },
 )
+
+// AQU-2654: a project page mounts useProject more than once (the workspace
+// and the tools mount under it). Their mount reads are one request; a refresh
+// from either is its own, even while that request is still in flight.
+it("instances that mount together resolve the project once, and a refresh still sends its own read", async () => {
+  const good: ResolveProjectResult = { ok: true, project: {
+    id: "shared-mount", name: "Shared", gitlabProjectId: null, archivedAt: null, archivedBy: null,
+    role: { level: 400, name: "contributor", source: "member" }, files: [],
+  } }
+  let settleMount!: (value: ResolveProjectResult) => void
+  mockResolve.mockImplementationOnce(() => new Promise((resolve) => { settleMount = resolve }))
+  const { result, unmount } = renderHook(() => [useProject("shared-mount"), useProject("shared-mount")] as const)
+  expect(mockResolve).toHaveBeenCalledTimes(1)
+
+  // One of them refreshes while the shared mount read hangs: a read of its own.
+  setResolveMock({ ...good, project: { ...good.project, name: "Refreshed" } })
+  act(() => { result.current[0].refresh() })
+  expect(mockResolve).toHaveBeenCalledTimes(2)
+  await waitFor(() => expect(result.current[0].project?.name).toBe("Refreshed"))
+
+  // The mount read lands for the instance still waiting on it, and cannot
+  // overwrite the one that refreshed past it.
+  await act(async () => settleMount(good))
+  await waitFor(() => expect(result.current[1].status).toBe("ready"))
+  expect(result.current[1].project?.name).toBe("Shared")
+  expect(result.current[0].project?.name).toBe("Refreshed")
+  expect(mockResolve).toHaveBeenCalledTimes(2)
+  unmount()
+})

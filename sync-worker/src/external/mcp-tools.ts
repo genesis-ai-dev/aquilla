@@ -240,6 +240,73 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'prepare_orthography_exceptions',
+    description:
+      'Stage a change to the words the project’s spelling rules must LEAVE ALONE as a ' +
+      'changeset (AQU-2642 — the MCP door onto the PatchOrthographyExceptions command). ' +
+      'Use this instead of patch_settings { key: "languageProfile" }: that replaces the whole ' +
+      'profile wholesale, so two people proposing exceptions around the same time is ' +
+      'last-write-wins on a list that records WHO asked for each word. Here you send OPS, and ' +
+      'the list is recomputed at commit from the then-current stored value, so an entry someone ' +
+      'else added meanwhile survives. Only an APPROVED exception affects the converter and the ' +
+      '"Old orthography" check — a pending one is a proposal and changes no text. ' +
+      'Contributor and up may add (lands pending); maintainer and up add as approved, and an ' +
+      'add naming an already-pending word APPROVES it, keeping the original proposer’s ' +
+      'credit. remove is maintainer-only: dropping an approved exception re-exposes the word to ' +
+      'the rules, which rewrites text. Args: projectId (required), ops (required: up to 200 ' +
+      '{ action: "add" | "remove", word, ref? }), ifMatchVersion (optional — unlike ' +
+      'patch_settings this is NOT required, because a version bump under a merge is not a ' +
+      'conflict; pass it to assert nothing changed since you read the profile), changesetId ' +
+      '(optional UUIDv7 for idempotency). A project with no languageProfile.orthography block ' +
+      'is validation_failed — a maintainer sets the rules and the canonical apostrophe ' +
+      'first. Sole command in its changeset. Returns { changesetId, summary, digest, mode, ' +
+      'approvalUrl? } like prepare_translations — nothing is applied until ' +
+      'confirm_changeset (ask mode: a human approves first). Call describe_command({ kind: ' +
+      '"PatchOrthographyExceptions" }) for the folding and no-op rules.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ops: {
+          type: 'array',
+          description:
+            'Up to 200 add/remove ops. Words are compared folded (lowercase, apostrophes ' +
+            'dropped), the way the converter matches, so naming the same word twice is ' +
+            'validation_failed.',
+          items: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', enum: ['add', 'remove'], description: 'add proposes or approves; remove is maintainer-only.' },
+              word: {
+                type: 'string',
+                description:
+                  'The word in the spelling the rules must NOT rewrite (≤ 32 characters, no ' +
+                  'whitespace). Stored with the profile’s canonical apostrophe substituted; ' +
+                  'the rules are deliberately not applied to it.',
+              },
+              ref: {
+                type: 'string',
+                description: 'Where the word was found (a cell id, a verse reference, a note) — shown in the Language profile panel.',
+              },
+            },
+            required: ['action', 'word'],
+            additionalProperties: false,
+          },
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the merge ' +
+            'runs against whatever the list holds at commit; pass it to get plan_stale if the ' +
+            'settings changed since you read them.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'ops'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_set_brief',
     description:
       'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
@@ -459,7 +526,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
-      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      '"omni-zs" | "omni-fast". "omni-fast" is the fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot; "auto" never picks it. ' +
+      '"omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
       'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
       'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
       'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
@@ -469,7 +537,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
-      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+      'only go to omni-ctc / omni-zs / omni-fast, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -484,7 +552,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           required: ['data', 'format'],
           additionalProperties: false,
         },
-        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs', 'omni-fast'], description: 'Default "auto". "omni-fast": fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.' },
         language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
         exampleCellIds: {
           type: 'array', items: { type: 'string' },
@@ -509,7 +577,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       type: 'object',
       properties: {
         ...projectIdProp,
-        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc', 'omni-fast'], description: 'Default "omni-zs". "omni-fast" starts in seconds and needs no warm-up.' },
         warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
       },
       required: ['projectId'],
@@ -901,6 +969,52 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'list_org_members',
+    description:
+      'Read the ORGANIZATION membership roster (AQU-2662) — who holds an org role, at what ' +
+      'level, and who sits in the org\'s owner seat. One entry per person: userId, username, ' +
+      'role (the canonical level: 100 viewer \u00b7 200 commenter \u00b7 300 reviewer \u00b7 ' +
+      '400 contributor \u00b7 500 project_lead \u00b7 600 maintainer \u00b7 700 owner), ' +
+      'roleName, roleSource, direct and orgOwner. Highest role first. Requires org OWNER ' +
+      '(700) \u2014 the same floor as changing org membership; below it you get ' +
+      'permission_denied, not an empty list, and a project-scoped credential gets ' +
+      'scope_denied (org governance is out of its reach entirely).\n\n' +
+      'READ THIS BEFORE STAGING AN ORG MEMBERSHIP CHANGE. Three fields decide what is ' +
+      'legal:\n' +
+      '1. `direct` \u2014 true when the person holds an `org_members` row. SetOrgRole and ' +
+      'RemoveOrgMember act on that row and are refused without one; AddOrgMember is refused ' +
+      'when there is one.\n' +
+      '2. `role` \u2014 the level the gate judges: you can never grant above your own, and ' +
+      'never target yourself.\n' +
+      '3. `orgOwner` \u2014 true for the holder of the organization\'s owner seat. That seat ' +
+      'cannot be demoted or removed through this API at all, nor can the last remaining ' +
+      'owner. roleSource is `member` (an org_members row) or `owner` (the seat held without ' +
+      'one).\n\n' +
+      'THIS IS THE READ THAT MAKES "confine an org maintainer to N projects" plannable: an ' +
+      'org-level role reaches EVERY project in the org, so somebody who shows up here at ' +
+      'maintainer is on all of them. The fix is RemoveOrgMember once, then InviteMember on ' +
+      'each of the N projects they should keep \u2014 and list_members on a project will show ' +
+      'them as roleSource `org`, direct: false until you do.\n\n' +
+      'The response is { data, total, truncated, nextCursor: null }. This read does not page: ' +
+      'at most 500 rows come back, highest role first, and `truncated: true` with a larger ' +
+      '`total` means the org has more members than that \u2014 the rows you get are the top of ' +
+      'the ladder. No email addresses are returned; the membership commands name people by ' +
+      'username, exactly as this tool reports them. Errors: permission_denied (403), ' +
+      'scope_denied (403), validation_failed (400), not_found (404), rate_limited (429). ' +
+      'This tool performs no membership writes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgId: {
+          type: 'string',
+          description: 'The organization id, as list_orgs reports it.',
+        },
+      },
+      required: ['orgId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
@@ -1005,6 +1119,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
       'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
       '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'AQU-2576: `username` may be an email address, and `email` is an accepted alias for ' +
+      'it — the target resolves by username first, then by account email. Do not guess a ' +
+      'handle you were not given. ' +
       'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
       'the credential\'s mode — membership is governance, so every change passes a human at ' +
       'the approvalUrl. You cannot grant a role above your own (permission_denied ' +
@@ -1659,6 +1776,9 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   // AQU-2407: both stage a changeset only; the brief write (and the L1
   // render it pays for) happens at confirm_changeset.
   prepare_set_brief: 'stage',
+  // AQU-2642: stages the exception merge only; the list is recomputed and
+  // written at confirm_changeset.
+  prepare_orthography_exceptions: 'stage',
   regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
@@ -1680,6 +1800,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   read_term_consistency: 'read',
   list_terms: 'read',
   list_members: 'read',
+  list_org_members: 'read',
   prepare_translations: 'stage',
   upload_artifact: 'upload',
   preview_import: 'read',

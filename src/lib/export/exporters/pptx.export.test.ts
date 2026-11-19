@@ -468,3 +468,18 @@ describe("exportPptx — table cells (AQU-1124)", () => {
     expect(reExtracted.map((s) => s.original)).toEqual(["Antes", "Book", "Chapters", "Después"])
   })
 })
+
+// AQU-2539: a slide paragraph cut into lines keeps every line's words when
+// only some of them are translated.
+describe("exportPptx — a paragraph with an untranslated line (AQU-2539)", () => {
+  it("writes the untranslated line's own words beside the translated one", async () => {
+    const at = (cell: CellData, segment: number) => withLocator(cell, "ppt/slides/slide2.xml", "p:sp[1]/p:txBody/a:p[1]", segment)
+    const cells = [
+      at(makeCell("t1", "Slide two", "Diapositive deux", ""), 0),
+      at(makeCell("t2", "title", "", ""), 1),
+    ]
+    const result = await exportPptx(await makePptx(), cells)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toContain("Diapositive deux title")
+  })
+})

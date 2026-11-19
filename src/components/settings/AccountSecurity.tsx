@@ -337,6 +337,8 @@ export function AccountSecurity({
                         false,
                         username,
                         false,
+                        undefined,
+                        false,
                         true,
                       ),
                     )
@@ -587,6 +589,8 @@ export function PasswordManagement({
               "/preferences/login-methods",
               false,
               username,
+              false,
+              undefined,
               false,
               true,
             ).catch(() => setError(t("auth.methods.connectFailed")))

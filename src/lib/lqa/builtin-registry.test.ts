@@ -24,6 +24,7 @@ describe("builtin-registry", () => {
       "length-ratio",
       "scripture-reference",
       "number-format",
+      "old-orthography",
     ])
   })
 

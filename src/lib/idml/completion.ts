@@ -5,6 +5,7 @@ import {
 } from "@aquilla/idml-roundtrip"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
+import { markedPromptSource, normalizeMarkedReply } from "@/lib/completion/docx-marks"
 import {
   idmlEditableSlotText,
   idmlPlainMatchesTranslation,
@@ -13,6 +14,8 @@ import {
 
 export interface IdmlCompletionCell {
   readonly id: string
+  /** The plain source; AQU-2539 checks a Word line's marked HTML against it. */
+  readonly original?: string
   readonly originalHtml?: string
   readonly translatedHtml?: string
   readonly metadata?: Record<string, unknown> | null
@@ -67,7 +70,9 @@ export function idmlCompletionPromptSource(
 ): string {
   return idmlMetadata(cell)?.version === 2 && cell.originalHtml
     ? cell.originalHtml
-    : fallbackSource
+    // AQU-2539: a Word line with inline marks is given its marked HTML;
+    // every other cell gets `fallbackSource` exactly as before.
+    : markedPromptSource(cell, fallbackSource)
 }
 
 export function idmlCompletionSystemAddendum(
@@ -129,6 +134,12 @@ export interface IdmlStitchOptions {
    * punctuation or a name the translation already kept is discarded.
    */
   readonly preserveWording?: string
+  /**
+   * AQU-2539: the cell as it was when the prompt was built, for a commit that
+   * passes the live cell. A Word line's marked answer is read by what its
+   * prompt was given, even if the source was edited while it generated.
+   */
+  readonly promptCell?: IdmlCompletionCell
 }
 
 /**
@@ -142,7 +153,9 @@ export function normalizeProtectedCompletion(
   options?: IdmlStitchOptions,
 ): NormalizedCompletion {
   const metadata = idmlMetadata(cell)
-  if (!metadata) return { value: generated }
+  // AQU-2539: a Word line given its marked HTML gets its answer validated as
+  // marks-only HTML; every other cell passes through exactly as before.
+  if (!metadata) return normalizeMarkedReply(options?.promptCell ?? cell, generated)
   if (!cell.originalHtml) {
     throw new IdmlCompletionError(
       `Cell ${cell.id} is missing protected source HTML. Re-import the original IDML before using AI drafting.`,

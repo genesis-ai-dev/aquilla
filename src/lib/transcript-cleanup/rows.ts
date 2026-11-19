@@ -10,7 +10,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { applyCorrections, type CorrectionRule } from "@/lib/audio/transcript-corrections"
-import { CLEANUP_MAX_PAIRS, CLEANUP_MAX_TERMS, type CleanupPair } from "./prompt"
+import { CLEANUP_MAX_PAIRS, CLEANUP_MAX_SAMPLES, CLEANUP_MAX_TERMS, sameWriting, type CleanupPair } from "./prompt"
 
 export interface TranscriptRow {
   cell: CellData
@@ -73,7 +73,10 @@ export function transcriptRowOf(cell: CellData): TranscriptRow | null {
  */
 export function isHumanCorrected(row: TranscriptRow, learned: readonly CorrectionRule[]): boolean {
   if (row.aiCleaned || !row.heard || !row.transcript) return false
-  return loose(row.transcript) !== loose(applyCorrections(row.heard, learned))
+  // `sameWriting`, not a case- and punctuation-blind comparison: a person who
+  // capitalised a name or added the full stops has corrected the transcript,
+  // and that correction is exactly the orthography the next cleanup must copy.
+  return !sameWriting(row.transcript, applyCorrections(row.heard, learned))
 }
 
 const wordSet = (s: string): Set<string> => new Set(loose(s).split(" ").filter(Boolean))
@@ -93,7 +96,7 @@ export function pickCleanupPairs(
   const seen = new Set<string>()
   return rows
     .filter((r) => r !== target && r.isSourceSegment === target.isSourceSegment && r.cell.id !== target.cell.id)
-    .filter((r) => isHumanCorrected(r, learned) || (r.validated && !!r.heard && loose(r.heard) !== loose(r.transcript)))
+    .filter((r) => isHumanCorrected(r, learned) || (r.validated && !!r.heard && !sameWriting(r.heard, r.transcript)))
     .map((r) => {
       let overlap = 0
       for (const w of wordSet(r.heard!)) if (words.has(w)) overlap++
@@ -138,6 +141,30 @@ export function cleanupTerms(concepts: readonly Concept[], isSourceSegment: bool
   return [...out].slice(0, CLEANUP_MAX_TERMS).map((term) => ({ term }))
 }
 
+/**
+ * Lines the team has WRITTEN in the language of a take, nearest the row first:
+ * the evidence of the orthography a cleanup has when no transcript has been
+ * corrected yet (a new project's first rows). Nearest, because neighbouring
+ * lines share names and vocabulary.
+ *
+ * Never the row's own line — a take's transcript is compared with the line it
+ * reads to catch misreadings, so the cleanup must not see it (prompt.ts, rule
+ * 3). And none for a source segment: its lane's writing IS its transcripts,
+ * which `pickCleanupPairs` and `pickCorrectedOnly` already offer.
+ */
+export function pickWritingSamples(cells: readonly CellData[], target: TranscriptRow): string[] {
+  if (target.isSourceSegment) return []
+  const at = cells.findIndex((cell) => cell.id === target.cell.id)
+  const seen = new Set<string>()
+  return cells
+    .map((cell, i) => ({ text: cell.translated?.trim().replace(/\s+/g, " ") ?? "", distance: Math.abs(i - at), id: cell.id }))
+    .filter(({ text, id }) => id !== target.cell.id && text.length > 0)
+    .sort((a, b) => a.distance - b.distance)
+    .filter(({ text }) => !seen.has(text) && Boolean(seen.add(text)))
+    .slice(0, CLEANUP_MAX_SAMPLES)
+    .map(({ text }) => text)
+}
+
 /** Source segments only: the transcripts around this one, in order. */
 export function neighbourTranscripts(rows: readonly TranscriptRow[], target: TranscriptRow, radius = 2): string[] {
   if (!target.isSourceSegment) return []
@@ -147,4 +174,58 @@ export function neighbourTranscripts(rows: readonly TranscriptRow[], target: Tra
     .slice(Math.max(0, i - radius), i + radius + 1)
     .filter((r) => r !== target && r.isSourceSegment && r.transcript)
     .map((r) => r.transcript)
+}
+
+/** Whether two pieces of plain data (a cell and what hangs off it) say the same. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!sameData(a[i], b[i])) return false
+    return true
+  }
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    if (!Object.hasOwn(b, key) || !sameData((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false
+  }
+  return true
+}
+
+/** The rows of a file, and the label each one is listed under. */
+export interface TranscriptRows {
+  rows: readonly TranscriptRow[]
+  /** By cell id: the line's own label, else its place among the file's cells. */
+  labels: ReadonlyMap<string, string>
+}
+
+export const NO_TRANSCRIPT_ROWS: TranscriptRows = { rows: [], labels: new Map() }
+
+/**
+ * The file's rows, keeping every row OBJECT whose line did not change.
+ *
+ * `cells` is rebuilt — a new object per cell — whenever any cell of the file
+ * changes or the file's audio is read again, so rows made afresh from it are
+ * all new every time and every row of the list re-renders for one line's
+ * change (AQU-2654, docs/decisions/0013: a row's props are stable). A row is
+ * therefore reused when its cell says what it said before, compared by
+ * content; the row keeps the cell object it was made from, which is equal to
+ * the new one. When no row changed, `previous` itself is returned.
+ */
+export function stableTranscriptRows(cells: readonly CellData[], previous: TranscriptRows): TranscriptRows {
+  const before = new Map(previous.rows.map((row) => [row.cell.id, row]))
+  const rows: TranscriptRow[] = []
+  const labels = new Map<string, string>()
+  let same = true
+  cells.forEach((cell, index) => {
+    const kept = before.get(cell.id)
+    const row = kept && (kept.cell === cell || sameData(kept.cell, cell)) ? kept : transcriptRowOf(cell)
+    if (!row) return
+    const label = cell.cellLabel ?? String(index + 1)
+    if (row !== previous.rows[rows.length] || previous.labels.get(cell.id) !== label) same = false
+    rows.push(row)
+    labels.set(cell.id, label)
+  })
+  return same && rows.length === previous.rows.length ? previous : { rows, labels }
 }

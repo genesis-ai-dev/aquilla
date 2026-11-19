@@ -107,6 +107,59 @@ export const editor = defineNamespace({
       },
       "total",
     ),
+    // AQU-2654: a run is honest about itself — which file, how long, and a
+    // terminal state for every way it can end.
+    "editor.completion.translatingFile": "Translating {file}",
+    "editor.completion.elapsed": "{time} elapsed",
+    "editor.completion.stalled":
+      "No progress for {minutes} minutes. The AI service or your connection may have stopped responding.",
+    "editor.completion.done": plural(
+      {
+        one: "{done} cell drafted in {time}.",
+        other: "{done} cells drafted in {time}.",
+      },
+      "done",
+    ),
+    "editor.completion.stopped": plural(
+      {
+        one: "Stopped — {done} of {total} cell drafted.",
+        other: "Stopped — {done} of {total} cells drafted.",
+      },
+      "total",
+    ),
+    "editor.completion.interrupted": plural(
+      {
+        one: "Drafting was interrupted when this page reloaded or was suspended — {done} of {total} cell drafted.",
+        other: "Drafting was interrupted when this page reloaded or was suspended — {done} of {total} cells drafted.",
+      },
+      "total",
+    ),
+    "editor.completion.runFailed": "Drafting stopped unexpectedly: {reason}",
+    "editor.completion.failedCells": "Not drafted: {cells}",
+    "editor.completion.failedCellsMore": plural(
+      {
+        one: "Not drafted: {cells} and {count} more",
+        other: "Not drafted: {cells} and {count} more",
+      },
+      "count",
+    ),
+    "editor.completion.failedReason": "Reason: {reason}",
+    "editor.completion.retryRemaining": plural(
+      {
+        one: "Retry {count} cell",
+        other: "Retry {count} cells",
+      },
+      "count",
+    ),
+    "editor.completion.resumeRemaining": plural(
+      {
+        one: "Draft the remaining {count} cell",
+        other: "Draft the remaining {count} cells",
+      },
+      "count",
+    ),
+    "editor.completion.openFileToRetry": "Open {file} in the editor, then try again.",
+    "editor.completion.openFile": "Open file",
 
     // — Health / decay breakdown popover ——————————————————————————
     "editor.health.needsAttention": "{percent}% of cells need attention",
@@ -1744,7 +1797,6 @@ export const editor = defineNamespace({
       "This row is a piece of the original recording, so it can\u2019t be removed.",
     "editor.row.idmlReason":
       "IDML files keep their original layout, so cells can\u2019t be added or removed.",
-    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
     // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
     // fragments below — a resolved-and-concatenated list, the house idiom (see
     // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,
@@ -2333,6 +2385,9 @@ export const editor = defineNamespace({
     "editor.row.lineAria": "Line {number}",
     "editor.row.cellAria": "{ref} cell",
     "editor.row.rowFallbackRef": "row {index}",
+    // AQU-1722, AQU-2278: a line named in a list (lib/cells/line-name.ts).
+    "editor.line.rowName": "row {number}",
+    "editor.line.emptyName": "(empty line)",
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
     // AQU-1163: why a target cell will not take your text — shown as the
@@ -2576,6 +2631,40 @@ export const editor = defineNamespace({
       "to go back to the computed gloss.",
     "editor.bt.glossContributorRequired": "Contributor+ required to correct the gloss",
     "editor.bt.alignment": "Alignment",
+    "editor.bt.inlineGenerating": "Back-translating…",
+    "editor.bt.inlineStale": "Out of date",
+    "editor.bt.inlineOpen": "Open the back-translation",
+
+    // — Back-translation column ————————————————————————————————————
+    "editor.btColumn.title": "Back-translation",
+    "editor.btColumn.show": "Show the back-translation column",
+    "editor.btColumn.hide": "Hide the back-translation column",
+    "editor.btColumn.options": "Back-translation options",
+    "editor.btColumn.about":
+      "Each translation, translated back so you can check that the meaning carried over. It is a check, not proof.",
+    "editor.btColumn.liveLabel": "Update as translations change",
+    "editor.btColumn.liveDescription":
+      "For everyone on this project. Each saved translation is back-translated, which uses AI credits.",
+    "editor.btColumn.liveMaintainerOnly": "Only a maintainer can change this.",
+    "editor.btColumn.liveBadge": "Automatic",
+    "editor.btColumn.fill": plural({
+      one: "Back-translate {count} row",
+      other: "Back-translate {count} rows",
+    }),
+    "editor.btColumn.fillHint":
+      "Rows on this page with no back-translation, or one that is out of date. Hand-corrected ones are left alone.",
+    "editor.btColumn.fillNone": "Every translated row on this page has a current back-translation.",
+    "editor.btColumn.progress": plural({
+      one: "{count} row left",
+      other: "{count} rows left",
+    }),
+    "editor.btColumn.stop": "Stop",
+    "editor.btColumn.cellGenerate": "Back-translate",
+    "editor.btColumn.cellWaiting": "Waiting",
+    "editor.btColumn.cellUpdate": "Update this back-translation",
+    "editor.btColumn.cellRetry": "Try again",
+    "editor.btColumn.cellText": "Back-translation text",
+    "editor.btColumn.cellEditHint": "Your correction is kept and is never replaced automatically.",
     "editor.bt.alignmentSub": "— word-level source/target view",
     "editor.transcript.editTooltip": "Correct the transcript",
     "editor.transcript.editAria": "Correct the transcript",
@@ -4160,6 +4249,126 @@ export const editor = defineNamespace({
           failed: "Number of cells that could not be translated.",
           total: "Number of cells the run attempted in total.",
           done: "Number of cells that were translated successfully.",
+        },
+      },
+      "editor.completion.translatingFile": {
+        description:
+          "Label at the left of the batch AI-translation progress bar when the " +
+          "file being drafted is known. Same status word as " +
+          "editor.completion.translating followed by the file name; shown app-wide, " +
+          "including on pages other than the editor, so the user can tell which " +
+          "file the run belongs to.",
+        placeholders: {
+          file: "Name of the file whose cells are being drafted, e.g. 'Guide.docx'.",
+        },
+      },
+      "editor.completion.elapsed": {
+        description:
+          "Accessible name and tooltip of the running clock beside the batch " +
+          "progress counter: how long the run has been going.",
+        placeholders: {
+          time: "Elapsed time as m:ss or h:mm:ss, e.g. '3:42'.",
+        },
+      },
+      "editor.completion.stalled": {
+        description:
+          "Warning shown on the batch AI-translation banner when the run has made " +
+          "no progress at all for several minutes. Two full sentences. It is " +
+          "followed by Retry and Stop buttons. State the fact plainly; do not " +
+          "soften it or promise that it will recover.",
+        placeholders: {
+          minutes: "Whole number of minutes without progress, at least 5.",
+        },
+      },
+      "editor.completion.done": {
+        description:
+          "Completion sentence replacing the progress bar when a batch AI " +
+          "translation finished and every cell was drafted. Full sentence with a " +
+          "period. The counted noun is 'cells', governed by {done}.",
+        placeholders: {
+          done: "Number of cells that were drafted.",
+          time: "How long the run took, as m:ss or h:mm:ss.",
+        },
+      },
+      "editor.completion.stopped": {
+        description:
+          "Sentence replacing the progress bar after the user pressed Stop on a " +
+          "batch AI translation. The cells already drafted are kept. The counted " +
+          "noun is 'cells', governed by {total}.",
+        placeholders: {
+          done: "Number of cells drafted before the run was stopped.",
+          total: "Number of cells the run was asked to draft.",
+        },
+      },
+      "editor.completion.interrupted": {
+        description:
+          "Sentence shown after a page reload when a batch AI translation was " +
+          "still running in this browser tab and was cut off (the page was " +
+          "reloaded, or the browser put the tab to sleep). Nothing is running any " +
+          "more. Followed by a button that drafts the remaining cells. The counted " +
+          "noun is 'cells', governed by {total}.",
+        placeholders: {
+          done: "Number of cells drafted before the interruption.",
+          total: "Number of cells the run was asked to draft.",
+        },
+      },
+      "editor.completion.runFailed": {
+        description:
+          "Line in the batch AI-translation failure summary when the run itself " +
+          "broke off (as opposed to individual cells failing). Honest failure " +
+          "reporting, so do not soften it.",
+        placeholders: {
+          reason: "The technical error message, shown verbatim (usually English).",
+        },
+      },
+      "editor.completion.failedCells": {
+        description:
+          "Line in the batch AI-translation failure summary naming the cells that " +
+          "were not drafted, when all of them fit.",
+        placeholders: {
+          cells: "Comma-separated cell labels, e.g. 'GEN 1:3, GEN 1:4'.",
+        },
+      },
+      "editor.completion.failedCellsMore": {
+        description:
+          "Same line as editor.completion.failedCells when the list was cut short: " +
+          "the first few cell labels, then how many more failed.",
+        placeholders: {
+          cells: "Comma-separated cell labels, e.g. 'GEN 1:3, GEN 1:4'.",
+          count: "Number of further failed cells that are not listed.",
+        },
+      },
+      "editor.completion.failedReason": {
+        description:
+          "Line in the batch AI-translation failure summary giving the error the " +
+          "first failed cell reported.",
+        placeholders: {
+          reason: "The technical error message, shown verbatim (usually English).",
+        },
+      },
+      "editor.completion.retryRemaining": {
+        description:
+          "Button on the batch AI-translation banner that drafts again the cells " +
+          "the run did not draft (failed, or never reached). Imperative.",
+        placeholders: {
+          count: "Number of cells that will be drafted.",
+        },
+      },
+      "editor.completion.resumeRemaining": {
+        description:
+          "Button on the batch AI-translation banner after a run was stopped or " +
+          "interrupted: drafts the cells the run never reached. Imperative.",
+        placeholders: {
+          count: "Number of cells that will be drafted.",
+        },
+      },
+      "editor.completion.openFileToRetry": {
+        description:
+          "Hint shown when the user pressed Retry on the batch AI-translation " +
+          "banner while a different file (or page) is open, so the remaining " +
+          "cells are not loaded. Followed by an 'Open file' link.",
+        placeholders: {
+          file: "Name of the file the run was drafting.",
         },
       },
       "editor.health.needsAttention": {
@@ -7129,7 +7338,9 @@ export const editor = defineNamespace({
         placeholders: {
           count: "Cells the click would sign off; selects the plural form (row/rows).",
           total: "Cells selected in all (always more than count).",
-          refs: "A list of row numbers such as \"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
+          refs:
+            "A list of the rows' labels in the # column, as shown there, such as " +
+            "\"4, 5 and 10\" or \"1, 2, 3 and 3 more\".",
         },
       },
       "editor.selection.validatePartialMoreRefs": {
@@ -9142,6 +9353,29 @@ export const editor = defineNamespace({
           "Lower-case because it is substituted mid-phrase.",
         placeholders: { index: "1-based position of the row in the file." },
       },
+      "editor.line.rowName": {
+        description:
+          "What a line with no reference (no verse, no cue timing) is called " +
+          "wherever lines are listed by name: the selection bar's notes, the " +
+          "generate-voice plan, the health card's list of lines that need " +
+          "attention. It names the line by the label its row shows in the " +
+          "editor table's # column. Shown inside a list of such names or on its " +
+          "own as a list entry, so keep it short; lowercase in English.",
+        maxLength: 12,
+        placeholders: {
+          number:
+            "The label the line's row shows in the editor table's # column, exactly " +
+            "as shown: usually a number (\"4\"), sometimes the source's own label " +
+            "(a spreadsheet's row number, \"14a\"). Do not translate or reformat it.",
+        },
+      },
+      "editor.line.emptyName": {
+        description:
+          "What a line is called in those same lists when it has no reference, no " +
+          "number in the # column, no label and no text of its own to go by: an " +
+          "empty line. Shown on its own as a list entry.",
+        maxLength: 24,
+      },
       "editor.row.editorAria": {
         description:
           "Screen-reader name of the editable translation box, so focusing it " +
@@ -9946,6 +10180,29 @@ export const editor = defineNamespace({
         description:
           "Advice shown when the score is healthy. The clause after the dash is " +
           "load-bearing: a good score never removes the need for human review.",
+      },
+      "editor.btColumn.title": {
+        description:
+          "Heading of the editor's third text column, after Source and Target: " +
+          "each translation rendered back into the source language so a reviewer " +
+          "can check the meaning. A standard Bible-translation term.",
+        maxLength: 24,
+      },
+      "editor.btColumn.fill": {
+        description:
+          "Button in the back-translation column's options: back-translates every " +
+          "row on the page that has a translation but no current back-translation.",
+        placeholders: {
+          count: "How many rows will be back-translated; selects the plural form.",
+        },
+      },
+      "editor.btColumn.progress": {
+        description:
+          "Progress beside the back-translation column heading while rows are " +
+          "being back-translated: how many are still waiting or in progress.",
+        placeholders: {
+          count: "Rows still to be back-translated; selects the plural form.",
+        },
       },
       "editor.bt.label": {
         description:

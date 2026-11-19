@@ -182,3 +182,56 @@ describe("AQU-1832 — applyPushedFileProgress", () => {
     hook.unmount()
   })
 })
+
+// AQU-2654. WHY: when this client's own pending overlay drained, the resource
+// forced a `/progress` read — for numbers the server had pushed on the socket
+// a moment earlier. One GET per edit, to read back what the write returned.
+describe("AQU-2654 — the overlay drain does not read back a pushed answer", () => {
+  it("own write, push landed while pending: the drain shows the pushed body with no request", async () => {
+    const { hook, fetchMock } = await mounted("own")
+    const { setLocalFileProgress, expectPushedFileProgress } = await import("./file-progress-resource")
+    const local = { ...served("own", 9, 1), file: counts(9) }
+    await act(async () => { setLocalFileProgress("project", "own", local, ["my-edit"]) })
+    await act(async () => {
+      // The applied frame for the write says the numbers are being pushed…
+      expectPushedFileProgress("project", "own")
+      // …and here they are, while the outbox record still exists.
+      applyPushedFileProgress("project", push({ fileId: "own" }))
+    })
+    expect(hook.result.current.progress!.file.filledCount).toBe(9)
+    await act(async () => { setLocalFileProgress("project", "own", local, []) })
+    expect(hook.result.current.progress!.file.filledCount).toBe(2)
+    expect(hook.result.current.progress!.revision).toBe(2)
+    expect(fetchMock).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+
+  it("own write, push announced but not here yet: the drain waits for it instead of reading", async () => {
+    const { hook, fetchMock } = await mounted("late")
+    const { setLocalFileProgress, expectPushedFileProgress } = await import("./file-progress-resource")
+    const local = { ...served("late", 9, 1), file: counts(9) }
+    await act(async () => { setLocalFileProgress("project", "late", local, ["my-edit"]) })
+    await act(async () => { expectPushedFileProgress("project", "late") })
+    await act(async () => { setLocalFileProgress("project", "late", local, []) })
+    // The optimistic numbers stay up until the push replaces them.
+    expect(hook.result.current.progress!.file.filledCount).toBe(9)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await act(async () => { applyPushedFileProgress("project", push({ fileId: "late" })) })
+    expect(hook.result.current.progress!.file.filledCount).toBe(2)
+    expect(fetchMock).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+
+  it("no push announced (older worker, no fan-out): the drain still reads, as before", async () => {
+    const { hook, fetchMock } = await mounted("plain")
+    const { setLocalFileProgress } = await import("./file-progress-resource")
+    const local = { ...served("plain", 9, 1), file: counts(9) }
+    await act(async () => { setLocalFileProgress("project", "plain", local, ["my-edit"]) })
+    // A PEER's push while this client's edit is pending is not an answer for
+    // the edit: nothing announced one for it.
+    await act(async () => { applyPushedFileProgress("project", push({ fileId: "plain" })) })
+    await act(async () => { setLocalFileProgress("project", "plain", local, []) })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    hook.unmount()
+  })
+})

@@ -334,6 +334,6 @@ describe("affected E2E run mode", () => {
 
 it("keeps login-settings protection in the push gate for security changes",()=>{
  const pool=affectedSpecPool(realSmokeSpecs(),spec=>existsSync(spec))
- for(const file of ["src/components/settings/AccountSecurity.tsx","auth-worker/src/routes/account-security.ts","auth-worker/src/routes/auth.ts","auth-worker/src/routes/email-change.ts","auth-worker/src/routes/oauth-google.ts","db/postgres/migrations/0205_login_method_security.sql"])
+ for(const file of ["src/components/settings/AccountSecurity.tsx","auth-worker/src/routes/account-security.ts","auth-worker/src/routes/auth.ts","auth-worker/src/routes/email-change.ts","auth-worker/src/routes/oauth-google.ts","db/postgres/migrations/0206_login_method_security.sql"])
   expect(selectAffectedE2E([file],pool).specs,file).toContain("e2e/specs/auth/account-security.spec.ts")
 })

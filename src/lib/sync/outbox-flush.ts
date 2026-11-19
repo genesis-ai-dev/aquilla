@@ -16,6 +16,8 @@ import {
   type OutboxRecord,
 } from "./outbox"
 import { sanitizeStoredEvents } from "./outbox-sanitize"
+import { dependencyIds, offlineQueueWaitingIds } from "./offline-routing"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
 import type { AppliedEventFrame } from "./live-apply"
@@ -25,6 +27,7 @@ import posthog from "@/lib/posthog"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
+import { mint403QuarantineReason } from "./lost-project-access"
 
 const MAX_BATCH = 100
 
@@ -51,6 +54,8 @@ export interface TokenMintResult {
   elevationRequired?: boolean
   /** AQU-2003: the role the token carries (server `role` field), when known. */
   role?: { level: number; source: string }
+  /** AQU-2455: auth-worker `error` text, when the minter preserved it. */
+  error?: string
 }
 
 interface PostBody {
@@ -146,7 +151,7 @@ export interface FlushDeps {
   /** Called with the server's `applied[]` frames (parsed) for the events this
    *  flush committed — the author's own write, projected. Also fans out to
    *  `subscribeAppliedEvents` listeners. */
-  onApplied?: (frames: AppliedEventFrame[]) => void
+  onApplied?: (frames: AppliedEventFrame[], sent: ReadonlyMap<string, OutboxRecord>) => void
   /** Called just before non-retryable 4xx rejections are dropped from the
    *  outbox. These arrive inside a 200 and used to disappear behind a
    *  console.error, so a refused write's optimistic UI simply reverted with no
@@ -234,6 +239,26 @@ function isElevationHeld(record: OutboxRecord): boolean {
 }
 
 /**
+ * The flusher's skip: elevation holds, plus — on desktop — any record that
+ * depends on an edit still waiting in LiveStore's offline queue, directly or
+ * through another record held here. The two queues flush independently, so
+ * sending it first would get it refused or logged stale; it goes on a later
+ * tick, once the offline queue has sent its dependency. The peek walks oldest
+ * first, so a held record is in `waiting` before its dependents come up.
+ */
+function holdBackFor(offlineWaiting: ReadonlySet<string> | null): (record: OutboxRecord) => boolean {
+  if (!offlineWaiting || offlineWaiting.size === 0) return isElevationHeld
+  const waiting = new Set(offlineWaiting)
+  return (record) => {
+    if (dependencyIds(record.event).some((id) => waiting.has(id))) {
+      waiting.add(record.id)
+      return true
+    }
+    return isElevationHeld(record)
+  }
+}
+
+/**
  * Let held projects mint again. useOutboxFlusher calls this on every explicit
  * retry (Retry now, reconnect, re-auth) and when the admin's step-up verifies.
  * A project still refused is simply held again after one mint.
@@ -315,7 +340,9 @@ export type FlushOutboxResult = {
 }
 
 type StaleSiblingsListener = (entries: StaleSiblingEntry[]) => void
-type AppliedListener = (frames: AppliedEventFrame[]) => void
+/** `sent` is the batch the flush posted, by event id — what a frame alone
+ *  does not say about its event (a validation's author and `editEventId`). */
+type AppliedListener = (frames: AppliedEventFrame[], sent: ReadonlyMap<string, OutboxRecord>) => void
 const appliedListeners = new Set<AppliedListener>()
 
 /**
@@ -472,7 +499,8 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   }
   const shouldSurface = (): boolean => deps.ownerScope?.shouldSurface?.() ?? true
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, isElevationHeld)
+  const offlineWaiting = isTauriRuntime() ? await offlineQueueWaitingIds() : null
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope, holdBackFor(offlineWaiting))
   if (records.length === 0 || !(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -527,11 +555,12 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
+      // AQU-2455: keep the server's phrase when we have one. "No access to
+      // project" is lost access; "Project is archived" / "Project is frozen"
+      // are not, and collapsing them made an archive look like a removal.
+      const reason = mint403QuarantineReason(mint.error)
       if (shouldSurface()) {
-        deps.onForbidden?.(forbiddenEntriesFor(
-          batch,
-          "no access to this change's project",
-        ))
+        deps.onForbidden?.(forbiddenEntriesFor(batch, reason))
         analytics.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
@@ -540,7 +569,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       }
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
-        { status: 403, reason: "no access to this change's project" },
+        { status: 403, reason },
         outboxScope,
       )
       return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
@@ -770,8 +799,9 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
         if (frame) frames.push(frame)
       }
       if (frames.length > 0) {
-        deps.onApplied?.(frames)
-        for (const listener of appliedListeners) listener(frames)
+        const sent = new Map(batch.map((record) => [record.id, record]))
+        deps.onApplied?.(frames, sent)
+        for (const listener of appliedListeners) listener(frames, sent)
       }
     }
     const permanentlyRejectedIds = new Set(

@@ -735,6 +735,7 @@ export function OrgProjectsDataTable({
                   <ProjectLaneSubRows
                     projectId={p.id}
                     projectName={p.name}
+                    orgName={p.orgName}
                     lanes={displayLanes(p)}
                     defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     colSpan={colSpan}

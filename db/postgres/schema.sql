@@ -365,6 +365,10 @@ CREATE TABLE project_settings (
     -- every source import, so it joins this projection rather than being the
     -- one write-path read that reopens the blob (db/shared/import-floor.ts).
     wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
+    -- AQU-2309 (0205): who may set, rename, resize and remove hand-set
+    -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
+    -- The events route reads this column instead of the settings blob.
+    wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they

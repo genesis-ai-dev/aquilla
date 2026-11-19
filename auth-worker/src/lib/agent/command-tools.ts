@@ -15,6 +15,7 @@
 
 import type { AuthUser, Env } from "../../types"
 import { mintSyncTokenForUser, type SyncTokenMintFailure } from "../../services/sync-token-mint"
+import { syncWorkerFetch } from "../sync-worker-fetch"
 import {
   catalogForRole,
   describeCommand,
@@ -284,7 +285,7 @@ export async function proposeCommandTool(
 
   let res: Response
   try {
-    res = await fetch(`${base}/api/v1/changesets/${encodeURIComponent(ctx.projectId)}`, {
+    res = await syncWorkerFetch(ctx.env, `${base}/api/v1/changesets/${encodeURIComponent(ctx.projectId)}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${mint.token}`,

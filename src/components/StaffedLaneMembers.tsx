@@ -25,9 +25,11 @@
 // one list, its one guard, and that confirmation.
 
 import { Link, useLocation } from "react-router-dom"
+import { ScopeGrantChip } from "@/components/access/ScopeBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import type { ScopePath } from "@/lib/access/types"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
@@ -45,6 +47,8 @@ export interface StaffedLaneMembersProps {
   projectId: string
   /** The lane's display label — named in the Remove control's accessible name. */
   laneLabel: string
+  /** Scope string shared with the popover heading. Omitted → no grant chip. */
+  scopePath?: ScopePath
   /** `null` while the first scope read for the open popover is still in flight. */
   people: StaffedLanePerson[] | null
   /** The person whose removal is in flight, if any. */
@@ -69,6 +73,7 @@ export interface StaffedLaneMembersProps {
 export function StaffedLaneMembers({
   projectId,
   laneLabel,
+  scopePath,
   people,
   busyUserId,
   error,
@@ -111,12 +116,21 @@ export function StaffedLaneMembers({
                 className="px-2 py-1.5"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <UsernameWithAvatar
-                    userId={person.userId}
-                    username={person.username}
-                    size="xs"
-                    nameClassName="text-xs"
-                  />
+                  <div className="min-w-0">
+                    <UsernameWithAvatar
+                      userId={person.userId}
+                      username={person.username}
+                      size="xs"
+                      nameClassName="text-xs"
+                    />
+                    {scopePath && scopePath.length > 0 ? (
+                      <ScopeGrantChip
+                        path={scopePath}
+                        viaTeam={null}
+                        className="block truncate text-[11px] font-normal text-muted-foreground"
+                      />
+                    ) : null}
+                  </div>
                   <Button
                     variant="ghost"
                     className="h-6 px-1.5 text-[11px]"

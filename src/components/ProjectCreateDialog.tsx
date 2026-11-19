@@ -156,20 +156,62 @@ const LONG_RUNNING_WORK_MS = 120_000
 type DialogWork = "creating" | "adding-lane"
 
 /**
- * Complete lane registry for the create settings PATCH: primary first, then
- * extras, case-insensitively deduped (trim + lower, matching collectExtras).
- * Always includes the primary — `settings.targetLanes` is the full registry.
+ * Where a language's "Delivers" choice is stored while the dialog is open.
+ *
+ * AQU-2445: the project may have two lanes of one language, so the language
+ * alone no longer identifies a choice — the second occurrence carries its
+ * place. Occurrence 0 keeps the bare lowercased language, so a project with
+ * one lane per language stores exactly what it stored before.
+ *
+ * Worst case, someone types a language that looks like a marker ("es#2") and
+ * shares a key with a real second "es": both lanes then deliver the same
+ * thing, which is what happened to every duplicate before this slice.
  */
-function completeTargetLanes(primary: string, extras: readonly string[]): string[] {
-  const claimed = new Set<string>()
-  const lanes: string[] = []
+function laneDeliversKey(language: string, occurrence: number): string {
+  const lower = language.trim().toLowerCase()
+  return occurrence === 0 ? lower : `${lower}#${occurrence + 1}`
+}
+
+/** One target lane the create writes, in the order it is written. */
+type PlannedTargetLane = {
+  /** The language as typed. Two lanes of one language both keep it. */
+  language: string
+  /** Where to read this lane's "Delivers" choice (`laneDeliversKey`). */
+  deliversKey: string
+  /** This lane repeats an earlier lane's language in the same create. */
+  duplicate: boolean
+}
+
+/**
+ * Complete lane registry for the create: primary first, then the extras as
+ * typed. Blank entries are skipped. Always includes the primary — the lane
+ * registry is the full set, not just the extras.
+ *
+ * AQU-2445: a repeat of an earlier language is NOT dropped. Two lanes of one
+ * language is a legitimate shape (two teams on one language) that "Add
+ * language lane" in Project settings already allows, and every lane surface
+ * tells the colliding labels apart itself — the second one reads
+ * "Spanish · 2" (AQU-1784), and either can be renamed afterwards. The repeat
+ * is flagged so the create can send `allowDuplicateName`, which is what the
+ * server needs to accept a display name the project already has.
+ */
+function completeTargetLanes(
+  primary: string,
+  extras: readonly string[],
+): PlannedTargetLane[] {
+  const occurrences = new Map<string, number>()
+  const lanes: PlannedTargetLane[] = []
   for (const raw of [primary, ...extras]) {
-    const trimmed = raw.trim()
-    if (!trimmed) continue
-    const key = trimmed.toLowerCase()
-    if (claimed.has(key)) continue
-    claimed.add(key)
-    lanes.push(trimmed)
+    const language = raw.trim()
+    if (!language) continue
+    const key = language.toLowerCase()
+    const occurrence = occurrences.get(key) ?? 0
+    occurrences.set(key, occurrence + 1)
+    lanes.push({
+      language,
+      deliversKey: laneDeliversKey(language, occurrence),
+      duplicate: occurrence > 0,
+    })
   }
   return lanes
 }
@@ -441,11 +483,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               })
               if (renamed.kind !== "ok") extraLanguagesFailed = true
             }
-            for (const language of completeTargetLanes(project.targetLanguage, extrasToApply)) {
+            for (const lane of completeTargetLanes(project.targetLanguage, extrasToApply)) {
               const created = await createProjectLane(jwt, project.id, {
                 name: "",
-                language,
-                delivers: value.deliversByLanguage[language.toLowerCase()] ?? "text",
+                language: lane.language,
+                delivers: value.deliversByLanguage[lane.deliversKey] ?? "text",
+                // AQU-2445: a second lane of the same language shows the same
+                // string, which the server refuses unless the caller says it
+                // meant it. The dialog warned about it before Create.
+                ...(lane.duplicate ? { allowDuplicateName: true } : {}),
               })
               if (created.kind !== "ok") {
                 extraLanguagesFailed = true
@@ -1499,6 +1545,14 @@ function AddAsLaneRecommendation({
 }
 
 /**
+ * What a box has to say about its own value, or null when it has nothing.
+ *
+ * AQU-2445: `"warning"` is advisory — Create goes ahead and the lane is
+ * created. Only `"error"` marks the box invalid.
+ */
+type LaneNotice = { level: "error" | "warning"; message: string }
+
+/**
  * AQU-538 / AQU-1240: the self-contained shape's target field is one text
  * box per lane, stacked, with a plus button that appends another. Box 0 is
  * the project's targetLanguage and the first settings.targetLanes entry;
@@ -1512,19 +1566,27 @@ function validateTargetLanguage(
   candidate: string,
   earlier: string[],
   t: TFunction,
-): string | null {
+): LaneNotice | null {
   const trimmed = candidate.trim()
   // A blank row is what an unused box looks like, not an error: the plus
   // button is what gates adding more, and blanks are dropped on submit.
   if (!trimmed) return null
   if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
-    return t("projectSettings.create.extraLanguagesTooLongError", {
-      max: MAX_EXTRA_LANGUAGE_LENGTH,
-    })
+    return {
+      level: "error",
+      message: t("projectSettings.create.extraLanguagesTooLongError", {
+        max: MAX_EXTRA_LANGUAGE_LENGTH,
+      }),
+    }
   }
   const lower = trimmed.toLowerCase()
   if (earlier.some((l) => l.trim().toLowerCase() === lower)) {
-    return t("projectSettings.create.extraLanguagesAlreadyAddedError")
+    // AQU-2445: a warning, not an error — the project gets both lanes, told
+    // apart on every lane surface, and either can be renamed afterwards.
+    return {
+      level: "warning",
+      message: t("projectSettings.create.extraLanguagesAlreadyAddedError"),
+    }
   }
   return null
 }
@@ -1572,42 +1634,64 @@ function TargetLanguageInputs({
 
   /**
    * Collapse the boxes and the overflow field into the lane list the form
-   * submits. Blank entries, over-long ones, and case-insensitive duplicates
-   * are dropped rather than PATCHed; boxes win over the overflow field
-   * because they came first. The primary is excluded — it travels as
-   * targetLanguage, not as a lane.
+   * submits. Blank and over-long entries are dropped rather than written;
+   * boxes come before the overflow field. The primary is excluded — it
+   * travels as targetLanguage, not as a lane.
+   *
+   * AQU-2445: a BOX that repeats an earlier language is kept. The person
+   * clicked "Add language lane" and typed it, the box warns about the repeat
+   * before Create, and two lanes of one language is a shape the app supports
+   * (AQU-1784 tells the labels apart). A repeat inside the OVERFLOW field is
+   * still dropped: that field is for pasting a column of languages, where a
+   * repeat is noise rather than a second lane someone asked for.
    */
   function collectExtras(nextLanes: LaneDraft[], nextBulk: string): string[] {
     const claimed = new Set<string>()
     const primary = (nextLanes[0]?.value ?? "").trim().toLowerCase()
     if (primary) claimed.add(primary)
     const extras: string[] = []
-    const candidates = [
-      ...nextLanes.slice(1).map((lane) => lane.value),
-      ...splitBulkLanes(nextBulk),
-    ]
-    for (const candidate of candidates) {
+    // The primary occupies one of the MAX_TARGET_LANES slots.
+    const atCap = () => extras.length >= MAX_TARGET_LANES - 1
+    for (const lane of nextLanes.slice(1)) {
+      const trimmed = lane.value.trim()
+      if (!trimmed || trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) continue
+      if (atCap()) break
+      claimed.add(trimmed.toLowerCase())
+      extras.push(trimmed)
+    }
+    for (const candidate of splitBulkLanes(nextBulk)) {
       const trimmed = candidate.trim()
       if (!trimmed || trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) continue
       const lower = trimmed.toLowerCase()
       if (claimed.has(lower)) continue
-      // The primary occupies one of the MAX_TARGET_LANES slots.
-      if (extras.length >= MAX_TARGET_LANES - 1) break
+      if (atCap()) break
       claimed.add(lower)
       extras.push(trimmed)
     }
     return extras
   }
 
-  /** Every language's choice, boxes first (a box wins over the overflow field). */
+  /**
+   * Every lane's choice, boxes first (a box wins over the overflow field).
+   *
+   * AQU-2445: keyed per LANE, not per language, so two boxes of the same
+   * language keep their own choices instead of the later one overwriting the
+   * earlier one's. The order matches `completeTargetLanes` (primary, then the
+   * boxes, then the overflow field), so each lane reads back its own choice.
+   */
   function collectDelivers(
     nextLanes: LaneDraft[],
     nextBulkDelivers: Record<string, LaneDelivers>,
   ): Record<string, LaneDelivers> {
     const out: Record<string, LaneDelivers> = { ...nextBulkDelivers }
+    const occurrences = new Map<string, number>()
     for (const lane of nextLanes) {
-      const key = lane.value.trim().toLowerCase()
-      if (key) out[key] = lane.delivers
+      const language = lane.value.trim()
+      if (!language) continue
+      const key = language.toLowerCase()
+      const occurrence = occurrences.get(key) ?? 0
+      occurrences.set(key, occurrence + 1)
+      out[laneDeliversKey(language, occurrence)] = lane.delivers
     }
     return out
   }
@@ -1642,7 +1726,7 @@ function TargetLanguageInputs({
       </FieldDescription>
 
       {lanes.map((lane, index) => {
-        const error = validateTargetLanguage(lane.value, values.slice(0, index), t)
+        const notice = validateTargetLanguage(lane.value, values.slice(0, index), t)
         return (
           <div key={lane.id} className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
@@ -1673,7 +1757,7 @@ function TargetLanguageInputs({
                     ? t("projectSettings.create.targetLanguagePlaceholder")
                     : t("projectSettings.create.additionalTargetPlaceholder")
                 }
-                aria-invalid={(index === 0 && invalid) || error != null}
+                aria-invalid={(index === 0 && invalid) || notice?.level === "error"}
                 disabled={disabled}
               />
               <LaneDeliversSelect
@@ -1703,7 +1787,20 @@ function TargetLanguageInputs({
                 </button>
               )}
             </div>
-            {error && <FieldError className="text-xs">{error}</FieldError>}
+            {notice?.level === "error" && (
+              <FieldError className="text-xs">{notice.message}</FieldError>
+            )}
+            {/* AQU-2445: a duplicate language is advisory, so it reads as a
+                warning beside the box and leaves Create alone. */}
+            {notice?.level === "warning" && (
+              <p
+                role="status"
+                className="text-xs text-amber-600 dark:text-amber-400"
+                data-testid={`create-target-lang-warning-${index}`}
+              >
+                {notice.message}
+              </p>
+            )}
           </div>
         )
       })}

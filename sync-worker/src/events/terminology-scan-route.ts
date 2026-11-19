@@ -8,6 +8,7 @@
 // or above. Each response is the scan result, not the project's cells.
 
 import { verifyTokenForProject } from "../auth"
+import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
 import {
   queryConceptSuggestions,
   queryTerminologyCandidates,
@@ -17,6 +18,8 @@ import {
 export interface TerminologyScanEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" or "true" turns the lane read wall on. */
+  LANE_READ_WALL?: string
 }
 
 const VIOLATIONS_RE = /^\/api\/v1\/projects\/([^/]+)\/terminology\/violations$/
@@ -47,6 +50,19 @@ export async function handleTerminologyScanRequest(
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
   const lane = url.searchParams.get("lane") ?? ""
+  // AQU-730 read wall: violations and suggestions are built from `lane`'s
+  // target text, and the lane is the caller's choice. Candidates read source
+  // text only. A lane the caller cannot read answers as an empty one, the way
+  // progress does, so the page that asked renders nothing instead of failing.
+  if (!candidates) {
+    const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+    if (!(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane))) {
+      const hidden = { headers: { "Cache-Control": "private, no-store" } }
+      return violations
+        ? Response.json({ violations: [], scanComplete: true, truncated: false }, hidden)
+        : Response.json({ suggestions: [] }, hidden)
+    }
+  }
   try {
     if (violations) {
       return Response.json(await queryTerminologyViolations(env.AQUILLA_PG, projectId, lane))

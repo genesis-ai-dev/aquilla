@@ -36,7 +36,7 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artifact"
 import { safeAudioContentType } from "./audio-content-type"
-import { fileScopeRefusal } from "./audio-write-guard"
+import { fileScopeRefusal, firstWriteRefusal } from "./audio-write-guard"
 // Type-only: erased at runtime, so this does not create an import cycle
 // with `audio.ts` (which imports this module).
 import type { AudioEnv } from "./audio"
@@ -148,6 +148,15 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
     // over one already stored.
     if (await env.SNAPSHOTS.head(key)) {
       return new Response("audio already stored under this id", { status: 409 })
+    }
+    // Nor under a name a take has named, nor as someone else's voice's WAV.
+    if (env.AQUILLA_PG) {
+      const taken = await firstWriteRefusal(
+        // A neighbour's key: this key with its own name swapped.
+        env.AQUILLA_PG, env.SNAPSHOTS, (name) => key.slice(0, key.length - audioId.length) + name,
+        verified.claims, projectId, fileId, audioId, env.LANE_READ_WALL,
+      )
+      if (taken) return new Response(taken.reason, { status: taken.status })
     }
     const contentType = safeAudioContentType(request.headers.get("X-Upload-Content-Type"))
     const upload = await env.SNAPSHOTS.createMultipartUpload(key, {

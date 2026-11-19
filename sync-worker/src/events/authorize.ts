@@ -32,6 +32,7 @@ import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-aut
 import { toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { findRestorableRemoval } from './removed-cell-archive'
+import { namesSidecar } from '../audio-write-guard'
 
 /** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
 const EXTENSION_GATED_KINDS = new Set<string>([
@@ -813,6 +814,16 @@ export async function authorize<K extends EventKind>(
     tokenClaims.role < ROLE.PROJECT_LEAD
   ) {
     return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
+  }
+
+  // AQU-2682: a take is never named as a `.peaks` sidecar. The audio route
+  // lets a sidecar be rewritten (it is drawn, never heard), so a take named
+  // like one would escape the write-once rule for recordings.
+  if (raw.kind === 'cell.audio.attach') {
+    const ap = raw.payload as { audioId?: unknown; url?: unknown } | null
+    if (namesSidecar(typeof ap?.audioId === 'string' ? ap.audioId : null, typeof ap?.url === 'string' ? ap.url : null)) {
+      return { ok: false, status: 422, reason: 'a take cannot be named as a waveform sidecar (.peaks)' }
+    }
   }
 
   // AQU-1068: removing an IMPORTED cell needs MAINTAINER, unless the project's

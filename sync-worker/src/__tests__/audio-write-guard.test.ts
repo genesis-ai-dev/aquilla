@@ -1,9 +1,9 @@
 // AQU-2682: audio storage refuses to replace or remove a take's recording it
 // shouldn't. A stored recording is written once: a second write with other
 // bytes under the same name is refused (the same bytes again are a retry and
-// succeed), a large upload may not start over an existing one, and removing
-// a recording that a live take plays is for whoever recorded it or a
-// Maintainer, within the files and languages their access covers.
+// succeed), and a large upload may not start over an existing one. Storage
+// creates or removes only recordings that no take, live or removed, has ever
+// named, within the files and languages the caller's access covers.
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { createHash } from 'node:crypto'
 
@@ -80,6 +80,8 @@ function bucket() {
   return { r2: r2 as unknown as R2Bucket, objects }
 }
 const text = (o?: { bytes: Uint8Array }) => (o ? new TextDecoder().decode(o.bytes) : undefined)
+/** A real peaks sidecar's start: the AQPK magic, then a version byte. */
+const peaks = (version: number) => new Uint8Array([0x41, 0x51, 0x50, 0x4b, version, 0, 0, 0, 1, 2, 3, 4])
 
 interface Who { username: string; userId: number; role: number; scopes?: unknown; laneGrants?: unknown }
 const OWNER: Who = { username: 'owner', userId: 1, role: 700 }
@@ -144,9 +146,9 @@ describe('AQU-2682: a stored recording is written once', () => {
 
   it('a peaks sidecar is derived and may be rewritten', async () => {
     await approvedTake()
-    expect((await audio(RITA, 'PUT', 'take-rita.webm.peaks', { body: 'P1' })).status).toBe(200)
-    expect((await audio(RITA, 'PUT', 'take-rita.webm.peaks', { body: 'P2' })).status).toBe(200)
-    expect(text(b.objects.get(KEY(F, 'take-rita.webm.peaks')))).toBe('P2')
+    expect((await audio(RITA, 'PUT', 'take-rita.webm.peaks', { body: peaks(1) })).status).toBe(200)
+    expect((await audio(RITA, 'PUT', 'take-rita.webm.peaks', { body: peaks(2) })).status).toBe(200)
+    expect(b.objects.get(KEY(F, 'take-rita.webm.peaks'))?.bytes[4]).toBe(2)
   })
 
   it('a large upload may not start over an existing recording', async () => {
@@ -213,18 +215,10 @@ describe('AQU-2682: who may write and remove recordings', () => {
     expect(b.objects.has(KEY(F, 'take-rita.webm'))).toBe(true)
   })
 
-  it('whoever recorded it, or a Maintainer, may remove it', async () => {
+  it('not even whoever recorded it, nor a Maintainer, removes a take\'s recording through storage', async () => {
     await approvedTake()
-    expect((await audio(RITA, 'DELETE', 'take-rita.webm')).status).toBe(200)
-    await approvedTake()
-    expect((await audio(MAX, 'DELETE', 'take-rita.webm')).status).toBe(200)
-  })
-
-  it('a contributor limited to one language may not remove a take\'s recording in another', async () => {
-    await approvedTake({ lane: 'es' })
-    const arabicOnly = { ...RITA, scopes: [{ kind: 'lane', value: 'cc33dd44' }] }
-    expect((await audio(arabicOnly, 'DELETE', 'take-rita.webm')).status).toBe(403)
-    const spanish = { ...RITA, scopes: [{ kind: 'lane', value: ES }] }
-    expect((await audio(spanish, 'DELETE', 'take-rita.webm')).status).toBe(200)
+    expect((await audio(RITA, 'DELETE', 'take-rita.webm')).status).toBe(403)
+    expect((await audio(MAX, 'DELETE', 'take-rita.webm')).status).toBe(403)
+    expect(b.objects.has(KEY(F, 'take-rita.webm'))).toBe(true)
   })
 })

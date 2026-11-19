@@ -24,6 +24,7 @@ Read these from the checkout before acting. Do not work from memory of an older 
   slow in this app, and the patterns that are not allowed
 - `scripts/perf/README.md` — the two harnesses and their budgets
 - `docs/routines/PERF-NIGHTLY.md` — the surface coverage table and the run log
+- `docs/routines/PERF-BACKLOG.md` — measured costs nobody has fixed yet
 
 Where this file and those disagree, `AGENTS.md` wins, then the decision record, then this file.
 
@@ -48,6 +49,15 @@ pnpm perf:interaction                  # builds, serves, seeds, measures, enforc
 cp perf-report/interaction-latest.json .perf/before.json
 ```
 
+For a surface outside the editor, `scripts/perf/surfaces-probe.ts` and
+`scripts/perf/transcribe-probe.ts` measure the same three numbers per action (README has the
+flags). They have no budgets yet; a coverage run (Step 4.3) is what gives a scenario one.
+
+```bash
+# only when tonight's target is outside the editor:
+pnpm exec tsx scripts/perf/surfaces-probe.ts --no-build --label before
+```
+
 The run takes about ten minutes. Read the whole report, not only the pass/fail line:
 `metrics` are the budgeted numbers; `phases[variant][i].topRenders` names the components that
 rendered most in each action; `repeatedRoutes` lists requests sent more than once for one action.
@@ -68,8 +78,11 @@ Take the first of these that applies:
 3. **Coverage.** Every third run that reaches this point, add a scenario for the next uncovered
    surface in the coverage table of `docs/routines/PERF-NIGHTLY.md` (one surface, with budgets from
    `--suggest-budgets`), instead of a fix. What is not measured is not kept fast.
-4. **Otherwise** take the largest remaining cost in the report, if a fix would move a budgeted
-   count metric by 10% or more. If nothing would, stop: "no change worth a PR tonight".
+4. **Otherwise** take the next item in `docs/routines/PERF-BACKLOG.md` (re-measure it first; it
+   was written on the day it was found), or the largest remaining cost in the report — whichever
+   would move a budgeted count metric more. If nothing would move one by 10%, stop: "no change
+   worth a PR tonight". Delete a backlog item in the PR that fixes it; add one when a run finds
+   something it will not fix that night.
 
 | What the user does | Instant means (at `--throttle 4`) |
 | --- | --- |

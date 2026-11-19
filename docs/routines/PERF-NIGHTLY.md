@@ -13,6 +13,7 @@ git), but **all of its instructions live in this repo**, so changing how it beha
 | What makes an interaction slow here, and the patterns that are not allowed | `docs/decisions/0013-interaction-cost-is-commits-times-tree.md` |
 | The benchmark, its budgets, and how to find a cause | `scripts/perf/README.md` → "Interaction benchmark" |
 | The stack it measures against, on a machine with no Docker | `scripts/perf/stack-up.sh` |
+| Measured costs nobody has fixed yet — the routine's queue | `docs/routines/PERF-BACKLOG.md` |
 
 It meets the five conditions in `docs/SELF-DRIVING-ROUTINES.md` §0: a schedule nobody has to
 notice, an action it takes alone (a PR), a verification (the benchmark, before and after), a
@@ -71,13 +72,11 @@ over the "instant" line adds the next `no` row (procedure, Step 4.3).
 | Editor — validate a cell | no | AQU-1016 reported a freeze here |
 | Editor — scroll a long file | no | AQU-2368 |
 | Editor — batch AI draft (10 cells) | no | needs the mock LLM; measure commits per chunk and the visible status |
-| Transcribe view — edit, clean up, transcribe all | no | streaming sets state per token |
+| Transcribe view — edit, clean up, transcribe all | probe only (`scripts/perf/transcribe-probe.ts`) | no budget yet |
 | Timeline / audio lens | no | |
-| Project dashboard — open, switch file | no | |
-| Projects list | no | |
-| Comments panel — open, post | no | |
-| Search — type a query, replace | no | |
-| Project settings / rules / glossary pages | no | the AQU-1868 harness measures open only |
+| Projects list, org pages, project overview and settings, glossary page, search, Living Memory, import and export dialogs, voice studio, timeline lens | probe only (`scripts/perf/surfaces-probe.ts`) | no budgets yet; its README section lists which scenarios are stable enough |
+| Comments panel and page with real comments | no | the fixture has none |
+| Search replace | no | |
 | Two users in one file (presence, remote edits) | no | remote `event.applied` render cost |
 
 ## Run log
@@ -86,4 +85,4 @@ One row per run that shipped or escalated. Newest first.
 
 | Date | Target | Mechanism | Before → after | PR |
 |---|---|---|---|---|
-| 2026-11-19 | (hand-run, AQU-2654) glossary lookup in render | every highlighted term rebuilt a regex for every concept on every row render | `glossary.open.longTaskTotalMs` 136,660 → 35,495 ms | AQU-2654 branch |
+| 2026-11-19 | (hand-run, AQU-2654) the editor's commit, focus, open and tab-return paths; glossary engines; transcribe view; batch drafting; ten other surfaces | commits per action × tree per commit × work in render — see decision 0013 | `plain.commit.longTaskTotalMs` 1,689 → 280; `plain.commit.componentRenders` 15,600 → 2,321; `plain.commit.requests` 7 → 2; `plain.tabReturn.requests` 30 → 11; `glossary.open.longTaskTotalMs` 136,660 → 4,619; `glossary.editTab.longTaskTotalMs` 58,599 → 4,235 | AQU-2654 branch |

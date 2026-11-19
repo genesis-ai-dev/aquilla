@@ -488,6 +488,24 @@ describe("CellStore announcements (AQU-2654)", () => {
     expect(all).toBe(3)
   })
 
+  it("an audit entry that differs only in fields no view reads is not a change", () => {
+    const store = new CellStore()
+    runtime(store, new Map([["a", stats("a", ["bob"])]]))
+    store.replaceRows([row("a", "source", "Hello"), row("a", "target", "Hola")])
+    let all = 0
+    store.subscribeAll(() => { all++ })
+    const version = store.getCellVersion("a")
+    // What deriving the entry from an applied commit changes relative to the
+    // optimistic overlay it replaces: bookkeeping, not anything drawn.
+    runtime(store, new Map([["a", { ...stats("a", ["bob"]), editCount: 4, contentHash: "h2", lastEditAt: 99 }]]))
+    expect(all).toBe(0)
+    expect(store.getCellVersion("a")).toBe(version)
+    // A validator change still is one.
+    runtime(store, new Map([["a", stats("a", ["bob", "carol"])]]))
+    expect(all).toBe(1)
+    expect(store.getCellVersion("a")).toBeGreaterThan(version)
+  })
+
   it("a whole-file subscriber is told once for a burst, while the row is told at once", () => {
     vi.useFakeTimers()
     try {

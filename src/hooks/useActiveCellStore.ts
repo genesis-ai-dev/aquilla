@@ -4079,10 +4079,13 @@ function sameStampRecord(
 function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
   if (a === b) return true
   if (!a || !b) return false
+  // AQU-2654: `editCount`, `contentHash` and `lastEditAt` are deliberately
+  // not compared. No view is built from them (buildCellData reads the
+  // validators, their stamps and the waivers), and they are exactly the
+  // fields on which the entry derived from an applied commit differs from the
+  // optimistic overlay it replaces — which bumped the cell, and re-rendered
+  // the workspace, to draw the same thing again.
   return (
-    a.editCount === b.editCount &&
-    a.contentHash === b.contentHash &&
-    a.lastEditAt === b.lastEditAt &&
     a.lastEditEventId === b.lastEditEventId &&
     sameStringArray(a.activeValidators, b.activeValidators) &&
     // AQU-2296: a re-validation on the SAME head moves one person's

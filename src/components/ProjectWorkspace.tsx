@@ -14414,7 +14414,7 @@ export function ProjectWorkspace() {
 
   /**
    * AQU-2577: the lines picked for Make speech on the timeline. A click on a
-   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * line's sparkle picks it and brings the Voices rail forward on the Make
    * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
    * lines already picked. Picking generates nothing: the panel's button does.
    */
@@ -14428,7 +14428,7 @@ export function ProjectWorkspace() {
     setDockTab("voices")
   }, [setDockTab])
   const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
-  /** The lines whose speech is being made right now: their ghosts show a spinner. */
+  /** The lines whose speech is being made right now: their sparkles show a spinner. */
   const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
   const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
     const running = state.kind === "running"

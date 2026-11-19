@@ -8,7 +8,8 @@ import { exportAudioByCharacter } from "./audio-by-character"
 import { exportAudioPerLine } from "./audio-per-line"
 import { measureLoudness } from "@/lib/audio/loudness"
 import { takeGain } from "@/lib/audio/take-gain"
-import { applyClipLevelPcm } from "./clip-level"
+import { applyClipLevelPcm, levelFields } from "./clip-level"
+import { withTrackVolumes } from "@/lib/audio/track-volume"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -127,5 +128,65 @@ describe("an evened-out take in an export", () => {
     const heardStereo = measureLoudness([left, left], TARGET_RATE).integratedLufs
     expect(Math.abs(heardMono - -16)).toBeLessThan(0.5)
     expect(Math.abs(heardMono - heardStereo)).toBeLessThan(0.05)
+  })
+})
+
+// Review M3: a track's volume rides each clip on its own, after the take's
+// evening out and own volume, in every export. −∞ is silence.
+describe("a track's volume in an export (review M3)", () => {
+  const silentTrack = { "target-audio": { volumeDb: "-inf" as const } }
+  const downSix = { "target-audio": { volumeDb: -6 } }
+  const peak = (pcm: Float32Array) => pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
+  /** An evened take with its own −2 dB on top. */
+  const own = (c: CellData) => {
+    const att = Object.values(c.attachments!)[0] as unknown as Record<string, unknown>
+    att.gainDb = -2
+    return c
+  }
+
+  it("by line: −∞ is silent; −6 dB lands after evening out and the take's own volume", async () => {
+    for (const [overrides, expectLufs] of [[silentTrack, null], [downSix, -16 - 2 - 6]] as const) {
+      const result = await exportAudioPerLine({
+        cells: withTrackVolumes([own(cell("c1", "quiet", 10, true))], overrides),
+        settings: SETTINGS, projectId: "p1", langCode: "es", format: "wav", decode, fetchBytes,
+      })
+      const zip = await JSZip.loadAsync(result.blob)
+      const [name] = Object.keys(zip.files).filter((n) => n.endsWith(".wav"))
+      const bytes = await zip.files[name].async("uint8array")
+      if (expectLufs == null) expect(peak(await samplesOf(bytes))).toBe(0)
+      else expect(Math.abs((await lufs(bytes)) - expectLufs)).toBeLessThan(0.5)
+    }
+  })
+
+  it("by chapter: −∞ is silent; −6 dB lands after evening out and the take's own volume", async () => {
+    for (const [overrides, expectLufs] of [[silentTrack, null], [downSix, -16 - 2 - 6]] as const) {
+      const result = await exportAudioByChapter({
+        cells: withTrackVolumes([own(cell("v1", "quiet", 1, true, "verse"))], overrides),
+        projectId: "p1", fetchBytes, decode,
+      })
+      const all = await samplesOf(new Uint8Array(await result.blob.arrayBuffer()))
+      if (expectLufs == null) expect(peak(all)).toBe(0)
+      else expect(Math.abs(measureLoudness([all], TARGET_RATE).integratedLufs - expectLufs)).toBeLessThan(0.5)
+    }
+  })
+
+  it("by character: −∞ is silent; −6 dB lands after evening out and the take's own volume", async () => {
+    for (const [overrides, expectLufs] of [[silentTrack, null], [downSix, -16 - 2 - 6]] as const) {
+      const result = await exportAudioByCharacter({
+        cells: withTrackVolumes([own(cell("c1", "quiet", 1, true))], overrides),
+        settings: SETTINGS, projectId: "p1", langCode: "es", fetchBytes, decode,
+      })
+      const zip = await JSZip.loadAsync(result.blob)
+      const [name] = Object.keys(zip.files).filter((n) => n.endsWith(".wav"))
+      const bytes = await zip.files[name].async("uint8array")
+      if (expectLufs == null) expect(peak(await samplesOf(bytes))).toBe(0)
+      else expect(Math.abs((await lufs(bytes)) - expectLufs)).toBeLessThan(0.5)
+    }
+  })
+
+  it("keeps the two stages apart on an export's own clip record", () => {
+    expect(levelFields({ gainDb: -2, trackGainDb: -Infinity })).toEqual({ gainDb: -2, trackGainDb: -Infinity, fadeInMs: null, fadeOutMs: null })
+    const out = applyClipLevelPcm(new Float32Array([0.5]), TARGET_RATE, levelFields({ gainDb: -2, trackGainDb: -Infinity }))
+    expect(out[0] === 0).toBe(true)
   })
 })

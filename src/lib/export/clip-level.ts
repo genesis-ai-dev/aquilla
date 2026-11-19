@@ -19,8 +19,9 @@ export interface ClipLevelFields extends TakeGainFields {
   trackGainDb?: number | null
 }
 
-/** The gain an export applies: the take's stages, then its track's volume. */
-function exportGainDb(att: ClipLevelFields): number {
+/** The gain an export applies: the take's stages, then its track's volume
+ *  (−∞ = silence). The one helper every export path goes through. */
+export function exportGainDb(att: ClipLevelFields): number {
   return takeGainDb(att) + (att.trackGainDb ?? 0)
 }
 
@@ -30,10 +31,13 @@ export function hasClipLevel(att: ClipLevelFields | null | undefined): boolean {
 }
 
 /** Just the level fields, for carrying on an export's own clip records: the
- *  gain as it plays (evening out and the track's volume already in it), and
- *  the fades. */
+ *  take's gain as it plays (evening out already in it), the TRACK's volume
+ *  on its own (review M3: folded together, a track at −∞ read as 0 dB, since
+ *  a take's gain must be finite), and the fades. `exportGainDb` adds the two. */
 export function levelFields(att: ClipLevelFields | null | undefined): ClipLevelFields {
-  return hasClipLevel(att) ? { gainDb: exportGainDb(att!), fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
+  return hasClipLevel(att)
+    ? { gainDb: takeGainDb(att), trackGainDb: att!.trackGainDb ?? null, fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null }
+    : {}
 }
 
 /** The kept part with its volume and fades applied (a copy); untouched when flat. */

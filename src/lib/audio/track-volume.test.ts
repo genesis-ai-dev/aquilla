@@ -97,7 +97,7 @@ describe("exports: every clip carries its track's volume", () => {
   it("applies it after the take's own volume, in the PCM and the level fields", () => {
     const att = { gainDb: -2, trackGainDb: -6 }
     expect(hasClipLevel({ trackGainDb: -6 })).toBe(true)
-    expect(levelFields(att).gainDb).toBeCloseTo(-8, 6)
+    expect(levelFields(att)).toMatchObject({ gainDb: -2, trackGainDb: -6 })
     const out = applyClipLevelPcm(new Float32Array([0.5]), 48000, att)
     expect(out[0]).toBeCloseTo(0.5 * Math.pow(10, -8 / 20), 5)
   })

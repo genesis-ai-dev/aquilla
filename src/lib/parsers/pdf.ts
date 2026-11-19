@@ -301,11 +301,14 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
         id: uuid(),
         original: seg.text,
         translated: "",
-        context: p.heading ?? "Paragraph",
+        // AQU-2680: a tagged list item is a list paragraph, as Word names it,
+        // with its kind and depth for the Word export's numbering.
+        context: p.heading ?? (p.list ? "List Paragraph" : "Paragraph"),
         group: seg.group,
         type: p.heading ? "heading" : "text",
         sourceLocation,
         ...(i === 0 ? { paragraphStart: true } : {}),
+        ...(p.list ? { metadata: { list: p.list.kind, listLevel: p.list.level } } : {}),
       })
     })
   }

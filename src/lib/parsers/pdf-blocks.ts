@@ -78,10 +78,19 @@ export interface PdfPageContent {
   tree: PdfStructNode | null
 }
 
+/** AQU-2680: a tagged list item: bulleted or numbered (from its dropped
+ *  label), and how deep it is nested (0 = a top-level item). */
+export interface PdfListItem {
+  kind: "bullet" | "number"
+  level: number
+}
+
 export interface PdfParagraph {
   text: string
   /** "Title", "Heading 1"…"Heading 6", "Heading" for a heading; null otherwise. */
   heading: string | null
+  /** Set on a tagged PDF's list items only; an untagged PDF has no lists. */
+  list?: PdfListItem
   /** The page the paragraph starts on (1-based). */
   page: number
 }
@@ -307,6 +316,7 @@ class TextJoiner {
 interface TaggedBlock {
   role: string
   text: string
+  list?: PdfListItem
   page: number
   /** Index of the block's first drawn piece on its page. */
   order: number
@@ -337,7 +347,9 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
   })
   const used = new Set<string>()
   const blocks: TaggedBlock[] = []
-  let cur: { role: string; parts: Part[] } | null = null
+  let cur: { role: string; parts: Part[]; list?: PdfListItem } | null = null
+  /** AQU-2680: how many lists (L) the walk is inside. */
+  let listDepth = 0
 
   const contentOf = (node: PdfStructNode): Part[] => {
     const out: Part[] = []
@@ -352,7 +364,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
     const text = clean(joiner.join(cur.parts))
     const pieces = cur.parts.filter((p): p is PdfTextPiece & { order: number } => isPiece(p) && p.s.trim() !== "")
     if (text && pieces.length) {
-      blocks.push({ role: cur.role, text, page: page.n, order: Math.min(...pieces.map((p) => p.order)) })
+      blocks.push({ role: cur.role, text, page: page.n, order: Math.min(...pieces.map((p) => p.order)), ...(cur.list ? { list: cur.list } : {}) })
     }
     cur = null
   }
@@ -375,7 +387,19 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
       if (c.type) continue // an annotation or object reference
       const role = c.role ?? ""
       if (role === "Figure" || role === "Artifact") { contentOf(c); continue }
-      if (role === "Lbl") { contentOf(c); continue }
+      if (role === "Lbl") {
+        // AQU-2680: the label is dropped from the text, but says whether the
+        // item is numbered ("1.", "iv)", "(a)") or bulleted ("•", "o", "–").
+        const label = clean(joiner.join(contentOf(c)))
+        if (cur?.list && label) cur.list = { ...cur.list, kind: listKind(label) }
+        continue
+      }
+      if (role === "L") {
+        listDepth++
+        visit(c, inBlock)
+        listDepth--
+        continue
+      }
       if (role === "Note") {
         const noteParts = contentOf(c)
         const raw = joiner.join(noteParts)
@@ -405,11 +429,12 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
       }
       if (BLOCK_ROLES.has(role)) {
         const outer = cur?.role
+        const outerList = cur?.list
         flush()
-        cur = { role, parts: [] }
+        cur = { role, parts: [], ...(role === "LI" ? { list: { kind: "bullet" as const, level: Math.min(8, Math.max(0, listDepth - 1)) } } : {}) }
         visit(c, true)
         flush()
-        if (outer && inBlock) cur = { role: outer, parts: [] }
+        if (outer && inBlock) cur = { role: outer, parts: [], ...(outerList ? { list: outerList } : {}) }
         continue
       }
       visit(c, inBlock)
@@ -428,6 +453,12 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
   return blocks.sort((a, b) => a.order - b.order)
 }
 
+/** AQU-2680: a list label that counts (digits, or a letter or roman numeral
+ *  with its "." or ")") marks a numbered item; anything else is a bullet. */
+function listKind(label: string): PdfListItem["kind"] {
+  return /^\(?(\d+(\.\d+)*[.)]?|[a-z][.)]|[ivxlcdm]+[.)])$/i.test(label.trim()) ? "number" : "bullet"
+}
+
 function headingContext(role: string): string | null {
   if (!HEADING_ROLE.test(role)) return null
   if (role === "Title") return "Title"
@@ -439,6 +470,7 @@ interface PageBlock {
   text: string
   page: number
   heading: string | null
+  list?: PdfListItem
   /** Ordinary body text, which page continuation may join. */
   body: boolean
   /** The layout reader's text size; null from the tags. */
@@ -470,7 +502,7 @@ function continueAcrossPages(pages: readonly PageBlock[][], joiner: TextJoiner):
       out.push({ ...b, endPage: b.page })
     })
   }
-  return out.map((b) => ({ text: b.text, heading: b.heading, page: b.page })).filter((p) => p.text)
+  return out.map((b) => ({ text: b.text, heading: b.heading, page: b.page, ...(b.list ? { list: b.list } : {}) })).filter((p) => p.text)
 }
 
 /** The tagged reader's blocks for one page, and whether its tags reach the
@@ -480,7 +512,7 @@ function taggedPageBlocks(page: PdfPageContent, joiner: TextJoiner, footnote: Fo
   const coverage: Coverage = { tagged: 0, untagged: 0 }
   const blocks = readTaggedPage(page, joiner, footnote, coverage, script).map((b): PageBlock => {
     const heading = headingContext(b.role)
-    return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null }
+    return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null, ...(b.list ? { list: b.list } : {}) }
   })
   const total = coverage.tagged + coverage.untagged
   return { blocks, byTags: blocks.length > 0 && total > 0 && coverage.tagged / total >= MIN_TAG_COVERAGE }

@@ -284,8 +284,8 @@ describe("a tagged PDF read by its tags", () => {
     expect(read.strings.map((s) => [s.type, s.context, s.original])).toEqual([
       ["heading", "Heading 2", "The Origin of Texts"],
       ["text", "Paragraph", "A paragraph with a note\\f + \\ft The note text.\\f* that runs on."],
-      ["text", "Paragraph", "First item"],
-      ["text", "Paragraph", "Second item"],
+      ["text", "List Paragraph", "First item"],
+      ["text", "List Paragraph", "Second item"],
       ["text", "Paragraph", "This paragraph is cut by the page foot and goes on."],
       // a bare number with no dot is the heading's own text
       ["heading", "Heading 1", "2 Corinthians"],
@@ -323,6 +323,70 @@ describe("a tagged PDF read by its tags", () => {
     const read = await extractPdfImport(pdf, { cellUnit: "paragraph" })
     expect(read.tagged).toBe(false)
     expect(read.strings.every((s) => s.type === "text")).toBe(true)
+  })
+})
+
+// AQU-2680: a tagged PDF's lists are lists, so the Word file can number them.
+// The label is still dropped from the text (question 55); it says only
+// whether the list is bulleted or numbered.
+describe("lists in a tagged PDF", () => {
+  const item = (lbl: string, body: string) => ({ role: "LI", children: [{ role: "Lbl", id: lbl }, { role: "LBody", id: body }] })
+  const listed = () => buildPdf({
+    pages: [{ runs: [
+      { text: "Before the list.", x: 72, y: 760, tag: "p0" },
+      { text: "•", x: 72, y: 740, tag: "l1" }, { text: "Bread for the whole week, bought from the baker on the corner of our street.", x: 84, y: 740, tag: "b1" },
+      { text: "It is bought fresh each morning, before the shop gets busy with people.", x: 84, y: 740 - 14, tag: "b1b" },
+      { text: "Then it is carried home in a cloth bag and kept in the cool box.", x: 84, y: 740 - 28, tag: "b1c" },
+      { text: "o", x: 90, y: 698, tag: "l2" }, { text: "Rye", x: 102, y: 698, tag: "b2" },
+      { text: "•", x: 72, y: 684, tag: "l3" }, { text: "Milk", x: 84, y: 684, tag: "b3" },
+      { text: "1.", x: 72, y: 662, tag: "n1" }, { text: "Wash", x: 84, y: 662, tag: "c1" },
+      { text: "b)", x: 90, y: 648, tag: "n2" }, { text: "Rinse", x: 102, y: 648, tag: "c2" },
+      { text: "After the list.", x: 72, y: 622, tag: "p1" },
+    ] }],
+    structure: [{ role: "Document", children: [
+      { role: "P", id: "p0" },
+      { role: "L", children: [
+        { role: "LI", children: [{ role: "Lbl", id: "l1" }, { role: "LBody", children: [{ role: "Span", id: "b1" }, { role: "Span", id: "b1b" }, { role: "Span", id: "b1c" }, { role: "L", children: [item("l2", "b2")] }] }] },
+        item("l3", "b3"),
+      ] },
+      { role: "L", children: [
+        { role: "LI", children: [{ role: "Lbl", id: "n1" }, { role: "LBody", children: [{ role: "Span", id: "c1" }, { role: "L", children: [item("n2", "c2")] }] }] },
+      ] },
+      { role: "P", id: "p1" },
+    ] }],
+  })
+
+  it("marks each item a list paragraph, bulleted or numbered, at its depth", async () => {
+    const read = await extractPdfImport(listed(), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.context, s.original, s.metadata ?? null])).toEqual([
+      ["Paragraph", "Before the list.", null],
+      ["List Paragraph", "Bread for the whole week, bought from the baker on the corner of our street. It is bought fresh each morning, before the shop gets busy with people. Then it is carried home in a cloth bag and kept in the cool box.", { list: "bullet", listLevel: 0 }],
+      ["List Paragraph", "Rye", { list: "bullet", listLevel: 1 }],
+      ["List Paragraph", "Milk", { list: "bullet", listLevel: 0 }],
+      ["List Paragraph", "Wash", { list: "number", listLevel: 0 }],
+      ["List Paragraph", "Rinse", { list: "number", listLevel: 1 }],
+      ["Paragraph", "After the list.", null],
+    ])
+  })
+
+  it("marks every sentence of an item on the Sentence setting", async () => {
+    const read = await extractPdfImport(listed(), { cellUnit: "sentence" })
+    const bread = read.strings.filter((s) => s.metadata?.listLevel === 0 && s.metadata?.list === "bullet").slice(0, 2)
+    expect(bread.map((s) => [s.context, s.metadata, s.paragraphStart ?? false])).toEqual([
+      ["List Paragraph", { list: "bullet", listLevel: 0 }, true],
+      ["List Paragraph", { list: "bullet", listLevel: 0 }, false],
+    ])
+  })
+
+  it("leaves an untagged PDF's list as plain paragraphs", async () => {
+    const read = await extractPdfImport(buildPdf({ pages: [{ runs: [
+      { text: "1.", x: 72, y: 700 }, { text: "Pray daily.", x: 120, y: 700 },
+      { text: "2.", x: 72, y: 686 }, { text: "Give thanks.", x: 120, y: 686 },
+    ] }] }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.context, s.original, s.metadata ?? null])).toEqual([
+      ["Paragraph", "1. Pray daily.", null],
+      ["Paragraph", "2. Give thanks.", null],
+    ])
   })
 })
 

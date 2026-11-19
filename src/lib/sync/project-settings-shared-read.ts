@@ -33,7 +33,7 @@
 //     mounted instance. A write no instance is mounted to hear still drops
 //     the kept answer (project-settings-write-signal.ts).
 
-import { registerSharedStateResetForTests } from "@/lib/request-coalescer"
+import { currentSyncTurn, registerSharedStateResetForTests } from "@/lib/request-coalescer"
 import { fetchProjectSettingsResult, type ProjectSettingsResponse } from "./project-settings"
 import { onProjectSettingsWrite } from "./project-settings-write-signal"
 
@@ -56,28 +56,13 @@ let knownWrites = 0
 const inFlight = new Map<string, InFlightRead>()
 const lastAnswer = new Map<string, { result: ProjectSettingsReadResult; at: number }>()
 
-let turn = 0
-let turnOpen = false
-
-/** A number that is the same for every call made before the stack unwinds. */
-function currentTurn(): number {
-  if (!turnOpen) {
-    turnOpen = true
-    turn += 1
-    queueMicrotask(() => {
-      turnOpen = false
-    })
-  }
-  return turn
-}
-
 export function readProjectSettingsShared(
   jwt: string,
   projectId: string,
   mode: ProjectSettingsReadMode,
 ): Promise<ProjectSettingsReadResult> {
   const key = `${jwt}\n${projectId}`
-  const now = currentTurn()
+  const now = currentSyncTurn()
   const existing = inFlight.get(key)
   if (mode === "afterWrite") {
     if (existing && existing.turn === now) return existing.promise

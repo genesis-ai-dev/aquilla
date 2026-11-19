@@ -493,6 +493,8 @@ export const pa: Catalog = {
   "editor.panel.resizeParallelBibles": "ਸਮਾਨਾਂਤਰ ਬਾਈਬਲਾਂ ਦੇ ਪੈਨਲ ਦਾ ਆਕਾਰ ਬਦਲੋ",
   "editor.panel.resizeVerseResources": "ਆਇਤ ਦੇ ਸਰੋਤਾਂ ਦੇ ਪੈਨਲ ਦਾ ਆਕਾਰ ਬਦਲੋ",
   "editor.translationNotes.loadFailed": "ਅਨੁਵਾਦ ਨੋਟਸ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੇ",
+  "editor.bookHealth.showFewerCells": "ਘੱਟ ਸੈੱਲ ਦਿਖਾਓ",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"{count} ਹੋਰ ਸੈੱਲ ਦਿਖਾਓ","other":"{count} ਹੋਰ ਸੈੱਲ ਦਿਖਾਓ"},"countVar":"count"},
   "editor.ai.copyError": "ਗਲਤੀ ਕਾਪੀ ਕਰੋ",
   "editor.ai.copyErrorDone": "ਕਾਪੀ ਹੋਈ",
   "editor.audio.record": "ਆਡੀਓ ਰਿਕਾਰਡ ਕਰੋ",

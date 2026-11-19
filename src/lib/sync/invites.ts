@@ -70,6 +70,11 @@ export type InvitePreviewResult<T> =
  *
  * - "used" / "time_expired" / "invalid" — the invite really is dead (410/404).
  * - "wrong_email"  — 403: this invite was sent to a different address.
+ * - "email_unverified" — 403 `code: "email_unverified"`: the address matches
+ *   this account, but the account has never proven it controls that address
+ *   (AQU-1579 refuses the redemption on a string compare alone). A DIFFERENT
+ *   refusal from "wrong_email" and a different way out — the account is the
+ *   right one, so the fix is to verify, not to switch accounts (AQU-2639).
  * - "unauthorized" — 401: the caller's session token was rejected. This is
  *   NOT evidence the invite is invalid — surfacing it as "invite dead" is
  *   the AQU-364 bug (a fresh signup's token intermittently 401ing read as a
@@ -82,6 +87,7 @@ export type AcceptFailReason =
   | "time_expired"
   | "invalid"
   | "wrong_email"
+  | "email_unverified"
   | "unauthorized"
   | "network"
   | "server"
@@ -113,7 +119,12 @@ async function classifyAcceptFailure(res: Response): Promise<AcceptFailure> {
     // when it's there; an older server just 403s with a bare message, and the
     // screen falls back to the generic sentence.
     try {
-      const body = (await res.json()) as { invitedEmail?: unknown }
+      const body = (await res.json()) as { invitedEmail?: unknown; code?: unknown }
+      // AQU-2639: two unrelated refusals share this status. `email_unverified`
+      // (AQU-1579) means the signed-in account IS the invited address but has
+      // never confirmed it — the join page offers a verification link for it,
+      // so it must not be collapsed into the wrong-account screen.
+      if (body.code === "email_unverified") return { reason: "email_unverified" }
       return typeof body.invitedEmail === "string" && body.invitedEmail.length > 0
         ? { reason: "wrong_email", invitedEmail: body.invitedEmail }
         : { reason: "wrong_email" }

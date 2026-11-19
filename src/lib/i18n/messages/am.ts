@@ -493,6 +493,8 @@ export const am: Catalog = {
   "editor.panel.resizeParallelBibles": "የትይዩ መጻሕፍት ፓነሉን መጠን ይቀይሩ",
   "editor.panel.resizeVerseResources": "የጥቅስ አጋዥ መረጃዎች ፓነሉን መጠን ይቀይሩ",
   "editor.translationNotes.loadFailed": "የትርጉም ማስታወሻዎችን መጫን አልተቻለም",
+  "editor.bookHealth.showFewerCells": "ጥቂት ሕዋሳትን ያሳዩ",
+  "editor.bookHealth.showMoreCells": {"forms":{"one":"ተጨማሪ {count} ሕዋስ ያሳዩ","other":"ተጨማሪ {count} ሕዋሳትን ያሳዩ"},"countVar":"count"},
   "editor.ai.copyError": "ስህተቱን ቅዳ",
   "editor.ai.copyErrorDone": "ተቀድቷል",
   "editor.audio.record": "ድምጽ ይቅረጹ",

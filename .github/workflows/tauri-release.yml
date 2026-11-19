@@ -166,7 +166,20 @@ jobs:
             exit 1
           fi
 
-      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+      # The release stays a DRAFT here: installed apps read the latest
+      # published release, and until every platform has built and the
+      # `verify` job below has passed, there must be nothing for them to read.
+      # v0.2.4 was published by its first finished build and for hours
+      # offered Windows and Linux an update that macOS did not have.
+      #
+      # Two attempts, ten minutes apart: Apple's notary service answers a
+      # healthy upload with an HTTP 500 for stretches at a time. It failed the
+      # Intel build of v0.2.4 twice, an hour apart, and accepted the same
+      # build on the third try. A second failure leaves the release a draft.
+      - name: Build, sign and upload
+        id: bundle
+        continue-on-error: true
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS notarization + signing
@@ -191,7 +204,114 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Aquilla ${{ github.ref_name }}"
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true
+
+      - name: Wait before the second attempt
+        if: steps.bundle.outcome == 'failure'
+        shell: bash
+        run: sleep 600
+
+      # Same step, same inputs. Keep the two in step.
+      - name: Build, sign and upload (second attempt)
+        if: steps.bundle.outcome == 'failure'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS notarization + signing
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Windows code signing (injected via env, not stored in conf)
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # Tauri updater signing
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Hot-bundle verification key, compiled into the shell (option_env!)
+          AQUILLA_BUNDLE_PUBKEY: ${{ secrets.AQUILLA_BUNDLE_PUBKEY }}
+          # Identity of the dist embedded in this shell, so a fresh install does
+          # not re-download an identical bundle (hot_bundle/mod.rs).
+          AQUILLA_BUNDLE_VERSION: ${{ github.ref_name }}
+          AQUILLA_BUNDLE_SHA: ${{ github.sha }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Aquilla ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
+          updaterJsonPreferNsis: true
+
+  # Copies the draft's files into a run artifact. A draft release is readable
+  # only with a write token; staging it here keeps that token out of the jobs
+  # that start the downloaded app.
+  stage:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the draft release
+        run: |
+          mkdir -p release
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D release
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets > release/assets.json
+          ls -la release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: desktop-release-assets
+          path: release
+          retention-days: 3
+
+  verify:
+    needs: stage
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/desktop-release-verify.yml
+    with:
+      tag: ${{ github.ref_name }}
+      staged_run: ${{ github.run_id }}
+
+  # Publishing is what puts the release in front of installed apps: their
+  # updater reads releases/latest/download/latest.json, which a draft is not.
+  promote:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - run: gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --draft=false --latest
+
+  # One line in #aquilla-alerts either way: a release nobody promoted is a fix
+  # nobody received, and that must not be something a person has to notice.
+  report:
+    needs: [build, stage, verify, promote]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          TAG: ${{ github.ref_name }}
+          PROMOTED: ${{ needs.promote.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$PROMOTED" = "success" ]; then
+            bash scripts/release-discord-notify.sh "Desktop $TAG is live: installed apps will offer the update."
+          else
+            bash scripts/release-discord-notify.sh "Desktop $TAG was NOT released: it is still a draft and no app can see it. $RUN_URL"
+          fi

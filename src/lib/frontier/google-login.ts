@@ -5,6 +5,7 @@ import { isTauriRuntime } from "../offline/is-tauri"
 import { safeLoginNext } from "../navigation/login-path"
 import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup-analytics-choice"
 const KEY = `aquilla:google-login:${AUTH_BASE}`
+export const GOOGLE_ATTEMPT_LIFETIME_MS = 10 * 60_000
 export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; desktopChallenge?: string; desktopReturned?: boolean; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
 export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
@@ -31,7 +32,7 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
   if (!response.ok) throw new Error(data.code === "dev_access_restricted" ? data.code : typeof data.error === "string" ? data.error : "unavailable")
   return data as T
 }
-export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false, signal?: AbortSignal): Promise<void> {
+export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false, signal?: AbortSignal, privateSession = false): Promise<void> {
   const desktop = isTauriRuntime()
   if (desktop) {
     const { invoke } = await import("@tauri-apps/api/core")
@@ -44,10 +45,15 @@ export async function startGoogleLogin(next: string, signup: boolean, connectUse
   if (signal?.aborted) return
   // Storage must survive the redirect. If unavailable, stay here without ever
   // contacting Google; password login remains usable.
-  const attempt: GoogleAttempt = { ...(desktop ? { desktopChallenge: challenge } : {}), verifier, next: safeLoginNext(next), expires: Date.now() + 10 * 60_000, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
+  const attempt: GoogleAttempt = { ...(desktop ? { desktopChallenge: challenge } : {}), verifier, next: safeLoginNext(next), expires: Date.now() + GOOGLE_ATTEMPT_LIFETIME_MS, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
   try { sessionStorage.setItem(KEY, JSON.stringify(attempt)) }
   catch { throw new Error("storage_unavailable") }
+  if (desktop) signal?.addEventListener("abort", () => {
+    const current = readGoogleAttempt()
+    if (current?.verifier === verifier && !current.desktopReturned) clearGoogleAttempt()
+  }, { once: true })
   const result = await googleRequest<{ authorization_url: string; desktop?: boolean }>("start", { challenge, ...(desktop ? { desktop: true } : {}) })
+  if (signal?.aborted) return
   if (desktop && result.desktop !== true) { clearGoogleAttempt(); throw new Error("desktop_unsupported") }
   const url = new URL(result.authorization_url)
   if (url.origin !== "https://accounts.google.com" || url.pathname !== "/o/oauth2/v2/auth") throw new Error("invalid_request")
@@ -58,8 +64,11 @@ export async function startGoogleLogin(next: string, signup: boolean, connectUse
     try {
       const { invoke } = await import("@tauri-apps/api/core")
       if (signal?.aborted || readGoogleAttempt()?.verifier !== verifier) return
-      await invoke("open_auth_browser", { authUrl: url.href })
-    } catch (cause) { if (readGoogleAttempt()?.verifier === verifier) clearGoogleAttempt(); throw new Error("browser_open_failed", { cause }) }
+      const cancel = () => { void invoke("cancel_auth_browser", { attempt: challenge }).catch(() => {}) }
+      signal?.addEventListener("abort", cancel, { once: true })
+      try { await invoke("open_auth_browser", { authUrl: url.href, attempt: challenge, privateSession }) }
+      finally { signal?.removeEventListener("abort", cancel) }
+    } catch (cause) { if (readGoogleAttempt()?.verifier === verifier) clearGoogleAttempt(); throw new Error(cause === "cancelled" ? "cancelled" : "browser_open_failed", { cause }) }
   } else window.location.assign(url.href)
 }
 export function readGoogleAttempt(): GoogleAttempt | null {

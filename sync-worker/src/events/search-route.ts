@@ -1,10 +1,10 @@
-// Project-wide cell search (Phase 2b). FTS5-backed.
+// Project-wide cell search (Phase 2b). Postgres full-text backed.
 //
 //   GET /api/v1/projects/:projectId/search?q=&side=&limit=
 //   GET /api/v1/projects/:projectId/search/passages?q=&side=&limit=
 //
 // Query params (both routes):
-//   q     — required, the user's search text. Sanitized before hitting FTS5.
+//   q     — required, the user's search text. Sanitized before it is matched.
 //   side  — optional. "source" | "target". Filters to one side of the
 //           paired cells. When omitted, both sides are returned.
 //   limit — optional. Default 50, max 500.
@@ -19,8 +19,9 @@
 //
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 //
-// SQL is not emitted here — all FTS5 execution is delegated to scoped-search.ts,
-// which is the single structural choke-point for project-scoped FTS queries.
+// SQL is not emitted here — all query execution is delegated to
+// scoped-search.ts, which is the single structural choke-point for
+// project-scoped full-text queries.
 
 import { grantedLaneIds, visibleLanesForRead } from "./lane-read-wall"
 import { verifyTokenForProject } from "../auth"
@@ -109,15 +110,16 @@ function flagOn(url: URL, name: string): boolean {
 }
 
 /**
- * Map a caught DB error to a Response. FTS5 syntax errors become 400; all
+ * Map a caught DB error to a Response. Query-syntax errors become 400; all
  * other failures become 500. The raw driver/DB message is logged server-side
  * but never echoed to the caller — it can leak schema or query internals.
  */
 function mapSearchError(err: unknown): Response {
-  // FTS5 syntax errors (e.g. the user wrote `"` un-balanced before our
+  // Query-syntax errors (e.g. the user wrote `"` un-balanced before our
   // sanitizer rolled out) surface as Postgres prepare/exec failures. Surface
   // them as a 400 rather than 500 so the client can fall back to a
-  // "no results" UI instead of an error banner.
+  // "no results" UI instead of an error banner. The `fts5` arm of the pattern
+  // is kept for stored/legacy messages; Postgres does not produce it.
   const message = err instanceof Error ? err.message : String(err)
   console.error('search request failed:', message)
   if (/syntax error|fts5|invalid regexp|invalid regular expression/i.test(message)) {

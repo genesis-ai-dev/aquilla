@@ -50,9 +50,24 @@ export function omniBackends(env: Env): Array<{ name: OmniBackend; url: string }
  * A cold CTC container (boot + ~25 s model load) answers in 60–90 s, so CTC
  * needs more than the Whisper path's 65 s. ZS never cold-loads here: the
  * service answers `{warming:true}` instead. Both stay under Modal's 150 s
- * web-request limit.
+ * web-request limit. `fast` is a CPU container with no GPU queue and a short
+ * cold start, so a minute is already a failure.
  */
-const TRANSCRIBE_TIMEOUT_MS: Record<OmniModel, number> = { ctc: 140000, zs: 140000 }
+const TRANSCRIBE_TIMEOUT_MS: Record<OmniModel, number> = { ctc: 140000, zs: 140000, fast: 60000 }
+
+/**
+ * True when the service refused the request because it does not know the
+ * model: 400 or 422 with a detail that names "model". A Modal deploy or a
+ * self-hosted box older than `fast` answers 400 `{"detail":"model must be ctc
+ * or zs"}`. The worker ships independently of both, so callers treat this
+ * answer to a `fast` request as "run it as ctc", not as a failure.
+ */
+export async function omniRefusesModel(response: Response): Promise<boolean> {
+  if (response.status !== 400 && response.status !== 422) return false
+  const body = await response.clone().json().catch(() => null) as { detail?: unknown } | null
+  const detail = typeof body?.detail === "string" ? body.detail : JSON.stringify(body?.detail ?? "")
+  return /model/i.test(detail)
+}
 
 /** A fetch cannot time the connect apart from the reply, and a transcription
  *  replies only when done. So a fallback backend first gets a /healthz probe

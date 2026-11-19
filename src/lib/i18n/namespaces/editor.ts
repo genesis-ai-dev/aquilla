@@ -2578,6 +2578,37 @@ export const editor = defineNamespace({
     "editor.bt.inlineGenerating": "Back-translating…",
     "editor.bt.inlineStale": "Out of date",
     "editor.bt.inlineOpen": "Open the back-translation",
+
+    // — Back-translation column ————————————————————————————————————
+    "editor.btColumn.title": "Back-translation",
+    "editor.btColumn.show": "Show the back-translation column",
+    "editor.btColumn.hide": "Hide the back-translation column",
+    "editor.btColumn.options": "Back-translation options",
+    "editor.btColumn.about":
+      "Each translation, translated back so you can check that the meaning carried over. It is a check, not proof.",
+    "editor.btColumn.liveLabel": "Update as translations change",
+    "editor.btColumn.liveDescription":
+      "For everyone on this project. Each saved translation is back-translated, which uses AI credits.",
+    "editor.btColumn.liveMaintainerOnly": "Only a maintainer can change this.",
+    "editor.btColumn.liveBadge": "Automatic",
+    "editor.btColumn.fill": plural({
+      one: "Back-translate {count} row",
+      other: "Back-translate {count} rows",
+    }),
+    "editor.btColumn.fillHint":
+      "Rows on this page with no back-translation, or one that is out of date. Hand-corrected ones are left alone.",
+    "editor.btColumn.fillNone": "Every translated row on this page has a current back-translation.",
+    "editor.btColumn.progress": plural({
+      one: "{count} row left",
+      other: "{count} rows left",
+    }),
+    "editor.btColumn.stop": "Stop",
+    "editor.btColumn.cellGenerate": "Back-translate",
+    "editor.btColumn.cellWaiting": "Waiting",
+    "editor.btColumn.cellUpdate": "Update this back-translation",
+    "editor.btColumn.cellRetry": "Try again",
+    "editor.btColumn.cellText": "Back-translation text",
+    "editor.btColumn.cellEditHint": "Your correction is kept and is never replaced automatically.",
     "editor.bt.alignmentSub": "— word-level source/target view",
     "editor.transcript.editTooltip": "Correct the transcript",
     "editor.transcript.editAria": "Correct the transcript",
@@ -9948,6 +9979,29 @@ export const editor = defineNamespace({
         description:
           "Advice shown when the score is healthy. The clause after the dash is " +
           "load-bearing: a good score never removes the need for human review.",
+      },
+      "editor.btColumn.title": {
+        description:
+          "Heading of the editor's third text column, after Source and Target: " +
+          "each translation rendered back into the source language so a reviewer " +
+          "can check the meaning. A standard Bible-translation term.",
+        maxLength: 24,
+      },
+      "editor.btColumn.fill": {
+        description:
+          "Button in the back-translation column's options: back-translates every " +
+          "row on the page that has a translation but no current back-translation.",
+        placeholders: {
+          count: "How many rows will be back-translated; selects the plural form.",
+        },
+      },
+      "editor.btColumn.progress": {
+        description:
+          "Progress beside the back-translation column heading while rows are " +
+          "being back-translated: how many are still waiting or in progress.",
+        placeholders: {
+          count: "Rows still to be back-translated; selects the plural form.",
+        },
       },
       "editor.bt.label": {
         description:

@@ -706,3 +706,72 @@ describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypas
     expect(guard("SELECT 'tree' FROM cells WHERE project_id = :project").ok).toBe(true)
   })
 })
+
+// A single quote inside a double-quoted identifier opened a "literal" for the
+// mask that Postgres never saw, so everything up to the next quote — a whole
+// subquery against a banned table — skipped every check. Each case here passed
+// guardSql() unchanged before the fix.
+describe("guardSql — pen-test 2026-11-18 double-quoted identifier desync", () => {
+  it.each([
+    `SELECT c.cell_id AS "a'", (SELECT max(password_hash) FROM users) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT c.cell_id AS "a'", (SELECT string_agg(token || chr(58) || email, chr(44)) FROM project_invites) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT c.cell_id AS "a'", pg_read_file(chr(47)) AS "b'" FROM cells c WHERE c.project_id = :project`,
+    `SELECT 'x' AS "a'", (SELECT max(email) FROM users) AS "b'" FROM cells WHERE project_id = :project`,
+    `SELECT U&"a'", (SELECT max(email) FROM users) AS "b'" FROM cells WHERE project_id = :project`,
+  ])("rejects a subquery hidden between quoted identifiers: %s", (sql) => {
+    const r = guard(sql)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/double-quoted identifiers/)
+  })
+
+  it("rejects a plain quoted alias too, with the unquoted spelling in the message", () => {
+    const r = guard(`SELECT count(*) AS "n" FROM cells WHERE project_id = :project`)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain("AS n")
+  })
+
+  it("still accepts a double quote inside a string literal", () => {
+    const r = guard(`SELECT cell_id FROM cells WHERE project_id = :project AND value LIKE '%"hi"%'`)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.sql).toContain(`'%"hi"%'`)
+  })
+})
+
+// Pen test 2026-11-19. `FROM (a CROSS JOIN b)` is a parenthesised join, not a
+// derived table. The scanner skipped the whole paren as a sub-select, so `a`
+// followed no FROM or JOIN and was never read: not allow-listed, not scoped.
+// Each rejected statement here returned ok:true before the fix, with the
+// first table left raw in the emitted SQL.
+describe("guardSql — pen-test 2026-11-19 parenthesised join hides its first table", () => {
+  it("rejects a non-readable table opening a parenthesised join", () => {
+    for (const table of ["project_invites", "org_settings", "platform_admins", "personal_access_tokens"]) {
+      const r = guard(`SELECT i.* FROM (${table} i CROSS JOIN files f) WHERE f.project_id = :project`)
+      expect(r.ok, table).toBe(false)
+    }
+  })
+
+  it("rejects a readable table there too, since it would go unscoped", () => {
+    const r = guard("SELECT c.value FROM (cells c CROSS JOIN files f) WHERE f.project_id = :project")
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/parenthesised joins/)
+  })
+
+  it("rejects it after JOIN, behind LATERAL and behind extra parentheses", () => {
+    expect(guard("SELECT 1 FROM files f JOIN (project_invites i CROSS JOIN files g) ON true WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM files f, LATERAL (project_invites i CROSS JOIN files g) WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM ((project_invites i CROSS JOIN files f)) WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM ( project_invites ) WHERE :project = :project").ok).toBe(false)
+  })
+
+  it("rejects the TABLE shorthand, which names a relation with no FROM", () => {
+    expect(guard("SELECT * FROM (TABLE project_invites) t WHERE :project = :project").ok).toBe(false)
+    expect(guard("WITH t AS (TABLE project_invites) SELECT * FROM t WHERE :project = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM files WHERE project_id = :project AND EXISTS (TABLE project_invites)").ok).toBe(false)
+  })
+
+  it("still accepts derived tables, nested ones and VALUES lists", () => {
+    expect(guard("SELECT t.cell_id FROM (SELECT cell_id FROM cells WHERE project_id = :project) t").ok).toBe(true)
+    expect(guard("SELECT t.cell_id FROM ((SELECT cell_id FROM cells WHERE project_id = :project)) t").ok).toBe(true)
+    expect(guard("SELECT v.n FROM (VALUES (1), (2)) AS v(n), files f WHERE f.project_id = :project").ok).toBe(true)
+  })
+})

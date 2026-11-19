@@ -10,9 +10,9 @@ export function AuthPage({ children, label }: { children: ReactNode; label?: str
   const Mark = brand.logo.Mark
 
   return (
-    <main aria-label={label} className="flex min-h-svh flex-col items-center gap-6 bg-background p-4 sm:p-6">
-      <div className="flex w-full flex-1 items-center justify-center py-6 sm:py-10">
-        <div className="flex w-full max-w-md flex-col gap-6">
+    <main aria-label={label} className="flex h-svh flex-col items-center gap-6 bg-background p-4 sm:p-6">
+      <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto py-6 sm:py-10">
+        <div className="m-auto flex w-full max-w-md shrink-0 flex-col gap-6">
           <Link to="/app" className="mx-auto inline-flex items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
             <Mark className="size-9" aria-hidden />
             <span className="text-lg font-semibold">{brand.app.name}</span>
@@ -20,7 +20,7 @@ export function AuthPage({ children, label }: { children: ReactNode; label?: str
           {children}
         </div>
       </div>
-      <footer className="w-full self-start">
+      <footer className="shrink-0 w-full self-start">
         <VersionBadge inline />
       </footer>
     </main>

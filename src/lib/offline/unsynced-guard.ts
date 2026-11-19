@@ -2,7 +2,7 @@
  * Guards against silent local-write loss on reload/close.
  *
  * Background: a real page reload (Cmd+R) or app auto-update tears down the
- * current LiveStore leader (SharedWorker + dedicated worker) while a freshly
+ * current LiveStore leader (its dedicated worker) while a freshly
  * loaded page's leader can race it for the same exclusive OPFS access
  * handle. When that race loses, LiveStore's push pipeline throws (observed
  * as a `RejectedPushError`/`InvalidStateError`) and whatever local writes

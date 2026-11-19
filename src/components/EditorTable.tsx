@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { createPlayingCueStore, PlayingCueContext, useIsPlayingCue, type PlayingCueStore } from "./editor-playing-cue"
 import { recordStep } from "@/lib/history/history"
+import { markedPreviewText } from "@/lib/completion/docx-marks"
 import { settleSourceStep, type SourceSession } from "@/lib/history/source-steps"
 import { createPortal } from "react-dom"
 import {
@@ -21,6 +22,7 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
+  MoreHorizontal,
   Bold,
   VolumeX,
   Eye,
@@ -74,6 +76,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
+import { canSetMilestones } from "@/lib/milestone-gate"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
@@ -105,7 +108,16 @@ import type { LinkedVideoSoundActions } from "@/lib/timeline/video-sound"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
-import { InlineBacktranslation } from "./cell/InlineBacktranslation"
+import {
+  BacktranslationColumnHeader,
+  BacktranslationColumnProvider,
+  BacktranslationColumnToggle,
+  BacktranslationRowCell,
+  BacktranslationRowStack,
+  useEditorBacktranslationColumn,
+  type EditorBacktranslationConfig,
+} from "./backtranslation/BacktranslationColumn"
+import { needsLiveBacktranslation } from "@/lib/completion/live-bt"
 import { useCellMorph } from "@/hooks/useCellMorph"
 import {
   overlayBacktranslation,
@@ -303,7 +315,7 @@ import {
   waivedKeys as waivedKeysOf,
 } from "@/lib/rules/waivers"
 import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
-import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
+import { selectTermRules, selectSourceApplicableTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -319,6 +331,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -1293,6 +1306,8 @@ interface EditorTableProps {
    * translator's chosen versions, else the project defaults). Absent: none.
    */
   parallelBibles?: EditorParallelBiblesConfig
+  /** The Back-translation column: absent ⇒ the column is not offered here. */
+  backtranslationColumn?: EditorBacktranslationConfig
   /**
    * AQU-1692: saves a maintainer's voice correction. Without it (or below
    * maintainer) the voice details offer no "Correct…".
@@ -1307,24 +1322,23 @@ interface EditorTableProps {
 }
 
 /**
- * AQU-2308: may this person name, rename, re-range or remove a run of this
- * file's lines? One answer for the cell menu and the navigator (AQU-2310).
+ * AQU-2308 / AQU-2309: may this person name, rename, re-range or remove a run
+ * of this file's lines? One answer for the cell menu and the navigator
+ * (AQU-2310), and the same one the Media timeline can call later.
  *
- * `canPerform` against the SAME role table `file.milestone.set` is enforced
- * by, not a re-derived rank — and it is the Maintainer floor, a rung above
- * the park/edit-source gate, because a division relayouts the navigator for
- * everyone who opens the file. (`file.milestone.remove` sits on the same rung.)
- *
- * The live-link test is the one `canEditSource` makes for itself: a
- * downstream project mirroring another's source is read-only structure, so
- * the entries are absent for every role there. It is NOT gated on
- * `canEditSource` itself — that flag is forced false by a DCS pin for every
- * role, and a DCS pin protects the source TEXT; which divisions this file is
+ * The project's milestone floor decides the rung. Below it the actions are
+ * absent. A live-linked downstream shows them to nobody, whatever the floor
+ * says: its divisions are mirrored from upstream. It is NOT gated on
+ * `canEditSource` — that flag is forced false by a DCS pin for every role,
+ * and a DCS pin protects the source TEXT; which divisions this file is
  * navigated by is still this project's own business.
  */
 function maySetMilestonesIn(project: ProjectRecord): boolean {
-  return canPerform("file.milestone.set", project.syncRole?.level ?? null)
-    && project.sourceLinkMode !== "live"
+  return canSetMilestones({
+    roleLevel: project.syncRole?.level,
+    milestoneFloor: project.milestoneFloor,
+    sourceLinkMode: project.sourceLinkMode,
+  })
 }
 
 /**
@@ -1410,6 +1424,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onChapterPicked,
   bibleOpen = false,
   parallelBibles,
+  backtranslationColumn,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
 }, ref) {
@@ -2791,7 +2806,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       return row ? [row] : []
     }))
   }, [parallelBibles, viewableIndexes, firstVisibleIndex, cellStoreVersion, displayCellIds, cellStore, versePartByCellId])
+  // The Back-translation column is decided before the Bible columns, so on a
+  // tight window it keeps its track and the Bibles stack under the source.
+  const collectMissingBacktranslations = useCallback(() => displayCellIds.filter((id) => {
+    const view = cellStore.getCellView(id)
+    return Boolean(view) && needsLiveBacktranslation({
+      translated: view?.translated ?? "",
+      targetEventId: view?.targetEventId,
+      record: backtranslationByCellId?.get(id),
+    })
+  }), [displayCellIds, cellStore, backtranslationByCellId])
+  const btColumn = useEditorBacktranslationColumn({
+    config: backtranslationColumn,
+    // A language that delivers audio and no text has nothing to read back.
+    enabled: Boolean(onBacktranslate) && !audioOnlyLane,
+    configured: Boolean(isBacktranslationConfigured),
+    canWrite: canEdit,
+    sourceLanguage: project.sourceLanguage || undefined,
+    widthRef: tableRootRef,
+    gutterPx: editorGutterPx(castGutter),
+    collectMissing: collectMissingBacktranslations,
+  })
+  const btTrack = btColumn?.layout === "column" ? 1 : 0
   const bibleColumns = useEditorBibleColumns({
+    extraTracks: btTrack,
     config: parallelBibles,
     // A scripture file: chapters, and nothing but chapters. (scriptureNumbering
     // alone is also true for a file with no milestones at all.)
@@ -2801,7 +2839,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     gutterPx: editorGutterPx(castGutter),
   })
   const bibleTrackCount = bibleColumns?.layout === "columns" ? bibleColumns.columns.length : 0
-  const gridCols: EditorGridCols = editorGridCols(castGutter, bibleTrackCount)
+  const extraTrackCount = bibleTrackCount + btTrack
+  const gridCols: EditorGridCols = editorGridCols(castGutter, extraTrackCount)
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
@@ -3327,7 +3366,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           exampleOriginFor={exampleOriginFor}
           completingState={completing.get(cell.id)}
           cellError={errors.get(cell.id)}
-          previewText={previews.get(cell.id)}
+          previewText={markedPreviewText(cell, previews.get(cell.id))}
           healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}
@@ -3644,10 +3683,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <PlayingCueContext.Provider value={cueStore}>
     <SmartEditsProvider value={smartEditsContext}>
     <BibleColumnsProvider value={bibleColumns}>
+    <BacktranslationColumnProvider value={btColumn}>
     <div
       ref={tableRootRef}
       className="flex h-full min-h-0 flex-col"
-      style={editorGridStyle(castGutter, bibleTrackCount)}
+      style={editorGridStyle(castGutter, extraTrackCount, btTrack > 0)}
       onMouseUp={handleMouseUp}
     >
       {showStripNav && stripNavSlot
@@ -3710,8 +3750,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
-              ? editorHeaderGridCols(true, bibleTrackCount)
-              : editorHeaderGridCols(false, bibleTrackCount),
+              ? editorHeaderGridCols(true, extraTrackCount)
+              : editorHeaderGridCols(false, extraTrackCount),
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
@@ -3858,7 +3898,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 {activeLaneLabel}
               </Badge>
             )}
+            <BacktranslationColumnToggle />
           </div>
+          <BacktranslationColumnHeader />
         </div>
         )}
       </div>
@@ -3948,6 +3990,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </BacktranslationColumnProvider>
     </BibleColumnsProvider>
     </SmartEditsProvider>
     </PlayingCueContext.Provider>
@@ -4189,13 +4232,14 @@ function CellTimestampsPopover({
 }
 
 /**
- * The timestamps popover anchors to a corner of the source column. The context
- * menu itself does not render a DOM node, so the anchor has to be placed inside
- * the column (the `relative` box) by the column, not by this wrapper.
+ * The menu's visible button and the timestamps popover both sit in a corner of
+ * the source column. The context menu itself does not render a DOM node, so
+ * they have to be placed inside the column (the `relative` box) by the column,
+ * not by this wrapper.
  */
 const CellMenuAnchorContext = React.createContext<React.ReactNode>(null)
 
-/** The timestamps popover, placed inside the source column so it anchors there. */
+/** The menu button and the timestamps popover, placed inside the source column. */
 function CellMenuAnchorSlot() {
   return React.useContext(CellMenuAnchorContext)
 }
@@ -4203,10 +4247,17 @@ function CellMenuAnchorSlot() {
 /**
  * AQU-1068 item 5: THE source cell's menu.
  *
- * Right-click (or long-press) the source cell. The entries are the ones that
- * used to live on the corner pencil and then the three-dot button: edit the
- * source text, edit timestamps, insert a row either side, split at quotes,
- * hide, remove.
+ * Right-click (or long-press) the source cell, or press the three-dot button
+ * in its corner. The entries are the ones that used to live on the corner
+ * pencil: edit the source text, edit timestamps, insert a row either side,
+ * split at quotes, hide, remove.
+ *
+ * ONE MENU, TWO WAYS IN. The button was dropped when the menu moved to a
+ * right-click, and an owner who had just opened add/remove to contributors then
+ * could not find the entries at all — nothing on screen says a cell answers a
+ * right-click. So the button is back, and it opens the SAME context menu
+ * (see `openFromButton`) rather than a second copy of the list that could
+ * drift from it.
  *
  * Every entry follows round 4's rule: an action this row cannot take is
  * RENDERED, disabled, with its reason — an absent control cannot tell you
@@ -4291,6 +4342,11 @@ function CellSourceMenu({
 }) {
   const t = useT()
   const [timesOpen, setTimesOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  // Was the menu open when this press began? Pressing the button while its
+  // menu is open dismisses the menu first (an outside press), so the click
+  // that follows must not open it again — the button toggles, as it used to.
+  const openAtPressRef = useRef(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
   // AQU-1422: the park entry sits with the structural block below (it changes
@@ -4302,18 +4358,88 @@ function CellSourceMenu({
     || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
   if (!offered) return children
 
-  const anchor = timestamps ? (
-    <CellTimestampsPopover
-      cellId={cellId}
-      open={timesOpen}
-      onOpenChange={setTimesOpen}
-      {...timestamps}
-    />
-  ) : null
+  /**
+   * Open the context menu from the button, at the button.
+   *
+   * The context menu has no "open here" call of its own: its trigger places
+   * the popup from the `contextmenu` event it is handed. So the button hands it
+   * one, aimed at its own lower corner — the trigger is the source column this
+   * button sits inside, and the event bubbles to it. That is the same path a
+   * right-click takes, which is what keeps the two ways in from drifting.
+   */
+  const openFromButton = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // The row selects itself on a click; reaching for the menu is not that.
+    event.stopPropagation()
+    const closedByThisPress = openAtPressRef.current
+    openAtPressRef.current = false
+    // `detail` is 0 for a keyboard press, which has no pointer-down of its own
+    // and so must not inherit the last one's answer.
+    if (closedByThisPress && event.detail !== 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    event.currentTarget.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left,
+        clientY: rect.bottom,
+      }),
+    )
+  }
+
+  const anchor = (
+    <>
+      <button
+        type="button"
+        data-testid={`cell-menu-button-${cellId}`}
+        data-selection-ignore=""
+        aria-label={t("editor.cellMenu.trigger")}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title={t("editor.cellMenu.trigger")}
+        onPointerDown={() => { openAtPressRef.current = menuOpen }}
+        // A mouse press must not move focus here. The source column lights up
+        // like an open editor on `focus-within`, and a closing menu hands focus
+        // back to wherever it was — so a focused button would leave the cell
+        // looking as if it were being edited, and would take the caret out of
+        // a translation the user was in the middle of. Tab still reaches it.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={openFromButton}
+        className={cn(
+          // Floated over the column's corner so it costs no layout. `right`,
+          // not `end`: the context line beside it is forced LTR and keeps its
+          // label on the left, so the right corner is the free one whichever
+          // way the source text runs.
+          "absolute right-1 top-1 flex size-5 shrink-0 items-center justify-center rounded-md",
+          // AQU-1134: the term action rail pops up over this corner and must
+          // render in FRONT of it. Both layers are owned by
+          // source-cell-layers.ts — don't hand-edit this one.
+          SOURCE_CELL_MENU_Z,
+          "text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground",
+          // Present but quiet until the row is reached for. An open menu (or
+          // an open source editor) pins it, so the button does not fade out
+          // from under its own menu. A touch screen has no hover to reveal it
+          // with, so it simply stays visible there.
+          menuOpen || sourceEditing
+            ? "bg-primary/10 text-primary opacity-100"
+            : "opacity-0 focus-visible:opacity-100 pointer-coarse:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
+        )}
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {timestamps && (
+        <CellTimestampsPopover
+          cellId={cellId}
+          open={timesOpen}
+          onOpenChange={setTimesOpen}
+          {...timestamps}
+        />
+      )}
+    </>
+  )
 
   return (
     <CellMenuAnchorContext.Provider value={anchor}>
-      <ContextMenu>
+      <ContextMenu onOpenChange={(open) => setMenuOpen(open)}>
         <ContextMenuTrigger
           // The trigger's own class is `select-none`. Source text has to stay
           // selectable (add-to-termbase / Ask AI), so this wins the merge.
@@ -6734,13 +6860,31 @@ function EditorRow({
   // lights up as-you-type instead of after the ~1.2s commit-idle debounce.
   const enabledTermRules = useMemo(() => selectTermRules(ruleMap.values()), [ruleMap])
 
+  // AQU-2654: the term rules that can possibly fire on THIS cell, narrowed by
+  // their source-side gate. The gate reads the cell's SOURCE, which does not
+  // change while the user types in the target, so this is keyed on the source
+  // fields only and survives every keystroke — the live check below then runs
+  // over a handful of rules instead of the whole termbase. With 664 active
+  // concepts and affix matching on, re-gating per keystroke cost ~32 ms of
+  // main-thread regex, which is what made the editor "take a deep breath after
+  // every letter typed".
+  //
+  // Deliberately keyed on the source fields `effectiveSourceText` reads rather
+  // than on `cell`: the cell object gets a fresh identity on every commit and
+  // overlay update, and depending on it would re-run the whole sweep each time.
+  const liveTermCandidates = useMemo(
+    () => selectSourceApplicableTermRules(cell, enabledTermRules),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabledTermRules, cell.original, cell.medium, cell.transcription],
+  )
+
   // Live terminology infractions computed from the un-committed buffer. Only
   // active while this cell is being edited and a live snapshot has arrived;
   // otherwise null so the committed (health-derived) infractions are used.
   const liveTermInfractions = useMemo<RuleInfraction[] | null>(() => {
     if (!isEditorActive || liveTargetText === null) return null
-    return computeLiveTermInfractions(cell, liveTargetText, enabledTermRules)
-  }, [isEditorActive, liveTargetText, enabledTermRules, cell])
+    return computeLiveTermInfractions(cell, liveTargetText, liveTermCandidates)
+  }, [isEditorActive, liveTargetText, liveTermCandidates, cell])
 
   // Infractions that drive the inline blot decorations. While editing, the
   // committed `term:` infractions (which lag by a commit cycle) are replaced by
@@ -8209,6 +8353,10 @@ function EditorRow({
   const isBtStale = Boolean(
     cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
+  const openBacktranslationDetails = useCallback(() => {
+    setExpansionTab("backtranslation")
+    setExpanded(true)
+  }, [])
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
     return cellAudioTimings.map((t) => t.word).join(" ")
@@ -9011,9 +9159,10 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Source column. Right-click opens the cell menu (edit source, hide,
-            insert, timestamps). The wrapper renders no DOM of its own, so this
-            div stays the grid item. */}
+        {/* Source column. Right-click, or the three-dot button in its corner,
+            opens the cell menu (edit source, hide, insert, timestamps). The
+            wrapper renders no DOM of its own, so this div stays the grid
+            item. */}
         <CellSourceMenu
           cellId={cell.id}
           sourceEditing={sourceEditing}
@@ -9752,17 +9901,14 @@ function EditorRow({
               )}
             </EditorTargetCellWell>
             </div>
-            {/* The back-translation, one quiet line under the translation —
-                live readings land here moments after a save. */}
-            <InlineBacktranslation
-              reading={cell.backtranslation}
+            {/* The back-translation under the translation: only when its
+                column is open but has no room (a narrow window, a phone). */}
+            <BacktranslationRowStack
+              cell={cell}
               stale={isBtStale}
               generating={Boolean(isBacktranslating)}
               error={backtranslationError}
-              onOpen={() => {
-                setExpansionTab("backtranslation")
-                setExpanded(true)
-              }}
+              onOpenDetails={openBacktranslationDetails}
             />
             {hasInlineFootnotes && (
               <FootnoteInline
@@ -9862,6 +10008,22 @@ function EditorRow({
           </div>
         </EditorTargetCellColumn>
 
+        {/* Back-translation column: the last track, after Target. */}
+        <BacktranslationRowCell
+          key={cell.id}
+          cell={cell}
+          visibleTranslated={visibleTranslated ?? ""}
+          stale={isBtStale}
+          generating={Boolean(isBacktranslating)}
+          error={backtranslationError}
+          editable={editable}
+          dir={sourceCellDirection}
+          fontSize={sourceFontSize}
+          onBacktranslate={onBacktranslate}
+          onSave={onSaveBacktranslation}
+          onOpenDetails={openBacktranslationDetails}
+        />
+
         {/* Floating action rail — anchored to the row's right edge, aligned
             with the target column's header lane so it never covers the target
             text. z-20 so it sits above the sticky column header (z-10).
@@ -9869,7 +10031,9 @@ function EditorRow({
             scroll container, the sticky header's stacking context wins (rows
             are position:relative with auto z-index, so the row's local z-10
             doesn't escape the sticky header's z-10 context). */}
-        <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-2 md:top-0.5">
+        {/* With the Back-translation column open the rail is no longer at the
+            row's end: `--editor-rail-end` (editor-grid.ts) keeps it over Target. */}
+        <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-[var(--editor-rail-end,0.5rem)] md:top-0.5">
           <div
             className="pointer-events-auto"
             // AQU-354: track focus landing on / leaving a rail control so the

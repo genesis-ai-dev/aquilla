@@ -39,6 +39,12 @@ export interface WritePathSettings {
    * role level STRICTER than its org's (db/shared/import-floor.ts).
    */
   importMinRole?: unknown
+  /**
+   * AQU-2309: who may set, rename, resize and remove milestones. Honoured
+   * only when it is exactly the string `project_lead`; anything else,
+   * including an absent key, reads as maintainer (db/shared/milestone-floor.ts).
+   */
+  milestoneFloor?: unknown
 }
 
 /**
@@ -57,6 +63,7 @@ export const WRITE_PATH_COLUMNS: Readonly<Record<string, keyof WritePathSettings
   wp_allow_self_validation_audio: 'allowSelfValidationAudio',
   wp_harmonize_min_role: 'harmonize_min_role',
   wp_import_min_role: 'importMinRole',
+  wp_milestone_floor: 'milestoneFloor',
 }
 
 /** The projected columns, in SELECT order. */

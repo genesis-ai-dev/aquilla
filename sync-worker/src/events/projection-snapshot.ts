@@ -19,7 +19,7 @@
 //     from the snapshot's `cells` rows — `cells.event_id` IS that head (see
 //     ChainHeadReplay.seedFromCellRows). One source, so a snapshot cannot
 //     disagree with itself.
-//   • `cells_fts`/`value_tsv` is a generated column and is never written by
+//   • `cells.value_tsv` is a generated column and is never written by
 //     hand; generated columns are excluded from the column set below.
 //
 // ── Why it fails toward a full replay ─────────────────────────────────────

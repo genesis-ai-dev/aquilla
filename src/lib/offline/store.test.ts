@@ -1,6 +1,9 @@
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { __resetOfflineStoreForTests, getOfflineStore, whenOfflineStoreVerified } from "./store"
+import type { Adapter } from "@livestore/livestore"
+import { Effect } from "@livestore/utils/effect"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { __resetOfflineStoreForTests, failBootOnLeaderError, getOfflineStore, whenOfflineStoreVerified } from "./store"
+import { OfflineLeaderBootError } from "./leader-boot-error"
 import { events, OFFLINE_DATA_GENERATION, tables } from "./schema"
 import { NewerOfflineDataError, type GenerationMarker } from "./generation-guard"
 
@@ -78,9 +81,51 @@ describe("getOfflineStore", () => {
     expect(calls).toBe(0)
   })
 
+  it("fails the boot when the leader worker stops before the store opens", async () => {
+    withTauriGlobal()
+    const leader = Object.assign(new EventTarget(), { terminate: vi.fn() })
+    // The adapter spawns the leader inside createStorePromise and never
+    // finishes, as when LiveStore's shutdown leaves its boot waiting.
+    const neverBoots = (() => {
+      failBootOnLeaderError(leader)
+      return Effect.never
+    }) as unknown as Adapter
+    const booting = getOfflineStore(() => neverBoots, freshDevice)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    leader.dispatchEvent(new ErrorEvent("error", { message: "Error: [offline] a60q7b6rsy is still open in another leader" }))
+
+    await expect(booting).rejects.toBeInstanceOf(OfflineLeaderBootError)
+    await expect(booting).rejects.toThrow(/still open in another leader/)
+    expect(leader.terminate).toHaveBeenCalledOnce()
+  })
+
+  it("ignores a leader error once the store is out", async () => {
+    withTauriGlobal()
+    const leader = new EventTarget()
+    const store = await getOfflineStore(() => {
+      failBootOnLeaderError(leader)
+      return makeInMemoryAdapter()
+    }, freshDevice)
+
+    leader.dispatchEvent(new ErrorEvent("error", { message: "late" }))
+
+    await expect(getOfflineStore()).resolves.toBe(store)
+  })
+
   it("reports the store verified once the leader confirms the session's head", async () => {
     withTauriGlobal()
     await getOfflineStore(() => makeInMemoryAdapter(), freshDevice)
     await expect(whenOfflineStoreVerified()).resolves.toBeUndefined()
+  })
+})
+
+describe("the LiveStore adapter the desktop app boots", () => {
+  // LiveStore documents makeSingleTabAdapter as a fallback it means to remove;
+  // the offline store's persistence depends on it (see store.ts). Fail here,
+  // not on a device, if a LiveStore bump drops it.
+  it("is still exported by @livestore/adapter-web", async () => {
+    const adapterWeb = await import("@livestore/adapter-web")
+    expect(typeof adapterWeb.makeSingleTabAdapter).toBe("function")
   })
 })

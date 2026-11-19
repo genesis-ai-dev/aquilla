@@ -756,7 +756,9 @@ export interface OutboxEventPayloads {
   // in the payload — only the two anchors are, and the navigator resolves the
   // run between them from the file's live cell order, so a cell inserted
   // inside the range is covered without a second write. Non-chain-mutating
-  // (parentId omitted).
+  // (parentId omitted). Changing who may do this (`milestoneFloor`) is a
+  // settings patch, not one of these events, so it does not rewrite a
+  // milestone or mark a translation stale.
   "file.milestone.set": {
     milestoneId: string
     name: string

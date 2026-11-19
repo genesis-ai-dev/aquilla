@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({ request: vi.fn(), start: vi.fn(), clearGoogleAttempt: vi.fn(), preview: false }))
-vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, startGoogleLogin: mocks.start, clearGoogleAttempt: mocks.clearGoogleAttempt }))
+vi.mock("@/lib/frontier/google-login", () => ({ GOOGLE_ATTEMPT_LIFETIME_MS: 600000, googleRequest: mocks.request, startGoogleLogin: mocks.start, clearGoogleAttempt: mocks.clearGoogleAttempt }))
 vi.mock("@/lib/deployment-environment", () => ({ resolveBackendEnvironment: () => ({ kind: mocks.preview ? "preview" : "development" }) }))
 import { GoogleLoginButton } from "./GoogleLoginButton"
 afterEach(() => vi.unstubAllGlobals())
@@ -20,7 +20,7 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
     expect(mocks.start).not.toHaveBeenCalled()
     fireEvent.click(button)
     await screen.findByRole("alert")
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true, undefined, false, expect.any(AbortSignal))
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true, undefined, false, expect.any(AbortSignal), false)
     expect(button).toBeEnabled()
   } else {
     await screen.findByRole("alert")
@@ -96,9 +96,27 @@ it("gates desktop on server capability and lets a pending native login be cancel
   render(<GoogleLoginButton />)
   const button = screen.getByRole("button", {name:"Continue with Google"})
   await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(screen.getByRole("checkbox", {name: /private Google/}))
   fireEvent.click(button)
-  await screen.findByText(/Finish signing in with Google/)
-  fireEvent.click(screen.getByRole("button", {name:"Cancel"}))
-  expect(mocks.clearGoogleAttempt).toHaveBeenCalledOnce()
-  expect(button).toBeEnabled()
+  expect(mocks.start.mock.lastCall?.[5]).toBe(true)
+  await screen.findByText("Signing in with Google")
+  expect(screen.queryByText("or")).toBeNull()
+  const signal = mocks.start.mock.lastCall?.[4] as AbortSignal
+  fireEvent.click(screen.getByRole("button", {name:"Cancel and use another method"}))
+  expect(signal.aborted).toBe(true)
+  expect(screen.getByRole("button", {name:"Continue with Google"})).toBeEnabled()
+})
+
+it("keeps the Google screen until cancellation in Aquilla after closing the system window", async () => {
+  vi.stubGlobal("__TAURI__", {})
+  mocks.request.mockResolvedValue({enabled:true, desktop:true})
+  mocks.start.mockRejectedValueOnce(new Error("cancelled"))
+  render(<GoogleLoginButton />)
+  const start = screen.getByRole("button", {name:"Continue with Google"})
+  await waitFor(() => expect(start).toBeEnabled())
+  fireEvent.click(start)
+  await screen.findByText("The Google sign-in window was closed.")
+  expect(screen.queryByText("or")).toBeNull()
+  fireEvent.click(screen.getByRole("button", {name:"Cancel and use another method"}))
+  expect(screen.getByRole("button", {name:"Continue with Google"})).toBeEnabled()
 })

@@ -6,10 +6,16 @@
 // "Clean up selected" for the rows ticked (Shift-click ticks a range). It
 // transcribes a row first when nothing ASR heard is saved yet, and is taught by
 // the corrections already made in this file's rows of the same language.
+//
+// The toolbar picks the speech model, Fast or Smart (transcribe-speed.ts), and
+// the view wakes that model as it opens. On Fast it also starts the
+// speech-recognition pass by itself. A row shows each step as it happens: see
+// TranscribeRow.tsx.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { AudioLines, Sparkles, Square, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -22,15 +28,35 @@ import { PENDING_CELL_SCROLL_MAX_ATTEMPTS } from "@/components/pending-cell-scro
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { applyCorrections } from "@/lib/audio/transcript-corrections"
 import { isHumanCorrected, transcriptRowOf, type TranscriptRow } from "@/lib/transcript-cleanup/rows"
-import { rowLanguage, transcribeAndCleanUp, transcribeRow, type SparkleOutcome } from "@/lib/transcript-cleanup/run"
+import {
+  rowLanguage, transcribeAndCleanUp, transcribeRow, type RowProgress, type SparkleOutcome,
+} from "@/lib/transcript-cleanup/run"
 import { clearTranscript, saveTranscript } from "@/lib/transcript-cleanup/save"
-import { TranscribeRow, type RowStatus } from "./TranscribeRow"
+import { usesHostedTranscription } from "@/lib/audio/transcription-preference"
+import type { OmniModelName } from "@/lib/audio/omni-warmup"
+import { TranscribeRow, type RowLive, type RowStatus } from "./TranscribeRow"
 import { SpeechModelBanner } from "./SpeechModelStatus"
-import { routesToCtc, useSpeechModelWarmup } from "./useSpeechModelWarmup"
+import { useSpeechModelWarmup } from "./useSpeechModelWarmup"
+import {
+  modelToWake, setTranscribeSpeed, speechChoice, TRANSCRIBE_SPEEDS, useTranscribeSpeed, type TranscribeSpeed,
+} from "./transcribe-speed"
 
 /** Rows sent at once. Omnilingual CTC runs up to 4 containers; the per-user
  *  limit (60 requests a window) is waited out, not failed. */
 const CONCURRENCY = 3
+
+/** How long a finished run's text stays on a row that has not shown it from
+ *  its own data yet. The row normally catches up within a second (the save is
+ *  flushed and the file's audio read back); this only bounds a row that never
+ *  does, so it cannot hide a later change for good. */
+const LIVE_TEXT_MAX_MS = 10_000
+
+/** A row has caught up once its own data shows what the run produced. */
+function caughtUp(row: TranscriptRow, live: RowLive): boolean {
+  return (live.heard === undefined || row.heard === live.heard)
+    && (live.transcript === undefined || row.transcript === live.transcript)
+    && (live.aiCleaned === undefined || row.aiCleaned === live.aiCleaned)
+}
 
 /** Run `work` over `items`, `size` at a time, until done or `stopped()`. */
 async function runPool<T>(items: readonly T[], size: number, stopped: () => boolean, work: (item: T) => Promise<void>) {
@@ -88,16 +114,28 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
     [cells],
   )
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
+  const [liveById, setLiveById] = useState<Record<string, RowLive>>({})
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   const stopRef = useRef(false)
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
   /** The last row ticked, where a Shift-click range starts. */
   const anchorRef = useRef<string | null>(null)
-  const needsCtc = useMemo(
-    () => rows.some((row) => routesToCtc(session?.username, rowLanguage(project, row, targetLang))),
-    [rows, session?.username, project, targetLang],
+  const speed = useTranscribeSpeed(session?.username)
+  const hosted = usesHostedTranscription(session, project.id)
+  const choiceFor = useCallback(
+    (row: TranscriptRow) => speechChoice(speed, session?.username, rowLanguage(project, row, targetLang)),
+    [speed, session?.username, project, targetLang],
   )
-  const modelState = useSpeechModelWarmup(editable ? session : null, project.id, needsCtc)
+  // The model most of this file's rows will run on is the one to wake.
+  const wakeModel = useMemo(() => {
+    const votes = new Map<OmniModelName, number>()
+    for (const row of rows) {
+      const model = modelToWake(choiceFor(row), rowLanguage(project, row, targetLang))
+      if (model) votes.set(model, (votes.get(model) ?? 0) + 1)
+    }
+    return [...votes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+  }, [rows, choiceFor, project, targetLang])
+  const modelState = useSpeechModelWarmup(editable ? session : null, project.id, wakeModel)
   // AQU-2153: the scroll container and the sticky toolbar that overlays its
   // top edge — the toolbar's bottom IS the top of the visible content, so it
   // is what both the measure and the restore below line rows up against.
@@ -160,25 +198,47 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
     notifyAudioAttachmentsChanged(row.cell.fileId)
   }, [onCommitted])
 
+  const setLive = useCallback((cellId: string, live: RowLive | null) => {
+    setLiveById((prev) => {
+      if (live) return { ...prev, [cellId]: { ...prev[cellId], ...live } }
+      if (!(cellId in prev)) return prev
+      const next = { ...prev }
+      delete next[cellId]
+      return next
+    })
+  }, [])
+
+  /** A step of a running row: show it, and keep what it produced on the row
+   *  until the row's own data has it (the save and the read-back take a beat). */
+  const onProgress = useCallback((row: TranscriptRow, progress: RowProgress) => {
+    setStatus(row.cell.id, { kind: "working", progress })
+    if (progress.stage === "heard") setLive(row.cell.id, { heard: progress.heard, transcript: progress.transcript })
+  }, [setStatus, setLive])
+
   const finish = useCallback(async (row: TranscriptRow, outcome: SparkleOutcome) => {
+    if (outcome.kind === "cleaned") setLive(row.cell.id, { transcript: outcome.text, aiCleaned: true })
     setStatus(row.cell.id, outcome.kind === "cleaned" || outcome.kind === "transcribed" ? { kind: "idle" } : outcome)
     await refresh(row)
-  }, [setStatus, refresh])
+    setTimeout(() => setLive(row.cell.id, null), LIVE_TEXT_MAX_MS)
+  }, [setStatus, setLive, refresh])
 
   const cleanUp = useCallback(async (row: TranscriptRow, forceAsr: boolean) => {
     if (!session) return
-    setStatus(row.cell.id, { kind: "working" })
+    setLive(row.cell.id, null)
     await finish(row, await transcribeAndCleanUp({
       row,
       rows,
+      cells,
       project,
       session,
       ...(targetLang ? { targetLang } : {}),
       concepts,
       learned: loadTranscriptCorrections(project.id),
       forceAsr,
+      onProgress: (progress) => onProgress(row, progress),
+      ...(hosted ? { speech: choiceFor(row) } : {}),
     }))
-  }, [session, rows, project, targetLang, concepts, setStatus, finish])
+  }, [session, rows, cells, project, targetLang, concepts, hosted, choiceFor, setLive, onProgress, finish])
 
   const runOne = useCallback((row: TranscriptRow, forceAsr: boolean) => {
     // Human work wins: replacing a hand-corrected transcript asks first.
@@ -210,12 +270,34 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
     if (!session) return
     const todo = rows.filter((r) => !r.validated && !r.heard && !r.transcript)
     await runBatch(todo, async (row) => {
-      setStatus(row.cell.id, { kind: "working" })
+      setLive(row.cell.id, null)
       await finish(row, await transcribeRow({
         row, project, session, ...(targetLang ? { targetLang } : {}), onRateLimited: waitOutLimit,
+        onProgress: (progress) => onProgress(row, progress),
+        ...(hosted ? { speech: choiceFor(row) } : {}),
       }))
     })
-  }, [session, rows, project, targetLang, runBatch, setStatus, finish, waitOutLimit])
+  }, [session, rows, project, targetLang, hosted, choiceFor, runBatch, setLive, onProgress, finish, waitOutLimit])
+
+  // Opening the view starts the first pass by itself (Ryder, 2026-11-18): the
+  // fast model costs little and its text is only a draft, so there is no
+  // reason to make a person ask for it. The cleanup stays theirs to start,
+  // because it learns from the lines they have corrected by then.
+  //
+  // Only the Fast choice does this. Smart can mean zero-shot, the expensive
+  // model, and on-device transcription would open a download prompt; those
+  // wait for "Transcribe all". Once per file per visit, so pressing Stop is
+  // not undone by the next row that arrives.
+  const autoRanFor = useRef<string | null>(null)
+  const fileId = rows[0]?.cell.fileId ?? null
+  const autoRun = editable && session !== null && hosted && speed === "fast" && audioLoaded
+    && fileId !== null && batch === null
+    && rows.some((r) => !r.validated && !r.heard && !r.transcript)
+  useEffect(() => {
+    if (!autoRun || autoRanFor.current === fileId) return
+    autoRanFor.current = fileId
+    void runAll()
+  }, [autoRun, fileId, runAll])
 
   const cleanUpSelected = useCallback(async () => {
     const learned = loadTranscriptCorrections(project.id)
@@ -265,16 +347,21 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
         author: session?.username ?? "local",
         learn: false,
       })
+      setLive(row.cell.id, null)
       setStatus(row.cell.id, { kind: "idle" })
       await refresh(row)
     } catch (err) {
       setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
     }
-  }, [project.id, targetLang, session, setStatus, refresh])
+  }, [project.id, targetLang, session, setStatus, setLive, refresh])
 
   const clear = useCallback(async (row: TranscriptRow) => {
     const attachment = row.cell.attachments?.[row.audioId]
     if (!attachment || !window.confirm(t("transcribe.confirmClear"))) return
+    // Empty at once, and kept empty until the read-back shows it: the row used
+    // to wait on that read, and kept its words until a page refresh when the
+    // read came back before the clear (reported 2026-11-18).
+    setLive(row.cell.id, { heard: null, transcript: "", aiCleaned: false })
     try {
       await clearTranscript({
         projectId: project.id,
@@ -286,10 +373,13 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
       })
       setStatus(row.cell.id, { kind: "idle" })
       await refresh(row)
+      setTimeout(() => setLive(row.cell.id, null), LIVE_TEXT_MAX_MS)
     } catch (err) {
+      // Not saved: the words are still there, so show them again.
+      setLive(row.cell.id, null)
       setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
     }
-  }, [project.id, targetLang, session, setStatus, refresh, t])
+  }, [project.id, targetLang, session, setStatus, setLive, refresh, t])
 
   const save = useCallback(async (row: TranscriptRow, text: string) => {
     const attachment = row.cell.attachments?.[row.audioId]
@@ -306,12 +396,13 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
         ...(targetLang && !row.isSourceSegment ? { targetLang } : {}),
         author: session?.username ?? "local",
       })
+      setLive(row.cell.id, null)
       setStatus(row.cell.id, { kind: "idle" })
       await refresh(row)
     } catch (err) {
       setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
     }
-  }, [project.id, targetLang, session, setStatus, refresh])
+  }, [project.id, targetLang, session, setStatus, setLive, refresh])
 
   if (rows.length === 0) {
     // Nothing until the read answers: a file whose takes are still on their
@@ -321,10 +412,39 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
   }
 
   const canRun = editable && session !== null
+  const speedItems = TRANSCRIBE_SPEEDS.map((value) => ({ value, label: t(`transcribe.speed.${value}`) }))
   return (
     <div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="transcribe-editor">
-      <div ref={toolbarRef} className="sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border bg-background px-4 py-2">
-        <SpeechModelBanner state={modelState} />
+      <div ref={toolbarRef} className="sticky top-0 z-10 flex flex-wrap items-center justify-end gap-2 border-b border-border bg-background px-4 py-2">
+        <div className="mr-auto flex min-w-0 items-center gap-3">
+          {/* The choice only exists for hosted transcription: on-device
+              transcription has the one model the device downloaded. */}
+          {canRun && hosted && (
+            <Select
+              items={speedItems}
+              value={speed}
+              onValueChange={(value) => setTranscribeSpeed(session?.username, value === "smart" ? "smart" : "fast")}
+              disabled={batch !== null}
+            >
+              <SelectTrigger size="sm" aria-label={t("transcribe.speed.label")} data-testid="transcribe-speed">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {TRANSCRIBE_SPEEDS.map((value: TranscribeSpeed) => (
+                    <SelectItem key={value} value={value} multiline data-testid={`transcribe-speed-${value}`}>
+                      <span className="flex flex-col">
+                        <span>{t(`transcribe.speed.${value}`)}</span>
+                        <span className="max-w-64 text-xs text-muted-foreground">{t(`transcribe.speed.${value}Hint`)}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          )}
+          <SpeechModelBanner state={modelState} />
+        </div>
         {!session && <span className="text-xs text-muted-foreground">{t("transcribe.signIn")}</span>}
         {batch && (
           <>
@@ -363,8 +483,12 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
           row={row}
           label={row.cell.cellLabel ?? String(cells.indexOf(row.cell) + 1 || i + 1)}
           editable={editable}
-          canRun={canRun && !batch}
+          // During a transcription pass a row that already has its text can
+          // still be cleaned up: the pass only touches rows with none.
+          canRun={canRun && (!batch || Boolean(row.heard || row.transcript))}
           status={statusById[row.cell.id] ?? { kind: "idle" }}
+          {...(liveById[row.cell.id] && !caughtUp(row, liveById[row.cell.id]) ? { live: liveById[row.cell.id] } : {})}
+          modelWaking={modelState.kind === "starting"}
           selected={selected.has(row.cell.id)}
           onToggleSelect={(range) => toggleSelect(row, range)}
           onRun={(forceAsr) => runOne(row, forceAsr)}

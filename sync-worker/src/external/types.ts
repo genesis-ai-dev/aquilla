@@ -54,10 +54,12 @@ export interface ChangesetWarning {
      *  events that DID land; the changeset is still `committing`, so retrying
      *  the commit resumes from there without duplicating them. */
     | 'apply_incomplete'
-    /** AQU-2425: the write lands, and reaches no AI prompt. Today the only
-     *  case is a translation-brief write on a project whose saved
+    /** The write lands and changes nothing that matters. Two cases:
+     *  AQU-2425, a translation-brief write on a project whose saved
      *  `translationInstructions` already decide every prompt — the brief
-     *  document changes, the AI does not. See `brief-inert-warning.ts`. */
+     *  document changes, the AI does not (`brief-inert-warning.ts`); and
+     *  AQU-2642, an orthography-exception plan whose every word is already in
+     *  the state it asks for, which a merge reports rather than refuses. */
     | 'inert_write'
   fileId: string
   cellId: string
@@ -80,6 +82,7 @@ export type ReceiptOnlyCommandKind =
   | 'CreateOrg'
   | 'UpdateProjectSettings'
   | 'PatchSettings'
+  | 'PatchOrthographyExceptions'
   | 'SetBrief'
   | 'RegenerateBriefSummary'
   | 'AddOrgMember'
@@ -533,6 +536,19 @@ export interface ReceiptOnlyReceipt {
   previousRole?: number
   /** AQU-1235: the org role written (absent for a removal). */
   role?: number
+  /** PatchOrthographyExceptions (AQU-2642): what the merge did to the lane's
+   *  exception list, and the per-word outcome. A word whose state already held
+   *  is reported as such rather than counted as a change — the ops are merged
+   *  into the then-current list, so "already approved" is a normal answer. */
+  orthographyExceptions?: {
+    added: number
+    approved: number
+    removed: number
+    unchanged: number
+    /** Length of the list after the merge. */
+    total: number
+    words: { word: string; action: 'add' | 'remove'; effect: string }[]
+  }
   /** RegenerateBriefSummary (AQU-1282): length of the rendered L1 summary. */
   briefSummaryChars?: number
   /** RegenerateBriefSummary (AQU-1282): the model that rendered it. */

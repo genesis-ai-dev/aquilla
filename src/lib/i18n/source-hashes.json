@@ -4971,7 +4971,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9927,7 +9931,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14870,7 +14878,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19839,7 +19851,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -19953,7 +19969,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -26083,7 +26099,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -26197,7 +26217,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -32329,7 +32349,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -32438,7 +32462,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -38647,7 +38671,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -38763,7 +38791,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -45012,7 +45040,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -45123,7 +45155,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -51292,7 +51324,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -51405,7 +51441,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -59518,7 +59554,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -59632,7 +59672,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -67749,7 +67789,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -67866,7 +67910,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -76391,7 +76435,9 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -76507,7 +76553,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -84676,7 +84722,11 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
+    "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -84794,7 +84844,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -93338,7 +93388,9 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -93455,7 +93507,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -101993,7 +102045,9 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -102111,7 +102165,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -110684,7 +110738,9 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -110801,7 +110857,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -119361,7 +119417,9 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -119478,7 +119536,7 @@
     "nav.historyControls.noPreviouslyViewed": "dd76f8d0c02825b1",
     "nav.account.addTitle": "2083c252eac8bd07",
     "nav.account.loginTitle": "36a0b72033cb187d",
-    "nav.account.signupTitle": "5a17c385540340ca",
+    "nav.account.signupTitle": "2585a15fd78d596b",
     "nav.account.newToFrontier": "9bbb85b792223d72",
     "nav.account.menuLabel": "f8f1a2ea93e6f838",
     "nav.account.preferences": "66962f72a0888373",
@@ -128030,6 +128088,8 @@
     "editor.cellDetail.description": "71dd0d2b1ebdedcc",
     "editor.cellDetail.previous": "ae8d98943ee3ec98",
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
-    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d"
+    "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
+    "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
   }
 }

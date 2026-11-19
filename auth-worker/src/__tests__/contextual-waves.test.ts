@@ -17,7 +17,7 @@
 // the user's anchor) and the frames that make it legible while it runs.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, afterAll, beforeAll, beforeEach, afterEach, vi } from "vitest"
 import {
   createRun,
   getRun,
@@ -42,6 +42,15 @@ import {
 } from "../lib/contextual/tick"
 import type { CellPair } from "../lib/agent/tools/select-cells"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
+import { setPoolGuardEnabled } from "../../../db/shared/test-pool-guard"
+
+// AQU-2613: a wave runs its spans concurrently — these drive ten at once —
+// and in production the tick loop holds a pool of its own
+// (routes/contextual.ts selfTickLoop → makePostgres on PG_CONNECTION_STRING),
+// where the harness gives every caller the one handle. The pool guard counts
+// one request's statements, so it is off for this suite and on elsewhere.
+beforeAll(() => setPoolGuardEnabled(false))
+afterAll(() => setPoolGuardEnabled(true))
 
 const db = env.AQUILLA_PG
 const PROJECT = "proj-wave"

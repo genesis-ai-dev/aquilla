@@ -43,6 +43,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── src-tauri/          # Tauri desktop shell. Hot-bundle update channel: docs/superpowers/specs/
 │                       #   2026-11-05-desktop-hot-bundle.md. Rust command/event/capability
 │                       #   changes bump the tauri.conf.json version (= minShellVersion).
+│                       #   Shell releases cut, verify and promote themselves: docs/DESKTOP-RELEASES.md.
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 │                       #   specs/partner-integrations/<partner>/ is partner-owned
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers

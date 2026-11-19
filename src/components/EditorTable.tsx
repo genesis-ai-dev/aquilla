@@ -318,7 +318,7 @@ import {
   waivedKeys as waivedKeysOf,
 } from "@/lib/rules/waivers"
 import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
-import { termRulesOf, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
+import { termRulesOf, selectSourceApplicableTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -6874,13 +6874,31 @@ function EditorRow({
   // AQU-2654: one list per rule map, shared by every row (see termRulesOf).
   const enabledTermRules = termRulesOf(ruleMap)
 
+  // AQU-2654: the term rules that can possibly fire on THIS cell, narrowed by
+  // their source-side gate. The gate reads the cell's SOURCE, which does not
+  // change while the user types in the target, so this is keyed on the source
+  // fields only and survives every keystroke — the live check below then runs
+  // over a handful of rules instead of the whole termbase. With 664 active
+  // concepts and affix matching on, re-gating per keystroke cost ~32 ms of
+  // main-thread regex, which is what made the editor "take a deep breath after
+  // every letter typed".
+  //
+  // Deliberately keyed on the source fields `effectiveSourceText` reads rather
+  // than on `cell`: the cell object gets a fresh identity on every commit and
+  // overlay update, and depending on it would re-run the whole sweep each time.
+  const liveTermCandidates = useMemo(
+    () => selectSourceApplicableTermRules(cell, enabledTermRules),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabledTermRules, cell.original, cell.medium, cell.transcription],
+  )
+
   // Live terminology infractions computed from the un-committed buffer. Only
   // active while this cell is being edited and a live snapshot has arrived;
   // otherwise null so the committed (health-derived) infractions are used.
   const liveTermInfractions = useMemo<RuleInfraction[] | null>(() => {
     if (!isEditorActive || liveTargetText === null) return null
-    return computeLiveTermInfractions(cell, liveTargetText, enabledTermRules)
-  }, [isEditorActive, liveTargetText, enabledTermRules, cell])
+    return computeLiveTermInfractions(cell, liveTargetText, liveTermCandidates)
+  }, [isEditorActive, liveTargetText, liveTermCandidates, cell])
 
   // Infractions that drive the inline blot decorations. While editing, the
   // committed `term:` infractions (which lag by a commit cycle) are replaced by

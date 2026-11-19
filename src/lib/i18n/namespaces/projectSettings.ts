@@ -258,7 +258,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
-    "projectSettings.create.extraLanguagesAlreadyAddedError": "Already added.",
+    // AQU-2445: adding a language the dialog already has is allowed — the
+    // project gets both language lanes — so this reads as a warning, not an
+    // error. The key keeps its old name so the translations already attached
+    // to it stay attached: the changed English makes `source-hashes.json`
+    // report each one stale, which is how they get re-translated. Renaming it
+    // would have thrown 18 usable translations away instead.
+    "projectSettings.create.extraLanguagesAlreadyAddedError": "Duplicate language lane",
     "projectSettings.create.validationTargetLanguageRequired": "Target language is required",
     "projectSettings.create.validationUpstreamProjectRequired": "Choose an upstream project",
     "projectSettings.create.laneRecommendationHeading": "Same source, new language?",

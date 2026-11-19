@@ -129,8 +129,8 @@ export default defineConfig(({ mode }) => ({
       },
     },
   ],
-  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
-  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
+  // format: "es" is required by LiveStore's web adapter (its leader worker entry
+  // is an ES module, imported via the `?worker` suffix in src/lib/offline/store.ts).
   worker: {
     format: "es",
   },
@@ -189,6 +189,12 @@ export default defineConfig(({ mode }) => ({
       "@livestore/livestore",
       "@livestore/adapter-web",
       "@livestore/react",
+      // Imported only by the leader worker (livestore.worker.ts), which the
+      // crawler doesn't reach either. Pre-bundled with the rest so the first
+      // boot doesn't re-optimize, and so Effect resolves to one shared chunk.
+      "@livestore/adapter-web/worker",
+      "@livestore/utils/effect",
+      "@livestore/common", // opfs-handles.ts (storage format version)
     ],
   },
   build: {

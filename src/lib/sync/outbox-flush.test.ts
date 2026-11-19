@@ -1847,6 +1847,28 @@ describe("OPS-44 elevation-required mint", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-owner" })
   })
 
+  it("AQU-2455: a mint 403 keeps the server denial so removal is not an archive", async () => {
+    await enqueueOutboxEvent(makeEvent("gone", "f1", { projectId: "gone" }))
+    await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: null, status: 403, error: "No access to project" }),
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    })
+    expect((await peekOutboxBatch(10)).find((r) => r.id === "gone")?.lastError).toMatchObject({
+      status: 403,
+      reason: "No access to project",
+    })
+
+    await resetIdb()
+    await enqueueOutboxEvent(makeEvent("archived", "f1", { projectId: "archived" }))
+    await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: null, status: 403, error: "Project is archived" }),
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    })
+    expect((await peekOutboxBatch(10)).find((r) => r.id === "archived")?.lastError?.reason).toBe(
+      "Project is archived",
+    )
+  })
+
   it("contrast: a generic mint 403 (no access, archived) still quarantines", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "gone" }))
     const onForbidden = vi.fn()

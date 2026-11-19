@@ -61,6 +61,11 @@ export interface ConnectionAttachment {
   numericUserId: number | null
   role: number | null
   tokenExpiresAt: number | null
+  /**
+   * AQU-730: the lane read wall limits this caller, so `event.applied` frames
+   * reach it without `rows` (every lane's text). See stripAppliedRows.
+   */
+  rowsWalled: boolean
   /** Epoch ms of the last frame the DO itself handled on this socket. */
   lastSeenAt: number
   /** Whether this socket has ever been seen to heartbeat. */
@@ -77,6 +82,7 @@ export interface ConnectionIdentity {
   numericUserId: number | null
   role: number | null
   tokenExpiresAt: number | null
+  rowsWalled: boolean
   lastSeenAt: number
   heartbeatSeen: boolean
 }
@@ -94,6 +100,7 @@ export function toConnectionAttachment(
     numericUserId: conn.numericUserId,
     role: conn.role,
     tokenExpiresAt: conn.tokenExpiresAt,
+    rowsWalled: conn.rowsWalled,
     lastSeenAt: conn.lastSeenAt,
     heartbeatSeen: conn.heartbeatSeen,
     presence: stripPresenceDraft(row),
@@ -132,6 +139,10 @@ export function parseConnectionAttachment(raw: unknown): ConnectionAttachment | 
     numericUserId,
     role,
     tokenExpiresAt,
+    // A socket accepted before this field existed has no answer. It is
+    // treated as walled until its next token.refresh: the cost is one by-ids
+    // refetch per frame, where the other guess would send it every lane.
+    rowsWalled: a.rowsWalled !== false,
     lastSeenAt: a.lastSeenAt,
     heartbeatSeen: a.heartbeatSeen,
     presence,

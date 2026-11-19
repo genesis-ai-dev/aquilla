@@ -268,6 +268,73 @@ export function checkRulesForCell(
   return out
 }
 
+/**
+ * Terminology rules (id `term:…`) are compiled by compileConceptsToRules using
+ * the shared matcher in lib/terminology/match.ts, whose wildcard/boundary
+ * patterns use Unicode property escapes (\p{L}) that REQUIRE the `u` flag.
+ * Only terminology rules opt into `u`; all other (incl. user-authored)
+ * patterns keep their original flags so a regex valid without `u` is never
+ * silently disabled by becoming invalid under `u`.
+ */
+function unicodeFlag(rule: TranslationRule): string {
+  return rule.id.startsWith("term:") ? "u" : ""
+}
+
+function caseInsensitiveFlag(check: TranslationRule["check"]): string {
+  return (check.type === "source-requires-target" || check.type === "target-forbids") && check.caseSensitive
+    ? ""
+    : "i"
+}
+
+/**
+ * AQU-2654: does this rule's SOURCE-side gate hold for this cell?
+ *
+ * Both terminology check shapes are gated on the source: a
+ * `source-requires-target` rule produces nothing when the source bears no
+ * instance of the concept, and a `target-forbids` rule carrying a
+ * `sourcePattern` (AQU-1712) produces nothing for the same reason. A rule
+ * whose gate is false therefore CANNOT yield an infraction on this cell, so
+ * the hot keystroke path can drop it up front.
+ *
+ * This matters because the gate is **invariant while typing in the target**:
+ * the cell's source text does not change, so re-scanning every rule's source
+ * pattern on each keystroke is pure waste. On the BibleProject French project
+ * (664 active concepts → 1328 compiled rules, affix matching on) exactly 2
+ * rules pass the gate on a typical cell, yet all 1328 source patterns — each
+ * ~4.5 KB of affix alternation — were re-scanned every ~150 ms live-check
+ * tick: ~32 ms of main-thread regex per keystroke, which is the reported
+ * "the app takes a deep breath after every letter typed".
+ *
+ * A failed compile returns false, matching both branches of `checkRule`,
+ * which bail with no infraction when their source regex does not compile.
+ *
+ * Note this is a necessary condition, not a sufficient one — a rule that
+ * passes the gate still has to be run by `checkRulesForCell` to find out
+ * whether it actually infracts.
+ */
+export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): boolean {
+  const check = rule.check
+  if (check.type !== "source-requires-target" && check.type !== "target-forbids") return true
+  const pattern = check.sourcePattern
+  if (pattern === undefined) return true
+  const re = compile(pattern, "g" + caseInsensitiveFlag(check) + unicodeFlag(rule))
+  if (!re) return false
+  return sourceBearsPattern(effectiveSourceText(cell), re)
+}
+
+/**
+ * True when `source` has at least one NON-EMPTY match for `re`. Zero-length
+ * matches are not instances of a term — the same rule both source-gated
+ * branches of `checkRule` apply.
+ */
+function sourceBearsPattern(source: string, re: RegExp): boolean {
+  // `matchAll` works on a clone, so the cached regex keeps no state.
+  for (const m of source.matchAll(re)) {
+    if (m.index !== undefined && m[0].length > 0) return true
+  }
+  return false
+}
+
 function checkRule(
   rule: TranslationRule,
   cell: CellData,
@@ -278,17 +345,8 @@ function checkRule(
   // source), never the import filename / span offsets stay display-aligned.
   const source = effectiveSourceText(cell)
   const check = rule.check
-  // Terminology rules (id `term:…`) are compiled by compileConceptsToRules using
-  // the shared matcher in lib/terminology/match.ts, whose wildcard/boundary
-  // patterns use Unicode property escapes (\p{L}) that REQUIRE the `u` flag.
-  // Only terminology rules opt into `u`; all other (incl. user-authored)
-  // patterns keep their original flags so a regex valid without `u` is never
-  // silently disabled by becoming invalid under `u`.
-  const uflag = rule.id.startsWith("term:") ? "u" : ""
-  const caseFlag =
-    (check.type === "source-requires-target" || check.type === "target-forbids") && check.caseSensitive
-      ? ""
-      : "i"
+  const uflag = unicodeFlag(rule)
+  const caseFlag = caseInsensitiveFlag(check)
   switch (check.type) {
     case "target-forbids": {
       // AQU-1712: an optional SOURCE condition. A forbidden rendering is
@@ -300,12 +358,10 @@ function checkRule(
       // project-wide scan already judge it that way; this is what makes the
       // editor agree (AQU-1711). Hand-authored rules carry no `sourcePattern`
       // and stay unconditional.
-      if (check.sourcePattern !== undefined) {
-        const sourceRe = compile(check.sourcePattern, "g" + caseFlag + uflag)
-        if (!sourceRe) return null
-        // Zero-length matches are not instances, as in source-requires-target.
-        if (!allMatches(sourceRe, source).some((m) => m.text.length > 0)) return null
-      }
+      // The predicate itself lives in `ruleSourceGateMatches` (AQU-2654) so the
+      // editor's per-cell prefilter and this branch can never disagree about
+      // which cells a forbidden rendering applies to.
+      if (check.sourcePattern !== undefined && !ruleSourceGateMatches(rule, cell)) return null
       const re = compile(check.targetPattern, "g" + caseFlag + uflag)
       if (!re) return null
       const spans: import("@/lib/parsers/types").InfractionSpan[] = []

@@ -413,7 +413,11 @@ describe("makeSyncTokenMinter — OPS-44 elevation required", () => {
     global.fetch = mockFetch({ status: 403, body: NO_ACCESS_BODY }) as unknown as typeof fetch
     const onForbidden = vi.fn()
     const mint = makeSyncTokenMinter(() => "jwt-admin", "p", "f", {}, API, { onForbidden })
-    expect(await mint()).toEqual({ token: null, status: 403 })
+    expect(await mint()).toEqual({
+      token: null,
+      status: 403,
+      error: "No access to project",
+    })
     expect(onForbidden).toHaveBeenCalledTimes(1)
     expect(isElevationRequired()).toBe(false)
   })
@@ -700,9 +704,10 @@ describe("one mint per (identity, project, file) for the tab", () => {
     const forbiddenA = vi.fn(), forbiddenB = vi.fn()
     const a = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API, { onForbidden: forbiddenA })
     const b = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API, { onForbidden: forbiddenB })
+    // AQU-2455: a refusal carries the server's sentence, and both joiners get it.
     expect(await Promise.all([a(), b()])).toEqual([
-      { token: null, status: 403 },
-      { token: null, status: 403 },
+      { token: null, status: 403, error: "nope" },
+      { token: null, status: 403, error: "nope" },
     ])
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(forbiddenA).toHaveBeenCalledTimes(1)

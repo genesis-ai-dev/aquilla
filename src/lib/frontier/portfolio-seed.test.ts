@@ -10,6 +10,7 @@ import {
   readDirectoryPageSeed,
   readOrgPortfolioSeed,
   readPortfolioRowSeed,
+  forgetPortfolioProject,
   rememberDirectoryPage,
   rememberOrgPortfolio,
   rememberPortfolioRows,
@@ -50,6 +51,22 @@ describe("portfolio seeds", () => {
     rememberOrgPortfolio("jwt-a", 2, { projects: [row("p2")], activeLanguageCount: 1 })
     rememberOrgPortfolio("jwt-a", 1, { projects: [], activeLanguageCount: 0 })
     expect(readPortfolioRowSeed("jwt-a", "p2")).not.toBeNull()
+  })
+
+  it("drops one refused project from the list paint, the org summary, and the row", () => {
+    const alpha = row("alpha", "PMR Alpha")
+    const beta = row("beta", "Beta Notes")
+    rememberDirectoryPage("jwt-a", "7", { projects: [alpha, beta], nextCursor: "c1" })
+    rememberOrgPortfolio("jwt-a", 7, { projects: [alpha, beta], activeLanguageCount: 2 })
+    rememberDirectoryPage("jwt-a", "7,8", { projects: [alpha], nextCursor: null })
+
+    forgetPortfolioProject("jwt-a", "alpha")
+
+    expect(readDirectoryPageSeed("jwt-a", "7")).toEqual({ projects: [beta], nextCursor: "c1" })
+    expect(readDirectoryPageSeed("jwt-a", "7,8")).toEqual({ projects: [], nextCursor: null })
+    expect(readOrgPortfolioSeed("jwt-a", 7)?.projects).toEqual([beta])
+    expect(readPortfolioRowSeed("jwt-a", "alpha")).toBeNull()
+    expect(readPortfolioRowSeed("jwt-a", "beta")).not.toBeNull()
   })
 
   it("remembers the directory's first page with its cursor", () => {

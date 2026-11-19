@@ -154,9 +154,9 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier, MilestoneFloor } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
-import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, MILESTONE_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -275,6 +275,8 @@ interface SavedSettings {
   cellEditingFloor: CellEditingTier | null
   /** AQU-2408: who may type a label on a cell; null = maintainer (the default). */
   cellLabelFloor: CellLabelTier | null
+  /** AQU-2309: who may set milestones; null = maintainer (the default). */
+  milestoneFloor: MilestoneFloor | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
   /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
@@ -341,6 +343,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     cellLabelFloor: project.cellLabelFloor ?? null,
+    milestoneFloor: project.milestoneFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
     filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
@@ -773,7 +776,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    cellEditingFloor, cellLabelFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
+    cellEditingFloor, cellLabelFloor, milestoneFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
     bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   } = live
@@ -792,6 +795,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-2408: no organization default — the built-in one is maintainer.
   const effectiveCellLabelFloor: CellLabelTier = cellLabelFloor ?? "maintainer"
+  // AQU-2309: no organization default — the built-in one is maintainer.
+  const effectiveMilestoneFloor: MilestoneFloor = milestoneFloor ?? "maintainer"
+  // A known role below project lead does not see the control. A project lead
+  // sees it and cannot change it (changing a shared setting takes a
+  // maintainer). No role — a local project — sees it, the same as the rows
+  // beside it.
+  const milestoneFloorVisible = projectRoleLevel == null || projectRoleLevel >= ROLE.PROJECT_LEAD
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -1030,7 +1040,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label", "milestone", "who can set milestones"] },
     // AQU-2342: the ONE instructions text every AI draft reads (it replaced
     // the brief, the system prompt and Living Memory's instruction entries).
     // Its own section id gives it a row in the AI pane AND makes a search for
@@ -1698,6 +1708,47 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                   </DisabledFieldTooltip>
                 }
               />
+              {/* AQU-2309: who may set, rename, resize and remove a milestone.
+                  Two rungs, maintainer unless opened to project leads. Below
+                  project lead the row is absent; a project lead sees it locked. */}
+              {milestoneFloorVisible && (
+              <SettingsRow
+                saveId="milestoneFloor"
+                label={<label htmlFor="milestone-floor">{t("projectSettings.milestones.label")}</label>}
+                description={t("projectSettings.milestones.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={MILESTONE_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: FLOOR_LABEL[o.level] ?? t(o.labelKey),
+                      }))}
+                      disabled={!canChangeShared}
+                      value={effectiveMilestoneFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveMilestoneFloor) setShared("milestoneFloor", value as MilestoneFloor)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="milestone-floor"
+                        data-testid="settings-milestone-floor"
+                        aria-label={t("projectSettings.milestones.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {MILESTONE_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+              )}
               {/* AQU-2408: who may type a label on a cell. Two rungs, maintainer
                   unless opened to project leads; no organization default. The
                   tier is enforced where the Label field is drawn, like the one

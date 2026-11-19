@@ -75,6 +75,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
+import { canSetMilestones } from "@/lib/milestone-gate"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
@@ -1319,24 +1320,23 @@ interface EditorTableProps {
 }
 
 /**
- * AQU-2308: may this person name, rename, re-range or remove a run of this
- * file's lines? One answer for the cell menu and the navigator (AQU-2310).
+ * AQU-2308 / AQU-2309: may this person name, rename, re-range or remove a run
+ * of this file's lines? One answer for the cell menu and the navigator
+ * (AQU-2310), and the same one the Media timeline can call later.
  *
- * `canPerform` against the SAME role table `file.milestone.set` is enforced
- * by, not a re-derived rank — and it is the Maintainer floor, a rung above
- * the park/edit-source gate, because a division relayouts the navigator for
- * everyone who opens the file. (`file.milestone.remove` sits on the same rung.)
- *
- * The live-link test is the one `canEditSource` makes for itself: a
- * downstream project mirroring another's source is read-only structure, so
- * the entries are absent for every role there. It is NOT gated on
- * `canEditSource` itself — that flag is forced false by a DCS pin for every
- * role, and a DCS pin protects the source TEXT; which divisions this file is
+ * The project's milestone floor decides the rung. Below it the actions are
+ * absent. A live-linked downstream shows them to nobody, whatever the floor
+ * says: its divisions are mirrored from upstream. It is NOT gated on
+ * `canEditSource` — that flag is forced false by a DCS pin for every role,
+ * and a DCS pin protects the source TEXT; which divisions this file is
  * navigated by is still this project's own business.
  */
 function maySetMilestonesIn(project: ProjectRecord): boolean {
-  return canPerform("file.milestone.set", project.syncRole?.level ?? null)
-    && project.sourceLinkMode !== "live"
+  return canSetMilestones({
+    roleLevel: project.syncRole?.level,
+    milestoneFloor: project.milestoneFloor,
+    sourceLinkMode: project.sourceLinkMode,
+  })
 }
 
 /**

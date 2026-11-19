@@ -158,6 +158,22 @@ describe('policyWriteDirection — per-key table', () => {
     })
   })
 
+  // AQU-2309: who may set milestones. Unset admits maintainers only.
+  describe('milestoneFloor (project_lead < maintainer; unset ⇒ maintainer)', () => {
+    it('project_lead → maintainer tightens; unset → maintainer and project_lead → null (clear) tighten', () => {
+      expect(policyWriteDirection('milestoneFloor', 'project_lead', 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection('milestoneFloor', undefined, 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection('milestoneFloor', 'project_lead', null).direction).toBe('tighten')
+    })
+    it('unset → project_lead and maintainer → project_lead loosen', () => {
+      expect(policyWriteDirection('milestoneFloor', undefined, 'project_lead').direction).toBe('loosen')
+      expect(policyWriteDirection('milestoneFloor', 'maintainer', 'project_lead').direction).toBe('loosen')
+    })
+    it('a tier outside the ladder is invalid', () => {
+      expect(policyWriteDirection('milestoneFloor', 'maintainer', 'contributor').direction).toBe('invalid')
+    })
+  })
+
   describe.each(['validationNamedUsers', 'validationNamedUsersAudio'])('%s (allowlist; empty ⇒ anyone above the floor)', (key) => {
     it('empty → [a] tightens (only a may validate); [a, b] → [a] tightens (fewer validators)', () => {
       expect(policyWriteDirection(key, undefined, ['a']).direction).toBe('tighten')

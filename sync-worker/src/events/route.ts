@@ -70,6 +70,7 @@ import type { WritePathSettings } from './write-path-settings'
 import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 import { reportStaleSiblings } from './stale-sibling-telemetry'
 import { loadOrgValidationDefaults, type OrgValidationDefaults } from '../../../db/shared/validation-threshold'
+import { milestoneFloorLevel } from '../../../db/shared/milestone-floor'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -1687,6 +1688,25 @@ export async function handleEventsWriteRequest(
             }
           }
         }
+      }
+    }
+
+    // AQU-2309: the project's milestone floor, on top of the static
+    // PROJECT_LEAD floor authorize() already applied. Absent, and any tier
+    // this build does not recognise, reads as maintainer — never looser
+    // than the default — so a project lead's event from a page that has not
+    // picked up a raised floor is refused here and the milestone is not
+    // written. A settings read that fails reads the same way.
+    if (rawEvent.kind === 'file.milestone.set' || rawEvent.kind === 'file.milestone.remove') {
+      const parsed = await readProjectSettings(rawEvent.projectId)
+      const floor = milestoneFloorLevel(parsed?.milestoneFloor)
+      if (callerRole < floor) {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: 'role too low to set milestones (project requires maintainer or above)',
+        })
+        continue
       }
     }
 

@@ -733,6 +733,11 @@ export interface ProjectRecord {
    *  out for the same reason as `cellEditingFloor` above (`CellLabelTier` in
    *  `@/lib/sync/project-settings`); `resolveCellLabelFloor` maps it. */
   cellLabelFloor?: "maintainer" | "project_lead"
+  /** AQU-2309: who may set, rename, resize and remove a hand-set milestone.
+   *  Absent = maintainer. Spelled out for the same reason as `cellEditingFloor`
+   *  above (`MilestoneFloor` in `@/lib/sync/project-settings`);
+   *  `resolveMilestoneFloor` maps it. */
+  milestoneFloor?: "maintainer" | "project_lead"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
    *  SECOND gate on top of the maintainer floor, so with it off the write is

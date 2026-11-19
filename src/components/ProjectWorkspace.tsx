@@ -375,6 +375,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
+import { applyPendingVolumes, applyTrackVolumes, settledPendingVolumes } from "@/lib/audio/track-volume"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
@@ -15074,6 +15075,12 @@ export function ProjectWorkspace() {
     fileId: string
     colors: Map<string, string | null>
   } | null>(null)
+  // AQU-2664: a track volume, drawn before the read shows it (as a colour is),
+  // so the fader doesn't spring back while the write travels.
+  const [pendingTrackVolumes, setPendingTrackVolumes] = useState<{
+    fileId: string
+    volumes: Map<string, number>
+  } | null>(null)
   /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
    *  A drag's write calls it first, so the outbox holds writes in the order
    *  they were made and a held move can never land over a later drag. */
@@ -15097,8 +15104,27 @@ export function ProjectWorkspace() {
     if (pendingTrackColors && pendingTrackColors.fileId === activeFile?.id) {
       tracks = applyPendingColors(tracks, pendingTrackColors.colors)
     }
+    if (pendingTrackVolumes && pendingTrackVolumes.fileId === activeFile?.id) {
+      tracks = applyPendingVolumes(tracks, pendingTrackVolumes.volumes)
+    }
     return tracks
-  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackColors, activeFile?.id])
+  }, [serverTimelineTracks, pendingNewTracks, pendingTrackOrders, pendingTrackScopes, pendingTrackColors, pendingTrackVolumes, activeFile?.id])
+  // AQU-2664 (board 74): each track's volume is the mixer's track stage, so the
+  // timeline plays at what the faders say (and every export applies the same).
+  useEffect(() => {
+    applyTrackVolumes(timelineTracks)
+  }, [timelineTracks])
+  useEffect(() => {
+    if (!pendingTrackVolumes || pendingTrackVolumes.fileId !== activeFileId) return
+    const settled = settledPendingVolumes(pendingTrackVolumes.volumes, serverTimelineTracks)
+    if (settled.length === 0) return
+    setPendingTrackVolumes((current) => {
+      if (!current || current.fileId !== activeFileId) return current
+      const next = new Map(current.volumes)
+      for (const id of settled) next.delete(id)
+      return next.size === 0 ? null : { fileId: current.fileId, volumes: next }
+    })
+  }, [serverTimelineTracks, pendingTrackVolumes, activeFileId])
   useEffect(() => {
     if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
     const known = new Set(serverTimelineTracks.map((tr) => tr.id))
@@ -16257,6 +16283,33 @@ export function ProjectWorkspace() {
       )
     },
     [applyTrackPatches, paintTrackColors, recordTrackChanges],
+  )
+
+  /**
+   * AQU-2664 (board 74): a track's volume from its header's fader — shared and
+   * exported, one write and one undo step per change (the fader writes once a
+   * drag ends). 0 dB is stored as nothing. Maintainer clearance, like colour.
+   */
+  const handleSetTrackVolume = useCallback(
+    (trackId: string, db: number) => {
+      const fileId = activeFileId
+      if (!fileId) return
+      const volumeDb = db === 0 ? null : db
+      setPendingTrackVolumes((current) => {
+        const volumes = new Map(current?.fileId === fileId ? current.volumes : [])
+        volumes.set(trackId, db)
+        return { fileId, volumes }
+      })
+      const revert = () => setPendingTrackVolumes((current) => {
+        if (!current || current.fileId !== fileId) return current
+        const volumes = new Map(current.volumes)
+        volumes.delete(trackId)
+        return volumes.size === 0 ? null : { fileId, volumes }
+      })
+      recordTrackChanges("editor.history.stepTrackVolume", [{ trackId, after: { volumeDb } }])
+      void applyTrackPatches([{ trackId, patch: { volumeDb } }], "Couldn't change the track's volume:", revert)
+    },
+    [activeFileId, applyTrackPatches, recordTrackChanges],
   )
 
   /**
@@ -19991,6 +20044,9 @@ export function ProjectWorkspace() {
                     // Colour rides the same clearance alone (Sam, 2026-09-26):
                     // how a track looks, not what the timeline holds.
                     onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
+                    // AQU-2664 (board 74): a track's volume, on the same
+                    // clearance as its colour (how it sounds).
+                    onSetTrackVolume={canReorderTracks ? handleSetTrackVolume : undefined}
                     // AQU-1566: a caption track already on an empty linked
                     // video becomes its rows. Maintainer, no switch.
                     onPromoteTrackToRows={offerCaptionRows ? requestUseTrackAsRows : undefined}

@@ -31,6 +31,10 @@ describe('isGatedTrackPatch — the ungated half', () => {
     // Audio view offers the picker on projects that never turn editing on.
     ['recolouring', { color: 'cyan' }],
     ['clearing a colour', { color: null }],
+    // AQU-2664: a track's volume is how it sounds, on the maintainer clearance
+    // alone, like its colour.
+    ['a track volume', { volumeDb: -4.5 }],
+    ['clearing a track volume', { volumeDb: null }],
   ]
 
   for (const [label, patch] of ungated) {

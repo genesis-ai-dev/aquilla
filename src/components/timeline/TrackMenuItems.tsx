@@ -28,7 +28,7 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { EyeOff, Folder, FolderInput, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
+import { EqualApproximately, EyeOff, Folder, FolderInput, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
 import {
   ContextMenuCheckboxItem,
   ContextMenuItem,
@@ -107,8 +107,14 @@ export function trackMenuScopes({
   canMoveToFolder = false,
   folders = [],
   busyIds,
+  canEvenOut = false,
+  evenOutTrackIds,
 }: {
   targets: readonly TimelineTrack[]
+  /** AQU-2664: may this person even takes out (Contributor)? */
+  canEvenOut?: boolean
+  /** AQU-2664: the tracks that hold takes Even out can act on. */
+  evenOutTrackIds?: ReadonlySet<string>
   canRename: boolean
   canColour: boolean
   canEdit: boolean
@@ -178,9 +184,15 @@ export function trackMenuScopes({
   const leavers = movable.filter((tr) => Boolean(tr.groupId))
   const moveTo = movable.length > 0 ? { tracks: movable, folders: moveDestinations, leavers } : null
 
+  // AQU-2664 (board 71C): the selected tracks that hold takes. Unlike colour
+  // this takes the part of a selection it can act on — the window it opens
+  // names those tracks and counts their takes before anything is done.
+  const evenable = canEvenOut ? targets.filter((tr) => evenOutTrackIds?.has(tr.id) ?? false) : []
+
   return {
     only,
     promotable,
+    evenable,
     hideable,
     hideBusy,
     rename: canRename ? only : null,
@@ -194,6 +206,7 @@ export function trackMenuScopes({
 /** Would this menu render nothing at all? Then it must not open. */
 export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): boolean {
   return (
+    scopes.evenable.length === 0 &&
     scopes.promotable == null &&
     scopes.hideable.length === 0 &&
     scopes.rename == null &&
@@ -214,7 +227,11 @@ export function trackMenuItems({
   onHide,
   busyTrackIds,
   folders,
+  evenOut,
 }: {
+  /** AQU-2664: open the Even out window on these tracks; `trackIds` are the
+   *  tracks holding takes. Contributor clearance. */
+  evenOut?: { trackIds: ReadonlySet<string>; open(trackIds: readonly string[]): void }
   /**
    * The tracks this menu acts on — the selection when the right-clicked row is
    * in it, otherwise just that row. Never contains a folder when it holds more
@@ -241,8 +258,10 @@ export function trackMenuItems({
   folders?: readonly TimelineTrack[]
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { promotable, hideable, hideBusy, rename, colourable, moveTo, deletable, lengths } = trackMenuScopes({
+  const { evenable, promotable, hideable, hideBusy, rename, colourable, moveTo, deletable, lengths } = trackMenuScopes({
     targets,
+    canEvenOut: Boolean(evenOut),
+    evenOutTrackIds: evenOut?.trackIds,
     canRename: Boolean(onRename),
     canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
@@ -258,6 +277,19 @@ export function trackMenuItems({
 
   return (
     <>
+      {/* AQU-2664 (board 71C): first, in its own section. */}
+      {evenOut && evenable.length > 0 && (
+        <>
+          <ContextMenuItem data-testid="tl-track-even-out" onClick={() => evenOut.open(ids(evenable))}>
+            <EqualApproximately className="h-3.5 w-3.5" />
+            {evenable.length > 1
+              ? t("editor.evenOut.menuItemTracks", { count: evenable.length })
+              : t("editor.evenOut.menuItem")}
+          </ContextMenuItem>
+          {/* Only when something follows it. */}
+          {(promotable || hideable.length > 0 || rename || colourable.length > 0 || lengths || moveTo || deletable.length > 0) && <ContextMenuSeparator />}
+        </>
+      )}
       {/* AQU-1566: first, because on an empty linked video it is the one
           thing this track is waiting for. */}
       {onPromote && promotable && (

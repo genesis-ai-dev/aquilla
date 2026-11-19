@@ -79,6 +79,7 @@ import {
   unvalidatedAudioLineIds,
 } from "@/lib/export/audio-validation-scope"
 import { audioLineLabels } from "@/lib/export/audio-line-labels"
+import { trackVolumeOverrides, withTrackVolumes } from "@/lib/audio/track-volume"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -1427,9 +1428,14 @@ export function ExportDialog({
    * describe who is recorded in the file, which is true whatever this download
    * is allowed to contain.
    */
+  // AQU-2664: every take carries its track's volume (the header's fader), so
+  // the files sound like the timeline.
   const audioExportCells = useMemo(
-    () => scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
-    [audioSourceCells, contentMode, audioValidationRequirement],
+    () => withTrackVolumes(
+      scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
+      trackVolumeOverrides(timelineTracks),
+    ),
+    [audioSourceCells, contentMode, audioValidationRequirement, timelineTracks],
   )
 
   const episodeEstimate = useMemo(

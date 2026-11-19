@@ -92,7 +92,13 @@ const PATCH_KEYS = new Set([
   // src/lib/timeline/tracks.ts. Gated like every key outside {name, order,
   // color}: it changes what the timeline holds, not how a track looks.
   'setsLineLengths',
+  // AQU-2664 (board 74): the track's volume, dB, −60…+6 (the fader's range);
+  // null clears it to 0 dB. HAND-MIRRORED with PersistedTrackPatch.volumeDb.
+  'volumeDb',
 ])
+
+const MIN_TRACK_VOLUME_DB = -60
+const MAX_TRACK_VOLUME_DB = 6
 
 /**
  * A palette ID, and validated as a SHAPE rather than against a list of the ids
@@ -306,6 +312,17 @@ export function handleFileTrackSet(
         ok: false,
         status: 400,
         reason: `file.track.set event ${event.id} sets setsLineLengths on default track ${trackId}`,
+      }
+    }
+  }
+
+  if (patch != null && 'volumeDb' in patch && patch.volumeDb !== null) {
+    const { volumeDb } = patch
+    if (typeof volumeDb !== 'number' || !Number.isFinite(volumeDb) || volumeDb < MIN_TRACK_VOLUME_DB || volumeDb > MAX_TRACK_VOLUME_DB) {
+      return {
+        ok: false,
+        status: 400,
+        reason: `file.track.set event ${event.id} carries an unusable volumeDb: ${String(volumeDb)}`,
       }
     }
   }

@@ -1366,6 +1366,10 @@ export interface EventPayloads {
       /** AQU-2252: false makes an added track a layer (its takes set no line's
        *  length while the file follows its recordings); null clears it. */
       setsLineLengths?: boolean | null
+      /** AQU-2664 (board 74): the track's volume, dB, −60…+6 — shared and
+       *  exported. null clears it back to 0 dB. A look, not a structure: an
+       *  ungated key (track-editing-authority.ts), like colour. */
+      volumeDb?: number | null
     } | null
   }
 

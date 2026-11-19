@@ -128,7 +128,8 @@ export function trackPatchRequiresExisting(trackId: string, patch: unknown): boo
   return !DEFAULT_TRACK_IDS.has(trackId)
 }
 
-const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color'])
+// AQU-2664: a track's volume is how it sounds, as its colour is how it looks.
+const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color', 'volumeDb'])
 
 export function isGatedTrackPatch(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return true

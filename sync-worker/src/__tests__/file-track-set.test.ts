@@ -255,6 +255,23 @@ describe('file.track.set — accepted writes', () => {
   })
 })
 
+describe('file.track.set — track volume (AQU-2664)', () => {
+  it.each([0, -4.5, -60, 6])('accepts a volume of %s dB on the main track', async (volumeDb) => {
+    const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { volumeDb } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts clearing a volume back to 0 dB', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { volumeDb: null } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it.each([-61, 6.5, Number.NaN, '3', true])('rejects an unusable volume: %s', async (volumeDb) => {
+    const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { volumeDb } })
+    expectRejected(dispatch(authed), /unusable volumeDb/)
+  })
+})
+
 describe('file.track.set — rejected writes', () => {
   it('rejects when fileId is absent', async () => {
     // The perimeter (authorize) refuses a fileId-less event before dispatch

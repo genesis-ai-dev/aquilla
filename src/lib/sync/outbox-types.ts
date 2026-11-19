@@ -967,6 +967,8 @@ export interface OutboxEventPayloads {
       sourceTrackId?: string | null
       /** AQU-2252: false makes an added track a layer; null clears it. */
       setsLineLengths?: boolean | null
+      /** AQU-2664: the track's volume, dB (−60…+6); null clears it to 0 dB. */
+      volumeDb?: number | null
     } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).

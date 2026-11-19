@@ -102,6 +102,8 @@ export interface EvenOutResult {
   failed: number
   /** The person may not even takes out here: nothing was done. */
   notAllowed?: true
+  /** The run's undo step (a toast's Undo takes it back); null when nothing changed. */
+  stepId?: string | null
 }
 
 export interface ClearResult {
@@ -109,6 +111,8 @@ export interface ClearResult {
   gone: number
   failed: number
   notAllowed?: true
+  /** The clear's undo step; null when nothing changed. */
+  stepId?: string | null
 }
 
 /**
@@ -117,8 +121,8 @@ export interface ClearResult {
  * step is recorded as the writes start (an Undo pressed meanwhile waits for
  * them) and, once they end, holds only the takes that were written.
  */
-async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEvenData[]): Promise<number> {
-  if (parts.length === 0) return 0
+async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEvenData[]): Promise<{ failed: number; stepId: string | null }> {
+  if (parts.length === 0) return { failed: 0, stepId: null }
   const landed = new Set<string>()
   const key = (d: { cellId: string; audioId: string }) => `${d.cellId}\u0000${d.audioId}`
   let stepId: string | null = null
@@ -153,9 +157,10 @@ async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEv
     fileId: host.fileId ?? null,
     fileName: host.fileName ?? null,
   }))
-  stepId = recordGroup({ labelKey, fileId: host.fileId ?? null, fileName: host.fileName ?? null }, steps, { pending: writes })
+  // The step is named with its count (board 73: "Even out loudness · 212 takes").
+  stepId = recordGroup({ labelKey, labelParams: { count: parts.length }, fileId: host.fileId ?? null, fileName: host.fileName ?? null }, steps, { pending: writes })
   await writes
-  return parts.length - landed.size
+  return { failed: parts.length - landed.size, stepId: landed.size > 0 ? stepId : null }
 }
 
 /** Even out `takes` to the target, measuring any that have no reading yet. */
@@ -215,7 +220,9 @@ export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[],
     result.evened++
     if (before !== targetLufs) parts.push({ ...t, before, after: targetLufs })
   }
-  result.failed = await applyAsOneStep(host, "editor.history.stepEvenOut", parts)
+  const written = await applyAsOneStep(host, "editor.history.stepEvenOut", parts)
+  result.failed = written.failed
+  result.stepId = written.stepId
   result.evened -= result.failed
   result.skipped = result.unmeasured + result.silent + result.gone
   return result
@@ -236,8 +243,8 @@ export async function clearEvenOut(host: EvenOutHost, takes: readonly TakeRef[])
     if (before == null) continue
     parts.push({ ...t, before, after: null })
   }
-  const failed = await applyAsOneStep(host, "editor.history.stepClearEvenOut", parts)
-  return { cleared: parts.length - failed, gone, failed }
+  const { failed, stepId } = await applyAsOneStep(host, "editor.history.stepClearEvenOut", parts)
+  return { cleared: parts.length - failed, gone, failed, stepId }
 }
 
 /**
@@ -256,6 +263,74 @@ export function takesToEvenOut(cells: readonly CellData[], opts: { slots?: reado
       if (slots && !slots.has(a.slot ?? "recording")) continue
       out.push({ cellId: c.id, audioId })
     }
+  }
+  return out
+}
+
+/** Each live take in `cells` (on `slots`, or all), with its attachment. */
+function* liveTakes(cells: readonly CellData[], slots: readonly string[] | undefined): Generator<[TakeRef, CodexCellAttachment]> {
+  const only = slots ? new Set(slots) : null
+  for (const c of cells) {
+    for (const [audioId, a] of Object.entries(c.attachments ?? {})) {
+      if (!a || a.isDeleted || a.role === "source") continue
+      if (a.type && !a.type.startsWith("audio")) continue
+      if (only && !only.has(a.slot ?? "recording")) continue
+      yield [{ cellId: c.id, audioId }, a]
+    }
+  }
+}
+
+/**
+ * A track's ≈ (board 74): "none" while the track has no takes or any take on
+ * it isn't evened out; "full" when every one is; "part" when every one is and
+ * at least one couldn't go all the way (take-gain's `held`, drawn amber).
+ */
+export function evenStateOf(cells: readonly CellData[], slots: readonly string[]): "none" | "full" | "part" {
+  let any = false
+  let held = false
+  for (const [, a] of liveTakes(cells, slots)) {
+    if (a.evenTargetLufs == null) return "none"
+    any = true
+    if (!held && evenOutCorrection(a).held) held = true
+  }
+  return !any ? "none" : held ? "part" : "full"
+}
+
+/** The evened takes a Clear over these tracks (or the file) would take back. */
+export function evenedTakesIn(cells: readonly CellData[], opts: { slots?: readonly string[] } = {}): TakeRef[] {
+  const out: TakeRef[] = []
+  for (const [ref, a] of liveTakes(cells, opts.slots)) if (a.evenTargetLufs != null) out.push(ref)
+  return out
+}
+
+/**
+ * QUESTION 89 (open, Nov 19): do new, cut or trimmed takes on an evened track
+ * even out by themselves? THE ONE SWITCH. It is read in one place —
+ * ProjectWorkspace hands it to `autoEvenCandidates` — so either answer is this
+ * one line.
+ *
+ * OFF (now): today's behaviour. A new take on an evened track isn't evened; a
+ * cut or trimmed take keeps its target and its stale reading, which still
+ * plays; the track's ≈ goes grey until Even out runs again.
+ * ON: those takes are evened out quietly in the background, measured the same
+ * way (worker or yielding page meter), one undo step per batch.
+ */
+export const AUTO_EVEN_CHANGED_TAKES = false
+
+/**
+ * The takes the switch would even out on their own: on a track (slot) where
+ * at least one take is evened out, every take with no target, or a target and
+ * a reading of another window (cut or trimmed since). None when `enabled` is
+ * off.
+ */
+export function autoEvenCandidates(cells: readonly CellData[], enabled: boolean): TakeRef[] {
+  if (!enabled) return []
+  const evenedSlots = new Set<string>()
+  for (const [, a] of liveTakes(cells, undefined)) if (a.evenTargetLufs != null) evenedSlots.add(a.slot ?? "recording")
+  if (evenedSlots.size === 0) return []
+  const out: TakeRef[] = []
+  for (const [ref, a] of liveTakes(cells, [...evenedSlots])) {
+    if (a.evenTargetLufs == null || readingIsStale(a)) out.push(ref)
   }
   return out
 }

@@ -212,6 +212,11 @@ export function setTrackGainDb(trackKey: string, db: number): void {
   if (n && graph) n.gain.setValueAtTime(Math.pow(10, db / 20), graph.ctx.currentTime)
 }
 
+/** A track's volume as the mixer holds it, dB (0 when never set). */
+export function trackGainDbOf(trackKey: string): number {
+  return trackDb.get(trackKey) ?? 0
+}
+
 /** Where a one-off player (the chip's play button) connects: the main volume
  *  and the peak guard, so it is as loud as the timeline would be. */
 export function mixerInput(trackKey?: string): AudioNode | null {

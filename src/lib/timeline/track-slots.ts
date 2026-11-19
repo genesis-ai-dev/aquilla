@@ -140,11 +140,23 @@ export function slotsForTrack(trackId: string): string[] {
  * switched it off.
  */
 export function slotAudible(
-  state: { target: boolean; bySlot?: Record<string, boolean> },
+  state: { target: boolean; bySlot?: Record<string, boolean>; solo?: readonly string[] },
   slot: string,
 ): boolean {
+  // AQU-2664 (board 74): while any track is soloed, only the soloed ones are
+  // heard; a track's own mute still wins. The default row is soloed as
+  // `"target"`, under either of its two slots.
+  const key = isDefaultTrackSlot(slot) ? "target" : slot
+  if (state.solo && state.solo.length > 0 && !state.solo.includes(key)) return false
   if (isDefaultTrackSlot(slot)) return state.target
   return state.bySlot?.[slot] !== false
+}
+
+/** AQU-2664: is the source (the master element, the film) heard — on, and
+ *  not quiet because another track is soloed? Structural, like slotAudible. */
+export function sourceHeard(state: { source: boolean; solo?: readonly string[] }): boolean {
+  if (!state.source) return false
+  return !state.solo || state.solo.length === 0 || state.solo.includes("source")
 }
 
 /**

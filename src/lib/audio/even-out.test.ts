@@ -3,7 +3,7 @@
 // measuring behind them, with its fallback: a take that can't be measured
 // plays at its own volume and is skipped, and the action says how many.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { clearEvenOut, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type EvenOutHost } from "./even-out"
+import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes, evenStateOf, evenedTakesIn, makeTakeMeasurer, takesToEvenOut, type EvenOutHost } from "./even-out"
 import { takeStepHandlers, type TakeStepContext } from "@/lib/history/take-steps"
 import { historyReady, historyView, redoLast, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
@@ -306,6 +306,84 @@ describe("which takes", () => {
   it("a track or tracks: the takes on them", () => {
     expect(takesToEvenOut(cells, { slots: ["track-2"] })).toEqual([{ cellId: "c2", audioId: "b" }])
     expect(takesToEvenOut(cells, { slots: ["recording", "track-2"] })).toHaveLength(2)
+  })
+})
+
+describe("the run as the UI shows it (boards 71–73)", () => {
+  it("names the step with its count, and hands back the step to undo from a toast", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14 } },
+      c2: { b: { loudnessLufs: -20, truePeakDb: -8 } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    const step = historyView().undoSteps[0]
+    expect(step.labelParams).toEqual({ count: 2 })
+    expect(r.stepId).toBe(step.id)
+    const c = await clearEvenOut(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(historyView().nextUndo?.labelParams).toEqual({ count: 1 })
+    expect(c.stepId).toBe(historyView().nextUndo?.id)
+  })
+
+  it("has no step to undo when nothing changed", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 } } })
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(r.stepId).toBeNull()
+  })
+})
+
+describe("a track's ≈ (board 74)", () => {
+  const cell = (id: string, atts: Record<string, Partial<Att>>) => ({ id, attachments: Object.fromEntries(Object.entries(atts).map(([k, a]) => [k, { url: "u", type: "audio", slot: "recording", ...a }])) }) as unknown as CellData
+
+  it("is grey with no takes, or while any take on the track isn't evened", () => {
+    expect(evenStateOf([], ["recording"])).toBe("none")
+    expect(evenStateOf([cell("c1", { a: { loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 }, b: {} })], ["recording"])).toBe("none")
+  })
+
+  it("is lit when every take is evened, and amber when one couldn't go all the way", () => {
+    const evened = cell("c1", { a: { loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 } })
+    expect(evenStateOf([evened], ["recording"])).toBe("full")
+    const held = cell("c2", { b: { loudnessLufs: -30, truePeakDb: -4, evenTargetLufs: -16 } })
+    expect(evenStateOf([evened, held], ["recording"])).toBe("part")
+  })
+
+  it("reads only the track's own slots, and never the film's sound", () => {
+    const c = cell("c1", {
+      a: { loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 },
+      other: { slot: "track-2" },
+      film: { role: "source" },
+    })
+    expect(evenStateOf([c], ["recording"])).toBe("full")
+    expect(evenStateOf([c], ["track-2"])).toBe("none")
+  })
+
+  it("counts the evened takes a Clear would take back", () => {
+    const c = cell("c1", { a: { evenTargetLufs: -16 }, b: {}, d: { evenTargetLufs: -16, slot: "track-2" } })
+    expect(evenedTakesIn([c])).toHaveLength(2)
+    expect(evenedTakesIn([c], { slots: ["recording"] })).toEqual([{ cellId: "c1", audioId: "a" }])
+  })
+})
+
+describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)", () => {
+  const cells = [
+    { id: "c1", attachments: {
+      a: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 },
+      // New on the evened track: no target.
+      b: { url: "u", type: "audio", slot: "recording" },
+      // Trimmed since it was measured: its reading is of another window.
+      c: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16, loudnessFromMs: 0, trimStartMs: 300 },
+      // On a track nobody evened: left alone.
+      d: { url: "u", type: "audio", slot: "track-2" },
+    } },
+  ] as unknown as CellData[]
+
+  it("is OFF for now: today's behaviour, nothing is evened on its own", () => {
+    expect(AUTO_EVEN_CHANGED_TAKES).toBe(false)
+    expect(autoEvenCandidates(cells, AUTO_EVEN_CHANGED_TAKES)).toEqual([])
+  })
+
+  it("ON: the new and the changed takes on an evened track, and nothing else", () => {
+    expect(autoEvenCandidates(cells, true)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
   })
 })
 

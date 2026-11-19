@@ -13,23 +13,33 @@ import { takeGainDb, type TakeGainFields } from "@/lib/audio/take-gain"
 export interface ClipLevelFields extends TakeGainFields {
   fadeInMs?: number | null
   fadeOutMs?: number | null
+  /** AQU-2664: the take's TRACK volume, dB (the header's fader), stamped on
+   *  by `withTrackVolumes` for an export. Playback never reads it: there the
+   *  mixer's track node applies it. */
+  trackGainDb?: number | null
+}
+
+/** The gain an export applies: the take's stages, then its track's volume. */
+function exportGainDb(att: ClipLevelFields): number {
+  return takeGainDb(att) + (att.trackGainDb ?? 0)
 }
 
 /** Does this take play at anything other than its recorded level? */
 export function hasClipLevel(att: ClipLevelFields | null | undefined): boolean {
-  return Boolean(att && (takeGainDb(att) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
+  return Boolean(att && (exportGainDb(att) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
 }
 
 /** Just the level fields, for carrying on an export's own clip records: the
- *  gain as it plays (evening out already in it), and the fades. */
+ *  gain as it plays (evening out and the track's volume already in it), and
+ *  the fades. */
 export function levelFields(att: ClipLevelFields | null | undefined): ClipLevelFields {
-  return hasClipLevel(att) ? { gainDb: takeGainDb(att), fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
+  return hasClipLevel(att) ? { gainDb: exportGainDb(att!), fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
 }
 
 /** The kept part with its volume and fades applied (a copy); untouched when flat. */
 export function applyClipLevelPcm(kept: Float32Array, rate: number, att: ClipLevelFields | null | undefined): Float32Array {
   if (!hasClipLevel(att)) return kept
-  const g = Math.pow(10, takeGainDb(att) / 20)
+  const g = Math.pow(10, exportGainDb(att!) / 20)
   const fin = Math.round(((att!.fadeInMs ?? 0) / 1000) * rate)
   const fout = Math.round(((att!.fadeOutMs ?? 0) / 1000) * rate)
   const n = kept.length

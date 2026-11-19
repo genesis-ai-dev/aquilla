@@ -8,7 +8,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, missingTakeKey, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
-import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
+import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type BuildProgrammeOptions, type Programme, type ProgrammePiece, type ProgrammeSlot } from "@/lib/timeline/programme"
@@ -364,6 +364,12 @@ export interface TrackAudibility {
    * only ever be there because someone switched it off.
    */
   bySlot?: Record<string, boolean>
+  /**
+   * AQU-2664 (board 74): the tracks played ALONE — "source", "target" (the
+   * default row) or an added track's slot. Empty or absent: nothing soloed,
+   * every track heard by its own mute. Personal, kept with the mutes.
+   */
+  solo?: string[]
 }
 
 let audibility: TrackAudibility = { source: true, target: true }
@@ -374,8 +380,9 @@ export function setQueueAudibility(next: TrackAudibility): void {
     source: Boolean(next.source),
     target: Boolean(next.target),
     ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+    ...(next.solo && next.solo.length > 0 ? { solo: [...next.solo] } : {}),
   }
-  if (currentAudio) currentAudio.muted = !audibility.source
+  if (currentAudio) currentAudio.muted = !sourceHeard(audibility)
   // PER ENTRY now, not one blanket flag. Adding `slot` to `OverlayEntry` is
   // what gave this sweep something to discriminate on — before it, every
   // overlay in the pool followed the single `target` boolean and there was no
@@ -2125,7 +2132,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   currentAttachmentUrl = src.url
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.source
+  audio.muted = !sourceHeard(audibility)
   mixLineElement(audio, cell, currentAttachmentUrl)
   pendingStartSeconds = atClipSec
 
@@ -4106,7 +4113,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   openingSeek = null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.source
+  audio.muted = !sourceHeard(audibility)
   mixLineElement(audio, cell, currentAttachmentUrl)
   setProgress({ currentTime: pendingStartSeconds ?? currentTrim?.start ?? 0, duration: 0 })
 

@@ -21,11 +21,11 @@ import {
   useQueueAudibility,
   type TrackAudibility,
 } from "@/lib/audio/play-queue"
-import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
+import { isDefaultTrackSlot, sourceHeard } from "@/lib/timeline/track-slots"
 
 // Re-exported so both buttons — the timeline's lane gutter and the video pane's
 // header — reach audibility through exactly one module.
-export { useQueueAudibility }
+export { sourceHeard, useQueueAudibility }
 export type { TrackAudibility }
 
 /** Persisted per file, like zoom. The key is MOVED VERBATIM from TimelineEditor
@@ -51,10 +51,13 @@ export function loadAudibility(fileId: string): TrackAudibility {
               Object.entries(p.bySlot).filter(([, v]) => typeof v === "boolean"),
             )
           : undefined
+      // AQU-2664: the tracks played alone, kept with the mutes.
+      const solo = Array.isArray(p.solo) ? p.solo.filter((v): v is string => typeof v === "string") : []
       return {
         source: p.source !== false,
         target: p.target !== false,
         ...(bySlot && Object.keys(bySlot).length > 0 ? { bySlot } : {}),
+        ...(solo.length > 0 ? { solo } : {}),
       }
     }
   } catch {
@@ -161,6 +164,38 @@ export function toggleAudibility(fileId: string, slotOrTrack: string): void {
         return { ...current, bySlot: { ...current.bySlot, [slotOrTrack]: !audible } }
     }
   })()
+  persist(fileId, next)
+  setQueueAudibility(next)
+}
+
+/** The one name a row is soloed under: "source", "target" (the default row,
+ *  under any of its names) or an added track's slot. */
+function soloKeyFor(slotOrTrack: string): string {
+  const kind = audibilityTargetFor(slotOrTrack)
+  return kind === "slot" ? slotOrTrack : kind
+}
+
+/** AQU-2664 (board 74): is this row played alone (its S lit)? */
+export function trackSoloed(state: TrackAudibility, slotOrTrack: string): boolean {
+  return state.solo?.includes(soloKeyFor(slotOrTrack)) ?? false
+}
+
+/** AQU-2664: is this row heard right now — not muted, and not quiet because
+ *  another row is soloed? Its own M is `trackAudible`, which solo never moves. */
+export function trackHeard(state: TrackAudibility, slotOrTrack: string): boolean {
+  if (!trackAudible(state, slotOrTrack)) return false
+  return !state.solo || state.solo.length === 0 || trackSoloed(state, slotOrTrack)
+}
+
+/** AQU-2664: solo or unsolo one row for one file: persist, then publish
+ *  (merged against the store, like `toggleAudibility`). */
+export function toggleSolo(fileId: string, slotOrTrack: string): void {
+  const current = getQueueAudibility()
+  const key = soloKeyFor(slotOrTrack)
+  const solo = current.solo ?? []
+  const nextSolo = solo.includes(key) ? solo.filter((k) => k !== key) : [...solo, key]
+  const next: TrackAudibility = { ...current, solo: nextSolo }
+  if (nextSolo.length === 0) delete next.solo
   persist(fileId, next)
   setQueueAudibility(next)
 }

@@ -2819,6 +2819,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   // usable width); otherwise they stack under the source text and the grid
   // stays three tracks.
   const tableRootRef = useRef<HTMLDivElement | null>(null)
+  const columnHeadersRef = useRef<HTMLDivElement | null>(null)
   // The rows in view, and a margin either side so the next rows' chapters are
   // already loading — their chapters are what the Bible columns fetch.
   const visibleBibleRows = useMemo(() => {
@@ -2897,6 +2898,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
     const target = event.target
+    // AQU-2678: Home on the Source/Target divider resets the divider; it is not list navigation.
+    if (target instanceof Element && target.closest("[role='separator']")) return
     if (
       target instanceof HTMLElement
       && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))
@@ -3792,8 +3795,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             of the marks and heading. Both reserve the same gutter instead — this one as an
             overflow-hidden scroll container; every popup here portals. */}
         {!hideColumnHeaders && (
-        <div data-testid="table-column-headers" className={cn(
-            "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
+        <div ref={columnHeadersRef} data-testid="table-column-headers" className={cn(
+            // relative: the AQU-2678 header grip is positioned on the Target track.
+            "relative grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
               ? editorHeaderGridCols(true, extraTrackCount)
               : editorHeaderGridCols(false, extraTrackCount),
@@ -4020,9 +4024,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             />
             </RowUiStateContext.Provider>
           </BibleDataProvider>
-          {/* AQU-2678: the draggable Source/Target line. Only while the two
-              columns sit side by side — Bible columns go between them. */}
-          {bibleTrackCount === 0 && <EditorSplitDivider rootRef={tableRootRef} gridCols={gridCols} />}
+          {/* AQU-2678: the draggable line before Target (with a grip in the
+              column headings). */}
+          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} gridCols={gridCols} bibleTracks={bibleTrackCount} />
         </div>
       ) : isTimeOrdered ? (
         // Shared with the Smart Extensions editor surface (AQU-1565/1566).

@@ -558,6 +558,7 @@ export const editor = defineNamespace({
     "editor.column.source": "Source",
     "editor.column.target": "Target",
     "editor.column.resizeSplit": "Resize the Source and Target columns",
+    "editor.column.splitValue": "Source {source}%, Target {target}%",
 
     // — View-settings popover ————————————————————————————————————————
     "editor.view.settings": "Editor settings",
@@ -6170,6 +6171,17 @@ export const editor = defineNamespace({
           "Screen-reader name of the drag handle on the line between the editing table's " +
           "Source and Target columns; dragging it widens one column and narrows the other. " +
           "Imperative. Source and Target should match editor.column.source and editor.column.target.",
+      },
+      "editor.column.splitValue": {
+        description:
+          "What a screen reader announces as the position of the drag handle between the Source " +
+          "and Target columns: each column's share of the table's width. {source} and {target} " +
+          "are whole numbers; keep the percent sign as your language writes it. Source and Target " +
+          "should match editor.column.source and editor.column.target.",
+        placeholders: {
+          source: "The Source column's share of the width, a whole number from 0 to 100.",
+          target: "The Target column's share of the width, a whole number from 0 to 100.",
+        },
       },
       "editor.view.settings": {
         description:

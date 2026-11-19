@@ -1414,10 +1414,12 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(speech()).not.toHaveAttribute("data-hot")
     })
 
-    // AQU-2663 (agreed Nov 19): a picked line, or one being made, keeps its
-    // pair showing with the pointer elsewhere, ✨ pressed or busy. Every other
-    // empty line still shows its pair only on hover.
-    it("keeps the pair showing on a picked or in-progress line, with the pointer away", () => {
+    // AQU-2663 (agreed Nov 19, revised after the zoomed-out shots): a picked
+    // line, or one being made, keeps its ✨ showing with the pointer away —
+    // ALONE, centred on the line, pressed or busy. The mic is not drawn and
+    // takes no room until that line is hovered, when the pair comes back with
+    // the mic centred. Every other empty line shows its pair only on hover.
+    it("keeps only the sparkle showing on a picked or in-progress line at rest; the mic returns on hover", () => {
       const props = wired({
         emptyCells: [worded("c9", 30, 36), worded("c10", 40, 46), worded("c11", 50, 56)],
         pickedGhostIds: new Set(["c9"]),
@@ -1425,23 +1427,76 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       })
       render(<TargetAudioLane {...props} />)
       const btn = (id: string, kind: "record" | "speech") => screen.getByTestId(`tl-target-empty-${id}-${kind}`)
-      for (const kind of ["record", "speech"] as const) {
-        expect(btn("c9", kind)).toHaveAttribute("data-hot", "true")
-        expect(btn("c11", kind)).toHaveAttribute("data-hot", "true")
-        expect(btn("c10", kind)).not.toHaveAttribute("data-hot")
+      const noBtn = (id: string, kind: "record" | "speech") => screen.queryByTestId(`tl-target-empty-${id}-${kind}`)
+      const rowOf = (id: string) => btn(id, "speech").parentElement!
+      for (const id of ["c9", "c11"]) {
+        expect(btn(id, "speech")).toHaveAttribute("data-hot", "true")
+        expect(noBtn(id, "record")).toBeNull()
+        expect(rowOf(id).style.marginInlineStart).toBe("")
       }
       expect(btn("c9", "speech")).toHaveAttribute("aria-pressed", "true")
       expect(btn("c11", "speech")).toHaveAttribute("data-busy", "true")
+      // An unpicked line: both there, neither lit.
+      expect(btn("c10", "record")).not.toHaveAttribute("data-hot")
+      expect(btn("c10", "speech")).not.toHaveAttribute("data-hot")
       expect(btn("c10", "speech")).toHaveAttribute("aria-pressed", "false")
 
-      // Hovering another line lights it too, and leaves the picked ones lit.
+      // Hovering the picked line brings the mic back beside it, mic centred.
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+      expect(btn("c9", "record")).toHaveAttribute("data-hot", "true")
+      expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
+      expect(rowOf("c9").style.marginInlineStart).toBe("32px")
+      expect(noBtn("c11", "record")).toBeNull()
+      fireEvent.pointerLeave(screen.getByTestId("tl-target-empty-c9"))
+      expect(noBtn("c9", "record")).toBeNull()
+      expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
+
+      // Hovering an unpicked line lights its pair and leaves the picked ✨ lit.
       fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c10"))
       expect(btn("c10", "record")).toHaveAttribute("data-hot", "true")
       expect(btn("c10", "speech")).toHaveAttribute("data-hot", "true")
       expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
-      fireEvent.pointerLeave(screen.getByTestId("tl-target-empty-c10"))
-      expect(btn("c10", "speech")).not.toHaveAttribute("data-hot")
-      expect(btn("c9", "record")).toHaveAttribute("data-hot", "true")
+      expect(noBtn("c9", "record")).toBeNull()
+    })
+
+    // The zoomed-out case that overlapped (shot 3d): 25px lines 40px apart,
+    // three picked. At rest each shows one 28px ✨ centred on its line, and no
+    // two of them touch. Boxes computed from the rendered slot, row and button.
+    it("at 25px lines, three picked lines at rest do not overlap", () => {
+      const ids = ["c9", "c10", "c11"]
+      // 0.625s at 40px/s = 25px; starts 1s (40px) apart.
+      render(<TargetAudioLane {...wired({
+        emptyCells: ids.map((id, i) => worded(id, 30 + i, 30.625 + i)),
+        pickedGhostIds: new Set(ids),
+      })} />)
+      const boxes = ids.map((id) => {
+        const slot = screen.getByTestId(`tl-target-empty-${id}`)
+        const slotL = parseFloat(slot.style.left)
+        const slotW = parseFloat(slot.style.width)
+        expect(slotW).toBeCloseTo(25)
+        const sp = screen.getByTestId(`tl-target-empty-${id}-speech`)
+        const row = sp.parentElement!
+        const buttons = Array.from(row.querySelectorAll("button"))
+        const m = parseFloat(row.style.marginInlineStart || "0")
+        const widths = buttons.map((b) => parseFloat(b.style.width))
+        const rowW = m + widths.reduce((a, b) => a + b, 0) + 4 * (buttons.length - 1)
+        const rowL = slotL + (slotW - rowW) / 2
+        // Every button drawn in that row, as boxes.
+        let x = rowL + m
+        return buttons.map((b, i) => {
+          const box = { id: b.getAttribute("data-testid"), left: x, right: x + widths[i] }
+          x = box.right + 4
+          return box
+        })
+      })
+      for (const row of boxes) expect(row).toHaveLength(1)
+      const flat = boxes.flat()
+      // Each ✨ centred on its line.
+      ids.forEach((id, i) => {
+        const slot = screen.getByTestId(`tl-target-empty-${id}`)
+        expect((flat[i].left + flat[i].right) / 2).toBeCloseTo(parseFloat(slot.style.left) + 12.5)
+      })
+      for (let i = 1; i < flat.length; i++) expect(flat[i].left).toBeGreaterThan(flat[i - 1].right)
     })
 
     it("on a narrow line keeps both buttons, at full size, centred and overhanging", () => {
@@ -1493,6 +1548,8 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       // glyph and outline. The mic is not a toggle and says nothing.
       expect(speech().className).toMatch(/(^| )aria-pressed:text-primary( |$)/)
       expect(speech().className).toMatch(/(^| )aria-pressed:ring-primary\/50( |$)/)
+      // At rest a picked line shows its ✨ alone; on hover the mic is back.
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
       expect(rec()).not.toHaveAttribute("aria-pressed")
       rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
       // Review S3: busy is aria-disabled, NOT natively disabled — a disabled

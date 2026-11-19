@@ -2425,19 +2425,24 @@ export function TargetAudioLane({
             const offersSpeech = Boolean(onPickGhost) && Boolean(cell.translated?.trim() || cell.original?.trim())
             const busy = offersSpeech && makingSpeechCellIds?.has(cell.id) === true
             const picked = offersSpeech && pickedGhostIds?.has(cell.id) === true
-            // A line picked for Make speech, or being made, keeps its pair
-            // showing with the pointer elsewhere; every other line shows it
-            // only on hover (AQU-2663, agreed Nov 19).
-            const hot = hotKey === `empty-${cell.id}` || picked || busy
+            const pointerHere = hotKey === `empty-${cell.id}`
+            // A line picked for Make speech, or being made, keeps its ✨
+            // showing with the pointer elsewhere — ALONE, centred on the line,
+            // so picked neighbours never pile up when zoomed out. The mic is
+            // not drawn and takes no room until the pointer is on the line;
+            // then the pair is back, mic centred. Every other line shows its
+            // pair only on hover. (AQU-2663, agreed Nov 19.)
+            const hot = pointerHere || picked || busy
+            const showMic = Boolean(onOpenRecording) && (pointerHere || !(picked || busy))
             return (
               <div
                 className="flex shrink-0 items-center gap-1"
                 // AQU-2663 (review S4): a leading margin the size of the ✨ and
                 // the gap keeps the MIC centred on the line, where it always
                 // sat; the ✨ hangs off to its right. The canvas is forced LTR.
-                style={onOpenRecording && offersSpeech ? { marginInlineStart: `${buttonPx + SLOT_PAIR_GAP_PX}px` } : undefined}
+                style={showMic && offersSpeech ? { marginInlineStart: `${buttonPx + SLOT_PAIR_GAP_PX}px` } : undefined}
               >
-                {onOpenRecording && (
+                {showMic && (
                   <TimelineSlotButton
                     testId={`tl-target-empty-${cell.id}-record`}
                     label={t("workspace.targetAudioLane.recordAudio")}

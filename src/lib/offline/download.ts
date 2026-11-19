@@ -140,8 +140,17 @@ const REMOVE_CHUNK = 500
  *  that one event took the page up by 4–5 GB on a persisted store (+0.2–0.5
  *  GB chunked), enough for macOS to start killing WebKit processes. A rebuild
  *  skips the chunks along with everything else before the removal
- *  (replay-skip.ts). */
+ *  (replay-skip.ts).
+ *
+ *  That makes the removal several commits, and a quit or WebKit kill can
+ *  persist only some of them. So the row is marked `removing` first: an
+ *  interrupted removal then reads as one recoverInterruptedDownloads finishes
+ *  at the next boot, not as a `ready` copy quietly missing cells. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
+  const row = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (row && row.status !== "removing") {
+    store.commit(events.offlineProjectStatusSet({ ...row, status: "removing" }))
+  }
   const byFile = new Map<string, { cellId: string; side: "source" | "target"; laneKey: string }[]>()
   for (const { fileId, cellId, side, laneKey } of store.query(
     tables.cells.select("fileId", "cellId", "side", "laneKey").where({ projectId }),

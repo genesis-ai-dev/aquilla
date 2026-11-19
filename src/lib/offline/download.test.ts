@@ -420,7 +420,7 @@ describe("removeOfflineProject", () => {
       store.commit = commit
     }
 
-    expect(names).toEqual(["v2.CellsRemoved", "v1.OfflineCopyRemoved"])
+    expect(names).toEqual(["v1.OfflineProjectStatusSet", "v2.CellsRemoved", "v1.OfflineCopyRemoved"])
     expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.syncCursors.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.cells.select().where({ projectId: "proj2" }))).toHaveLength(1)
@@ -459,6 +459,48 @@ describe("removeOfflineProject", () => {
     expect(removed.every((n) => n <= 500)).toBe(true)
     expect(removed.reduce((a, b) => a + b, 0)).toBe(total)
     expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
+  })
+
+  // The removal is several commits; a quit or WebKit kill can land only some.
+  it("marks the copy removing first, so a removal cut off mid-chunks is finished at next boot", async () => {
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+    const rows = Array.from({ length: 1200 }, (_, i) => ({
+      cellId: `big${i}`,
+      side: "target" as const,
+      value: `v${i}`,
+      valueHtml: null,
+      eventId: `e${i}`,
+      sourceEventId: null,
+      validated: false,
+      aiDrafted: false,
+      sequenceIndex: i,
+      canonicalRef: null,
+      targetLang: "",
+      laneId: null,
+    }))
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "big", rows }))
+
+    const commit = store.commit
+    let chunks = 0
+    store.commit = ((...args: Parameters<typeof commit>) => {
+      for (const e of args) {
+        if ((e as { name: string }).name === "v2.CellsRemoved" && ++chunks > 1) throw new Error("app quit")
+      }
+      return commit(...args)
+    }) as typeof commit
+    try {
+      expect(() => removeOfflineProject(store, "proj1")).toThrow("app quit")
+    } finally {
+      store.commit = commit
+    }
+
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())?.status).toBe("removing")
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" })).length).toBeGreaterThan(0)
+
+    expect(recoverInterruptedDownloads(store)).toEqual(["proj1"])
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.files.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 
   it("blocks removal when a pending write is queued, and reports the depth", async () => {

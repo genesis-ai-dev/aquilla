@@ -13,6 +13,9 @@
 //
 // MEASURING. A take with no loudness reading yet is measured first, once
 // (makeTakeMeasurer: fetch, decode, BS.1770 meter, `cell.audio.measure`).
+// The meter runs off the page in a Web Worker, with the samples transferred;
+// where the worker can't run, on the page in chunks that yield between takes
+// and inside long ones (loudness-client.ts), so the editor never freezes.
 //
 // THE FALLBACK (weak devices, slow networks). Measuring is only ever done
 // here, by the action — never by playback or an export, which read the stored
@@ -26,7 +29,8 @@ import { recordGroup, type StepInput } from "@/lib/history/history"
 import type { TakeEvenData } from "@/lib/history/take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { CellData } from "@/hooks/useCells"
-import { measureLoudness, SILENT_LUFS } from "./loudness"
+import { SILENT_LUFS, type LoudnessReading } from "./loudness"
+import { loudnessClient } from "./loudness-client"
 import { TARGET_RATE } from "./decode-mono"
 import { DEFAULT_EVEN_TARGET_LUFS, evenOutCorrection } from "./take-gain"
 
@@ -207,6 +211,9 @@ export interface TakeMeasurerDeps {
   decode(bytes: Uint8Array): Promise<Float32Array>
   /** Store the reading (emitCellAudioMeasure + an optimistic overlay). */
   emit(cellId: string, audioId: string, reading: LoudnessFields, durationMs: number): Promise<void>
+  /** The meter. Default: off the page in the loudness worker, else on the
+   *  page in yielding chunks (loudness-client.ts). It may take the samples. */
+  meter?: (pcm: Float32Array, rate: number) => Promise<LoudnessReading>
   pcmBudgetBytes?: number
   timeoutMs?: number
 }
@@ -220,6 +227,7 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
   const byUrl = new Map<string, Promise<{ reading: LoudnessFields; durationMs: number } | null>>()
   const budget = deps.pcmBudgetBytes ?? MEASURE_PCM_BUDGET_BYTES
   const timeoutMs = deps.timeoutMs ?? MEASURE_TIMEOUT_MS
+  const meter = deps.meter ?? ((pcm: Float32Array, rate: number) => loudnessClient().measure([pcm], rate))
   const run = async (where: TakeRef, att: CodexCellAttachment, signal?: AbortSignal): Promise<{ reading: LoudnessFields; durationMs: number } | null> => {
     // Too long for this device's memory: don't fetch it at all.
     if (att.durationMs != null && (att.durationMs / 1000) * TARGET_RATE * 4 > budget) return null
@@ -229,8 +237,10 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
       const bytes = await deps.fetchBytes(att, where, signal)
       if (signal?.aborted) return null
       const pcm = await deps.decode(bytes)
-      const r = measureLoudness([pcm], TARGET_RATE)
-      return { reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb }, durationMs: Math.round((pcm.length / TARGET_RATE) * 1000) }
+      // Read before the meter: the worker path transfers the samples away.
+      const durationMs = Math.round((pcm.length / TARGET_RATE) * 1000)
+      const r = await meter(pcm, TARGET_RATE)
+      return { reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb }, durationMs }
     })().catch(() => null)
     try {
       return await Promise.race([work, timeout])

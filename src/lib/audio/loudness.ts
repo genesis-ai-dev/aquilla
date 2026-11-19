@@ -75,33 +75,89 @@ export function kWeighting(rate: number): { shelf: Biquad; highPass: Biquad } {
 const toDb = (amp: number) => (amp > 0 ? Math.max(PEAK_FLOOR_DB, 20 * Math.log10(amp)) : PEAK_FLOOR_DB)
 const lufsOf = (meanSquare: number) => -0.691 + 10 * Math.log10(meanSquare)
 
-/** Sum of the K-weighted squares of one channel, per 100 ms step. */
-function stepEnergies(x: Float32Array, rate: number, step: number, steps: number): Float64Array {
+/** How many samples the meter works through between two chances to yield. */
+export const METER_CHUNK = 48_000 // one second at 48 kHz
+
+/**
+ * The meter, as a generator that yields after about every {@link METER_CHUNK}
+ * samples of work (AQU-2664, the weak-hardware rule). Run straight through
+ * (`measureLoudness`, and the worker) it is one pass; run with pauses
+ * (`measureLoudnessYielding`, the on-page fallback) it lets the editor paint
+ * and type between chunks, inside a long take too. Either way the arithmetic
+ * is the same code in the same order, so the readings are identical.
+ */
+export function* meterSteps(channels: readonly Float32Array[], rate: number, chunk = METER_CHUNK): Generator<void, LoudnessReading, void> {
+  if (channels.length === 0) return { integratedLufs: SILENT_LUFS, truePeakDb: PEAK_FLOOR_DB, samplePeakDb: PEAK_FLOOR_DB }
+  let budget = chunk
+  // 1. Sample peaks, and the K-weighted energy per 100 ms step.
+  const step = Math.round(rate / 10)
+  const len = Math.min(...channels.map((c) => c.length))
+  const steps = step > 0 ? Math.floor(len / step) : 0
   const { shelf: s, highPass: h } = kWeighting(rate)
-  const out = new Float64Array(steps)
-  // Direct form I, in doubles (the 38 Hz high-pass needs the precision).
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0
-  let u1 = 0, u2 = 0, z1 = 0, z2 = 0
-  const n = steps * step
-  for (let i = 0; i < n; i++) {
-    const xi = x[i]
-    const y = s.b[0] * xi + s.b[1] * x1 + s.b[2] * x2 - s.a[1] * y1 - s.a[2] * y2
-    x2 = x1; x1 = xi; y2 = y1; y1 = y
-    const z = h.b[0] * y + h.b[1] * u1 + h.b[2] * u2 - h.a[1] * z1 - h.a[2] * z2
-    u2 = u1; u1 = y; z2 = z1; z1 = z
-    out[(i / step) | 0] += z * z
+  const samplePeaks: number[] = []
+  const energies: Float64Array[] = []
+  for (const x of channels) {
+    const e = new Float64Array(steps)
+    // Direct form I, in doubles (the 38 Hz high-pass needs the precision).
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0
+    let u1 = 0, u2 = 0, z1 = 0, z2 = 0
+    const n = steps * step
+    let peak = 0
+    for (let i = 0; i < x.length; i++) {
+      const xi = x[i]
+      const a = Math.abs(xi)
+      if (a > peak) peak = a
+      if (i < n) {
+        const y = s.b[0] * xi + s.b[1] * x1 + s.b[2] * x2 - s.a[1] * y1 - s.a[2] * y2
+        x2 = x1; x1 = xi; y2 = y1; y1 = y
+        const z = h.b[0] * y + h.b[1] * u1 + h.b[2] * u2 - h.a[1] * z1 - h.a[2] * z2
+        u2 = u1; u1 = y; z2 = z1; z1 = z
+        e[(i / step) | 0] += z * z
+      }
+      if (--budget <= 0) {
+        budget = chunk
+        yield
+      }
+    }
+    samplePeaks.push(peak)
+    energies.push(e)
   }
-  return out
+  // 2. True peak: only pairs within 6 dB of the sample peak are interpolated
+  //    (a point between two samples can't sit far above both of them).
+  let sample = 0
+  let truePeak = 0
+  for (let c = 0; c < channels.length; c++) {
+    const x = channels[c]
+    const sp = samplePeaks[c]
+    sample = Math.max(sample, sp)
+    truePeak = Math.max(truePeak, sp)
+    if (sp === 0) continue
+    const near = sp * 0.5
+    const n = x.length
+    for (let i = 0; i < n - 1; i++) {
+      if (--budget <= 0) {
+        budget = chunk
+        yield
+      }
+      if (Math.abs(x[i]) < near && Math.abs(x[i + 1]) < near) continue
+      for (const taps of PHASES) {
+        let y = 0
+        for (let m = -HALF + 1; m <= HALF; m++) {
+          const j = i + m
+          if (j >= 0 && j < n) y += x[j] * taps[m + HALF - 1]
+        }
+        const a = Math.abs(y)
+        if (a > truePeak) truePeak = a
+      }
+    }
+  }
+  return { integratedLufs: gated(energies, steps, step), truePeakDb: toDb(truePeak), samplePeakDb: toDb(sample) }
 }
 
-/** Integrated loudness, BS.1770-5 gating. */
-function integrated(channels: readonly Float32Array[], rate: number): number {
-  const step = Math.round(rate / 10) // 100 ms
-  const len = Math.min(...channels.map((c) => c.length))
-  const steps = Math.floor(len / step)
+/** Integrated loudness from the step energies, BS.1770-5 gating. */
+function gated(energies: readonly Float64Array[], steps: number, step: number): number {
   const blocks = steps - 3 // 400 ms = four steps
   if (!(blocks > 0) || step <= 0) return SILENT_LUFS
-  const energies = channels.map((c) => stepEnergies(c, rate, step, steps))
   // Each block's mean square, summed over channels (all weight 1).
   const z = new Float64Array(blocks)
   const blockLen = step * 4
@@ -152,46 +208,34 @@ const PHASES: Float64Array[] = [1, 2, 3].map((k) => {
   return taps
 })
 
-function peaks(x: Float32Array): { sample: number; truePeak: number } {
-  let sample = 0
-  for (let i = 0; i < x.length; i++) {
-    const a = Math.abs(x[i])
-    if (a > sample) sample = a
-  }
-  if (sample === 0) return { sample: 0, truePeak: 0 }
-  // A point between two samples stays within a few dB of the larger of them
-  // for anything but a contrived signal, so only pairs within 6 dB of the
-  // sample peak are interpolated.
-  const near = sample * 0.5
-  let truePeak = sample
-  const n = x.length
-  for (let i = 0; i < n - 1; i++) {
-    if (Math.abs(x[i]) < near && Math.abs(x[i + 1]) < near) continue
-    for (const taps of PHASES) {
-      let y = 0
-      for (let m = -HALF + 1; m <= HALF; m++) {
-        const j = i + m
-        if (j >= 0 && j < n) y += x[j] * taps[m + HALF - 1]
-      }
-      const a = Math.abs(y)
-      if (a > truePeak) truePeak = a
-    }
-  }
-  return { sample, truePeak }
-}
-
 /**
- * Measure a take: its integrated loudness and its peaks. `channels` are the
- * decoded samples (one array per channel, or the app's mono mix), at `rate`.
+ * Measure a take, straight through: its integrated loudness and its peaks.
+ * `channels` are the decoded samples (one array per channel, or the app's
+ * mono mix), at `rate`. Blocks its thread for the whole take — the worker's
+ * path. On the page use `measureLoudnessYielding` (or loudness-client.ts).
  */
 export function measureLoudness(channels: readonly Float32Array[], rate: number): LoudnessReading {
-  if (channels.length === 0) return { integratedLufs: SILENT_LUFS, truePeakDb: PEAK_FLOOR_DB, samplePeakDb: PEAK_FLOOR_DB }
-  let sample = 0
-  let truePeak = 0
-  for (const c of channels) {
-    const p = peaks(c)
-    sample = Math.max(sample, p.sample)
-    truePeak = Math.max(truePeak, p.truePeak)
+  const run = meterSteps(channels, rate, Number.MAX_SAFE_INTEGER)
+  for (;;) {
+    const r = run.next()
+    if (r.done) return r.value
   }
-  return { integratedLufs: integrated(channels, rate), truePeakDb: toDb(truePeak), samplePeakDb: toDb(sample) }
+}
+
+/** Give the page a turn: a macrotask, so input and paint run in between. */
+export const yieldToPage = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+/** Measure a take on the page, yielding every `chunk` samples of work. */
+export async function measureLoudnessYielding(
+  channels: readonly Float32Array[],
+  rate: number,
+  opts: { chunk?: number; yieldFn?: () => Promise<void> } = {},
+): Promise<LoudnessReading> {
+  const pause = opts.yieldFn ?? yieldToPage
+  const run = meterSteps(channels, rate, opts.chunk ?? METER_CHUNK)
+  for (;;) {
+    const r = run.next()
+    if (r.done) return r.value
+    await pause()
+  }
 }

@@ -188,7 +188,7 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // copy of the preference clobber one another.
 import { useQueueStateValue, useMissingClipTakes } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
-import { seedAudibility, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed, useQueueAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, setDrawnRows, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed, useQueueAudibility } from "@/lib/audio/audibility"
 import { setTrackGainDb } from "@/lib/audio/mixer"
 import { EvenOutButton, MuteSoloPair, TrackFader, type EvenState } from "./TrackMixControls"
 
@@ -1672,6 +1672,16 @@ export function TimelineEditor({
 
   const selectedTrackIds = selectedIdsInOrder(trackSelection, selectableTrackIds)
   const selectedTrackIdSet = new Set(selectedTrackIds)
+  // Review M4: the rows drawn now, by their audibility keys, so a soloed track
+  // that is deleted or hidden is ignored rather than silencing every other row.
+  const drawnAudioKey = tracks
+    .filter((tr) => !hiddenTrackIds.has(tr.id))
+    .map((tr) => TRACK_RENDER[tr.kind]?.audibilityKey ?? (tr.kind === "audio" ? slotForTrack(tr.id) : null))
+    .filter((k): k is string => k != null)
+    .join("\u0000")
+  useEffect(() => {
+    setDrawnRows(drawnAudioKey ? drawnAudioKey.split("\u0000") : [])
+  }, [drawnAudioKey, fileId])
   // AQU-2664: the workspace's Even out window offers the selection when it is
   // opened from the file menu.
   const selectionKey = selectedTrackIds.join("\u0000")

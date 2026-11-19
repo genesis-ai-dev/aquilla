@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { audibilityKey, loadAudibility, sourceHeard, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed } from "./audibility"
+import { audibilityKey, loadAudibility, setDrawnRows, sourceHeard, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed } from "./audibility"
 import { getQueueAudibility, setQueueAudibility } from "./play-queue"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 
@@ -140,5 +140,39 @@ describe("solo (AQU-2664)", () => {
     const reloaded = loadAudibility(FILE)
     expect(trackSoloed(reloaded, ADDED)).toBe(true)
     expect(trackAudible(reloaded, "target")).toBe(false)
+  })
+})
+
+// Review M4: a soloed track that is deleted or hidden must not leave the rest
+// silent with nothing lit to undo it. Solo entries for rows not drawn are
+// ignored (kept, so the solo comes back with the row).
+describe("solo on a row that is no longer drawn (review M4)", () => {
+  it("is ignored: every drawn row and the film are heard", () => {
+    toggleSolo(FILE, ADDED)
+    setDrawnRows(["source", "target"])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, "target")).toBe(true)
+    expect(trackHeard(state, "source")).toBe(true)
+    expect(slotAudible(state, RECORDING_SLOT)).toBe(true)
+    expect(sourceHeard(state)).toBe(true)
+  })
+
+  it("counts again once the row is drawn again", () => {
+    toggleSolo(FILE, ADDED)
+    setDrawnRows(["source", "target"])
+    setDrawnRows(["source", "target", ADDED])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, ADDED)).toBe(true)
+    expect(trackHeard(state, "target")).toBe(false)
+    expect(sourceHeard(state)).toBe(false)
+  })
+
+  it("keeps a drawn row's solo working beside an ignored one", () => {
+    toggleSolo(FILE, ADDED)
+    toggleSolo(FILE, "target")
+    setDrawnRows(["source", "target"])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, "target")).toBe(true)
+    expect(trackHeard(state, "source")).toBe(false)
   })
 })

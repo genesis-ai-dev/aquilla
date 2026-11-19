@@ -370,6 +370,12 @@ export interface TrackAudibility {
    * every track heard by its own mute. Personal, kept with the mutes.
    */
   solo?: string[]
+  /**
+   * Review M4: the audibility keys of the rows drawn now (the timeline says).
+   * Solo entries for anything else are ignored (track-slots `activeSolo`).
+   * Not persisted.
+   */
+  drawn?: string[]
 }
 
 let audibility: TrackAudibility = { source: true, target: true }
@@ -381,6 +387,7 @@ export function setQueueAudibility(next: TrackAudibility): void {
     target: Boolean(next.target),
     ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
     ...(next.solo && next.solo.length > 0 ? { solo: [...next.solo] } : {}),
+    ...(next.drawn ? { drawn: [...next.drawn] } : {}),
   }
   if (currentAudio) currentAudio.muted = !sourceHeard(audibility)
   // PER ENTRY now, not one blanket flag. Adding `slot` to `OverlayEntry` is

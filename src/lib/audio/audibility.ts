@@ -21,7 +21,7 @@ import {
   useQueueAudibility,
   type TrackAudibility,
 } from "@/lib/audio/play-queue"
-import { isDefaultTrackSlot, sourceHeard } from "@/lib/timeline/track-slots"
+import { activeSolo, isDefaultTrackSlot, sourceHeard } from "@/lib/timeline/track-slots"
 
 // Re-exported so both buttons — the timeline's lane gutter and the video pane's
 // header — reach audibility through exactly one module.
@@ -68,7 +68,10 @@ export function loadAudibility(fileId: string): TrackAudibility {
 
 function persist(fileId: string, value: TrackAudibility): void {
   try {
-    localStorage.setItem(audibilityKey(fileId), JSON.stringify(value))
+    // Which rows are drawn is this moment's, not a preference.
+    const { drawn: _drawn, ...kept } = value
+    void _drawn
+    localStorage.setItem(audibilityKey(fileId), JSON.stringify(kept))
   } catch {
     /* private mode — just won't persist */
   }
@@ -87,7 +90,10 @@ function persist(fileId: string, value: TrackAudibility): void {
  * visible and the disk copy is only ever the file's STARTING point.
  */
 export function seedAudibility(fileId: string): void {
-  setQueueAudibility(loadAudibility(fileId))
+  // The drawn rows are the timeline's to say (review M4), not the disk's: keep
+  // what it last said; it says it again whenever its rows change.
+  const drawn = getQueueAudibility().drawn
+  setQueueAudibility({ ...loadAudibility(fileId), ...(drawn ? { drawn } : {}) })
 }
 
 /**
@@ -184,7 +190,21 @@ export function trackSoloed(state: TrackAudibility, slotOrTrack: string): boolea
  *  another row is soloed? Its own M is `trackAudible`, which solo never moves. */
 export function trackHeard(state: TrackAudibility, slotOrTrack: string): boolean {
   if (!trackAudible(state, slotOrTrack)) return false
-  return !state.solo || state.solo.length === 0 || trackSoloed(state, slotOrTrack)
+  const solo = activeSolo(state)
+  return solo.length === 0 || solo.includes(soloKeyFor(slotOrTrack))
+}
+
+/**
+ * Review M4: which rows are drawn now, by their audibility keys ("source",
+ * "target", an added track's slot). The timeline publishes it whenever its
+ * rows change; solo entries for any other row are ignored, so a soloed track
+ * that is deleted or hidden never silences the rest.
+ */
+export function setDrawnRows(keys: readonly string[]): void {
+  const current = getQueueAudibility()
+  const next = [...new Set(keys.map(soloKeyFor))].sort()
+  if (current.drawn && current.drawn.length === next.length && current.drawn.every((k, i) => k === next[i])) return
+  setQueueAudibility({ ...current, drawn: next })
 }
 
 /** AQU-2664: solo or unsolo one row for one file: persist, then publish

@@ -168,10 +168,21 @@ function precomposedVariants(base: string): readonly string[] {
  * byte as before.
  */
 function foldedChar(ch: string): string {
-  const variants = precomposedVariants(ch)
-  if (variants.length === 0) return escapeRegex(ch)
-  return `[${escapeRegex(ch)}${variants.map((v) => escapeRegex(v)).join("")}]`
+  // Cached per letter (AQU-2654): a glossary is the same few dozen letters
+  // thousands of times over, and each class is dozens of escaped variants.
+  let folded = foldedChars.get(ch)
+  if (folded === undefined) {
+    const variants = precomposedVariants(ch)
+    folded =
+      variants.length === 0
+        ? escapeRegex(ch)
+        : `[${escapeRegex(ch)}${variants.map((v) => escapeRegex(v)).join("")}]`
+    foldedChars.set(ch, folded)
+  }
+  return folded
 }
+
+const foldedChars = new Map<string, string>()
 
 /**
  * Escape a literal segment for the regex. When folding, marks are removed from
@@ -225,7 +236,30 @@ function affixGroup(
   fold: boolean,
   side: "prefix" | "suffix",
 ): string {
-  const list = (affixes ?? []).map((a) => a.trim()).filter((a) => a.length > 0)
+  if (!affixes || affixes.length === 0) return ""
+  // Cached by content (AQU-2654): every alternate of every concept of a
+  // project asks for the same two groups, and callers hand in a freshly
+  // filtered array each time.
+  const key = `${side}\u0001${fold ? 1 : 0}\u0001${maxAffixes ?? ""}\u0001${affixes.join("\u0001")}`
+  let group = affixGroups.get(key)
+  if (group === undefined) {
+    group = buildAffixGroup(affixes, maxAffixes, fold, side)
+    if (affixGroups.size >= MAX_AFFIX_GROUPS) affixGroups.clear()
+    affixGroups.set(key, group)
+  }
+  return group
+}
+
+const MAX_AFFIX_GROUPS = 256
+const affixGroups = new Map<string, string>()
+
+function buildAffixGroup(
+  affixes: string[],
+  maxAffixes: number | undefined,
+  fold: boolean,
+  side: "prefix" | "suffix",
+): string {
+  const list = affixes.map((a) => a.trim()).filter((a) => a.length > 0)
   if (list.length === 0) return ""
   // Dedupe and drop empties AFTER folding, not before: folding collapses
   // differently-pointed spellings of one affix onto the same pattern (ים/יִם),
@@ -454,8 +488,51 @@ export function compiledPattern(pattern: string, flags: string): RegExp | null {
     }
     patternsCompiled += 1
     byFlags.set(flags, re)
+    if (re && prefilterByPattern.has(pattern)) {
+      conceptPatterns += 1
+      compileOnce(re)
+    }
   }
   return re
+}
+
+let conceptPatterns = 0
+
+/**
+ * How many CONCEPT patterns have been compiled — the expensive kind (see
+ * `compileOnce`). A caller that must not hold the main thread budgets its
+ * synchronous work on this count instead of on a clock, which makes the
+ * budget the same on every machine (`useHealth`).
+ */
+export function conceptPatternsCompiled(): number {
+  return conceptPatterns
+}
+
+/** Long enough for V8 to compile a regex to native code on its first run. */
+const WARM_UP_SUBJECT = "\u0000".repeat(1024)
+
+/**
+ * Make V8 compile a concept pattern once instead of twice.
+ *
+ * V8 runs a new regex in its bytecode interpreter and recompiles it to native
+ * code on the second execution. For a concept pattern each compilation is
+ * several milliseconds (every folded letter is a class plus `\p{M}*`), and
+ * every pattern that is used at all is used more than once, so it pays both.
+ * A first subject of 1,000 characters or more goes straight to native code —
+ * so the first thing a new concept regex runs on is a kilobyte of NULs. A term
+ * is built of literal letters, so the scan fails at every position at once;
+ * it costs microseconds, matches nothing (or, for a bare `*`, the empty
+ * string), and has no effect on any later match. Measured on the benchmark
+ * glossary's patterns: ~15 ms → ~8 ms per pattern at 1x CPU.
+ *
+ * Only for patterns this module built: a hand-written rule pattern can be
+ * arbitrarily slow on a long subject. On an engine without this tiering it is
+ * one cheap, harmless execution.
+ */
+function compileOnce(re: RegExp): void {
+  re.lastIndex = 0
+  re.test(WARM_UP_SUBJECT)
+  re.lastIndex = 0
 }
 
 /** How many distinct (pattern, flags) have been compiled — for tests that count work. */

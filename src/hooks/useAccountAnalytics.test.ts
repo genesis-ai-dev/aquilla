@@ -92,13 +92,30 @@ describe("useAccountAnalytics (AQU-2654)", () => {
     expect(result.current.enabled()).toBe(true)
   })
 
-  it("keeps unapproved scopes apart per owner", () => {
+  it("the username coming and going without approval is not a new scope either", () => {
+    // A return to the tab clears the account's username and sets it again
+    // before the consent read lands.
     act(() => account.publish({ generation: 400, username: "ryder" }, false))
-    const { result } = renderHook(() => useAccountAnalytics())
-    expect(result.current.owner).toBe("ryder")
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useAccountAnalytics()
+    })
+    const scope = result.current
+    const rendersBefore = renders
     act(() => account.publish({ generation: 401, username: null }, false))
-    expect(result.current.owner).toBeNull()
-    act(() => account.publish({ generation: 402, username: "alex" }, false))
+    act(() => account.publish({ generation: 402, username: "ryder" }, false))
+    expect(result.current).toBe(scope)
+    expect(renders).toBe(rendersBefore)
+    // Whoever it was made under, it cannot send, for this owner or the next.
+    act(() => account.publish({ generation: 403, username: "alex" }, false))
+    expect(result.current).toBe(scope)
+    expect(scope.enabled()).toBe(false)
+    // Approval for the next owner is a scope of its own, bound to that owner.
+    act(() => account.publish({ generation: 403 }, true))
+    expect(result.current).not.toBe(scope)
     expect(result.current.owner).toBe("alex")
+    expect(result.current.enabled()).toBe(true)
+    expect(scope.enabled()).toBe(false)
   })
 })

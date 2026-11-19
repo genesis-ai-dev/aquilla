@@ -13,22 +13,23 @@ type AnalyticsScope = ReturnType<typeof posthog.scope>
 // re-rendered the workspace once per publish for scopes that all do the same
 // thing: nothing.
 //
-// So the scopes that cannot send are one object per owner, and a sending scope
-// is one object per generation. Consumers re-render when what their scope can
-// do changes, not when the state object behind it was replaced.
-const unapproved = new Map<string | null, AnalyticsScope>()
+// So there is one scope that cannot send, and a sending scope is one object
+// per generation. Consumers re-render when what their scope can do changes,
+// not when the state object behind it was replaced.
+//
+// The one scope that cannot send keeps the `owner` it was made under while
+// the account's username comes and goes (it is cleared and set again on every
+// return to the tab). Nothing can tell: `enabled()` is false for it whoever
+// the owner is, and a caller that compares `owner` also requires `enabled()`.
+let unapproved: AnalyticsScope | null = null
 let approved: { generation: number; owner: string | null; scope: AnalyticsScope } | null = null
 
 function currentScope(): AnalyticsScope {
   const { generation, username } = analyticsAccount.getSnapshot()
   if (!analyticsAccount.eligible()) {
-    let scope = unapproved.get(username)
-    if (!scope) {
-      // Made while not eligible, so it stays unable to send.
-      scope = posthog.scope(generation)
-      unapproved.set(username, scope)
-    }
-    return scope
+    // Made while not eligible, so it stays unable to send.
+    unapproved ??= posthog.scope(generation)
+    return unapproved
   }
   if (!approved || approved.generation !== generation || approved.owner !== username) {
     approved = { generation, owner: username, scope: posthog.scope(generation) }

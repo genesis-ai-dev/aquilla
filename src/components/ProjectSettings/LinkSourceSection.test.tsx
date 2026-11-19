@@ -23,7 +23,7 @@
 // upstream's files did not arrive. Those cases are in their own describe too.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
@@ -78,6 +78,15 @@ const fetchLinkFileMatches = vi.fn()
 
 vi.mock("@/lib/sync/link-file-match", () => ({
   fetchLinkFileMatches: (...args: unknown[]) => fetchLinkFileMatches(...args),
+}))
+
+// AQU-2549: the files a replace may follow into, as the server decides it.
+// Unreadable by default: the picker falls back to every own file, so the cases
+// that predate the list read exactly as they did.
+const fetchReplaceTargets = vi.fn()
+
+vi.mock("@/lib/sync/link-join-copy", () => ({
+  fetchReplaceTargets: (...args: unknown[]) => fetchReplaceTargets(...args),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -183,6 +192,8 @@ beforeEach(() => {
   loadUpstreamLaneChoices.mockReset()
   loadUpstreamLaneChoices.mockResolvedValue(ONE_LANE)
   fetchLinkFileMatches.mockReset()
+  fetchReplaceTargets.mockReset()
+  fetchReplaceTargets.mockRejectedValue(new Error("not readable"))
   navigationError = null
   navigationProjects = [
     summary("proj-upstream", "English Source"),
@@ -1150,6 +1161,31 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     expect(linkProjectSource.mock.calls[0][2]).toMatchObject({
       replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mark-renamed" }],
     })
+  })
+
+  // WHY (AQU-2549): a project linked before still holds the copy that link
+  // made. Offered at first link, picking it met a plain refusal from the
+  // server; the picker now lists only the files the server accepts.
+  it("does not offer a copy an earlier link made as the file to replace", async () => {
+    const user = userEvent.setup()
+    const preview = previewOf("English Source", UPSTREAM_FILES, [])
+    loadLinkSourcePreview.mockResolvedValue({
+      ...preview,
+      ownFiles: [
+        { id: "own-mark-renamed", name: "Mark (BSB)" },
+        { id: "copy-from-earlier-link", name: "MRK (old copy)" },
+      ],
+    })
+    fetchReplaceTargets.mockResolvedValue([{ id: "own-mark-renamed", name: "Mark (BSB)" }])
+    renderSection(700)
+    await pick(user, "English Source")
+
+    const markRow = fileCheckbox("MRK").closest("li") as HTMLElement
+    await user.click(await within(markRow).findByRole("checkbox", { name: /^Replace the source/ }))
+    fireEvent.click(screen.getByRole("combobox", { name: "Your file to replace with MRK" }))
+    const offered = await screen.findAllByRole("option")
+    expect(offered.map((o) => o.textContent)).toEqual(["Mark (BSB)"])
+    expect(fetchReplaceTargets).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream")
   })
 
   // WHY: the whole feature. Turning it on has to say what will happen first,

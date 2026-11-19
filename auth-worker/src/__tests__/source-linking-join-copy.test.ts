@@ -362,3 +362,40 @@ describe("a replace cannot follow into a copy, or into a file that already follo
     expect(JSON.parse((await adoptRaw())!)).toEqual({ files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
   })
 })
+
+describe("GET /link-source/replace-targets at first link (AQU-2549)", () => {
+  const COPY_GD = deterministicDownstreamFileId(DOWN, UP_GD)
+
+  async function targets(sourceProjectId: string = UP): Promise<Response> {
+    return app.request(
+      `/api/v2/projects/${DOWN}/link-source/replace-targets?sourceProjectId=${encodeURIComponent(sourceProjectId)}`,
+      { headers: authHeader(await jwtFor("lead")) },
+      env,
+    )
+  }
+
+  // WHY: a project unlinked and linked again still holds the copy the earlier
+  // link made. The picker listed it, and picking it met a plain 409.
+  it("leaves out a copy an earlier link made, which the link request refuses", async () => {
+    await seedFile(DOWN, COPY_GD, "3 Genesis–Deuteronomy (copy)", "copy", LINES)
+
+    const res = await targets()
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { ownFiles: unknown }).ownFiles).toEqual([
+      { id: OWN_GD, name: "3 Genesis–Deuteronomy" },
+    ])
+
+    const refused = await post("/link-source", {
+      sourceProjectId: UP,
+      mode: "live",
+      consumes: "source",
+      replaceFiles: [{ upstreamFileId: UP_GD, fileId: COPY_GD }],
+    })
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toMatchObject({ reason: "replaceTargetIsCopy" })
+  })
+
+  it("refuses a caller who cannot see the source project", async () => {
+    expect((await targets("proj-2549-unseen")).status).toBe(403)
+  })
+})

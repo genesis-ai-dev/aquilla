@@ -8,7 +8,7 @@
 // be stubbed away with it. The type travels as `import type`, which is erased,
 // so this module depends on nothing at runtime.
 
-import type { LinkSourcePreviewFile } from "./link-source-preview"
+import type { LinkSourcePreview, LinkSourcePreviewFile } from "./link-source-preview"
 
 /**
  * AQU-1561: the two numbers every caller needs off a selection, derived in one
@@ -51,4 +51,21 @@ export function selectedClashNames(
     names.push(f.name)
   }
   return names
+}
+
+/** AQU-2549: the preview with only `ownFiles` left as files a replace can
+ *  follow into, and no same-name default that points anywhere else. `allowed`
+ *  is the server's list (`GET /link-source/copies` or `/replace-targets`). */
+export function onlyJoinableOwnFiles(
+  preview: LinkSourcePreview,
+  allowed: ReadonlyArray<{ id: string }>,
+): LinkSourcePreview {
+  const ok = new Set(allowed.map((f) => f.id))
+  return {
+    ...preview,
+    ownFiles: preview.ownFiles?.filter((f) => ok.has(f.id)),
+    files: preview.files.map(({ clashFileId, ...file }) =>
+      clashFileId !== undefined && ok.has(clashFileId) ? { ...file, clashFileId } : file,
+    ),
+  }
 }

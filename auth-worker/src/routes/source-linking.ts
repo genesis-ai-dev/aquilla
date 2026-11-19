@@ -68,6 +68,7 @@ import {
   loadLinkedFileCopies,
   loadStoppedUpstreamFileIds,
   replaceTargetsProblem,
+  loadReplaceTargetFiles,
   loadUpstreamFileIds,
   matchFilesForReplace,
   parseLinkFileIds,
@@ -897,6 +898,32 @@ sourceLinking.get("/:projectId/link-source/copies", authMiddleware, async (c) =>
   const adoption = await loadLinkAdoption(c.env, projectId)
   const { copies, ownFiles } = await loadLinkedFileCopies(c.env, projectId, link.upstreamId, adoption?.files ?? null)
   return c.json({ projectId, copies, ownFiles })
+})
+
+// AQU-2549: the files a replace from `?sourceProjectId=` may follow into —
+// the link flow's "replace the source in one of my files" list, from the same
+// rule the link request is refused by (`replaceTargetsProblem`), so the picker
+// never offers a copy an earlier link made. The replace record counts only
+// while this project links to that source; a first link starts without one,
+// as `POST /link-source` checks it.
+sourceLinking.get("/:projectId/link-source/replace-targets", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") as string
+  const sourceProjectId = c.req.query("sourceProjectId") ?? ""
+  if (!sourceProjectId || sourceProjectId.length > 256) {
+    return c.json({ error: "sourceProjectId is required" }, 400)
+  }
+  const user = c.get("user")
+  const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
+  if (!role) return c.json({ error: "not found or no access" }, 403)
+  if (role.level < LINK_MIN_ROLE) {
+    return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
+  }
+  const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, sourceProjectId)
+  if (!sourceRole) return c.json({ error: "not found or no access to source project" }, 403)
+  const project = await loadProjectWithSource(c.env, projectId)
+  const adoption = project?.source_project_id === sourceProjectId ? await loadLinkAdoption(c.env, projectId) : null
+  const ownFiles = await loadReplaceTargetFiles(c.env, projectId, sourceProjectId, adoption?.files ?? null)
+  return c.json({ projectId, ownFiles })
 })
 
 const joinCopySchema = z.object({

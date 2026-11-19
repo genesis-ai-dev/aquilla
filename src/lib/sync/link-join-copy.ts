@@ -53,6 +53,26 @@ export async function fetchLinkedFileCopies(
   return { copies: body.copies ?? [], ownFiles: body.ownFiles ?? [] }
 }
 
+/**
+ * AQU-2549: this project's files a replace from `sourceProjectId` may follow
+ * into, as the server decides it (the rule the link request is refused by), so
+ * the first link's picker never offers a copy an earlier link made.
+ */
+export async function fetchReplaceTargets(
+  jwt: string,
+  projectId: string,
+  sourceProjectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<Array<{ id: string; name: string }>> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/link-source/replace-targets?sourceProjectId=${encodeURIComponent(sourceProjectId)}`,
+    { headers: headers(jwt) },
+  )
+  if (!res.ok) throw new UserError(res.status, await res.text().catch(() => ""), "project")
+  const body = (await res.json()) as { ownFiles?: Array<{ id: string; name: string }> }
+  return body.ownFiles ?? []
+}
+
 export interface JoinLinkedCopyResult {
   match: LinkFileMatch
   /** False while the sync is still joining a big file. */

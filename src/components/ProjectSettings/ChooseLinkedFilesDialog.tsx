@@ -87,25 +87,10 @@ import {
 } from "@/lib/sync/archive"
 import { loadLinkSourcePreview, type LinkSourcePreview } from "@/lib/sync/link-source-preview"
 import { fetchLinkedFileCopies } from "@/lib/sync/link-join-copy"
+import { onlyJoinableOwnFiles } from "@/lib/sync/link-file-selection"
 import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-/** AQU-2549: the preview with only `ownFiles` left as files a replace can
- *  follow into, and no same-name default that points anywhere else. */
-function onlyJoinableOwnFiles(
-  preview: LinkSourcePreview,
-  joinable: ReadonlyArray<{ id: string }>,
-): LinkSourcePreview {
-  const ok = new Set(joinable.map((f) => f.id))
-  return {
-    ...preview,
-    ownFiles: preview.ownFiles?.filter((f) => ok.has(f.id)),
-    files: preview.files.map(({ clashFileId, ...file }) =>
-      clashFileId !== undefined && ok.has(clashFileId) ? { ...file, clashFileId } : file,
-    ),
-  }
-}
 
 export interface ChooseLinkedFilesDialogProps {
   projectId: string

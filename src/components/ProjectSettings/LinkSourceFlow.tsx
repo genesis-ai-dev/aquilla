@@ -114,9 +114,11 @@ import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedS
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
 import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import {
+  onlyJoinableOwnFiles,
   selectedClashNames,
   summarizeFileSelection,
 } from "@/lib/sync/link-file-selection"
+import { fetchReplaceTargets } from "@/lib/sync/link-join-copy"
 import {
   loadLinkSourcePreview,
   type LinkSourcePreview,
@@ -310,9 +312,17 @@ export function LinkSourceFlow({
     // No reset needed on entry: `reviewing` only ever goes null → an id (the
     // picker is the one caller, and it is only on screen while `reviewing` is
     // null), and both backToPicker and the retry handler clear these first.
-    void loadLinkSourcePreview(jwt, projectId, reviewing)
-      .then((result) => {
+    // AQU-2549: the files a replace may follow into are the server's answer —
+    // never a copy an earlier link made, which the link request refuses.
+    // Unreadable (a weak network): the full list, and the server's refusal of a
+    // bad pick is the backstop.
+    void Promise.all([
+      loadLinkSourcePreview(jwt, projectId, reviewing),
+      fetchReplaceTargets(jwt, projectId, reviewing).catch(() => null),
+    ])
+      .then(([loaded, allowed]) => {
         if (cancelled) return
+        const result = allowed ? onlyJoinableOwnFiles(loaded, allowed) : loaded
         setPreview(result)
         setSelectedFileIds(new Set(result.files.map((f) => f.id)))
         resetReplace()

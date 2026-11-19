@@ -742,6 +742,43 @@ export async function loadLinkedFileCopies(
   return { copies, ownFiles }
 }
 
+/** AQU-2549: the id a link's copy of each file the source project has or had
+ *  takes here — the files `replaceTargetsProblem` refuses as copies. */
+async function loadEarlierLinkCopyIds(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+): Promise<Set<string>> {
+  const { results } = await env.AQUILLA_PG.prepare("SELECT id FROM files WHERE project_id = ?")
+    .bind(upstreamProjectId)
+    .all<{ id: string }>()
+  return new Set((results ?? []).map((row) => deterministicDownstreamFileId(projectId, row.id)))
+}
+
+/**
+ * AQU-2549: this project's files a replace from `upstreamProjectId` may follow
+ * into, in the project's own order — the picker's list, so it never offers a
+ * file `replaceTargetsProblem` would refuse. Leaves out every copy an earlier
+ * link made and every file already in the replace record.
+ */
+export async function loadReplaceTargetFiles(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<Array<{ id: string; name: string }>> {
+  const copies = await loadEarlierLinkCopyIds(env, projectId, upstreamProjectId)
+  const taken = new Set(Object.values(adoptedFileIdOf ?? {}))
+  const { results } = await env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM files WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at, id",
+  )
+    .bind(projectId)
+    .all<{ id: string; name: string }>()
+  return (results ?? [])
+    .filter((row) => !copies.has(row.id) && !taken.has(row.id))
+    .map((row) => ({ id: row.id, name: row.name }))
+}
+
 /**
  * AQU-2549: why a replace cannot follow into the files it names, or null.
  *
@@ -758,10 +795,7 @@ export async function replaceTargetsProblem(
   pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
   adoptedFileIdOf: Readonly<Record<string, string>> | null,
 ): Promise<{ reason: "replaceTargetIsCopy" | "replaceTargetAlreadyFollows"; error: string } | null> {
-  const { results } = await env.AQUILLA_PG.prepare("SELECT id FROM files WHERE project_id = ?")
-    .bind(upstreamProjectId)
-    .all<{ id: string }>()
-  const copies = new Set((results ?? []).map((row) => deterministicDownstreamFileId(projectId, row.id)))
+  const copies = await loadEarlierLinkCopyIds(env, projectId, upstreamProjectId)
   if (pairs.some((pair) => copies.has(pair.fileId))) {
     return {
       reason: "replaceTargetIsCopy",

@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTimelineOriginPx } from "./timeline-origin"
 import type { ReactNode } from "react"
-import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Plus, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -30,6 +30,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE, useQueueStateValue } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { emptySlotFit } from "@/lib/timeline/empty-slot-fit"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
@@ -2253,13 +2255,15 @@ export function TargetAudioLane({
   // line whose buttons hold focus unfolds its mic and is lifted, like the
   // line under the pointer.
   const [focusSlotKey, setFocusSlotKey] = useState<string | null>(null)
+  // AQU-2663: the narrow line whose one-button menu is open; it stays lit and
+  // lifted while the pointer is in the menu.
+  const [slotMenuKey, setSlotMenuKey] = useState<string | null>(null)
   // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
   // draws over the lanes above and below on a short row. Stage 3 hid it there;
   // it shrinks with the ROW HEIGHT instead, because a compact timeline is
   // exactly when you can see every un-dubbed stretch at once and want to record
-  // into one. It takes no account of how WIDE its region is (Sam, 2026-08-14):
-  // a narrow region gets the same circle, centred and overflowing either side.
-  // See `slotButtonPx`.
+  // into one. On an EMPTY LINE, width decides what is shown (AQU-2663,
+  // `emptySlotFit`): it never overhangs onto the neighbouring clips.
   const { chipH } = useRowMetrics()
 
   // SUB-51: a record button hiding in the empty space under each dub-free
@@ -2297,6 +2301,12 @@ export function TargetAudioLane({
           return [{ cell, leftPx: secToPx(start, pxPerSec), widthPx }]
         })
       : []
+  // AQU-2663: the clips on this track, so a revealed button on a very narrow
+  // line keeps off them. Their full audible span: a clip drawn cut short at
+  // rest only frees more room than this.
+  const clipSpansPx = emptySlots.length
+    ? chips.map((c) => ({ startPx: secToPx(c.geom.start, pxPerSec), endPx: secToPx(c.geom.end, pxPerSec) }))
+    : []
 
   // AQU-2432: for each chip, the chip before it on this track that reaches
   // furthest — a long take can run on past the short one after it, over the
@@ -2420,7 +2430,7 @@ export function TargetAudioLane({
             // selected or hovered — so a narrow line's overhanging pair stays
             // reachable. Under a dragged clip's 2000. At rest (picked or not)
             // nothing is lifted: real clips keep the pointer.
-            ...(hotKey === `empty-${cell.id}` || focusSlotKey === `empty-${cell.id}` ? { zIndex: SLOT_LIFT_Z } : {}),
+            ...([hotKey, focusSlotKey, slotMenuKey].includes(`empty-${cell.id}`) ? { zIndex: SLOT_LIFT_Z } : {}),
           }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
@@ -2440,67 +2450,168 @@ export function TargetAudioLane({
         >
           {/* AQU-2663 (Sam, Nov 19): Make speech is the record button's
               SIBLING — the same slot button, size and hot slot, side by side
-              in one row. On a line narrower than the pair, the pair keeps its
-              size and overhangs centred, as the mic alone always has. A picked
-              or in-progress line keeps its pair lit. */}
+              in one row, centred. What the line offers fits INSIDE it
+              (`emptySlotFit`): too narrow for the pair, ONE button with a
+              menu; too narrow for that, nothing at rest and the button
+              revealed on hover or focus over empty space only. */}
           {(() => {
-            const buttonPx = slotButtonPx(chipH)
-            const iconPx = slotIconPx(buttonPx)
-            const iconStyle = { width: `${iconPx}px`, height: `${iconPx}px` }
+            const key = `empty-${cell.id}`
+            const rowButtonPx = slotButtonPx(chipH)
             const offersSpeech = Boolean(onPickGhost) && Boolean(cell.translated?.trim() || cell.original?.trim())
+            const offersRecord = Boolean(onOpenRecording)
             const busy = offersSpeech && makingSpeechCellIds?.has(cell.id) === true
             const picked = offersSpeech && pickedGhostIds?.has(cell.id) === true
-            // Keyboard focus on the line counts as the pointer being on it.
-            const pointerHere = hotKey === `empty-${cell.id}` || focusSlotKey === `empty-${cell.id}`
-            // A line picked for Make speech, or being made, keeps its ✨
-            // showing with the pointer elsewhere — ALONE, centred on the line,
-            // so picked neighbours never pile up when zoomed out. The mic is
-            // folded (0×0, out of flow, still Tab-reachable) until the pointer
-            // or focus is on the line; then the pair is back, centred. Every
-            // other line shows its pair only on hover. (AQU-2663, agreed Nov 19.)
-            const hot = pointerHere || picked || busy
-            const showMic = Boolean(onOpenRecording) && (pointerHere || !(picked || busy))
-            return (
-              // AQU-2663 spec §3: the PAIR is centred on the line (the slot is
-              // justify-center), mic then ✨ with gap-1; the canvas is forced
-              // LTR. A narrow line's overhang stays reachable because the
-              // hovered line is lifted over the clips (above).
-              <div className="flex shrink-0 items-center gap-1">
-                {onOpenRecording && (
+            const menuOpen = slotMenuKey === key
+            // Keyboard focus on the line, or its open menu, counts as the
+            // pointer being on it.
+            const pointerHere = hotKey === key || focusSlotKey === key || menuOpen
+            const fit = emptySlotFit({
+              lineLeftPx: leftPx,
+              lineWidthPx: widthPx,
+              buttonPx: rowButtonPx,
+              actions: offersRecord && offersSpeech ? 2 : 1,
+              neighbours: clipSpansPx,
+            })
+            const buttonPx = fit.sizePx
+            const iconPx = slotIconPx(buttonPx)
+            const iconStyle = { width: `${iconPx}px`, height: `${iconPx}px` }
+            const speechGlyph = busy ? <Spinner style={iconStyle} /> : <Sparkles style={iconStyle} aria-hidden />
+            const record = () => {
+              onSelect(cell.id)
+              onOpenRecording?.(cell.id)
+            }
+            const pickSpeech = (additive: boolean) => {
+              if (!additive) onSelect(cell.id)
+              onPickGhost?.(cell.id, { additive })
+            }
+
+            if (fit.kind === "pair") {
+              // A line picked for Make speech, or being made, keeps its ✨
+              // showing with the pointer elsewhere — ALONE, centred on the
+              // line. The mic is folded (0×0, out of flow, still
+              // Tab-reachable) until the pointer or focus is on the line;
+              // then the pair is back, centred. (AQU-2663, agreed Nov 19.)
+              const hot = pointerHere || picked || busy
+              const showMic = pointerHere || !(picked || busy)
+              return (
+                <div className="flex shrink-0 items-center gap-1">
                   <TimelineSlotButton
-                    testId={`tl-target-empty-${cell.id}-record`}
+                    testId={`tl-target-${key}-record`}
                     label={t("workspace.targetAudioLane.recordAudio")}
                     hot={hot}
                     sizePx={buttonPx}
                     folded={!showMic}
-                    onClick={() => {
-                      onSelect(cell.id)
-                      onOpenRecording?.(cell.id)
-                    }}
+                    onClick={record}
                   >
                     <Mic style={iconStyle} />
                   </TimelineSlotButton>
-                )}
-                {offersSpeech && (
-                  // AQU-2577: a click picks this line for Make speech and
-                  // generates nothing; Shift, Ctrl or ⌘ adds or removes it.
+                  {/* AQU-2577: a click picks this line for Make speech and
+                      generates nothing; Shift, Ctrl or ⌘ adds or removes it. */}
                   <TimelineSlotButton
-                    testId={`tl-target-empty-${cell.id}-speech`}
+                    testId={`tl-target-${key}-speech`}
                     label={busy ? t("audio.makeSpeech.makingLine") : t("audio.makeSpeech.ghost")}
                     hot={hot}
                     sizePx={buttonPx}
                     pressed={picked}
                     busy={busy}
-                    onClick={(e) => {
-                      const additive = e.shiftKey || e.metaKey || e.ctrlKey
-                      if (!additive) onSelect(cell.id)
-                      onPickGhost?.(cell.id, { additive })
-                    }}
+                    onClick={(e) => pickSpeech(e.shiftKey || e.metaKey || e.ctrlKey)}
                   >
-                    {busy ? <Spinner style={iconStyle} /> : <Sparkles style={iconStyle} aria-hidden />}
+                    {speechGlyph}
                   </TimelineSlotButton>
+                </div>
+              )
+            }
+
+            // ONE button. With both actions it opens a menu; with one it is
+            // that action's own button (a line with no words: the mic).
+            const reveal = fit.kind === "reveal"
+            const hot = pointerHere || (!reveal && (picked || busy))
+            const button = offersRecord && offersSpeech ? (
+              <TimelineSlotButton
+                testId={`tl-target-${key}-menu`}
+                label={busy ? t("audio.makeSpeech.makingLine") : t("workspace.targetAudioLane.slotMenu")}
+                hot={hot}
+                sizePx={buttonPx}
+                folded={reveal && !pointerHere}
+                picked={picked}
+                busy={busy}
+                menu={{
+                  open: menuOpen,
+                  onOpenChange: (open) => setSlotMenuKey((cur) => (open ? key : cur === key ? null : cur)),
+                  content: (
+                    <>
+                      <DropdownMenuItem data-testid={`tl-target-${key}-menu-record`} onClick={record}>
+                        <Mic aria-hidden />
+                        {t("workspace.targetAudioLane.slotMenuRecord")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        data-testid={`tl-target-${key}-menu-speech`}
+                        disabled={busy}
+                        // Shift, Ctrl or ⌘ adds or removes, by mouse or by
+                        // Enter (the menu hands the keyboard event on).
+                        onClick={(e) => pickSpeech(e.shiftKey || e.metaKey || e.ctrlKey)}
+                      >
+                        <Sparkles aria-hidden />
+                        {t("workspace.targetAudioLane.slotMenuMakeSpeech")}
+                      </DropdownMenuItem>
+                    </>
+                  ),
+                }}
+              >
+                {busy || picked ? speechGlyph : <Plus style={iconStyle} aria-hidden />}
+              </TimelineSlotButton>
+            ) : offersRecord ? (
+              <TimelineSlotButton
+                testId={`tl-target-${key}-record`}
+                label={t("workspace.targetAudioLane.recordAudio")}
+                hot={hot}
+                sizePx={buttonPx}
+                folded={reveal && !pointerHere}
+                onClick={record}
+              >
+                <Mic style={iconStyle} />
+              </TimelineSlotButton>
+            ) : (
+              <TimelineSlotButton
+                testId={`tl-target-${key}-speech`}
+                label={busy ? t("audio.makeSpeech.makingLine") : t("audio.makeSpeech.ghost")}
+                hot={hot}
+                sizePx={buttonPx}
+                folded={reveal && !pointerHere}
+                pressed={picked}
+                busy={busy}
+                onClick={(e) => pickSpeech(e.shiftKey || e.metaKey || e.ctrlKey)}
+              >
+                {speechGlyph}
+              </TimelineSlotButton>
+            )
+            if (!reveal) return button
+            // Too narrow even for one button: revealed only, in a box over
+            // the line and the empty space beside it — never a clip — and
+            // clipped to the line's edges when there is no empty space. At
+            // rest a picked or in-progress line shows a thin primary mark
+            // inside its own bounds instead.
+            return (
+              <>
+                {!pointerHere && (picked || busy) && (
+                  <span
+                    data-testid={`tl-target-${key}-mark`}
+                    data-busy={busy ? "true" : undefined}
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute inset-y-1 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary",
+                      busy && "animate-pulse",
+                    )}
+                  />
                 )}
-              </div>
+                <div
+                  data-testid={`tl-target-${key}-box`}
+                  className={cn("absolute inset-y-0 flex items-center justify-center", fit.clipped && "overflow-hidden")}
+                  style={{ left: `${fit.boxLeftPx}px`, width: `${fit.boxWidthPx}px` }}
+                >
+                  {button}
+                </div>
+              </>
             )
           })()}
         </div>

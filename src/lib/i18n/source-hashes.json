@@ -4980,7 +4980,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9945,7 +9948,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14897,7 +14903,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19875,7 +19884,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26128,7 +26140,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32383,7 +32398,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38710,7 +38728,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45084,7 +45105,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51373,7 +51397,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59608,7 +59635,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67848,7 +67878,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76497,7 +76530,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84791,7 +84827,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93460,7 +93499,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102122,7 +102164,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110820,7 +110865,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119504,7 +119552,10 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128180,6 +128231,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
+    "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572"
   }
 }

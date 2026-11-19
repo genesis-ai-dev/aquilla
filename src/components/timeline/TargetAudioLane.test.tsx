@@ -1368,8 +1368,10 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     }
     const centreOf = (boxes: { left: number; right: number }[]) => (boxes[0].left + boxes[boxes.length - 1].right) / 2
 
-    it("centres the pair on the line, on wide and narrow lines", () => {
-      for (const [start, end] of [[30, 36], [30, 30.5]] as const) {
+    it("centres the pair on the line, on wide lines and the narrowest that holds it", () => {
+      // The pair needs 68px: two 28px buttons, the 4px gap, 4px each side.
+      // 1.75s at 40px/s = 70px.
+      for (const [start, end] of [[30, 36], [30, 31.75]] as const) {
         const { unmount } = render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", start, end)] })} />)
         fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
         const { slotW, boxes } = drawnBoxes("c9")
@@ -1566,55 +1568,263 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     })
 
     // The zoomed-out case that overlapped (shot 3d): 25px lines 40px apart,
-    // three picked. At rest each shows one 28px ✨ centred on its line, and no
-    // two of them touch. Boxes computed from the rendered slot, row and button.
-    it("at 25px lines, three picked lines at rest do not overlap", () => {
+    // three picked. Too narrow for the pair, each line shows ONE button that
+    // fits inside it (17px: 25 less 4px each side), lit as picked.
+    it("at 25px lines, three picked lines at rest each show one button inside the line", () => {
       const ids = ["c9", "c10", "c11"]
-      // 0.625s at 40px/s = 25px; starts 1s (40px) apart.
       render(<TargetAudioLane {...wired({
         emptyCells: ids.map((id, i) => worded(id, 30 + i, 30.625 + i)),
         pickedGhostIds: new Set(ids),
       })} />)
-      const boxes = ids.map((id) => {
+      for (const id of ids) {
         const slot = screen.getByTestId(`tl-target-empty-${id}`)
-        const slotL = parseFloat(slot.style.left)
-        const slotW = parseFloat(slot.style.width)
-        expect(slotW).toBeCloseTo(25)
-        const sp = screen.getByTestId(`tl-target-empty-${id}-speech`)
-        const row = sp.parentElement!
-        // A folded mic is out of flow and 0×0: it draws nothing.
-        const buttons = Array.from(row.querySelectorAll("button")).filter((b) => b.getAttribute("data-folded") !== "true")
-        const m = parseFloat(row.style.marginInlineStart || "0")
-        const widths = buttons.map((b) => parseFloat(b.style.width))
-        const rowW = m + widths.reduce((a, b) => a + b, 0) + 4 * (buttons.length - 1)
-        const rowL = slotL + (slotW - rowW) / 2
-        // Every button drawn in that row, as boxes.
-        let x = rowL + m
-        return buttons.map((b, i) => {
-          const box = { id: b.getAttribute("data-testid"), left: x, right: x + widths[i] }
-          x = box.right + 4
-          return box
-        })
-      })
-      for (const row of boxes) expect(row).toHaveLength(1)
-      const flat = boxes.flat()
-      // Each ✨ centred on its line.
-      ids.forEach((id, i) => {
-        const slot = screen.getByTestId(`tl-target-empty-${id}`)
-        expect((flat[i].left + flat[i].right) / 2).toBeCloseTo(parseFloat(slot.style.left) + 12.5)
-      })
-      for (let i = 1; i < flat.length; i++) expect(flat[i].left).toBeGreaterThan(flat[i - 1].right)
+        expect(parseFloat(slot.style.width)).toBeCloseTo(25)
+        const one = screen.getByTestId(`tl-target-empty-${id}-menu`)
+        expect(one.style.width).toBe("17px")
+        expect(one).toHaveAttribute("data-hot", "true")
+        expect(one).toHaveAttribute("data-picked", "true")
+        expect(slot.querySelectorAll("button")).toHaveLength(1)
+        expect(slot.className).toMatch(/\bjustify-center\b/)
+      }
     })
 
-    it("on a narrow line keeps both buttons, at full size, centred and overhanging", () => {
-      // 0.5s at 40px/s = a 20px line, narrower than the pair.
-      render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", 30, 30.5)] })} />)
-      const slot = screen.getByTestId("tl-target-empty-c9")
-      expect(parseFloat(slot.style.width)).toBeCloseTo(20)
-      expect(rec().style.width).toBe("28px")
-      expect(speech().style.width).toBe("28px")
-      expect(slot.className).toMatch(/\bjustify-center\b/)
-      expect(slot.className).not.toMatch(/overflow-hidden/)
+    // AQU-2663 (Sam, Nov 19, shot 2: "This won't do for narrow... chips"):
+    // what a line offers fits INSIDE it. Too narrow for the pair → ONE button
+    // inside the line with a menu (Record, Make speech). Too narrow even for
+    // that → nothing at rest; on hover or keyboard focus it is revealed over
+    // the line and empty space only, never over a neighbouring clip.
+    describe("narrow lines", () => {
+      // 1s at 40px/s = 40px: too narrow for the 68px pair, room for one 28px.
+      const narrow = (id = "c9") => worded(id, 30, 31)
+      // 0.25s = 10px: under the 16px floor plus its margin.
+      const tiny = (id = "c9") => worded(id, 30, 30.25)
+      const one = () => screen.getByTestId("tl-target-empty-c9-menu")
+      const slot = () => screen.getByTestId("tl-target-empty-c9")
+      const glyph = (el: HTMLElement) => el.querySelector("svg")?.getAttribute("class") ?? ""
+
+      it("a line too narrow for the pair shows one button, inside the line", () => {
+        render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+        expect(screen.queryByTestId("tl-target-empty-c9-record")).toBeNull()
+        expect(screen.queryByTestId("tl-target-empty-c9-speech")).toBeNull()
+        expect(slot().querySelectorAll("button")).toHaveLength(1)
+        expect(one().style.width).toBe("28px")
+        expect(parseFloat(one().style.width) + 8).toBeLessThanOrEqual(parseFloat(slot().style.width))
+        expect(one()).toHaveAttribute("aria-haspopup", "menu")
+        expect(one().getAttribute("aria-label")).toBe("Record or make speech for this line")
+        // Invisible at rest like the pair, lit with the pointer on the line.
+        expect(one()).not.toHaveAttribute("data-hot")
+        fireEvent.pointerEnter(slot())
+        expect(one()).toHaveAttribute("data-hot", "true")
+      })
+
+      it("shrinks to fit inside the line, down to 16px", () => {
+        // 0.6s = 24px: 16px plus 4px each side.
+        render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", 30, 30.6)] })} />)
+        expect(one().style.width).toBe("16px")
+        expect(one()).not.toHaveAttribute("data-folded")
+      })
+
+      it("its menu records or picks the line, by mouse", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()] })
+        render(<TargetAudioLane {...props} />)
+        await user.click(one())
+        const items = await screen.findAllByRole("menuitem")
+        expect(items.map((i) => i.textContent)).toEqual(["Record", "Make speech"])
+        await user.click(screen.getByRole("menuitem", { name: "Record" }))
+        expect(props.onOpenRecording).toHaveBeenCalledWith("c9")
+        expect(props.onSelect).toHaveBeenCalledWith("c9")
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
+
+        await user.click(one())
+        await user.click(await screen.findByRole("menuitem", { name: "Make speech" }))
+        expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: false })
+      })
+
+      it("Shift, Ctrl or Cmd on Make speech adds or removes, without selecting", async () => {
+        const user = userEvent.setup()
+        for (const key of ["Shift", "Control", "Meta"]) {
+          const props = wired({ emptyCells: [narrow()] })
+          const { unmount } = render(<TargetAudioLane {...props} />)
+          await user.click(one())
+          const item = await screen.findByRole("menuitem", { name: "Make speech" })
+          await user.keyboard(`{${key}>}`)
+          await user.click(item)
+          await user.keyboard(`{/${key}}`)
+          expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
+          expect(props.onSelect).not.toHaveBeenCalled()
+          unmount()
+        }
+      })
+
+      it("its menu works from the keyboard: Enter or Space opens, arrows move, Esc closes", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()] })
+        render(<TargetAudioLane {...props} />)
+        await user.tab()
+        expect(document.activeElement).toBe(one())
+        expect(one()).toHaveAttribute("data-hot", "true")
+        await user.keyboard("{Enter}")
+        expect(await screen.findByRole("menu")).toBeInTheDocument()
+        await user.keyboard("{Escape}")
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
+        expect(document.activeElement).toBe(one())
+        await user.keyboard(" ")
+        expect(await screen.findByRole("menu")).toBeInTheDocument()
+        // Opened from the keyboard, the first item takes focus.
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Record"))
+        await user.keyboard("{ArrowDown}")
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Make speech"))
+        await user.keyboard("{ArrowUp}")
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Record"))
+        await user.keyboard("{ArrowDown}")
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Make speech"))
+        await user.keyboard("{Enter}")
+        expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: false })
+        expect(props.onOpenRecording).not.toHaveBeenCalled()
+      })
+
+      it("Shift+Enter on Make speech adds or removes from the keyboard too", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()] })
+        render(<TargetAudioLane {...props} />)
+        await user.tab()
+        await user.keyboard("{Enter}")
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Record"))
+        await user.keyboard("{ArrowDown}")
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("Make speech"))
+        await user.keyboard("{Shift>}{Enter}{/Shift}")
+        expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
+        expect(props.onSelect).not.toHaveBeenCalled()
+      })
+
+      it("shows picked and busy on the one button: the primary sparkle, then the spinner", () => {
+        const { rerender } = render(<TargetAudioLane {...wired({ emptyCells: [narrow()], pickedGhostIds: new Set(["c9"]) })} />)
+        expect(one()).toHaveAttribute("data-hot", "true")
+        expect(one()).toHaveAttribute("data-picked", "true")
+        expect(one().className).toMatch(/\btext-primary\b/)
+        expect(glyph(one())).toMatch(/sparkles/)
+        rerender(<TargetAudioLane {...wired({ emptyCells: [narrow()], makingSpeechCellIds: new Set(["c9"]) })} />)
+        expect(one()).toHaveAttribute("data-hot", "true")
+        expect(one()).toHaveAttribute("data-busy", "true")
+        expect(one().getAttribute("aria-label")).toBe("Making this line's speech…")
+        expect(one().querySelector("[class*='animate-spin'], [role='status']")).not.toBeNull()
+      })
+
+      it("while busy, the menu still records but cannot make the speech again", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()], makingSpeechCellIds: new Set(["c9"]) })
+        render(<TargetAudioLane {...props} />)
+        await user.click(one())
+        const make = await screen.findByRole("menuitem", { name: "Make speech" })
+        expect(make).toHaveAttribute("aria-disabled", "true")
+        await user.click(make)
+        expect(props.onPickGhost).not.toHaveBeenCalled()
+      })
+
+      it("a narrow line with no words shows the mic alone, with no menu", () => {
+        const props = wired({ emptyCells: [emptyCell("c9", 30, 31)] })
+        render(<TargetAudioLane {...props} />)
+        expect(screen.queryByTestId("tl-target-empty-c9-menu")).toBeNull()
+        const mic = screen.getByTestId("tl-target-empty-c9-record")
+        expect(mic).not.toHaveAttribute("aria-haspopup")
+        expect(mic.style.width).toBe("28px")
+        fireEvent.click(mic)
+        expect(props.onOpenRecording).toHaveBeenCalledWith("c9")
+      })
+
+      it("draws nothing for a line the person cannot edit", () => {
+        render(<TargetAudioLane {...wired({ emptyCells: [narrow(), tiny("c10")], editable: false, pickedGhostIds: new Set(["c10"]) })} />)
+        expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+        expect(screen.queryByTestId("tl-target-empty-c10")).toBeNull()
+        expect(screen.queryByTestId("tl-target-empty-c10-mark")).toBeNull()
+      })
+
+      describe("too narrow even for one button", () => {
+        // Clips tight against both sides: 20..30s and 30.25..40s.
+        const tight = [item({ startTime: 20, endTime: 30 }, 10000, "c1"), item({ startTime: 30.25, endTime: 40 }, 9750, "c2")]
+        const box = () => screen.getByTestId("tl-target-empty-c9-box")
+        const boxSpan = () => {
+          const l = parseFloat(slot().style.left) + parseFloat(box().style.left)
+          return { left: l, right: l + parseFloat(box().style.width) }
+        }
+
+        it("shows nothing at rest, and still lets Tab reach it", async () => {
+          const user = userEvent.setup()
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()] })} />)
+          expect(one()).toHaveAttribute("data-folded", "true")
+          expect(one()).not.toHaveAttribute("data-hot")
+          expect(screen.queryByTestId("tl-target-empty-c9-mark")).toBeNull()
+          await user.tab()
+          expect(document.activeElement).toBe(one())
+          expect(one()).not.toHaveAttribute("data-folded")
+          expect(one()).toHaveAttribute("data-hot", "true")
+        })
+
+        it("on hover, appears over the line and empty space at 16px, unclipped when there is room", () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: [tight[0]] })} />)
+          fireEvent.pointerEnter(slot())
+          expect(one()).not.toHaveAttribute("data-folded")
+          expect(one().style.width).toBe("16px")
+          // The clip on the left ends at the line's start (1200px): the box
+          // starts there and runs into the empty space on the right.
+          expect(boxSpan()).toEqual({ left: 1200, right: 1216 })
+          expect(box().className).not.toMatch(/overflow-hidden/)
+        })
+
+        it("with clips tight on both sides, is clipped to the line and never covers either", () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: tight })} />)
+          fireEvent.pointerEnter(slot())
+          const c1 = screen.getByTestId("tl-target-c1")
+          const c2 = screen.getByTestId("tl-target-c2")
+          const c1Right = parseFloat(c1.style.left) + parseFloat(c1.style.width)
+          expect(boxSpan().left).toBeGreaterThanOrEqual(c1Right)
+          expect(boxSpan().right).toBeLessThanOrEqual(parseFloat(c2.style.left))
+          expect(boxSpan()).toEqual({ left: 1200, right: 1210 })
+          expect(box().className).toMatch(/\boverflow-hidden\b/)
+        })
+
+        it("a picked line at rest shows a thin primary mark inside the line, not the sparkle", () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: tight, pickedGhostIds: new Set(["c9"]) })} />)
+          const mark = screen.getByTestId("tl-target-empty-c9-mark")
+          expect(slot().contains(mark)).toBe(true)
+          expect(mark.className).toMatch(/\bbg-primary\b/)
+          expect(mark.className).toMatch(/\bpointer-events-none\b/)
+          expect(one()).toHaveAttribute("data-folded", "true")
+          // On hover the button replaces the mark, showing the pick.
+          fireEvent.pointerEnter(slot())
+          expect(screen.queryByTestId("tl-target-empty-c9-mark")).toBeNull()
+          expect(one()).toHaveAttribute("data-picked", "true")
+          expect(glyph(one())).toMatch(/sparkles/)
+        })
+
+        it("a busy line at rest shows the mark as busy; on hover, the spinner", () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], makingSpeechCellIds: new Set(["c9"]) })} />)
+          expect(screen.getByTestId("tl-target-empty-c9-mark")).toHaveAttribute("data-busy", "true")
+          fireEvent.pointerEnter(slot())
+          expect(one()).toHaveAttribute("data-busy", "true")
+        })
+
+        it("is laid out the same in a right-to-left interface", () => {
+          const { unmount } = render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: [tight[0]] })} />)
+          fireEvent.pointerEnter(slot())
+          const ltr = boxSpan()
+          unmount()
+          render(<div dir="rtl"><TargetAudioLane {...wired({ emptyCells: [tiny()], items: [tight[0]] })} /></div>)
+          fireEvent.pointerEnter(slot())
+          expect(boxSpan()).toEqual(ltr)
+        })
+      })
+
+      it("in a right-to-left interface, the one button stays inside the line and its menu lists Record first", async () => {
+        const user = userEvent.setup()
+        render(<div dir="rtl"><TargetAudioLane {...wired({ emptyCells: [narrow()] })} /></div>)
+        expect(slot().className).toMatch(/\bjustify-center\b/)
+        expect(parseFloat(one().style.width) + 8).toBeLessThanOrEqual(parseFloat(slot().style.width))
+        await user.click(one())
+        const items = await screen.findAllByRole("menuitem")
+        expect(items.map((i) => i.textContent)).toEqual(["Record", "Make speech"])
+      })
     })
 
     it("on a short row shrinks with the record button", () => {

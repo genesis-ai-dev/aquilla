@@ -23,6 +23,7 @@
 import type { MouseEvent, ReactNode } from "react"
 
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
 
 export function TimelineSlotButton({
@@ -33,6 +34,8 @@ export function TimelineSlotButton({
   pressed,
   busy = false,
   folded = false,
+  picked = false,
+  menu,
   onClick,
   children,
 }: {
@@ -57,12 +60,20 @@ export function TimelineSlotButton({
    *  stays in the DOM and in the Tab order, so focus can reach it and the
    *  lane can unfold it. */
   folded?: boolean
-  /** Handed the click, for callers that read Shift/Ctrl/⌘. */
-  onClick(e: MouseEvent<HTMLButtonElement>): void
+  /** AQU-2663: shows a pick without being a toggle (the one button on a
+   *  narrow line, whose menu holds the toggle): the same primary glyph and
+   *  outline a pressed toggle gets. */
+  picked?: boolean
+  /** AQU-2663: the button opens this menu instead of acting itself (the one
+   *  button on a line too narrow for the pair). The app's dropdown menu, so
+   *  Enter/Space open it, the arrows move and Esc closes. While it is open
+   *  the tooltip stays shut. */
+  menu?: { open: boolean; onOpenChange(open: boolean): void; content: ReactNode }
+  /** Handed the click, for callers that read Shift/Ctrl/⌘. Unused with `menu`. */
+  onClick?(e: MouseEvent<HTMLButtonElement>): void
   children: ReactNode
 }) {
-  return (
-    <AppTooltip content={label}>
+  const button = (
       <button
         type="button"
         aria-label={label}
@@ -70,13 +81,15 @@ export function TimelineSlotButton({
         data-hot={hot ? "true" : undefined}
         data-busy={busy ? "true" : undefined}
         data-folded={folded ? "true" : undefined}
+        data-picked={picked ? "true" : undefined}
         aria-pressed={pressed}
-        aria-disabled={busy ? true : undefined}
+        // A menu button stays usable while busy: its menu still records.
+        aria-disabled={busy && !menu ? true : undefined}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
-          if (busy) return
-          onClick(e)
+          if (busy || menu) return
+          onClick?.(e)
         }}
         style={folded ? { width: "0px", height: "0px" } : { width: `${sizePx}px`, height: `${sizePx}px` }}
         className={[
@@ -89,11 +102,22 @@ export function TimelineSlotButton({
           // AQU-2663: a toggle's ON state (a line picked for Make speech) is
           // seen, not only announced. Inert on buttons that pass no `pressed`.
           "aria-pressed:text-primary aria-pressed:ring-primary/50",
+          picked ? "text-primary ring-primary/50" : "",
           "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
         ].join(" ")}
       >
         {children}
       </button>
-    </AppTooltip>
+  )
+  if (!menu) return <AppTooltip content={label}>{button}</AppTooltip>
+  return (
+    <DropdownMenu open={menu.open} onOpenChange={menu.onOpenChange}>
+      <AppTooltip content={label} disabled={menu.open}>
+        <DropdownMenuTrigger render={button} />
+      </AppTooltip>
+      <DropdownMenuContent align="center" className="w-auto">
+        {menu.content}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

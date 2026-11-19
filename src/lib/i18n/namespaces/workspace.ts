@@ -522,6 +522,9 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    "workspace.targetAudioLane.slotMenu": "Record or make speech for this line",
+    "workspace.targetAudioLane.slotMenuRecord": "Record",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "Make speech",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.takeValidated": "This take is validated",
@@ -2263,6 +2266,26 @@ export const workspace = defineNamespace({
           "Tooltip/accessible name for the small record-button affordance on " +
           "the target-audio timeline lane — both the corner mic button on an " +
           "existing chip and the button that fills an empty (undubbed) slot.",
+      },
+      "workspace.targetAudioLane.slotMenu": {
+        description:
+          "Tooltip and accessible name of the one small button shown on an empty " +
+          "line of the target-audio timeline track when the line is too narrow for " +
+          "the record button and the make-speech button side by side. Clicking it " +
+          "opens a two-item menu: record this line, or make its speech with a voice.",
+      },
+      "workspace.targetAudioLane.slotMenuRecord": {
+        description:
+          "Menu item in that small menu on a narrow empty timeline line: opens the " +
+          "recorder for this line. A verb (record audio), not a noun.",
+        maxLength: 20,
+      },
+      "workspace.targetAudioLane.slotMenuMakeSpeech": {
+        description:
+          "Menu item in that small menu on a narrow empty timeline line: picks this " +
+          "line for the Make speech panel, which generates the line's spoken audio " +
+          "from its text with a synthetic voice. Same wording as the panel's title.",
+        maxLength: 24,
       },
       "workspace.targetAudioLane.runsPastSectionTooltip": {
         description:

@@ -16,6 +16,7 @@ import vm from "node:vm"
 import { describe, expect, it } from "vitest"
 import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
 import { MAX_KB_PDF_FORM_BYTES, readPdfForm } from "../routes/knowledge"
+import { startsAsPdf } from "../routes/parse-document"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
 
 const MB = 1024 * 1024
@@ -96,4 +97,13 @@ describe("reading a Knowledge Base PDF form (AQU-2551)", () => {
     // (one form), so the bar is half a form.
     expect(now.peakMB).toBeLessThan(old.peakMB - now.formMB / 2)
   }, 60_000)
+})
+
+// AQU-2551 re-review finding 9: the server takes the header where pdf.js
+// does, so a PDF the browser read is not refused here as "not a PDF".
+describe("a stored original's PDF header (AQU-2551)", () => {
+  it("is taken after a line break in the first kilobyte", () => {
+    expect(startsAsPdf(new TextEncoder().encode("junk\r\n%PDF-1.4\n"))).toBe(true)
+    expect(startsAsPdf(new TextEncoder().encode("mentions %PDF-1.4 mid-line\n"))).toBe(false)
+  })
 })

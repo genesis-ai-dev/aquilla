@@ -100,6 +100,14 @@ describe("a PDF on the source path", () => {
     const prepared = await prepareImportFile(new File([bom], "report"), { ...PROJECT, cellUnit: "paragraph" })
     expect(prepared.fileType).toBe("pdf")
   })
+
+  // Re-review finding 9 (Nov 14): pdf.js reads a PDF whose header follows a
+  // line break later in the first kilobyte, so the app takes it there too.
+  it("takes the PDF header after a line break in the first kilobyte", async () => {
+    const junk = new Uint8Array([...new TextEncoder().encode("X-Gateway: scanned\r\n"), ...new Uint8Array(pdfOfParagraphs(["After a junk line."]))])
+    const prepared = await prepareImportFile(new File([junk], "report"), { ...PROJECT, cellUnit: "paragraph" })
+    expect(prepared.fileType).toBe("pdf")
+  })
 })
 
 // ─── a translated PDF ───────────────────────────────────────────────────────

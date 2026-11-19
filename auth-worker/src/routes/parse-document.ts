@@ -20,6 +20,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { unzipSync } from "fflate"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
+import { hasPdfHeader } from "../../../shared/pdf-header"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
 // Ceiling on the whole multipart envelope (AQU-1858). The form used to be
@@ -291,14 +292,11 @@ function decodeTextSpan(decoder: TextDecoder, span: Uint8Array): string {
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
-/** True when the bytes start as a PDF does: "%PDF-" at the very start, after
- *  at most a byte-order mark or whitespace, as PDF readers accept it. Used to
- *  check that an original stored as application/pdf is one (AQU-2551). */
+/** True when the bytes hold a PDF's header where pdf.js takes it (AQU-2551
+ *  re-review finding 9, shared/pdf-header). Used to check that an original
+ *  stored as application/pdf is one (AQU-2551). */
 export function startsAsPdf(bytes: Uint8Array): boolean {
-  let i = 0
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3
-  while (i < bytes.length && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d || bytes[i] === 0x0c || bytes[i] === 0x00)) i++
-  return bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46 && bytes[i + 4] === 0x2d
+  return hasPdfHeader(bytes)
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────

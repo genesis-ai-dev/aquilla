@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button"
 import type { Concept, TermMatchingSettings, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
-import { conceptsForSourceSurface } from "@/lib/terminology/source-lookup"
+import { conceptAnswersSourceSurface, conceptsForSourceSurface } from "@/lib/terminology/source-lookup"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -125,6 +125,14 @@ export interface TermLookupPopoverProps {
   sourceTerm: string
   /** Full concept set to search (caller provides, from subscribed termbases). */
   concepts: Concept[]
+  /**
+   * Concepts OF `concepts` the caller already knows match this occurrence —
+   * the source column found the highlight by matching them. When one of them
+   * answers the lookup, the trigger is decorated without searching the
+   * glossary; the full lookup then runs when the popover opens (AQU-2654).
+   * Optional: without it the lookup decides, as before.
+   */
+  knownConcepts?: readonly Concept[]
   /** Project affix inventory + fold defaults feeding the shared matcher. */
   termMatching?: TermMatchingSettings
   /** Opens a matching concept in the Terminology page. */
@@ -144,9 +152,41 @@ export interface TermLookupPopoverProps {
   anchor?: HTMLElement | null
 }
 
+/**
+ * The popover's body. A component of its own so that the lookup — which
+ * concepts this surface resolves to, AQU-1272's shared-matcher verdict — runs
+ * when the popup mounts, not when the row that holds the trigger draws
+ * (AQU-2654: every highlighted term of every row used to pay for it).
+ */
+function LookupPanels({
+  sourceTerm,
+  concepts,
+  termMatching,
+  onViewConcept,
+}: Pick<TermLookupPopoverProps, "sourceTerm" | "concepts" | "termMatching" | "onViewConcept">) {
+  const t = useT()
+  const matches = conceptsForSourceSurface(sourceTerm, concepts, termMatching)
+  return (
+    <div
+      className="space-y-4"
+      role="tooltip"
+      aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
+    >
+      {matches.map((concept) => (
+        <ConceptPanel
+          key={concept.id}
+          concept={concept}
+          onViewConcept={onViewConcept}
+        />
+      ))}
+    </div>
+  )
+}
+
 export function TermLookupPopover({
   sourceTerm,
   concepts,
+  knownConcepts,
   termMatching,
   onViewConcept,
   children,
@@ -155,15 +195,21 @@ export function TermLookupPopover({
   onOpenChange,
   anchor,
 }: TermLookupPopoverProps) {
-  const t = useT()
   const isControlled = open !== undefined
 
   // AQU-1272: the shared matcher decides, so a prefixed or differently pointed
   // occurrence resolves to its entry like it does for chips and enforcement.
-  const matches = conceptsForSourceSurface(sourceTerm, concepts, termMatching)
+  //
+  // Here only "is there anything to show" is needed. A concept the caller
+  // already matched answers that with the lookup's own per-concept predicate;
+  // the lookup over the whole glossary is the fallback (no hint, or a hinted
+  // concept the lookup turns away, e.g. on an excluded form).
+  const hasMatch =
+    (knownConcepts?.some((concept) => conceptAnswersSourceSurface(sourceTerm, concept, termMatching)) ?? false) ||
+    conceptsForSourceSurface(sourceTerm, concepts, termMatching).length > 0
 
   // No matches → just render trigger with no popover decoration
-  if (matches.length === 0) {
+  if (!hasMatch) {
     return <>{children}</>
   }
 
@@ -173,19 +219,12 @@ export function TermLookupPopover({
       sideOffset={6}
       anchor={anchor ?? undefined}
     >
-      <div
-        className="space-y-4"
-        role="tooltip"
-        aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
-      >
-        {matches.map((concept) => (
-          <ConceptPanel
-            key={concept.id}
-            concept={concept}
-            onViewConcept={onViewConcept}
-          />
-        ))}
-      </div>
+      <LookupPanels
+        sourceTerm={sourceTerm}
+        concepts={concepts}
+        termMatching={termMatching}
+        onViewConcept={onViewConcept}
+      />
     </PopoverContent>
   )
 

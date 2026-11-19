@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "./live-term-check"
+import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions, termRulesOf } from "./live-term-check"
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -123,5 +123,21 @@ describe("mergeBlotInfractions", () => {
     // for the next commit.
     const merged = mergeBlotInfractions([committedTerm, committedUser], [])
     expect(merged).toEqual([committedUser])
+  })
+})
+
+describe("termRulesOf (AQU-2654)", () => {
+  it("is selectTermRules of the map's rules, as one array per map", () => {
+    const rule = (id: string, enabled = true): TranslationRule => ({
+      id, name: id, description: "", severity: "minor", source: "user", scope: "project", enabled,
+      createdAt: "2026-01-01T00:00:00Z",
+      check: { type: "target-forbids", targetPattern: "x" },
+    })
+    const map = new Map([rule("term:a:approved"), rule("user-1"), rule("term:b:approved", false), rule("term:c:approved")].map((r) => [r.id, r]))
+    const rules = termRulesOf(map)
+    expect(rules).toEqual(selectTermRules(map.values()))
+    expect(rules.map((r) => r.id)).toEqual(["term:a:approved", "term:c:approved"])
+    // Shared by every row that holds the same rule map.
+    expect(termRulesOf(map)).toBe(rules)
   })
 })

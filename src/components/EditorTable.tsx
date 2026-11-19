@@ -314,13 +314,14 @@ import {
   waivedKeys as waivedKeysOf,
 } from "@/lib/rules/waivers"
 import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
-import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
+import { termRulesOf, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
-import { findConceptMatches } from "@/lib/terminology/match"
+import { candidateConcepts, findConceptMatches } from "@/lib/terminology/match"
+import { activeConceptsOf } from "@/lib/terminology/source-lookup"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -377,7 +378,7 @@ import {
   idmlPointerSelectionFromPoint,
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
-import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import { findApprovedRenderingMatches } from "@/lib/richtext/terminology-chip-plugin"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import { readLanguageProfile } from "../../db/shared/language-profile"
@@ -5286,10 +5287,9 @@ export function SourceWithTermLookup({
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
-  const activeConcepts = useMemo(
-    () => concepts.filter((c) => c.status === "active"),
-    [concepts],
-  )
+  // AQU-2654: one active list per termbase array, shared by every row — a
+  // filter per row gave each row its own array, and so its own empty caches.
+  const activeConcepts = activeConceptsOf(concepts)
 
   // Match whole terms over the full text with the shared matcher, not
   // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
@@ -5298,19 +5298,32 @@ export function SourceWithTermLookup({
   // popover lights up on the same occurrences as the chips, enforcement and the
   // per-term stats — wildcards (`grac*` → grace/graced), mark folding, the
   // project's affix inventory, extra `match.forms` and `excludedForms` included.
+  //
+  // AQU-2654: only the concepts that CAN match this text are run — the
+  // matcher's candidate index answers that in one pass over the text, so a row
+  // costs what its own terms cost, not the size of the glossary. Each kept
+  // span remembers the concepts that matched exactly it, so the popover knows
+  // it has something to show without looking the surface up again.
   const matches = useMemo(() => {
-    const found: Array<{ start: number; end: number }> = []
-    for (const concept of activeConcepts) {
-      for (const m of findConceptMatches(text, concept, termMatching)) found.push(m)
+    const found: Array<{ start: number; end: number; concept: Concept }> = []
+    for (const concept of candidateConcepts(text, activeConcepts, termMatching)) {
+      for (const m of findConceptMatches(text, concept, termMatching)) {
+        found.push({ start: m.start, end: m.end, concept })
+      }
     }
     // Longest-first at each offset, then drop anything overlapping an already
     // taken span — a highlight may not start inside another one.
     found.sort((a, b) => a.start - b.start || b.end - a.end)
-    const kept: Array<{ start: number; end: number }> = []
+    const kept: Array<{ start: number; end: number; concepts: Concept[] }> = []
     let taken = -1
     for (const m of found) {
+      const last = kept[kept.length - 1]
+      if (last && last.start === m.start && last.end === m.end) {
+        last.concepts.push(m.concept)
+        continue
+      }
       if (m.start < taken) continue
-      kept.push(m)
+      kept.push({ start: m.start, end: m.end, concepts: [m.concept] })
       taken = m.end
     }
     return kept
@@ -5339,7 +5352,7 @@ export function SourceWithTermLookup({
   const parts: React.ReactNode[] = []
   let cursor = 0
   for (let i = 0; i < matches.length; i++) {
-    const { start, end } = matches[i]
+    const { start, end, concepts: matchedConcepts } = matches[i]
     if (start > cursor) {
       parts.push(
         <HighlightedText
@@ -5358,6 +5371,7 @@ export function SourceWithTermLookup({
         key={`term-${i}`}
         sourceTerm={matchedText}
         concepts={activeConcepts}
+        knownConcepts={matchedConcepts}
         termMatching={termMatching}
         onViewConcept={onViewConcept}
       >
@@ -5835,20 +5849,9 @@ export function TargetDecoratedText({
 }) {
   const t = useT()
   const matches = useMemo(() => {
-    const activeConcepts = concepts.filter((concept) => concept.status === "active")
-    if (activeConcepts.length === 0 || !text) return []
-
-    const out: Array<{ start: number; end: number; term: string }> = []
-    for (const concept of activeConcepts) {
-      const approvedRenderings = concept.renderings.filter(
-        (rendering) => rendering.status === "preferred" || rendering.status === "admitted",
-      )
-      for (const rendering of approvedRenderings) {
-        for (const match of findTermMatches(text, rendering.rendering)) {
-          out.push({ ...match, term: concept.sourceTerm })
-        }
-      }
-    }
+    // AQU-2654: every approved rendering of every active concept, but only the
+    // ones that can occur in this text are run (and none is compiled per row).
+    const out = findApprovedRenderingMatches(text, concepts)
     out.sort((a, b) => a.start - b.start || b.end - a.end)
 
     const nonOverlapping: Array<{ start: number; end: number; term: string }> = []
@@ -6773,7 +6776,8 @@ function EditorRow({
   // AQU-664: terminology-only rules, extracted from the shared ruleMap. Used to
   // recompute term violations off the live editor buffer so the inline blot
   // lights up as-you-type instead of after the ~1.2s commit-idle debounce.
-  const enabledTermRules = useMemo(() => selectTermRules(ruleMap.values()), [ruleMap])
+  // AQU-2654: one list per rule map, shared by every row (see termRulesOf).
+  const enabledTermRules = termRulesOf(ruleMap)
 
   // Live terminology infractions computed from the un-committed buffer. Only
   // active while this cell is being edited and a live snapshot has arrived;

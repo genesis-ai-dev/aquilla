@@ -86,7 +86,9 @@ export interface PdfPageContent {
 /** AQU-2680: a tagged list item: bulleted or numbered (from its dropped
  *  label), and how deep it is nested (0 = a top-level item). */
 export interface PdfListItem {
-  kind: "bullet" | "number"
+  /** AQU-2680 review finding 7: "none" for an item with no label (its text
+   *  may carry its own "1)"); the export adds no bullet or number to it. */
+  kind: "bullet" | "number" | "none"
   level: number
   /** AQU-2680 review findings 2, 3 and 7: the dropped label as printed ("1.",
    *  "a)", "1.1.3.", "iv."); none on an item that has no label. */
@@ -470,7 +472,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
         const takesList = role !== "LI" && outer === "LI" && outerList !== undefined
           && !cur!.parts.some((p) => isPiece(p) && p.s.trim() !== "")
         flush()
-        const list = role === "LI" ? { kind: "bullet" as const, level: Math.min(8, Math.max(0, listDepth - 1)) } : takesList ? outerList : undefined
+        const list = role === "LI" ? { kind: "none" as const, level: Math.min(8, Math.max(0, listDepth - 1)) } : takesList ? outerList : undefined
         cur = { role, parts: [], ...(list ? { list } : {}) }
         visit(c, true)
         flush()

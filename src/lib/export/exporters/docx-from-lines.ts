@@ -43,8 +43,9 @@ export interface LinesParagraph {
   /** The paragraph's lines; a break inside a line (a poetry line) is a line too. */
   lines: InlineRun[][]
   /** AQU-2680: a list item (a tagged PDF's), bulleted or numbered, at a depth
-   *  0–8, with the label it was printed with ("a)", "1.1.3."), if known. */
-  list?: { kind: "bullet" | "number"; level: number; label?: string }
+   *  0–8, with the label it was printed with ("a)", "1.1.3."), if known; an
+   *  item of kind "none" had no label and gets no bullet or number. */
+  list?: { kind: "bullet" | "number" | "none"; level: number; label?: string }
   /** AQU-2680: the whole paragraph is bold (italic): a PDF's subtitle, a quotation. */
   bold?: boolean
   italic?: boolean
@@ -53,7 +54,7 @@ export interface LinesParagraph {
 /** AQU-2680: the list item a line's import recorded (`metadata.list`). */
 function listOf(cell: CellData): LinesParagraph["list"] {
   const kind = cell.metadata?.list
-  if (kind !== "bullet" && kind !== "number") return undefined
+  if (kind !== "bullet" && kind !== "number" && kind !== "none") return undefined
   const level = Number(cell.metadata?.listLevel)
   const label = typeof cell.metadata?.listLabel === "string" ? cell.metadata.listLabel.trim() : ""
   return { kind, level: Number.isInteger(level) ? Math.min(8, Math.max(0, level)) : 0, ...(label ? { label } : {}) }
@@ -152,7 +153,7 @@ const NUMBER_FORMATS = ["decimal", "lowerLetter", "lowerRoman"]
 
 type NumberFormat = "decimal" | "lowerLetter" | "upperLetter" | "lowerRoman" | "upperRoman"
 
-/** AQU-2680 review finding 2: a numbered label read: its form (what comes
+/** AQU-2680 review findings 2 and 7: a numbered label read: its form (what comes
  *  before and after the number, and the number's kind) and its value. */
 interface ParsedLabel { format: NumberFormat; value: number; before: string; after: string }
 
@@ -204,7 +205,10 @@ interface NumberedList { numId: number; level: number; start: number; label: Par
 function numberingXml(lists: readonly NumberedList[]): string {
   let nums = `<w:num w:numId="${BULLET_NUM_ID}"><w:abstractNumId w:val="0"/></w:num>`
   for (const list of lists) {
-    nums += `<w:num w:numId="${list.numId}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="${list.level}"><w:startOverride w:val="${list.start}"/></w:lvlOverride></w:num>`
+    const label = list.label
+    // a wide label ("1.1.3.") gets a wider hanging indent
+    const own = label ? lvl(list.level, list.start, label.format, `${label.before}%${list.level + 1}${label.after}`, label.before.length + label.after.length > 2 ? 720 : 360) : ""
+    nums += `<w:num w:numId="${list.numId}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="${list.level}"><w:startOverride w:val="${list.start}"/>${own}</w:lvlOverride></w:num>`
   }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:numbering xmlns:w="${W_NS}">` +
@@ -245,6 +249,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
     const plain = p.lines.flat().map((r) => r.text).join("")
     const rtl = detectStrongTextDirection(plain) === "rtl"
     let numPr = ""
+    let ind = ""
     if (p.list) {
       anyList = true
       const level = p.list.level
@@ -262,15 +267,18 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
         }
         open[level]!.items++
         numPr = `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${open[level]!.numId}"/></w:numPr>`
-      } else {
+      } else if (p.list.kind === "bullet") {
         numPr = `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${BULLET_NUM_ID}"/></w:numPr>`
+      } else {
+        // review finding 7: no label, so no bullet or number; set in line with the items' text
+        ind = `<w:ind w:left="${720 * (level + 1)}"/>`
       }
     }
     prevList = Boolean(p.list)
     const style = p.style ?? (p.list ? "ListParagraph" : null)
-    // the schema's order: style, numbering, then right-to-left
+    // the schema's order: style, numbering, right-to-left, then indent
     const pPr = style || rtl
-      ? `<w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ""}${numPr}${rtl ? "<w:bidi/>" : ""}</w:pPr>`
+      ? `<w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ""}${numPr}${rtl ? "<w:bidi/>" : ""}${ind}</w:pPr>`
       : ""
     const rPr = rtl ? "<w:rPr><w:rtl/></w:rPr>" : ""
     let runs = ""

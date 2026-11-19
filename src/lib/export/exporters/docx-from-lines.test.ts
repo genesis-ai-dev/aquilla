@@ -211,6 +211,31 @@ describe("lists", () => {
     expect(files["word/numbering.xml"]).toContain('<w:num w:numId="2"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="4"/>')
   })
 
+  // AQU-2680 review finding 7: "a)" and "1.1.1." came out as Word's own "1.".
+  it("numbers each list in its label's form: letters, roman numerals, brackets, a section number", () => {
+    const item = (id: string, label: string, level = 0) =>
+      cell({ id, original: id, context: "List Paragraph", paragraphStart: true, metadata: { list: "number", listLevel: level, listLabel: label } })
+    const between = (id: string) => cell({ id, original: `Text ${id}.`, paragraphStart: true })
+    const files = docxFromLinesFiles([
+      item("Ha", "h)"), item("Ia", "i)"), between("1"), item("Roman", "iv."), between("2"), item("Brackets", "(1)"),
+      between("3"), item("Section", "1.1.3."), between("4"), item("Upper", "B."), between("5"), item("UpperRoman", "II.", 1),
+    ])
+    const numbering = files["word/numbering.xml"]
+    const lvlOf = (numId: number) => new RegExp(`<w:num w:numId="${numId}">.*?</w:num>`).exec(numbering)?.[0]
+    expect(lvlOf(2)).toContain('<w:startOverride w:val="8"/><w:lvl w:ilvl="0"><w:start w:val="8"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1)"/>')
+    expect(files["word/document.xml"]).toContain('<w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">Ia</w:t>')
+    expect(lvlOf(3)).toContain('<w:start w:val="4"/><w:numFmt w:val="lowerRoman"/><w:lvlText w:val="%1."/>')
+    expect(lvlOf(4)).toContain('<w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="(%1)"/>')
+    expect(lvlOf(5)).toContain('<w:start w:val="3"/><w:numFmt w:val="decimal"/><w:lvlText w:val="1.1.%1."/>')
+    expect(lvlOf(6)).toContain('<w:start w:val="2"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%1."/>')
+    expect(lvlOf(7)).toContain('<w:lvlOverride w:ilvl="1"><w:startOverride w:val="2"/><w:lvl w:ilvl="1"><w:start w:val="2"/><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%2."/>')
+  })
+
+  it("adds no bullet or number to an item that had no label", () => {
+    const doc = docxFromLinesFiles([cell({ original: "1) Its own number.", context: "List Paragraph", paragraphStart: true, metadata: { list: "none", listLevel: 1 } })])["word/document.xml"]
+    expect(doc).toContain('<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:ind w:left="1440"/></w:pPr><w:r><w:t xml:space="preserve">1) Its own number.</w:t>')
+  })
+
   it("adds no numbering part or list style to a document without lists", () => {
     const files = docxFromLinesFiles(STORY)
     expect(files["word/numbering.xml"]).toBeUndefined()

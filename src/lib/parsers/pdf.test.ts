@@ -394,6 +394,16 @@ describe("lists in a tagged PDF", () => {
     expect(read.strings.map((s) => s.metadata?.listLabel ?? null)).toEqual([null, "\u2022", "o", "\u2022", "1.", "b)", null])
   })
 
+  // AQU-2680 review finding 7: an item with no label got a bullet, so a
+  // "1)" written in its text came out "• 1) …".
+  it("marks an item with no label as having none, and keeps its text", async () => {
+    const read = await extractPdfImport(buildPdf({
+      pages: [{ runs: [{ text: "1) Its own number.", x: 72, y: 760, tag: "b" }] }],
+      structure: [{ role: "Document", children: [{ role: "L", children: [{ role: "LI", children: [{ role: "LBody", id: "b" }] }] }] }],
+    }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.context, s.original, s.metadata?.list])).toEqual([["List Paragraph", "1) Its own number.", "none"]])
+  })
+
   it("marks every sentence of an item on the Sentence setting", async () => {
     const read = await extractPdfImport(listed(), { cellUnit: "sentence" })
     const bread = read.strings.filter((s) => s.metadata?.listLevel === 0 && s.metadata?.list === "bullet").slice(0, 2)

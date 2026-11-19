@@ -116,7 +116,9 @@ export async function fileScopeRefusal(
  * `cell_audio` rows are never hard-deleted, so this is the whole history. A
  * piece needs no third test: it plays its take's url, and its take's row
  * (named by `piece_of`) is itself a row naming the object. Two indexed
- * lookups (`idx_cell_audio_name`, `idx_cell_audio_url`).
+ * lookups (`idx_cell_audio_name`, and `idx_cell_audio_stored_url`, partial on
+ * `frontier-audio://` urls — the predicate is repeated here so the planner
+ * can use it).
  */
 export async function namedByATake(
   db: AquillaDb,
@@ -129,6 +131,7 @@ export async function namedByATake(
       `SELECT 1 AS hit FROM cell_audio WHERE project_id = ? AND file_id = ? AND audio_id = ?
        UNION ALL
        SELECT 1 FROM cell_audio WHERE project_id = ? AND file_id = ? AND url = ?
+         AND url LIKE 'frontier-audio://%'
        LIMIT 1`,
     )
     .bind(projectId, fileId, objectName, projectId, fileId, `frontier-audio://${objectName}`)

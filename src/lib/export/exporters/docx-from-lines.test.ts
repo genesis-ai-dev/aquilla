@@ -133,6 +133,50 @@ describe("a Word document from the lines", () => {
   })
 })
 
+// AQU-2680: a tagged PDF's list items are Word list items, numbered by Word.
+describe("lists", () => {
+  const LIST: CellData[] = [
+    cell({ id: "1", original: "Before.", paragraphStart: true }),
+    cell({ id: "2", original: "Bread", context: "List Paragraph", paragraphStart: true, metadata: { list: "bullet", listLevel: 0 } }),
+    cell({ id: "3", original: "Rye", context: "List Paragraph", paragraphStart: true, metadata: { list: "bullet", listLevel: 1 } }),
+    cell({ id: "4", original: "Wash", context: "List Paragraph", paragraphStart: true, metadata: { list: "number", listLevel: 0 } }),
+    cell({ id: "5", original: "Rinse", context: "List Paragraph", paragraphStart: true, metadata: { list: "number", listLevel: 0 } }),
+    cell({ id: "6", original: "Between.", paragraphStart: true }),
+    cell({ id: "7", original: "Dry", context: "List Paragraph", paragraphStart: true, metadata: { list: "number", listLevel: 0 } }),
+  ]
+
+  it("writes list items as Word list paragraphs, at their level", () => {
+    const doc = docxFromLinesFiles(LIST)["word/document.xml"]
+    expect(doc).toContain('<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">Bread</w:t>')
+    expect(doc).toContain('<w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">Rye</w:t>')
+    expect(doc).toContain('<w:p><w:r><w:t xml:space="preserve">Before.</w:t>')
+  })
+
+  it("numbers each numbered list from 1, and continues the numbers within one list", () => {
+    const files = docxFromLinesFiles(LIST)
+    const numIds = [...files["word/document.xml"].matchAll(/<w:numId w:val="(\d+)"\/><\/w:numPr><\/w:pPr><w:r><w:t xml:space="preserve">(\w+)/g)].map((m) => [m[2], m[1]])
+    expect(numIds).toEqual([["Bread", "1"], ["Rye", "1"], ["Wash", "2"], ["Rinse", "2"], ["Dry", "3"]])
+    expect(files["word/numbering.xml"]).toContain('<w:num w:numId="3"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>')
+    expect(files["word/numbering.xml"]).toContain('<w:numFmt w:val="bullet"/>')
+    expect(files["word/numbering.xml"]).toContain('<w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/>')
+    expect(files["word/styles.xml"]).toContain('w:styleId="ListParagraph"')
+    expect(files["[Content_Types].xml"]).toContain('PartName="/word/numbering.xml"')
+    expect(files["word/_rels/document.xml.rels"]).toContain('Target="numbering.xml"')
+  })
+
+  it("adds no numbering part or list style to a document without lists", () => {
+    const files = docxFromLinesFiles(STORY)
+    expect(files["word/numbering.xml"]).toBeUndefined()
+    expect(files["word/styles.xml"]).not.toContain("ListParagraph")
+    expect(files["[Content_Types].xml"]).not.toContain("numbering")
+  })
+
+  it("reads back in the app's Word import with every item kept", async () => {
+    const back = await reimport(await exportDocxFromLines(LIST))
+    expect(back.map((p) => p.text)).toEqual(["Before.", "Bread", "Rye", "Wash", "Rinse", "Between.", "Dry"])
+  })
+})
+
 describe("a PDF source comes back as Word", () => {
   it("imports a tagged PDF and exports its lines as the same headings and paragraphs", async () => {
     const pdf = pdfOfParagraphs(["# Chapter One", "A first paragraph that is long enough to wrap onto a second line of the page, so the reader joins it.", "A second paragraph."], { tagged: true })

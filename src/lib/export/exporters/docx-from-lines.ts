@@ -15,11 +15,13 @@
 //     the Word, PDF and USFM imports carry (any note kind becomes a footnote);
 //   * a paragraph whose text reads right-to-left is set right-to-left;
 //   * bold and italic marks (`\bd …\bd*`, `\it …\it*`) are bold and
-//     italic runs (AQU-2680).
+//     italic runs (AQU-2680);
+//   * a tagged PDF's list items are Word list items, bulleted or numbered at
+//     their depth, Word doing the numbering (AQU-2680).
 // An untranslated line falls back to its source text, as the other exports do.
 //
 // Valid against the ECMA-376 WordprocessingML schema (document, styles,
-// footnotes, settings); see docx-from-lines.test.ts.
+// footnotes, numbering, settings); see docx-from-lines.test.ts.
 
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -36,6 +38,16 @@ export interface LinesParagraph {
   style: string | null
   /** The paragraph's lines; a break inside a line (a poetry line) is a line too. */
   lines: InlineRun[][]
+  /** AQU-2680: a list item (a tagged PDF's), bulleted or numbered, at a depth 0–8. */
+  list?: { kind: "bullet" | "number"; level: number }
+}
+
+/** AQU-2680: the list item a line's import recorded (`metadata.list`). */
+function listOf(cell: CellData): LinesParagraph["list"] {
+  const kind = cell.metadata?.list
+  if (kind !== "bullet" && kind !== "number") return undefined
+  const level = Number(cell.metadata?.listLevel)
+  return { kind, level: Number.isInteger(level) ? Math.min(8, Math.max(0, level)) : 0 }
 }
 
 /** The lines' text as the export writes it: the translation, else the source. */
@@ -72,7 +84,8 @@ export function linesToParagraphs(cells: readonly CellData[]): LinesParagraph[] 
       last.push({ kind: "text", text: " ", marks: [], roles: [] }, ...runs[0])
       current.lines.push(...runs.slice(1))
     } else {
-      paragraphs.push({ style, lines: runs })
+      const list = style === null ? listOf(cell) : undefined
+      paragraphs.push({ style, lines: runs, ...(list ? { list } : {}) })
     }
     prev = cell
   }
@@ -108,17 +121,66 @@ function runProps(marks: readonly string[], rtl: boolean): string {
 interface Built {
   documentXml: string
   footnotesXml: string | null
+  /** AQU-2680: present only when the document has list items. */
+  numberingXml: string | null
+}
+
+/** AQU-2680: bullets use one list definition (numId 1). Each numbered list,
+ *  a run of list items with no other paragraph between them, gets its own
+ *  numId restarting at 1, so a second list does not carry on the first's
+ *  numbers. */
+const BULLET_NUM_ID = 1
+const BULLETS = ["\u2022", "\u25e6", "\u25aa"]
+const NUMBER_FORMATS = ["decimal", "lowerLetter", "lowerRoman"]
+
+function levels(kind: "bullet" | "number"): string {
+  let out = ""
+  for (let l = 0; l < 9; l++) {
+    const fmt = kind === "bullet" ? "bullet" : NUMBER_FORMATS[l % 3]
+    const text = kind === "bullet" ? BULLETS[l % 3] : `%${l + 1}.`
+    out += `<w:lvl w:ilvl="${l}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${text}"/><w:lvlJc w:val="left"/>` +
+      `<w:pPr><w:ind w:left="${720 * (l + 1)}" w:hanging="360"/></w:pPr></w:lvl>`
+  }
+  return out
+}
+
+function numberingXml(numberedLists: number): string {
+  let nums = `<w:num w:numId="${BULLET_NUM_ID}"><w:abstractNumId w:val="0"/></w:num>`
+  for (let k = 0; k < numberedLists; k++) {
+    nums += `<w:num w:numId="${BULLET_NUM_ID + 1 + k}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`
+  }
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<w:numbering xmlns:w="${W_NS}">` +
+    `<w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>${levels("bullet")}</w:abstractNum>` +
+    `<w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>${levels("number")}</w:abstractNum>` +
+    `${nums}</w:numbering>`
 }
 
 /** The document and footnote parts for these paragraphs. */
 export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
   const footnotes: string[] = []
   const body: string[] = []
+  let anyList = false
+  let numberedLists = 0
+  /** The numId of the numbered list being written, or null outside one. */
+  let numberedId: number | null = null
+  let prevList = false
   for (const p of paragraphs) {
     const plain = p.lines.flat().map((r) => r.text).join("")
     const rtl = detectStrongTextDirection(plain) === "rtl"
-    const pPr = p.style || rtl
-      ? `<w:pPr>${p.style ? `<w:pStyle w:val="${p.style}"/>` : ""}${rtl ? "<w:bidi/>" : ""}</w:pPr>`
+    let numPr = ""
+    if (p.list) {
+      anyList = true
+      if (!prevList) numberedId = null
+      if (p.list.kind === "number" && numberedId === null) numberedId = BULLET_NUM_ID + 1 + numberedLists++
+      const numId = p.list.kind === "number" ? numberedId : BULLET_NUM_ID
+      numPr = `<w:numPr><w:ilvl w:val="${p.list.level}"/><w:numId w:val="${numId}"/></w:numPr>`
+    }
+    prevList = Boolean(p.list)
+    const style = p.style ?? (p.list ? "ListParagraph" : null)
+    // the schema's order: style, numbering, then right-to-left
+    const pPr = style || rtl
+      ? `<w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ""}${numPr}${rtl ? "<w:bidi/>" : ""}</w:pPr>`
       : ""
     const rPr = rtl ? "<w:rPr><w:rtl/></w:rPr>" : ""
     let runs = ""
@@ -151,7 +213,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
     `<w:footnote w:type="separator" w:id="-1"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:separator/></w:r></w:p></w:footnote>` +
     `<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>` +
     `${footnotes.join("")}</w:footnotes>`
-  return { documentXml, footnotesXml }
+  return { documentXml, footnotesXml, numberingXml: anyList ? numberingXml(numberedLists) : null }
 }
 
 const heading = (id: string, name: string, size: number, outline: number | null) =>
@@ -159,7 +221,11 @@ const heading = (id: string, name: string, size: number, outline: number | null)
   `<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240" w:after="120"/>${outline === null ? "" : `<w:outlineLvl w:val="${outline}"/>`}</w:pPr>` +
   `<w:rPr><w:b/><w:bCs/><w:sz w:val="${size}"/><w:szCs w:val="${size}"/></w:rPr></w:style>`
 
-export function stylesXml(lang: string | null): string {
+/** AQU-2680: written only when the document has list items. */
+const LIST_PARAGRAPH_STYLE = `<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:uiPriority w:val="34"/><w:qFormat/>` +
+  `<w:pPr><w:ind w:left="720"/><w:contextualSpacing/></w:pPr></w:style>`
+
+export function stylesXml(lang: string | null, options?: { lists?: boolean }): string {
   const langEl = lang ? `<w:lang w:val="${escapeXml(lang)}"/>` : ""
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:styles xmlns:w="${W_NS}">` +
@@ -178,6 +244,7 @@ export function stylesXml(lang: string | null): string {
     `<w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:style>` +
     `<w:style w:type="character" w:styleId="FootnoteReference"><w:name w:val="footnote reference"/><w:basedOn w:val="DefaultParagraphFont"/><w:uiPriority w:val="99"/><w:unhideWhenUsed/>` +
     `<w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>` +
+    (options?.lists ? LIST_PARAGRAPH_STYLE : "") +
     `</w:styles>`
 }
 
@@ -203,17 +270,19 @@ export interface DocxFromLinesOptions {
 
 /** Every part of the package, by its path. */
 export function docxFromLinesFiles(cells: readonly CellData[], options?: DocxFromLinesOptions): Record<string, string> {
-  const { documentXml, footnotesXml } = buildDocxParts(linesToParagraphs(cells))
+  const { documentXml, footnotesXml, numberingXml } = buildDocxParts(linesToParagraphs(cells))
   const rels = [
     `<Relationship Id="rId1" Type="${R_NS}/styles" Target="styles.xml"/>`,
     `<Relationship Id="rId2" Type="${R_NS}/settings" Target="settings.xml"/>`,
     ...(footnotesXml ? [`<Relationship Id="rId3" Type="${R_NS}/footnotes" Target="footnotes.xml"/>`] : []),
+    ...(numberingXml ? [`<Relationship Id="rId4" Type="${R_NS}/numbering" Target="numbering.xml"/>`] : []),
   ]
   const overrides = [
     `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>`,
     `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>`,
     `<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>`,
     ...(footnotesXml ? [`<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>`] : []),
+    ...(numberingXml ? [`<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>`] : []),
   ]
   const head = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`
   return {
@@ -224,9 +293,10 @@ export function docxFromLinesFiles(cells: readonly CellData[], options?: DocxFro
       `<Relationship Id="rId1" Type="${R_NS}/officeDocument" Target="word/document.xml"/></Relationships>`,
     "word/_rels/document.xml.rels": `${head}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join("")}</Relationships>`,
     "word/document.xml": documentXml,
-    "word/styles.xml": stylesXml(wordLang(options?.lang)),
+    "word/styles.xml": stylesXml(wordLang(options?.lang), { lists: numberingXml !== null }),
     "word/settings.xml": settingsXml(footnotesXml !== null),
     ...(footnotesXml ? { "word/footnotes.xml": footnotesXml } : {}),
+    ...(numberingXml ? { "word/numbering.xml": numberingXml } : {}),
   }
 }
 

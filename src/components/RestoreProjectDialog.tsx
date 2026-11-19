@@ -1,3 +1,4 @@
+import { cloneElement, useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -45,5 +46,31 @@ export function RestoreProjectDialog({ open, onOpenChange, onConfirm }: RestoreP
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Owns the confirmation state so ProjectWorkspace does not take another
+ * useState. The structure ratchet counts every useState in that file.
+ */
+export function RestoreProjectButton({
+  onRestore,
+  children,
+}: {
+  onRestore: () => void | Promise<void>
+  children: ReactElement<{ onClick?: () => void }>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      {cloneElement(children, { onClick: () => setOpen(true) })}
+      <RestoreProjectDialog
+        open={open}
+        onOpenChange={setOpen}
+        onConfirm={() => {
+          void onRestore()
+        }}
+      />
+    </>
   )
 }

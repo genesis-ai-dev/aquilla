@@ -569,7 +569,7 @@ import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
-import { RestoreProjectDialog } from "@/components/RestoreProjectDialog"
+import { RestoreProjectButton } from "@/components/RestoreProjectDialog"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -21732,7 +21732,6 @@ interface ArchivedProjectScreenProps {
 function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectScreenProps) {
   const t = useT()
   const { session } = useFrontierSession()
-  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
   const { canRestore, bodyKey, hintKey } = archivedProjectNotice({
     project,
     hasSession: session != null,
@@ -21754,20 +21753,15 @@ function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectS
             {t("workspace.backToDashboard")}
           </Button>
           {canRestore && (
-            <Button onClick={() => setRestoreConfirmOpen(true)}>
-              <Undo2 className="me-1 h-4 w-4" />
-              {t("common.restore")}
-            </Button>
+            <RestoreProjectButton onRestore={onRestore}>
+              <Button>
+                <Undo2 className="me-1 h-4 w-4" />
+                {t("common.restore")}
+              </Button>
+            </RestoreProjectButton>
           )}
         </div>
       </div>
-      <RestoreProjectDialog
-        open={restoreConfirmOpen}
-        onOpenChange={setRestoreConfirmOpen}
-        onConfirm={() => {
-          void onRestore()
-        }}
-      />
     </div>
   )
 }

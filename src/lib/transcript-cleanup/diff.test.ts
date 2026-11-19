@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { diffWhileWriting, diffWriting, hasChanges, type DiffChunk } from "./diff"
+import { __resetStreamingDiffForTests, diffWhileWriting, diffWriting, hasChanges, type DiffChunk } from "./diff"
 
 /** A diff as one line: `[-out-]` `{+in+}`, changed letters in capitals' place
  *  are not shown — this reads the word-level shape only. */
@@ -100,5 +100,31 @@ describe("diffWhileWriting", () => {
   it("leaves trailing heard words pending rather than deleted while the reply is open", () => {
     const cut = diffWhileWriting("yesu akasema amina amina", "Yesu akasema ")
     expect(cut.pending).toBe("amina amina")
+  })
+
+  // AQU-2654: a reply that grows by a word continues the comparison it has
+  // already made instead of redoing every pair of words on every token. The
+  // answer must be the one a comparison from scratch gives, at every point of
+  // the reply, and a reply that is NOT a continuation must not be answered
+  // from the one before it.
+  it("answers a growing reply exactly as a comparison from scratch does", () => {
+    const long = "ni eema akaenda kwa mji kapernaumu na wanafunzi wake wakamfuata hata baharini"
+    const reply = "Ni Yesu akaenda mjini Kapernaumu, na wanafunzi wake wakamfuata hata baharini."
+    const fromScratch = (written: string) => {
+      __resetStreamingDiffForTests()
+      return diffWhileWriting(long, written)
+    }
+    const expected = Array.from({ length: reply.length + 1 }, (_, cut) => fromScratch(reply.slice(0, cut)))
+    __resetStreamingDiffForTests()
+    for (let cut = 0; cut <= reply.length; cut++) {
+      expect(diffWhileWriting(long, reply.slice(0, cut)), `after ${JSON.stringify(reply.slice(0, cut))}`).toEqual(expected[cut])
+    }
+    // A different reply to the same heard text (the row was run again).
+    const other = "ni eema hakuenda "
+    const continued = diffWhileWriting(long, other)
+    expect(continued).toEqual(fromScratch(other))
+    // And the same reply cut shorter than what was last compared.
+    diffWhileWriting(long, reply)
+    expect(diffWhileWriting(long, reply.slice(0, 20))).toEqual(fromScratch(reply.slice(0, 20)))
   })
 })

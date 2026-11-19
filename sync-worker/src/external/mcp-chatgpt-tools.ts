@@ -95,6 +95,12 @@ const descriptions: Record<string, string> = {
     'those instructions are what every drafting prompt reads and this write reaches no prompt: the staged ' +
     'changeset carries an inert_write warning, and the brief document still changes. Show the summary, ' +
     'including any warning, before confirm_changeset.',
+  prepare_orthography_exceptions: 'Stage changes to the words the project spelling rules must leave alone, '
+    + 'within the existing permission checks. Send only the words the user asked to add or remove; the server '
+    + 'merges them into the stored list, so a word someone else decided meanwhile is never dropped. The acting '
+    + 'role decides the outcome and this tool cannot assert it: a contributor proposal is inert until a '
+    + 'maintainer approves it, and removal is maintainer-only. A word already in the state requested is '
+    + 'reported as such, not written twice. Show the summary before confirm_changeset.',
   regenerate_brief_summary: 'Stage a re-render of the translation brief summary from the sections already saved. ' +
     'It adds no content of its own and changes no answers. Use it when a saved brief reports an unrendered summary.',
   read_content: 'Read source and target cells in an authorized file. Use lane to select a target language lane. ' +

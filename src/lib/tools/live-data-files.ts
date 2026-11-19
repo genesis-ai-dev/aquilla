@@ -7,9 +7,13 @@
  *   - a NEW file goes through the bulk /import front door (bulkUploadSource),
  *     the same one every importer uses;
  *   - a REFRESH runs the shared change detection (src/lib/import/change-
- *     detection.ts, lifted out of the Door43 delta) and emits only the
- *     source.cell.create / commit / delete events that differ — so downstream
- *     translations go stale through the normal staleness machinery;
+ *     detection.ts) and emits only the source.cell.create / commit / delete
+ *     events that differ — so downstream translations go stale through the
+ *     normal staleness machinery;
+ *   - a REFRESH of a file whose source side is a revision chain (AQU-2459)
+ *     posts one revision instead, paired by cell key: cells a revision
+ *     inserted do not carry this extension's derived ids, so matching by id
+ *     would delete and re-create them;
  *   - every write carries the extension's tool_origin WITH its server-minted
  *     session, which the sync-worker verifies (and requires for these writes).
  *
@@ -26,8 +30,9 @@ import { bulkUploadSource, type BulkImportCell } from "@/lib/sync/bulk-import"
 import { fetchAllFileCells, fetchCellsByIds, fetchCellsByRef, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import { emitFileExtensionSet, emitFileRename, emitSourceCellCommit, emitSourceCellCreate, emitSourceCellDelete } from "@/lib/sync/events-emit"
+import { postFileRevision } from "@/lib/sync/revision-import"
 import { fetchRawOriginalSource } from "@/lib/sync/source-export"
-import { uploadSourceOriginal } from "@/lib/sync/source-upload"
+import { sha256Hex, uploadSourceOriginal } from "@/lib/sync/source-upload"
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
 import type { SourceArtifactFormat } from "../../../shared/import-contract"
 import { EXTENSION_DATA_ROLE, type FileExtensionKind, type FileExtensionMeta } from "../../../shared/tools/file-extension"
@@ -234,6 +239,14 @@ export class LiveFilesData implements ToolFilesHostData {
       return { fileId, created: true, creates: cells.length, commits: 0, deletes: 0, unchanged: 0, cellIds }
     }
 
+    if (existing.revisioned) {
+      const revised = await this.reviseFile(spec, fileId, cellIds, origin)
+      await this.refreshFileMeta(existing, spec, fileId, extension, origin)
+      this.opts.flush()
+      this.filesCache = null
+      return revised
+    }
+
     // Refresh: classify against the held source rows, emit only the deltas.
     const rows = await fetchAllFileCells(projectId, fileId, await this.token(fileId), "source")
     const held = new Map<string, HeldCellState>()
@@ -278,12 +291,7 @@ export class LiveFilesData implements ToolFilesHostData {
     for (const cellId of changes.deletes) {
       await emitSourceCellDelete({ projectId, fileId, cellId, parentId: held.get(cellId)?.eventId ?? null, author: this.opts.author, toolOrigin: origin })
     }
-    const before = existing.extension ?? null
-    const comparable = (e: FileExtensionMeta | null) => (e?.import ? { ...e, import: { ...e.import, at: 0 } } : e)
-    if (JSON.stringify(comparable(before)) !== JSON.stringify(comparable(extension))) {
-      await emitFileExtensionSet({ projectId, fileId, extension: extension as unknown as Record<string, unknown>, author: this.opts.author, toolOrigin: origin })
-    }
-    if (existing.name !== spec.name) await emitFileRename({ projectId, fileId, name: spec.name, author: this.opts.author })
+    await this.refreshFileMeta(existing, spec, fileId, extension, origin)
     if (spec.raw) {
       await uploadSourceOriginal({
         projectId,
@@ -306,6 +314,96 @@ export class LiveFilesData implements ToolFilesHostData {
       deletes: changes.deletes.length,
       unchanged: changes.unchanged,
       cellIds,
+    }
+  }
+
+  /** A refresh also carries the file's extension metadata and name. */
+  private async refreshFileMeta(
+    existing: FileSummary,
+    spec: ToolFileUpsert,
+    fileId: string,
+    extension: FileExtensionMeta,
+    origin: ToolOrigin,
+  ): Promise<void> {
+    const { projectId } = this.opts
+    const before = existing.extension ?? null
+    const comparable = (e: FileExtensionMeta | null) => (e?.import ? { ...e, import: { ...e.import, at: 0 } } : e)
+    if (JSON.stringify(comparable(before)) !== JSON.stringify(comparable(extension))) {
+      await emitFileExtensionSet({ projectId, fileId, extension: extension as unknown as Record<string, unknown>, author: this.opts.author, toolOrigin: origin })
+    }
+    if (existing.name !== spec.name) await emitFileRename({ projectId, fileId, name: spec.name, author: this.opts.author })
+  }
+
+  /**
+   * AQU-2459: refresh a revisioned file as ONE revision. Units pair by cell
+   * key; `cellKeys` tells the route which key each cell this extension wrote
+   * under its own derived id goes by, so a file that was adopted keeps every
+   * id. The server compares normalized TEXT (decision 0008), so a change to
+   * rich text alone does not move a cell here, unlike the per-cell refresh.
+   * `realign` because the same original can parse differently under the same
+   * extension version (import options); a parse that changes nothing writes
+   * no revision.
+   */
+  private async reviseFile(
+    spec: ToolFileUpsert,
+    fileId: string,
+    cellIds: Record<string, string>,
+    origin: ToolOrigin,
+  ): Promise<ToolUpsertResult> {
+    const { projectId } = this.opts
+    const getToken = (id: string) => this.opts.tokenFor(projectId, id)
+    const units = spec.cells.map((c, i) => ({
+      unitKey: c.key,
+      positional: false,
+      text: c.value,
+      ...(c.html !== undefined ? { html: storedSourceHtml(c.html) } : {}),
+      ...(c.type !== undefined ? { type: c.type } : {}),
+      ...(c.ref !== undefined ? { canonicalRef: c.ref } : {}),
+      sequenceIndex: c.sequenceIndex ?? i,
+      ...(c.metadata !== undefined ? { metadata: c.metadata } : {}),
+    }))
+    const cellKeys: Record<string, string> = {}
+    for (const c of spec.cells) cellKeys[cellIds[c.key]] = c.key
+    // The original when the extension kept one; otherwise the units are the
+    // only artifact there is, and their hash names the revision.
+    const bytes = new TextEncoder().encode(spec.raw ? spec.raw.text : JSON.stringify(units)).buffer as ArrayBuffer
+    const stored = spec.raw
+      ? await uploadSourceOriginal({
+          projectId,
+          fileId,
+          artifactId: uuidv7(),
+          bytes,
+          format: spec.raw.format as SourceArtifactFormat,
+          artifactName: spec.name,
+          updateSourceSidecar: false,
+          getToken,
+        })
+      : null
+    const out = await postFileRevision({
+      projectId,
+      fileId,
+      artifactSha256: stored ? stored.sha256 : await sha256Hex(bytes),
+      revision: {
+        stamp: `extension:${origin.toolId.replace(/[^A-Za-z0-9:._-]/g, "_")}@${origin.version}`,
+        units,
+        cellKeys,
+      },
+      origin: "reimport",
+      ...(stored && spec.raw ? { artifactId: stored.artifactId, rawSourceFormat: spec.raw.format } : {}),
+      realign: true,
+      returnCellIds: true,
+      toolOrigin: origin,
+      getToken,
+    })
+    const counts = out.counts ?? { equal: spec.cells.length, changed: 0, moved: 0, inserted: 0, deleted: 0 }
+    return {
+      fileId,
+      created: false,
+      creates: counts.inserted,
+      commits: counts.changed,
+      deletes: counts.deleted,
+      unchanged: counts.equal + counts.moved,
+      cellIds: out.cellIds ?? cellIds,
     }
   }
 

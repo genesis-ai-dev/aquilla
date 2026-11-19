@@ -467,3 +467,32 @@ describe("?chapter=N — one chapter of a USFM file (AQU-2561)", () => {
     expect(await res?.text()).toBe(THREE_CHAPTERS)
   })
 })
+
+// AQU-730: an org may lower the export floor below Maintainer. The export
+// overlays the requested lane's translation, so a walled member past the
+// floor still needs a grant on that lane.
+describe("export lane read wall", () => {
+  const lowered = () => makeStubDb({ orgSettings: JSON.stringify({ exportMinRole: 400 }) })
+
+  it("403s a contributor with no grant on the lane when the wall is on", async () => {
+    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: lowered(), SNAPSHOTS: makeStubBucket(), LANE_READ_WALL: "1" }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(400), "es"), env)
+    expect(res?.status).toBe(403)
+    expect(await res?.text()).toBe("lane not readable")
+  })
+
+  it("leaves a maintainer, and everyone while the wall is off, as before (404 = gate passed)", async () => {
+    const on: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: lowered(), SNAPSHOTS: makeStubBucket(), LANE_READ_WALL: "1" }
+    expect((await handleExportSourceRequest(exportReq(await makeToken(600), "es"), on))?.status).toBe(404)
+    const off: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: lowered(), SNAPSHOTS: makeStubBucket() }
+    expect((await handleExportSourceRequest(exportReq(await makeToken(400), "es"), off))?.status).toBe(404)
+  })
+
+  it("does not wall the byte-exact original, which carries no translation", async () => {
+    const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: lowered(), SNAPSHOTS: makeStubBucket(), LANE_READ_WALL: "1" }
+    const req = new Request("https://w/api/v1/projects/p1/files/f1/source?mode=raw", {
+      headers: { Authorization: `Bearer ${await makeToken(400)}` },
+    })
+    expect((await handleExportSourceRequest(req, env))?.status).toBe(404)
+  })
+})

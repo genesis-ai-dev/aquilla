@@ -10,7 +10,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { applyCorrections, type CorrectionRule } from "@/lib/audio/transcript-corrections"
-import { CLEANUP_MAX_PAIRS, CLEANUP_MAX_TERMS, type CleanupPair } from "./prompt"
+import { CLEANUP_MAX_PAIRS, CLEANUP_MAX_SAMPLES, CLEANUP_MAX_TERMS, sameWriting, type CleanupPair } from "./prompt"
 
 export interface TranscriptRow {
   cell: CellData
@@ -73,7 +73,10 @@ export function transcriptRowOf(cell: CellData): TranscriptRow | null {
  */
 export function isHumanCorrected(row: TranscriptRow, learned: readonly CorrectionRule[]): boolean {
   if (row.aiCleaned || !row.heard || !row.transcript) return false
-  return loose(row.transcript) !== loose(applyCorrections(row.heard, learned))
+  // `sameWriting`, not a case- and punctuation-blind comparison: a person who
+  // capitalised a name or added the full stops has corrected the transcript,
+  // and that correction is exactly the orthography the next cleanup must copy.
+  return !sameWriting(row.transcript, applyCorrections(row.heard, learned))
 }
 
 const wordSet = (s: string): Set<string> => new Set(loose(s).split(" ").filter(Boolean))
@@ -93,7 +96,7 @@ export function pickCleanupPairs(
   const seen = new Set<string>()
   return rows
     .filter((r) => r !== target && r.isSourceSegment === target.isSourceSegment && r.cell.id !== target.cell.id)
-    .filter((r) => isHumanCorrected(r, learned) || (r.validated && !!r.heard && loose(r.heard) !== loose(r.transcript)))
+    .filter((r) => isHumanCorrected(r, learned) || (r.validated && !!r.heard && !sameWriting(r.heard, r.transcript)))
     .map((r) => {
       let overlap = 0
       for (const w of wordSet(r.heard!)) if (words.has(w)) overlap++
@@ -136,6 +139,30 @@ export function cleanupTerms(concepts: readonly Concept[], isSourceSegment: bool
     if (out.size >= CLEANUP_MAX_TERMS) break
   }
   return [...out].slice(0, CLEANUP_MAX_TERMS).map((term) => ({ term }))
+}
+
+/**
+ * Lines the team has WRITTEN in the language of a take, nearest the row first:
+ * the evidence of the orthography a cleanup has when no transcript has been
+ * corrected yet (a new project's first rows). Nearest, because neighbouring
+ * lines share names and vocabulary.
+ *
+ * Never the row's own line — a take's transcript is compared with the line it
+ * reads to catch misreadings, so the cleanup must not see it (prompt.ts, rule
+ * 3). And none for a source segment: its lane's writing IS its transcripts,
+ * which `pickCleanupPairs` and `pickCorrectedOnly` already offer.
+ */
+export function pickWritingSamples(cells: readonly CellData[], target: TranscriptRow): string[] {
+  if (target.isSourceSegment) return []
+  const at = cells.findIndex((cell) => cell.id === target.cell.id)
+  const seen = new Set<string>()
+  return cells
+    .map((cell, i) => ({ text: cell.translated?.trim().replace(/\s+/g, " ") ?? "", distance: Math.abs(i - at), id: cell.id }))
+    .filter(({ text, id }) => id !== target.cell.id && text.length > 0)
+    .sort((a, b) => a.distance - b.distance)
+    .filter(({ text }) => !seen.has(text) && Boolean(seen.add(text)))
+    .slice(0, CLEANUP_MAX_SAMPLES)
+    .map(({ text }) => text)
 }
 
 /** Source segments only: the transcripts around this one, in order. */

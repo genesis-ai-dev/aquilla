@@ -12,6 +12,7 @@ import {
   PresenceTier2Batcher,
   releaseUserLocks,
   resolveTokenRefresh,
+  stripAppliedRows,
   presenceFrameOwnerConnId,
   presenceFrameAudience,
   presenceSnapshotFor,
@@ -1585,5 +1586,37 @@ describe("releaseUserLocks", () => {
     const result = releaseUserLocks(locks, "demoted", 5_000)
     expect(result.emit).toEqual([])
     expect([...result.locks.keys()]).toEqual(["c1"])
+  })
+})
+
+// AQU-730: `rows` is the cell's text in every lane, and one frame goes to the
+// whole project. A lane-walled socket gets the frame without it.
+describe("stripAppliedRows", () => {
+  const frame: ProjectDoServerMessage = {
+    t: "event.applied",
+    id: "e1",
+    kind: "target.cell.commit",
+    project: "p1",
+    file: "f1",
+    cell: "c1",
+    by: "alice",
+    serverSeq: 42,
+    rows: [],
+  }
+
+  it("drops rows and keeps every other field, so the client refetches by ids", () => {
+    const stripped = stripAppliedRows(frame)
+    expect(stripped).not.toHaveProperty("rows")
+    expect(stripped).toEqual({ ...frame, rows: undefined })
+    expect(JSON.parse(JSON.stringify(stripped))).toEqual({
+      t: "event.applied", id: "e1", kind: "target.cell.commit", project: "p1", file: "f1", cell: "c1", by: "alice", serverSeq: 42,
+    })
+  })
+
+  it("returns a frame with no rows, and any other frame, as the same object", () => {
+    const { rows: _rows, ...bare } = frame as Extract<ProjectDoServerMessage, { t: "event.applied" }>
+    expect(stripAppliedRows(bare)).toBe(bare)
+    const released: ProjectDoServerMessage = { t: "lock.released", cellId: "c1", by: { userId: "alice", ts: 1 } }
+    expect(stripAppliedRows(released)).toBe(released)
   })
 })

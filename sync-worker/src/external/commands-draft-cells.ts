@@ -26,6 +26,7 @@ import { fetchIdentity, type IdentityTransport } from './identity-bridge'
 //     a clean named error and NOTHING is staged.
 
 import { ROLE } from '../events/role-policy'
+import { convertOrthography, type OrthographyProfile } from '../../../db/shared/orthography'
 import type { AiDraftProvenance } from '../events/types'
 import { ExternalError } from './errors'
 import type { CommandValidationIssue } from './commands'
@@ -160,6 +161,56 @@ function toProvenance(v: unknown): AiDraftProvenance | undefined {
     return undefined
   }
   return v as AiDraftProvenance
+}
+
+/**
+ * AQU-2642 §2: call site D of the per-lane orthography transform (AQU-2628) —
+ * the drafts the AGENT API asked for, converted before they are staged.
+ *
+ * The parent wired the app's drafting path (`src/lib/completion`, call site
+ * B). DraftCells never passes through it: auth-worker runs the model
+ * server-side and sync-worker materializes the result into SetTranslation
+ * commands, so an agent draft reached the cell in whatever spelling the model
+ * produced — `Yer shaklsiz va boʻm-boʻsh edi…`, zero new letters, and then the
+ * "Old orthography" check underlined the app's own output. Per that check's
+ * contract, a finding on an AI draft is a bug in the drafting call site, and
+ * this is the call site it was pointing at.
+ *
+ * Here and not in auth-worker's model call, because here is where the text
+ * becomes the plan a HUMAN approves: the reviewer reads what will land, not
+ * what the model said. The raw output stays readable through the draft's
+ * `ai_interventions` row, exactly as on the app path.
+ *
+ * The converter is a no-op for a null profile, so a project with no Language
+ * profile orthography pays one null check and nothing else.
+ */
+export function convertDraftsOrthography(
+  drafts: readonly GeneratedDraft[],
+  orthography: OrthographyProfile | null | undefined,
+): GeneratedDraft[] {
+  if (!orthography) return [...drafts]
+  return drafts.map((draft) => {
+    const converted = convertOrthography(draft.value, orthography)
+    if (converted.wordsConverted === 0 && converted.exceptionsApplied === 0) return draft
+    return {
+      ...draft,
+      value: converted.text,
+      // Nothing to stamp when the bridge returned no provenance; the
+      // conversion still stands, it just goes unrecorded rather than
+      // inventing a provenance record the model never produced.
+      ...(draft.aiDraft
+        ? {
+            aiDraft: {
+              ...draft.aiDraft,
+              orthography: {
+                wordsConverted: converted.wordsConverted,
+                exceptionsApplied: converted.exceptionsApplied,
+              },
+            },
+          }
+        : {}),
+    }
+  })
 }
 
 export interface DraftBridgeEnv extends IdentityTransport {

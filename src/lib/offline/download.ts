@@ -127,12 +127,43 @@ const defaultDeps: DownloadProjectDeps = {
   whenStoreVerified: () => import("./store").then((m) => m.whenOfflineStoreVerified()),
 }
 
+/** Cell rows per v2.CellsRemoved when a project's copy is deleted. */
+const REMOVE_CHUNK = 500
+
 /** Deletes every locally held row for a project (cells, files, the project
- *  row itself, its sync cursors, and the offline_projects row) in one commit —
- *  used both for an explicit "Remove offline copy" and to roll back a
- *  failed/aborted download rather than leave a partial copy masquerading as
- *  complete. */
+ *  row itself, its sync cursors, and the offline_projects row) — used both
+ *  for an explicit "Remove offline copy" and to roll back a failed/aborted
+ *  download rather than leave a partial copy masquerading as complete.
+ *
+ *  The cells go first, REMOVE_CHUNK rows per event, then
+ *  v1.OfflineCopyRemoved clears the rest. Deleting a 31k-row Bible file in
+ *  that one event took the page up by 4–5 GB on a persisted store (+0.2–0.5
+ *  GB chunked), enough for macOS to start killing WebKit processes. A rebuild
+ *  skips the chunks along with everything else before the removal
+ *  (replay-skip.ts).
+ *
+ *  That makes the removal several commits, and a quit or WebKit kill can
+ *  persist only some of them. So the row is marked `removing` first: an
+ *  interrupted removal then reads as one recoverInterruptedDownloads finishes
+ *  at the next boot, not as a `ready` copy quietly missing cells. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
+  const row = store.query(tables.offlineProjects.select().where({ projectId }).first())
+  if (row && row.status !== "removing") {
+    store.commit(events.offlineProjectStatusSet({ ...row, status: "removing" }))
+  }
+  const byFile = new Map<string, { cellId: string; side: "source" | "target"; laneKey: string }[]>()
+  for (const { fileId, cellId, side, laneKey } of store.query(
+    tables.cells.select("fileId", "cellId", "side", "laneKey").where({ projectId }),
+  )) {
+    const cells = byFile.get(fileId)
+    if (cells) cells.push({ cellId, side, laneKey })
+    else byFile.set(fileId, [{ cellId, side, laneKey }])
+  }
+  for (const [fileId, cells] of byFile) {
+    for (let i = 0; i < cells.length; i += REMOVE_CHUNK) {
+      store.commit(events.cellsRemoved({ projectId, fileId, cells: cells.slice(i, i + REMOVE_CHUNK) }))
+    }
+  }
   store.commit(events.offlineCopyRemoved({ projectId }))
 }
 
@@ -141,8 +172,9 @@ function deleteProjectRows(store: Store<typeof schema>, projectId: string): void
  * every file, and every cell (both sides) in anchor-chain order. Idempotent —
  * a no-op if the project is `ready` or already downloading in this session.
  * A `downloading` row with no download behind it is one an earlier session
- * left half-done: its partial copy is cleared and the download starts over,
- * so the user can retry without waiting on recoverInterruptedDownloads. Like
+ * left half-done, and a `removing` row is a removal cut off mid-chunks: either
+ * way its partial copy is cleared and the download starts over, so the user
+ * can retry without waiting on recoverInterruptedDownloads. Like
  * recovery, anything short of `ready` waits for the store to be verified
  * first — an unverified store can show a ready project as `downloading`, or
  * not at all, and a failed download's rollback would then wipe a good copy.
@@ -165,7 +197,7 @@ export async function downloadProjectOffline(
   if (getDownloadProgress(projectId) !== null) return
   existing = store.query(tables.offlineProjects.select().where({ projectId }).first())
   if (existing?.status === "ready") return
-  if (existing?.status === "downloading") deleteProjectRows(store, projectId)
+  if (existing?.status === "downloading" || existing?.status === "removing") deleteProjectRows(store, projectId)
 
   store.commit(
     events.offlineProjectStatusSet({ projectId, status: "downloading", syncedAt: null, queueDepth: 0 }),

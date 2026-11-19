@@ -186,6 +186,37 @@ function exceptionProblem(value: unknown, where: string): string | null {
   return null
 }
 
+/**
+ * Null when `word` is usable as an exception, else what is wrong with it. The
+ * same rule a stored exception's `word` passes, exported so a WRITER (the
+ * Agent API's exception merge, AQU-2642) refuses a bad word with the message
+ * the profile validator would have given rather than inventing its own.
+ */
+export function exceptionWordProblem(word: unknown): string | null {
+  return ruleSideProblem(word, 'word')
+}
+
+/**
+ * The comparison form of an exception word: lowercase, apostrophes dropped.
+ * Two spellings that fold the same ARE the same exception to the converter
+ * (`Ishoq`, `Isʼhoq` and `IS'HOQ` all protect the same word), so a writer
+ * must dedupe the list on this and never on the raw string.
+ */
+export function foldExceptionWord(word: string): string {
+  return foldWord(word)
+}
+
+/**
+ * `word` with every apostrophe variant replaced by `apostrophe` — rule 3
+ * applied to a word on its way INTO the list, so the stored spelling carries
+ * the profile's own mark whatever the proposer's keyboard typed. The rules
+ * are deliberately NOT applied: an exception exists precisely because they
+ * must not touch this word.
+ */
+export function normalizeExceptionWord(word: string, apostrophe: string): string {
+  return word.replace(APOSTROPHE_RE, apostrophe)
+}
+
 /** Null when `value` is a valid orthography block, else what is wrong with it. */
 export function orthographyProblem(value: unknown): string | null {
   if (!isPlainObject(value)) return 'orthography must be an object'

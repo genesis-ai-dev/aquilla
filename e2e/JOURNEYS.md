@@ -157,7 +157,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | EBL guide import (whole guide + topic/lesson sections) | `e2e/specs/partner-integrations/biblica/import-ebl.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
-| Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
+| Org access lifecycle (multi-path revoke; AQU-435/1107 org Contributor sees no projects). A member removed while the editor is open — directly or because their team was the only path — sees the AQU-2452 refusal once and lands on the org project list, which refetches without that project or its stats (AQU-2455, covered in RTL: `src/components/RevokedOpenProject.test.tsx`; not a new smoke) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
 | Pointed term forms: mark folding, the saved project affix inventory, and a per-form exclusion that survives reload | `e2e/specs/terminology/pointed-term-forms.spec.ts` |
@@ -631,6 +631,8 @@ a simulated provider boundary and a real Aquilla JWT. It does not claim live
 Google Cloud verification. `auth-worker/src/__tests__/oauth-google.test.ts`
 verifies signed provider claims through real Postgres creation/linking and the
 normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
+`e2e/tauri/smoke.spec.ts` covers native callback delivery and rejects credential-bearing links. The worker Google suite passes native callbacks through the shared desktop parser and tests PKCE and replay (AQU-2640).
+`GoogleLoginButton.test.tsx` and `google-login.test.ts` cover start-failure classification, safe fallback messages, and retry (AQU-2640, covered in RTL).
 `src/pages/GoogleLoginReturn.test.tsx` covers separate account-bound analytics
 approval. The existing onboarding/account-switch smoke remains the session
 regression gate. Run the browser matrix with

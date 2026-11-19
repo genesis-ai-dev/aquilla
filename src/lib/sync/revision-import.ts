@@ -84,14 +84,29 @@ export interface RevisionImport {
   stamp: string
   optionsHash?: string
   units: RevisionUnitInput[]
+  /** Which provider wrote it. Defaults to the caller's ("import"). */
+  origin?: RevisionOrigin
+  /** `cellId → unitKey` for cells this provider wrote before the file had
+   *  revisions, so an adopted file pairs by the provider's key. */
+  cellKeys?: Record<string, string>
 }
+
+export type RevisionOrigin = "import" | "reimport" | "dcs"
 
 export interface PostFileRevisionArgs {
   projectId: string
   fileId: string
   artifactSha256: string
   revision: RevisionImport
-  origin?: "import" | "reimport"
+  origin?: RevisionOrigin
+  /** Align and report the counts; write nothing. */
+  dryRun?: boolean
+  /** Re-parse the artifact the head already names (a parser fix). */
+  realign?: boolean
+  /** Ask for `cellIds` (`unitKey → cellId`) in the result. */
+  returnCellIds?: boolean
+  /** Smart Extensions: the extension this revision is attributed to. */
+  toolOrigin?: unknown
   /** Re-import only: merged into files.meta with the cells (import manifest,
    *  parserVersion), and the stored artifact the source pointer moves to. */
   file?: BulkImportFileMeta
@@ -112,6 +127,8 @@ export interface FileRevisionResult {
   adopted?: boolean
   counts?: { equal: number; changed: number; moved: number; inserted: number; deleted: number }
   unitCount?: number
+  dryRun?: boolean
+  cellIds?: Record<string, string>
 }
 
 export async function postFileRevision(args: PostFileRevisionArgs): Promise<FileRevisionResult> {
@@ -121,13 +138,18 @@ export async function postFileRevision(args: PostFileRevisionArgs): Promise<File
     artifactSha256: args.artifactSha256,
     stamp: args.revision.stamp,
     ...(args.revision.optionsHash ? { optionsHash: args.revision.optionsHash } : {}),
-    origin: args.origin ?? "import",
+    origin: args.origin ?? args.revision.origin ?? "import",
     units: args.revision.units,
     ...(args.file ? { file: args.file } : {}),
     ...(args.artifactId && args.rawSourceFormat
       ? { artifactId: args.artifactId, rawSourceFormat: args.rawSourceFormat }
       : {}),
     ...(args.finalizeFollows ? { finalizeFollows: true } : {}),
+    ...(args.revision.cellKeys ? { cellKeys: args.revision.cellKeys } : {}),
+    ...(args.dryRun ? { dryRun: true } : {}),
+    ...(args.realign ? { realign: true } : {}),
+    ...(args.returnCellIds ? { returnCellIds: true } : {}),
+    ...(args.toolOrigin !== undefined ? { toolOrigin: args.toolOrigin } : {}),
   })
   let token = await args.getToken(args.fileId)
   for (let attempt = 0; attempt < 2; attempt++) {

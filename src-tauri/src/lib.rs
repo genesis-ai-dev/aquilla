@@ -18,6 +18,8 @@ use tauri::{Manager, WebviewWindowBuilder};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
+        .manage(auth::GoogleCallback::default())
         // Managed before `setup` so the `app://` handler can find it on the first request.
         .manage(hot_bundle::HotBundleState::default())
         .register_uri_scheme_protocol(hot_bundle::SCHEME, hot_bundle::serve_request)
@@ -135,6 +137,10 @@ pub fn run() {
                     titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
+                    auth::cancel_auth_browser,
+                    auth::take_google_callback,
+                    auth::google_login_supported,
+                    auth::google_private_session_supported,
                     auth::simulate_deep_link_callback,
                     connectivity::get_connectivity,
                     connectivity::set_connectivity_probe_url,
@@ -177,6 +183,10 @@ pub fn run() {
                     titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
+                    auth::cancel_auth_browser,
+                    auth::take_google_callback,
+                    auth::google_login_supported,
+                    auth::google_private_session_supported,
                     connectivity::get_connectivity,
                     connectivity::set_connectivity_probe_url,
                     llm_proxy::set_llm_config,

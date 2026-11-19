@@ -1767,9 +1767,13 @@ async function grantProjectMemberOne(
       code: "user_not_found",
       // An email that resolves to nothing is a different situation from a
       // username typo — the person likely has no account yet — and the
-      // invite link is the path that reaches them.
+      // invite link is the path that reaches them. AQU-2638: the lookup only
+      // matches VERIFIED addresses, and this answer is deliberately the same
+      // for "an account uses it but has not verified it", so the message names
+      // every way forward (including verification) and must stay word-for-word
+      // in step with the dropdown's workspace.typeahead.noAccountWithEmail.
       message: looksLikeEmail(username)
-        ? "no Aquilla account has verified that email address — add them by username, or send them an invite link instead"
+        ? "no Aquilla account has verified that email address — add them by username, send them an invite link, or ask them to verify this address in their account settings"
         : "user not found",
     }
   }

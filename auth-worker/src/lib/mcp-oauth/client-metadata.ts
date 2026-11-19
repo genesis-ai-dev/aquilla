@@ -96,11 +96,33 @@ export function isAcceptableRedirectUri(value: unknown): value is string {
   return url.protocol === "http:" && isLoopback(url.hostname)
 }
 
+// The cap is enforced WHILE reading: the document's host is chosen by whoever
+// supplies the client_id, and a chunked response declares no length, so
+// buffering the body first let it grow for the whole fetch timeout before the
+// length was looked at (AQU pen-test finding, 2026-11-18).
 async function readCapped(response: Response): Promise<string | null> {
   const declared = Number(response.headers.get("content-length") ?? "0")
   if (declared > MAX_DOCUMENT_BYTES) return null
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > MAX_DOCUMENT_BYTES) return null
+  if (!response.body) return ""
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_DOCUMENT_BYTES) {
+      await reader.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
   return new TextDecoder().decode(bytes)
 }
 

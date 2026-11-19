@@ -261,7 +261,10 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
         if (!user) throw new Error("Missing migrated account")
         version = user.session_version
       })
-      if (migrated.created) return c.json(await session(c.env, migrated.username, migrated.userId, false, true, version))
+      if (migrated.created) {
+        try { return c.json(await session(c.env, migrated.username, migrated.userId, false, true, version)) }
+        catch { return c.json({ error: "session_failed" }, 503) }
+      }
       // Another importer committed first. Use the current password and session
       // version via the normal linking path, never the stale Frontier proof.
       const refreshed = await accountFor(c.env.AQUILLA_PG, flow)

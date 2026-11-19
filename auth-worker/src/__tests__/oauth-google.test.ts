@@ -333,7 +333,7 @@ describe("Google login boundary", () => {
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM provider_identities").first()).toEqual({ n: 1 })
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM email_verification_tokens").first()).toEqual({ n: 1 })
   })
-  it.each(["nightly first", "nightly during access lookup", "Google first", "provider conflict"])("preserves one legacy identity and atomic grants: %s", async order => {
+  it.each(["nightly first", "nightly during access lookup", "Google first", "provider conflict", "session failure"])("preserves one legacy identity and atomic grants: %s", async order => {
     const code = await handoff()
     const password = "legacy-password-example"
     const source = { id: 701, gitlab_user_id: 77, username: "codex-alice", email: "alice@example.com",
@@ -361,9 +361,20 @@ describe("Google login boundary", () => {
           expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 0 })
       } finally { await env.AQUILLA_PG.exec("DROP TRIGGER reject_google ON provider_identities"); await env.AQUILLA_PG.exec("DROP FUNCTION reject_google()") }
     }
+    if (order === "session failure") {
+      vi.spyOn(JWTService.prototype, "createAccessTokenWithPayload").mockRejectedValueOnce(new Error("signer unavailable"))
+    }
     const response = await post("finish", body)
-    expect(await response.json()).toMatchObject({ username: source.username })
-    expect(response.status).toBe(200)
+    if (order === "session failure") {
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({ error: "session_failed" })
+      vi.stubGlobal("fetch", network)
+      const retry = await post("exchange", { code: await handoff(), verifier })
+      expect(await retry.json()).toMatchObject({ username: source.username, created: false })
+    } else {
+      expect(await response.json()).toMatchObject({ username: source.username })
+      expect(response.status).toBe(200)
+    }
     expect((await nightly()).created).toBe(false)
     for (const table of ["users", "legacy_identity_links", "provider_identities"])
       expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 1 })

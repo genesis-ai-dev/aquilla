@@ -30,12 +30,12 @@ import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
-import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
+import { CellAreaPlaceholder, CellRowsLoadStatus as CellRowsLoadStatusImpl } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
-import { TabStrip } from "./TabStrip"
+import { TabStrip as TabStripImpl } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
@@ -206,7 +206,7 @@ import { ParallelPassagesPanel as ParallelPassagesPanelImpl, type ParallelPanelM
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
-import { StatusBar, statusBarFigure } from "./StatusBar"
+import { StatusBar as StatusBarImpl, statusBarFigure } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
@@ -263,7 +263,7 @@ import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import type { FixPreview, ProposalKind } from "@/lib/rules/autofix"
 import { CommentsDrawer } from "./CommentsDrawer"
-import { NotificationsInbox } from "./NotificationsInbox"
+import { NotificationsInbox as NotificationsInboxImpl } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -296,7 +296,7 @@ import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
-import { HistoryPanel } from "./history/HistoryPanel"
+import { HistoryPanel as HistoryPanelImpl } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
 import { TrackWriteNotes, trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
@@ -462,7 +462,7 @@ import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-st
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
-import { OfflineBanner } from "./OfflineBanner"
+import { OfflineBanner as OfflineBannerImpl } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
@@ -470,11 +470,11 @@ import { AppShell, useIsLgUp } from "./AppShell"
 import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
 import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
-import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
-import { ParatextBridgeBadge } from "@/components/paratext/ParatextBridgeBadge"
+import { DcsSyncBadgeMount as DcsSyncBadgeMountImpl } from "@/components/dcs/DcsSyncBadge"
+import { LangQuestLinkBadge as LangQuestLinkBadgeImpl } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextBridgeBadge as ParatextBridgeBadgeImpl } from "@/components/paratext/ParatextBridgeBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
-import { EditorLayoutSwitch } from "@/components/bible-document/EditorLayoutSwitch"
+import { EditorLayoutSwitch as EditorLayoutSwitchImpl } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
@@ -531,7 +531,7 @@ import { PanelMenuItemsContext, regionControls } from "@/components/timeline/Med
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
-import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
+import { ViewSettingsMenu as ViewSettingsMenuImpl, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
 import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
@@ -586,7 +586,7 @@ import {
   type TextDirection,
 } from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
+import { SystemPromptNudge as SystemPromptNudgeImpl } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -640,7 +640,7 @@ import type { EditorBacktranslationConfig } from "@/components/backtranslation/B
 import { readDraftingSettings } from "../../db/shared/drafting-settings"
 // FRO-192: assignment work-pickup UI
 import { AssignModal as AssignModalImpl } from "./AssignModal"
-import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
+import { ProjectAssignedToMe as ProjectAssignedToMeImpl } from "./ProjectAssignedToMe"
 import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { assignedFileIds } from "@/lib/assignments/assigned-files"
@@ -650,9 +650,9 @@ import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
-import { useStableCallback } from "@/hooks/useStableCallback"
+import { useStableCallback, useChangeSignal } from "@/hooks/useStableCallback"
 import { memoWhileClosed } from "@/components/memoWhileClosed"
-import { useStableValue, mapsEqual } from "@/hooks/useStableValue"
+import { useStableValue, mapsEqual, shallowEqualObjects } from "@/hooks/useStableValue"
 import { ChapterNavTrailingContext, CHAPTER_NAV_TRAILING_OUTLET } from "@/components/ChapterNavTrailingSlot"
 import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import {
@@ -738,7 +738,15 @@ const TranscribeEditor = lazy(() =>
   import("@/components/transcribe/TranscribeEditor").then((m) => ({ default: m.TranscribeEditor })),
 )
 const SetupChecklistDrawer = lazy(() =>
-  import("./onboarding/SetupChecklistDrawer").then((m) => ({ default: m.SetupChecklistDrawer })),
+  import("./onboarding/SetupChecklistDrawer").then((m) => ({
+    // AQU-2654: not re-rendered while closed — except when the project or the
+    // checklist's counts change, which its "setup completed" analytics effect
+    // reads whether or not the drawer is open.
+    default: memoWhileClosed(m.SetupChecklistDrawer, undefined, (previous, next) =>
+      previous.project.id === next.project.id
+      && previous.state.completedCount === next.state.completedCount
+      && previous.state.totalCount === next.state.totalCount),
+  })),
 )
 const ImportCharactersDialog = lazy(() =>
   import("./timeline/ImportCharactersDialog").then((m) => ({ default: memoWhileClosed(m.ImportCharactersDialog) })),
@@ -933,6 +941,29 @@ const LinkVideoTimingDialog = memoWhileClosed(LinkVideoTimingDialogImpl)
 // The sidebar's file list: ~100 components, re-rendered by every workspace
 // render until its props were made stable (see the `handleFileList*` handlers).
 const ExpandableFileList = memo(ExpandableFileListImpl)
+
+// Small children of the workspace whose props are stable (or were made so
+// below): memoized so a workspace render does not re-run them. The workspace
+// itself is not compiled by the React Compiler, so nothing else would.
+const CellRowsLoadStatus = memo(CellRowsLoadStatusImpl)
+const StatusBar = memo(StatusBarImpl)
+const NotificationsInbox = memo(NotificationsInboxImpl)
+const HistoryPanel = memo(HistoryPanelImpl)
+const OfflineBanner = memo(OfflineBannerImpl)
+const DcsSyncBadgeMount = memo(DcsSyncBadgeMountImpl)
+const LangQuestLinkBadge = memo(LangQuestLinkBadgeImpl)
+const ParatextBridgeBadge = memo(ParatextBridgeBadgeImpl)
+const EditorLayoutSwitch = memo(EditorLayoutSwitchImpl)
+const ViewSettingsMenu = memo(ViewSettingsMenuImpl)
+const SystemPromptNudge = memo(SystemPromptNudgeImpl)
+const TabStrip = memo(TabStripImpl)
+const ProjectAssignedToMe = memo(ProjectAssignedToMeImpl)
+// The "Recently deleted" dialog is inline JSX below; its root skips rendering
+// (children and all) while it stays closed.
+const TrashDialog = memoWhileClosed(Dialog)
+
+const fileProgressMapsEqual = (a: Map<string, FileStats>, b: Map<string, FileStats>): boolean =>
+  mapsEqual(a, b, shallowEqualObjects)
 
 type CellAssignmentMap = ReadonlyMap<string, { username: string; scopeLabel: string }>
 const assignmentMapsEqual = (a: CellAssignmentMap, b: CellAssignmentMap): boolean =>
@@ -18238,8 +18269,17 @@ export function ProjectWorkspace() {
     }),
   )
   const handlePlaceChange = useStableCallback((cellId: string) => rememberCell(cellId, "top"))
-  // The sidebar file list is memoized for the same reason; these seven were
-  // its inline arrows, each run only from a click or a finished drag.
+  // The sidebar file list is memoized for the same reason. Its progress map is
+  // rebuilt on every store emit, mostly to the same figures; and the active
+  // file's chapter-health getter is rebuilt on every emit by design (its
+  // identity said "re-read"), which re-rendered the whole list for a grid that
+  // only an EXPANDED file shows. The getter is stable now and the grid
+  // subscribes to `activeChapterHealthSignal` instead.
+  const fileListProgress = useStableValue(editorFileProgress, fileProgressMapsEqual)
+  const getActiveChapterHealthForList = useStableCallback(getActiveChapterHealth)
+  const activeChapterHealthSignal = useChangeSignal([getActiveChapterHealth])
+  // These seven were its inline arrows, each run only from a click or a
+  // finished drag.
   const handleFileListMove = useStableCallback((fileId: string) => {
     setMoveTargetId(fileId)
     setMoveCorpus(project?.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
@@ -18272,6 +18312,63 @@ export function ProjectWorkspace() {
   })
   const handleFileListReorder = useStableCallback((writes: Parameters<typeof handleReorderFiles>[0]) => { void handleReorderFiles(writes) })
   const handleFileListMoveToGroup = useStableCallback((move: Parameters<typeof handleMoveFileToGroup>[0]) => { void handleMoveFileToGroup(move) })
+  // The chapter-row toolbar, the view-settings menu and the layout switch are
+  // memoized children too; these were their inline arrows.
+  const handleToolbarLensChange = useStableCallback((l: EditorLens) => {
+    switchLens(l)
+    if (l === "audio") selectDockTab("voices")
+  })
+  const handleToolbarAgentSelect = useStableCallback(() => openAgentTab("editor"))
+  const handleLayoutSwitchChange = useStableCallback((document: boolean) => {
+    if (activeFileId) setBibleDocumentViewForFile(activeFileId, document)
+  })
+  const handleSourceFontSizeChange = useStableCallback((v: number) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) })
+  const handleTargetFontSizeChange = useStableCallback((v: number) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) })
+  const handleSourceFontSizeReset = useStableCallback(() => { if (activeFileId) clearFileFontSize(activeFileId, "source") })
+  const handleTargetFontSizeReset = useStableCallback(() => { if (activeFileId) clearFileFontSize(activeFileId, "target") })
+  const handleTnSidebarChange = useStableCallback((v: boolean) => {
+    setTnSidebarVisible(v)
+    if (projectId) writeTnSidebarVisible(projectId, v)
+  })
+  const handleNudgeCustomize = useStableCallback(() => setChecklistOpen(true))
+  // The tab strip above the editor, and the left dock's tab rail.
+  const handleCloseTabForStrip = useStableCallback(handleCloseTab)
+  const tabStripSurfaceTabs = useMemo(
+    () => [
+      ...(agentTabOpen && projectId
+        ? [{
+            id: "agent",
+            label: t("nav.dock.agentTab"),
+            active: centerSurface === "agent",
+            onActivate: () => openOverlay("agent"),
+            onClose: closeAgentTab,
+          }]
+        : []),
+    ],
+    [agentTabOpen, projectId, t, centerSurface, openOverlay, closeAgentTab],
+  )
+  const handleDockSurfaceTabToggle = useStableCallback(() => closeAgentTab())
+  const handleDockActiveTabChange = useStableCallback((tab: Parameters<typeof setDockTab>[0]) => {
+    // The Agent rail opens the conversations panel everywhere (v2.2):
+    // beside the workbench it is the conversation list, so no
+    // special case re-focuses the workbench instead.
+    setDockTab(tab)
+    // Opening the Voices tab puts the editor into the Audio lens so
+    // the per-line voice controls show alongside the panel.
+    if (tab === "voices" && lens !== "audio") switchLens("audio")
+  })
+  const notificationFiles = useMemo(
+    () => (project?.files ?? []).map((file) => ({ id: file.id, name: file.name })),
+    [project?.files],
+  )
+  // What the table is handed. `handleClaimCell` is rebuilt whenever the focus
+  // lock is, and the two maps are rebuilt by every health pass, usually with
+  // the entries they already had; the table (and every row's render closure)
+  // re-rendered each time. Only the table's props are stabilised here — every
+  // other reader keeps the live values.
+  const handleClaimCellForTable = useStableCallback(handleClaimCell)
+  const tableInfractions = useStableValue(infractions, mapsEqual)
+  const tableHealthMap = useStableValue(effectiveHealthMap, mapsEqual)
   // (Hooks: these sit above the early returns below. What they call is
   // declared further down, which is fine — each runs from a later click.)
 
@@ -18604,15 +18701,12 @@ export function ProjectWorkspace() {
       layoutSwitch={documentLayoutOffered ? (
         <EditorLayoutSwitch
           document={documentLayoutActive}
-          onChange={(document) => { if (activeFileId) setBibleDocumentViewForFile(activeFileId, document) }}
+          onChange={handleLayoutSwitchChange}
         />
       ) : undefined}
       lens={lens}
-      onLensChange={(l) => {
-        switchLens(l)
-        if (l === "audio") selectDockTab("voices")
-      }}
-      onAgentSelect={() => openAgentTab("editor")}
+      onLensChange={handleToolbarLensChange}
+      onAgentSelect={handleToolbarAgentSelect}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
       checkResult={checkResult}
@@ -18670,14 +18764,11 @@ export function ProjectWorkspace() {
           onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
           onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
           onCellLabelsChange={setCellLabelsEnabled}
-          onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
-          onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
-          onSourceFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "source") }}
-          onTargetFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "target") }}
-          onTnSidebarChange={(v) => {
-            setTnSidebarVisible(v)
-            if (projectId) writeTnSidebarVisible(projectId, v)
-          }}
+          onSourceFontSizeChange={handleSourceFontSizeChange}
+          onTargetFontSizeChange={handleTargetFontSizeChange}
+          onSourceFontSizeReset={handleSourceFontSizeReset}
+          onTargetFontSizeReset={handleTargetFontSizeReset}
+          onTnSidebarChange={handleTnSidebarChange}
         />
       )}
       translateAsReadEnabled={translateAsReadEnabled}
@@ -18767,16 +18858,8 @@ export function ProjectWorkspace() {
             // its rail icon active while it is up; clicking it then (with the
             // conversations panel hidden) closes the workbench.
             surfaceTab={centerSurface === "agent" ? "agent" : null}
-            onSurfaceTabToggle={() => closeAgentTab()}
-            onActiveTabChange={(t) => {
-              // The Agent rail opens the conversations panel everywhere (v2.2):
-              // beside the workbench it is the conversation list, so no
-              // special case re-focuses the workbench instead.
-              setDockTab(t)
-              // Opening the Voices tab puts the editor into the Audio lens so
-              // the per-line voice controls show alongside the panel.
-              if (t === "voices" && lens !== "audio") switchLens("audio")
-            }}
+            onSurfaceTabToggle={handleDockSurfaceTabToggle}
+            onActiveTabChange={handleDockActiveTabChange}
             toolsPanel={extensionsOn ? <ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: fileDisplayName(activeFile) } : undefined} /> : undefined}
             voicesPanel={
               project ? (
@@ -18814,10 +18897,11 @@ export function ProjectWorkspace() {
                   projectId={projectId!}
                   files={project.files}
                   activeFileId={activeFileId}
-                  fileProgress={editorFileProgress}
+                  fileProgress={fileListProgress}
                   lane={activeLane}
                   hasActiveChapters={hasActiveChapters}
-                  getActiveChapterHealth={getActiveChapterHealth}
+                  getActiveChapterHealth={getActiveChapterHealthForList}
+                  activeChapterHealthSignal={activeChapterHealthSignal}
                   // AQU-1326: the sidebar's per-file /progress reads wait for
                   // the editor's first cell page, same gate as the other
                   // secondary reads above.
@@ -18980,7 +19064,7 @@ export function ProjectWorkspace() {
                 projectId={project.id}
                 readerUsername={currentUsername}
                 comments={allProjectComments}
-                files={project.files.map((file) => ({ id: file.id, name: file.name }))}
+                files={notificationFiles}
               />
             )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
@@ -19024,18 +19108,8 @@ export function ProjectWorkspace() {
             activeTabId={centerSurface === "editor" ? workspaceTabs.activeTabId : null}
             files={projectFiles}
             onActivate={workspaceTabs.activateTab}
-            onClose={handleCloseTab}
-            surfaceTabs={[
-              ...(agentTabOpen && projectId
-                ? [{
-                    id: "agent",
-                    label: t("nav.dock.agentTab"),
-                    active: centerSurface === "agent",
-                    onActivate: () => openOverlay("agent"),
-                    onClose: closeAgentTab,
-                  }]
-                : []),
-            ]}
+            onClose={handleCloseTabForStrip}
+            surfaceTabs={tabStripSurfaceTabs}
           />
         }
         beforeMain={
@@ -19105,7 +19179,7 @@ export function ProjectWorkspace() {
               <SystemPromptNudge
                 project={project}
                 onProjectUpdated={handleProjectUpdated}
-                onCustomize={() => setChecklistOpen(true)}
+                onCustomize={handleNudgeCustomize}
               />
             )}
             {/* FRO-214 (orchestrator glue): frozen-project banner — surfaces the
@@ -19978,7 +20052,7 @@ export function ProjectWorkspace() {
             onCompleteSingle={handleCompleteSingle} onPrefetchCompletion={prefetchSingleEvidence} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
             onAlignStyles={handleAlignStyles}
-            healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
+            healthMap={tableHealthMap} infractions={tableInfractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
@@ -20040,7 +20114,7 @@ export function ProjectWorkspace() {
             cellLockHolders={cellLockHolders}
             presenceStore={presenceStore}
             cellsWithRemoteChange={cellsWithRemoteChange}
-            onClaimCell={handleClaimCell}
+            onClaimCell={handleClaimCellForTable}
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
             onNavigateToCell={handleNavigatorCell}
@@ -21379,7 +21453,7 @@ export function ProjectWorkspace() {
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned
           sidebar row (project_lead+); was an inline expander in the files panel. */}
-      <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
+      <TrashDialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{t("nav.sidebarSection.trash")}</DialogTitle></DialogHeader>
           <div className="space-y-0.5">
@@ -21412,7 +21486,7 @@ export function ProjectWorkspace() {
             </p>
           </div>
         </DialogContent>
-      </Dialog>
+      </TrashDialog>
       {moveTargetId !== null && (
         <MoveToCorpusDialog
           // Remount per-open so internal state resets cleanly without an effect.

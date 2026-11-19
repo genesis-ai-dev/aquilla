@@ -23,17 +23,29 @@ import { createElement, memo, useState, type ComponentType, type MemoExoticCompo
  * prop while closed — resets its format when the active file changes, reports
  * analytics when a checklist completes — would get that change late, in the
  * same commit as the open, where effect order can pick a different winner.
- * `ExportDialog`, `ImportDialog`, `AudioRecordingModal` and
- * `SetupChecklistDrawer` are deliberately not wrapped for that reason.
+ * `ExportDialog`, `ImportDialog` and `AudioRecordingModal` are deliberately not
+ * wrapped for that reason; `SetupChecklistDrawer` is, with the two things its
+ * closed-state effect reads passed as `unchangedWhileClosed`.
  */
 export function memoWhileClosed<Props extends object>(
   Component: ComponentType<Props>,
   isOpen: (props: Readonly<Props>) => boolean = openProp,
+  /**
+   * For a dialog that DOES read something while closed (an effect on a prop
+   * other than `open`): return false when that something changed, and the
+   * closed dialog renders for it. Everything else stays skipped.
+   */
+  unchangedWhileClosed: (previous: Readonly<Props>, next: Readonly<Props>) => boolean = alwaysUnchanged,
 ): MemoExoticComponent<ComponentType<Props>> {
-  const Memoized = memo(Component, (previous, next) => !isOpen(previous) && !isOpen(next))
+  const Memoized = memo(
+    Component,
+    (previous, next) => !isOpen(previous) && !isOpen(next) && unchangedWhileClosed(previous, next),
+  )
   Memoized.displayName = `WhileOpen(${Component.displayName || Component.name || "Component"})`
   return Memoized
 }
+
+const alwaysUnchanged = () => true
 
 function openProp(props: object): boolean {
   return Boolean((props as { open?: unknown }).open)

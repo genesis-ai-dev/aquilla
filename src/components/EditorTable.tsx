@@ -111,9 +111,9 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
-  BacktranslationColumnHeader,
+  BacktranslationColumnHeader as BacktranslationColumnHeaderImpl,
   BacktranslationColumnProvider,
-  BacktranslationColumnToggle,
+  BacktranslationColumnToggle as BacktranslationColumnToggleImpl,
   BacktranslationRowCell,
   BacktranslationRowStack,
   useEditorBacktranslationColumn,
@@ -243,7 +243,7 @@ import {
   type MilestoneNavigatorEditing,
 } from "./ChapterNavigator"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
-import { PericopeSuggestions } from "./PericopeSuggestions"
+import { PericopeSuggestions as PericopeSuggestionsImpl } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
 import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
@@ -256,7 +256,7 @@ import {
   useVisibleStyleSegments,
 } from "@/lib/store/visible-style-segments-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
-import { CheckMarks, GutterMarks } from "./table-header-marks"
+import { CheckMarks as CheckMarksImpl, GutterMarks as GutterMarksImpl } from "./table-header-marks"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
 import { getUnsupportedReason } from "./CellAudioRecordButton"
@@ -283,8 +283,8 @@ import {
 } from "@/lib/editor/editor-grid"
 import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
 import {
-  AddBibleMenu,
-  BibleColumnHeaders,
+  AddBibleMenu as AddBibleMenuImpl,
+  BibleColumnHeaders as BibleColumnHeadersImpl,
   BibleColumnsProvider,
   BibleRowCells,
   BibleRowStack,
@@ -850,6 +850,17 @@ const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
 const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+// AQU-2654: the table's column-heading row. The table function is not compiled
+// by the React Compiler, so each of its renders (one per cell activation, one
+// per store emit) re-ran these although their props had not changed.
+const AddBibleMenu = React.memo(AddBibleMenuImpl)
+const BibleColumnHeaders = React.memo(BibleColumnHeadersImpl)
+const BacktranslationColumnHeader = React.memo(BacktranslationColumnHeaderImpl)
+const BacktranslationColumnToggle = React.memo(BacktranslationColumnToggleImpl)
+const PericopeSuggestions = React.memo(PericopeSuggestionsImpl)
+const CheckMarks = React.memo(CheckMarksImpl)
+const GutterMarks = React.memo(GutterMarksImpl)
+
 // AQU-2654: the list's constant props, built once — an inline object or
 // arrow here is a new prop on every table render.
 const cellIdKeyExtractor = (cellId: string) => cellId

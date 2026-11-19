@@ -1,12 +1,17 @@
-import { useMemo, type RefObject, type ReactNode } from "react"
+import { memo, useMemo, type RefObject, type ReactNode } from "react"
 import { Eye, EyeOff, ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
-import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
+import { EditorModeToggle as EditorModeToggleImpl, type EditorLens } from "@/components/EditorModeToggle"
 import { EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS } from "@/components/editor-surface-toolbar"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+// AQU-2654: this toolbar re-renders with the workspace (it is handed elements
+// the workspace builds per render); the lens switch under it need not, now
+// that its two handlers are stable.
+const EditorModeToggle = memo(EditorModeToggleImpl)
 
 /**
  * AQU-1422: the "N hidden" indicator and its reveal toggle, in one control.

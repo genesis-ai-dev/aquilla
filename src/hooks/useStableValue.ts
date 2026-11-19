@@ -31,3 +31,14 @@ export function mapsEqual<K, V>(
   }
   return true
 }
+
+/** Same own keys, and `Object.is` for every value. For small plain records. */
+export function shallowEqualObjects<T extends object>(a: T, b: T): boolean {
+  if (a === b) return true
+  const aKeys = Object.keys(a) as Array<keyof T>
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !Object.is(a[key], b[key])) return false
+  }
+  return true
+}

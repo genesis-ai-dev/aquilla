@@ -74,6 +74,23 @@ describe("memoWhileClosed (AQU-2654)", () => {
   })
 })
 
+describe("memoWhileClosed — a prop the dialog reads while closed (AQU-2654)", () => {
+  it("renders the closed dialog when that prop changes, and for nothing else", () => {
+    const onRender = vi.fn()
+    function Drawer({ done }: { open: boolean; done: number; label: string }) {
+      onRender(done)
+      return null
+    }
+    const Wrapped = memoWhileClosed(Drawer, undefined, (previous, next) => previous.done === next.done)
+    const { rerender } = render(<Wrapped open={false} done={1} label="a" />)
+    rerender(<Wrapped open={false} done={1} label="b" />)
+    expect(onRender).toHaveBeenCalledTimes(1)
+    rerender(<Wrapped open={false} done={2} label="b" />)
+    expect(onRender).toHaveBeenCalledTimes(2)
+    expect(onRender).toHaveBeenLastCalledWith(2)
+  })
+})
+
 describe("mountOnFirstOpen (AQU-2654)", () => {
   it("mounts nothing until the first open, then stays mounted and keeps its state", () => {
     const onRender = vi.fn()

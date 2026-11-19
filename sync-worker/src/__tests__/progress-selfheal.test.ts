@@ -343,22 +343,28 @@ describe('AQU-2145 progress self-heal sweep', () => {
       expect(await laneFileTotal('old', 'kept')).toBe(2)
     })
 
-    it('shares the cap with the audio repairs, a file picked by both counting as audio', async () => {
+    it('shares the cap with the audio repairs, which go first whatever the id order', async () => {
+      // Production, 2026-11-19: 8,688 lane-only files were queued ahead of 195
+      // audio-stale ones purely by project id, at 200 a night. The audio file
+      // here sorts LAST by id and must still be the one a capped run takes.
       await seedLanes(test, P)
-      await seedAudioFile(test, P, 'a-audio')
-      await seedAudioEvent(test, P, 'a-audio', 90)
-      await seedTextFile('b-text', 2)
+      await seedTextFile('a-text', 2)
+      await seedAudioFile(test, P, 'z-audio')
+      await seedAudioEvent(test, P, 'z-audio', 90)
       await test.pg.query(
         `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES ('fr', $1, 'target', 'French', 'French', 2)`,
         [P],
       )
 
+      // `z-audio` is picked by both selectors (no row for any lane, and behind
+      // its audio) and counts once, as audio.
       const first = await sweepStaleAudioProgress(sweepEnv(test), { maxRepairs: 1 })
-      expect(first.repaired.map((r) => r.fileId)).toEqual(['a-audio'])
+      expect(first.repaired.map((r) => r.fileId)).toEqual(['z-audio'])
       expect(first.filesRepaired).toBe(1)
+      expect(first.laneRowsRepaired).toBe(0)
       expect(first.remaining).toBe(1)
       const second = await sweepStaleAudioProgress(sweepEnv(test), { maxRepairs: 1 })
-      expect(second.repaired.map((r) => r.fileId)).toEqual(['b-text'])
+      expect(second.repaired.map((r) => r.fileId)).toEqual(['a-text'])
       expect(second.laneRowsRepaired).toBe(1)
     })
   })

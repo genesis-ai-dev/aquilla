@@ -57,7 +57,6 @@ export function emptySlotFit({
   if (fitsOne >= SLOT_BUTTON_MIN_PX) return { kind: "one", sizePx: fitsOne }
 
   const sizePx = Math.min(buttonPx, SLOT_BUTTON_MIN_PX)
-  const lineRightPx = lineLeftPx + lineWidthPx
   const centre = lineLeftPx + lineWidthPx / 2
   // The empty space around the line, up to the nearest DRAWN clip each side.
   // A clip drawn into the line (a tiny take at its painted minimum) keeps that

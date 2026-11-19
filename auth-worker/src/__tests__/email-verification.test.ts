@@ -133,7 +133,7 @@ describe("email verification", () => {
  * signed in only, newest link wins, and a bounded number of sends.
  */
 describe("resending the verification link", () => {
-  const send = vi.fn(async (_mail: { to: string[]; text: string }) => {})
+  const send = vi.fn(async (_mail: { to: string[]; text?: string }) => ({ messageId: "test" }))
   const testEnv = Object.assign(Object.create(env), { EMAIL: { send } }) as typeof env & {
     EMAIL?: { send: typeof send }
     BASE_URL?: string
@@ -149,13 +149,13 @@ describe("resending the verification link", () => {
 
   /** The plaintext token exists only inside the emailed link. */
   const linkedToken = () =>
-    send.mock.calls.at(-1)![0].text.match(/verify-email\?token=([a-f0-9]+)/)![1]
+    send.mock.calls.at(-1)![0].text!.match(/verify-email\?token=([a-f0-9]+)/)![1]
 
   beforeEach(async () => {
     testEnv.EMAIL = { send }
     testEnv.BASE_URL = "https://aquilla.test"
     send.mockReset()
-    send.mockResolvedValue(undefined)
+    send.mockResolvedValue({ messageId: "test" })
     await seedUser(1, "rver")
     jwt = await jwtFor("rver")
   })

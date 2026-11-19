@@ -6,6 +6,13 @@ import { createOfflineSyncAdapter, MAX_FLUSH_BATCH, type MintToken } from "./syn
 import { __resetConflictsForTests, getConflicts } from "./conflicts"
 import { catchUpProject } from "./catch-up"
 import { isProjectUnavailable, resetProjectAccessForTests } from "./project-access"
+import {
+  forgetStallRescueForTests,
+  isRescuedFromOfflineQueue,
+  holdJournalUntilPersisted,
+  rescueUnpersistedOfflineWrites,
+} from "@/lib/sync/offline-stall-rescue"
+import type { OutboxRecord } from "@/lib/sync/outbox"
 
 // The catch-up pull reads over real HTTP; these tests are about the socket and
 // the flush, so stub it (catch-up.test.ts covers it). The row-mapping helpers
@@ -555,6 +562,189 @@ describe("flush triggering", () => {
     })
 
     adapter.close()
+  })
+
+  it("leaves rows rescued into IndexedDB to the HTTP flusher, without spinning on them", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    queueCommit("q2")
+    // The leader stalled before persisting q1, so it was copied to IndexedDB.
+    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [{ id: "q2" }] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      // q1's IndexedDB copy hasn't uploaded yet.
+      outbox: { has: async (ids) => new Set(ids.filter((id) => id === "q1")), subscribe: () => () => {} },
+    })
+    try {
+      await waitFor(() => fetchImpl.mock.calls.length > 0)
+      await new Promise((r) => setTimeout(r, 50))
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+      const body = JSON.parse(init.body as string) as { events: Array<{ id: string }> }
+      expect(body.events.map((e) => e.id)).toEqual(["q2"])
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("dequeues a rescued row once its IndexedDB copy has uploaded, and not before", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    // A fake outbox: q1 sits in IndexedDB until the HTTP flusher "uploads" it.
+    const inOutbox = new Set(["q1"])
+    const listeners = new Set<() => void>()
+    const outbox = {
+      has: vi.fn(async (ids: readonly string[]) => new Set(ids.filter((id) => inOutbox.has(id)))),
+      subscribe: (cb: () => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    }
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox,
+    })
+    try {
+      await waitFor(() => outbox.has.mock.calls.length > 0)
+      await new Promise((r) => setTimeout(r, 30))
+      // Still in IndexedDB: the row stays, so the edit still counts as unsynced.
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+      expect(isRescuedFromOfflineQueue("q1")).toBe(true)
+
+      inOutbox.delete("q1")
+      for (const cb of listeners) cb()
+      await waitFor(() => store.query(tables.eventQueue.select("id")).length === 0)
+      expect(isRescuedFromOfflineQueue("q1")).toBe(false)
+      // Never sent from the offline queue.
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("after a restart, leaves rows that also have an IndexedDB copy to the HTTP flusher", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    // The leader persisted both before the restart; q1 had also been rescued.
+    queueCommit("q1")
+    queueCommit("q2")
+    expect(isRescuedFromOfflineQueue("q1")).toBe(false)
+
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [{ id: "q2" }] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox: { has: async (ids) => new Set(ids.filter((id) => id === "q1")), subscribe: () => () => {} },
+    })
+    try {
+      await waitFor(() => fetchImpl.mock.calls.length > 0)
+      await new Promise((r) => setTimeout(r, 30))
+      expect(isRescuedFromOfflineQueue("q1")).toBe(true)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+      const body = JSON.parse(init.body as string) as { events: Array<{ id: string }> }
+      expect(body.events.map((e) => e.id)).toEqual(["q2"])
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("forgets a rescued row once a POST that began before the rescue lands it", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+
+    let answer: () => void = () => {}
+    const fetchImpl = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = () => resolve(new Response(JSON.stringify({ accepted: [{ id: "q1" }] }), { status: 200 }))
+        }),
+    )
+    // Once rescued, q1's IndexedDB copy waits to upload, so release keeps the row.
+    let rescued = false
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox: { has: async (ids) => new Set(rescued ? ids : []), subscribe: () => () => {} },
+    })
+    try {
+      await waitFor(() => fetchImpl.mock.calls.length > 0)
+      // The leader stalls mid-POST, and the rescue copies q1.
+      holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+      expect(
+        await rescueUnpersistedOfflineWrites(async () => {
+          rescued = true
+        }),
+      ).toBe(true)
+      expect(isRescuedFromOfflineQueue("q1")).toBe(true)
+
+      answer()
+      await waitFor(() => store.query(tables.eventQueue.select("id")).length === 0)
+      // Nothing left to leave alone, so hasPending is back on its cheap path.
+      await waitFor(() => !isRescuedFromOfflineQueue("q1"))
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("stops watching the outbox once closed", async () => {
+    let subscribed = 0
+    const outbox = {
+      has: async () => new Set<string>(),
+      subscribe: () => {
+        subscribed += 1
+        return () => {
+          subscribed -= 1
+        }
+      },
+    }
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      outbox,
+    })
+    expect(subscribed).toBe(1)
+    adapter.close()
+    expect(subscribed).toBe(0)
   })
 
   it("stops flushing once closed", async () => {

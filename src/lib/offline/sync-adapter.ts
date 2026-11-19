@@ -47,12 +47,16 @@ import {
   type WsReconciler,
 } from "@/lib/sync/ws-reconciler"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { anyRescuedFromOfflineQueue, isRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
 import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
 import { catchUpProject, sameAsLocal, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
 import { markProjectAvailable, withAccessTracking } from "./project-access"
 import { desktopConnectivity, type ConnectivitySource } from "./connectivity"
+import { createRescuedRows, indexedDbOutbox, type RescueOutbox } from "./rescued-rows"
+
+export type { RescueOutbox } from "./rescued-rows"
 
 /** Events per POST. sync-worker refuses more than 500 (413); a week offline can queue thousands. */
 export const MAX_FLUSH_BATCH = 200
@@ -97,6 +101,8 @@ export interface OfflineSyncAdapterOptions {
   catchUpDeps?: CatchUpDeps
   /** While this reports offline, nothing is attempted; coming online flushes. Defaults to the Rust probe. */
   connectivity?: ConnectivitySource
+  /** Test seam for the IndexedDB outbox, which owns rows rescued from a stalled leader. */
+  outbox?: RescueOutbox
 }
 
 export interface OfflineSyncAdapter {
@@ -162,6 +168,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const minFlushRetryMs = options.minFlushRetryMs ?? 2_000
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
   const frameCoalesceMs = options.frameCoalesceMs ?? 100
+  // Rows rescued into IndexedDB when the leader stalled (rescued-rows.ts).
+  const rescuedRows = createRescuedRows(store, projectId, options.outbox ?? indexedDbOutbox)
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -354,7 +362,11 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
 
   // Serialize flushes — a reconnect racing an explicit flushNow() must not
   // POST the same queued rows twice.
-  let flushChain: Promise<void> = Promise.resolve()
+  // The first flush waits until rows rescued before a restart are known
+  // again, or it would send them alongside their IndexedDB copies.
+  let flushChain: Promise<void> = rescuedRows.adopt().catch((err: unknown) => {
+    console.warn("[offline] Couldn't check the queue for rows rescued to IndexedDB", err)
+  })
 
   /**
    * "idle"  — nothing was pending, nothing to reschedule.
@@ -368,9 +380,12 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     // Nothing is written to the store until the server answers: a queue that
     // sits through weeks of failed attempts must not grow the eventlog with
     // each one. An in-flight row is simply one a running flush holds.
+    // A row rescued into IndexedDB when the leader stalled is the HTTP
+    // flusher's to send (offline-stall-rescue.ts); sending it here too would
+    // upload it twice and handle its result twice.
     const pending = (
       store.query(tables.eventQueue.select().where({ projectId, status: "pending" })) as readonly EventQueueRow[]
-    ).toSorted(byQueueOrder)
+    ).filter((row) => !isRescuedFromOfflineQueue(row.id)).toSorted(byQueueOrder)
     if (pending.length === 0) return "idle"
 
     const file = store.query(tables.files.select().where({ projectId }).first())
@@ -504,10 +519,15 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return "ok"
   }
 
+  // Rescued rows don't count: flushQueue skips them, and counting them would
+  // re-arm an "idle" flush forever.
   function hasPending(): boolean {
-    return (
-      store.query(tables.eventQueue.select().where({ projectId, status: "pending" }).first()) != null
-    )
+    if (!anyRescuedFromOfflineQueue()) {
+      return store.query(tables.eventQueue.select().where({ projectId, status: "pending" }).first()) != null
+    }
+    return store
+      .query(tables.eventQueue.select("id").where({ projectId, status: "pending" }))
+      .some((id) => !isRescuedFromOfflineQueue(id))
   }
 
   function cancelFlushTimer(): void {
@@ -604,6 +624,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const unsubscribeQueue = store.subscribe(
     tables.eventQueue.select("id", "status").where({ projectId }),
     () => {
+      // Also while a flush runs: a rescued row it held returning to pending
+      // is what lets the row be released.
+      rescuedRows.release()
       if (flushInFlight) return
       armFlush(flushDebounceMs)
     },
@@ -629,9 +652,14 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     void flushNow()
   })
 
+  // IndexedDB's copy of a rescued row uploading (or being discarded) is what
+  // lets the row go.
+  const unsubscribeOutbox = (options.outbox ?? indexedDbOutbox).subscribe(rescuedRows.release)
+
   // Anything already queued from a previous session (the app was closed with
   // unsynced work) goes out without waiting for the socket.
   armFlush(flushDebounceMs)
+  rescuedRows.release()
 
   return {
     isConnected: () => reconciler.isConnected(),
@@ -648,6 +676,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       bufferedFrames = []
       unsubscribeQueue()
       unsubscribeConnectivity()
+      unsubscribeOutbox()
+      rescuedRows.stop()
       reconciler.close()
     },
   }

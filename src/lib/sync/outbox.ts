@@ -31,6 +31,12 @@ import {
   type JournalContents,
 } from "./outbox-recovery"
 import { planOfflineRouting } from "./offline-routing"
+import {
+  holdJournalUntilPersisted,
+  rescueUnpersistedOfflineWrites as rescueStalledOfflineWrites,
+  untilJournalClearedOrStalled,
+  type WhenPersisted,
+} from "./offline-stall-rescue"
 import { purgeCellsCacheForQuota } from "./cells-cache"
 import { withStorageQuotaRecovery } from "@/lib/storage/storage-pressure"
 
@@ -287,6 +293,11 @@ async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<stri
   return found
 }
 
+/** Which of `ids` are in the IndexedDB outbox, in any status (any owner). */
+export function outboxHasIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
+  return lookupOutboxIds(ids)
+}
+
 /**
  * Writes still running in this page, by event id: each resolves to the ids
  * that write put (or is putting) in IndexedDB, once it has decided — so a
@@ -337,20 +348,42 @@ async function recoverIntoQueues(db: IDBDatabase, { records, keys }: JournalCont
       : null
     const routedIds = new Set(routing?.routed.map((event) => event.id))
     await addOutboxRecords(db, STORE, pending.filter((record) => !routedIds.has(record.id)))
+    let whenPersisted: WhenPersisted | null = null
     if (routing && routedIds.size > 0) {
       try {
-        routing.commit()
+        whenPersisted = routing.commit()
       } catch (error) {
         console.warn("[outbox] Offline queue refused recovered edits; using the HTTP outbox", error)
         await addOutboxRecords(db, STORE, pending.filter((record) => routedIds.has(record.id)))
       }
     }
-    clearJournal(keys)
+    if (whenPersisted) {
+      holdJournalUntilPersisted(pending.filter((record) => routedIds.has(record.id)), whenPersisted, () => clearJournal(keys))
+    } else {
+      clearJournal(keys)
+    }
     if (pending.length > 0) notifyOutboxChanged()
   } catch (error) {
     releaseJournal(keys)
     console.warn("[outbox] Couldn't recover journaled edits; will retry on next launch", error)
   }
+}
+
+/**
+ * The offline store's leader has stopped persisting (OfflineLeaderWatchdog):
+ * copies every edit it hasn't confirmed into the IndexedDB outbox, so a
+ * restart, or the page dying, can't lose it, and it uploads over HTTP when
+ * online. See offline-stall-rescue.ts.
+ */
+export async function rescueUnpersistedOfflineWrites(): Promise<boolean> {
+  let copied = false
+  const safe = await rescueStalledOfflineWrites(async (records) => {
+    // Add-not-put: an id already in IndexedDB keeps its state.
+    await addRecordsWithQuotaRecovery(records)
+    copied = true
+  })
+  if (copied) notifyOutboxChanged()
+  return safe
 }
 
 /**
@@ -448,8 +481,13 @@ export async function enqueueOutboxEvents(
     return
   }
   // In order, each run its own transaction, offline commit and journal
-  // entry, so at most one run's worth sits in localStorage at a time.
-  for (const run of splitForJournal(records)) await writeJournaledBatch(run, ownerKey)
+  // entry, so at most one run's worth sits in localStorage at a time: an
+  // offline run's entry is held until the leader persists it, so the next
+  // run waits for that.
+  for (const run of splitForJournal(records)) {
+    const { journalCleared } = await writeJournaledBatch(run, ownerKey)
+    await untilJournalClearedOrStalled(journalCleared)
+  }
 }
 
 export interface EnqueueBatchOptions {
@@ -464,8 +502,16 @@ export interface EnqueueBatchOptions {
 }
 
 /** One batch write, journaled whole when it fits (or, for a lone target
- *  commit too big for a batch entry, under its own per-commit entry). */
-async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxRecord["ownerKey"] | undefined): Promise<void> {
+ *  commit too big for a batch entry, under its own per-commit entry).
+ *  Resolves once written, with a promise of the journal entry clearing. */
+async function writeJournaledBatch(
+  records: OutboxRecord[],
+  ownerKey: OutboxRecord["ownerKey"] | undefined,
+): Promise<{ journalCleared: Promise<void> }> {
+  let markCleared = () => {}
+  const cleared = new Promise<void>((resolve) => {
+    markCleared = resolve
+  })
   let clearEntry = () => {}
   if (ownerKey !== undefined) {
     const journalKey = journalBatch(records)
@@ -476,7 +522,14 @@ async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxReco
       clearEntry = () => clearJournalRecord(records[0].id)
     }
   }
-  await writeOutboxRecords(records, { routeOffline: isTauriRuntime(), clearJournal: clearEntry })
+  await writeOutboxRecords(records, {
+    routeOffline: isTauriRuntime(),
+    clearJournal: () => {
+      clearEntry()
+      markCleared()
+    },
+  })
+  return { journalCleared: cleared }
 }
 
 /**
@@ -495,6 +548,9 @@ async function writeOutboxRecords(
   const toRecords = (list: readonly CqrsRawEvent[]) => list.map((event) => byEvent.get(event)!)
 
   let wrote: boolean
+  // Set once the offline queue took the routed events: their journal entry
+  // then waits for the leader to persist them (holdJournalUntilPersisted).
+  let offlineCommit: { routed: readonly OutboxRecord[]; whenPersisted: WhenPersisted } | null = null
   // Ids this call added to IndexedDB. A record that was already queued before
   // it (a re-enqueue) isn't ours to remove on failure.
   let added: string[] = []
@@ -519,7 +575,7 @@ async function writeOutboxRecords(
     const inIndexedDb = new Set(toWrite.map((rec) => rec.id))
     if (routing && routing.routed.length > 0) {
       try {
-        routing.commit()
+        offlineCommit = { routed: toRecords(routing.routed), whenPersisted: routing.commit() }
       } catch (error) {
         // The offline store refused them (shut down, a materializer error):
         // send them over HTTP instead, so the batch still lands whole.
@@ -548,7 +604,8 @@ async function writeOutboxRecords(
       if (writeDestinations.get(rec.id) === destination) writeDestinations.delete(rec.id)
     }
   }
-  clearJournal()
+  if (offlineCommit) holdJournalUntilPersisted(offlineCommit.routed, offlineCommit.whenPersisted, clearJournal)
+  else clearJournal()
   if (wrote) notifyOutboxChanged()
 }
 

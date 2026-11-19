@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { watchLeaderLiveness } from "./leader-watchdog"
+import { leaderHasPersisted, watchLeaderLiveness, watchLeaderPersisted } from "./leader-watchdog"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
@@ -86,5 +86,171 @@ describe("watchLeaderLiveness", () => {
     stop()
     await vi.advanceTimersByTimeAsync(60_000)
     expect(onStall).not.toHaveBeenCalled()
+  })
+})
+
+describe("leaderHasPersisted", () => {
+  it("compares global then client sequence numbers", () => {
+    expect(leaderHasPersisted("e5.3", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e5.4", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e6", "e5.3")).toBe(true)
+    expect(leaderHasPersisted("e5.2", "e5.3")).toBe(false)
+    expect(leaderHasPersisted("e5", "e5.1")).toBe(false)
+    expect(leaderHasPersisted("e4.9", "e5")).toBe(false)
+  })
+
+  it("compares numbers only, whatever the rebase generation", () => {
+    expect(leaderHasPersisted("e5.3r1", "e5.3")).toBe(true)
+  })
+
+  it("treats an unreadable head as not persisted", () => {
+    expect(leaderHasPersisted("garbage", "e5.3")).toBe(false)
+    expect(leaderHasPersisted("e5.3", "")).toBe(false)
+  })
+})
+
+describe("watchLeaderPersisted", () => {
+  type FeedStatus = { upstreamHead: string; localHead: string; isSynced: boolean }
+  function makeFeed(upstreamHead: string, localHead = "e3.9") {
+    let current: FeedStatus = { upstreamHead, localHead, isSynced: false }
+    const listeners = new Set<(status: FeedStatus) => void>()
+    const store = {
+      syncStatus: () => current,
+      subscribeSyncStatus: (cb: (status: FeedStatus) => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    } as unknown as Parameters<typeof watchLeaderPersisted>[0]
+    const emit = (next: Partial<FeedStatus>) => {
+      current = { ...current, ...next }
+      for (const cb of [...listeners]) cb(current)
+    }
+    return { store, listeners, emit, advance: (next: string) => emit({ upstreamHead: next }) }
+  }
+
+  it("calls back at once when the head is already persisted", () => {
+    const { store, listeners } = makeFeed("e3.2")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e3.1", onPersisted)
+    expect(onPersisted).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("calls back once the leader catches up, then unsubscribes", () => {
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e3.2", onPersisted)
+    advance("e3.1")
+    expect(onPersisted).not.toHaveBeenCalled()
+    advance("e3.2")
+    advance("e3.3")
+    expect(onPersisted).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("stops waiting when told to", () => {
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const onPersisted = vi.fn()
+    const stop = watchLeaderPersisted(store, "e3.2", onPersisted)
+    stop()
+    advance("e3.5")
+    expect(onPersisted).not.toHaveBeenCalled()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("shares one subscription between waiters and settles them in order", () => {
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const calls: string[] = []
+    watchLeaderPersisted(store, "e3.1", () => calls.push("a"))
+    watchLeaderPersisted(store, "e3.2", () => calls.push("b"))
+    const stopC = watchLeaderPersisted(store, "e3.3", () => calls.push("c"))
+    watchLeaderPersisted(store, "e3.4", () => calls.push("d"))
+    expect(listeners.size).toBe(1)
+
+    stopC()
+    advance("e3.2")
+    expect(calls).toEqual(["a", "b"])
+    advance("e3.4")
+    expect(calls).toEqual(["a", "b", "d"])
+    expect(listeners.size).toBe(0)
+  })
+
+  it("settles everything once the session is fully synced", () => {
+    const { store, emit } = makeFeed("e3.0")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e3.4", onPersisted)
+    emit({ isSynced: true })
+    expect(onPersisted).toHaveBeenCalledOnce()
+  })
+
+  it("isn't fooled by another session's event taking its number in a rebase", () => {
+    // This session committed e264.1. Another session's push won that number,
+    // so this one rebased its edit to e264.2r1.
+    const { store, emit } = makeFeed("e264.0", "e264.1")
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(store, "e264.1", onPersisted)
+
+    emit({ upstreamHead: "e264.1", localHead: "e264.2r1" })
+    expect(onPersisted).not.toHaveBeenCalled()
+    emit({ upstreamHead: "e264.2r1" })
+    expect(onPersisted).toHaveBeenCalledOnce()
+  })
+
+  it("ignores a late status from a retired subscription", () => {
+    // LiveStore's unsubscribe interrupts its fiber asynchronously, so a
+    // status already in flight can still reach a listener after it.
+    let current: FeedStatus = { upstreamHead: "e3.0", localHead: "e3.9", isSynced: false }
+    const listeners = new Set<(status: FeedStatus) => void>()
+    const retired: Array<(status: FeedStatus) => void> = []
+    const store = {
+      syncStatus: () => current,
+      subscribeSyncStatus: (cb: (status: FeedStatus) => void) => {
+        listeners.add(cb)
+        return () => {
+          listeners.delete(cb)
+          retired.push(cb)
+        }
+      },
+    } as unknown as Parameters<typeof watchLeaderPersisted>[0]
+    const advance = (upstreamHead: string) => {
+      current = { ...current, upstreamHead }
+      for (const cb of [...listeners]) cb(current)
+    }
+
+    const first = vi.fn()
+    watchLeaderPersisted(store, "e3.1", first)
+    advance("e3.1")
+    expect(first).toHaveBeenCalledOnce()
+    expect(retired).toHaveLength(1)
+
+    // A new queue starts; then the retired feed delivers one last status.
+    const second = vi.fn()
+    const stopSecond = watchLeaderPersisted(store, "e3.3", second)
+    retired[0](current)
+    // The new queue is still the one on record: a third waiter joins it
+    // instead of opening another subscription, and stopping works.
+    const third = vi.fn()
+    watchLeaderPersisted(store, "e3.4", third)
+    expect(listeners.size).toBe(1)
+    stopSecond()
+    advance("e3.4")
+    expect(second).not.toHaveBeenCalled()
+    expect(third).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
+  it("keeps the caller's backup when the store can't report its status", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const broken = {
+      syncStatus: () => {
+        throw new Error("shut down")
+      },
+      subscribeSyncStatus: () => () => {},
+    } as unknown as Parameters<typeof watchLeaderPersisted>[0]
+    const onPersisted = vi.fn()
+    watchLeaderPersisted(broken, "e1", onPersisted)
+    expect(onPersisted).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

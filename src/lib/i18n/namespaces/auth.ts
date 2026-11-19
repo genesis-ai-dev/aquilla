@@ -291,6 +291,19 @@ export const auth = defineNamespace({
     "auth.verifyEmail.confirmedBody": "Thanks — your email address is confirmed.",
     "auth.verifyEmail.goToApp": "Go to Aquilla",
     "auth.verifyEmail.couldntVerify": "Couldn't verify",
+    "auth.verifyEmail.statusVerified": "Email verified",
+    "auth.verifyEmail.statusUnverified": "Email not verified",
+    "auth.verifyEmail.unverifiedWhy":
+      "Verify this address so teammates can add you to a project by email.",
+    "auth.verifyEmail.sendLink": "Send verification link",
+    "auth.verifyEmail.sending": "Sending…",
+    "auth.verifyEmail.linkSent": "Verification link sent to {email}. Open it to confirm this address.",
+    "auth.verifyEmail.already_verified": "This address is already verified.",
+    "auth.verifyEmail.rate_limited":
+      "Too many verification emails were sent. Try again later.",
+    "auth.verifyEmail.email_delivery_unavailable":
+      "We could not send the verification email. Try again later.",
+    "auth.verifyEmail.sendFailed": "We could not send the verification email. Try again.",
     "auth.verifyEmail.stillUsable":
       "You can still use Aquilla — verification isn't required to sign in.",
 
@@ -1082,6 +1095,59 @@ export const auth = defineNamespace({
       },
       "auth.verifyEmail.couldntVerify": {
         description: "Error heading shown when the verification link could not be processed.",
+      },
+      "auth.verifyEmail.statusVerified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has been confirmed. Read-only — there is no action next to it.",
+      },
+      "auth.verifyEmail.statusUnverified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has not been confirmed yet.",
+      },
+      "auth.verifyEmail.unverifiedWhy": {
+        description:
+          "One line under auth.verifyEmail.statusUnverified saying why confirming the " +
+          "address matters: an unconfirmed address cannot be found by a project owner " +
+          "adding members by email.",
+      },
+      "auth.verifyEmail.sendLink": {
+        description:
+          "Button in account settings that emails a fresh verification link to the " +
+          "account's own address.",
+      },
+      "auth.verifyEmail.sending": {
+        description: "Label on auth.verifyEmail.sendLink while the request is in flight.",
+      },
+      "auth.verifyEmail.linkSent": {
+        description:
+          "Confirmation after the link was emailed. {email} is the account's own email " +
+          "address, rendered inline — never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The account's own email address, the only address the link is ever sent to.",
+        },
+      },
+      "auth.verifyEmail.already_verified": {
+        description:
+          "Shown instead of a confirmation when the address turned out to be verified " +
+          "already (for example it was confirmed in another tab).",
+      },
+      "auth.verifyEmail.rate_limited": {
+        description:
+          "Shown when the send button has been used too many times in a short period, " +
+          "so no further email was sent.",
+      },
+      "auth.verifyEmail.email_delivery_unavailable": {
+        description:
+          "Shown when Aquilla could not hand the verification email to its mail " +
+          "provider, so nothing was sent.",
+      },
+      "auth.verifyEmail.sendFailed": {
+        description:
+          "Generic failure for the send-verification-link button when no more specific " +
+          "reason is known (e.g. the network dropped).",
       },
       "auth.verifyEmail.stillUsable": {
         description:

@@ -1028,10 +1028,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.previewNoneSelected":
       "Pick at least one file to link.",
     // ── AQU-1679: a file this project already has can follow the link itself,
-    // instead of gaining a second copy. Offered per same-named file, off by
-    // default, and shown with what it will do before anything is linked.
+    // instead of gaining a second copy, shown with what it will do before
+    // anything is linked. AQU-2549: ticked by default when exactly one file
+    // shares the name; the lead can pick any other of his files.
     "projectSettings.linkSource.replaceOption":
       "Replace the source in my existing {name} and keep its translations",
+    // AQU-2549: the lead picks which of his files a row replaces; a row whose
+    // name matches exactly one file starts ticked with that file.
+    "projectSettings.linkSource.replaceOptionChoose":
+      "Replace the source in one of my files and keep its translations",
+    "projectSettings.linkSource.replaceTargetLabel": "Your file to replace with {name}",
+    "projectSettings.linkSource.replaceTargetPlaceholder": "Choose a file",
+    "projectSettings.linkSource.replaceTargetTaken":
+      "Another file in this list is already set to replace {name}. Pick a different file for one of them.",
     "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
     // AQU-2549: the source project's import of the file has not finished.
     "projectSettings.linkSource.replaceStillImporting":
@@ -3122,7 +3131,8 @@ export const projectSettings = defineNamespace({
           "project already has exactly one file of the same name. On: the link " +
           "follows into that existing file \u2014 its source text is replaced by the " +
           "source project's and its translations stay \u2014 instead of adding a second " +
-          "file of that name. Off by default.",
+          "file of that name. Ticked by default when exactly one file of this project " +
+          "shares the name; a picker under it lets the lead choose another file.",
         placeholders: {
           name: "The file's name as the user named it \u2014 never translated.",
         },
@@ -3132,6 +3142,32 @@ export const projectSettings = defineNamespace({
           "Shown under replaceOption instead of the comparison when the source " +
           "project is still importing the file, so there is nothing to compare yet. " +
           "It is a wait, not a mismatch.",
+      },
+      "projectSettings.linkSource.replaceOptionChoose": {
+        description:
+          "Checkbox under an upstream file in the link confirm step and in Choose files, " +
+          "when no file of this project has been picked yet for it to replace. On: a " +
+          "file picker appears to choose which of the project's files follows the link.",
+      },
+      "projectSettings.linkSource.replaceTargetLabel": {
+        description:
+          "Accessible name of the file picker under replaceOption: which of this " +
+          "project's files the upstream file replaces the source of.",
+        placeholders: {
+          name: "The source project's file name — never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceTargetPlaceholder": {
+        description: "Empty state of the file picker under replaceOption.",
+      },
+      "projectSettings.linkSource.replaceTargetTaken": {
+        description:
+          "Shown under replaceOption when two upstream files are set to replace the " +
+          "same file of this project. One file can follow only one upstream file, so " +
+          "the link waits until the lead picks another.",
+        placeholders: {
+          name: "The project's file both rows picked — never translated.",
+        },
       },
       "projectSettings.linkSource.replaceComparing": {
         description:

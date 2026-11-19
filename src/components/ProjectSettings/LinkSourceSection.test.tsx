@@ -23,7 +23,7 @@
 // upstream's files did not arrive. Those cases are in their own describe too.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
@@ -1070,19 +1070,27 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     linkProjectSource.mockResolvedValue({ seeded: true })
   })
 
-  // WHY: adding alongside is still what a link does unless the lead says
-  // otherwise. The option must arrive off, and an untouched confirm must send
-  // exactly the request it sent before this slice.
-  it("offers the option off by default, and links as before when it is left off", async () => {
+  // WHY (AQU-2549, Sam's pick): a file whose name matches exactly one file
+  // here is almost always the same material, and leaving the option off is
+  // how Joel's project gained a second copy. It starts ticked; turning it off
+  // still sends exactly the request a link sent before AQU-1679.
+  it("ticks the option by default for the one same-named file, and links as before when it is turned off", async () => {
     const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
     renderSection(700)
     await pick(user, "English Source")
 
-    expect((await screen.findByRole("alert")).textContent).toContain("MRK")
-    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("false")
-    // Only the file with a counterpart here offers it.
+    expect(await screen.findByText("678 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("true")
+    expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream", [
+      { upstreamFileId: "up-MRK", fileId: "own-mrk" },
+    ])
+    // Only the file with a counterpart here offers it (this preview lists no
+    // other files of the project's to pick from).
     expect(screen.getAllByRole("checkbox", { name: /^Replace the source/ })).toHaveLength(1)
 
+    await user.click(replaceCheckbox())
+    expect((await screen.findByRole("alert")).textContent).toContain("MRK")
     await user.click(linkButton())
 
     await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
@@ -1092,8 +1100,56 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       consumes: "source",
       inherit,
     })
-    expect(fetchLinkFileMatches).not.toHaveBeenCalled()
     expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual([])
+  })
+
+  // WHY (AQU-2549): the replace used to exist only for an exact name match, so
+  // a file the project had renamed could never be replaced and arrived as a
+  // copy. The lead picks which of his files it replaces; the half-the-lines
+  // check still decides.
+  it("lets the lead pick a differently named file to replace, and posts that pair", async () => {
+    const user = userEvent.setup()
+    const preview = previewOf("English Source", UPSTREAM_FILES, [])
+    loadLinkSourcePreview.mockResolvedValue({
+      ...preview,
+      ownFiles: [
+        { id: "own-intro", name: "Introduction" },
+        { id: "own-mark-renamed", name: "Mark (BSB)" },
+      ],
+    })
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ fileId: "own-mark-renamed" })])
+    renderSection(700)
+    await pick(user, "English Source")
+
+    const options = await screen.findAllByRole("checkbox", {
+      name: "Replace the source in one of my files and keep its translations",
+    })
+    // Every checked row offers it, none ticked: no name matches.
+    expect(options).toHaveLength(UPSTREAM_FILES.length)
+    expect(options.every((box) => box.getAttribute("aria-checked") === "false")).toBe(true)
+    expect(fetchLinkFileMatches).not.toHaveBeenCalled()
+
+    const markRow = fileCheckbox("MRK").closest("li") as HTMLElement
+    await user.click(within(markRow).getByRole("checkbox", { name: /^Replace the source/ }))
+    // Nothing picked yet: the link waits.
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+    await pickSelectOption("Your file to replace with MRK", "Mark (BSB)")
+
+    expect(await screen.findByText("678 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream", [
+      { upstreamFileId: "up-MRK", fileId: "own-mark-renamed" },
+    ])
+    expect(
+      within(markRow).getByRole("checkbox", {
+        name: "Replace the source in my existing Mark (BSB) and keep its translations",
+      }),
+    ).toBeTruthy()
+
+    await user.click(linkButton())
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toMatchObject({
+      replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mark-renamed" }],
+    })
   })
 
   // WHY: the whole feature. Turning it on has to say what will happen first,
@@ -1103,9 +1159,6 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 670, changed: 5, added: 3, kept: 2 })])
     renderSection(700)
     await pick(user, "English Source")
-    await screen.findByRole("alert")
-
-    await user.click(replaceCheckbox())
 
     expect(await screen.findByText("670 of 678 lines are the same in both files.")).toBeTruthy()
     expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream", [
@@ -1150,9 +1203,6 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 12, changed: 666, canReplace: false })])
     renderSection(700)
     await pick(user, "English Source")
-    await screen.findByRole("alert")
-
-    await user.click(replaceCheckbox())
 
     expect(
       await screen.findByText(
@@ -1178,9 +1228,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     fetchLinkFileMatches.mockResolvedValueOnce([matchOf()])
     renderSection(700)
     await pick(user, "English Source")
-    await screen.findByRole("alert")
 
-    await user.click(replaceCheckbox())
     expect(await screen.findByText(/Couldn't compare the two files\./)).toBeTruthy()
     expect(linkButton().hasAttribute("disabled")).toBe(true)
 
@@ -1199,8 +1247,6 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
     fetchLinkFileMatches.mockResolvedValue([matchOf()])
     renderSection(700)
     await pick(user, "English Source")
-    await screen.findByRole("alert")
-    await user.click(replaceCheckbox())
     await screen.findByText("678 of 678 lines are the same in both files.")
 
     await user.click(fileCheckbox("MRK"))

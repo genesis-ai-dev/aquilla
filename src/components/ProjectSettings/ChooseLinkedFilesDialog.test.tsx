@@ -22,6 +22,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { pickSelectOption } from "@/test-utils/select"
 import { UserError } from "@/lib/errors/user-error"
 import { SourceLinkSection, type SourceLinkSectionProps } from "./SourceLinkSection"
 import {
@@ -591,11 +592,10 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     await openDialog()
     expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
 
+    // AQU-2549 (Sam's pick): the one same-named file starts ticked, and is
+    // compared as soon as the row is checked.
     await userEvent.click(fileCheckbox("LUK"))
-    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("false")
-    expect(screen.getByText(/already has a file with the same name/)).toBeTruthy()
-
-    await userEvent.click(replaceCheckbox())
+    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("true")
 
     expect(await screen.findByText("1151 of 1151 lines are the same in both files.")).toBeTruthy()
     expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, UPSTREAM_ID, [
@@ -632,8 +632,6 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     await openDialog()
     await userEvent.click(fileCheckbox("LUK"))
 
-    await userEvent.click(replaceCheckbox())
-
     expect(await screen.findByText(/not the same material: only 20 of 1151 lines match/)).toBeTruthy()
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
 
@@ -666,5 +664,37 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     await userEvent.click(fileCheckbox("LUK"))
 
     expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+  })
+
+  // WHY (AQU-2549): the project renamed its own copy of the book, so no name
+  // matches; the lead picks which of his files the added file replaces.
+  it("lets the lead pick a differently named file to replace", async () => {
+    loadLinkSourcePreview.mockResolvedValue({
+      ...upstreamPreview([]),
+      ownFiles: [
+        { id: "own-mat", name: "MAT" },
+        { id: "own-luke-renamed", name: "Luke (BSB)" },
+      ],
+    })
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ fileId: "own-luke-renamed" })])
+    renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
+
+    const option = screen.getByRole("checkbox", {
+      name: "Replace the source in one of my files and keep its translations",
+    })
+    expect(option.getAttribute("aria-checked")).toBe("false")
+    await userEvent.click(option)
+    await pickSelectOption("Your file to replace with LUK", "Luke (BSB)")
+
+    expect(await screen.findByText("1151 of 1151 lines are the same in both files.")).toBeTruthy()
+    await userEvent.click(reviewButton())
+    expect(screen.getByText("Luke (BSB)")).toBeTruthy()
+    await userEvent.click(confirmButton())
+    expect(addLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-LUK"], [
+      { upstreamFileId: "up-LUK", fileId: "own-luke-renamed" },
+    ])
+    resetAdoptedIdmlAlignmentForTests()
   })
 })

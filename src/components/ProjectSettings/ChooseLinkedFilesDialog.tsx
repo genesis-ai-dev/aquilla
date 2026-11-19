@@ -64,7 +64,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ReplaceMatchNote } from "@/components/UpstreamFileChoiceList"
+import { ReplaceFileOption, replaceOfferedFor } from "@/components/UpstreamFileChoiceList"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { addLinkedSourceFiles, loadLinkedSourceFileState, stopLinkedSourceFiles } from "@/lib/sync/archive"
@@ -125,13 +125,34 @@ export function ChooseLinkedFilesDialog({
   // AQU-1679: the picked upstream files set to replace the project's own
   // same-named file, and the server's comparison of each pair.
   const canReplace = sourceLinkConsumes !== "target"
+  // AQU-2549: the rows showing the option — picked, not a stopped copy, with a
+  // file here to follow into (see replaceOffered below).
+  const replaceOfferedIds = useMemo(() => {
+    const stoppedIds = new Set(linkState?.stoppedFileIds ?? [])
+    const hasOwnFiles = (preview?.ownFiles?.length ?? 0) > 0
+    return new Set(
+      canReplace
+        ? files
+            .filter((f) => picked.has(f.id) && !stoppedIds.has(f.id) && (f.clashFileId !== undefined || hasOwnFiles))
+            .map((f) => f.id)
+        : [],
+    )
+  }, [canReplace, files, picked, linkState, preview])
+  const replaceChoices = useReplaceFileChoices({
+    jwt,
+    projectId,
+    sourceProjectId,
+    files,
+    ownFiles: preview?.ownFiles,
+    offeredFileIds: replaceOfferedIds,
+  })
   const {
     replaceFileIds,
-    matches: replaceMatches,
-    toggleReplace,
+    targetOf: replaceTargetOf,
+    takenTargets: replaceTakenTargets,
     reset: resetReplace,
     isUnresolved: replaceIsUnresolved,
-  } = useReplaceFileChoices({ jwt, projectId, sourceProjectId, files })
+  } = replaceChoices
 
   // Both reads happen on every open: the list has to show files the upstream
   // gained since the link was made, and the selection can have moved on (a
@@ -220,21 +241,33 @@ export function ChooseLinkedFilesDialog({
   // stopped copy (resuming one already brings the upstream's text into it).
   const replaceOffered = useCallback(
     (f: { id: string; clashFileId?: string }) =>
-      canReplace && picked.has(f.id) && !stopped.has(f.id) && f.clashFileId !== undefined,
-    [canReplace, picked, stopped],
+      canReplace && picked.has(f.id) && !stopped.has(f.id) && replaceOfferedFor(f, replaceChoices),
+    [canReplace, picked, stopped, replaceChoices],
   )
   const replacing = useMemo(
     () => files.filter((f) => replaceOffered(f) && replaceFileIds.has(f.id)),
     [files, replaceOffered, replaceFileIds],
   )
   const replacingIds = useMemo(() => new Set(replacing.map((f) => f.id)), [replacing])
+  // AQU-2549: two rows that picked the same file of this project.
+  const replaceTakenIds = useMemo(
+    () => replaceTakenTargets(replacing.map((f) => f.id)),
+    [replaceTakenTargets, replacing],
+  )
   const addIds = useMemo(
     () => [...picked].filter((id) => !stopped.has(id) && !replacingIds.has(id)),
     [picked, stopped, replacingIds],
   )
   const resumeNames = useMemo(() => named(new Set(resumeIds)), [named, resumeIds])
   const addNames = useMemo(() => named(new Set(addIds)), [named, addIds])
-  const replaceNames = useMemo(() => replacing.map((f) => f.name), [replacing])
+  // AQU-2549: the lead's own file, which may be named differently now.
+  const replaceNames = useMemo(
+    () =>
+      replacing.map(
+        (f) => replaceChoices.ownFiles.find((own) => own.id === replaceTargetOf(f.id))?.name ?? f.name,
+      ),
+    [replacing, replaceChoices.ownFiles, replaceTargetOf],
+  )
   // A replace the server has not cleared holds the action back; the row says why.
   const replaceUnresolved = replaceIsUnresolved(replacing.map((f) => f.id))
   // A plain add of files this project never had is one press, as AQU-1560 made
@@ -297,7 +330,7 @@ export function ChooseLinkedFilesDialog({
       if (picked.size > 0) {
         // AQU-1679: the pairs ride with the add. Three arguments when there are
         // none, so the request is the one AQU-1560 made.
-        const pairs = replacing.map((f) => ({ upstreamFileId: f.id, fileId: f.clashFileId as string }))
+        const pairs = replacing.map((f) => ({ upstreamFileId: f.id, fileId: replaceTargetOf(f.id) as string }))
         const result =
           pairs.length > 0
             ? await addLinkedSourceFiles(jwt, projectId, [...picked], pairs)
@@ -485,18 +518,12 @@ export function ChooseLinkedFilesDialog({
                       {/* AQU-1679: follow INTO the file this project already has,
                           instead of adding a copy beside it. */}
                       {replaceOffered(f) && (
-                        <div className="mb-1 ml-6 space-y-1">
-                          <label className="flex items-start gap-2 text-xs">
-                            <Checkbox
-                              className="mt-0.5"
-                              checked={replaceFileIds.has(f.id)}
-                              disabled={applying}
-                              onCheckedChange={(checked) => toggleReplace(f.id, !!checked)}
-                            />
-                            {t("projectSettings.linkSource.replaceOption", { name: f.name })}
-                          </label>
-                          {replaceFileIds.has(f.id) && <ReplaceMatchNote state={replaceMatches.get(f.id)} />}
-                        </div>
+                        <ReplaceFileOption
+                          file={f}
+                          choices={replaceChoices}
+                          taken={replaceTakenIds.has(f.id)}
+                          disabled={applying}
+                        />
                       )}
                     </li>
                   )

@@ -49,9 +49,22 @@ export interface LinkSourcePreviewFile {
   clashFileId?: string
 }
 
+/** AQU-2549: one of this project's own files, as a choice of which file a
+ *  replace follows into. */
+export interface LinkSourceOwnFile {
+  id: string
+  name: string
+}
+
 export interface LinkSourcePreview {
   /** The upstream project's display name, as the server knows it. */
   upstreamName: string
+  /**
+   * AQU-2549: this project's files, in its own order — the list the lead picks
+   * from when an upstream file should replace the source of a file whose name
+   * differs. Empty for a project being created.
+   */
+  ownFiles: LinkSourceOwnFile[]
   /**
    * AQU-1559: every file in the upstream, in the upstream's own order — the
    * rows of the confirm step's checkbox list. Empty for an upstream with no
@@ -134,6 +147,7 @@ export function buildLinkSourcePreview(
   }
   return {
     upstreamName: upstream.name,
+    ownFiles: existingFiles.flatMap((f) => (f.id ? [{ id: f.id, name: f.name }] : [])),
     files,
     fileCount: upstream.files.length,
     clashingNames,

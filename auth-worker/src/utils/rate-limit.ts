@@ -99,6 +99,16 @@ export const CREDENTIAL_MINT_MAX_PER_USER = 10
 // links from a shared office/campus IP, never trips it.
 export const ACCESS_LINK_REDEEM_MAX_PER_IP = 30
 
+// AQU-2636: POST /api/v2/auth/me/resend-verification mints a fresh
+// email-verification link and mails it. The route is authenticated and always
+// sends to the caller's OWN stored address, so this is inbox protection (and a
+// bound on token churn), not an anti-enumeration control — a signed-in user
+// leaning on the button cannot bomb their own mailbox, and a compromised
+// session cannot use it as a mail relay. Counts every send, not just failures:
+// there is no failure state here, just mails that went out. Three inside the
+// 15-minute window is enough for a real user whose first mail landed in spam.
+export const VERIFY_RESEND_MAX_PER_USER = 3
+
 export type RateLimitKind =
   | "social_login"
   | "social_link"
@@ -117,6 +127,7 @@ export type RateLimitKind =
   | "access_link_redeem"
   | "feedback"
   | "tool_web_fetch"
+  | "email_verification_resend"
 
 /**
  * Keep `auth_rate_limit_events` bounded.

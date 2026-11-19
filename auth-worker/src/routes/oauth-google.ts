@@ -47,9 +47,14 @@ routes.get("/config", async c => {
 // Account management never contacts Google merely to read connection status.
 routes.get("/methods", authMiddleware, async c => {
   const user = c.get("user")
+  // AQU-2636: email_verified rides along here because this is the read the
+  // account-settings email row already makes. An unverified address stops the
+  // account resolving in Add members and in email-bound invites, so settings
+  // has to be able to say so (and offer /me/resend-verification).
   const row = await c.env.AQUILLA_PG.prepare(`SELECT email, password_hash IS NOT NULL AS password,
+    email_verified_at IS NOT NULL AS email_verified,
     EXISTS(SELECT 1 FROM provider_identities p WHERE p.user_id=users.id AND p.provider='google') AS google
-    FROM users WHERE id=?`).bind(user.id).first<{ email: string; password: boolean; google: boolean }>()
+    FROM users WHERE id=?`).bind(user.id).first<{ email: string; password: boolean; email_verified: boolean; google: boolean }>()
   if (!row) return c.json({ error: "unavailable" }, 401)
   return c.json({ ...row, google_available: configured(c.env) })
 })

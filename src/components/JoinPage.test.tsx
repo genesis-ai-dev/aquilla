@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage, InviteSummary } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
+import { resendVerificationEmail } from "@/lib/frontier/auth"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { CATALOGS } from "@/lib/i18n/messages/all"
@@ -49,6 +50,13 @@ vi.mock("@/components/git-import/FrontierLoginForm", () => ({
 }))
 vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({
   FrontierForgotPasswordForm: () => <div />,
+}))
+
+// AQU-2639: the verification prompt's one action. isJwtExpired stays real —
+// this page's whole session story is built on it.
+vi.mock("@/lib/frontier/auth", async (i) => ({
+  ...(await i<typeof import("@/lib/frontier/auth")>()),
+  resendVerificationEmail: vi.fn(async () => "invitee@example.com"),
 }))
 
 function renderJoin() {
@@ -275,6 +283,109 @@ describe("JoinPage AQU-364: accept-time failures are classified honestly", () =>
     renderJoin()
     fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
     expect(await screen.findByText("This invite was sent to a different email address.")).toBeInTheDocument()
+  })
+})
+
+// AQU-2639: an email-bound invite opened by the very account it was sent to,
+// whose address has never been verified (AQU-1579 refuses that), used to show
+// one sentence — "Verify your email address before accepting an invite sent to
+// it." — and no way to verify anywhere in the app. Nearly every account was in
+// that state: 27 of 1,287 on the dev database. The page now carries the action.
+describe("JoinPage — unverified email on an email-bound invite (AQU-2639)", () => {
+  const session = {
+    jwt: fakeJwt(3600),
+    username: "Naladda",
+    email: "naladda@example.com",
+  }
+
+  async function refuse() {
+    sessionValue = { session, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "email_unverified" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({ ok: false, reason: "email_unverified" })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    return screen.findByRole("button", { name: /send verification link/i })
+  }
+
+  it("offers a way out instead of naming a requirement with nowhere to satisfy it", async () => {
+    await refuse()
+    expect(
+      screen.getByText(/verify your email address to accept this invite/i),
+    ).toBeInTheDocument()
+    // Not the wrong-account screen: this IS the right account.
+    expect(screen.queryByText(/you're signed in as/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /sign out and use the invited address/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("names the account's own address, masked as every address here is", async () => {
+    await refuse()
+    expect(screen.getByText("n…a@example.com")).toBeInTheDocument()
+    expect(screen.queryByText(/naladda@example\.com/)).not.toBeInTheDocument()
+  })
+
+  it("sends the link to the account's own address and confirms where it went", async () => {
+    const send = await refuse()
+    fireEvent.click(send)
+    // The jwt is the only argument — the address is never passed, so this
+    // button cannot be pointed at someone else's mailbox.
+    await waitFor(() => expect(resendVerificationEmail).toHaveBeenCalledWith(session.jwt))
+    expect(await screen.findByText(/verification link sent to i…e@example\.com/i)).toBeInTheDocument()
+  })
+
+  it("masks the address the SERVER says it mailed, not the one in client state", async () => {
+    vi.mocked(resendVerificationEmail).mockResolvedValueOnce("someone.else@example.com")
+    const send = await refuse()
+    fireEvent.click(send)
+    expect(await screen.findByText(/sent to s…e@example\.com/i)).toBeInTheDocument()
+  })
+
+  it("reports the server's refusal rather than claiming a send", async () => {
+    vi.mocked(resendVerificationEmail).mockRejectedValueOnce(new Error("rate_limited"))
+    const send = await refuse()
+    fireEvent.click(send)
+    expect(
+      await screen.findByText(/too many verification emails were sent/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/verification link sent to/i)).not.toBeInTheDocument()
+  })
+
+  it("falls back to a generic failure when the send fails for an unknown reason", async () => {
+    vi.mocked(resendVerificationEmail).mockRejectedValueOnce(new Error("unavailable"))
+    const send = await refuse()
+    fireEvent.click(send)
+    expect(
+      await screen.findByText(/could not send the verification email\. try again\./i),
+    ).toBeInTheDocument()
+  })
+
+  it("offers the accept retry only once a link has gone out, and nothing joins before it", async () => {
+    const send = await refuse()
+    expect(screen.queryByRole("button", { name: /accept invitation/i })).not.toBeInTheDocument()
+    fireEvent.click(send)
+    const retry = await screen.findByRole("button", { name: /accept invitation/i })
+
+    // Verifying on its own granted nothing: the accept is still an explicit act.
+    expect(navigate).not.toHaveBeenCalledWith(expect.stringContaining("/project/"))
+    fireEvent.click(retry)
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/project/p1/editor"))
+  })
+
+  it("leaves the wrong-address rejection alone — a mismatch is not an unverified address", async () => {
+    sessionValue = { session, loading: false }
+    vi.mocked(acceptMultiInvite).mockResolvedValueOnce({ ok: false, reason: "wrong_email" })
+    vi.mocked(acceptServerInvite).mockResolvedValueOnce({
+      ok: false,
+      reason: "wrong_email",
+      invitedEmail: "n…l@proton.me",
+    })
+    renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    expect(await screen.findByText(/this invite is for/i)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /send verification link/i }),
+    ).not.toBeInTheDocument()
   })
 })
 

@@ -12,7 +12,7 @@ import { ROLE, type Env } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, startsAsPdf } from "./parse-document"
-import { readBytesWithLimit } from "../../../shared/http-body-limit"
+import { declaresOversizeBody } from "../../../shared/http-body-limit"
 import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
@@ -303,11 +303,52 @@ async function restartIndexing(c: Context<AuthHonoEnv>, docId: string): Promise<
 /** The multipart envelope of a PDF upload: the original (up to its own cap)
  *  plus its text (up to MAX_KB_TEXT_CHARS, at most 3 UTF-8 bytes a UTF-16
  *  unit), with room for the part headers. */
-const MAX_KB_PDF_FORM_BYTES = MAX_KB_ORIGINAL_BYTES + 3 * MAX_KB_TEXT_CHARS + 64 * 1024
+export const MAX_KB_PDF_FORM_BYTES = MAX_KB_ORIGINAL_BYTES + 3 * MAX_KB_TEXT_CHARS + 64 * 1024
 
 const PDF_TEXT_REQUIRED: Record<"app" | "api", string> = {
   app: "PDFs are read in the app before they are uploaded: reload the page and upload this PDF again.",
   api: "PDFs can't be read through the API: send the document's text as a .txt or .md file, or upload the PDF in the app.",
+}
+
+/** AQU-2551 re-review finding 6: a PDF form of up to ~31 MB was held three
+ *  times at once (the raw body, the parsed form, the file's buffer), about
+ *  80–90 MB of a Worker's 128 MB. Now: a declared Content-Length over the cap
+ *  is refused before a byte is read; the form is parsed once, straight from
+ *  the request, through a byte counter that stops it past the cap (a body
+ *  with no declared length); and only the file's one buffer is kept. */
+export async function readPdfForm(
+  headers: Headers,
+  body: ReadableStream<Uint8Array> | null,
+): Promise<{ ok: true; bytes: Uint8Array; text: string } | { ok: false; reason: "too-large" | "bad-form" | "no-text" }> {
+  if (declaresOversizeBody(headers, MAX_KB_PDF_FORM_BYTES)) return { ok: false, reason: "too-large" }
+  let seen = 0
+  let tooLarge = false
+  const capped = body?.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, ctrl) {
+      seen += chunk.byteLength
+      if (seen > MAX_KB_PDF_FORM_BYTES) {
+        tooLarge = true
+        ctrl.error(new Error("form exceeds its limit"))
+        return
+      }
+      ctrl.enqueue(chunk)
+    },
+  }))
+  let file: FormDataEntryValue | null
+  let text: FormDataEntryValue | null
+  try {
+    const form = await new Response(capped ?? null, { headers: { "content-type": headers.get("content-type") ?? "" } }).formData()
+    file = form.get("file")
+    text = form.get("text")
+  } catch {
+    return { ok: false, reason: tooLarge ? "too-large" : "bad-form" }
+  }
+  if (!file || typeof file === "string") return { ok: false, reason: "bad-form" }
+  if (typeof text !== "string") return { ok: false, reason: "no-text" }
+  const bytes = new Uint8Array(await (file as File).arrayBuffer())
+  file = null
+  // a form sends its text's line ends as CRLF; the text is stored with LF
+  return { ok: true, bytes, text: text.replace(/\r\n?/g, "\n") }
 }
 
 /** AQU-2551 (review findings 1–3): the server no longer reads PDFs. The app
@@ -325,24 +366,13 @@ async function readPdfUpload(
   const refused = () => errorJson("pdf_text_required", PDF_TEXT_REQUIRED[via], 415)
   const type = c.req.header("content-type") ?? ""
   if (via === "api" || !type.toLowerCase().startsWith("multipart/form-data")) return { ok: false, ...refused() }
-  const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_PDF_FORM_BYTES)
-  if (!upload.ok) {
+  const read = await readPdfForm(c.req.raw.headers, c.req.raw.body)
+  if (read.ok) return read
+  if (read.reason === "too-large") {
     return { ok: false, ...errorJson("validation_failed", `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`, 400) }
   }
-  let form: FormData
-  try {
-    form = await new Response(upload.bytes, { headers: { "content-type": type } }).formData()
-  } catch {
-    return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
-  }
-  const file = form.get("file")
-  const text = form.get("text")
-  if (!file || typeof file === "string") {
-    return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
-  }
-  if (typeof text !== "string") return { ok: false, ...refused() }
-  // a form sends its text's line ends as CRLF; the text is stored with LF
-  return { ok: true, bytes: new Uint8Array(await (file as File).arrayBuffer()), text: text.replace(/\r\n?/g, "\n") }
+  if (read.reason === "no-text") return { ok: false, ...refused() }
+  return { ok: false, ...errorJson("validation_failed", "expected a form with the PDF and its text", 400) }
 }
 
 /** The one upload implementation: extension allowlist → size cap → text

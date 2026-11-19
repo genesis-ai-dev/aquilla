@@ -1684,6 +1684,40 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(props.onOpenRecording).not.toHaveBeenCalled()
       })
 
+      // Review S2: a zoom or scroll forgets the open menu, as it forgets
+      // hover — so the line is not left lit, and the menu never reopens itself.
+      it("a zoom forgets the open menu: nothing stays lit, and it does not reopen", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()] })
+        const { rerender } = render(<TargetAudioLane {...props} />)
+        await user.click(one())
+        expect(await screen.findByRole("menu")).toBeInTheDocument()
+        // Zoomed in, the line now holds the pair.
+        rerender(<TargetAudioLane {...props} pxPerSec={100} />)
+        fireEvent.pointerLeave(slot())
+        expect(screen.getByTestId("tl-target-empty-c9-record")).not.toHaveAttribute("data-hot")
+        expect(screen.getByTestId("tl-target-empty-c9-speech")).not.toHaveAttribute("data-hot")
+        expect(slot().style.zIndex).toBe("")
+        rerender(<TargetAudioLane {...props} pxPerSec={40} />)
+        await act(async () => { await Promise.resolve() })
+        expect(screen.queryByRole("menu")).toBeNull()
+        expect(one()).not.toHaveAttribute("data-hot")
+      })
+
+      it("a scroll forgets the open menu: scrolled back, it does not reopen", async () => {
+        const user = userEvent.setup()
+        const props = wired({ emptyCells: [narrow()] })
+        const { rerender } = render(<TargetAudioLane {...props} />)
+        await user.click(one())
+        expect(await screen.findByRole("menu")).toBeInTheDocument()
+        rerender(<TargetAudioLane {...props} viewStartSec={50} viewEndSec={150} />)
+        expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+        rerender(<TargetAudioLane {...props} />)
+        await act(async () => { await Promise.resolve() })
+        expect(screen.queryByRole("menu")).toBeNull()
+        expect(one()).not.toHaveAttribute("data-hot")
+      })
+
       it("Shift+Enter on Make speech adds or removes from the keyboard too", async () => {
         const user = userEvent.setup()
         const props = wired({ emptyCells: [narrow()] })

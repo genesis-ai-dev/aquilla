@@ -2254,14 +2254,18 @@ export function TargetAudioLane({
   // Which record slot the pointer is on — ONE for both kinds, so an
   // add-and-record slot and an empty-section slot can never both be lit. Keys
   // are prefixed because a span start and a cell id share no namespace.
-  const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
-  // AQU-2663: KEYBOARD focus counts as hover for an empty line's pair — the
-  // line whose buttons hold focus unfolds its mic and is lifted, like the
-  // line under the pointer.
-  const [focusSlotKey, setFocusSlotKey] = useState<string | null>(null)
-  // AQU-2663: the narrow line whose one-button menu is open; it stays lit and
-  // lifted while the pointer is in the menu.
-  const [slotMenuKey, setSlotMenuKey] = useState<string | null>(null)
+  const {
+    hotKey,
+    menuKey: slotMenuKey,
+    setMenuOpen: setSlotMenuOpen,
+    focusKey: focusSlotKey,
+    setFocusKey: setFocusSlotKey,
+    slotHoverProps,
+  } = useHotSlot(viewStartSec, pxPerSec)
+  // AQU-2663: KEYBOARD focus (`focusSlotKey`) and an open menu
+  // (`slotMenuKey`) count as hover for an empty line — that line unfolds and
+  // is lifted like the one under the pointer. All three live in useHotSlot,
+  // so a scroll or zoom forgets them together.
   // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
   // draws over the lanes above and below on a short row. Stage 3 hid it there;
   // it shrinks with the ROW HEIGHT instead, because a compact timeline is
@@ -2545,7 +2549,9 @@ export function TargetAudioLane({
                 busy={busy}
                 menu={{
                   open: menuOpen,
-                  onOpenChange: (open) => setSlotMenuKey((cur) => (open ? key : cur === key ? null : cur)),
+                  // The narrow line whose menu is open stays lit and lifted
+                  // while the pointer is in the menu (useHotSlot).
+                  onOpenChange: (open) => setSlotMenuOpen(key, open),
                   content: (
                     <>
                       <DropdownMenuItem data-testid={`tl-target-${key}-menu-record`} onClick={record}>

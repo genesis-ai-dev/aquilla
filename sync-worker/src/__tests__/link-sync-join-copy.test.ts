@@ -30,6 +30,7 @@ import type { AquillaStatement } from '../../../db/shim/postgres'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { headParentFor } from './helpers/chain-parent'
+import { loadFileSourceLines } from '../../../db/shared/link-file-match'
 
 const SECRET = 'test-secret'
 const BSB = 'proj-bsb-source'
@@ -326,4 +327,63 @@ describe('AQU-2549 part 1: joining a copy that already arrived into the project\
       await t.close()
     }
   })
+})
+
+// AQU-2549 review, finding 1: the source file has lines the project's own file
+// lacks (two headings the team's import left out). A join's link position is
+// already past the upstream's history, so those lines never come through the
+// forward fold; the join itself has to write them.
+describe('AQU-2549: a join brings in the source lines the own file lacks', () => {
+  /** The own file without two of the source's headings. */
+  const OWN_LINES = LINES(OLD_NOTE).filter((_, i) => i !== 1 && i !== 5)
+
+  async function orderedValues(t: TestDb, projectId: string, fileId: string): Promise<string[]> {
+    return (await loadFileSourceLines(t.db, projectId, fileId)).map((line) => line.value)
+  }
+
+  for (const how of ['join a copy that already arrived', 'replace at link time (AQU-1679)'] as const) {
+    it(`${how}: every source line, in source order, translations kept, a later edit changes one row`, async () => {
+      const { t, reader, revise } = await setup()
+      try {
+        await revise(LANG, OWN_GD, 'a', OWN_LINES)
+        await translate(t, OWN_GD)
+        const before = await targetsAndValidators(t)
+        await revise(BSB, UP_GD, 'b', LINES(NEW_NOTE))
+        if (how === 'join a copy that already arrived') {
+          await link(t, null)
+          await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+          expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy').sort()).toEqual(['copy', 'own'])
+          await t.pg.query(`UPDATE projects SET source_link_adopt = $2 WHERE id = $1`, [
+            LANG, JSON.stringify({ files: { [UP_GD]: OWN_GD }, pending: [UP_GD] }),
+          ])
+        } else {
+          await link(t, { files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
+        }
+        await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+
+        expect(await orderedValues(t, LANG, OWN_GD)).toEqual(LINES(NEW_NOTE))
+        expect(await targetsAndValidators(t)).toEqual(before)
+
+        // The upstream edits one of the lines the own file lacked.
+        const heading = (await sourceOf(t, BSB, UP_GD)).find((c) => c.value === 'The Call of Abram')!
+        await emit(t, BSB, 'source.cell.commit', {
+          fileId: UP_GD, cellId: heading.cell_id, parentId: heading.event_id,
+          payload: { value: 'The Call of Abram (Genesis 12)' },
+        })
+        await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+
+        const expected = LINES(NEW_NOTE).map((v) => (v === 'The Call of Abram' ? 'The Call of Abram (Genesis 12)' : v))
+        expect(await orderedValues(t, LANG, OWN_GD)).toEqual(expected)
+        const rows = await t.pg.query<{ file_id: string }>(
+          `SELECT c.file_id FROM cells c JOIN files f ON f.project_id = c.project_id AND f.id = c.file_id
+            WHERE c.project_id = $1 AND c.side = 'source' AND f.deleted_at IS NULL
+              AND (c.cell_id = $2 OR c.upstream_cell_id = $2)`,
+          [LANG, heading.cell_id],
+        )
+        expect(rows.rows).toEqual([{ file_id: OWN_GD }])
+      } finally {
+        await t.close()
+      }
+    })
+  }
 })

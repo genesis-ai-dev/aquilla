@@ -321,18 +321,29 @@ async function adoptFile(
     return null
   }
 
-  // An upstream line with no counterpart here arrives through the forward fold
-  // as a new cell under its own id. A matched line that FOLLOWS such a line
-  // upstream is re-anchored on it, so the new line slots in where the upstream
-  // has it instead of forking the order. Every other matched line keeps the
-  // anchor it has — the file's own order, which its own unmatched lines hang
-  // off.
-  const paired = new Set(match.pairs.map((pair) => pair.upstreamCellId))
+  // AQU-2549: an upstream line with no counterpart here is written in by the
+  // join itself, as a new line under the upstream's own cell id — the id the
+  // forward fold gives any line it finds no mapping for, so a later upstream
+  // edit lands on this same row. (A join made after the link has run has a
+  // link position past the upstream's history, so the forward fold would never
+  // bring it in; on a replace made at link time the fold's older events for the
+  // row are already below its stamp.) Its anchor is the upstream's, read
+  // through the pairs. A matched line that FOLLOWS such a line upstream is
+  // re-anchored on it, so the new line slots in where the upstream has it
+  // instead of forking the order. Every other matched line keeps the anchor it
+  // has — the file's own order, which its own unmatched lines hang off.
+  const localOf = new Map(match.pairs.map((pair) => [pair.upstreamCellId, pair.cellId]))
+  const lines: Array<{ upstreamCellId: string; cellId: string; paired: boolean }> = [
+    ...match.pairs.map((pair) => ({ upstreamCellId: pair.upstreamCellId, cellId: pair.cellId, paired: true })),
+    ...upstreamLines
+      .filter((line) => !localOf.has(line.cellId))
+      .map((line) => ({ upstreamCellId: line.cellId, cellId: line.cellId, paired: false })),
+  ]
   const now = Date.now()
   let mirrored = 0
 
-  for (let start = 0; start < match.pairs.length; start += ADOPT_CHUNK_LINES) {
-    const chunk = match.pairs.slice(start, start + ADOPT_CHUNK_LINES)
+  for (let start = 0; start < lines.length; start += ADOPT_CHUNK_LINES) {
+    const chunk = lines.slice(start, start + ADOPT_CHUNK_LINES)
     const rows = await db
       .prepare(
         `SELECT cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
@@ -341,7 +352,7 @@ async function adoptFile(
           WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND tombstoned_at IS NULL AND cell_id IN (${chunk.map(() => '?').join(', ')})`,
       )
-      .bind(upstreamProjectId, upstreamFileId, ...chunk.map((pair) => pair.upstreamCellId))
+      .bind(upstreamProjectId, upstreamFileId, ...chunk.map((line) => line.upstreamCellId))
       .all<UpstreamLineRow>()
     const rowOf = new Map(rows.results.map((row) => [row.cell_id, row]))
 
@@ -354,12 +365,15 @@ async function adoptFile(
       if (!row) continue
       const value = row.value ?? ''
       const anchor = row.anchor_cell_id
+      const anchorCellId = pair.paired
+        ? (anchor && !localOf.has(anchor) ? anchor : null)
+        : (anchor ? localOf.get(anchor) ?? anchor : null)
       const payload: EventPayloads['source.cell.mirror'] = {
         value,
         valueHtml: row.value_html ?? undefined,
         type: row.type ?? undefined,
         canonicalRef: row.canonical_ref ?? undefined,
-        anchorCellId: anchor && !paired.has(anchor) ? anchor : null,
+        anchorCellId,
         startMs: row.start_ms == null ? undefined : Number(row.start_ms),
         endMs: row.end_ms == null ? undefined : Number(row.end_ms),
         metadata: row.metadata ?? undefined,
@@ -367,7 +381,9 @@ async function adoptFile(
         // first sync. A visible one says nothing, so a line this project's own
         // lead parked stays parked.
         hidden: row.hidden_at != null ? true : undefined,
-        adopt: true,
+        // A new line is an ordinary mirror, under the monotonic guard: a re-run
+        // of this join finds it already stamped and leaves it be.
+        adopt: pair.paired ? true : undefined,
         upstream: {
           projectId: upstreamProjectId,
           cellId: pair.upstreamCellId,
@@ -380,7 +396,9 @@ async function adoptFile(
       // Keyed on the upstream head event as well as the pair, so re-adopting
       // the file after the upstream moved on is a new event, and a re-run of
       // this same adoption is an exact replay the events PK drops.
-      const eventId = mirrorEventId(`adopt:${fileId}:${pair.cellId}:${row.event_id}`)
+      const eventId = mirrorEventId(
+        `${pair.paired ? 'adopt' : 'adopt-new'}:${fileId}:${pair.cellId}:${row.event_id}`,
+      )
       const envelope = {
         id: eventId,
         schemaVersion: ADOPT_SCHEMA_VERSION,

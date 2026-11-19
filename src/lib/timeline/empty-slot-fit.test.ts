@@ -51,9 +51,17 @@ describe("emptySlotFit", () => {
     expect(fit).toEqual({ kind: "reveal", sizePx: SLOT_BUTTON_MIN_PX, boxLeftPx: 0, boxWidthPx: 10, clipped: true })
   })
 
-  it("a clip reaching into the line still clips at the line's edge, not past it", () => {
+  it("a clip drawn into the line keeps its drawn part: the box is only the free space", () => {
+    // A tiny take painted at its 10px minimum reaches 4px into the line.
     const fit = at(10, 2, [{ startPx: 900, endPx: 1004 }, { startPx: 1006, endPx: 1100 }])
-    expect(fit).toMatchObject({ boxLeftPx: 0, boxWidthPx: 10, clipped: true })
+    expect(fit).toMatchObject({ boxLeftPx: 4, boxWidthPx: 2, clipped: true })
+    // Free space only on the right of the drawn take: shifted past it.
+    expect(at(10, 2, [{ startPx: 990, endPx: 1006 }]))
+      .toMatchObject({ boxLeftPx: 6, boxWidthPx: 16, clipped: false })
+  })
+
+  it("a line covered by a drawn clip reveals nothing", () => {
+    expect(at(10, 2, [{ startPx: 990, endPx: 1012 }, { startPx: 1012, endPx: 1100 }])).toMatchObject({ boxWidthPx: 0, clipped: true })
   })
 
   it("uses only the empty space a little gap leaves", () => {

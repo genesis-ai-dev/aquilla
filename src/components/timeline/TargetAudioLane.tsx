@@ -1014,7 +1014,7 @@ function TargetAudioChip({
   // inspecting. Note the hover-record mic further down is a different control
   // (an action, not a label) and stays.
   const overflowSec = span.end - section.end
-  const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
+  const paintedPx = Math.max(CHIP_MIN_PAINTED_PX, secToPx(paintedEnd - paintedStart, pxPerSec))
   // AQU-646: the waveform's window into this clip. Computed from the PAINTED
   // edges, so a chip cut short by the at-fault rule shows exactly the audio it
   // is drawn over — and hovering, which restores the true edges, widens the
@@ -2087,6 +2087,10 @@ function isFocusVisible(el: Element): boolean {
   }
 }
 
+/** A take is never drawn narrower than this, however short its audio. The
+ *  empty-line fit measures takes at this width too (AQU-2663). */
+const CHIP_MIN_PAINTED_PX = 10
+
 /** AQU-2663: a hovered empty line's z — over every clip but a dragged one. */
 const SLOT_LIFT_Z = 1999
 
@@ -2302,10 +2306,14 @@ export function TargetAudioLane({
         })
       : []
   // AQU-2663: the clips on this track, so a revealed button on a very narrow
-  // line keeps off them. Their full audible span: a clip drawn cut short at
-  // rest only frees more room than this.
+  // line keeps off them. Their full audible span, but never narrower than a
+  // clip is drawn (CHIP_MIN_PAINTED_PX); a clip drawn cut short at rest only
+  // frees more room than this.
   const clipSpansPx = emptySlots.length
-    ? chips.map((c) => ({ startPx: secToPx(c.geom.start, pxPerSec), endPx: secToPx(c.geom.end, pxPerSec) }))
+    ? chips.map((c) => {
+        const startPx = secToPx(c.geom.start, pxPerSec)
+        return { startPx, endPx: Math.max(secToPx(c.geom.end, pxPerSec), startPx + CHIP_MIN_PAINTED_PX) }
+      })
     : []
 
   // AQU-2432: for each chip, the chip before it on this track that reaches

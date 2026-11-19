@@ -1784,6 +1784,18 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
           expect(box().className).toMatch(/\boverflow-hidden\b/)
         })
 
+        it("never covers a tiny take drawn wider than its audio (its 10px minimum)", () => {
+          // A 0.1s take (4px of audio) at 29.9..30s is drawn 10px wide, out to
+          // 1206px, over the start of the empty line at 1200..1210px.
+          const short = item({ startTime: 29.9, endTime: 30 }, 100, "c1")
+          render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: [short] })} />)
+          fireEvent.pointerEnter(slot())
+          const c1 = screen.getByTestId("tl-target-c1")
+          const c1Right = parseFloat(c1.style.left) + parseFloat(c1.style.width)
+          expect(c1Right).toBeCloseTo(1206)
+          expect(boxSpan().left).toBeGreaterThanOrEqual(c1Right - 0.001)
+        })
+
         it("a picked line at rest shows a thin primary mark inside the line, not the sparkle", () => {
           render(<TargetAudioLane {...wired({ emptyCells: [tiny()], items: tight, pickedGhostIds: new Set(["c9"]) })} />)
           const mark = screen.getByTestId("tl-target-empty-c9-mark")

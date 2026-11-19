@@ -257,6 +257,19 @@ describe("Join into my existing file (AQU-2549 part 1)", () => {
     expect(await adoptRaw()).toBeNull()
   })
 
+  // WHY (re-check finding 3): the copy of a file the source project deleted is
+  // still a copy. Listed as one of the project's own files, it was offered as
+  // a file to join into, and the server then refused the pick.
+  it("does not offer the copy of a deleted source file as one of the project's own files", async () => {
+    await linkedWithCopy()
+    await env.AQUILLA_PG.prepare("UPDATE files SET deleted_at = 9001 WHERE id = ?").bind(UP_GD).run()
+    const listed = await copies()
+    expect(listed.status).toBe(200)
+    const body = (await listed.json()) as { copies: unknown[]; ownFiles: Array<{ id: string }> }
+    expect(body.copies).toEqual([])
+    expect(body.ownFiles.map((f) => f.id)).toEqual([OWN_GD])
+  })
+
   it("is for a Project Lead or higher", async () => {
     await linkedWithCopy()
     await seedUser(2, "translator")

@@ -670,10 +670,19 @@ export async function loadLinkedFileCopies(
   const followedSet = followed ? new Set(followed) : null
   const upstreamOfCopy = new Map<string, string>()
   const stoppedCopies = new Set<string>()
-  for (const upstreamFileId of await loadUpstreamFileIds(env, upstreamProjectId)) {
+  // AQU-2549: every file the source project has OR HAD, the set
+  // `replaceTargetsProblem` checks: the copy of a deleted source file is still
+  // a copy, so it is no own file to join into. Nor can it be joined — its
+  // source file is gone — so it is left out like a stopped one.
+  const upstreamFiles = await env.AQUILLA_PG.prepare(
+    "SELECT id, deleted_at IS NOT NULL AS deleted FROM files WHERE project_id = ?",
+  )
+    .bind(upstreamProjectId)
+    .all<{ id: string; deleted: boolean }>()
+  for (const { id: upstreamFileId, deleted } of upstreamFiles.results ?? []) {
     if (adopted[upstreamFileId]) continue
     const copyId = deterministicDownstreamFileId(projectId, upstreamFileId)
-    if (followedSet && !followedSet.has(upstreamFileId)) stoppedCopies.add(copyId)
+    if (deleted || (followedSet && !followedSet.has(upstreamFileId))) stoppedCopies.add(copyId)
     else upstreamOfCopy.set(copyId, upstreamFileId)
   }
   const { results } = await env.AQUILLA_PG.prepare(

@@ -9,6 +9,8 @@
 
 import { isElevationRequiredBody } from "@/lib/errors/user-error"
 import { notifyElevationRequiredIfCurrent } from "@/lib/frontier/elevation"
+import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
+import { registerSharedStateResetForTests } from "@/lib/request-coalescer"
 import { ROLE } from "@/lib/frontier/roles"
 
 // Phase D: default points at aquilla-identity (aquilla-identity).
@@ -149,34 +151,76 @@ interface CachedToken {
 const REFRESH_SAFETY_MS = 30_000
 
 /**
- * A file route can mint its sync token while the workspace chunk is still
- * loading. The minter created later joins this instead of starting a second
- * POST. Keyed by the identity that minted it, so an account switch cannot
- * pick up the previous account's token.
+ * One mint per (identity, project, file) for the whole tab (AQU-2654).
+ *
+ * Every `makeSyncTokenMinter` closure used to keep its own token, so opening
+ * one file POSTed /sync-token once per closure that needed the file: the
+ * workspace's file fetcher, its outbox minter, the route-scoped fetcher, each
+ * read hook's own fetcher. They are all the same credential. A mint is now
+ * shared by key while it is in flight and reused until it nears expiry; the
+ * closures keep their own fast path and their own callbacks.
+ *
+ * The session JWT is part of the key, so an account switch cannot pick up the
+ * previous account's token (AQU-616). A failed mint is not kept: everyone who
+ * joined it sees the failure, and the next call tries again.
  */
-const warmedSyncTokens = new Map<string, Promise<{ resp: SyncTokenResponse; mintedAt: number } | null>>()
+type SharedMint =
+  | { ok: true; resp: SyncTokenResponse; mintedAt: number }
+  | { ok: false; err: unknown }
 
-function warmKey(apiUrl: string, jwt: string, projectId: string, fileId: string): string {
+const sharedMints = new Map<string, Promise<SharedMint>>()
+
+function mintKey(apiUrl: string, jwt: string, projectId: string, fileId: string): string {
   return `${apiUrl}\n${jwt}\n${projectId}\n${fileId}`
 }
 
-/** Start the file's sync-token mint now. A later minter for the same identity reuses it. */
+function startSharedMint(
+  key: string,
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  bootstrap: ProjectBootstrap,
+  apiUrl: string,
+): Promise<SharedMint> {
+  // Counted from before the request, so a slow mint never looks younger than
+  // it is.
+  const mintedAt = Date.now()
+  const slot: Promise<SharedMint> = fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl).then(
+    (resp): SharedMint => ({ ok: true, resp, mintedAt }),
+    (err: unknown): SharedMint => {
+      if (sharedMints.get(key) === slot) sharedMints.delete(key)
+      return { ok: false, err }
+    },
+  )
+  sharedMints.set(key, slot)
+  return slot
+}
+
+function sharedMintIsUsable(mint: SharedMint): boolean {
+  return mint.ok && mint.mintedAt + mint.resp.expiresIn * 1000 > Date.now() + REFRESH_SAFETY_MS
+}
+
+// AQU-2003: an un-elevated platform admin is minted a Viewer token for a
+// foreign project. Once they step up, the next mint must carry the elevated
+// role, so nothing minted before the grant is handed out again (the audio
+// fetcher's cache does the same).
+onElevationGranted(() => sharedMints.clear())
+
+registerSharedStateResetForTests(() => sharedMints.clear())
+
+/**
+ * Start the file's sync-token mint now: a file route can do this while the
+ * workspace chunk is still loading, and the minter created later joins it.
+ */
 export function warmSyncToken(
   jwt: string,
   projectId: string,
   fileId: string,
   apiUrl: string = AUTH_API_URL,
 ): void {
-  const key = warmKey(apiUrl, jwt, projectId, fileId)
-  if (warmedSyncTokens.has(key)) return
-  const slot = fetchSyncToken(jwt, projectId, fileId, {}, apiUrl).then(
-    (resp) => ({ resp, mintedAt: Date.now() }),
-    () => {
-      warmedSyncTokens.delete(key)
-      return null
-    },
-  )
-  warmedSyncTokens.set(key, slot)
+  const key = mintKey(apiUrl, jwt, projectId, fileId)
+  if (sharedMints.has(key)) return
+  void startSharedMint(key, jwt, projectId, fileId, {}, apiUrl)
 }
 
 /**
@@ -267,7 +311,6 @@ export function makeSyncTokenMinter(
   callbacks: SyncTokenCallbacks = {}
 ): (opts?: SyncTokenMintOptions) => Promise<SyncTokenMintResult> {
   let cached: CachedToken | null = null
-  const pending = new Map<string, Promise<SyncTokenMintResult>>()
   return async (opts?: SyncTokenMintOptions) => {
     const now = Date.now()
     const forceRefresh = opts?.forceRefresh === true
@@ -287,67 +330,60 @@ export function makeSyncTokenMinter(
     if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200, ...platformRole(cached.role) }
     }
-    const warmSlotKey = warmKey(apiUrl ?? AUTH_API_URL, jwt, projectId, fileId)
-    if (forceRefresh) warmedSyncTokens.delete(warmSlotKey)
-    else {
-      const warmed = warmedSyncTokens.get(warmSlotKey)
-      if (warmed) {
-        const slot = await warmed
-        if (slot && getJwt() === jwt) {
-          const expiresAtMs = slot.mintedAt + slot.resp.expiresIn * 1000
-          if (expiresAtMs > Date.now() + REFRESH_SAFETY_MS) {
-            cached = { value: slot.resp.token, expiresAtMs, jwt, role: slot.resp.role }
-            callbacks.onRole?.(slot.resp.role)
-            return { token: slot.resp.token, status: 200, ...platformRole(slot.resp.role) }
-          }
-        }
-        warmedSyncTokens.delete(warmSlotKey)
+    const resolvedApiUrl = apiUrl ?? AUTH_API_URL
+    const key = mintKey(resolvedApiUrl, jwt, projectId, fileId)
+    // AQU-1788: a forced mint joins nothing (a mint already in flight may
+    // carry the same stale role) and replaces the shared one, so no other
+    // closure is handed the stale-role token after it.
+    let outcome: SharedMint | null = forceRefresh
+      ? await startSharedMint(key, jwt, projectId, fileId, bootstrap, resolvedApiUrl)
+      : null
+    while (!outcome) {
+      const existing = sharedMints.get(key)
+      if (!existing) {
+        outcome = await startSharedMint(key, jwt, projectId, fileId, bootstrap, resolvedApiUrl)
+        break
+      }
+      const settled = await existing
+      // A failure is shared by everyone who joined it; a token near expiry is
+      // replaced by whoever notices first.
+      if (!settled.ok || sharedMintIsUsable(settled)) outcome = settled
+      else if (sharedMints.get(key) === existing) sharedMints.delete(key)
+    }
+    if (outcome.ok) {
+      const resp = outcome.resp
+      if (getJwt() === jwt) cached = {
+        value: resp.token,
+        expiresAtMs: outcome.mintedAt + resp.expiresIn * 1000,
+        jwt,
+        role: resp.role,
+      }
+      callbacks.onRole?.(resp.role)
+      return { token: resp.token, status: 200, ...platformRole(resp.role) }
+    }
+    const err = outcome.err
+    let status: number | null = null
+    let elevationRequired = false
+    if (err instanceof SyncTokenError) {
+      status = err.status
+      if (err.elevationRequired) {
+        // fetchSyncToken already raised the step-up prompt.
+        elevationRequired = true
+      } else if (err.status === 403) {
+        callbacks.onForbidden?.()
+      } else if (err.status === 401) {
+        // Session JWT was rejected. Evict the in-memory sync token cache so
+        // the next call re-fetches, and notify the caller with the JWT that
+        // failed so it can raise the session-expired signal (AQU-159) —
+        // without destroying the session on what may be a transient
+        // misreported 401 (AQU-994) or clearing unrelated accounts.
+        if (cached?.jwt === jwt) cached = null
+        callbacks.onUnauthorized?.(jwt)
       }
     }
-    const existing = forceRefresh ? undefined : pending.get(jwt)
-    if (existing) return existing
-    const request = (async (): Promise<SyncTokenMintResult> => {
-      try {
-        const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
-        if (getJwt() === jwt) cached = {
-          value: resp.token,
-          expiresAtMs: now + resp.expiresIn * 1000,
-          jwt,
-          role: resp.role,
-        }
-        callbacks.onRole?.(resp.role)
-        return { token: resp.token, status: 200, ...platformRole(resp.role) }
-      } catch (err) {
-        let status: number | null = null
-        let elevationRequired = false
-        if (err instanceof SyncTokenError) {
-          status = err.status
-          if (err.elevationRequired) {
-            // fetchSyncToken already raised the step-up prompt.
-            elevationRequired = true
-          } else if (err.status === 403) {
-            callbacks.onForbidden?.()
-          } else if (err.status === 401) {
-            // Session JWT was rejected. Evict the in-memory sync token cache so
-            // the next call re-fetches, and notify the caller with the JWT that
-            // failed so it can raise the session-expired signal (AQU-159) —
-            // without destroying the session on what may be a transient
-            // misreported 401 (AQU-994) or clearing unrelated accounts.
-            if (cached?.jwt === jwt) cached = null
-            callbacks.onUnauthorized?.(jwt)
-          }
-        }
-        // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
-        console.warn("[sync-token] fetch failed:", err)
-        return elevationRequired ? { token: null, status, elevationRequired } : { token: null, status }
-      }
-    })()
-    pending.set(jwt, request)
-    try {
-      return await request
-    } finally {
-      if (pending.get(jwt) === request) pending.delete(jwt)
-    }
+    // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
+    console.warn("[sync-token] fetch failed:", err)
+    return elevationRequired ? { token: null, status, elevationRequired } : { token: null, status }
   }
 }
 

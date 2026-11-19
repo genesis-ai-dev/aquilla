@@ -91,6 +91,15 @@ export function createRequestCoalescer<T>(options: RequestCoalescerOptions = {})
   return coalescer
 }
 
+/**
+ * Module-level shared reads that are not built on a coalescer (the sync-token
+ * mint, the project-settings read) register their reset here, so the one
+ * `afterEach` in src/test-setup.ts clears them too.
+ */
+export function registerSharedStateResetForTests(reset: () => void): void {
+  registry.add(reset)
+}
+
 /** Test-only: drop every coalescer's cache and in-flight state. */
 export function resetAllRequestCoalescersForTests(): void {
   for (const reset of registry) reset()

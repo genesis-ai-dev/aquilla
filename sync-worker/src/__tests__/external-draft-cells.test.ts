@@ -144,6 +144,35 @@ function draftEverything(model = 'test/model') {
   })
 }
 
+/** Bridge that drafts every requested cell as the SAME given text. */
+function draftText(value: string, withProvenance = true) {
+  return stubBridge((body) => {
+    const cellIds = (body.cellIds ?? []) as string[]
+    return Response.json({
+      fileId: body.fileId,
+      model: 'test/model',
+      drafts: cellIds.map((cellId) => ({
+        cellId,
+        value,
+        ...(withProvenance ? { aiDraft: provenance() } : {}),
+      })),
+      missed: [],
+      remaining: 0,
+    })
+  })
+}
+
+/** The Uzbek 2026 alphabet slot, as AQU-2628's dev project records it. */
+const UZBEK_ORTHOGRAPHY = {
+  languageProfile: {
+    orthography: {
+      rules: [['sh', 'ş'], ['ch', 'ç'], ['oʻ', 'ö'], ['gʻ', 'ğ']],
+      apostrophe: 'ʼ',
+      exceptions: [{ word: 'Isʼhoq', status: 'approved' }],
+    },
+  },
+}
+
 const databases = new Set<TestDb>()
 let tdb: TestDb
 
@@ -453,5 +482,85 @@ describe('DraftCells — staged, never auto-committed', () => {
     expect(body.error?.code).toBe('job_failed')
     expect(body.error?.message).toMatch(/nothing was staged/)
     expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+})
+
+// ── AQU-2642 §2: the lane's orthography applies to a server-side draft ──────
+//
+// The parent (AQU-2628) converted the APP's drafting path. DraftCells runs the
+// model in auth-worker and materializes the result here, so an agent draft
+// bypassed the converter entirely: the Agent API wrote `Yer shaklsiz va
+// boʻm-boʻsh edi…` — zero new letters — and the app's own "Old orthography"
+// check then underlined it. These pin the correction at the staging seam, which
+// is also where a human reads the plan they are approving.
+
+describe('DraftCells — the lane orthography (AQU-2642)', () => {
+  it('stages the draft in the lane spelling, not the model output', async () => {
+    tdb = await seed(1, UZBEK_ORTHOGRAPHY)
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    draftText('Yer shaklsiz va chiroq edi')
+
+    const prep = await prepare(env, token, draftCmd(['c1']))
+    expect(prep.res.status).toBe(200)
+    const { res } = await commit(env, token, prep.body.changeset!.id)
+    expect(res.status).toBe(200)
+
+    const target = (await tdb.rows<{ side: string; value: string; ai_draft: unknown }>('cells'))
+      .find((c) => c.side === 'target')!
+    expect(target.value).toBe('Yer şaklsiz va çiroq edi')
+    const stored = typeof target.ai_draft === 'string'
+      ? (JSON.parse(target.ai_draft) as { orthography?: { wordsConverted: number; exceptionsApplied: number } })
+      : (target.ai_draft as { orthography?: { wordsConverted: number; exceptionsApplied: number } })
+    expect(stored.orthography).toEqual({ wordsConverted: 2, exceptionsApplied: 0 })
+  })
+
+  it('records an approved exception the rules were kept off', async () => {
+    tdb = await seed(1, UZBEK_ORTHOGRAPHY)
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    draftText('Isʼhoq shahar')
+
+    const prep = await prepare(env, token, draftCmd(['c1']))
+    await commit(env, token, prep.body.changeset!.id)
+
+    const target = (await tdb.rows<{ side: string; value: string; ai_draft: unknown }>('cells'))
+      .find((c) => c.side === 'target')!
+    expect(target.value).toBe('Isʼhoq şahar')
+    const stored = typeof target.ai_draft === 'string'
+      ? (JSON.parse(target.ai_draft) as { orthography?: { exceptionsApplied: number } })
+      : (target.ai_draft as { orthography?: { exceptionsApplied: number } })
+    expect(stored.orthography?.exceptionsApplied).toBe(1)
+  })
+
+  it('leaves the text alone in a project with no orthography slot', async () => {
+    tdb = await seed(1, null)
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    draftText('Yer shaklsiz edi')
+
+    const prep = await prepare(env, token, draftCmd(['c1']))
+    await commit(env, token, prep.body.changeset!.id)
+
+    const target = (await tdb.rows<{ side: string; value: string; ai_draft: unknown }>('cells'))
+      .find((c) => c.side === 'target')!
+    expect(target.value).toBe('Yer shaklsiz edi')
+    const stored = typeof target.ai_draft === 'string'
+      ? (JSON.parse(target.ai_draft) as { orthography?: unknown })
+      : (target.ai_draft as { orthography?: unknown })
+    expect(stored.orthography).toBeUndefined()
+  })
+
+  it('converts even when the bridge returned no provenance to stamp', async () => {
+    tdb = await seed(1, UZBEK_ORTHOGRAPHY)
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    draftText('chiroq', false)
+
+    const prep = await prepare(env, token, draftCmd(['c1']))
+    await commit(env, token, prep.body.changeset!.id)
+
+    const target = (await tdb.rows<{ side: string; value: string }>('cells')).find((c) => c.side === 'target')!
+    expect(target.value).toBe('çiroq')
   })
 })

@@ -10,6 +10,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { FileSectionGrid } from "./FileSectionGrid"
+import type { BookHealthChapter } from "./BookHealthSpine"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import {
   resetFileProgressResourceForTests,
@@ -119,3 +120,46 @@ describe("FileSectionGrid — audio progress from the server (AQU-2112)", () => 
     expect(figure(rows[0], "audio")).toBeNull()
   })
 })
+
+describe("FileSectionGrid — the active file's chapters (AQU-2654)", () => {
+  const chapter = (key: string): BookHealthChapter => ({ key, label: key, translated: 0, validated: 0, total: 2 })
+
+  function makeSignal() {
+    let version = 0
+    const listeners = new Set<() => void>()
+    return {
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      getVersion: () => version,
+      bump: () => { version += 1; for (const listener of [...listeners]) listener() },
+    }
+  }
+
+  it("re-reads a stable getter when its signal bumps, without the parent re-rendering", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(response("open-file", []))))
+    let chapters = [chapter("GEN 1")]
+    // One function for the life of the test, as the workspace now passes it.
+    const getChapters = () => chapters
+    const signal = makeSignal()
+    await act(async () => {
+      render(
+        <I18nProvider>
+          <FileSectionGrid
+            projectId={PROJECT}
+            fileId="open-file"
+            validationCount={1}
+            getTokenForFile={async () => "token"}
+            onSectionClick={vi.fn()}
+            getChapters={getChapters}
+            chaptersSignal={signal}
+          />
+        </I18nProvider>,
+      )
+    })
+    expect(screen.getAllByTestId("book-health-chapter")).toHaveLength(1)
+
+    chapters = [chapter("GEN 1"), chapter("GEN 2")]
+    act(() => signal.bump())
+    expect(screen.getAllByTestId("book-health-chapter")).toHaveLength(2)
+  })
+})
+

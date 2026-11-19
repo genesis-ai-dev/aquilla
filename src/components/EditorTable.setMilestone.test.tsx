@@ -4,11 +4,12 @@
  * What is pinned here, and why each one earns a test:
  *
  *   - THE ENTRY IS ABSENT, NOT DISABLED, BELOW THE GATE — and the gate is a
- *     rung ABOVE the park/edit-source one. Naming a range relayouts the
- *     navigator for everyone who opens the file, which is why the event sits at
- *     MAINTAINER; a project lead who may park and remove rows still does not
- *     see this. That off-by-one-rung is the easiest thing for a later refactor
- *     to "simplify" into `canEditSource`.
+ *     rung ABOVE the park/edit-source one on the default floor. Naming a
+ *     range relayouts the navigator for everyone who opens the file. The
+ *     default tier is Maintainer, so a project lead who may park and remove
+ *     rows still does not see this until the project opens the floor. That
+ *     off-by-one-rung is the easiest thing for a later refactor to
+ *     "simplify" into `canEditSource`.
  *   - A LIVE-LINKED DOWNSTREAM PROJECT SHOWS IT TO NOBODY, maintainer included.
  *     Its divisions are mirrored from upstream, so there is nothing to name.
  *   - IT IS NOT GATED ON `canEditSource`, which a DCS pin forces false for
@@ -208,10 +209,44 @@ describe("EditorTable — Set a new milestone…", () => {
     expect(noEntry()).toBeNull()
   })
 
+  it("offers it to a project lead when the floor is opened to project leads", async () => {
+    renderTable({
+      project: projectAt(ROLE.PROJECT_LEAD, { milestoneFloor: "project_lead" }),
+    }, {
+      onSetMilestone: () => {},
+      onSetCellHidden: () => {},
+    })
+    await screen.findByText("First line")
+
+    openMenu("line-a")
+    await screen.findByTestId("cell-menu-toggle-hidden")
+    expect((await entry()).textContent).toContain("Set a new milestone")
+  })
+
+  it("still hides it from a contributor when the floor is opened to project leads", async () => {
+    renderTable({
+      project: projectAt(ROLE.CONTRIBUTOR, { milestoneFloor: "project_lead" }),
+    }, { onSetMilestone: () => {} })
+    await screen.findByText("First line")
+
+    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    expect(noEntry()).toBeNull()
+  })
+
   it("hides it from everyone on a live-linked downstream project", async () => {
     renderTable({ project: projectAt(ROLE.MAINTAINER, { sourceLinkMode: "live" }) }, {
       onSetMilestone: () => {},
     })
+    await screen.findByText("First line")
+
+    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    expect(noEntry()).toBeNull()
+  })
+
+  it("hides it on a live-linked downstream even when the floor is project lead", async () => {
+    renderTable({
+      project: projectAt(ROLE.MAINTAINER, { sourceLinkMode: "live", milestoneFloor: "project_lead" }),
+    }, { onSetMilestone: () => {} })
     await screen.findByText("First line")
 
     expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
@@ -254,6 +289,19 @@ describe("EditorTable — editing milestones from the navigator", () => {
     fireEvent.click(await screen.findByRole("combobox", { name: /Part 1/ }))
   }
 
+  it("gives a project lead both controls when the floor is opened", async () => {
+    const milestoneEditing = editing()
+    renderTable({
+      project: projectAt(ROLE.PROJECT_LEAD, { milestoneFloor: "project_lead" }),
+      milestoneEditing,
+    })
+    await screen.findByText("First line")
+
+    await openNavigator()
+    expect(await screen.findByTestId("milestone-new")).toBeInTheDocument()
+    expect(screen.getAllByTestId("milestone-row-edit")).toHaveLength(1)
+  })
+
   it("gives a maintainer New milestone… and a control on Part 1", async () => {
     const milestoneEditing = editing()
     renderTable({ milestoneEditing })
@@ -267,8 +315,11 @@ describe("EditorTable — editing milestones from the navigator", () => {
   })
 
   it.each([
-    ["a project lead", projectAt(ROLE.PROJECT_LEAD)],
+    ["a project lead on the default floor", projectAt(ROLE.PROJECT_LEAD)],
+    ["a project lead when the floor is maintainer", projectAt(ROLE.PROJECT_LEAD, { milestoneFloor: "maintainer" })],
+    ["a contributor when the floor is project lead", projectAt(ROLE.CONTRIBUTOR, { milestoneFloor: "project_lead" })],
     ["a maintainer on a live-linked downstream project", projectAt(ROLE.MAINTAINER, { sourceLinkMode: "live" })],
+    ["a maintainer on a live-linked downstream whose floor is project lead", projectAt(ROLE.MAINTAINER, { sourceLinkMode: "live", milestoneFloor: "project_lead" })],
   ])("gives %s neither", async (_who, project) => {
     renderTable({ project, milestoneEditing: editing() })
     await screen.findByText("First line")

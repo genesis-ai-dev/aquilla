@@ -228,7 +228,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       },
       changeVoice: () => {
         if (recordingRef.current) return
-        setMessage(host.changeVoice(target.cellId) ?? t("editor.station.voiceStarted"))
+        setMessage(host.changeVoice(target.cellId, target.audioId) ?? t("editor.station.voiceStarted"))
       },
     })
     return () => setStationUi({ removeNoise: null, changeVoice: null })

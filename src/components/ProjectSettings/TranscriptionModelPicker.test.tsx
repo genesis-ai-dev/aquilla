@@ -71,22 +71,36 @@ describe("TranscriptionModelPicker support lines (AQU-2052)", () => {
   it("names the lane's language when the lane was tagged by NAME, not by code", async () => {
     renderPicker(projectWith([lane({ language: "Spanish" })]))
     await allThreeCatalogsLoaded()
-    expect(screen.getAllByText("Supports Spanish")).toHaveLength(3)
+    // Whisper, Qwen3-ASR, Omnilingual and Omnilingual fast.
+    expect(screen.getAllByText("Supports Spanish")).toHaveLength(4)
   })
 
   it("reads the lane, not the retired project-level language", async () => {
     renderPicker(projectWith([lane({ language: "French" })], "Spanish"))
     await allThreeCatalogsLoaded()
-    expect(screen.getAllByText("Supports French")).toHaveLength(3)
+    expect(screen.getAllByText("Supports French")).toHaveLength(4)
     expect(screen.queryByText("Supports Spanish")).toBeNull()
   })
 
   it("says which models do not know the language", async () => {
-    // Swahili: Whisper and Omnilingual know it, Qwen3-ASR does not.
+    // Swahili: Whisper and both Omnilingual models know it, Qwen3-ASR does not.
     renderPicker(projectWith([lane({ language: "Swahili" })]))
     await allThreeCatalogsLoaded()
     expect(screen.getByText("Does not support Swahili")).toBeInTheDocument()
-    expect(screen.getAllByText("Supports Swahili")).toHaveLength(2)
+    expect(screen.getAllByText("Supports Swahili")).toHaveLength(3)
+  })
+
+  it("offers Omnilingual fast as a choice that stores the omni-fast model id", async () => {
+    // The Transcribe lens and Preferences must name the same model: the id the
+    // radio stores is the one the server routes to the CPU service.
+    const user = (await import("@testing-library/user-event")).default.setup()
+    const { setTranscriptionModel } = await import("@/lib/audio/transcription-model")
+    renderPicker(projectWith([lane({ language: "Tok Pisin", langCode: "tpi" })]))
+    await allThreeCatalogsLoaded()
+    await user.click(screen.getByRole("radio", { name: /^Omnilingual fast/ }))
+    expect(setTranscriptionModel).toHaveBeenCalledWith("tester", "omni-fast")
+    // Tok Pisin is a language only Omnilingual has; Fast covers it too.
+    expect(screen.getAllByText("Supports Tok Pisin")).toHaveLength(2)
   })
 
   it("shows no line for a freeform label no catalog matches", async () => {

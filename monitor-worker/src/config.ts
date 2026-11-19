@@ -2,6 +2,13 @@
 // safe default except the target list, so a bad var fails the tick loudly
 // (Workers Logs) instead of silently monitoring nothing.
 
+import {
+  DEFAULT_REPEAT_MINUTES,
+  DEFAULT_THRESHOLD,
+  DEFAULT_TIMEOUT_MS,
+  type StuckSessionsConfig,
+} from "./stuck-sessions"
+
 export interface Target {
   /** Stable key for stored state. Renaming it resets that target's history. */
   id: string
@@ -19,6 +26,8 @@ export interface Target {
 export interface MonitorConfig {
   environment: string
   targets: Target[]
+  /** The AQU-2611 database check, or null when it is not configured. */
+  stuckSessions: StuckSessionsConfig | null
   /** Consecutive failed checks before a target is marked down. */
   failureThreshold: number
   /** Consecutive good checks before a down target is marked up again. */
@@ -31,6 +40,15 @@ export interface MonitorConfig {
 
 export interface MonitorEnv {
   ENVIRONMENT_LABEL?: string
+  /** sync-worker's stuck-session probe URL. Unset disables the check. */
+  STUCK_SESSIONS_URL?: string
+  /** Sessions stuck half-sent before alerting. Default 5. */
+  STUCK_SESSIONS_THRESHOLD?: string
+  /** Minutes between repeat alerts while stuck. Default 10. 0 = never repeat. */
+  STUCK_SESSIONS_REPEAT_MINUTES?: string
+  /** Admin bearer for the probe (a secret). Required once STUCK_SESSIONS_URL is
+   *  set, but deliberately NOT read here: it never belongs in MonitorConfig,
+   *  which /status serializes. runTick enforces the pairing — see below. */
   /** JSON array of Target. */
   MONITOR_TARGETS?: string
   FAILURE_THRESHOLD?: string
@@ -85,10 +103,27 @@ function parseTargets(raw: string | undefined): Target[] {
   })
 }
 
+/** The AQU-2611 check is off unless a probe URL is set. The missing-token case
+ *  is runTick's to raise, not this function's: readConfig runs before any
+ *  probing, so throwing here would take the uptime checks down with it while a
+ *  secret is being provisioned. */
+function parseStuckSessions(env: MonitorEnv): StuckSessionsConfig | null {
+  const url = env.STUCK_SESSIONS_URL?.trim()
+  if (!url) return null
+  if (!/^https?:\/\//.test(url)) throw new Error("STUCK_SESSIONS_URL is not an http(s) URL")
+  return {
+    url,
+    threshold: parseCount(env.STUCK_SESSIONS_THRESHOLD, DEFAULT_THRESHOLD, 1),
+    repeatMinutes: parseCount(env.STUCK_SESSIONS_REPEAT_MINUTES, DEFAULT_REPEAT_MINUTES, 0),
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+  }
+}
+
 export function readConfig(env: MonitorEnv): MonitorConfig {
   return {
     environment: env.ENVIRONMENT_LABEL?.trim() || "local",
     targets: parseTargets(env.MONITOR_TARGETS),
+    stuckSessions: parseStuckSessions(env),
     failureThreshold: parseCount(env.FAILURE_THRESHOLD, 3, 1),
     recoveryThreshold: parseCount(env.RECOVERY_THRESHOLD, 2, 1),
     reminderMinutes: parseCount(env.REMINDER_MINUTES, 60, 0),

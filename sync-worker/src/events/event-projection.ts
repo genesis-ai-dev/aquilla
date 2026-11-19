@@ -27,6 +27,7 @@ import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
+import { cellMetadataMergeBaseSql } from '../../../db/shared/cell-metadata-sql'
 import { usableSortIndex } from './sort-index'
 import { lineRoomToStore } from './line-room-authority'
 import { commentAuthorLabel } from './comment-authorship'
@@ -327,9 +328,9 @@ export function laneOfGlossEvent(payload: unknown): string {
   return typeof lang === 'string' ? lang : ''
 }
 
-// FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
-// generated column + GIN index on every cells write, so the projection emits no
-// FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
+// Full-text index maintenance: none. Postgres auto-maintains the
+// cells.value_tsv generated column + its GIN index on every cells write, so the
+// projection emits no index statements of its own.
 
 /**
  * Recompute the denormalized `files` rollup counters from the live `cells`
@@ -869,10 +870,6 @@ export function buildEventProjectionStmts(
       // NOTE: buildBulkSourceCellCreateStmt (above) mirrors this insert for
       // the bulk-import path — change them together.
 
-      // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
-      // row already exists for this key. No-op when this is a genuine first
-      // insert.
-
       // The lane is part of the row key via lane_id. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
       // own row beside its siblings. The projection target_lang column is not filled.
@@ -937,9 +934,6 @@ export function buildEventProjectionStmts(
           ),
       )
 
-      // FTS5 maintenance (post-DML): insert the new value now that the cells
-      // row reflects the post-create/update state.
-
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
@@ -958,25 +952,50 @@ export function buildEventProjectionStmts(
       if (!p.metadata || typeof p.metadata !== 'object' || Array.isArray(p.metadata)) {
         throw new Error(`${event.kind} event ${event.id} has invalid metadata`)
       }
-      const metadataJson = JSON.stringify(p.metadata)
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cells SET
-               metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
-               value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
-             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source'`,
-          )
-          .bind(
-            metadataJson,
-            p.valueHtml ?? null,
-            p.valueHtml ?? null,
-            event.projectId,
-            event.fileId,
-            event.cellId,
-          ),
-      )
+      // The source row is written only for what the patch carries.
+      //
+      // A patch with no keys changes none, so the row's metadata is not
+      // assigned at all: whatever shape it is stored in, it stays byte for
+      // byte what it was. That is the "markup only" save of an IDML
+      // translation (`emitIdmlTargetMarkup`), which sends `{}` beside the
+      // target HTML. It used to run the merge anyway, and on a row a source
+      // link mirrored — whose envelope is stored as a JSON string — `||`
+      // answered with the array `["<envelope>", {}]`. Each line placed that
+      // way lost its IDML locator, and the export it was placed for stopped
+      // on "has no supported IDML v2 locator".
+      //
+      // A patch that does carry keys merges onto the stored value read as an
+      // object (`cellMetadataMergeBaseSql`), for the same reason.
+      if (Object.keys(p.metadata).length > 0) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET
+                 metadata = (${cellMetadataMergeBaseSql()} || ?::text::jsonb),
+                 value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'source'`,
+            )
+            .bind(
+              JSON.stringify(p.metadata),
+              p.valueHtml ?? null,
+              p.valueHtml ?? null,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+            ),
+        )
+      } else if (p.valueHtml != null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET value_html = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'source'`,
+            )
+            .bind(p.valueHtml, event.projectId, event.fileId, event.cellId),
+        )
+      }
       if (p.targetHtml !== undefined) {
         stmts.push(
           db
@@ -1074,10 +1093,6 @@ export function buildEventProjectionStmts(
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
-
-      // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
-      // overwrite the cells row. Must run first so the old value is still
-      // readable from `cells`.
 
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
@@ -1316,9 +1331,6 @@ export function buildEventProjectionStmts(
         }
       }
 
-      // FTS5 maintenance (post-DML): insert the new indexed value now that
-      // the cells row has been updated/upserted.
-
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
@@ -1337,10 +1349,6 @@ export function buildEventProjectionStmts(
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
       const lane = laneOfEvent(event.kind, event.payload)
       const dependentGateBinds = dependentGateBindsFor(side, lane)
-
-      // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
-      // the cells row so the OLD value is still readable for the 'delete'
-      // command.
 
       // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
       //

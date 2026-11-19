@@ -39,9 +39,10 @@ export interface StationHost {
   /** Item 2 / slice 9: clean the take's noise into a new version (the Remove
    *  noise action, keeping its track, kept part and places); its new id. */
   removeNoise(cellId: string, audioId: string): Promise<string | null>
-  /** Item 2 / slice 9: change the line's voice into a new version; a reason
-   *  when it can't, else null. */
-  changeVoice(cellId: string): string | null
+  /** Item 2 / slice 9: change the voice of the take open here into a new
+   *  version (AQU-2499: this take, not the main track's); a reason when it
+   *  can't, else null. */
+  changeVoice(cellId: string, audioId: string): string | null
   /** AQU-2493 (review, Nov 9): is the take's track a layer (music, effects,
    *  ambience)? There its sound follows its clip's start in both timings. */
   takeIsLayer(fileId: string, slot: string | undefined): boolean

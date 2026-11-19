@@ -1,6 +1,6 @@
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { checkRulesForCell } from "./rule-engine"
+import { checkRulesForCell, ruleSourceGateMatches } from "./rule-engine"
 
 /**
  * AQU-664: live terminology-blot support.
@@ -17,11 +17,56 @@ export function selectTermRules(rules: Iterable<TranslationRule>): TranslationRu
   return [...rules].filter((r) => r.enabled && r.id.startsWith("term:"))
 }
 
+const termRulesByMap = new WeakMap<ReadonlyMap<string, TranslationRule>, TranslationRule[]>()
+
+/**
+ * `selectTermRules` of a rule map, as ONE array per map (AQU-2654). Every
+ * editor row asks for the same list; a filter per row walked the whole
+ * glossary's rules once per row and gave each row an array of its own, so the
+ * rule engine's per-array plan could never be shared between them.
+ */
+export function termRulesOf(ruleMap: ReadonlyMap<string, TranslationRule>): TranslationRule[] {
+  let rules = termRulesByMap.get(ruleMap)
+  if (!rules) {
+    rules = selectTermRules(ruleMap.values())
+    termRulesByMap.set(ruleMap, rules)
+  }
+  return rules
+}
+
+/**
+ * AQU-2654: the term rules that can possibly infract on THIS cell, narrowed by
+ * the source-side gate every terminology rule carries.
+ *
+ * Both compiled terminology shapes only fire on a cell whose source bears the
+ * concept, so a rule that fails the gate cannot produce an infraction here and
+ * is dropped. The gate reads the cell's SOURCE text, which does not change
+ * while the user types in the target — so callers compute this once per cell
+ * and reuse it across keystrokes instead of re-scanning the whole termbase on
+ * every live-check tick.
+ *
+ * On a 664-concept termbase with affix matching on (BibleProject French), this
+ * takes 1328 candidate rules down to ~2, turning a ~32 ms per-keystroke regex
+ * sweep into ~0.03 ms. The output of `computeLiveTermInfractions` is unchanged:
+ * dropping a rule that cannot infract removes no infraction.
+ */
+export function selectSourceApplicableTermRules(
+  cell: CellData,
+  termRules: TranslationRule[],
+): TranslationRule[] {
+  if (termRules.length === 0) return termRules
+  return termRules.filter((rule) => ruleSourceGateMatches(rule, cell))
+}
+
 /**
  * Terminology violations computed off the LIVE editor buffer. Promotes an
  * "empty" status to "unvalidated" whenever the buffer has content, because
  * `checkRulesForCell` short-circuits on an empty target and would otherwise
  * never run the term rules against just-typed text.
+ *
+ * Pass `termRules` already narrowed by `selectSourceApplicableTermRules` — the
+ * hot path must not re-scan the whole termbase's source patterns per keystroke
+ * (AQU-2654).
  */
 export function computeLiveTermInfractions(
   cell: CellData,

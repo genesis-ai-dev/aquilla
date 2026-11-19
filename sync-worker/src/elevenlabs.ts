@@ -10,6 +10,10 @@
 //   GET  /api/v1/elevenlabs/user?projectId=          tier + character quota (unknown for a key without user_read)
 //   GET  /api/v1/elevenlabs/voices?projectId=&search=&category=&pageToken=
 //   GET  /api/v1/elevenlabs/models?projectId=        curated TTS models
+//   GET  /api/v1/elevenlabs/library?projectId=&search=&language=&gender=&age=&page=
+//                                                    ElevenLabs' public voice library
+//   POST /api/v1/elevenlabs/library/add              JSON; saves a library voice to
+//                                                    the caller's own account
 //   POST /api/v1/elevenlabs/tts                      JSON; stores mp3 + returns the
 //                                                    /voice/tts contract, or with
 //                                                    `preview: true` returns the
@@ -43,6 +47,7 @@ import {
   ELEVENLABS_MAX_TEXT_CHARS,
   ELEVENLABS_STS_MODEL,
   ElevenLabsUpstreamError,
+  addElevenLabsLibraryVoice,
   cloneElevenLabsVoice,
   connectElevenLabsAccount,
   convertSpeechElevenLabs,
@@ -53,6 +58,7 @@ import {
   isElevenLabsVoiceId,
   listElevenLabsModels,
   listElevenLabsVoices,
+  searchElevenLabsLibrary,
   mp3DurationSeconds,
   parseVoiceSettings,
   synthesizeElevenLabs,
@@ -159,7 +165,10 @@ export async function handleElevenLabsRequest(request: Request, env: ElevenLabsE
     case "user":
     case "voices":
     case "models":
+    case "library":
       return handleRead(request, env, url, route)
+    case "library/add":
+      return handleLibraryAdd(request, env)
     case "tts":
       return handleTts(request, env)
     case "sts":
@@ -171,11 +180,39 @@ export async function handleElevenLabsRequest(request: Request, env: ElevenLabsE
   }
 }
 
+/**
+ * Save a voice from ElevenLabs' public library to the caller's own ElevenLabs
+ * account, so it can be used like any other voice there. Nothing is stored in
+ * Aquilla: the project gets the voice when the app adds it to the cast.
+ */
+async function handleLibraryAdd(request: Request, env: ElevenLabsEnv): Promise<Response> {
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+  let body: { projectId?: unknown; ownerId?: unknown; voiceId?: unknown; name?: unknown }
+  try {
+    body = await request.json()
+  } catch {
+    return new Response("expected JSON", { status: 400 })
+  }
+  const projectId = typeof body.projectId === "string" ? body.projectId.trim() : ""
+  if (!projectId || !isPathSafeId(projectId)) return new Response("missing or invalid projectId", { status: 400 })
+  const verified = await verifyTokenForProject(bearer(request), projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) return new Response(verified.reason, { status: verified.status })
+  const ownerId = typeof body.ownerId === "string" ? body.ownerId.trim() : ""
+  const voiceId = typeof body.voiceId === "string" ? body.voiceId.trim() : ""
+  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : ""
+  if (!/^[A-Za-z0-9]{1,128}$/.test(ownerId) || !isElevenLabsVoiceId(voiceId) || !name) {
+    return new Response("missing or invalid ownerId, voiceId, or name", { status: 400 })
+  }
+  const config = keyFrom(request, env)
+  if (config instanceof Response) return config
+  return upstreamCall(async () => Response.json({ voiceId: await addElevenLabsLibraryVoice(config, { ownerId, voiceId, name }) }))
+}
+
 async function handleRead(
   request: Request,
   env: ElevenLabsEnv,
   url: URL,
-  route: "user" | "voices" | "models",
+  route: "user" | "voices" | "models" | "library",
 ): Promise<Response> {
   if (request.method !== "GET") return new Response("method not allowed", { status: 405 })
   const projectId = url.searchParams.get("projectId")?.trim() ?? ""
@@ -188,6 +225,16 @@ async function handleRead(
   return upstreamCall(async () => {
     if (route === "user") return Response.json(await connectElevenLabsAccount(config))
     if (route === "models") return Response.json({ models: await listElevenLabsModels(config) })
+    if (route === "library") {
+      const filter = (name: string) => url.searchParams.get(name)?.trim().slice(0, 60) || undefined
+      return Response.json(await searchElevenLabsLibrary(config, {
+        search: url.searchParams.get("search")?.trim().slice(0, 100) || undefined,
+        language: filter("language"),
+        gender: filter("gender"),
+        age: filter("age"),
+        page: Number(url.searchParams.get("page")) || 0,
+      }))
+    }
     const category = url.searchParams.get("category") ?? undefined
     const page = await listElevenLabsVoices(config, {
       search: url.searchParams.get("search")?.trim().slice(0, 100) || undefined,

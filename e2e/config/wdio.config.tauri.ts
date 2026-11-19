@@ -16,6 +16,9 @@ const appBinaryPath = path.resolve(
 
 export const config: WebdriverIO.Config = {
   runner: "local",
+  // The shell is single-instance: concurrent specs attach to the same window
+  // and race navigation/keychain state. Run complete journeys sequentially.
+  maxInstances: 1,
   specs: [path.resolve(REPO_ROOT, "e2e/tauri/**/*.spec.ts")],
 
   capabilities: [createTauriCapabilities(appBinaryPath, { driverProvider: "embedded" })],

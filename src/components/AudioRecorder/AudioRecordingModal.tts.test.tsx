@@ -444,14 +444,14 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
 
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
     onActiveCellChange.mockClear()
     recorderState.value = { kind: "idle" }
   })
   afterEach(() => {
     recorderState.value = { kind: "idle" }
-    localStorage.removeItem("aq.recording-auto-advance.v1")
+    localStorage.removeItem("aq.recording-auto-advance.v2")
     resetRecordingAutoAdvanceCacheForTests()
   })
 
@@ -482,35 +482,37 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     const sw = screen.getByTestId("rec-auto-advance")
     expect(sw).toHaveAttribute("role", "switch")
     fireEvent.click(sw)
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
-    fireEvent.click(screen.getByText("Move on after saving a recording"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByText("Move on after saving a recording"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
     expect(screen.queryByText(/Saved recordings (jump|stay)/)).toBeNull()
   })
 
-  it("defaults to on — saving still moves to the next line", async () => {
+  // AQU-2620 (Matthew, 2026-11-16): off is the default now. Saving a take
+  // leaves you on the line you are working, recorder open, for another take.
+  it("defaults to off — saving stays on the same line for another take", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
     // By testid, not by name: the settings popover is open at this point, and
     // AQU-1216 put the word "Saved" into the auto-advance description, so a
     // /Save/ role query matches that control too.
     fireEvent.click(screen.getByTestId("rec-save"))
-    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
+    await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
+    expect(onActiveCellChange).not.toHaveBeenCalled()
   })
 
-  it("turned off, saving stays on the same line for another take", async () => {
+  it("turned on, saving moves to the next line", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
 
     fireEvent.click(screen.getByTestId("rec-save"))
-    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
-    await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
-    expect(onActiveCellChange).not.toHaveBeenCalled()
+    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
   })
 
   it("the choice survives a remount", () => {
@@ -523,7 +525,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
   })
 })
 

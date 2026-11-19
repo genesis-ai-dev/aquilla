@@ -23,7 +23,7 @@ import { audioProgressSegments, textProgressSegments } from "@/lib/progress/prog
 import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { fileProgressView, type FileStats } from "@/lib/progress/file-summary-progress"
 
-interface FileRowProps {
+export interface FileRowProps {
   file: FileReference
   active: boolean
   expanded: boolean

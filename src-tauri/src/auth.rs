@@ -1,87 +1,146 @@
-use crate::keychain;
-use tauri::Emitter;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+#[path = "mac_google.rs"]
+mod mac_google;
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
-/// Opens the given URL in the system browser to begin the OAuth flow.
-/// The `auth_url` is supplied by the SPA from its `VITE_AUTH_BASE` env var.
-#[tauri::command]
-pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String) -> Result<(), String> {
-    app.opener()
-        .open_url(auth_url, None::<&str>)
-        .map_err(|e| e.to_string())
+#[derive(Default)]
+pub struct GoogleCallback(Mutex<Option<String>>);
+
+// A URL supplied by web content must never open arbitrary native protocols.
+fn valid_authorization_url(value: &str) -> bool {
+    Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("accounts.google.com")
+            && url.path() == "/o/oauth2/v2/auth"
+            && url.port().is_none()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.fragment().is_none()
+    })
 }
 
-/// Registers the deep-link handler for `aquilla://auth/callback` URLs
-/// (`codex://` is still accepted for older dev installs; the parser is scheme-agnostic).
-/// Call this once from `lib.rs` inside the `.setup()` closure.
+#[tauri::command]
+pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String, attempt: Option<String>, private_session: Option<bool>) -> Result<(), String> {
+    if !valid_authorization_url(&auth_url) {
+        return Err("invalid_authorization_url".into());
+    }
+    #[cfg(target_os = "macos")]
+    return mac_google::open(app, auth_url, attempt.unwrap_or_default(), private_session.unwrap_or(false)).await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = (attempt, private_session);
+    #[cfg(not(target_os = "macos"))]
+    app.opener()
+        .open_url(auth_url, None::<&str>)
+        .map_err(|_| "browser_open_failed".into())
+}
+
+#[tauri::command]
+pub fn cancel_auth_browser(app: tauri::AppHandle, attempt: String) {
+    #[cfg(target_os = "macos")]
+    mac_google::cancel(app, attempt);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, attempt);
+}
+
+#[tauri::command]
+pub fn google_private_session_supported() -> bool {
+    cfg!(target_os = "macos")
+}
+
+#[tauri::command]
+pub fn google_login_supported() -> bool {
+    true
+}
+
+#[tauri::command]
+pub fn take_google_callback(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    Ok(app
+        .state::<GoogleCallback>()
+        .0
+        .lock()
+        .map_err(|_| "callback_unavailable")?
+        .take())
+}
+
 pub fn setup_deep_link_handler(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_deep_link::DeepLinkExt;
-
-    let app_handle = app.handle().clone();
-
+    let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
-        for url_str in event.urls() {
-            handle_callback_url(&app_handle, url_str.as_str());
+        for url in event.urls() {
+            handle_callback_url(&handle, url.as_str());
         }
     });
-
+    if let Some(urls) = app.deep_link().get_current()? {
+        for url in urls {
+            handle_callback_url(app.handle(), url.as_str());
+        }
+    }
     Ok(())
 }
 
-/// Parses an `aquilla://auth/callback?token=<jwt>&refresh=<refresh_token>` URL,
-/// persists the credentials to the OS keychain, and notifies the SPA.
-fn handle_callback_url(app: &tauri::AppHandle, url_str: &str) {
-    match parse_and_store(app, url_str) {
-        Ok(()) => {
-            let _ = app.emit(
-                "auth://token-received",
-                serde_json::json!({ "success": true }),
-            );
-        }
-        Err(err) => {
-            let _ = app.emit(
-                "auth://token-received",
-                serde_json::json!({ "success": false, "error": err }),
-            );
-        }
+fn valid_callback(value: &str) -> bool {
+    if value.len() > 512 {
+        return false;
+    }
+    let Ok(url) = Url::parse(value) else {
+        return false;
+    };
+    if url.scheme() != "aquilla"
+        || url.host_str() != Some("auth")
+        || url.path() != "/google"
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+    {
+        return false;
+    }
+    let params: Vec<_> =
+        url::form_urlencoded::parse(url.fragment().unwrap_or("").as_bytes()).collect();
+    if params.len() != 2 {
+        return false;
+    }
+    let states: Vec<_> = params.iter().filter(|(key, _)| key == "state").collect();
+    if states.len() != 1
+        || states[0].1.len() != 43
+        || !states[0]
+            .1
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return false;
+    }
+    params.iter().any(|(key, value)| {
+        (key == "code"
+            && value.len() == 64
+            && value
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+            || (key == "error"
+                && ["cancelled", "invalid_request", "provider_failed"].contains(&value.as_ref()))
+    })
+}
+
+fn handle_callback_url(app: &tauri::AppHandle, value: &str) {
+    // Never accept credentials from a URL. The SPA must match the local attempt
+    // and redeem this short-lived code using its private PKCE verifier.
+    if !valid_callback(value) {
+        return;
+    }
+    if let Ok(mut slot) = app.state::<GoogleCallback>().0.lock() {
+        *slot = Some(value.to_owned());
+    }
+    let _ = app.emit("auth://google-return", ());
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
-// Pulled out of `parse_and_store` so the URL/query parsing can be unit
-// tested without a `tauri::AppHandle`.
-fn parse_callback_url(url_str: &str) -> Result<(String, String), String> {
-    let url = Url::parse(url_str).map_err(|e| format!("Invalid callback URL: {e}"))?;
-
-    let mut token: Option<String> = None;
-    let mut refresh: Option<String> = None;
-
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
-            "token" => token = Some(value.into_owned()),
-            "refresh" => refresh = Some(value.into_owned()),
-            _ => {}
-        }
-    }
-
-    let token = token.ok_or_else(|| "Missing 'token' query parameter".to_string())?;
-    let refresh = refresh.ok_or_else(|| "Missing 'refresh' query parameter".to_string())?;
-
-    Ok((token, refresh))
-}
-
-fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> {
-    let (token, refresh) = parse_callback_url(url_str)?;
-    keychain::store_tokens(app, token, refresh)
-}
-
-/// Test-only: lets e2e/tauri/smoke.spec.ts exercise `handle_callback_url`'s real wiring
-/// (parse -> keychain store -> `auth://token-received` emit) via WebDriver. Confirmed by hand
-/// against the embedded WebDriver service that `browser.tauri.triggerDeeplink()` only injects
-/// a JS-layer event and never reaches this Rust-side `on_open_url` handler in embedded/unbundled
-/// mode (see its own docs: "bypasses platform-specific single-instance IPC mechanisms... which
-/// don't work reliably with unbundled binaries") — this app has no JS-side deep-link listener,
-/// so there is no other way to reach this code path from WebDriver.
 #[cfg(feature = "e2e-webdriver")]
 #[tauri::command]
 pub fn simulate_deep_link_callback(app: tauri::AppHandle, url: String) {
@@ -91,46 +150,41 @@ pub fn simulate_deep_link_callback(app: tauri::AppHandle, url: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn parse_callback_url_extracts_token_and_refresh() {
-        let (token, refresh) =
-            parse_callback_url("codex://auth/callback?token=abc123&refresh=def456").unwrap();
-        assert_eq!(token, "abc123");
-        assert_eq!(refresh, "def456");
+    fn validates_handoffs_and_rejects_credentials_or_foreign_destinations() {
+        let good = format!(
+            "aquilla://auth/google#code={}&state={}",
+            "a".repeat(64),
+            "b".repeat(43)
+        );
+        assert!(valid_callback(&good));
+        assert!(valid_callback(&format!(
+            "aquilla://auth/google#error=cancelled&state={}",
+            "b".repeat(43)
+        )));
+        for bad in [
+            good.replace("aquilla:", "codex:"),
+            good.replace("auth/google", "other/google"),
+            good.replace("#", "?"),
+            format!("{good}&token=jwt"),
+            good.replace("code=", "token="),
+            "aquilla://auth/callback?token=jwt&refresh=r".into(),
+        ] {
+            assert!(!valid_callback(&bad));
+        }
     }
-
     #[test]
-    fn parse_callback_url_decodes_percent_encoded_values() {
-        let (token, _) =
-            parse_callback_url("codex://auth/callback?token=a%2Fb&refresh=r").unwrap();
-        assert_eq!(token, "a/b");
-    }
-
-    #[test]
-    fn parse_callback_url_ignores_unknown_params() {
-        let (token, refresh) = parse_callback_url(
-            "codex://auth/callback?token=abc&refresh=def&extra=ignored",
-        )
-        .unwrap();
-        assert_eq!(token, "abc");
-        assert_eq!(refresh, "def");
-    }
-
-    #[test]
-    fn parse_callback_url_rejects_missing_token() {
-        let err = parse_callback_url("codex://auth/callback?refresh=def456").unwrap_err();
-        assert!(err.contains("token"));
-    }
-
-    #[test]
-    fn parse_callback_url_rejects_missing_refresh() {
-        let err = parse_callback_url("codex://auth/callback?token=abc123").unwrap_err();
-        assert!(err.contains("refresh"));
-    }
-
-    #[test]
-    fn parse_callback_url_rejects_malformed_url() {
-        assert!(parse_callback_url("not a url").is_err());
+    fn opens_only_google_authorization_urls() {
+        assert!(valid_authorization_url(
+            "https://accounts.google.com/o/oauth2/v2/auth?state=example"
+        ));
+        for bad in [
+            "file:///etc/passwd",
+            "https://evil.example/o/oauth2/v2/auth",
+            "https://accounts.google.com/other",
+            "https://user@accounts.google.com/o/oauth2/v2/auth",
+        ] {
+            assert!(!valid_authorization_url(bad));
+        }
     }
 }

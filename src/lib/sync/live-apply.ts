@@ -22,6 +22,8 @@ export interface LiveApplyStore {
   clearConfirmedShadows(serverRows: CellRow[], fetchStartSeq: number): void
   markCellFresh(cellId: string): void
   replaceRowsForCell(cellId: string, rows: CellRow[]): void
+  /** AQU-2654: announce the mutations made inside `run` once (CellStore.batch). */
+  batch?<T>(run: () => T): T
 }
 
 export type LiveApplyDecision = "apply" | "refetch" | "ignore"
@@ -78,10 +80,15 @@ export function createLiveApplier(opts: {
       // drops a shadow on value equality, so the surviving shadow keeps
       // painting the local value through applyContentOverlays until its own
       // commit echoes back and confirms it.
-      const startSeq = store.getWriteSeq()
-      store.clearConfirmedShadows(rows, startSeq)
-      store.markCellFresh(cell)
-      store.replaceRowsForCell(cell, rows)
+      const land = () => {
+        const startSeq = store.getWriteSeq()
+        store.clearConfirmedShadows(rows, startSeq)
+        store.markCellFresh(cell)
+        store.replaceRowsForCell(cell, rows)
+      }
+      // One frame is one event: its three mutations are announced together.
+      if (store.batch) store.batch(land)
+      else land()
       lastSeqByCell.set(cell, serverSeq)
       return "applied"
     },

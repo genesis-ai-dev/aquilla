@@ -27,6 +27,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import {
   loadCurrentTargetLanes,
@@ -43,6 +44,51 @@ import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import type { MemberLaneGrant } from "../../../src/lib/lanes/grant-gap"
 import { loadProjectTeamLaneAttachments, syncMemberLaneGrants } from "../services/lane-grants"
 import { getMemberLaneAssignments } from "../services/assignments"
+
+// ──────────────────────────────────────────────────────────────────────────
+// OPSEC 2026-11-16 — OPS-56: the PROJECT_LEAD floor on the PUT below, with
+// un-elevated platform-admin power stripped out of it.
+//
+// `resolveProjectRole` contributes { source: "platform", level: 700 } for
+// every platform operator on every project on the platform, and
+// ROLE.PROJECT_LEAD is 500 — so `callerRole.level < ROLE.PROJECT_LEAD` was
+// false by definition for an un-elevated admin JWT. AQU-1322's rule ("admin
+// power applies only while elevated") reaches this route for three reasons,
+// and the third is why the floor alone was not the whole of the hole:
+//
+//   * This PUT does not write a setting, it writes AUTHORIZATION. One request
+//     replace-sets `project_member_scopes` AND, through
+//     `syncMemberLaneGrants`, `project_member_lane_roles` — the table the lane
+//     read wall actually enforces (AQU-730 / AQU-1415).
+//   * A grant row is STANDING access that outlives the request. The wall reads
+//     the member's own grants (sync-worker events/lane-read-wall.ts) and has no
+//     actor to check, so an elevation check at use time can never reach back to
+//     who wrote the row. Same shape as OPS-44's PAT, OPS-49's integration link,
+//     OPS-51's source link and OPS-53's termbase subscription — the fifth time
+//     this series has found it.
+//   * `planLaneGrants` reads an EMPTY scope set as "every lane". So the
+//     cheapest request on this route — `{ scopes: [] }` — is the widening one:
+//     it hands a lane-walled member every target lane of the project, archived
+//     ones included. The narrowing direction walls a member off their work
+//     instead. Both were reachable on any tenant's project.
+//
+// Two guards downstream of the floor read the caller's LEVEL, so narrowing the
+// role without threading it through them would have been cosmetic:
+//
+//   * the self-edit refusal (`targetUserId === user.id`), which an admin's 700
+//     cleared as a "maintainer", letting them widen their own lanes;
+//   * `mergeLanesALimitedCallerMayGrant`, whose `lanesHeldByCaller` returns
+//     "every lane" at MAINTAINER+ — so 700 skipped the "you can only grant
+//     lanes you hold" rule entirely.
+//
+// Both now read the de-escalated level. The floor is checked BEFORE narrowing,
+// so a genuine below-floor member and a non-member keep their byte-identical
+// pre-OPS-56 refusals; only a caller who cleared the floor on platform power
+// alone sees the elevation wording.
+//
+// The three READS in this file are deliberately left open — AQU-2003 priced
+// un-elevated platform access as read-only on our own content, not refused.
+// ──────────────────────────────────────────────────────────────────────────
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -69,13 +115,27 @@ const getParamsSchema = z.object({
   userId: z.string().regex(/^(?:\d+|me)$/),
 })
 
+// OPS-57: `scopes` carried no cap and `value` no length bound, while the PUT
+// below does PER-ELEMENT work — one awaited INSERT per scope, plus a second
+// awaited INSERT per planned grant — against the single-writer datastore. The
+// cap is the OPS-54 convention (43 of the 58 z.array() schemas in routes/ now
+// carry a .max()), and sits far above every path the client can produce: the
+// editor sends one scope per target lane plus the member's existing file
+// scopes.
+const MAX_MEMBER_SCOPES = 500
+const MAX_SCOPE_VALUE_LENGTH = 256
+
 const scopeSchema = z.object({
   kind: z.enum(["lane", "file"]),
-  value: z.string(),
+  // Deliberately NO .min(1): `''` is the legacy default-lane tag (AQU-1607),
+  // still sent by older clients and still converted on the way in, so a
+  // non-empty rule here would refuse the very request that header promises
+  // keeps working.
+  value: z.string().max(MAX_SCOPE_VALUE_LENGTH),
 })
 
 const putBodySchema = z.object({
-  scopes: z.array(scopeSchema),
+  scopes: z.array(scopeSchema).max(MAX_MEMBER_SCOPES),
 })
 
 export interface MemberScope {
@@ -355,12 +415,23 @@ memberScopes.put(
       return c.json({ error: "project_lead required to manage scopes" }, 403)
     }
 
+    // OPS-56: platform power is licensed only while elevated. Narrow first,
+    // then re-apply this route's own floor to whatever genuinely remains, and
+    // use the narrowed level for BOTH guards below. See the header note.
+    const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, callerRole)
+    if (!effective || effective.level < ROLE.PROJECT_LEAD) {
+      return c.json(
+        { error: "elevation required to manage a member's lane scopes with platform-admin access" },
+        403,
+      )
+    }
+
     // [Pen test] Authorization & access control (2026-10-20): a project lead
     // can be limited to some lanes. An empty replace-set means "every lane", so
     // a lane-limited lead could clear their OWN scopes and widen themselves to
     // every lane. Below Maintainer (who already reads every lane) nobody edits
     // their own scopes; another lead or a maintainer does it.
-    if (targetUserId === user.id && callerRole.level < ROLE.MAINTAINER) {
+    if (targetUserId === user.id && effective.level < ROLE.MAINTAINER) {
       return c.json({ error: "you cannot change your own lane scopes" }, 403)
     }
 
@@ -423,7 +494,7 @@ memberScopes.put(
       c.env,
       projectId,
       user.id,
-      callerRole.level,
+      effective.level,
       targetUserId,
       laneIds,
     )

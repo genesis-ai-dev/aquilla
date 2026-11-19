@@ -21,17 +21,23 @@ import { ALL_ORGS_PARAM, orgHomePath } from "@/lib/navigation/org-paths"
  * project overview (`ProjectOverview`, which until AQU-2452 silently replaced
  * the URL with the dashboard and showed nothing at all).
  */
-export function ProjectNoAccess() {
+export function ProjectNoAccess({ onBack }: { onBack?: () => void }) {
   const t = useT()
   const navigate = useNavigate()
   const { activeOrgId, isAllOrgs } = useActiveOrg()
   // "Back to dashboard" goes to the dashboard the caller is actually on — the
-  // org selected in the switcher, or the all-orgs view.
+  // org selected in the switcher, or the all-orgs view. AQU-2455 passes
+  // `onBack` when the person had the project open and then lost it: same
+  // sentence, and the control leaves for the org project list.
   const goToDashboard = useCallback(() => {
+    if (onBack) {
+      onBack()
+      return
+    }
     navigate(
       isAllOrgs || activeOrgId == null ? orgHomePath(ALL_ORGS_PARAM) : orgHomePath(activeOrgId),
     )
-  }, [activeOrgId, isAllOrgs, navigate])
+  }, [activeOrgId, isAllOrgs, navigate, onBack])
 
   return (
     <div className="p-8" data-testid="project-no-access">

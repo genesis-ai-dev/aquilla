@@ -1,4 +1,5 @@
 import { complete } from "./completion-service"
+import { backtranslationSettings } from "./live-bt"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { Concept } from "@/lib/terminology/types"
@@ -168,7 +169,8 @@ export async function generateBacktranslation(options: GenerateBacktranslationOp
 
   // Backtranslation uses a lower temperature for literal output.
   return complete({
-    settings: { ...options.settings, temperature: 0.1 },
+    // The project's back-translation model when it set one, else the drafting model.
+    settings: { ...backtranslationSettings(options.settings), temperature: 0.1 },
     session: options.session,
     messages,
     stream: Boolean(options.onChunk),

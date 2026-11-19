@@ -123,6 +123,9 @@ export const settings = defineNamespace({
     "settings.transcription.model.omni": "Omnilingual",
     "settings.transcription.model.omniDescription":
       "Meta's model for more than 1,600 languages, including many that no other model knows.",
+    "settings.transcription.model.omniFast": "Omnilingual fast",
+    "settings.transcription.model.omniFastDescription":
+      "Fastest. A rough phonetic first pass in 1,600+ languages; best followed by the AI cleanup.",
     "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
     "settings.transcription.model.zeroShotDescription":
       "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
@@ -230,21 +233,16 @@ export const settings = defineNamespace({
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
       "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
-    // AQU-1967: this row names CELLS — its label always did, and so does the
-    // project page's copy of it — and it carries the one rule that decides
-    // whether the rung picked here means what an org admin reads into it:
-    // removing an IMPORTED cell needs a maintainer whatever this says
-    // (cell-editing-gate.ts `canRemoveImportedCells`, mirrored at the
-    // perimeter in sync-worker authorize.ts). Biblica ETT set the tier to
-    // Project Lead expecting their leads to be able to delete cells; every
-    // cell in a project imported from USFM is an imported cell, so each lead's
-    // Remove entry stayed disabled and the setting read as broken. The project
-    // page said so already (projectSettings.cellEditing.description) and this
-    // one did not, which is the whole of that surprise.
+    // AQU-1967 / AQU-2632: this row names CELLS, and the rung picked here is
+    // the whole rule: whoever it admits can remove any cell, imported ones
+    // included (it used to stop at Maintainer for imported cells, which made
+    // "Project lead" read as broken for every project imported from Scripture
+    // files). cell-editing-gate.ts and sync-worker cell-removal-authority.ts
+    // both read it.
     "settings.mediaDefaults.cellEditingFloorDescription":
       "Who may add and remove cells. Removing a cell also removes its translations, recordings and "
-      + "comments; removing an imported cell always needs a maintainer, whatever this is set to. "
-      + "Projects use this unless they set their own.",
+      + "comments. Whoever this allows can remove any cell, including cells that came in with an "
+      + "imported file. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowSelfValidationAudioDescription":
       "Whether people may validate their own recordings. Projects use this unless they set their own.",
     "settings.mediaDefaults.validationRoleFloorAudioDescription":
@@ -746,6 +744,16 @@ export const settings = defineNamespace({
         placeholders: {
           where: "The setting's new home as a path of already-translated page names joined by ' → ', e.g. 'Preferences → General'.",
         },
+      },
+      "settings.transcription.model.omniFast": {
+        description:
+          "Radio label for a hosted transcription model: the small, quick version of Meta's " +
+          "'Omnilingual' model. 'Omnilingual' is a product name and stays as it is; translate 'fast'.",
+      },
+      "settings.transcription.model.omniFastDescription": {
+        description:
+          "One line under the 'Omnilingual fast' model choice. It answers in seconds but writes what it " +
+          "hears sound by sound, so the text is rough. 'AI cleanup' is the step that corrects a transcript afterwards.",
       },
       "settings.transcription.model.supports": {
         description: "Tick line on a transcription model's row: the model knows the project's language.",

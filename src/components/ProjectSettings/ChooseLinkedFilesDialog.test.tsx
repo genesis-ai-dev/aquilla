@@ -32,11 +32,13 @@ import {
 const addLinkedSourceFiles = vi.fn()
 const stopLinkedSourceFiles = vi.fn()
 const loadLinkedSourceFileState = vi.fn()
+const triggerLinkSync = vi.fn()
 
 vi.mock("@/lib/sync/archive", () => ({
   addLinkedSourceFiles: (...args: unknown[]) => addLinkedSourceFiles(...args),
   stopLinkedSourceFiles: (...args: unknown[]) => stopLinkedSourceFiles(...args),
   loadLinkedSourceFileState: (...args: unknown[]) => loadLinkedSourceFileState(...args),
+  triggerLinkSync: (...args: unknown[]) => triggerLinkSync(...args),
   runLinkSync: vi.fn(),
 }))
 
@@ -130,6 +132,8 @@ beforeEach(() => {
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(upstreamPreview())
   loadLinkedSourceFileState.mockResolvedValue(linkState())
+  triggerLinkSync.mockReset()
+  triggerLinkSync.mockResolvedValue(true)
   fetchLinkFileMatches.mockReset()
 })
 
@@ -284,28 +288,87 @@ describe("'Choose files' — adding files (AQU-1560)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
-  // WHY: "if adding fails … the failure is stated, and trying again works —
-  // no file is left half-added". The server answers `complete: false` when the
-  // files did not all arrive; the dialog stays open on the same pick, says so,
-  // and the same press resumes.
-  it("states an incomplete add and lets the same press finish it", async () => {
-    addLinkedSourceFiles
-      .mockResolvedValueOnce({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK"], complete: false })
-      .mockResolvedValueOnce({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK", "up-LUK"], complete: true })
+  // WHY: the server answers `complete: false` when the add is RECORDED but the
+  // files are not all in — which is every add wherever the server's own sync
+  // trigger does not reach the sync worker. The dialog used to answer that with
+  // a red "didn't finish arriving … try again" over the same button, and
+  // pressing it sent the request again and showed the sentence again, while the
+  // files were in fact arriving. Any sync of the link finishes a recorded add,
+  // so the dialog now runs one itself, like the link flow, and closes when the
+  // files are in. The request is made once.
+  it("brings the files in itself when the add is saved but they have not arrived", async () => {
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK"], complete: false })
+    triggerLinkSync.mockImplementation(async () => {
+      loadLinkedSourceFileState.mockResolvedValue(linkState(["up-MAT", "up-MRK", "up-LUK"]))
+      return true
+    })
     const { onFilesAdded } = renderCard()
     await openDialog()
     await userEvent.click(fileCheckbox("LUK"))
 
     await userEvent.click(addButton())
 
-    expect(await screen.findByText(/didn't finish arriving/)).toBeTruthy()
-    expect(onFilesAdded).not.toHaveBeenCalled()
-    expect(fileCheckbox("LUK").getAttribute("aria-checked")).toBe("true")
+    await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(triggerLinkSync).toHaveBeenCalledWith("tok", PROJECT_ID)
+    expect(addLinkedSourceFiles).toHaveBeenCalledTimes(1)
+  })
+
+  // WHY: and when they are still not in after that, it is a saved change that
+  // is taking a while — not an error, and not something to confirm again. The
+  // step names the files, says the change is saved, and offers only a look
+  // ("Check again") and a way out; neither sends the add a second time.
+  it("says a saved add is still arriving, with nothing to confirm again", async () => {
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK"], complete: false })
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
 
     await userEvent.click(addButton())
 
+    expect(await screen.findByText("This file is still arriving")).toBeTruthy()
+    const dialog = within(screen.getByRole("dialog"))
+    expect(dialog.getByText("LUK")).toBeTruthy()
+    expect(dialog.getByText(/Your change is saved/)).toBeTruthy()
+    expect(dialog.getByText(/nothing to confirm again/)).toBeTruthy()
+    expect(dialog.queryByRole("alert")).toBeNull()
+    expect(dialog.queryByRole("button", { name: "Confirm" })).toBeNull()
+    expect(dialog.queryByRole("button", { name: "Add files" })).toBeNull()
+    expect(onFilesAdded).not.toHaveBeenCalled()
+
+    // A look that finds the same thing says so, rather than doing nothing.
+    await userEvent.click(dialog.getByRole("button", { name: "Check again" }))
+    expect(await dialog.findByText("Checked just now: it is still arriving.")).toBeTruthy()
+    expect(triggerLinkSync).toHaveBeenCalledTimes(2)
+
+    // And once the files are in, the same look finishes the job.
+    loadLinkedSourceFileState.mockResolvedValue(linkState(["up-MAT", "up-MRK", "up-LUK"]))
+    await userEvent.click(dialog.getByRole("button", { name: "Check again" }))
+
     await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
-    expect(addLinkedSourceFiles).toHaveBeenLastCalledWith("tok", PROJECT_ID, ["up-LUK"])
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(addLinkedSourceFiles).toHaveBeenCalledTimes(1)
+  })
+
+  // WHY: "you can close this and keep working" has to be true — closing leaves
+  // the recorded add alone and the next open starts clean.
+  it("can be closed while the files are still arriving", async () => {
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK"], complete: false })
+    triggerLinkSync.mockResolvedValue(false)
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(addButton())
+    await screen.findByText("This file is still arriving")
+
+    // The footer's Close, not the dialog's own corner one (same name).
+    await userEvent.click(within(screen.getByRole("dialog")).getByText("Close", { selector: "button" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(onFilesAdded).not.toHaveBeenCalled()
+    await openDialog()
+    expect(screen.queryByText("This file is still arriving")).toBeNull()
+    expect(fileCheckbox("LUK").getAttribute("aria-checked")).toBe("false")
   })
 
   it("states a refused request", async () => {
@@ -476,6 +539,24 @@ describe("'Choose files' — stopping a file (AQU-1562)", () => {
 
     await waitFor(() => expect(calls).toEqual(["stop", "add"]))
   })
+
+  // WHY: a stop that went through is in effect whatever the add is doing, so
+  // the card behind the dialog is refreshed even while the added file is still
+  // arriving.
+  it("refreshes the card for a stop while the added file is still arriving", async () => {
+    stopLinkedSourceFiles.mockResolvedValue({ stopped: ["up-MRK"], fileIds: ["up-MAT"], wasWholeProject: false })
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT"], complete: false })
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("MRK"))
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(reviewButton())
+    await userEvent.click(confirmButton())
+
+    expect(await screen.findByText("This file is still arriving")).toBeTruthy()
+    expect(onFilesAdded).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("'Choose files' — resuming a stopped file (AQU-1562)", () => {
@@ -620,6 +701,37 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
     // The file now takes its source from the link; the workspace places an IDML
     // file's kept translations into that source (useAdoptedIdmlAlignment).
+    expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual(["own-luk"])
+    resetAdoptedIdmlAlignmentForTests()
+  })
+
+  // WHY: the report this slice answers — a lead replaced the source of a large
+  // file, was told in red that it "didn't finish arriving", pressed Confirm
+  // again and was told the same. The replace was saved the first time. It is
+  // now said that way, the confirm step is over, and the file is recorded for
+  // the workspace's placement pass on the save rather than only on arrival
+  // (that pass syncs the link first, so nothing is placed early) — before this
+  // a replace that finished after the dialog had answered was never recorded.
+  it("says a saved replace is still arriving instead of asking for the confirm again", async () => {
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK"], complete: false })
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
+    await userEvent.click(replaceCheckbox())
+    await screen.findByText("1151 of 1151 lines are the same in both files.")
+    await userEvent.click(reviewButton())
+
+    await userEvent.click(confirmButton())
+
+    expect(await screen.findByText("This file is still arriving")).toBeTruthy()
+    const dialog = within(screen.getByRole("dialog"))
+    expect(dialog.queryByText("Confirm these changes to the link")).toBeNull()
+    expect(dialog.queryByRole("button", { name: "Confirm" })).toBeNull()
+    expect(dialog.queryByRole("button", { name: "Back" })).toBeNull()
+    expect(dialog.queryByRole("alert")).toBeNull()
+    expect(addLinkedSourceFiles).toHaveBeenCalledTimes(1)
+    expect(onFilesAdded).not.toHaveBeenCalled()
     expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual(["own-luk"])
     resetAdoptedIdmlAlignmentForTests()
   })

@@ -15,6 +15,10 @@ error, a timeout or a 5xx. It never falls back on a 4xx.
 | `OMNI_CTC_QUANTIZE` | unset | `int8`: dynamic int8 Linear layers. CPU only. |
 | `OMNI_EXAMPLE_HOSTS` | unset | Allow-list for ZS example URLs, as on Modal. |
 
+Model `fast` (the Transcribe lens's "Fast" choice) needs no setting: it is the
+300M aligner the server always loads, run in one forward pass on the CTC
+device. `ctc` with `OMNI_CTC_MODEL=omniASR_CTC_300M` runs the same pass.
+
 The server reports the real device name as `gpu` (for example
 `NVIDIA GeForce RTX 4090`), or `self-hosted-cpu` on CPU. Billing prices those
 names in `db/shared/omni-asr-cost.ts`. If you add a new card, add its name
@@ -39,7 +43,7 @@ sudo chmod 600 /etc/aquilla-omni.env
 sudo cp infra/selfhost/omni-asr@.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now "omni-asr@$USER"
 journalctl -u "omni-asr@$USER" -f     # wait for "[zs] loaded"
-curl -s localhost:8088/healthz       # {"ok":true,"models":["ctc","zs"]}
+curl -s localhost:8088/healthz       # {"ok":true,"models":["ctc","fast","zs"]}
 ```
 
 Without sudo, run it as a systemd **user** service instead (needs

@@ -20,6 +20,12 @@ import {
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { noteProjectSettingsWrite } from "@/lib/sync/project-settings-write-signal"
+import {
+  readProjectSettingsShared,
+  sameProjectSettingsResponse,
+  type ProjectSettingsReadMode,
+} from "@/lib/sync/project-settings-shared-read"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
@@ -263,6 +269,7 @@ export interface ProjectSettingsUpdatedDetail {
 
 /** Tell every other mounted settings consumer in this tab to re-read the row. */
 export function broadcastProjectSettingsUpdated(detail: ProjectSettingsUpdatedDetail): void {
+  noteProjectSettingsWrite(detail.projectId)
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent<ProjectSettingsUpdatedDetail>(PROJECT_SETTINGS_UPDATED_EVENT, { detail }),
@@ -577,6 +584,18 @@ export function useProjectSettings(
   options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
   const analytics = useAccountAnalytics()
+  // AQU-2654: the analytics scope is a new object every time the account's
+  // analytics generation moves, and it moves on every return to the tab
+  // (suspended while hidden, re-verified on return). As a dependency of
+  // `refresh` it gave `refresh` a new identity each time, which re-ran the
+  // hydration effect below and re-sent the settings GET, once per generation
+  // bump per mounted instance: 8 to 13 GETs for one return. Callbacks read the
+  // scope through this ref when they START, so a response that outlives an
+  // account switch is still dropped by the scope it started under.
+  const analyticsRef = useRef(analytics)
+  useEffect(() => {
+    analyticsRef.current = analytics
+  }, [analytics])
   const termbaseEditMinRole = options?.termbaseEditMinRole
   const languageEditMinRole = options?.languageEditMinRole
   const { session } = useFrontierSession()
@@ -691,6 +710,10 @@ export function useProjectSettings(
   // Keep one request per mounted consumer in flight and let every caller await
   // the same result instead of stacking identical GETs.
   const refreshInFlightRef = useRef<Promise<ProjectSettingsResponse | null> | null>(null)
+  // Which (identity, project) the snapshot in `serverRef` was read for, once a
+  // server answer has been applied. The hook keeps its state across a change
+  // of `projectId`, so "already holds this answer" is only true per key.
+  const appliedReadKeyRef = useRef<string | null>(null)
   // Desktop, server unreachable: hydrate from the downloaded project's last
   // settings response so the editor gets its lane rows and allows edits. Never
   // marks hasFetched — anything that fails closed on it stays closed.
@@ -706,7 +729,9 @@ export function useProjectSettings(
     if (cached && aliveRef.current && !serverRef.current) writeServer(cached)
   }, [projectId, jwt, writeServer])
 
-  const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
+  // AQU-2654: the read itself is shared by every mounted instance; the modes
+  // and what each may be answered with are in project-settings-shared-read.ts.
+  const read = useCallback(async (mode: ProjectSettingsReadMode): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
     if (!isOnlineRef.current) {
       void hydrateFromOfflineCopy()
@@ -714,8 +739,9 @@ export function useProjectSettings(
     }
     if (refreshInFlightRef.current) return refreshInFlightRef.current
 
+    const analyticsAtStart = analyticsRef.current
     const request = (async (): Promise<ProjectSettingsResponse | null> => {
-      const out = await fetchProjectSettingsResult(jwt, projectId)
+      const out = await readProjectSettingsShared(jwt, projectId, mode)
       // Guard against post-unmount state updates. aliveRef is only set false on
       // final unmount; explicit refresh() calls from still-mounted consumers
       // should always land (aliveRef.current will be true for them).
@@ -730,11 +756,19 @@ export function useProjectSettings(
         return null
       }
       const got = out.value
+      // A revalidation that returns what this instance already applied changes
+      // nothing: no state is set (an equal-by-content new object would re-render
+      // every consumer), and the IDB mirror below already holds these values.
+      const readKey = `${jwt}\n${projectId}`
+      if (appliedReadKeyRef.current === readKey && sameProjectSettingsResponse(serverRef.current, got)) {
+        return serverRef.current
+      }
       writeServerConfirmed(got)
+      appliedReadKeyRef.current = readKey
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
-        analytics.capture("project settings hydrated", {
+        analyticsAtStart.capture("project settings hydrated", {
           project_id: projectId,
           within_ms: withinMs,
           has_server_row: got.version > 0,
@@ -815,7 +849,12 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed, analytics])
+  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed])
+
+  // What callers get: a read that follows something they know changed.
+  const refresh = useCallback(() => read("afterWrite"), [read])
+  const hydrate = useCallback(() => read("mount"), [read])
+  const revalidate = useCallback(() => read("revalidate"), [read])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's
@@ -850,7 +889,7 @@ export function useProjectSettings(
     // runs the cleanup on the first mount.
     aliveRef.current = true
 
-    void refresh()
+    void hydrate()
     void getProject(projectId)
       .then((rec) => {
         if (!alive) return
@@ -865,7 +904,7 @@ export function useProjectSettings(
     return () => {
       alive = false
     }
-  }, [projectId, refresh])
+  }, [projectId, hydrate])
 
   // Re-fetch only when transitioning offline -> online. Calling refresh on an
   // initially-online mount duplicates the parallel initial request above.
@@ -873,8 +912,8 @@ export function useProjectSettings(
   useEffect(() => {
     const wasOnline = previousOnlineRef.current
     previousOnlineRef.current = isOnline
-    if (!wasOnline && isOnline && projectId && jwt) void refresh()
-  }, [isOnline, projectId, jwt, refresh])
+    if (!wasOnline && isOnline && projectId && jwt) void revalidate()
+  }, [isOnline, projectId, jwt, revalidate])
 
   // Project settings are written by identity, while the editor's live channel
   // is the project Durable Object. Two producers feed this listener:
@@ -910,8 +949,8 @@ export function useProjectSettings(
   // useCells' "refetch on focus is the cheap drift mitigation" for settings.
   useEffect(() => {
     if (!projectId || !jwt) return
-    return subscribeWindowRegainedFocus(() => { void refresh() })
-  }, [projectId, jwt, refresh])
+    return subscribeWindowRegainedFocus(() => { void revalidate() })
+  }, [projectId, jwt, revalidate])
 
   // Server values overlay local for keys the server has set (non-empty row).
   const settings: ProjectWideSettings = useMemo(
@@ -968,6 +1007,7 @@ export function useProjectSettings(
     // Claim the flag before the await so a re-render during the network call
     // cannot double-fire within this hook instance.
     migrationFiredRef.current = true
+    const analyticsAtStart = analyticsRef.current
     void (async () => {
       const baseVersion = serverRef.current?.version ?? 0
       const out = await runSerialized(() =>
@@ -977,13 +1017,13 @@ export function useProjectSettings(
       const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServerConfirmed(out.value)
-        analytics.capture("project settings migrated", {
+        analyticsAtStart.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
         writeServerConfirmed(out.latest)
-        analytics.capture("project settings migration conflict", {
+        analyticsAtStart.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
@@ -991,7 +1031,7 @@ export function useProjectSettings(
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
-  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed, analytics])
+  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
 
   // AQU-2259: upload this browser's old drafting settings once, when the team
   // has none yet (src/hooks/useDraftingSettingsUpload.ts).
@@ -1003,8 +1043,8 @@ export function useProjectSettings(
       version: response.version,
       origin: instanceIdRef.current,
     })
-    if (wrote) analytics.capture("project drafting settings uploaded", { project_id: projectId })
-  }, [projectId, writeServerConfirmed, analytics])
+    if (wrote) analyticsRef.current.capture("project drafting settings uploaded", { project_id: projectId })
+  }, [projectId, writeServerConfirmed])
   useDraftingSettingsUpload({
     projectId,
     jwt,
@@ -1016,6 +1056,7 @@ export function useProjectSettings(
   })
 
   const patch = useCallback(async (partial: ProjectWideSettings, opts?: PatchOptions): Promise<PatchOutcome> => {
+    const analytics = analyticsRef.current
     const mergeKeys = opts?.mergeKeys
     const over = (base: ProjectWideSettings | undefined) => applySettingsPatch(base, partial, mergeKeys)
     // Gate logic for local apply vs. server write:
@@ -1209,7 +1250,7 @@ export function useProjectSettings(
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message, status: result.status }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed, analytics])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed])
 
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.

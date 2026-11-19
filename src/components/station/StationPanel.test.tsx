@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event"
 import { historyReady, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast, type StepHandler } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
 import { __resetStationTargetForTests, getStationTarget, openInStation } from "@/lib/station/target"
+import { getStationUi } from "@/lib/station/ui"
 import { StationSave } from "./StationEdits"
 import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
@@ -364,6 +365,17 @@ describe("the Station", () => {
     } finally {
       outside.remove()
     }
+  })
+
+  // AQU-2499 (review, Nov 9): the ⋯ menu's Change voice re-voiced the main
+  // track's take; it now names the take open here.
+  it("Change voice acts on the take open in the Station", () => {
+    const take = makeTake()
+    const changeVoice = vi.fn(() => null)
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take, { changeVoice })} visible />)
+    act(() => getStationUi().changeVoice?.())
+    expect(changeVoice).toHaveBeenCalledWith("c331", "t2.webm")
   })
 
   it("opens on the take the store names, and shows its heading", () => {

@@ -14,6 +14,7 @@ import { sessionKey } from "@/lib/frontier/session-store"
 // expiry, mirroring `makeSyncTokenFetcher` in src/lib/sync/sync-token.ts.
 
 import { fetchSyncToken, SyncTokenError } from "@/lib/sync/sync-token"
+import { fetchSharedSyncToken } from "@/lib/sync/shared-sync-token"
 import { onElevationGranted } from "@/lib/errors/elevation-required-signal"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncTokenForFile } from "./upload"
@@ -91,10 +92,18 @@ export function makeAudioSyncTokenFetcher(
       return cached.value
     }
     try {
-      const resp = await fetchSyncToken(session.jwt, projectId, fileId)
+      // AQU-2654: the tab's one mint for this (identity, project, file). The
+      // editor's file token and this one are the same credential; minting it
+      // here again was a second and third POST /sync-token per file open.
+      const { resp, mintedAt } = await fetchSharedSyncToken(
+        session.jwt,
+        projectId,
+        fileId,
+        (jwt, project, file) => fetchSyncToken(jwt, project, file),
+      )
       cache.set(key, {
         value: resp.token,
-        expiresAtMs: now + resp.expiresIn * 1000,
+        expiresAtMs: mintedAt + resp.expiresIn * 1000,
       })
       return resp.token
     } catch (err) {

@@ -306,4 +306,66 @@ describe("useAccounts", () => {
     await waitFor(() => expect(view.getByText("ready:alice@example.com")).toBeTruthy())
     expect(renderedLoading).not.toContain(true)
   })
+
+  // AQU-2654: the store is re-read on every return to the tab. A read that
+  // finds the same account must not hand consumers a new session object:
+  // that re-rendered every consumer of the session and re-ran every effect
+  // keyed on it.
+  it("keeps the session's identity, and renders no consumer, when a return to the tab finds nothing changed", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    await addSession(alice)
+    const snapshotSpy = vi.spyOn(sessionStore, "loadAccountsSnapshot")
+    let renders = 0
+    function Probe() {
+      const { active } = useAccounts()
+      renders += 1
+      return <span>{active ? `ready:${active.username}` : "none"}</span>
+    }
+    let latest!: ReturnType<typeof useAccounts>
+    function Capture() {
+      latest = useAccounts()
+      return null
+    }
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <AccountsProvider><Probe /><Capture /></AccountsProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(view.getByText("ready:alice")).toBeTruthy())
+    const before = latest
+    const rendersBefore = renders
+    const readsBefore = snapshotSpy.mock.calls.length
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(snapshotSpy.mock.calls.length).toBeGreaterThan(readsBefore))
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)) })
+
+    expect(latest.active).toBe(before.active)
+    expect(latest.sessions).toBe(before.sessions)
+    expect(latest).toBe(before)
+    expect(renders).toBe(rendersBefore)
+  })
+
+  it("still hands out a new session when a return to the tab finds a renewed credential", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    await addSession(alice)
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.active?.jwt).toBe("a"))
+    const before = result.current.active
+    // Another tab renewed the credential while this one was away.
+    vi.spyOn(sessionStore, "loadAccountsSnapshot").mockResolvedValue({
+      active: { ...alice, jwt: "a-renewed" },
+      sessions: result.current.sessions,
+      dataOwner: sessionKey(alice),
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.active?.jwt).toBe("a-renewed"))
+    expect(result.current.active).not.toBe(before)
+  })
 })

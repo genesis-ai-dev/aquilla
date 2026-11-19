@@ -67,11 +67,19 @@ export class AnalyticsAccount {
       this.publish({ accountId: result.accountId, decision: result.decision, ready: !blocked, blocked, error: false })
     } catch {
       if (generation === this.state.generation) this.publish({ error: true })
+    } finally {
+      if (this.request === controller) this.request = null
     }
   }
   refresh = () => this.activate(this.session)
+  /** A consent read for the current session is on its way. */
+  verifying = () => this.request !== null
   async revalidate(): Promise<void> {
     if (this.state.saving) return
+    // AQU-2654: an activation already in flight will answer this. Restarting
+    // it aborted the request and sent the same GET again: the 1 s timer below
+    // did exactly that on every return to the tab.
+    if (!this.state.ready && this.session && this.request) return
     if (!this.state.ready || !this.session) return this.refresh()
     const generation = this.state.generation
     const session = this.session
@@ -88,6 +96,8 @@ export class AnalyticsAccount {
         this.suspend()
         this.publish({ error: true })
       }
+    } finally {
+      if (this.request === controller) this.request = null
     }
   }
   refreshIfSession = (jwt: string) => this.session?.jwt === jwt ? this.refresh() : Promise.resolve()
@@ -140,6 +150,8 @@ export class AnalyticsAccount {
     } catch (error) {
       if (generation === this.state.generation) this.publish({ saving: false, error: true, ready: false })
       throw error
+    } finally {
+      if (this.request === controller) this.request = null
     }
   }
 }
@@ -181,8 +193,21 @@ if (typeof window !== "undefined") {
   window.addEventListener("offline", analyticsAccount.suspend)
   window.addEventListener("online", () => { void analyticsAccount.refresh() })
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) analyticsAccount.suspend()
-    else void analyticsAccount.refresh()
+    if (document.hidden) {
+      analyticsAccount.suspend()
+      return
+    }
+    // AQU-2654: resume once every `visibilitychange` listener has run. The
+    // session store's listener invalidates this account on the same event and
+    // its reader re-activates it after re-reading the stored session; a consent
+    // GET sent from here first was aborted a moment later and sent again. So:
+    // nothing to do when the session was taken away (whoever took it resumes)
+    // or a read is already on its way. Resuming later never collects earlier.
+    setTimeout(() => {
+      if (typeof document === "undefined" || document.hidden) return
+      if (analyticsAccount.storageOwner() === null || analyticsAccount.verifying()) return
+      void analyticsAccount.refresh()
+    }, 0)
   })
   window.addEventListener("storage", (event) => {
     if (event.key?.startsWith("aquilla:analytics")) void analyticsAccount.refresh()

@@ -63,6 +63,35 @@ it("keeps a verified lease without restarting, but closes it on expiry or refres
   expect(state.getSnapshot().error).toBe(true)
 })
 
+// AQU-2654: coming back to the tab activated the account, and the 1 s timer's
+// revalidate() found it "not ready" and activated it again, aborting the first
+// consent read and sending a second.
+it("a revalidation does not restart an activation that is still in flight, and retries one that failed", async () => {
+  let release!: (v: { accountId: string; decision: ReturnType<typeof decision> }) => void
+  const request = vi.fn((_jwt: string, _signal: AbortSignal) =>
+    new Promise<{ accountId: string; decision: ReturnType<typeof decision> }>((resolve) => { release = resolve }))
+  const state = new AnalyticsAccount(request)
+  const activating = state.activate(session("a"))
+  expect(state.verifying()).toBe(true)
+  await state.revalidate()
+  await state.revalidate()
+  expect(request).toHaveBeenCalledTimes(1)
+  expect(request.mock.calls[0][1].aborted).toBe(false)
+  release({ accountId: "a", decision: decision(true) })
+  await activating
+  expect(state.eligible()).toBe(true)
+  expect(state.verifying()).toBe(false)
+
+  // A failed activation leaves nothing in flight, so the next tick retries it.
+  request.mockRejectedValueOnce(new Error("unavailable"))
+  await state.refresh()
+  expect(state.getSnapshot().error).toBe(true)
+  expect(state.verifying()).toBe(false)
+  request.mockResolvedValueOnce({ accountId: "a", decision: decision(true) })
+  await state.revalidate()
+  expect(state.eligible()).toBe(true)
+})
+
 it("immediately suppresses a cross-tab refusal and never applies another account's hint", async () => {
   const state = new AnalyticsAccount(async jwt => ({ accountId: jwt, decision: decision(true) }))
   await state.activate(session("a"))

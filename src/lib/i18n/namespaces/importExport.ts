@@ -652,6 +652,11 @@ export const importExport = defineNamespace({
     "importExport.format.docxLines.description":
       "A new Word document written from the lines: headings stay headings, each paragraph's lines " +
       "are one paragraph, and notes are Word footnotes. The original file's page layout is not kept.",
+    // AQU-2680 (question 54): offered beside "New Word document"; the browser's print window saves the PDF.
+    "importExport.format.pdfPrint.label": "PDF (.pdf)",
+    "importExport.format.pdfPrint.description":
+      "Laid out like the new Word document and opened in your browser's print window, where you " +
+      "choose \"Save as PDF\". Notes are listed at the end.",
     "importExport.format.pptx.label": "PowerPoint (.pptx)",
     "importExport.format.pptx.description":
       "Translations injected back into the original slide deck. Slide/shape/paragraph structure is " +
@@ -751,7 +756,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.episodeConfirmStart": "Start export",
     "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
     "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
-    // AQU-2680: the PDF export saved the Word file instead (offline, no converter, a failure or the time limit).
+    // AQU-2680: the PDF export opened the print window; the person saves the PDF there.
+    "importExport.status.pdfChooseSaveAsPdf": "The print window is open. Choose \"Save as PDF\" there to save the file.",
+    // AQU-2680: printing is not available here (another app's built-in browser), so the PDF export saved the Word file.
     "importExport.status.pdfFellBackToWord": "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
@@ -2994,7 +3001,16 @@ export const importExport = defineNamespace({
         description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",
       },
       "importExport.status.pdfFellBackToWord": {
-        description: "Shown after a PDF export when the PDF could not be made (offline, the converter failed or took too long), so the app saved the translation as a Word file instead. Word and Pages are the programs; the person opens the file there and saves it as a PDF.",
+        description: "Shown after a PDF export when this browser cannot print (for example a browser built into another app, such as Facebook or Instagram), so the app saved the translation as a Word file instead. Word and Pages are the programs; the person opens the file there and saves it as a PDF.",
+      },
+      "importExport.status.pdfChooseSaveAsPdf": {
+        description: "Shown after the person exports as PDF: the browser's print window has opened with the translation laid out as pages. \"Save as PDF\" is the browser's own choice in that window (in Chrome it is under Destination; on a phone it may be under Share), so use the name the browser shows in your language.",
+      },
+      "importExport.format.pdfPrint.label": {
+        description: "An export format: the translation as a PDF file. The app opens the browser's print window and the person saves the PDF from there. Keep \".pdf\" as is.",
+      },
+      "importExport.format.pdfPrint.description": {
+        description: "Explains the PDF export format. \"Save as PDF\" is the browser's own choice in its print window; use the name the browser shows in your language. \"Notes\" are the translation's footnotes, which the PDF lists after the text.",
       },
       "importExport.errors.pdfTooComplex": {
         description: "Shown when a PDF takes too long to read (a damaged or deliberately crafted file), so the app stopped reading it. Saving it again from the program that made it (Word, InDesign…) usually gives a normal PDF; the person can also import that program's own document instead.",

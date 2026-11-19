@@ -1,51 +1,41 @@
-// AQU-2680: the fallback the PDF export will use (PLAN.md section 4).
+// AQU-2680: the PDF export (question 54, Sam's decision Nov 19). There is no
+// converter on a server: the translation is laid out as a print page
+// (`buildPrintPage`) and opened in the browser's print window, where the
+// person picks "Save as PDF". Nothing is uploaded, so it works offline and
+// on any network.
 //
-// The PDF is made from the Word file the browser has already built, by a
-// converter on the server (question 98, not built yet; it is passed in).
-// When there is no converter, the device is offline, or the converter fails,
-// hands back nothing or runs past the time limit, the export saves the Word
-// file instead, with one sentence on how to save it as PDF. Nothing is lost:
-// the Word file is already made. Trying again is the same button again.
+// The fallback: where printing is blocked or missing (another app's built-in
+// browser, a browser with no print), the export gives the new Word document
+// instead, with one sentence on saving it as PDF from Word. A cancel in the
+// print window is the person's own choice and saves nothing.
 
+import type { CellData } from "@/hooks/useCells"
 import { t } from "@/lib/i18n/standalone"
+import { exportDocxFromLines } from "./exporters/docx-from-lines"
+import { buildPrintPage } from "./exporters/print-from-lines"
+import { printHtml, type PrintOptions } from "./print-window"
 
-/** Turns a Word file into a PDF. Stops when `signal` aborts. */
-export type DocxToPdf = (docx: Blob, options: { signal: AbortSignal }) => Promise<Blob>
-
-export interface PdfOrWord {
-  blob: Blob
-  ext: "pdf" | "docx"
-  /** The sentence to show when the Word file was saved instead; null for the PDF. */
-  notice: string | null
-}
-
-/** No spinner past this: the person is waiting on the export. */
-export const PDF_CONVERT_TIMEOUT_MS = 60_000
+export type PdfOrWord =
+  /** The print window opened; the person saves the PDF there. */
+  | { kind: "print" }
+  /** Printing is not available here: the Word file, and the sentence to show. */
+  | { kind: "word"; blob: Blob; notice: string }
 
 export interface PdfOrWordOptions {
-  /** Default: the browser's own `navigator.onLine`. */
-  online?: boolean
-  timeoutMs?: number
+  /** The page's title, which browsers name the saved PDF after. */
+  title: string
+  /** The export's target language. */
+  lang?: string
+  /** For tests: how the page is opened for printing. */
+  print?: PrintOptions
 }
 
-export async function exportPdfOrWord(docx: Blob, convert: DocxToPdf | null | undefined, options?: PdfOrWordOptions): Promise<PdfOrWord> {
-  const word: PdfOrWord = { blob: docx, ext: "docx", notice: t("importExport.status.pdfFellBackToWord") }
-  const online = options?.online ?? (typeof navigator === "undefined" || navigator.onLine !== false)
-  if (!convert || !online) return word
-  const controller = new AbortController()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timedOut = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), options?.timeoutMs ?? PDF_CONVERT_TIMEOUT_MS)
-  })
-  try {
-    const pdf = await Promise.race([convert(docx, { signal: controller.signal }), timedOut])
-    if (!pdf || pdf.size === 0) return word
-    return { blob: pdf, ext: "pdf", notice: null }
-  } catch {
-    return word
-  } finally {
-    clearTimeout(timer)
-    // ends a request still running (the time limit); harmless after it finished
-    controller.abort()
+export async function exportPdfOrWord(cells: readonly CellData[], options: PdfOrWordOptions): Promise<PdfOrWord> {
+  const page = buildPrintPage(cells, { title: options.title, lang: options.lang })
+  if (await printHtml(page, options.print)) return { kind: "print" }
+  return {
+    kind: "word",
+    blob: await exportDocxFromLines(cells, { lang: options.lang }),
+    notice: t("importExport.status.pdfFellBackToWord"),
   }
 }

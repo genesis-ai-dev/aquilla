@@ -1,59 +1,107 @@
 /**
- * AQU-2680: the fallback the PDF export will use. The PDF is made from the
- * Word file by a converter (none exists yet; it waits on question 98). When
- * the converter is missing, the device is offline, or the converter fails or
- * runs out of time, the person still gets the Word file, already built, with
- * one sentence on how to save it as PDF. Nothing is lost, and there is no
- * spinner past the time limit.
+ * AQU-2680 (question 54, Sam's decision Nov 19): the PDF comes from the
+ * browser's print window ("Save as PDF"); there is no converter on a server.
+ * Where printing is blocked or missing (another app's built-in browser, no
+ * `print`, a page that never loads), the person gets the new Word document
+ * with one sentence on saving it as PDF from Word. A cancel in the print
+ * window is the person's own and saves nothing.
  */
 
 import { describe, expect, it, vi } from "vitest"
+import type { CellData } from "@/hooks/useCells"
 import { t } from "@/lib/i18n/standalone"
-import { exportPdfOrWord, type DocxToPdf } from "./pdf-or-word"
+import { extractDocxStrings } from "@/lib/parsers/docx"
+import { exportPdfOrWord } from "./pdf-or-word"
+import type { PrintableWindow } from "./print-window"
 
-const DOCX = new Blob(["docx bytes"], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })
-const PDF = new Blob(["%PDF-1.7"], { type: "application/pdf" })
 const SENTENCE = "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF."
+const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+const INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.0.0"
+const ANDROID_WEBVIEW = "Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36"
 
-describe("a PDF from the Word file, or the Word file", () => {
-  it("gives the PDF when the converter makes one", async () => {
-    const convert = vi.fn<DocxToPdf>(async () => PDF)
-    const out = await exportPdfOrWord(DOCX, convert, { online: true })
-    expect(out).toEqual({ blob: PDF, ext: "pdf", notice: null })
-    expect(convert).toHaveBeenCalledWith(DOCX, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+const CELLS = [
+  { id: "1", fileId: "f", original: "Chapter One", translated: "Capítulo uno", type: "heading", context: "Heading 1", group: "", paragraphStart: true },
+  { id: "2", fileId: "f", original: "First line.", translated: "Primera línea.", type: "text", context: "Paragraph", group: "", paragraphStart: true },
+] as CellData[]
+
+/** A print window that opens, and what was printed in it. */
+function printer(win: Partial<PrintableWindow> | null = {}) {
+  const pages: string[] = []
+  const close = vi.fn()
+  const print = vi.fn()
+  const open = vi.fn(async (html: string) => {
+    pages.push(html)
+    return { win: win === null ? null : ({ print, ...win } as PrintableWindow), close }
+  })
+  return { pages, close, print, open }
+}
+
+async function wordText(blob: Blob): Promise<string[]> {
+  return (await extractDocxStrings(await blob.arrayBuffer(), { cellUnit: "paragraph" })).map((s) => s.original)
+}
+
+describe("a PDF from the print window, or the Word file", () => {
+  it("opens the print page in the print window, and saves nothing itself", async () => {
+    const p = printer()
+    const out = await exportPdfOrWord(CELLS, { title: "notes", lang: "es", print: { open: p.open, userAgent: CHROME } })
+    expect(out).toEqual({ kind: "print" })
+    expect(p.print).toHaveBeenCalledTimes(1)
+    expect(p.pages[0]).toContain("<title>notes</title>")
+    expect(p.pages[0]).toContain("<h1>Capítulo uno</h1>")
+    expect(p.pages[0]).toContain("@page{size:A4;margin:72pt}")
+    // the print window's frame goes once the person is done with it
+    expect(p.close).not.toHaveBeenCalled()
   })
 
-  it("gives the Word file and the sentence when the converter fails", async () => {
-    const out = await exportPdfOrWord(DOCX, async () => { throw new Error("502") }, { online: true })
-    expect(out).toEqual({ blob: DOCX, ext: "docx", notice: SENTENCE })
+  it("closes the print page when the print window closes, saved or cancelled", async () => {
+    let afterPrint: (() => void) | undefined
+    const p = printer({ addEventListener: (_type, listener) => { afterPrint = listener } })
+    expect(await exportPdfOrWord(CELLS, { title: "notes", print: { open: p.open, userAgent: CHROME } })).toEqual({ kind: "print" })
+    afterPrint?.()
+    expect(p.close).toHaveBeenCalledTimes(1)
   })
 
-  it("gives the Word file when the converter hands back no PDF", async () => {
-    const out = await exportPdfOrWord(DOCX, async () => new Blob([]), { online: true })
-    expect(out.ext).toBe("docx")
+  it.each([
+    ["another app's built-in browser", INSTAGRAM],
+    ["an Android web view", ANDROID_WEBVIEW],
+  ])("gives the Word file and the sentence in %s, without opening the print window", async (_name, userAgent) => {
+    const p = printer()
+    const out = await exportPdfOrWord(CELLS, { title: "notes", lang: "es", print: { open: p.open, userAgent } })
+    expect(p.open).not.toHaveBeenCalled()
+    expect(out.kind).toBe("word")
+    if (out.kind !== "word") return
+    expect(out.notice).toBe(SENTENCE)
+    expect(await wordText(out.blob)).toEqual(["Capítulo uno", "Primera línea."])
   })
 
-  it("stops waiting at the time limit, cancels the converter and gives the Word file", async () => {
-    let signal: AbortSignal | undefined
-    const convert: DocxToPdf = (_docx, opts) => { signal = opts.signal; return new Promise(() => {}) }
-    const t0 = performance.now()
-    const out = await exportPdfOrWord(DOCX, convert, { online: true, timeoutMs: 50 })
-    expect(performance.now() - t0).toBeLessThan(1_000)
-    expect(out).toEqual({ blob: DOCX, ext: "docx", notice: SENTENCE })
-    expect(signal?.aborted).toBe(true)
+  it("gives the Word file when the page cannot be opened for printing", async () => {
+    const failing = vi.fn(async () => { throw new Error("blocked") })
+    expect((await exportPdfOrWord(CELLS, { title: "n", print: { open: failing, userAgent: CHROME } })).kind).toBe("word")
+    const neverLoads = printer(null)
+    expect((await exportPdfOrWord(CELLS, { title: "n", print: { open: neverLoads.open, userAgent: CHROME } })).kind).toBe("word")
+    expect(neverLoads.close).toHaveBeenCalled()
   })
 
-  it("gives the Word file without trying when there is no converter", async () => {
-    expect(await exportPdfOrWord(DOCX, undefined, { online: true })).toEqual({ blob: DOCX, ext: "docx", notice: SENTENCE })
-  })
-
-  it("gives the Word file without trying when the device is offline", async () => {
-    const convert = vi.fn<DocxToPdf>(async () => PDF)
-    expect(await exportPdfOrWord(DOCX, convert, { online: false })).toEqual({ blob: DOCX, ext: "docx", notice: SENTENCE })
-    expect(convert).not.toHaveBeenCalled()
+  it("gives the Word file when the browser has no print, or its print fails", async () => {
+    const none = printer({ print: undefined as unknown as () => void })
+    expect((await exportPdfOrWord(CELLS, { title: "n", print: { open: none.open, userAgent: CHROME } })).kind).toBe("word")
+    const throws = printer({ print: () => { throw new Error("printing is disabled") } })
+    const out = await exportPdfOrWord(CELLS, { title: "n", print: { open: throws.open, userAgent: CHROME } })
+    expect(out.kind).toBe("word")
+    expect(throws.close).toHaveBeenCalled()
   })
 
   it("words the sentence through the app's messages", () => {
     expect(t("importExport.status.pdfFellBackToWord")).toBe(SENTENCE)
+    expect(t("importExport.status.pdfChooseSaveAsPdf")).toBe('The print window is open. Choose "Save as PDF" there to save the file.')
+  })
+})
+
+describe("the print frame", () => {
+  it("prints from a hidden frame in the app's page, and removes it when it cannot print", async () => {
+    // the test browser (happy-dom) cannot print a frame
+    const out = await exportPdfOrWord(CELLS, { title: "n", print: { userAgent: CHROME, loadTimeoutMs: 20 } })
+    expect(out.kind).toBe("word")
+    expect(document.querySelector("iframe")).toBeNull()
   })
 })

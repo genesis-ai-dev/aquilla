@@ -187,6 +187,30 @@ describe("lists", () => {
     expect(files["word/_rels/document.xml.rels"]).toContain('Target="numbering.xml"')
   })
 
+  // AQU-2680 review finding 2: a numbered list started again at 1 after any
+  // paragraph between its items, and a numbered list under bullets carried on
+  // under the next bullet. The printed label says where a list starts again.
+  it("carries a numbered list on across paragraphs between its items, and starts again where the label says 1", () => {
+    const item = (id: string, label: string | null, level: number, kind = "number") =>
+      cell({ id, original: id, context: "List Paragraph", paragraphStart: true, metadata: { list: kind, listLevel: level, ...(label ? { listLabel: label } : {}) } })
+    const files = docxFromLinesFiles([
+      item("Wash", "1.", 0), cell({ id: "x", original: "A note between.", paragraphStart: true }), item("Rinse", "2.", 0),
+      item("Bul", "\u2022", 0, "bullet"), item("SubOne", "1.", 1), item("SubTwo", "2.", 1),
+      item("Bultwo", "\u2022", 0, "bullet"), item("SubAgain", "1.", 1),
+      item("Dry", "3.", 0), cell({ id: "y", original: "Another list.", paragraphStart: true }), item("New", "1.", 0),
+      cell({ id: "z", original: "Part way.", paragraphStart: true }), item("Five", "5.", 0),
+    ])
+    const numIds = Object.fromEntries([...files["word/document.xml"].matchAll(/<w:numId w:val="(\d+)"\/><\/w:numPr><\/w:pPr><w:r><w:t xml:space="preserve">(\w+)/g)].map((m) => [m[2], m[1]]))
+    expect(numIds).toEqual({ Wash: "2", Rinse: "2", Bul: "1", SubOne: "3", SubTwo: "3", Bultwo: "1", SubAgain: "4", Dry: "2", New: "5", Five: "6" })
+    expect(files["word/numbering.xml"]).toContain('<w:num w:numId="4"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="1"><w:startOverride w:val="1"/>')
+    expect(files["word/numbering.xml"]).toContain('<w:num w:numId="6"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/>')
+  })
+
+  it("starts a list at its label's number", () => {
+    const files = docxFromLinesFiles([cell({ original: "Later", context: "List Paragraph", paragraphStart: true, metadata: { list: "number", listLevel: 0, listLabel: "4." } })])
+    expect(files["word/numbering.xml"]).toContain('<w:num w:numId="2"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="4"/>')
+  })
+
   it("adds no numbering part or list style to a document without lists", () => {
     const files = docxFromLinesFiles(STORY)
     expect(files["word/numbering.xml"]).toBeUndefined()

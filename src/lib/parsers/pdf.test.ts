@@ -326,9 +326,10 @@ describe("a tagged PDF read by its tags", () => {
   })
 })
 
-/** AQU-2680: a cell's metadata without the page size (pinned on its own below). */
+/** AQU-2680: a cell's metadata without the page size and the list label
+ *  (each pinned on its own below). */
 function meta(s: { metadata?: Record<string, unknown> }): Record<string, unknown> | null {
-  const { pageSize: _pageSize, ...rest } = s.metadata ?? {}
+  const { pageSize: _pageSize, listLabel: _listLabel, ...rest } = s.metadata ?? {}
   return Object.keys(rest).length ? rest : null
 }
 
@@ -384,6 +385,13 @@ describe("lists in a tagged PDF", () => {
       ["List Paragraph", "Rinse", { list: "number", listLevel: 1 }],
       ["Paragraph", "After the list.", null],
     ])
+  })
+
+  // AQU-2680 review finding 2: the label as printed goes to the Word export,
+  // which restarts a numbered list only where the label says 1, a or i.
+  it("keeps each item's label as printed", async () => {
+    const read = await extractPdfImport(listed(), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => s.metadata?.listLabel ?? null)).toEqual([null, "\u2022", "o", "\u2022", "1.", "b)", null])
   })
 
   it("marks every sentence of an item on the Sentence setting", async () => {

@@ -42,8 +42,9 @@ export interface LinesParagraph {
   style: string | null
   /** The paragraph's lines; a break inside a line (a poetry line) is a line too. */
   lines: InlineRun[][]
-  /** AQU-2680: a list item (a tagged PDF's), bulleted or numbered, at a depth 0–8. */
-  list?: { kind: "bullet" | "number"; level: number }
+  /** AQU-2680: a list item (a tagged PDF's), bulleted or numbered, at a depth
+   *  0–8, with the label it was printed with ("a)", "1.1.3."), if known. */
+  list?: { kind: "bullet" | "number"; level: number; label?: string }
   /** AQU-2680: the whole paragraph is bold (italic): a PDF's subtitle, a quotation. */
   bold?: boolean
   italic?: boolean
@@ -54,7 +55,8 @@ function listOf(cell: CellData): LinesParagraph["list"] {
   const kind = cell.metadata?.list
   if (kind !== "bullet" && kind !== "number") return undefined
   const level = Number(cell.metadata?.listLevel)
-  return { kind, level: Number.isInteger(level) ? Math.min(8, Math.max(0, level)) : 0 }
+  const label = typeof cell.metadata?.listLabel === "string" ? cell.metadata.listLabel.trim() : ""
+  return { kind, level: Number.isInteger(level) ? Math.min(8, Math.max(0, level)) : 0, ...(label ? { label } : {}) }
 }
 
 /** The lines' text as the export writes it: the translation, else the source. */
@@ -136,29 +138,73 @@ interface Built {
   numberingXml: string | null
 }
 
-/** AQU-2680: bullets use one list definition (numId 1). Each numbered list,
- *  a run of list items with no other paragraph between them, gets its own
- *  numId restarting at 1, so a second list does not carry on the first's
- *  numbers. */
+/** AQU-2680: bullets use one list definition (numId 1). Each numbered list
+ *  gets its own numId. Review finding 2: a numbered list carries on across
+ *  the paragraphs between its items while its labels count on ("3." after
+ *  "2."); where a label says another number (1, a, i, or a "7." after "2.")
+ *  or changes form ("a)" after "3."), a list starts at that number. A list
+ *  item at a shallower level ends the lists below it. With no label recorded
+ *  (a file imported before labels were kept), a list starts again after any
+ *  other paragraph, as before. */
 const BULLET_NUM_ID = 1
 const BULLETS = ["\u2022", "\u25e6", "\u25aa"]
 const NUMBER_FORMATS = ["decimal", "lowerLetter", "lowerRoman"]
 
+type NumberFormat = "decimal" | "lowerLetter" | "upperLetter" | "lowerRoman" | "upperRoman"
+
+/** AQU-2680 review finding 2: a numbered label read: its form (what comes
+ *  before and after the number, and the number's kind) and its value. */
+interface ParsedLabel { format: NumberFormat; value: number; before: string; after: string }
+
+function romanValue(s: string): number {
+  const v: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 }
+  let total = 0
+  const lower = s.toLowerCase()
+  for (let k = 0; k < lower.length; k++) {
+    const cur = v[lower[k]]
+    const next = v[lower[k + 1]] ?? 0
+    total += cur < next ? -cur : cur
+  }
+  return total
+}
+
+/** "1.", "a)", "(iv)", "1.1.3.": the leading parts of a "1.1.3." stay as
+ *  written. A lone "i" (or "v", "x"…) is a letter when the list it would
+ *  carry on counts in letters, else "i" is a roman one. */
+function parseLabel(label: string, current: NumberFormat | null): ParsedLabel | null {
+  const m = /^(\(?)((?:\d+\.)*)(\d+|[a-z]+|[A-Z]+)([.)]?)$/.exec(label.trim())
+  if (!m) return null
+  const [, open, parts, n, close] = m
+  const before = open + parts
+  if (/^\d+$/.test(n)) return { format: "decimal", value: Number(n), before, after: close }
+  if (parts) return null
+  const upper = n === n.toUpperCase()
+  const letter = n.length === 1 && (current === "lowerLetter" || current === "upperLetter" || !/^[iI]$/.test(n))
+  if (letter) return { format: upper ? "upperLetter" : "lowerLetter", value: n.toLowerCase().charCodeAt(0) - 96, before, after: close }
+  if (/^[ivxlcdm]+$/i.test(n)) return { format: upper ? "upperRoman" : "lowerRoman", value: romanValue(n), before, after: close }
+  return null
+}
+
+function lvl(level: number, start: number, fmt: string, text: string, hanging = 360): string {
+  return `<w:lvl w:ilvl="${level}"><w:start w:val="${start}"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${escapeXml(text)}"/><w:lvlJc w:val="left"/>` +
+    `<w:pPr><w:ind w:left="${720 * (level + 1)}" w:hanging="${hanging}"/></w:pPr></w:lvl>`
+}
+
 function levels(kind: "bullet" | "number"): string {
   let out = ""
   for (let l = 0; l < 9; l++) {
-    const fmt = kind === "bullet" ? "bullet" : NUMBER_FORMATS[l % 3]
-    const text = kind === "bullet" ? BULLETS[l % 3] : `%${l + 1}.`
-    out += `<w:lvl w:ilvl="${l}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${text}"/><w:lvlJc w:val="left"/>` +
-      `<w:pPr><w:ind w:left="${720 * (l + 1)}" w:hanging="360"/></w:pPr></w:lvl>`
+    out += kind === "bullet" ? lvl(l, 1, "bullet", BULLETS[l % 3]) : lvl(l, 1, NUMBER_FORMATS[l % 3], `%${l + 1}.`)
   }
   return out
 }
 
-function numberingXml(numberedLists: number): string {
+/** One numbered list: where it starts, and its label's form when known. */
+interface NumberedList { numId: number; level: number; start: number; label: ParsedLabel | null; items: number }
+
+function numberingXml(lists: readonly NumberedList[]): string {
   let nums = `<w:num w:numId="${BULLET_NUM_ID}"><w:abstractNumId w:val="0"/></w:num>`
-  for (let k = 0; k < numberedLists; k++) {
-    nums += `<w:num w:numId="${BULLET_NUM_ID + 1 + k}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`
+  for (const list of lists) {
+    nums += `<w:num w:numId="${list.numId}"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="${list.level}"><w:startOverride w:val="${list.start}"/></w:lvlOverride></w:num>`
   }
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:numbering xmlns:w="${W_NS}">` +
@@ -191,9 +237,9 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
   const footnotes: string[] = []
   const body: string[] = []
   let anyList = false
-  let numberedLists = 0
-  /** The numId of the numbered list being written, or null outside one. */
-  let numberedId: number | null = null
+  const numbered: NumberedList[] = []
+  /** The numbered list open at each level. */
+  let open: (NumberedList | undefined)[] = []
   let prevList = false
   for (const p of paragraphs) {
     const plain = p.lines.flat().map((r) => r.text).join("")
@@ -201,10 +247,24 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
     let numPr = ""
     if (p.list) {
       anyList = true
-      if (!prevList) numberedId = null
-      if (p.list.kind === "number" && numberedId === null) numberedId = BULLET_NUM_ID + 1 + numberedLists++
-      const numId = p.list.kind === "number" ? numberedId : BULLET_NUM_ID
-      numPr = `<w:numPr><w:ilvl w:val="${p.list.level}"/><w:numId w:val="${numId}"/></w:numPr>`
+      const level = p.list.level
+      // a list item ends the lists below its level
+      open = open.slice(0, level + 1)
+      if (p.list.kind === "number") {
+        const cur = open[level]
+        const label = p.list.label ? parseLabel(p.list.label, cur?.label?.format ?? null) : null
+        const sameForm = cur?.label && label && cur.label.format === label.format && cur.label.before === label.before && cur.label.after === label.after
+        const carriesOn = cur !== undefined && (label ? sameForm && label.value === cur.start + cur.items : prevList && !cur.label)
+        if (!carriesOn) {
+          const list: NumberedList = { numId: BULLET_NUM_ID + 1 + numbered.length, level, start: label?.value ?? 1, label, items: 0 }
+          numbered.push(list)
+          open[level] = list
+        }
+        open[level]!.items++
+        numPr = `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${open[level]!.numId}"/></w:numPr>`
+      } else {
+        numPr = `<w:numPr><w:ilvl w:val="${level}"/><w:numId w:val="${BULLET_NUM_ID}"/></w:numPr>`
+      }
     }
     prevList = Boolean(p.list)
     const style = p.style ?? (p.list ? "ListParagraph" : null)
@@ -243,7 +303,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
     `<w:footnote w:type="separator" w:id="-1"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:separator/></w:r></w:p></w:footnote>` +
     `<w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>` +
     `${footnotes.join("")}</w:footnotes>`
-  return { documentXml, footnotesXml, numberingXml: anyList ? numberingXml(numberedLists) : null }
+  return { documentXml, footnotesXml, numberingXml: anyList ? numberingXml(numbered) : null }
 }
 
 const heading = (id: string, name: string, size: number, outline: number | null) =>

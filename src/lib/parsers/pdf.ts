@@ -360,7 +360,9 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
     const segments = splitFootnoteAware(p.text, cellUnit)
     // AQU-2680: what the Word export needs of the paragraph, on each of its
     // cells: its list item, and its whole-paragraph bold and italic.
-    const list = p.list ? { list: p.list.kind, listLevel: p.list.level } : {}
+    // AQU-2680 review findings 2 and 7: plus the printed label, so the export
+    // keeps the list's numbering ("a)", "1.1.3.") and where it restarts.
+    const list = p.list ? { list: p.list.kind, listLevel: p.list.level, ...(p.list.label ? { listLabel: p.list.label } : {}) } : {}
     const style = { ...(p.bold ? { paragraphBold: true } : {}), ...(p.italic ? { paragraphItalic: true } : {}) }
     segments.forEach((seg, i) => {
       // AQU-2680: the page size rides on each page's first line, so the Word

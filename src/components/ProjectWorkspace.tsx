@@ -15217,10 +15217,10 @@ export function ProjectWorkspace() {
   }, [handleClearEvenOut, evenOutToast, t])
   handleClearOneTakeRef.current = handleClearOneTake
 
-  // QUESTION 89 — the ONE switch (lib/audio/even-out.ts AUTO_EVEN_CHANGED_TAKES),
-  // read here and nowhere else. OFF: nothing happens (today's behaviour). ON: a
-  // new, cut or trimmed take on an evened track is evened out quietly, one
-  // batch at a time, with no toast and no window.
+  // QUESTION 89 (settled Nov 19: ON) — the ONE switch (lib/audio/even-out.ts
+  // AUTO_EVEN_CHANGED_TAKES), read here and nowhere else: a new, cut or
+  // trimmed take on an evened track is evened out quietly, one batch at a
+  // time, with no toast and no window.
   const autoEvenBusy = useRef(false)
   const autoEvenKey = useMemo(
     () => autoEvenCandidates(evenOutCells, AUTO_EVEN_CHANGED_TAKES).map((r) => `${r.cellId}\u0000${r.audioId}`).join("|"),

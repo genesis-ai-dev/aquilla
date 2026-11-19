@@ -389,9 +389,13 @@ describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)
     } },
   ] as unknown as CellData[]
 
-  it("is OFF for now: today's behaviour, nothing is evened on its own", () => {
-    expect(AUTO_EVEN_CHANGED_TAKES).toBe(false)
-    expect(autoEvenCandidates(cells, AUTO_EVEN_CHANGED_TAKES)).toEqual([])
+  it("is ON (settled Nov 19): an evened track stays even", () => {
+    expect(AUTO_EVEN_CHANGED_TAKES).toBe(true)
+    expect(autoEvenCandidates(cells, AUTO_EVEN_CHANGED_TAKES)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
+  })
+
+  it("OFF would leave every take alone", () => {
+    expect(autoEvenCandidates(cells, false)).toEqual([])
   })
 
   it("ON: the new and the changed takes on an evened track, and nothing else", () => {

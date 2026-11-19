@@ -342,18 +342,16 @@ export function evenedTakesIn(cells: readonly CellData[], opts: { slots?: readon
 }
 
 /**
- * QUESTION 89 (open, Nov 19): do new, cut or trimmed takes on an evened track
- * even out by themselves? THE ONE SWITCH. It is read in one place —
- * ProjectWorkspace hands it to `autoEvenCandidates` — so either answer is this
- * one line.
+ * QUESTION 89 (settled Nov 19: ON): an evened track stays even. New, cut and
+ * trimmed takes on an evened track are evened out quietly in the background,
+ * measured the same way (worker or yielding page meter), one undo step per
+ * batch; each shows ≈ and can be cleared in the Station. Read in one place —
+ * ProjectWorkspace hands it to `autoEvenCandidates`.
  *
- * OFF (now): today's behaviour. A new take on an evened track isn't evened; a
- * cut or trimmed take keeps its target and its stale reading, which still
- * plays; the track's ≈ goes grey until Even out runs again.
- * ON: those takes are evened out quietly in the background, measured the same
- * way (worker or yielding page meter), one undo step per batch.
+ * Fallback: a take that can't be measured plays at its own volume, as any
+ * unmeasured take does.
  */
-export const AUTO_EVEN_CHANGED_TAKES = false
+export const AUTO_EVEN_CHANGED_TAKES = true
 
 /**
  * The takes the switch would even out on their own: on a track (slot) where

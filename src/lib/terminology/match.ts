@@ -419,7 +419,13 @@ function compiledFor(concept: ConceptLike, project?: TermMatchingSettings): Comp
     let compiled = compiledByContent.get(contentKey)
     if (!compiled) {
       compiled = {}
-      if (compiledByContent.size >= MAX_COMPILED_BY_CONTENT) compiledByContent.clear()
+      if (compiledByContent.size >= MAX_COMPILED_BY_CONTENT) {
+        // Bounded for a long-lived worker isolate that sees many projects.
+        // The two go together: a pattern is registered when it is built, so a
+        // pattern rebuilt after this is registered again.
+        compiledByContent.clear()
+        prefilterByPattern.clear()
+      }
       compiledByContent.set(contentKey, compiled)
     }
     entry = { sourceTerm: concept.sourceTerm, match: concept.match, compiled }

@@ -260,6 +260,15 @@ function scanRelations(masked: string): RelationScan {
       if (/^lateral\b/i.test(masked.slice(i))) i = skipSpace(masked, i + "lateral".length)
       if (masked[i] === "(") {
         // Derived table / sub-select: its own FROM is matched on its own.
+        // Postgres also takes a parenthesised join here, `FROM (a JOIN b)`,
+        // whose first table follows no FROM or JOIN and so would never be
+        // read: not allow-listed, not scoped. Only a query may open a paren.
+        if (!/^[\s(]*(?:select|with|values)\b/i.test(masked.slice(i))) {
+          return {
+            ok: false,
+            error: `parenthesised joins are not allowed in ${keyword.toUpperCase()} — write the joins without the outer parentheses`,
+          }
+        }
         const after = afterMatchingParen(masked, i)
         if (after < 0) return { ok: false, error: "unbalanced parentheses" }
         i = after

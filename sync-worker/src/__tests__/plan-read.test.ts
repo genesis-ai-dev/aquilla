@@ -813,3 +813,40 @@ describe("GET .../plan — lines done on both halves", () => {
     expect(body.units[0]).toMatchObject({ totalCount: 10, validatedCount: 7, audioValidatedCount: 6, bothValidatedCount: 4 })
   })
 })
+
+// AQU-730: the plan carries the requested lane's per-file progress, and the
+// lane is the caller's choice.
+describe("GET .../plan — lane read wall", () => {
+  const seed = () =>
+    makeTestDb({
+      lanes: [
+        { id: "aaaaaaaa", project_id: P, role: "target", legacy_tag: "", position: 0 },
+        { id: "bbbbbbbb", project_id: P, role: "target", legacy_tag: "es", language: "Spanish", position: 1 },
+      ],
+      files: [file("doc")],
+      file_section_progress: [
+        { ...progress("doc", "file", "", { total_count: 10, filled_count: 4 }), lane_id: "aaaaaaaa" },
+        { ...progress("doc", "file", "", { total_count: 10, filled_count: 9, target_lang: "es" }), lane_id: "bbbbbbbb" },
+      ],
+    })
+  const call = async (db: AquillaDb, claims: Record<string, unknown>, wall: string | undefined, lane: string) => {
+    const token = await makeTestToken(SECRET, { projectId: P, ...claims })
+    const res = await handlePlanRequest(
+      new Request(`https://sync.test/api/v1/projects/${P}/plan?lane=${lane}`, { headers: { Authorization: `Bearer ${token}` } }),
+      { ...envWith(db), LANE_READ_WALL: wall },
+    )
+    return (await res!.json()) as PlanResponse
+  }
+  const walled = { role: 400, laneGrants: [{ lane: "aaaaaaaa", level: 400 }] }
+
+  it("answers a lane the caller was not granted as an empty plan", async () => {
+    const { db } = await seed()
+    expect((await call(db, walled, "1", "es")).units).toEqual([])
+  })
+
+  it("still answers a granted lane, a maintainer, and anyone while the wall is off", async () => {
+    const { db } = await seed()
+    expect((await call(db, { role: 600 }, "1", "es")).units.length).toBeGreaterThan(0)
+    expect((await call(db, walled, undefined, "es")).units.length).toBeGreaterThan(0)
+  })
+})

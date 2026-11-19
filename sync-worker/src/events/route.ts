@@ -44,6 +44,7 @@ import {
   type ChainSlot,
 } from './chain-claims'
 import { buildFileProgressPushFrames } from './progress-push'
+import { visibleLanesForRead } from './lane-read-wall'
 import type { FileProgressPushFrame, RecomputedFile } from './progress-push'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
@@ -784,6 +785,12 @@ export async function handleEventsWriteRequest(
   /** `event.applied`-shaped frames for every committed entry — built once,
    *  broadcast to peers AND returned to the author as `applied[]`. */
   const appliedFrames: AppliedFrame[] = []
+  // AQU-730: a frame's `rows` is the cell's text in every lane. Peers get the
+  // full frame through the DO, which drops `rows` per walled socket; the
+  // author's own copy in this response drops it here. The author then
+  // refetches by ids through the cells route, as it does when `rows` is
+  // omitted for a large batch.
+  let appliedRowsWalled = false
   const rejected: RejectedEntry[] = []
   // Chain-mutating events that were accepted (logged) but did NOT advance
   // the projection — stale siblings. Keyed by event id so we can `has`-check
@@ -1077,6 +1084,14 @@ export async function handleEventsWriteRequest(
     // is scoped to this event's project, so it can never name a tenant the
     // caller has no access to.
     const eventProjectId = authResult.event.claims.projectId
+    if (
+      visibleLanesForRead(env.LANE_READ_WALL, {
+        role: authResult.event.claims.roleLevel,
+        src: authResult.event.claims.src,
+      }) !== null
+    ) {
+      appliedRowsWalled = true
+    }
     if (allocProjectId === null) {
       allocProjectId = eventProjectId
       seqBase = await allocateSeqRange(db, allocProjectId, rawEvents.length)
@@ -2352,6 +2367,6 @@ export async function handleEventsWriteRequest(
     // Lets the author's client land its own write's projected rows straight
     // from the POST (no by-ids GET after the outbox flush). Omitted on the
     // partial-commit (batch-failure) path above — clients refetch as before.
-    applied: appliedFrames,
+    applied: appliedRowsWalled ? appliedFrames.map(({ rows: _rows, ...frame }) => frame) : appliedFrames,
   })
 }

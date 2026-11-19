@@ -16,9 +16,10 @@ import {
   parseFrontierAudioUrl,
 } from "./upload"
 import { audioCachePutBlob } from "./bytes-cache"
-import { decodeToMono48k } from "./decode-mono"
+import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
+import { loudnessClient } from "./loudness-client"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioEven } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioEven, emitCellAudioMeasure } from "@/lib/sync/events-emit"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
@@ -132,6 +133,39 @@ async function cleanAndUpload(args: {
   return { blob, durationMs, result, fullAudioId, dropUpload }
 }
 
+/**
+ * AQU-2664: measure the cleaned take(s) right away, from the cleaned audio
+ * this action holds, over each take's kept part — off the page in the
+ * loudness worker, else on the page in yielding chunks. Never awaited by the
+ * save: it runs after it, and any failure just leaves the take unmeasured
+ * (it plays at its own volume, the fallback, until Even out measures it).
+ */
+async function measureCleaned(
+  blob: Blob,
+  where: { projectId: string; fileId: string; cellId: string; author: string; targetLang?: string },
+  takes: ReadonlyArray<{ audioId: string; trimStartMs?: number | null; trimEndMs?: number | null }>,
+): Promise<void> {
+  try {
+    const pcm = await decodeToMono48k(new Uint8Array(await blob.arrayBuffer()))
+    const durationMs = Math.round((pcm.length / TARGET_RATE) * 1000)
+    for (const t of takes) {
+      const a = Math.min(pcm.length, Math.max(0, Math.round(((t.trimStartMs ?? 0) / 1000) * TARGET_RATE)))
+      const b = t.trimEndMs != null ? Math.min(pcm.length, Math.round((t.trimEndMs / 1000) * TARGET_RATE)) : pcm.length
+      // A copy: the worker takes (transfers) what it measures.
+      const r = await loudnessClient().measure([pcm.slice(a, Math.max(a, b))], TARGET_RATE)
+      await emitCellAudioMeasure({
+        projectId: where.projectId, fileId: where.fileId, cellId: where.cellId, audioId: t.audioId, durationMs,
+        loudness: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: t.trimStartMs ?? 0, loudnessToMs: t.trimEndMs ?? null },
+        ...(where.targetLang ? { targetLang: where.targetLang } : {}),
+        author: where.author,
+      })
+    }
+    notifyAudioAttachmentsChanged(where.fileId)
+  } catch {
+    // The fallback: unmeasured, it plays at its own volume.
+  }
+}
+
 export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeResult> {
   const { projectId, fileId, cellId, sourceAudioId, author } = args
   const { blob, durationMs, result, fullAudioId, dropUpload } = await cleanAndUpload({ ...args })
@@ -205,6 +239,9 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     ...(src?.evenTargetLufs != null ? { evenTargetLufs: src.evenTargetLufs } : {}),
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
+  void measureCleaned(blob, { projectId, fileId, cellId, author, ...(args.targetLang ? { targetLang: args.targetLang } : {}) }, [
+    { audioId: fullAudioId, trimStartMs: src?.trimStartMs, trimEndMs: src?.trimEndMs },
+  ])
   if (args.history) {
     recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
   }
@@ -309,6 +346,8 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
     throw emitErr
   }
   notifyAudioAttachmentsChanged(fileId)
+  void measureCleaned(blob, { projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}) },
+    born.map(({ piece, audioId }) => ({ audioId, trimStartMs: piece.trimStartMs, trimEndMs: piece.trimEndMs })))
   if (args.history) {
     recordTakeAdded(
       "denoise",

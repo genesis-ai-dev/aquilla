@@ -13,7 +13,12 @@
 //   3. Two gates: blocks under -70 LUFS (silence) are dropped, then blocks
 //      more than 10 LU under the loudness of what is left (pauses, breaths).
 //   4. The loudness of the blocks kept.
-// Every channel has weight 1 (no surround here); a mono take is one channel.
+// Every channel has weight 1 (no surround here). A MONO take is measured as
+// it will be heard, on both speakers: dual mono, its energy counted twice
+// (+3 LU, BS.1770) — Sam, Nov 19 — so −16 means "−16 as heard" for mono and
+// stereo alike, and a mono voice is not left 3 dB hot beside stereo music.
+// A take shorter than one 400 ms block (a one-word line) is measured as ONE
+// block over all of it, gated by the −70 only.
 //
 // TRUE PEAK (dBTP): the highest point of the waveform BETWEEN samples too, by
 // 4x oversampling (a 48-tap windowed-sinc interpolator, as BS.1770 Annex 2
@@ -96,6 +101,8 @@ export function* meterSteps(channels: readonly Float32Array[], rate: number, chu
   const { shelf: s, highPass: h } = kWeighting(rate)
   const samplePeaks: number[] = []
   const energies: Float64Array[] = []
+  // Every K-weighted square, for a take shorter than one block.
+  let total = 0
   for (const x of channels) {
     const e = new Float64Array(steps)
     // Direct form I, in doubles (the 38 Hz high-pass needs the precision).
@@ -107,12 +114,13 @@ export function* meterSteps(channels: readonly Float32Array[], rate: number, chu
       const xi = x[i]
       const a = Math.abs(xi)
       if (a > peak) peak = a
-      if (i < n) {
+      if (i < len) {
         const y = s.b[0] * xi + s.b[1] * x1 + s.b[2] * x2 - s.a[1] * y1 - s.a[2] * y2
         x2 = x1; x1 = xi; y2 = y1; y1 = y
         const z = h.b[0] * y + h.b[1] * u1 + h.b[2] * u2 - h.a[1] * z1 - h.a[2] * z2
         u2 = u1; u1 = y; z2 = z1; z1 = z
-        e[(i / step) | 0] += z * z
+        if (i < n) e[(i / step) | 0] += z * z
+        total += z * z
       }
       if (--budget <= 0) {
         budget = chunk
@@ -151,18 +159,28 @@ export function* meterSteps(channels: readonly Float32Array[], rate: number, chu
       }
     }
   }
-  return { integratedLufs: gated(energies, steps, step), truePeakDb: toDb(truePeak), samplePeakDb: toDb(sample) }
+  // Dual mono: a mono take's energy counts on both speakers.
+  const weight = channels.length === 1 ? 2 : 1
+  const integratedLufs = steps >= 4 ? gated(energies, steps, step, weight) : shortTake(total * weight, len)
+  return { integratedLufs, truePeakDb: toDb(truePeak), samplePeakDb: toDb(sample) }
+}
+
+/** A take shorter than one block: one block over all of it, the −70 gate only. */
+function shortTake(energy: number, len: number): number {
+  if (len <= 0 || !(energy > 0)) return SILENT_LUFS
+  const l = lufsOf(energy / len)
+  return l > SILENT_LUFS ? l : SILENT_LUFS
 }
 
 /** Integrated loudness from the step energies, BS.1770-5 gating. */
-function gated(energies: readonly Float64Array[], steps: number, step: number): number {
+function gated(energies: readonly Float64Array[], steps: number, step: number, weight: number): number {
   const blocks = steps - 3 // 400 ms = four steps
   if (!(blocks > 0) || step <= 0) return SILENT_LUFS
   // Each block's mean square, summed over channels (all weight 1).
   const z = new Float64Array(blocks)
   const blockLen = step * 4
   for (const e of energies) {
-    for (let j = 0; j < blocks; j++) z[j] += (e[j] + e[j + 1] + e[j + 2] + e[j + 3]) / blockLen
+    for (let j = 0; j < blocks; j++) z[j] += (weight * (e[j] + e[j + 1] + e[j + 2] + e[j + 3])) / blockLen
   }
   const ABS_GATE = SILENT_LUFS
   let sum = 0

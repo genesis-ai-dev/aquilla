@@ -41,12 +41,19 @@ describe("K-weighting", () => {
 })
 
 describe("integrated loudness", () => {
-  it("reads a mono 1 kHz sine made to be -23 LUFS as -23 LUFS", () => {
-    // Mono is one channel at weight 1, so -23 LUFS is a sine whose mean
-    // square is 3 dB above its peak's: a peak of -19.99 dBFS.
-    const r = measureLoudness([sine(20, -23 + 10 * Math.log10(2))], 48_000)
-    expect(Math.abs(r.integratedLufs - -23)).toBeLessThan(0.5)
+  // Sam, Nov 19: a mono take is measured as it will be heard — on both
+  // speakers, dual mono (BS.1770: +3 LU) — so a mono sine reads what the same
+  // sine on both channels of a stereo file reads.
+  it("reads a mono 1 kHz sine at -23 dBFS as -23 LUFS, as heard on both speakers", () => {
+    const r = measureLoudness([sine(20, -23)], 48_000)
     expect(Math.abs(r.integratedLufs - -23)).toBeLessThan(0.1)
+  })
+
+  it("a mono take and a stereo take of the same sound read the same", () => {
+    const s = sine(10, -20)
+    const mono = measureLoudness([s], 48_000).integratedLufs
+    const stereo = measureLoudness([s, s], 48_000).integratedLufs
+    expect(Math.abs(mono - stereo)).toBeLessThan(0.01)
   })
 
   it("Tech 3341 case 1: a stereo 1 kHz sine at -23 dBFS is -23 LUFS", () => {
@@ -102,8 +109,14 @@ describe("integrated loudness", () => {
     expect(measureLoudness([sine(5, -80)], 48_000).integratedLufs).toBe(SILENT_LUFS)
   })
 
-  it("measures a take shorter than one 400 ms block as nothing to measure", () => {
-    expect(measureLoudness([sine(0.3, -20)], 48_000).integratedLufs).toBe(SILENT_LUFS)
+  // Review S5: a one-word line ("No.") is shorter than one 400 ms block. It
+  // is measured as ONE block over the whole take, gated by the -70 only.
+  it("measures a take shorter than one 400 ms block as one block over all of it", () => {
+    const short = measureLoudness([sine(0.35, -20, 48_000, 300)], 48_000).integratedLufs
+    const long = measureLoudness([sine(5, -20, 48_000, 300)], 48_000).integratedLufs
+    expect(Math.abs(short - long)).toBeLessThan(0.5)
+    expect(measureLoudness([sine(0.3, -80)], 48_000).integratedLufs).toBe(SILENT_LUFS)
+    expect(measureLoudness([new Float32Array(0)], 48_000).integratedLufs).toBe(SILENT_LUFS)
   })
 })
 

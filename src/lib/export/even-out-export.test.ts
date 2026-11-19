@@ -7,15 +7,18 @@ import { exportAudioByChapter } from "./audio-chapter"
 import { exportAudioByCharacter } from "./audio-by-character"
 import { exportAudioPerLine } from "./audio-per-line"
 import { measureLoudness } from "@/lib/audio/loudness"
+import { takeGain } from "@/lib/audio/take-gain"
+import { applyClipLevelPcm } from "./clip-level"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 const SETTINGS: ProjectTtsSettings = { voices: [{ id: "v-mary", name: "Mary" }], castAssignments: {} }
 
-/** A mono 1 kHz sine whose loudness is `lufs`, `seconds` long, at 48 kHz. */
+/** A mono 1 kHz sine whose loudness is `lufs` as heard (dual mono: its
+ *  peak in dBFS), `seconds` long, at 48 kHz. */
 function sineAt(lufs: number, seconds = 3): Float32Array {
-  const a = Math.pow(10, (lufs + 10 * Math.log10(2)) / 20)
+  const a = Math.pow(10, lufs / 20)
   const out = new Float32Array(Math.round(seconds * TARGET_RATE))
   for (let i = 0; i < out.length; i++) out[i] = a * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE)
   return out
@@ -107,5 +110,22 @@ describe("an evened-out take in an export", () => {
     const zip = await JSZip.loadAsync(result.blob)
     const [name] = Object.keys(zip.files).filter((n) => n.endsWith(".wav"))
     expect(Math.abs((await lufs(await zip.files[name].async("uint8array"))) - -16)).toBeLessThan(0.5)
+  })
+
+  // Sam, Nov 19: mono is measured as heard (dual mono), so a mono voice and a
+  // stereo take of the same sound end up at the same heard level.
+  it("a mono take and a stereo take of the same sound even out to the same heard level", () => {
+    const sound = sineAt(-27, 3)
+    const monoR = measureLoudness([sound], TARGET_RATE)
+    const stereoR = measureLoudness([sound, sound], TARGET_RATE)
+    const fields = (r: typeof monoR) => ({ loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, evenTargetLufs: -16 })
+    expect(takeGain(fields(monoR)).correctionDb).toBeCloseTo(takeGain(fields(stereoR)).correctionDb, 2)
+    const mono = applyClipLevelPcm(sound, TARGET_RATE, fields(monoR))
+    const left = applyClipLevelPcm(sound, TARGET_RATE, fields(stereoR))
+    // Heard: the mono take on both speakers; the stereo take as it is.
+    const heardMono = measureLoudness([mono, mono], TARGET_RATE).integratedLufs
+    const heardStereo = measureLoudness([left, left], TARGET_RATE).integratedLufs
+    expect(Math.abs(heardMono - -16)).toBeLessThan(0.5)
+    expect(Math.abs(heardMono - heardStereo)).toBeLessThan(0.05)
   })
 })

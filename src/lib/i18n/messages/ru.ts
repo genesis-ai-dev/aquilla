@@ -4667,7 +4667,6 @@ export const ru: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Отметьте файл выше, чтобы добавить его в эту связь, или снимите отметку, чтобы перестать следовать за ним.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Добавить файлы",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Добавление файлов…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Файлы не успели поступить полностью, поэтому они ещё не добавлены в связь. Повторите попытку, чтобы завершить перенос.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "следование прекращено",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Проверить изменения",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Подтвердите эти изменения связи",

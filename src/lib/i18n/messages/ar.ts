@@ -4543,7 +4543,6 @@ export const ar: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "حدِّد ملفًا أعلاه لإضافته إلى هذا الارتباط، أو ألغِ تحديد ملف لتتوقف عن متابعته.",
   "projectSettings.sourceLink.chooseFilesAddButton": "إضافة الملفات",
   "projectSettings.sourceLink.chooseFilesAddingButton": "جارٍ إضافة الملفات…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "لم يكتمل وصول الملفات، لذا لم تُضَف إلى الارتباط بعد. حاول مجددًا لإكمال جلبها.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "توقفت المتابعة",
   "projectSettings.sourceLink.chooseFilesReviewButton": "مراجعة التغييرات",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "أكِّد هذه التغييرات على الارتباط",

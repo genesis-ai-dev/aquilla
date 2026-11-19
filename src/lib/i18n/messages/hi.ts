@@ -5318,7 +5318,6 @@ export const hi: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "इसे इस लिंक में जोड़ने के लिए ऊपर एक फ़ाइल चेक करें, या पालन रोकने के लिए एक अनचेक करें।",
   "projectSettings.sourceLink.chooseFilesAddButton": "फ़ाइलें जोड़ें",
   "projectSettings.sourceLink.chooseFilesAddingButton": "फ़ाइलें जोड़ी जा रही हैं…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "फ़ाइलें पूरी नहीं पहुँचीं, इसलिए वे अभी लिंक में नहीं जुड़ीं। उन्हें लाना पूरा करने के लिए फिर कोशिश करें।",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "पालन रुका",
   "projectSettings.sourceLink.chooseFilesReviewButton": "बदलाव की समीक्षा करें",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "लिंक के इन बदलावों की पुष्टि करें",

@@ -867,9 +867,35 @@ export const projectSettings = defineNamespace({
       "following it.",
     "projectSettings.sourceLink.chooseFilesAddButton": "Add files",
     "projectSettings.sourceLink.chooseFilesAddingButton": "Adding files…",
-    "projectSettings.sourceLink.chooseFilesIncomplete":
-      "The files didn't finish arriving, so they haven't been added to the link " +
-      "yet. Try again to finish bringing them in.",
+    // A change that is saved but whose files are not all in yet. Not a failure:
+    // the addition is recorded and any sync of the link finishes it, so the
+    // dialog runs one itself ("Bringing files in…") and only shows this step
+    // when the files are still not in afterwards. Nothing here asks the lead to
+    // confirm or try again — "Check again" only looks.
+    "projectSettings.sourceLink.chooseFilesBringingInButton": "Bringing files in…",
+    "projectSettings.sourceLink.chooseFilesArrivingTitle": plural({
+      one: "This file is still arriving",
+      other: "These files are still arriving",
+    }),
+    "projectSettings.sourceLink.chooseFilesArrivingBody": plural({
+      one:
+        "Your change is saved and this file is on its way. A large file can take " +
+        "a few minutes. It joins the link once all of it has arrived, so it never " +
+        "shows up half-filled.",
+      other:
+        "Your change is saved and these files are on their way. Large files can " +
+        "take a few minutes. They join the link once they have fully arrived, so " +
+        "none shows up half-filled.",
+    }),
+    "projectSettings.sourceLink.chooseFilesArrivingCloseNote":
+      "There is nothing to confirm again. You can close this and keep working: " +
+      "it carries on as you work in this project.",
+    "projectSettings.sourceLink.chooseFilesArrivingCheckButton": "Check again",
+    "projectSettings.sourceLink.chooseFilesArrivingCheckingButton": "Checking…",
+    "projectSettings.sourceLink.chooseFilesArrivingStillNote": plural({
+      one: "Checked just now: it is still arriving.",
+      other: "Checked just now: they are still arriving.",
+    }),
     // AQU-1562: unchecking a file the link follows stops this project following
     // that one file — a per-file detach. The file stays, with everything on it;
     // only the flow of upstream changes ends. Checking a stopped file again
@@ -3080,11 +3106,41 @@ export const projectSettings = defineNamespace({
           "Label of the confirm step's button while the changes are being saved; the button is " +
           "disabled meanwhile.",
       },
-      "projectSettings.sourceLink.chooseFilesIncomplete": {
+      "projectSettings.sourceLink.chooseFilesBringingInButton": {
         description:
-          "Error under the list when the files could not all be brought in. Nothing " +
-          "is half-added: the files are not in the project yet, and pressing the " +
-          "button again resumes.",
+          "Label of the \"Choose files\" dialog's primary button once the changes are saved and " +
+          "the dialog is waiting for the added files to arrive; the button is disabled " +
+          "meanwhile. Progress, not an error.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingTitle": {
+        description:
+          "Title of the \"Choose files\" dialog's last step, shown when the changes are saved but " +
+          "the added files have not all arrived yet. A state, not an error or a question — " +
+          "nothing is being confirmed. {count} is the number of files listed below it.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingBody": {
+        description:
+          "Under the list of files that are still arriving. Reassures: the change is saved, " +
+          "this takes time for a large file, and a file is never shown half-filled. " +
+          "{count} is the number of files.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingCloseNote": {
+        description:
+          "Second sentence of that step: the lead does not have to confirm or repeat anything " +
+          "and may close the dialog; the files keep arriving while they work in the project.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingCheckButton": {
+        description:
+          "Primary button of that step. It only looks whether the files have arrived (and " +
+          "closes the dialog if they have); it does not submit the change again.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingCheckingButton": {
+        description: "Label of that button while it is looking; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesArrivingStillNote": {
+        description:
+          "Shown in that step after \"Check again\" found the files are still not all in, so " +
+          "the press visibly did something. {count} is the number of files.",
       },
       "projectSettings.sourceLink.notSyncedBadge": {
         description:

@@ -4515,7 +4515,6 @@ export const ms: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Tandakan fail di atas untuk menambahnya pada pautan ini, atau nyahtanda satu fail untuk berhenti mengikutinya.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Tambah fail",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Menambah fail…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Fail tidak selesai tiba, jadi ia belum ditambah pada pautan. Cuba lagi untuk menyelesaikan proses membawanya masuk.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "berhenti mengikuti",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Semak perubahan",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Sahkan perubahan pada pautan ini",

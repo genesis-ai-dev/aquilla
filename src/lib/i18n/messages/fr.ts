@@ -4602,7 +4602,6 @@ export const fr: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Cochez un fichier ci-dessus pour l’ajouter à ce lien, ou décochez-en un pour cesser de le suivre.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Ajouter les fichiers",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Ajout des fichiers…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Les fichiers ne sont pas arrivés en entier ; ils n’ont donc pas encore été ajoutés au lien. Réessayez pour terminer leur import.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "ne suit plus",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Examiner les modifications",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Confirmer ces modifications du lien",

@@ -5288,7 +5288,6 @@ export const es: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Marca un archivo de arriba para agregarlo a este enlace, o desmarca uno para dejar de seguirlo.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Agregar archivos",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Agregando archivos…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Los archivos no terminaron de llegar, así que todavía no se han agregado al enlace. Inténtalo de nuevo para terminar de traerlos.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "se dejó de seguir",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Revisar cambios",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Confirmar estos cambios del enlace",

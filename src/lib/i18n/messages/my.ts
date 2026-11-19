@@ -4533,7 +4533,6 @@ export const my: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "ဤလင့်ခ်သို့ ထည့်ရန် အထက်ရှိ ဖိုင်ကို အမှန်ခြစ်ပါ၊ သို့မဟုတ် လိုက်နာမှုရပ်ရန် အမှန်ခြစ်ကို ဖယ်ပါ။",
   "projectSettings.sourceLink.chooseFilesAddButton": "ဖိုင်များ ထည့်ရန်",
   "projectSettings.sourceLink.chooseFilesAddingButton": "ဖိုင်များ ထည့်နေသည်…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "ဖိုင်များ အပြည့်အဝ မရောက်လာသဖြင့် လင့်ခ်ထဲသို့ မထည့်ရသေးပါ။ ယူဆောင်ခြင်းကို အပြီးသတ်ရန် ထပ်ကြိုးစားပါ။",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "လိုက်နာမှု ရပ်ထားသည်",
   "projectSettings.sourceLink.chooseFilesReviewButton": "ပြောင်းလဲမှုများ သုံးသပ်ရန်",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "လင့်ခ်သို့ ဤပြောင်းလဲမှုများကို အတည်ပြုပါ",

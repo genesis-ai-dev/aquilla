@@ -149,4 +149,80 @@ describe("POST /:projectId/link-source — QA-BUG-1 live-mode seeded flag", () =
     expect(body.seeded).toBe(false)
     fetchSpy.mockRestore()
   })
+
+  // WHY: on the deployed environments identity and sync are routes on one
+  // hostname, and Cloudflare does not deliver a plain fetch from one Worker to
+  // another Worker's route on the same zone — only a service binding reaches
+  // it (the AQU-2216 class; lib/sync-worker-fetch.ts). This trigger used the
+  // URL, so the "awaited" first sync did not run there: links answered
+  // `seeded: false`, "Choose files" adds answered `complete: false`, and a lead
+  // was told their files "didn't finish arriving" on every confirm. Where a
+  // binding is configured the trigger must use it and leave the URL alone.
+  it("live: runs the seed sync through the SYNC_WORKER service binding when one is configured", async () => {
+    await seedUser(14, "lead-live-binding")
+    await seedProjectWithLead("proj-live-bind-up", "Upstream", 14)
+    await seedProjectWithLead("proj-live-bind-down", "Downstream", 14)
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const bindingCalls: Array<{ url: string; method?: string; authorization: string | null }> = []
+    const SYNC_WORKER = {
+      fetch: async (url: string, init?: RequestInit) => {
+        bindingCalls.push({
+          url,
+          method: init?.method,
+          authorization: new Headers(init?.headers).get("Authorization"),
+        })
+        return new Response(JSON.stringify({ ranSync: true, cellsMirrored: 2, filesMirrored: 1 }), { status: 200 })
+      },
+    }
+
+    const res = await app.request(
+      "/api/v2/projects/proj-live-bind-down/link-source",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("lead-live-binding")),
+        body: JSON.stringify({ sourceProjectId: "proj-live-bind-up", mode: "live" }),
+      },
+      { ...env, SYNC_WORKER },
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { seeded: boolean }).seeded).toBe(true)
+    expect(bindingCalls).toHaveLength(1)
+    expect(bindingCalls[0].url).toContain("/api/v1/projects/proj-live-bind-down/link/sync")
+    expect(bindingCalls[0].method).toBe("POST")
+    expect(bindingCalls[0].authorization).toMatch(/^Bearer .+/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+
+  // WHY: the trigger is best-effort, and before this a non-2xx answer left no
+  // trace at all — the fault above had to be pieced together from what was
+  // MISSING in the logs. A trigger that does not land now says so, with the
+  // status and the transport, and the route still reports `seeded: false` so
+  // the client self-heals.
+  it("live: a trigger the sync worker refuses is reported and logged with its status", async () => {
+    await seedUser(15, "lead-live-refused")
+    await seedProjectWithLead("proj-live-refused-up", "Upstream", 15)
+    await seedProjectWithLead("proj-live-refused-down", "Downstream", 15)
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const SYNC_WORKER = { fetch: async () => new Response("", { status: 522 }) }
+
+    const res = await app.request(
+      "/api/v2/projects/proj-live-refused-down/link-source",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("lead-live-refused")),
+        body: JSON.stringify({ sourceProjectId: "proj-live-refused-up", mode: "live" }),
+      },
+      { ...env, SYNC_WORKER },
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { seeded: boolean }).seeded).toBe(false)
+    const logged = warnSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes("triggerLinkSeedSync"))
+    expect(logged).toContain("HTTP 522")
+    expect(logged).toContain("proj-live-refused-down")
+    expect(logged).toContain("service binding")
+    warnSpy.mockRestore()
+  })
 })

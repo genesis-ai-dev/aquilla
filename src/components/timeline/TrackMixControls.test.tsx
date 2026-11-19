@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { EvenOutButton, MuteSoloPair, TrackFader } from "./TrackMixControls"
+import { faderPos } from "@/lib/audio/fader-scale"
+import { TRACK_VOLUME_FLOOR_DB } from "@/lib/audio/track-volume-store"
 
 afterEach(() => vi.useRealTimers())
 
@@ -71,16 +73,33 @@ describe("the fader", () => {
     return { onLive, onCommit, slider }
   }
 
-  it("is a 64×16 slider over −60…+6 dB, its thumb at the level", () => {
+  it("is a 64×16 slider from −∞ to +6 dB on the shared scale, its thumb at the level", () => {
     const { slider } = setup(0)
     expect(slider.className).toContain("w-16")
-    expect(slider).toHaveAttribute("aria-valuemin", "-60")
+    expect(slider).toHaveAttribute("aria-valuemin", String(TRACK_VOLUME_FLOOR_DB))
     expect(slider).toHaveAttribute("aria-valuemax", "6")
     expect(slider).toHaveAttribute("aria-valuenow", "0")
     expect(slider).toHaveAttribute("aria-valuetext", "0.0 dB")
-    // 0 dB sits at 0.82 of the 54px travel.
-    expect(screen.getByTestId("tl-fader-thumb-t1").style.left).toBe(`${(0.82 * 54).toFixed(1)}px`)
+    expect(screen.getByTestId("tl-fader-thumb-t1").style.left).toBe(`${(faderPos(0) * 54).toFixed(1)}px`)
     expect(slider.title).toBe("Volume · double-click to type · Option-click for 0 dB")
+  })
+
+  it("marks +6, 0, −6, −20, −40 and −∞ along the groove", () => {
+    setup(0)
+    const ticks = screen.getAllByTestId("tl-fader-tick-t1")
+    expect(ticks.map((t) => t.getAttribute("data-db"))).toEqual(["+6", "0", "−6", "−20", "−40", "−∞"])
+  })
+
+  it("reads −∞ at the bottom, and a drag to the left end silences the track", () => {
+    const onCommit = vi.fn()
+    render(<TrackFader name="Mu" testKey="t2" db={-Infinity} onLive={() => {}} onCommit={onCommit} />)
+    const slider = screen.getByTestId("tl-fader-t2")
+    expect(slider).toHaveAttribute("aria-valuetext", "−∞ dB")
+    expect(Number.parseFloat(screen.getByTestId("tl-fader-thumb-t2").style.left)).toBe(0)
+    slider.getBoundingClientRect = () => ({ left: 0, width: 64, top: 0, height: 16, right: 64, bottom: 16, x: 0, y: 0, toJSON: () => {} })
+    fireEvent.pointerDown(slider, { clientX: 30, pointerId: 1, button: 0 })
+    fireEvent.pointerUp(slider, { clientX: 0, pointerId: 1 })
+    expect(onCommit).toHaveBeenLastCalledWith(-Infinity)
   })
 
   it("shows the readout on hover, left of the fader", () => {
@@ -96,15 +115,15 @@ describe("the fader", () => {
     vi.useFakeTimers()
     const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => setTimeout(() => cb(0), 0) as unknown as number)
     const { slider, onLive, onCommit } = setup(0)
-    fireEvent.pointerDown(slider, { clientX: 5 + 0.5 * 54, pointerId: 1, button: 0 })
-    fireEvent.pointerMove(slider, { clientX: 5 + 0.65 * 54, pointerId: 1 })
-    fireEvent.pointerMove(slider, { clientX: 5 + 0.39 * 54, pointerId: 1 })
+    fireEvent.pointerDown(slider, { clientX: 5 + faderPos(-12) * 54, pointerId: 1, button: 0 })
+    fireEvent.pointerMove(slider, { clientX: 5 + faderPos(-6) * 54, pointerId: 1 })
+    fireEvent.pointerMove(slider, { clientX: 5 + faderPos(-18) * 54, pointerId: 1 })
     act(() => { vi.runAllTimers() })
     // Two moves in one frame: the mixer hears the last of them, once.
     expect(onLive.mock.calls.at(-1)?.[0]).toBeCloseTo(-18, 1)
     expect(screen.getByTestId("tl-fader-readout-t1").textContent).toBe("−18.0 dB")
     expect(onCommit).not.toHaveBeenCalled()
-    fireEvent.pointerUp(slider, { clientX: 5 + 0.39 * 54, pointerId: 1 })
+    fireEvent.pointerUp(slider, { clientX: 5 + faderPos(-18) * 54, pointerId: 1 })
     expect(onCommit).toHaveBeenCalledTimes(1)
     expect(onCommit.mock.calls[0][0]).toBeCloseTo(-18, 1)
     raf.mockRestore()
@@ -133,6 +152,28 @@ describe("the fader", () => {
     fireEvent.change(third, { target: { value: "40" } })
     fireEvent.keyDown(third, { key: "Enter" })
     expect(onCommit).toHaveBeenLastCalledWith(6)
+  })
+
+  it.each(["-inf", "−∞"])("takes %j typed as −∞", (typed) => {
+    const { slider, onCommit } = setup(0)
+    fireEvent.doubleClick(slider)
+    const field = screen.getByRole("textbox", { name: "Volume of Jesus" })
+    fireEvent.change(field, { target: { value: typed } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(onCommit).toHaveBeenCalledWith(-Infinity)
+  })
+
+  it("steps from −60 dB down to −∞ and back up", () => {
+    vi.useFakeTimers()
+    const onLive = vi.fn()
+    render(<TrackFader name="Mu" testKey="t3" db={-60} onLive={onLive} onCommit={() => {}} />)
+    const slider = screen.getByTestId("tl-fader-t3")
+    fireEvent.keyDown(slider, { key: "ArrowDown" })
+    expect(onLive).toHaveBeenLastCalledWith(-Infinity)
+    fireEvent.keyDown(slider, { key: "ArrowUp" })
+    expect(onLive).toHaveBeenLastCalledWith(-60)
+    fireEvent.keyDown(slider, { key: "End" })
+    expect(onLive).toHaveBeenLastCalledWith(-Infinity)
   })
 
   it("steps with the arrow keys and saves after a pause, not on every key", () => {

@@ -6,7 +6,8 @@
 //   silences the track for you; S plays only the soloed tracks. A track's own M
 //   stays as it was while another is soloed.
 // - The fader is SHARED and exported (track-volume.ts, `file.track.set`
-//   `volumeDb`). It moves the mixer's track gain live, one frame at a time, and
+//   `volumeDb`), on the one fader scale (fader-scale.ts, shared with AQU-2668: Logic's
+//   taper, +6 dB down to −∞, which silences the track). It moves the mixer's track gain live, one frame at a time, and
 //   writes once when the drag ends; arrow keys write after a 400 ms pause. So a
 //   slow device draws and plays smoothly and the outbox sees one write.
 // - ≈ opens the Even out window on this track. Grey until the track is evened,
@@ -19,7 +20,8 @@ import { EqualApproximately } from "lucide-react"
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type SyntheticEvent } from "react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { clampTrackVolumeDb, faderDb, faderPos, formatFaderDb } from "@/lib/audio/track-volume"
+import { FADER_MAX_DB, FADER_TICKS, faderDb, faderPos, formatDbValue, parseDbValue } from "@/lib/audio/fader-scale"
+import { TRACK_VOLUME_FLOOR_DB, clampTrackVolumeDb } from "@/lib/audio/track-volume-store"
 
 /** One button's box: 20×18, a 1px border, the letter 11px bold. */
 const BOX = "inline-flex h-[18px] w-5 shrink-0 items-center justify-center border p-0 text-[11px] leading-none font-bold outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
@@ -104,14 +106,12 @@ export function EvenOutButton({ testKey, state, onClick }: { testKey: string; st
 const FADER_W = 64
 const THUMB_W = 10
 const TRAVEL = FADER_W - THUMB_W
+/** The arrow keys' lowest finite step: the scale's lowest stop. */
+const KEY_FLOOR_DB = -60
+/** The ticks drawn on this small fader: +6, 0, −6, −20, −40, −∞. */
+const DRAWN_TICKS = FADER_TICKS.filter((tick) => [6, 0, -6, -20, -40, -Infinity].includes(tick.db))
 /** Arrow keys write this long after the last press. */
 const KEY_SAVE_MS = 400
-
-/** "−4.5", "4.5", "+3" or "-3" typed into the field; null when it isn't a number. */
-function parseTyped(text: string): number | null {
-  const n = Number.parseFloat(text.replace(/[−–]/g, "-").replace(/db/i, "").trim())
-  return Number.isFinite(n) ? n : null
-}
 
 export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = false }: {
   name: string
@@ -150,7 +150,6 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
 
   const shown = local ?? db
   const x = faderPos(shown) * TRAVEL
-  const zero = faderPos(0) * TRAVEL + THUMB_W / 2
 
   const dbAt = (el: HTMLElement, clientX: number) => {
     const box = el.getBoundingClientRect()
@@ -200,9 +199,11 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
     if (disabled) return
     const step = e.shiftKey ? 3 : 0.5
     let next: number | null = null
-    if (e.key === "ArrowUp" || e.key === "ArrowRight") next = shown + step
-    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") next = shown - step
+    // Under −60 dB (the scale's lowest stop) is −∞, and up from −∞ is −60.
+    if (e.key === "ArrowUp" || e.key === "ArrowRight") next = shown === -Infinity ? KEY_FLOOR_DB : shown + step
+    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") next = shown <= KEY_FLOOR_DB ? -Infinity : Math.max(KEY_FLOOR_DB, shown - step)
     else if (e.key === "Home") next = 0
+    else if (e.key === "End") next = -Infinity
     else if (e.key === "Enter") {
       setTyping(true)
       e.preventDefault()
@@ -229,7 +230,7 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
     typingRef.current = false
     setTyping(false)
     if (text == null) return
-    const n = parseTyped(text)
+    const n = parseDbValue(text)
     if (n != null) commit(n)
   }
 
@@ -240,7 +241,7 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
           ref={typedRef}
           autoFocus
           aria-label={t("editor.mix.fader", { name })}
-          defaultValue={(Math.round(shown * 10) / 10).toString().replace("-", "−")}
+          defaultValue={shown === -Infinity ? "−∞" : (Math.round(shown * 10) / 10).toString().replace("-", "−")}
           onPointerDown={keep}
           onClick={keep}
           onKeyDown={(e) => {
@@ -262,10 +263,11 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
       tabIndex={0}
       data-testid={`tl-fader-${testKey}`}
       aria-label={t("editor.mix.fader", { name })}
-      aria-valuemin={-60}
-      aria-valuemax={6}
-      aria-valuenow={shown}
-      aria-valuetext={formatFaderDb(shown)}
+      // −∞ is announced by its text; the number stays in range.
+      aria-valuemin={TRACK_VOLUME_FLOOR_DB}
+      aria-valuemax={FADER_MAX_DB}
+      aria-valuenow={shown === -Infinity ? TRACK_VOLUME_FLOOR_DB : shown}
+      aria-valuetext={formatDbValue(shown)}
       aria-disabled={disabled || undefined}
       title={disabled ? t("editor.mix.faderLocked") : t("editor.mix.faderTitle")}
       onPointerDown={onPointerDown}
@@ -291,12 +293,22 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
           data-testid={`tl-fader-readout-${testKey}`}
           className="pointer-events-none absolute top-[-1px] right-[calc(100%+6px)] z-30 inline-flex h-[18px] items-center rounded-[4px] border border-foreground/25 bg-popover px-[5px] font-mono text-[10.5px] whitespace-nowrap text-foreground shadow-[0_2px_6px_-2px_rgba(0,0,0,.25)]"
         >
-          {formatFaderDb(shown)}
+          {formatDbValue(shown)}
         </span>
       )}
       <span aria-hidden className="absolute inset-x-0 top-[5px] h-1.5 rounded-[3px] bg-[var(--lg-groove)] shadow-[inset_0_1px_1px_rgba(0,0,0,.18)]" />
       <span aria-hidden className="absolute top-[5px] left-0 h-1.5 rounded-[3px] bg-[var(--lg-fill)]" style={{ width: `${(x + THUMB_W / 2).toFixed(1)}px` }} />
-      <span aria-hidden className="absolute top-[13px] h-[3px] w-px bg-foreground/50" style={{ left: `${zero.toFixed(1)}px` }} />
+      {/* The scale's ticks: +6, 0, −6, −20, −40, −∞ (0 dB the strongest). */}
+      {DRAWN_TICKS.map((tick) => (
+        <span
+          key={tick.label}
+          aria-hidden
+          data-testid={`tl-fader-tick-${testKey}`}
+          data-db={tick.label}
+          className={cn("absolute top-[13px] h-[3px] w-px", tick.db === 0 ? "bg-foreground/50" : "bg-foreground/25")}
+          style={{ left: `${(tick.pos * TRAVEL + THUMB_W / 2).toFixed(1)}px` }}
+        />
+      ))}
       <span
         aria-hidden
         data-testid={`tl-fader-thumb-${testKey}`}

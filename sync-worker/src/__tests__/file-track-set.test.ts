@@ -256,7 +256,7 @@ describe('file.track.set — accepted writes', () => {
 })
 
 describe('file.track.set — track volume (AQU-2664)', () => {
-  it.each([0, -4.5, -60, 6])('accepts a volume of %s dB on the main track', async (volumeDb) => {
+  it.each([0, -4.5, -60, -150, 6, '-inf'])('accepts a volume of %s dB on the main track ("-inf" is silence)', async (volumeDb) => {
     const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { volumeDb } })
     expect(dispatch(authed).ok).toBe(true)
   })
@@ -266,7 +266,7 @@ describe('file.track.set — track volume (AQU-2664)', () => {
     expect(dispatch(authed).ok).toBe(true)
   })
 
-  it.each([-61, 6.5, Number.NaN, '3', true])('rejects an unusable volume: %s', async (volumeDb) => {
+  it.each([-151, 6.5, Number.NaN, '3', '-Infinity', 'inf', true])('rejects an unusable volume: %s', async (volumeDb) => {
     const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { volumeDb } })
     expectRejected(dispatch(authed), /unusable volumeDb/)
   })

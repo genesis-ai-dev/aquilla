@@ -92,13 +92,16 @@ const PATCH_KEYS = new Set([
   // src/lib/timeline/tracks.ts. Gated like every key outside {name, order,
   // color}: it changes what the timeline holds, not how a track looks.
   'setsLineLengths',
-  // AQU-2664 (board 74): the track's volume, dB, −60…+6 (the fader's range);
-  // null clears it to 0 dB. HAND-MIRRORED with PersistedTrackPatch.volumeDb.
+  // AQU-2664 (board 74): the track's volume: a number, −150…+6 dB, or the
+  // string "-inf" for silence (−∞ on the fader); null clears it to 0 dB.
+  // Not null for silence: the overrides are merged with jsonb_strip_nulls, so
+  // a null is dropped. HAND-MIRRORED with src/lib/audio/track-volume-store.ts.
   'volumeDb',
 ])
 
-const MIN_TRACK_VOLUME_DB = -60
+const MIN_TRACK_VOLUME_DB = -150
 const MAX_TRACK_VOLUME_DB = 6
+const SILENT_TRACK_VOLUME = '-inf'
 
 /**
  * A palette ID, and validated as a SHAPE rather than against a list of the ids
@@ -316,7 +319,7 @@ export function handleFileTrackSet(
     }
   }
 
-  if (patch != null && 'volumeDb' in patch && patch.volumeDb !== null) {
+  if (patch != null && 'volumeDb' in patch && patch.volumeDb !== null && patch.volumeDb !== SILENT_TRACK_VOLUME) {
     const { volumeDb } = patch
     if (typeof volumeDb !== 'number' || !Number.isFinite(volumeDb) || volumeDb < MIN_TRACK_VOLUME_DB || volumeDb > MAX_TRACK_VOLUME_DB) {
       return {

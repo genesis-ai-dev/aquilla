@@ -100,8 +100,8 @@ export interface TimelineTrack {
    */
   setsLineLengths?: false
   /**
-   * AQU-2664 (board 74): the track's own volume, dB, −60…+6 — the fader in its
-   * header. Absent means 0 dB. Shared (everyone hears it) and exported: the
+   * AQU-2664 (board 74): the track's own volume, dB, −150…+6 or −Infinity
+   * (silence) — the fader in its header. Absent means 0 dB. Shared (everyone hears it) and exported: the
    * mixer's track stage and every export apply it, after each take's evening
    * out, own volume and fades.
    */
@@ -139,15 +139,19 @@ export interface PersistedTrackPatch {
    *  the server accepts; only `false` means anything. HAND-MIRRORED with the
    *  handler's PATCH_KEYS. */
   setsLineLengths?: boolean
-  /** AQU-2664: the track's volume, dB (see TimelineTrack.volumeDb).
-   *  HAND-MIRRORED with the handler's PATCH_KEYS. */
-  volumeDb?: number
+  /** AQU-2664: the track's volume, dB (see TimelineTrack.volumeDb), or
+   *  "-inf" for silence. HAND-MIRRORED with the handler's PATCH_KEYS. */
+  volumeDb?: number | "-inf"
 }
 
-/** AQU-2664: a stored track volume this build can use, or undefined. The
- *  range is the worker's (file-track-set.ts): anything else reads as none. */
+/** AQU-2664: a stored track volume this build can use, or undefined: the
+ *  number (−150…+6 dB), or "-inf" for silence (read as −Infinity). The rule is
+ *  lib/audio/track-volume-store.ts `fromStoredVolume`, HAND-MIRRORED here because
+ *  this module has no imports (a test holds the two together), and the
+ *  worker's (file-track-set.ts). Anything else reads as none. */
 export function overrideVolumeDb(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= -60 && value <= 6 ? value : undefined
+  if (value === "-inf" || value === -Infinity) return -Infinity
+  return typeof value === "number" && Number.isFinite(value) && value >= -150 && value <= 6 ? value : undefined
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>

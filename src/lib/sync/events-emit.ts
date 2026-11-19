@@ -1425,8 +1425,9 @@ export interface FileTrackSetInput {
      *  it back to the default (every track sets them). The server refuses it
      *  on a reserved (derived) track id. */
     setsLineLengths?: boolean | null
-    /** AQU-2664: the track's volume, dB (−60…+6); null clears it to 0 dB. */
-    volumeDb?: number | null
+    /** AQU-2664: the track's volume, dB (−150…+6), or "-inf" for silence;
+     *  null clears it to 0 dB. */
+    volumeDb?: number | "-inf" | null
   } | null
   author: string
   clientTs?: number

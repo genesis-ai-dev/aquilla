@@ -2,15 +2,9 @@
 // where playback applies it, and that every export applies it too.
 import { afterEach, describe, expect, it } from "vitest"
 import {
-  TRACK_VOLUME_MAX_DB,
-  TRACK_VOLUME_MIN_DB,
   applyPendingVolumes,
   applyTrackVolumes,
   settledPendingVolumes,
-  clampTrackVolumeDb,
-  faderDb,
-  faderPos,
-  formatFaderDb,
   formatOwnVolume,
   trackVolumeForSlot,
   trackVolumeOverrides,
@@ -28,37 +22,7 @@ const track = (id: string, kind: TimelineTrack["kind"], volumeDb?: number): Time
   id, kind, name: id, order: 0, ...(volumeDb != null ? { volumeDb } : {}),
 })
 
-describe("the fader's scale (board 74 FADER_STOPS)", () => {
-  it.each([
-    [-60, 0], [-48, 0.08], [-36, 0.17], [-24, 0.3], [-18, 0.39], [-12, 0.5], [-6, 0.65], [0, 0.82], [6, 1],
-  ])("puts %s dB at %s", (db, pos) => {
-    expect(faderPos(db)).toBeCloseTo(pos, 6)
-    expect(faderDb(pos)).toBeCloseTo(db, 6)
-  })
-
-  it("is linear between stops and stops at both ends", () => {
-    expect(faderPos(-3)).toBeCloseTo((0.65 + 0.82) / 2, 6)
-    expect(faderPos(-90)).toBe(0)
-    expect(faderPos(20)).toBe(1)
-    expect(faderDb(-1)).toBe(TRACK_VOLUME_MIN_DB)
-    expect(faderDb(2)).toBe(TRACK_VOLUME_MAX_DB)
-  })
-
-  it("clamps typed values into −60…+6 and rounds to a tenth", () => {
-    expect(clampTrackVolumeDb(-99)).toBe(-60)
-    expect(clampTrackVolumeDb(9)).toBe(6)
-    expect(clampTrackVolumeDb(-4.46)).toBe(-4.5)
-    expect(clampTrackVolumeDb(Number.NaN)).toBe(0)
-  })
-})
-
 describe("the readouts", () => {
-  it("reads the fader as the board does", () => {
-    expect(formatFaderDb(0)).toBe("0.0 dB")
-    expect(formatFaderDb(-4.5)).toBe("−4.5 dB")
-    expect(formatFaderDb(2)).toBe("+2.0 dB")
-  })
-
   it("reads a take's own volume as the Station line does", () => {
     expect(formatOwnVolume(0)).toBe("0 dB")
     expect(formatOwnVolume(-2)).toBe("−2 dB")
@@ -72,6 +36,12 @@ describe("playback: the mixer's track stage", () => {
     expect(trackGainDbOf(RECORDING_SLOT)).toBe(-9)
     expect(trackGainDbOf(GENERATED_VOICE_SLOT)).toBe(-9)
     expect(trackGainDbOf("trk-music")).toBe(3)
+  })
+
+  it("silences a track at −∞", () => {
+    applyTrackVolumes([track("trk-music", "audio", -Infinity)])
+    expect(trackGainDbOf("trk-music")).toBe(-Infinity)
+    expect(Math.pow(10, trackGainDbOf("trk-music") / 20)).toBe(0)
   })
 
   it("puts a track back to 0 dB when its volume is cleared", () => {
@@ -99,6 +69,13 @@ describe("exports: every clip carries its track's volume", () => {
     expect(trackVolumeForSlot(overrides, GENERATED_VOICE_SLOT)).toBe(-6)
     expect(trackVolumeForSlot(overrides, "trk-music")).toBe(0)
     expect(trackVolumeForSlot(null, "trk-music")).toBe(0)
+  })
+
+  it("writes silence on every sample of a track at −∞, and reads its stored form", () => {
+    expect(trackVolumeForSlot({ "trk-music": { kind: "audio", name: "Music", volumeDb: "-inf" } }, "trk-music")).toBe(-Infinity)
+    const out = applyClipLevelPcm(new Float32Array([0.5, -0.25]), 48000, { gainDb: 3, trackGainDb: -Infinity })
+    expect([...out].every((v) => v === 0)).toBe(true)
+    expect(trackVolumeOverrides([track("trk-music", "audio", -Infinity)])["trk-music"]).toEqual({ volumeDb: "-inf" })
   })
 
   it("reads the drawn tracks the same way", () => {

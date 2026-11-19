@@ -380,6 +380,7 @@ import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWri
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
 import { applyPendingVolumes, applyTrackVolumes, settledPendingVolumes } from "@/lib/audio/track-volume"
+import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
@@ -16401,7 +16402,8 @@ export function ProjectWorkspace() {
     (trackId: string, db: number) => {
       const fileId = activeFileId
       if (!fileId) return
-      const volumeDb = db === 0 ? null : db
+      // Stored: nothing for 0 dB, the number, or "-inf" for silence (fader-scale.ts).
+      const volumeDb = toStoredVolume(db)
       setPendingTrackVolumes((current) => {
         const volumes = new Map(current?.fileId === fileId ? current.volumes : [])
         volumes.set(trackId, db)

@@ -13,7 +13,8 @@ import { useState } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { takeGain } from "@/lib/audio/take-gain"
-import { formatFaderDb, formatOwnVolume } from "@/lib/audio/track-volume"
+import { formatOwnVolume } from "@/lib/audio/track-volume"
+import { formatDbValue } from "@/lib/audio/fader-scale"
 import type { StationHost, StationTake } from "./station-host"
 
 export function StationEvenLine({ host, take, target, ownDb, editable }: {
@@ -76,8 +77,8 @@ export function StationEvenLine({ host, take, target, ownDb, editable }: {
         >
           <EqualApproximately aria-hidden className="size-3.5" strokeWidth={2.4} />
           {g.held
-            ? t("editor.station.evenedPart", { db: formatFaderDb(g.correctionDb) })
-            : t("editor.station.evened", { db: formatFaderDb(g.correctionDb) })}
+            ? t("editor.station.evenedPart", { db: formatDbValue(g.correctionDb) })
+            : t("editor.station.evened", { db: formatDbValue(g.correctionDb) })}
         </span>
       ) : (
         <span data-testid="station-even-amount" className="inline-flex items-center gap-[5px] text-muted-foreground">

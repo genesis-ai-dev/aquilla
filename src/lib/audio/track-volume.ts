@@ -9,60 +9,19 @@
 //
 // Playback applies it in the mixer's track node (`setTrackGainDb`), and an
 // export multiplies each clip by it (`withTrackVolumes` + clip-level.ts).
+// −∞ (stored "-inf") is silence in both: a gain of 0.
 // Mute and solo are NOT here: they are personal (audibility.ts).
 
 import type { CellData } from "@/hooks/useCells"
 import { setTrackGainDb } from "./mixer"
 import { slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { overrideVolumeDb, type PersistedTrackOverrides, type TimelineTrack } from "@/lib/timeline/tracks"
+import { toStoredVolume } from "./track-volume-store"
 
-export const TRACK_VOLUME_MIN_DB = -60
-export const TRACK_VOLUME_MAX_DB = 6
-
-/** Board 74's fader scale: dB → position 0..1 across the groove, linear
- *  between these stops (Logic's taper, roughly). */
-const FADER_STOPS: ReadonlyArray<readonly [number, number]> = [
-  [-60, 0], [-48, 0.08], [-36, 0.17], [-24, 0.3], [-18, 0.39], [-12, 0.5], [-6, 0.65], [0, 0.82], [6, 1],
-]
-
-export function faderPos(db: number): number {
-  if (db <= FADER_STOPS[0][0]) return 0
-  for (let i = 1; i < FADER_STOPS.length; i++) {
-    const [b, pb] = FADER_STOPS[i]
-    if (db <= b) {
-      const [a, pa] = FADER_STOPS[i - 1]
-      return pa + ((db - a) / (b - a)) * (pb - pa)
-    }
-  }
-  return 1
-}
-
-export function faderDb(pos: number): number {
-  if (pos <= 0) return TRACK_VOLUME_MIN_DB
-  for (let i = 1; i < FADER_STOPS.length; i++) {
-    const [b, pb] = FADER_STOPS[i]
-    if (pos <= pb) {
-      const [a, pa] = FADER_STOPS[i - 1]
-      return a + ((pos - pa) / (pb - pa)) * (b - a)
-    }
-  }
-  return TRACK_VOLUME_MAX_DB
-}
-
-/** A value the fader can hold: −60…+6, to a tenth of a dB; junk reads 0. */
-export function clampTrackVolumeDb(db: number): number {
-  if (!Number.isFinite(db)) return 0
-  const r = Math.round(Math.min(TRACK_VOLUME_MAX_DB, Math.max(TRACK_VOLUME_MIN_DB, db)) * 10) / 10
-  return Object.is(r, -0) ? 0 : r
-}
+// The fader's scale, its typing and its readout live in fader-scale.ts; what
+// it holds and how that is stored, in track-volume-store.ts.
 
 const sign = (r: number) => (r > 0 ? "+" : r < 0 ? "−" : "")
-
-/** The fader's readout: "0.0 dB", "−4.5 dB", "+2.0 dB". */
-export function formatFaderDb(db: number): string {
-  const r = Math.round(db * 10) / 10
-  return `${sign(r)}${Math.abs(r).toFixed(1)} dB`
-}
 
 /** A take's own volume as the Station line reads it: "0 dB", "−2 dB", "+1.5 dB". */
 export function formatOwnVolume(db: number): string {
@@ -88,7 +47,10 @@ export function trackVolumeForSlot(overrides: PersistedTrackOverrides | null | u
  *  caller holding the drawn tracks rather than the file's overrides. */
 export function trackVolumeOverrides(tracks: readonly TimelineTrack[] | null | undefined): PersistedTrackOverrides {
   const out: PersistedTrackOverrides = {}
-  for (const tr of tracks ?? []) if (tr.volumeDb) out[tr.id] = { volumeDb: tr.volumeDb }
+  for (const tr of tracks ?? []) {
+    const stored = tr.volumeDb ? toStoredVolume(tr.volumeDb) : null
+    if (stored != null) out[tr.id] = { volumeDb: stored }
+  }
   return out
 }
 

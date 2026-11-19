@@ -28,7 +28,7 @@ export interface TrackWritePatch {
   sourceTrackId?: string | null
   contentFileId?: string | null
   setsLineLengths?: boolean | null
-  volumeDb?: number | null
+  volumeDb?: number | "-inf" | null
 }
 
 export interface TrackOverlays {

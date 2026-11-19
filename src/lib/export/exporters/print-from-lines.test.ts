@@ -92,6 +92,13 @@ describe("the PDF's print page", () => {
       .toContain("@page{size:144pt 216pt;margin:18pt}")
   })
 
+  // AQU-2680 re-check finding 1: two A4 pages, then Letter for the rest.
+  it("prints on the page size most pages have", () => {
+    const sizes = [{ width: 595.3, height: 841.9 }, { width: 595.3, height: 841.9 }, { width: 612, height: 792 }, { width: 612, height: 792 }, { width: 612, height: 792 }]
+    const page = buildPrintPage(sizes.map((pageSize, i) => cell({ id: String(i), original: "Hi.", paragraphStart: true, metadata: { pageSize } })), { title: "t" })
+    expect(page).toContain("@page{size:612pt 792pt;margin:72pt}")
+  })
+
   it("prints what a translation says, never runs it", () => {
     const page = buildPrintPage([cell({ original: "x", translated: "<script>alert(1)</script> & \\bd bold\\bd*", paragraphStart: true })], { title: "<b>" })
     expect(page).toContain("<title>&lt;b&gt;</title>")

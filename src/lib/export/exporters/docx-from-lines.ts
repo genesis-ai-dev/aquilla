@@ -217,15 +217,25 @@ function numberingXml(lists: readonly NumberedList[]): string {
     `${nums}</w:numbering>`
 }
 
-/** AQU-2680: the page size a line's import recorded (a PDF's, in points),
- *  when it is a plausible page (1 to 22 inches a side). */
+/** AQU-2680: the page size the import recorded (a PDF's, in points), when it
+ *  is a plausible page (1 to 22 inches a side). Each page's first line carries
+ *  its page's size; re-check finding 1: the size most pages have wins (a
+ *  tie goes to the earlier), so two A4 cover pages don't put 55 Letter pages
+ *  on A4. */
 export function pageSizeOf(cells: readonly CellData[]): { width: number; height: number } | null {
+  const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 72 && v <= 1584
+  const counts = new Map<string, { size: { width: number; height: number }; pages: number }>()
+  let best: { size: { width: number; height: number }; pages: number } | null = null
   for (const cell of cells) {
     const size = cell.metadata?.pageSize as { width?: unknown; height?: unknown } | undefined
-    const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 72 && v <= 1584
-    if (size && ok(size.width) && ok(size.height)) return { width: size.width, height: size.height }
+    if (!size || !ok(size.width) || !ok(size.height)) continue
+    const key = `${size.width}x${size.height}`
+    const entry = counts.get(key) ?? { size: { width: size.width, height: size.height }, pages: 0 }
+    entry.pages++
+    counts.set(key, entry)
+    if (!best || entry.pages > best.pages) best = entry
   }
-  return null
+  return best?.size ?? null
 }
 
 /** The page: the recorded size, else A4 (in twentieths of a point). */

@@ -137,6 +137,20 @@ describe("a Word document from the lines", () => {
     expect(docxFromLinesFiles([cell({ original: "Hi.", metadata: { pageSize: { width: "x", height: 5 } } })])["word/document.xml"]).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
   })
 
+  // AQU-2680 re-check finding 1: the partner's PDF opens on two A4 pages and
+  // its other 55 are Letter; the document is on Letter, as most of it is.
+  it("takes the page size most pages have, not the first page's", () => {
+    const A4 = { width: 595.3, height: 841.9 }
+    const LETTER = { width: 612, height: 792 }
+    const pages = [A4, A4, LETTER, LETTER, LETTER].map((pageSize, i) => cell({ id: String(i), original: "Hi.", paragraphStart: true, metadata: { pageSize } }))
+    const doc = docxFromLinesFiles(pages)["word/document.xml"]
+    expect(doc).toContain('<w:pgSz w:w="12240" w:h="15840"/>')
+    expect(doc).toContain('<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"')
+    // a tie keeps the first page's size
+    const tie = docxFromLinesFiles([A4, LETTER].map((pageSize, i) => cell({ id: String(i), original: "Hi.", metadata: { pageSize } })))["word/document.xml"]
+    expect(tie).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
+  })
+
   // AQU-2680 review finding 8: a page under about 2.5 inches left no room
   // inside fixed 1-inch margins.
   it("keeps 1-inch margins, and narrows them on a page too small for them", () => {

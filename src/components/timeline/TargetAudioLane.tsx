@@ -2402,14 +2402,19 @@ export function TargetAudioLane({
           {/* AQU-2663 (Sam, Nov 19): Make speech is the record button's
               SIBLING — the same slot button, size and hot slot, side by side
               in one row. On a line narrower than the pair, the pair keeps its
-              size and overhangs centred, as the mic alone always has. */}
+              size and overhangs centred, as the mic alone always has. A picked
+              or in-progress line keeps its pair lit. */}
           {(() => {
             const buttonPx = slotButtonPx(chipH)
             const iconPx = slotIconPx(buttonPx)
             const iconStyle = { width: `${iconPx}px`, height: `${iconPx}px` }
-            const hot = hotKey === `empty-${cell.id}`
             const offersSpeech = Boolean(onPickGhost) && Boolean(cell.translated?.trim() || cell.original?.trim())
-            const busy = makingSpeechCellIds?.has(cell.id) === true
+            const busy = offersSpeech && makingSpeechCellIds?.has(cell.id) === true
+            const picked = offersSpeech && pickedGhostIds?.has(cell.id) === true
+            // A line picked for Make speech, or being made, keeps its pair
+            // showing with the pointer elsewhere; every other line shows it
+            // only on hover (AQU-2663, agreed Nov 19).
+            const hot = hotKey === `empty-${cell.id}` || picked || busy
             return (
               <div className="flex shrink-0 items-center gap-1">
                 {onOpenRecording && (
@@ -2434,7 +2439,7 @@ export function TargetAudioLane({
                     label={t("audio.makeSpeech.ghost")}
                     hot={hot}
                     sizePx={buttonPx}
-                    pressed={pickedGhostIds?.has(cell.id) === true}
+                    pressed={picked}
                     busy={busy}
                     onClick={(e) => {
                       const additive = e.shiftKey || e.metaKey || e.ctrlKey

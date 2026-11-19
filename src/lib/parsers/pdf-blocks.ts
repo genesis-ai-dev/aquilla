@@ -230,6 +230,15 @@ const TRAILING_NOTES = /(?:\s*\\f\s(?:(?!\\f\*)[\s\S])*\\f\*|\s*\u0001\d+\u0002)
 /** True when the text ends its sentence, ignoring notes after the full stop. */
 const endsSentence = (text: string) => END_PUNCT.test(text.replace(TRAILING_NOTES, "").trim())
 
+/** The gap between two pieces, in either reading direction. */
+const gapBetween = (a: PdfTextPiece, b: PdfTextPiece) => Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w))
+/** AQU-2551: a zero-width piece (marks drawn on their own) sits on the letter
+ *  it is nearer. True when that is the next piece: Hebrew points drawn just
+ *  before their letter, so the next piece is the same word. A shadda drawn
+ *  after its letter (vowelled Arabic) is nearer that letter, and the next gap
+ *  is measured from the letter. */
+const marksOnNext = (mark: PdfTextPiece, letter: PdfTextPiece, next: PdfTextPiece) => gapBetween(mark, next) < gapBetween(letter, mark)
+
 class TextJoiner {
   private readonly words = new Set<string>()
 
@@ -254,6 +263,7 @@ class TextJoiner {
   join(parts: readonly Part[]): string {
     let s = ""
     let prev: PdfTextPiece | null = null
+    let mark: PdfTextPiece | null = null
     let pendingBreak = false
     for (const it of parts) {
       if (!isPiece(it)) {
@@ -261,6 +271,7 @@ class TextJoiner {
         s = s.replace(/\s+$/, "") + it.note
         if (it.eol && !/\s$/.test(s)) s += " "
         prev = null
+        mark = null
         pendingBreak = false
         continue
       }
@@ -268,17 +279,17 @@ class TextJoiner {
         if (pendingBreak) {
           pendingBreak = false
           s = this.joinHyphen(s, it.s).slice(0, -it.s.length || undefined)
-        } else if (prev && prev.w > 0 && it.w > 0 && !/\s$/.test(s) && !/^\s/.test(it.s)) {
+        } else if (prev && prev.w > 0 && it.w > 0 && !/\s$/.test(s) && !/^\s/.test(it.s) && !(mark && marksOnNext(mark, prev, it))) {
           // Two pieces on one baseline with a visible gap, in either reading
           // direction, and no space between them: one space.
           const h = Math.max(it.h, prev.h, 1)
-          const gap = Math.max(it.x - (prev.x + prev.w), prev.x - (it.x + it.w))
+          const gap = gapBetween(prev, it)
           if (Math.abs(it.y - prev.y) < 0.3 * h && gap > 0.15 * h) s += " "
         }
         s += it.s
         // AQU-2551 re-review finding 5: a zero-width piece (a shadda drawn on
         // its own) is no position to measure the next gap from
-        if (it.w > 0 || !prev) prev = it
+        if (it.w > 0 || !prev) { prev = it; mark = null } else mark = it
       }
       if (it.eol) {
         if (/\p{L}[-­]$/u.test(s)) { pendingBreak = true; continue }
@@ -486,6 +497,8 @@ interface Line {
   sizeChars: Map<number, number>
   text: string
   prev: (PdfTextPiece & { sup: boolean }) | null
+  /** A zero-width piece after `prev`, if any (see marksOnNext). */
+  mark: PdfTextPiece | null
   /** The last piece that is not one of pdf.js's zero-height spaces. */
   lastReal: PdfTextPiece | null
   /** Letters in right-to-left pieces minus the others: the line reads
@@ -527,14 +540,14 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
       || (!zeroSpace && jump > 3 * h)
     const sup = !!cur && !newLine && h < 0.85 * cur.h && it.y - cur.y > 0.12 * cur.h
     if (newLine || !cur) {
-      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, lastReal: null, rtlBalance: 0, rtl: false }
+      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, mark: null, lastReal: null, rtlBalance: 0, rtl: false }
       lines.push(cur)
-    } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s)) {
+    } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s) && !(cur.mark && marksOnNext(cur.mark, cur.prev, it))) {
       cur.text += " "
     }
     // re-review finding 5: as in TextJoiner.join, a zero-width piece is not
     // where the next gap is measured from, so it never joins two words
-    if (it.w > 0 || !cur.prev) cur.prev = { ...it, sup }
+    if (it.w > 0 || !cur.prev) { cur.prev = { ...it, sup }; cur.mark = null } else cur.mark = it
     if (!zeroSpace) {
       cur.lastReal = it
       cur.x = Math.min(cur.x, it.x)

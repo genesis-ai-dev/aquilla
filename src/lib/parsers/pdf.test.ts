@@ -563,6 +563,22 @@ describe("review findings: Arabic (Nov 14)", () => {
     expect(text).toEqual([WORDS.join(" ").normalize("NFC")])
   })
 
+  // AQU-2551 check of fix 2: the partner's Hebrew (Num. 14:34, לַשָּׁנָה) draws
+  // its points as a zero-width piece just before their letter, so the gap to
+  // the letter after the points is no word break.
+  const heb = (s: string, x: number, w: number) => ({ s, x, y: 541.3, b: 0, w, h: 11.04, eol: false, dir: "rtl" })
+  const POINTED = [heb("ַל", 282.2, 5.11), heb("ָׁ ּ", 271.0, 0), heb("ש", 261.3, 7.66)]
+
+  it("puts no space after Hebrew points drawn on their own just before their letter", () => {
+    const layout = pdfPagesToParagraphs([{ n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null, items: POINTED }], (t) => t)
+    const tagged = pdfPagesToParagraphs([{
+      n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 },
+      items: [{ mc: "begin", id: "p0", tag: "P" }, ...POINTED, { mc: "end" }],
+      tree: { role: "Root", children: [{ role: "P", children: [{ type: "content", id: "p0" }] }] },
+    }], (t) => t)
+    for (const read of [layout, tagged]) expect(read.paragraphs.map((p) => p.text)).toEqual([expect.stringMatching(/ּש$/)])
+  })
+
   it("does not reverse a right-to-left piece that holds a whole word", () => {
     const words = pdfPagesToParagraphs([{
       n: 1, box: { x0: 0, y0: 0, x1: 595, y1: 842 }, tree: null,

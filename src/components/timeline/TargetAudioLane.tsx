@@ -2075,6 +2075,11 @@ function TargetAudioChip({
   )
 }
 
+/** AQU-2663: the gap between the mic and the ✨ (`gap-1`). */
+const SLOT_PAIR_GAP_PX = 4
+/** AQU-2663: a hovered empty line's z — over every clip but a dragged one. */
+const SLOT_LIFT_Z = 1999
+
 export function TargetAudioLane({
   items,
   layout,
@@ -2395,7 +2400,16 @@ export function TargetAudioLane({
         <div
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
-          style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
+          style={{
+            left: `${leftPx - originPx}px`,
+            width: `${widthPx}px`,
+            // AQU-2663 (review S4): while the pointer is on this line, lift it
+            // over the clips — whose inline z runs to paintOrder, +1000 when
+            // selected or hovered — so a narrow line's overhanging pair stays
+            // reachable. Under a dragged clip's 2000. At rest (picked or not)
+            // nothing is lifted: real clips keep the pointer.
+            ...(hotKey === `empty-${cell.id}` ? { zIndex: SLOT_LIFT_Z } : {}),
+          }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >
@@ -2416,7 +2430,13 @@ export function TargetAudioLane({
             // only on hover (AQU-2663, agreed Nov 19).
             const hot = hotKey === `empty-${cell.id}` || picked || busy
             return (
-              <div className="flex shrink-0 items-center gap-1">
+              <div
+                className="flex shrink-0 items-center gap-1"
+                // AQU-2663 (review S4): a leading margin the size of the ✨ and
+                // the gap keeps the MIC centred on the line, where it always
+                // sat; the ✨ hangs off to its right. The canvas is forced LTR.
+                style={onOpenRecording && offersSpeech ? { marginInlineStart: `${buttonPx + SLOT_PAIR_GAP_PX}px` } : undefined}
+              >
                 {onOpenRecording && (
                   <TimelineSlotButton
                     testId={`tl-target-empty-${cell.id}-record`}

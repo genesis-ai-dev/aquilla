@@ -1342,13 +1342,49 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       // The pair is centred on the line, not pushed into a corner.
       expect(slot.className).toMatch(/\bjustify-center\b/)
       expect(slot.className).not.toMatch(/justify-end/)
-      // Bounds: two fixed squares 4px apart in a row — the second starts past
-      // the first's right edge.
-      const w = parseFloat(rec().style.width)
-      const gapPx = 4
-      const recBox = { left: 0, right: w }
-      const speechBox = { left: w + gapPx, right: w + gapPx + parseFloat(speech().style.width) }
-      expect(speechBox.left).toBeGreaterThan(recBox.right)
+    })
+
+    // Review S4: the mic stays centred on its line, where it sat before
+    // Make speech joined it, and the ✨ hangs off to its right. The row
+    // carries a leading margin of one button plus the gap, so the row's
+    // centre (which the slot centres) is the mic's centre. Computed from the
+    // rendered sizes, so a change to either button or the margin fails it.
+    it("keeps the mic centred on the line, the sparkle beside it, on wide and narrow lines", () => {
+      for (const [start, end] of [[30, 36], [30, 30.5]] as const) {
+        const { unmount } = render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", start, end)] })} />)
+        const slotW = parseFloat(screen.getByTestId("tl-target-empty-c9").style.width)
+        const row = rec().parentElement!
+        const m = parseFloat(row.style.marginInlineStart || "0")
+        const recW = parseFloat(rec().style.width)
+        const spW = parseFloat(speech().style.width)
+        const gapPx = 4 // gap-1
+        const rowW = m + recW + gapPx + spW
+        const rowLeft = (slotW - rowW) / 2 // justify-center
+        const recBox = { left: rowLeft + m, right: rowLeft + m + recW }
+        const spBox = { left: recBox.right + gapPx, right: recBox.right + gapPx + spW }
+        expect((recBox.left + recBox.right) / 2).toBeCloseTo(slotW / 2)
+        expect(spBox.left).toBeGreaterThan(recBox.right)
+        unmount()
+      }
+      // No sparkle on this line: no margin, the mic alone is centred.
+      render(<TargetAudioLane {...wired({ emptyCells: [emptyCell("c9")] })} />)
+      expect(rec().parentElement!.style.marginInlineStart).toBe("")
+    })
+
+    // Review S4: while the pointer is on a line, its slot is lifted over the
+    // neighbouring clips (even a selected one), so the overhang on a narrow
+    // line stays reachable. Not at rest, and not merely for being picked:
+    // real clips keep the pointer otherwise.
+    it("lifts the slot over the clips only while the pointer is on it", () => {
+      render(<TargetAudioLane {...wired({ emptyCells: [worded("c9"), worded("c10", 40, 46)], pickedGhostIds: new Set(["c10"]) })} />)
+      const slot = screen.getByTestId("tl-target-empty-c9")
+      expect(slot.style.zIndex).toBe("")
+      fireEvent.pointerEnter(slot)
+      expect(Number(slot.style.zIndex)).toBeGreaterThan(1000)
+      expect(Number(slot.style.zIndex)).toBeLessThan(2000)
+      expect(screen.getByTestId("tl-target-empty-c10").style.zIndex).toBe("")
+      fireEvent.pointerLeave(slot)
+      expect(slot.style.zIndex).toBe("")
     })
 
     it("is the same size, shape and class as the record button", () => {

@@ -69,9 +69,26 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { addLinkedSourceFiles, loadLinkedSourceFileState, stopLinkedSourceFiles } from "@/lib/sync/archive"
 import { loadLinkSourcePreview, type LinkSourcePreview } from "@/lib/sync/link-source-preview"
+import { fetchLinkedFileCopies } from "@/lib/sync/link-join-copy"
 import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+/** AQU-2549: the preview with only `ownFiles` left as files a replace can
+ *  follow into, and no same-name default that points anywhere else. */
+function onlyJoinableOwnFiles(
+  preview: LinkSourcePreview,
+  joinable: ReadonlyArray<{ id: string }>,
+): LinkSourcePreview {
+  const ok = new Set(joinable.map((f) => f.id))
+  return {
+    ...preview,
+    ownFiles: preview.ownFiles?.filter((f) => ok.has(f.id)),
+    files: preview.files.map(({ clashFileId, ...file }) =>
+      clashFileId !== undefined && ok.has(clashFileId) ? { ...file, clashFileId } : file,
+    ),
+  }
+}
 
 export interface ChooseLinkedFilesDialogProps {
   projectId: string
@@ -160,9 +177,16 @@ export function ChooseLinkedFilesDialog({
   useEffect(() => {
     if (!open || !jwt) return
     let cancelled = false
-    void loadLinkSourcePreview(jwt, projectId, sourceProjectId)
-      .then((result) => {
-        if (!cancelled) setPreview(result)
+    // AQU-2549: the files a replace may follow into are this project's own
+    // files that follow nothing yet — never a copy the link brought in, never
+    // a file already in the replace record (the server's answer, as the join
+    // offers). Unreadable: the full list, and the server refuses a bad pick.
+    void Promise.all([
+      loadLinkSourcePreview(jwt, projectId, sourceProjectId),
+      fetchLinkedFileCopies(jwt, projectId).catch(() => null),
+    ])
+      .then(([result, joinable]) => {
+        if (!cancelled) setPreview(joinable ? onlyJoinableOwnFiles(result, joinable.ownFiles) : result)
       })
       .catch(() => {
         if (!cancelled) setPreviewFailed(true)

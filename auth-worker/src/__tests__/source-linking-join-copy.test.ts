@@ -278,3 +278,74 @@ describe("Join into my existing file (AQU-2549 part 1)", () => {
     expect(await adoptRaw()).toBeNull()
   })
 })
+
+// Review finding 2: two source files must never write into one file. A file
+// the link brought in (a copy) is the source file's own place here, and a file
+// that already follows a source file follows that one; neither can be the file
+// a replace follows into.
+describe("a replace cannot follow into a copy, or into a file that already follows one (AQU-2549)", () => {
+  const UP_EX = "file-2549-up-ex"
+  const COPY_GD = deterministicDownstreamFileId(DOWN, UP_GD)
+
+  beforeEach(async () => {
+    await seedFile(UP, UP_EX, "Exodus", "ex", LINES)
+    await seedFile(DOWN, COPY_GD, "3 Genesis–Deuteronomy", "up", LINES)
+  })
+
+  async function adoptRaw(): Promise<string | null> {
+    const row = await env.AQUILLA_PG.prepare("SELECT source_link_adopt FROM projects WHERE id = ?")
+      .bind(DOWN)
+      .first<{ source_link_adopt: string | null }>()
+    return row?.source_link_adopt ?? null
+  }
+
+  async function linkFollowing(fileIds: string[], adopt: Record<string, unknown> | null): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      `UPDATE projects SET source_project_id = ?, source_link_mode = 'live', source_link_consumes = 'source',
+              source_link_gate = 'validated', source_link_cursor = 10, source_link_file_ids = ?,
+              source_link_adopt = ? WHERE id = ?`,
+    )
+      .bind(UP, JSON.stringify(fileIds), adopt ? JSON.stringify(adopt) : null, DOWN)
+      .run()
+  }
+
+  it("Choose files refuses a copy the link brought in as the file to replace", async () => {
+    await linkFollowing([UP_GD], null)
+    const res = await post("/link-source/files", {
+      fileIds: [UP_EX],
+      replaceFiles: [{ upstreamFileId: UP_EX, fileId: COPY_GD }],
+    })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ reason: "replaceTargetIsCopy" })
+    expect(await adoptRaw()).toBeNull()
+  })
+
+  it("Choose files refuses a file that already follows a source file", async () => {
+    const record = { files: { [UP_GD]: OWN_GD }, pending: [] }
+    await linkFollowing([UP_GD], record)
+    const res = await post("/link-source/files", {
+      fileIds: [UP_EX],
+      replaceFiles: [{ upstreamFileId: UP_EX, fileId: OWN_GD }],
+    })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ reason: "replaceTargetAlreadyFollows" })
+    expect(JSON.parse((await adoptRaw())!)).toEqual(record)
+  })
+
+  it("the link refuses a copy as the file to replace, and still replaces into an own file", async () => {
+    const refused = await post("/link-source", {
+      sourceProjectId: UP, mode: "live", consumes: "source",
+      replaceFiles: [{ upstreamFileId: UP_GD, fileId: COPY_GD }],
+    })
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toMatchObject({ reason: "replaceTargetIsCopy" })
+    expect(await adoptRaw()).toBeNull()
+
+    const linked = await post("/link-source", {
+      sourceProjectId: UP, mode: "live", consumes: "source",
+      replaceFiles: [{ upstreamFileId: UP_GD, fileId: OWN_GD }],
+    })
+    expect(linked.status).toBe(200)
+    expect(JSON.parse((await adoptRaw())!)).toEqual({ files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
+  })
+})

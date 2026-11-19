@@ -67,6 +67,7 @@ import {
   loadLinkFileIdsRaw,
   loadLinkedFileCopies,
   loadStoppedUpstreamFileIds,
+  replaceTargetsProblem,
   loadUpstreamFileIds,
   matchFilesForReplace,
   parseLinkFileIds,
@@ -347,6 +348,9 @@ sourceLinking.post(
     // must not silently get two.
     let adoptionJson: string | null = null
     if (replaceFiles) {
+      // AQU-2549: never into a file the link would itself write.
+      const target = await replaceTargetsProblem(c.env, projectId, sourceProjectId, replaceFiles, null)
+      if (target) return c.json(target, 409)
       const matches = await matchFilesForReplace(c.env, {
         projectId,
         sourceProjectId,
@@ -718,6 +722,11 @@ sourceLinking.post(
     // The pairs are checked against the two projects' actual lines before
     // anything is recorded — the same pairing the mirror then performs.
     if (replaceFiles) {
+      // AQU-2549: never into a copy, or into a file that already follows one.
+      const target = await replaceTargetsProblem(
+        c.env, projectId, upstreamId, replaceFiles, (await loadLinkAdoption(c.env, projectId))?.files ?? null,
+      )
+      if (target) return c.json(target, 409)
       const matches = await matchFilesForReplace(c.env, {
         projectId,
         sourceProjectId: upstreamId,

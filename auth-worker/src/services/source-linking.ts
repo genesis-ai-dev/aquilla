@@ -713,6 +713,42 @@ export async function loadLinkedFileCopies(
   return { copies, ownFiles }
 }
 
+/**
+ * AQU-2549: why a replace cannot follow into the files it names, or null.
+ *
+ * One file follows one source file. A copy the link brought in (found by its
+ * identity, `deterministicDownstreamFileId`, for any file the source project
+ * has or had) is that source file's own place here; a file already in the
+ * replace record follows its own source file. Either as a target would have
+ * two source files writing into one file.
+ */
+export async function replaceTargetsProblem(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<{ reason: "replaceTargetIsCopy" | "replaceTargetAlreadyFollows"; error: string } | null> {
+  const { results } = await env.AQUILLA_PG.prepare("SELECT id FROM files WHERE project_id = ?")
+    .bind(upstreamProjectId)
+    .all<{ id: string }>()
+  const copies = new Set((results ?? []).map((row) => deterministicDownstreamFileId(projectId, row.id)))
+  if (pairs.some((pair) => copies.has(pair.fileId))) {
+    return {
+      reason: "replaceTargetIsCopy",
+      error: "a file the link brought in from the source project cannot be the file a replace follows into",
+    }
+  }
+  const taken = new Map(Object.entries(adoptedFileIdOf ?? {}).map(([upstream, own]) => [own, upstream]))
+  if (pairs.some((pair) => taken.has(pair.fileId) && taken.get(pair.fileId) !== pair.upstreamFileId)) {
+    return {
+      reason: "replaceTargetAlreadyFollows",
+      error: "that file already takes its source from another file in the source project",
+    }
+  }
+  return null
+}
+
 /** AQU-1560: the upstream's current (non-deleted) file ids. */
 export async function loadUpstreamFileIds(env: Env, upstreamProjectId: string): Promise<string[]> {
   const { results } = await env.AQUILLA_PG.prepare(

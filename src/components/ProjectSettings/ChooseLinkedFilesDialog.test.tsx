@@ -56,6 +56,14 @@ vi.mock("@/lib/sync/link-file-match", () => ({
   fetchLinkFileMatches: (...args: unknown[]) => fetchLinkFileMatches(...args),
 }))
 
+// AQU-2549: the project's own files a replace may follow into, as the server
+// answers them. Unreadable by default: the dialog then offers the full list.
+const fetchLinkedFileCopies = vi.fn()
+
+vi.mock("@/lib/sync/link-join-copy", () => ({
+  fetchLinkedFileCopies: (...args: unknown[]) => fetchLinkedFileCopies(...args),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "lead" }, loading: false }),
 }))
@@ -132,6 +140,8 @@ beforeEach(() => {
   loadLinkSourcePreview.mockResolvedValue(upstreamPreview())
   loadLinkedSourceFileState.mockResolvedValue(linkState())
   fetchLinkFileMatches.mockReset()
+  fetchLinkedFileCopies.mockReset()
+  fetchLinkedFileCopies.mockRejectedValue(new Error("not readable"))
 })
 
 describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
@@ -664,6 +674,24 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     await userEvent.click(fileCheckbox("LUK"))
 
     expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+  })
+
+  // WHY (AQU-2549 review, finding 2): the same-named LUK here is the copy the
+  // link brought in, or a file that already follows another source file.
+  // Replacing into it would have two source files writing into one file.
+  it("does not offer a copy, or a file that already follows one, as the file to replace", async () => {
+    loadLinkSourcePreview.mockResolvedValue({
+      ...previewWithOwnLuke(),
+      ownFiles: [{ id: "own-luk", name: "LUK" }],
+    })
+    fetchLinkedFileCopies.mockResolvedValue({ copies: [], ownFiles: [] })
+    renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
+
+    expect(fetchLinkedFileCopies).toHaveBeenCalledWith("tok", PROJECT_ID)
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+    expect(fetchLinkFileMatches).not.toHaveBeenCalled()
   })
 
   // WHY (AQU-2549): the project renamed its own copy of the book, so no name

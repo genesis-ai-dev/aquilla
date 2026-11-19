@@ -4977,7 +4977,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9939,7 +9945,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14888,7 +14900,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19863,7 +19881,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26113,7 +26137,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32365,7 +32395,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38688,7 +38724,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45058,7 +45100,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51343,7 +51391,12 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59574,7 +59627,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67810,7 +67869,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76455,7 +76520,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84745,7 +84816,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93410,7 +93487,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102068,7 +102151,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110763,7 +110852,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119443,7 +119538,13 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128115,6 +128216,12 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.format.pdfPrint.description": "68822bad714537b3",
+    "importExport.htmlPage.notes": "8a7525b1492fb848",
+    "importExport.htmlPage.backToText": "15b71d3fab74024f",
+    "importExport.status.pdfChooseSaveAsPdf": "4da5c660c310deaf",
+    "importExport.dialog.pdfOrDownloadWord": "0a296b315dce0519",
+    "importExport.status.pdfFellBackToWord": "ec3e56d5053641e6"
   }
 }

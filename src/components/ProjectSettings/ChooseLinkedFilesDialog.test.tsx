@@ -728,7 +728,7 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
     const { onFilesAdded } = renderCard()
     await openDialog()
     await userEvent.click(fileCheckbox("LUK"))
-    await userEvent.click(replaceCheckbox())
+    // AQU-2549: the one same-named file starts ticked to replace.
     await screen.findByText("1151 of 1151 lines are the same in both files.")
     await userEvent.click(reviewButton())
 

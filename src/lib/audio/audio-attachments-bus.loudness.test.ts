@@ -28,4 +28,11 @@ describe("a reading on a take still being attached", () => {
     const live = (getOptimisticShadows(FILE).get(CELL) ?? []).find((s) => s.kind === "attach")
     expect(live).toMatchObject({ att: { loudnessLufs: -24, trimEndMs: 2000 } })
   })
+
+  it("an even-out on a take still being attached shows at once too", () => {
+    injectOptimisticAudioAttachment(FILE, CELL, take(), "evt-attach")
+    injectOptimisticAudioTrim(FILE, CELL, take({ evenTargetLufs: -16 }), "evt-even")
+    const live = (getOptimisticShadows(FILE).get(CELL) ?? []).find((s) => s.kind === "attach")
+    expect(live).toMatchObject({ att: { evenTargetLufs: -16 } })
+  })
 })

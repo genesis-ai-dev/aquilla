@@ -286,6 +286,7 @@ import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { clearEvenOut, evenOutTakes, makeTakeMeasurer, type EvenOutHost, type EvenOutOptions, type TakeRef } from "@/lib/audio/even-out"
+import { flushEvenOutWrites } from "@/lib/audio/even-out-flush"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
@@ -4582,7 +4583,7 @@ export function ProjectWorkspace() {
   // `flush: false` (the Even out action) queues the write and leaves the one
   // outbox flush to the action, so 300 takes are not 300 round trips.
   const applyTakeEven = useCallback(
-    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<string | null> => {
+    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<{ fileId: string; eventId: string } | null> => {
       if (!project?.id) return null
       const owner = resolveTakeCellRef.current(cellId)
       const att = owner?.cell.attachments?.[audioId]
@@ -4594,11 +4595,11 @@ export function ProjectWorkspace() {
         author: currentUsername,
       })
       injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), evenTargetLufs: targetLufs }, p)
-      await p
-      if (opts?.flush === false) return owner.fileId
+      const eventId = await p
+      if (opts?.flush === false) return { fileId: owner.fileId, eventId }
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(owner.fileId)
-      return owner.fileId
+      return { fileId: owner.fileId, eventId }
     },
     [project?.id, currentUsername, getTokenForProjectFile, activeLane],
   )
@@ -4612,6 +4613,7 @@ export function ProjectWorkspace() {
     const projectId = project.id
     const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
     const touched = new Set<string>()
+    const written: string[] = []
     const measure = makeTakeMeasurer({
       fetchBytes: async (att, where, signal) => {
         const ref = parseFrontierAudioUrl(att.url)
@@ -4638,12 +4640,15 @@ export function ProjectWorkspace() {
     return {
       readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
       applyEven: async (cellId, audioId, target) => {
-        const fileId = await applyTakeEven(cellId, audioId, target, { flush: false })
-        if (!fileId) throw new Error("even out: the take is gone")
-        touched.add(fileId)
+        const w = await applyTakeEven(cellId, audioId, target, { flush: false })
+        if (!w) throw new Error("even out: the take is gone")
+        touched.add(w.fileId)
+        written.push(w.eventId)
       },
+      // Every write out before the action ends: round after round of the
+      // outbox, not one batch of 100 (even-out-flush.ts).
       flush: async () => {
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await flushEvenOutWrites(written.splice(0), { getTokenForFile: getTokenForProjectFile })
         for (const f of touched) notifyAudioAttachmentsChanged(f)
         touched.clear()
       },

@@ -43,4 +43,33 @@ describe("printing from the hidden frame", () => {
     expect(focus).toHaveBeenCalledTimes(1)
     expect(print).toHaveBeenCalledTimes(1)
   })
+
+  // AQU-2680 browser pass: WebKit runs no listener on a frame that may not
+  // run scripts, so the frame's own afterprint never comes there. The app's
+  // page removes the frame when it has the person back: its window gets focus
+  // again, or its own afterprint. The next PDF export removes it in any case.
+  async function printInFrame() {
+    const printing = printHtml("<p>x</p>", { userAgent: CHROME, loadTimeoutMs: 1000 })
+    const frame = document.querySelector("iframe")!
+    // like WebKit: listeners added to the frame's window never run
+    Object.defineProperty(frame, "contentWindow", { value: { print: vi.fn(), focus: vi.fn(), addEventListener: vi.fn() } })
+    frame.dispatchEvent(new Event("load"))
+    expect(await printing).toBe(true)
+    return frame
+  }
+
+  it.each(["focus", "afterprint"])("removes the frame when the app's window gets %s", async (type) => {
+    const frame = await printInFrame()
+    expect(frame.isConnected).toBe(true)
+    window.dispatchEvent(new Event(type))
+    expect(frame.isConnected).toBe(false)
+  })
+
+  it("removes the last frame before the next print", async () => {
+    const first = await printInFrame()
+    const second = printHtml("<p>y</p>", { userAgent: CHROME, loadTimeoutMs: 1000 })
+    expect(first.isConnected).toBe(false)
+    expect(document.querySelectorAll("iframe")).toHaveLength(1)
+    expect(await second).toBe(false)
+  })
 })

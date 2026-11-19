@@ -46,8 +46,9 @@ const IN_APP_BROWSER = /\b(FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snap
 
 const LOAD_TIMEOUT_MS = 10_000
 
-/** The frame of the last print; it stays until the next one, as some
- *  browsers keep reading it while their print window is open. */
+/** The frame of the last print; it stays while the print window is open, as
+ *  some browsers keep reading it, and goes when the person is back in the app
+ *  (see `printHtml`) or, at the latest, at the next print. */
 let lastFrame: HTMLIFrameElement | null = null
 
 function openInFrame(html: string, timeoutMs: number): Promise<{ win: PrintableWindow | null; close: () => void }> {
@@ -93,15 +94,28 @@ export async function printHtml(html: string, options?: PrintOptions): Promise<b
     options.beforePrint()
     await nextPaint()
   }
+  // AQU-2680 browser pass: WebKit runs no listener on a frame that may not
+  // run scripts, so the frame's own afterprint never comes there. The app's
+  // page removes it once the person is back: its window gets focus again
+  // (the print window closed, or a click in the app), or its own afterprint.
+  const host = typeof window === "undefined" ? null : window
+  const done = () => {
+    host?.removeEventListener("focus", done)
+    host?.removeEventListener("afterprint", done)
+    close()
+  }
   try {
-    win.addEventListener?.("afterprint", close)
+    win.addEventListener?.("afterprint", done)
     // AQU-2680 re-check finding 4: Safari prints the focused window, which
     // without this can be the app's page rather than the frame.
     win.focus?.()
     win.print()
+    // Only now, so focus moving to the frame for printing doesn't count.
+    host?.addEventListener("focus", done)
+    host?.addEventListener("afterprint", done)
     return true
   } catch {
-    close()
+    done()
     return false
   }
 }

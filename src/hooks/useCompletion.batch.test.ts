@@ -604,3 +604,59 @@ describe("completeBatch — an honest run (AQU-2654)", () => {
     expect(commit).toHaveBeenCalledTimes(20)
   })
 })
+
+// A batch run is not tied to the editor route: it keeps drafting after the
+// user navigates away. Spend attribution must follow the project the run
+// started in, not the URL at the moment each chunk is sent — the server bills
+// (and, metered, admits) the call by that project's org.
+describe("completeBatch — spend attribution follows the starting project", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+    dismissBatchCompletionSummary()
+    window.history.pushState({}, "", "/project/project-a/editor/file/file-a")
+  })
+
+  it("sends the starting project's id with every chunk even when the route changes mid-run", async () => {
+    const sent: { projectId?: string; path: string }[] = []
+    // Where the user goes while the run continues: off project routes after
+    // chunk 1, then into another project after chunk 2.
+    const nextPaths = ["/preferences", "/project/project-b/editor"]
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as { projectId?: string }
+        sent.push({ projectId: body.projectId, path: window.location.pathname })
+        const next = nextPaths.shift()
+        if (next) window.history.pushState({}, "", next)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: encodeChunkResponse(THIRTY_CELLS.slice(0, 10)) } }] }),
+          body: null,
+        })
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() =>
+      useCompletion(
+        { ...SETTINGS, provider: "frontier", endpoint: "" }, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        THIRTY_CELLS as never, undefined, DEFAULT_DRAFT_CONTEXT,
+        "", undefined, undefined, undefined, undefined,
+        { id: "project-a", files: [{ id: FILE_A, name: "file-a.docx" }] },
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeBatch(THIRTY_CELLS as never)
+    })
+
+    expect(sent.map((s) => s.path)).toEqual([
+      "/project/project-a/editor/file/file-a", "/preferences", "/project/project-b/editor",
+    ])
+    expect(sent.map((s) => s.projectId)).toEqual(["project-a", "project-a", "project-a"])
+    window.history.pushState({}, "", "/")
+  })
+})

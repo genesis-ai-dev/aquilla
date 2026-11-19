@@ -386,7 +386,11 @@ export function useCompletion(
   /** AQU-2342: the Language profile — its filled slots join every prompt's
    *  checks hint (db/shared/prompt-blocks.ts). */
   languageProfile?: import("../../db/shared/language-profile").LanguageProfile,
-  /** AQU-2654: project + file naming for the batch progress surface. */
+  /** AQU-2654: project + file naming for the batch progress surface. Its id
+   *  also rides on every model call for spend attribution, so a batch that
+   *  outlives the editor route stays billed to the project it started in (a
+   *  run keeps the callbacks, and so the id, it started with). Omitted →
+   *  complete() falls back to the URL. */
   batchProject?: CompletionBatchProject | null,
 ) {
   const batchProjectId = batchProject?.id
@@ -641,7 +645,7 @@ export function useCompletion(
         }),
       })
       const result = await complete({
-        settings: generationSettings, session,
+        settings: generationSettings, session, projectId: batchProjectId,
         messages,
         // Protected IDML markup is committed only after whole-response anchor
         // validation; never flash partial HTML as a translator-visible draft.
@@ -744,7 +748,7 @@ export function useCompletion(
         finalText,
         async (messages) => complete({
           settings: generationSettings,
-          session,
+          session, projectId: batchProjectId,
           messages: [...messages],
           stream: false,
           signal,
@@ -804,7 +808,7 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile, analytics])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile, analytics, batchProjectId])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -857,7 +861,7 @@ export function useCompletion(
         sentMessages = messages
         rawOutput = await complete({
           settings: { ...effectiveSettings, temperature: 0 },
-          session,
+          session, projectId: batchProjectId,
           messages: [...messages],
           stream: false,
           signal,
@@ -929,18 +933,18 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics, batchProjectId])
 
   const askAlignStyles = useCallback(async (
     messages: readonly IdmlRepairMessage[],
     signal?: AbortSignal,
   ) => complete({
     settings: { ...effectiveSettings, temperature: 0 },
-    session,
+    session, projectId: batchProjectId,
     messages: [...messages],
     stream: false,
     signal,
-  }), [effectiveSettings, session])
+  }), [effectiveSettings, session, batchProjectId])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -1234,7 +1238,7 @@ export function useCompletion(
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             result = await complete({
-              settings: effectiveSettings, session, messages,
+              settings: effectiveSettings, session, projectId: batchProjectId, messages,
               stream: true,
               onChunk: (full) => {
                 // Every delta proves the stream is alive (stall watchdog).
@@ -1343,7 +1347,7 @@ export function useCompletion(
                 ladder.value,
                 async (messages) => complete({
                   settings: effectiveSettings,
-                  session,
+                  session, projectId: batchProjectId,
                   messages: [...messages],
                   stream: false,
                   signal: getBatchCompletionSignal(runId),
@@ -1738,7 +1742,7 @@ export function useCompletion(
       // 4. Call model (on-complete; progressive streaming disabled for Frontier per spec).
       const result = await complete({
         settings: effectiveSettings,
-        session,
+        session, projectId: batchProjectId,
         messages,
         // SWARM-TODO(p1-draft): enable progressive streaming here once Frontier SSE fix ships
         // (the tag format already supports it — see paragraph-protocol.ts).
@@ -1831,7 +1835,7 @@ export function useCompletion(
           settledText,
           async (messages) => complete({
             settings: effectiveSettings,
-            session,
+            session, projectId: batchProjectId,
             messages: [...messages],
             stream: false,
             signal,
@@ -1906,7 +1910,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile, analytics, batchProjectId])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { expectDisabledNote } from "@/test-utils/tooltip"
-import { formatScopePath } from "@/lib/access/scope-path"
+import { formatGrantPlace, formatScopePath } from "@/lib/access/scope-path"
 import type { MemberAccess, ScopePath } from "@/lib/access/types"
 import { ROLE } from "@/lib/frontier/roles"
 
@@ -47,7 +47,7 @@ describe("ScopeBreadcrumb (§3.9)", () => {
 describe("GrantOriginBadge (§3.7 rule 1)", () => {
   it.each([
     [{ kind: "direct" as const }, "Direct"],
-    [{ kind: "inherited" as const, from: teamPath }, "Inherited · Biblica ETT › biblica/pattani-malay"],
+    [{ kind: "inherited" as const, from: teamPath }, "Biblica ETT · via team biblica/pattani-malay"],
     [{ kind: "creator" as const }, "Creator"],
     [{ kind: "platform" as const }, "Platform admin"],
   ])("labels %o as %s", (origin, text) => {
@@ -112,7 +112,7 @@ describe("EffectiveRoleCell (§3.7 rule 3)", () => {
       />,
     )
     expect(container.textContent).toBe(
-      "Contributor (direct) → Project Lead (via Biblica ETT › biblica/pattani-malay)",
+      "Contributor (direct) → Project Lead (via team biblica/pattani-malay)",
     )
   })
 
@@ -139,7 +139,7 @@ describe("InheritedRoleControl (§3.7 rule 2)", () => {
       </TooltipProvider>,
     )
     expect(screen.getByRole("button", { name: "Role" })).toBeDisabled()
-    const path = formatScopePath(teamPath)
+    const path = formatGrantPlace(teamPath)
     // a11y: the disabled control is described, and the link says where to go.
     expect(screen.getByRole("button", { name: "Role" })).toHaveAccessibleDescription(`Set at ${path} — change it there`)
     expect(screen.getByTestId("inherited-role-control")).not.toHaveAttribute("tabindex")

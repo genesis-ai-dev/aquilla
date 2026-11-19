@@ -649,17 +649,6 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     },
     [session?.jwt, id],
   )
-  const {
-    metrics: postEditMetrics,
-    isLoading: metricsLoading,
-    isError: metricsError,
-    revalidate: revalidateMetrics,
-  } = usePostEditMetrics({
-    projectId: isCloudProject ? (id ?? null) : null,
-    files: metricsFiles,
-    getJwt,
-    enabled: isCloudProject && !!id,
-  })
 
   // AQU-478: file-scoped sync-token minter for the Upstream-changes panel
   // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
@@ -1083,6 +1072,24 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   // mount; the box stays user-editable/clearable afterward.
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
+  // AQU-2654: the post-edit figures cost a sync-token and an /events read PER
+  // FILE (40 requests on a 20-file project, 132 on a whole Bible), and they
+  // were read every time project settings opened, on any pane and in the
+  // in-place dialog. They are read when the pane that shows them is the one
+  // on screen: the Metrics pane, or a settings search (which lists every
+  // matching card, this one included).
+  const metricsOnScreen = sectionParam === "metrics" || lowerQuery.length > 0
+  const {
+    metrics: postEditMetrics,
+    isLoading: metricsLoading,
+    isError: metricsError,
+    revalidate: revalidateMetrics,
+  } = usePostEditMetrics({
+    projectId: isCloudProject ? (id ?? null) : null,
+    files: metricsFiles,
+    getJwt,
+    enabled: isCloudProject && !!id && metricsOnScreen,
+  })
 
   // AQU-2031: `?focus=<target>` is the pane-mode counterpart of `?q=`. A caller
   // that wants one card reachable in one click deep-links to the card's GROUP

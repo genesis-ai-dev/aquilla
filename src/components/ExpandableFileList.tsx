@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import type { ChangeSignal } from "@/hooks/useStableCallback"
 import { fileDisplayName } from "@/lib/file-display-name"
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
 import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
@@ -181,6 +182,13 @@ interface Props {
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
   /**
+   * AQU-2654: bumps when the active file's chapter health may have changed.
+   * With it the caller can hand `getActiveChapterHealth` over as one stable
+   * function, and a store emit re-renders the expanded file's chapter grid
+   * instead of this whole list. Absent ⇒ the getter's identity is the signal.
+   */
+  activeChapterHealthSignal?: ChangeSignal
+  /**
    * AQU-2118: the target lane every per-file `/progress` read here names —
    * the lane the editor's switcher shows, so an expanded file's chapters and
    * the hover prefetch report that lane and not the project's default. '' is
@@ -232,7 +240,7 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  hasActiveChapters, getActiveChapterHealth,
+  hasActiveChapters, getActiveChapterHealth, activeChapterHealthSignal,
   deferSectionProgress,
   lane = "",
   filterFocus,
@@ -687,6 +695,7 @@ export function ExpandableFileList({
                               delivers={delivers}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
+                              chaptersSignal={file.id === activeFileId ? activeChapterHealthSignal : undefined}
                               deferFetch={deferSectionProgress}
                               lane={lane}
                               onSectionClick={(label) => {

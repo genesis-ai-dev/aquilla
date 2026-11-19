@@ -1,4 +1,6 @@
 import { useMemo } from "react"
+import { readAtVersion } from "@/hooks/useActiveCellStore"
+import { useChangeSignalVersion, type ChangeSignal } from "@/hooks/useStableCallback"
 import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { Spinner } from "@/components/ui/spinner"
 import { BookHealthSpine, type BookHealthChapter } from "./BookHealthSpine"
@@ -17,6 +19,12 @@ interface Props {
   onSectionClick: (sectionLabel: string) => void
   /** Read the active file’s current health only while this grid is mounted. */
   getChapters?: () => BookHealthChapter[]
+  /**
+   * AQU-2654: `getChapters` is identity-stable, so this is what says "the
+   * chapters may have changed". Absent ⇒ a new `getChapters` identity is the
+   * signal, as before.
+   */
+  chaptersSignal?: ChangeSignal
   /**
    * AQU-1326: hold the per-file `/progress` read until the editor's first cell
    * page has painted. The active file is expanded on open, so this grid's fetch
@@ -41,9 +49,12 @@ interface Props {
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch, lane, delivers }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, chaptersSignal, deferFetch, lane, delivers }: Props) {
   const t = useT()
-  const chapters = useMemo(() => getChapters?.(), [getChapters])
+  const chaptersVersion = useChangeSignalVersion(chaptersSignal, Boolean(getChapters))
+  // `readAtVersion`: the version is the reason to re-read, not an input to
+  // the read, and the React Compiler would otherwise memoize it away.
+  const chapters = useMemo(() => readAtVersion(chaptersVersion, () => getChapters?.()), [getChapters, chaptersVersion])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
   // soon as a real id arrives, so the gate needs no extra plumbing.
   const { sections, error, retry } = useSectionProgressState(

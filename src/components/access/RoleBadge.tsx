@@ -2,7 +2,7 @@ import { ArrowUpRight } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { roleRung } from "@/lib/access/role-scale"
-import { formatScopePath } from "@/lib/access/scope-path"
+import { formatScopePath, viaTeamName } from "@/lib/access/scope-path"
 import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
@@ -78,12 +78,17 @@ export function RoleBadge({
   const rung = roleRung(roleLevel)
   const inherited = origin.kind === "inherited"
   const place = sourcePlace(origin)
-  const path = origin.kind === "inherited" && origin.from?.length ? formatScopePath(origin.from) : undefined
+  const from = inherited ? origin.from ?? [] : []
+  const team = viaTeamName(from)
+  const scope = from.length ? formatScopePath(from) : undefined
+  // A team is not a crumb. The pill says "via team Blue", the same chip the
+  // grant row uses, instead of "via Org › Team".
+  const viaPhrase = team ? `${t("org.access.scope.team")} ${team}` : scope
   const href = place ? hrefFor?.(place) : undefined
 
   const label = inherited
-    ? path
-      ? t("org.access.roleBadge.via", { role, path })
+    ? viaPhrase
+      ? t("org.access.roleBadge.via", { role, path: viaPhrase })
       : t("org.access.roleBadge.origin", { role, origin: originLabel(t, origin) })
     : origin.kind === "direct"
       ? role
@@ -104,7 +109,7 @@ export function RoleBadge({
     "data-origin": origin.kind,
     "data-role-rung": rung ? String(rung.step) : undefined,
     "data-testid": "role-badge",
-    title: path ? t("org.access.origin.inheritedFrom", { path }) : undefined,
+    title: scope ? t("org.access.origin.inheritedFrom", { path: scope }) : undefined,
     className: cn("rounded-full border", shape, className),
   }
 

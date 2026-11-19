@@ -15,6 +15,7 @@ import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { receiptOnlyGates } from './commit-gates'
 import { orgRoleName, type OrgMemberCommand } from './commands-org-members'
+import { resolveOrgMemberLevel } from './org-members-read'
 import { ROLE } from '../events/role-policy'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type {
@@ -25,6 +26,12 @@ import type {
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
+
+/** The org role required to change org membership (AQU-780's owner-only
+ *  rule). Exported so the roster read (org-members-read.ts) can pin its own
+ *  floor equal to it — read and write halves of one governance surface. */
+export const ORG_MEMBERSHIP_FLOOR = ROLE.OWNER
+
 // ── shared gate ──────────────────────────────────────────────────────────────
 
 interface OrgMemberGate {
@@ -73,12 +80,8 @@ async function resolveOrgMemberGate(
 
   // OWNER-only (AQU-780). Platform-admin elevation is deliberately NOT applied:
   // the external API confers no cross-tenant governance authority.
-  const callerRow = await db
-    .prepare(`SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?`)
-    .bind(orgId, cred.userId)
-    .first<{ role_level: number }>()
-  const callerLevel = callerRow?.role_level ?? null
-  if (callerLevel == null || callerLevel < ROLE.OWNER) {
+  const callerLevel = await resolveOrgMemberLevel(db, orgId, cred.userId)
+  if (callerLevel == null || callerLevel < ORG_MEMBERSHIP_FLOOR) {
     return errorResponse('permission_denied', 'org role owner is required to manage org membership')
   }
 
@@ -99,11 +102,9 @@ async function resolveOrgMemberGate(
     )
   }
 
-  const currentRow = await db
-    .prepare(`SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?`)
-    .bind(orgId, target.id)
-    .first<{ role_level: number }>()
-  const currentLevel = currentRow?.role_level ?? null
+  // The same resolver the roster read reports, so `direct`/`role` on the roster
+  // and `already_member`/`not a member` here can never disagree.
+  const currentLevel = await resolveOrgMemberLevel(db, orgId, target.id)
 
   if (cmd.kind === 'AddOrgMember' && currentLevel != null) {
     return errorResponse(

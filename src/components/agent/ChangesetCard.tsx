@@ -41,6 +41,7 @@ import {
 } from "@/lib/agent/changeset-review"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 import { LiveChangesetCard } from "./LiveChangesetCard"
+import { startVisibleInterval } from "@/lib/visible-interval"
 
 const POLL_INTERVAL_MS = 5000
 
@@ -98,10 +99,12 @@ function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
     }
 
     void poll()
-    const id = setInterval(() => void poll(), POLL_INTERVAL_MS)
+    // One poll per pending card, so a thread of staged changesets left open in
+    // a background tab must not keep asking (AQU-2654).
+    const stop = startVisibleInterval(() => void poll(), POLL_INTERVAL_MS)
     return () => {
       cancelled = true
-      clearInterval(id)
+      stop()
     }
   }, [jwt, item.changesetId, status])
 

@@ -6,7 +6,7 @@ import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
-import { FileRow } from "./FileRow"
+import { FileRowSlot } from "./FileRowSlot"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import {
   hasPlacedFiles,
@@ -642,7 +642,7 @@ export function ExpandableFileList({
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                             onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                           >
-                          <FileRow
+                          <FileRowSlot
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}

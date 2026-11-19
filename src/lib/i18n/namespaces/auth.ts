@@ -252,6 +252,15 @@ export const auth = defineNamespace({
       "Sign out and sign in with the invited address, or ask the project owner to add " +
       "your account \u201C{username}\u201D directly.",
     "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
+    "auth.join.emailUnverified": "Verify your email address to accept this invite.",
+    "auth.join.emailUnverifiedInvited":
+      "This invite was sent to {email}, and this account hasn\u2019t confirmed that " +
+      "address yet.",
+    "auth.join.emailUnverifiedBody":
+      "This invite was sent to an email address this account hasn\u2019t confirmed yet.",
+    "auth.join.emailUnverifiedNext":
+      "Send yourself a verification link, open it, then come back to this invite and " +
+      "accept.",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -938,6 +947,35 @@ export const auth = defineNamespace({
         description:
           "Button on the email-mismatch rejection that signs the person out " +
           "so they can sign back in with the address the invite was sent to.",
+      },
+      "auth.join.emailUnverified": {
+        description:
+          "Heading on the join page when accepting was refused because the signed-in " +
+          "account has never confirmed the email address the invite was sent to. The " +
+          "account is the right one \u2014 this is not the wrong-address rejection " +
+          "(auth.join.wrongEmail).",
+      },
+      "auth.join.emailUnverifiedInvited": {
+        description:
+          "Detail under auth.join.emailUnverified. {email} is the signed-in account's " +
+          "own address, masked (\u201Cn\u2026a@proton.me\u201D) and rendered inline " +
+          "\u2014 never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The signed-in account's own email address, masked. It is also the address " +
+            "the invite was sent to, which is why the invite matched this account at all.",
+        },
+      },
+      "auth.join.emailUnverifiedBody": {
+        description:
+          "Stands in for auth.join.emailUnverifiedInvited when the session carries no " +
+          "email address to name.",
+      },
+      "auth.join.emailUnverifiedNext": {
+        description:
+          "One line under auth.join.emailUnverified saying what to do: use the send " +
+          "button below it, open the emailed link, then return here and accept. Makes " +
+          "clear that verifying alone does not join the project.",
       },
       "auth.join.noLongerValidFresh": {
         description:

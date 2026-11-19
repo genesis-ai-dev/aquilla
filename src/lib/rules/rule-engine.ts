@@ -40,6 +40,8 @@ function allMatches(re: RegExp, text: string): Array<{ index: number; text: stri
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     out.push({ index: m.index, text: m[0] })
+    // Every caller compiles with `g`; without it `exec` would never advance.
+    if (!re.global) break
     if (m[0] === "") {
       const at = re.lastIndex
       const code = re.unicode ? text.codePointAt(at) : undefined

@@ -1478,6 +1478,13 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       fireEvent.click(speech(), { shiftKey: true })
       expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
       expect(props.onSelect).not.toHaveBeenCalled()
+      // Ctrl and ⌘ add or remove the same way, without selecting.
+      fireEvent.click(speech(), { ctrlKey: true })
+      expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
+      fireEvent.click(speech(), { metaKey: true })
+      expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
+      expect(props.onPickGhost).toHaveBeenCalledTimes(4)
+      expect(props.onSelect).not.toHaveBeenCalled()
       expect(props.onOpenRecording).not.toHaveBeenCalled()
 
       rerender(<TargetAudioLane {...props} pickedGhostIds={new Set(["c9"])} />)

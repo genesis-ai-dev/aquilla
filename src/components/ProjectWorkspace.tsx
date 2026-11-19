@@ -570,6 +570,7 @@ import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
+import { RestoreProjectButton } from "@/components/RestoreProjectDialog"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -21793,10 +21794,12 @@ function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectS
             {t("workspace.backToDashboard")}
           </Button>
           {canRestore && (
-            <Button onClick={() => onRestore()}>
-              <Undo2 className="me-1 h-4 w-4" />
-              {t("common.restore")}
-            </Button>
+            <RestoreProjectButton onRestore={onRestore}>
+              <Button>
+                <Undo2 className="me-1 h-4 w-4" />
+                {t("common.restore")}
+              </Button>
+            </RestoreProjectButton>
           )}
         </div>
       </div>

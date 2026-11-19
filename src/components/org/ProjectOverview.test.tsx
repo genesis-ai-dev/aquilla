@@ -1120,9 +1120,37 @@ describe("ProjectOverview archive/restore", () => {
     renderOverview()
 
     expect(await screen.findByText("Archived")).toBeInTheDocument()
-    const btn = screen.getByRole("button", { name: "Restore" })
-    fireEvent.click(btn)
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Restore" }))
 
+    await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
+  })
+
+  it("confirms before restoring an archived project, and the confirm button is not destructive (AQU-2456)", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700, deletedAt: "2026-05-01" }), status: "ready", refresh })
+    unarchiveProjectRemote.mockResolvedValue({ kind: "restored" })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent(
+      "Everyone who had access to this project before will have access again.",
+    )
+    expect(unarchiveProjectRemote).not.toHaveBeenCalled()
+
+    const confirm = within(dialog).getByRole("button", { name: "Restore" })
+    expect(confirm).toHaveClass("bg-primary")
+    expect(confirm.className).not.toMatch(/bg-destructive/)
+    expect(confirm.className).not.toMatch(/text-destructive/)
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(unarchiveProjectRemote).not.toHaveBeenCalled()
+    expect(screen.getByText("Archived")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    const again = await screen.findByRole("dialog")
+    fireEvent.click(within(again).getByRole("button", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
   })
 
@@ -1142,6 +1170,7 @@ describe("ProjectOverview archive/restore", () => {
     const portfolioReads = getPortfolio.mock.calls.length
 
     fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Restore" }))
 
     await waitFor(() => expect(screen.queryByTestId("overview-archived-notice")).toBeNull())
     expect(LOADED_PROJECT_SETTINGS.refresh).toHaveBeenCalled()

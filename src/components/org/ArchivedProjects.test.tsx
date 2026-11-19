@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { openRowMenu } from "@/test-utils/row-menu"
@@ -100,6 +100,7 @@ describe("ArchivedProjects", () => {
 
     await openRowMenu("More actions for Old Project")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
 
@@ -120,6 +121,7 @@ describe("ArchivedProjects", () => {
     expect(row).toBeTruthy()
     fireEvent.contextMenu(row!)
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
 

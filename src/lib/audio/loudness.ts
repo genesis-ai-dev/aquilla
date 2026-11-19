@@ -247,11 +247,12 @@ export const yieldToPage = (): Promise<void> => new Promise((resolve) => setTime
 export async function measureLoudnessYielding(
   channels: readonly Float32Array[],
   rate: number,
-  opts: { chunk?: number; yieldFn?: () => Promise<void> } = {},
+  opts: { chunk?: number; yieldFn?: () => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<LoudnessReading> {
   const pause = opts.yieldFn ?? yieldToPage
   const run = meterSteps(channels, rate, opts.chunk ?? METER_CHUNK)
   for (;;) {
+    if (opts.signal?.aborted) throw new DOMException("loudness: aborted", "AbortError")
     const r = run.next()
     if (r.done) return r.value
     await pause()

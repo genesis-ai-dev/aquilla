@@ -324,7 +324,7 @@ export interface TakeMeasurerDeps {
   emit(cellId: string, audioId: string, reading: LoudnessFields, durationMs: number): Promise<void>
   /** The meter. Default: off the page in the loudness worker, else on the
    *  page in yielding chunks (loudness-client.ts). It may take the samples. */
-  meter?: (pcm: Float32Array, rate: number) => Promise<LoudnessReading>
+  meter?: (pcm: Float32Array, rate: number, signal?: AbortSignal) => Promise<LoudnessReading>
   pcmBudgetBytes?: number
   timeoutMs?: number
 }
@@ -352,7 +352,7 @@ export type TakeMeasurer = EvenOutHost["measure"] & { release(): void }
 export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
   const budget = deps.pcmBudgetBytes ?? MEASURE_PCM_BUDGET_BYTES
   const timeoutMs = deps.timeoutMs ?? MEASURE_TIMEOUT_MS
-  const meter = deps.meter ?? ((pcm: Float32Array, rate: number) => loudnessClient().measure([pcm], rate))
+  const meter = deps.meter ?? ((pcm: Float32Array, rate: number, signal?: AbortSignal) => loudnessClient().measure([pcm], rate, signal))
   // One recording at a time (one decode in memory).
   let held: HeldRecording | null = null
   const results = new Map<string, LoudnessFields>()
@@ -413,7 +413,8 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
       durationMs = att.durationMs ?? 0
     }
     if (!part || signal.aborted) return null
-    const r = await meter(part, TARGET_RATE)
+    // Cancel and the timeout stop the meter too, not just the download.
+    const r = await meter(part, TARGET_RATE, signal)
     if (signal.aborted) return null
     return {
       reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: att.trimStartMs ?? 0, loudnessToMs: att.trimEndMs ?? null },

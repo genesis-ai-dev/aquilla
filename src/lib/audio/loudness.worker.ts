@@ -3,9 +3,11 @@
  * blocks the editor. The samples arrive transferred; see loudness-client.ts.
  */
 
-import { answerLoudnessRequest, type LoudnessRequest } from "./loudness-protocol"
+import { runLoudnessRequest, type LoudnessRequest } from "./loudness-protocol"
 
+const post = (self as unknown as { postMessage(m: unknown, t?: Transferable[]): void }).postMessage.bind(self)
+
+// It beats as it measures, so the page knows it is alive (loudness-client.ts).
 self.onmessage = (event: MessageEvent<LoudnessRequest>) => {
-  const { response, transfer } = answerLoudnessRequest(event.data)
-  ;(self as unknown as { postMessage(m: unknown, t: Transferable[]): void }).postMessage(response, transfer)
+  runLoudnessRequest(event.data, (msg, transfer) => post(msg, transfer ?? []))
 }

@@ -596,3 +596,27 @@ describe("memory while measuring", () => {
     expect(release).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("the timeout reaches the meter", () => {
+  it("the meter is handed a signal that aborts when the take runs out of time", async () => {
+    vi.useFakeTimers()
+    try {
+      let meterSignal: AbortSignal | undefined
+      const measure = makeTakeMeasurer({
+        fetchBytes: async () => new Uint8Array([1]),
+        decode: async () => new Float32Array(48_000),
+        emit: async () => {},
+        timeoutMs: 1000,
+        meter: (_pcm, _rate, signal) => { meterSignal = signal; return new Promise(() => {}) },
+      })
+      const p = measure("c1", "a", { url: "frontier-audio://m.wav", type: "audio", durationMs: 1000 } as CodexCellAttachment)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(meterSignal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await p).toBeNull()
+      expect(meterSignal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

@@ -36,11 +36,16 @@ export interface LoudnessClientOptions {
   readyTimeoutMs?: number
   /** A worker idle this long is let go (a new one starts on the next take). */
   idleMs?: number
+  /** A measuring worker silent this long is dead: let go, and the page
+   *  measures from then on. It beats about every second of samples. */
+  heartbeatMs?: number
 }
 
 export interface LoudnessClient {
-  /** Measure a take. Its channels' buffers may be transferred: don't reuse them. */
-  measure(channels: Float32Array[], rate: number): Promise<LoudnessReading>
+  /** Measure a take. Its channels' buffers may be transferred: don't reuse
+   *  them. `signal` stops it (an AbortError): the worker is let go and the
+   *  next take starts a fresh one; on the page it stops between chunks. */
+  measure(channels: Float32Array[], rate: number, signal?: AbortSignal): Promise<LoudnessReading>
   /** Which path the last measure took. */
   lastPath(): "worker" | "page" | null
   dispose(): void
@@ -64,13 +69,14 @@ export function createLoudnessClient(opts: LoudnessClientOptions = {}): Loudness
   const pause = opts.yieldFn ?? yieldToPage
   const readyTimeoutMs = opts.readyTimeoutMs ?? 5_000
   const idleMs = opts.idleMs ?? 60_000
+  const heartbeatMs = opts.heartbeatMs ?? 10_000
   let worker: WorkerLike | null = null
   let ready: Promise<WorkerLike | null> | null = null
   let broken = false
   let path: "worker" | "page" | null = null
   let nextId = 1
   let idle: ReturnType<typeof setTimeout> | null = null
-  const pending = new Map<number, { resolve: (r: LoudnessReading) => void; reject: (e: WorkerFailed) => void }>()
+  const pending = new Map<number, { resolve: (r: LoudnessReading) => void; reject: (e: WorkerFailed) => void; alive: () => void }>()
   let onPong: (() => void) | null = null
 
   const drop = (why: string, markBroken: boolean) => {
@@ -108,8 +114,12 @@ export function createLoudnessClient(opts: LoudnessClientOptions = {}): Loudness
         return
       }
       const p = pending.get(msg.id)
-      pending.delete(msg.id)
       if (!p) return
+      if (msg.type === "beat") {
+        p.alive()
+        return
+      }
+      pending.delete(msg.id)
       if (msg.type === "result") p.resolve(msg.reading)
       else p.reject(new WorkerFailed(msg.message, msg.channels))
     }
@@ -143,17 +153,42 @@ export function createLoudnessClient(opts: LoudnessClientOptions = {}): Loudness
     return ready
   }
 
-  const viaWorker = (w: WorkerLike, channels: Float32Array[], rate: number) =>
+  const aborted = () => new DOMException("loudness: aborted", "AbortError")
+
+  const viaWorker = (w: WorkerLike, channels: Float32Array[], rate: number, signal?: AbortSignal) =>
     new Promise<LoudnessReading>((resolve, reject) => {
       const id = nextId++
-      pending.set(id, { resolve, reject })
+      let watchdog: ReturnType<typeof setTimeout> | null = null
+      const done = () => {
+        if (watchdog) clearTimeout(watchdog)
+        signal?.removeEventListener("abort", onAbort)
+      }
+      // No answer and no beat for heartbeatMs: the worker died without a word.
+      const alive = () => {
+        if (watchdog) clearTimeout(watchdog)
+        watchdog = setTimeout(() => drop("loudness worker went silent", true), heartbeatMs)
+      }
+      const onAbort = () => {
+        done()
+        pending.delete(id)
+        // Its work can't be interrupted, only ended: let it go (not broken).
+        drop("aborted", false)
+        reject(aborted())
+      }
+      pending.set(id, {
+        resolve: (r) => { done(); resolve(r) },
+        reject: (e) => { done(); reject(e) },
+        alive,
+      })
+      signal?.addEventListener("abort", onAbort, { once: true })
+      alive()
       w.postMessage({ type: "measure", id, rate, channels }, buffersOf(channels))
     })
 
-  const onPage = async (channels: Float32Array[], rate: number) => {
+  const onPage = async (channels: Float32Array[], rate: number, signal?: AbortSignal) => {
     path = "page"
     await pause()
-    return measureLoudnessYielding(channels, rate, { yieldFn: pause })
+    return measureLoudnessYielding(channels, rate, { yieldFn: pause, signal })
   }
 
   const armIdle = () => {
@@ -165,19 +200,22 @@ export function createLoudnessClient(opts: LoudnessClientOptions = {}): Loudness
   }
 
   return {
-    async measure(channels, rate) {
+    async measure(channels, rate, signal) {
+      if (signal?.aborted) throw aborted()
       const w = await start()
-      if (!w) return onPage(channels, rate)
+      if (signal?.aborted) throw aborted()
+      if (!w) return onPage(channels, rate, signal)
       try {
-        const r = await viaWorker(w, channels, rate)
+        const r = await viaWorker(w, channels, rate, signal)
         path = "worker"
         armIdle()
         return r
       } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") throw e
         drop("loudness worker failed", true)
         const back = e instanceof WorkerFailed ? e.channels : null
         // Handed back: measure them here. Gone with the worker: this take fails.
-        if (back) return onPage(back, rate)
+        if (back) return onPage(back, rate, signal)
         throw e
       }
     },

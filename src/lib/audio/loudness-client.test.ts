@@ -4,7 +4,7 @@
 // them — inside a long take too — so the editor never freezes.
 import { describe, expect, it, vi } from "vitest"
 import { createLoudnessClient, type WorkerLike } from "./loudness-client"
-import { answerLoudnessRequest, type LoudnessRequest } from "./loudness-protocol"
+import { answerLoudnessRequest, runLoudnessRequest, type LoudnessRequest } from "./loudness-protocol"
 import { measureLoudness, measureLoudnessYielding, METER_CHUNK } from "./loudness"
 
 const RATE = 48_000
@@ -168,5 +168,87 @@ describe("FALLBACK: the page path never freezes the editor", () => {
     await client.measure([new Float32Array(100)], RATE)
     // Even a take shorter than one chunk gives the page a turn first.
     expect(order).toEqual(["yield", "take 1 done", "yield"])
+  })
+})
+
+// Re-check S2: Cancel and the timeout stop the meter itself, and a worker
+// that dies without a word fails fast (a heartbeat), never a full timeout.
+describe("stopping the meter", () => {
+  const pong = (w: WorkerLike) => setTimeout(() => w.onmessage?.({ data: { type: "pong" } } as MessageEvent), 0)
+
+  it("Cancel stops a worker measure: the worker is let go and the next take starts a fresh one", async () => {
+    const stuck: WorkerLike = {
+      onmessage: null, onerror: null,
+      postMessage(msg: LoudnessRequest) { if (msg.type === "ping") pong(stuck) /* measure: never answers */ },
+      terminate: vi.fn(),
+    }
+    const log = { transfers: [] as Transferable[][], posts: 0 }
+    const makeWorker = vi.fn().mockReturnValueOnce(stuck).mockImplementation(() => inProcessWorker(log))
+    const client = createLoudnessClient({ makeWorker, heartbeatMs: 10_000 })
+    const ac = new AbortController()
+    const p = client.measure([speechish(1)], RATE, ac.signal)
+    await new Promise((r) => setTimeout(r, 10))
+    ac.abort()
+    await expect(p).rejects.toThrow(/abort/i)
+    expect(stuck.terminate).toHaveBeenCalled()
+    // Not broken: the next take gets a fresh worker.
+    expect(await client.measure([speechish(1)], RATE)).toBeTruthy()
+    expect(client.lastPath()).toBe("worker")
+    expect(makeWorker).toHaveBeenCalledTimes(2)
+  })
+
+  it("a worker that goes silent fails fast, and the page measures the rest", async () => {
+    const silent: WorkerLike = {
+      onmessage: null, onerror: null,
+      postMessage(msg: LoudnessRequest) { if (msg.type === "ping") pong(silent) },
+      terminate: vi.fn(),
+    }
+    const client = createLoudnessClient({ makeWorker: () => silent, heartbeatMs: 50, yieldFn: async () => {} })
+    const t0 = Date.now()
+    await expect(client.measure([speechish(1)], RATE)).rejects.toThrow()
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(silent.terminate).toHaveBeenCalled()
+    const pcm = speechish(1)
+    const expected = measureLoudness([pcm.slice()], RATE)
+    expect(await client.measure([pcm], RATE)).toEqual(expected)
+    expect(client.lastPath()).toBe("page")
+  })
+
+  it("a long measure that keeps beating is not cut off", async () => {
+    const pcm = speechish(1)
+    const expected = measureLoudness([pcm.slice()], RATE)
+    const busy: WorkerLike = {
+      onmessage: null, onerror: null,
+      postMessage(msg: LoudnessRequest) {
+        if (msg.type === "ping") return pong(busy)
+        if (msg.type !== "measure") return
+        let beats = 0
+        const tick = setInterval(() => {
+          if (++beats < 8) busy.onmessage?.({ data: { type: "beat", id: msg.id } } as MessageEvent)
+          else {
+            clearInterval(tick)
+            busy.onmessage?.({ data: { type: "result", id: msg.id, reading: expected } } as MessageEvent)
+          }
+        }, 20)
+      },
+      terminate: vi.fn(),
+    }
+    const client = createLoudnessClient({ makeWorker: () => busy, heartbeatMs: 60 })
+    expect(await client.measure([pcm], RATE)).toEqual(expected)
+    expect(client.lastPath()).toBe("worker")
+  })
+
+  it("the worker's own loop beats while it measures", () => {
+    const beats: unknown[] = []
+    runLoudnessRequest({ type: "measure", id: 7, rate: RATE, channels: [speechish(3)] }, (m) => { if ((m as { type: string }).type === "beat") beats.push(m) })
+    expect(beats.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("Cancel stops the page meter between chunks", async () => {
+    const ac = new AbortController()
+    let yields = 0
+    const p = measureLoudnessYielding([speechish(10)], RATE, { signal: ac.signal, yieldFn: async () => { if (++yields === 3) ac.abort() } })
+    await expect(p).rejects.toThrow(/abort/i)
+    expect(yields).toBe(3)
   })
 })

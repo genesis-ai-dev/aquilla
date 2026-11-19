@@ -741,6 +741,13 @@ export interface EventPayloads {
     gainDb: number | null
     fadeInMs: number | null
     fadeOutMs: number | null
+    /**
+     * AQU-2664: the loudness (LUFS) this take is evened out to; null clears
+     * it. ABSENT = this event has no say about it and it is kept: every
+     * client before AQU-2664, and the Station's volume line, which sets the
+     * take's own volume ON TOP of the evening out.
+     */
+    evenTargetLufs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -891,6 +898,10 @@ export interface EventPayloads {
   'cell.audio.measure': {
     audioId: string
     durationMs: number
+    /** AQU-2664: the recording's integrated loudness (LUFS, -70 = silent)
+     *  and true peak (dBTP), both or neither. Fill-only, like the duration. */
+    loudnessLufs?: number
+    truePeakDb?: number
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

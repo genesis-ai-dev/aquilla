@@ -2446,6 +2446,23 @@ case 'cell.audio.attach': {
             p.audioId,
           ),
       )
+      // AQU-2664: the loudness it is evened out to, only when the event
+      // states it (absent = no say, kept; null clears). Its own statement so
+      // an event without it is exactly the statement above.
+      if (p.evenTargetLufs !== undefined) {
+        const t = p.evenTargetLufs
+        if (t !== null && (typeof t !== 'number' || !Number.isFinite(t))) {
+          throw new Error(`cell.audio.gain event ${event.id} has a malformed evenTargetLufs`)
+        }
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET even_target_lufs = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(t, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
       return ['cell_audio']
     }
 
@@ -2562,13 +2579,15 @@ case 'cell.audio.attach': {
               project_id, file_id, cell_id, audio_id, slot, url, mime_type, voice_id,
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
-              created_by, role, target_offset_ms, recordings_offset_ms, piece_of
+              created_by, role, target_offset_ms, recordings_offset_ms, piece_of,
+              loudness_lufs, true_peak_db, even_target_lufs
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
                    ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
                    a.created_by, a.role, a.target_offset_ms, a.recordings_offset_ms,
-                   COALESCE(a.piece_of, a.audio_id)
+                   COALESCE(a.piece_of, a.audio_id),
+                   a.loudness_lufs, a.true_peak_db, a.even_target_lufs
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'
@@ -2799,6 +2818,22 @@ case 'cell.audio.attach': {
           )
           .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
       )
+      // AQU-2664: the recording's loudness and true peak, both or neither,
+      // fill-only for the same reason: the bytes of an audio id never change.
+      if (p.loudnessLufs !== undefined || p.truePeakDb !== undefined) {
+        const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+        if (!ok(p.loudnessLufs) || !ok(p.truePeakDb)) {
+          throw new Error(`cell.audio.measure event ${event.id} has a malformed loudness reading`)
+        }
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET loudness_lufs = COALESCE(loudness_lufs, ?), true_peak_db = COALESCE(true_peak_db, ?)
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(p.loudnessLufs, p.truePeakDb, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
       return ['cell_audio']
     }
 

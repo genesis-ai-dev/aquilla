@@ -272,6 +272,36 @@ describe('file.track.set — track volume (AQU-2664)', () => {
   })
 })
 
+// AQU-2664 (Sam, Nov 19): a track's volume is set at the level a take's
+// volume is (Contributor); its colour and every other track key stay with
+// maintainers. Its own small allow-list in track-editing-authority.ts — the
+// kind's floor is not widened.
+describe('file.track.set — who may set a track volume', () => {
+  it('lets a contributor (400) set volumeDb, and clear it', async () => {
+    expect((await authorizeTrackSetRaw({ trackId: 'target-audio', patch: { volumeDb: -3 } }, 400)).ok).toBe(true)
+    expect((await authorizeTrackSetRaw({ trackId: 'music', patch: { volumeDb: '-inf' } }, 400)).ok).toBe(true)
+    expect((await authorizeTrackSetRaw({ trackId: 'music', patch: { volumeDb: null } }, 400)).ok).toBe(true)
+  })
+
+  it.each([
+    ['colour', { color: 'cyan' }],
+    ['a name', { name: 'Music' }],
+    ['an order', { order: 2 }],
+    ['volume with colour', { volumeDb: -3, color: 'cyan' }],
+    ['a reset', null],
+  ])('still refuses a contributor %s', async (_label, patch) => {
+    const result = await authorizeTrackSetRaw({ trackId: 'target-audio', patch }, 400)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.status).toBe(403)
+  })
+
+  it.each([[{ volumeDb: -3 }], [{ color: 'cyan' }]])('refuses a viewer (100) either: %j', async (patch) => {
+    const result = await authorizeTrackSetRaw({ trackId: 'target-audio', patch }, 100)
+    expect(result.ok).toBe(false)
+  })
+})
+
 describe('file.track.set — rejected writes', () => {
   it('rejects when fileId is absent', async () => {
     // The perimeter (authorize) refuses a fileId-less event before dispatch

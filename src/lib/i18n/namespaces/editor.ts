@@ -1267,7 +1267,7 @@ export const editor = defineNamespace({
     "editor.mix.soloTitle": "Solo",
     "editor.mix.fader": "Volume of {name}",
     "editor.mix.faderTitle": "Volume · double-click to type · Option-click for 0 dB",
-    "editor.mix.faderLocked": "Only maintainers can change a track's volume",
+    "editor.mix.faderLocked": "Your role can't change a track's volume",
     "editor.mix.evenOff": "Even out loudness…",
     "editor.mix.evenFull": "Evened out · click to change",
     "editor.mix.evenPart": "Evened out, some takes not all the way · click to change",

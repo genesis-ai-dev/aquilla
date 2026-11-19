@@ -70,6 +70,7 @@
 // which the root build does not apply. Importing the type explicitly makes the
 // module self-contained — needed the moment event-projection began importing
 // it, which pulled this file into the root graph for the first time.
+import { requiredRoleFor } from './role-policy'
 import type { AquillaDb } from '../../../db/shim/postgres'
 import { effectiveMediaSettings } from './media-settings'
 import { makeRequestCache, type RequestCache } from './request-cache'
@@ -130,6 +131,23 @@ export function trackPatchRequiresExisting(trackId: string, patch: unknown): boo
 
 // AQU-2664: a track's volume is how it sounds, as its colour is how it looks.
 const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color', 'volumeDb'])
+
+/**
+ * AQU-2664 (Sam, Nov 19): the role floor for one `file.track.set`. A patch
+ * that sets the track's VOLUME and nothing else is held to a take's volume
+ * floor (`cell.audio.gain`, Contributor): changing how loud a track plays is
+ * the same work as changing how loud a take plays. Every other patch —
+ * colour, name, order, structure, a reset — keeps the kind's own floor
+ * (Maintainer). The kind's floor is not widened; this is the one exception.
+ */
+const VOLUME_ONLY_KEYS = new Set(['volumeDb'])
+export function trackPatchRoleFloor(payload: unknown): number {
+  const patch = typeof payload === 'object' && payload !== null ? (payload as { patch?: unknown }).patch : undefined
+  const keys = typeof patch === 'object' && patch !== null && !Array.isArray(patch) ? Object.keys(patch) : []
+  return keys.length > 0 && keys.every((k) => VOLUME_ONLY_KEYS.has(k))
+    ? requiredRoleFor('cell.audio.gain')
+    : requiredRoleFor('file.track.set')
+}
 
 export function isGatedTrackPatch(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return true

@@ -391,7 +391,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canSetTrackVolume, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -20151,9 +20151,10 @@ export function ProjectWorkspace() {
                     // Colour rides the same clearance alone (Sam, 2026-09-26):
                     // how a track looks, not what the timeline holds.
                     onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
-                    // AQU-2664 (board 74): a track's volume, on the same
-                    // clearance as its colour (how it sounds).
-                    onSetTrackVolume={canReorderTracks ? handleSetTrackVolume : undefined}
+                    // AQU-2664 (board 74): a track's volume, at a take's
+                    // volume level (Contributor); its other settings stay
+                    // with maintainers.
+                    onSetTrackVolume={canSetTrackVolume(project?.syncRole?.level ?? null) ? handleSetTrackVolume : undefined}
                     // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
                     // window, for anyone who may even takes out.
                     evenOut={timelineEvenOut}

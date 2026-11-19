@@ -248,6 +248,16 @@ export function canAttachSourceAudio(roleLevel: number | null | undefined): bool
 }
 
 /**
+ * AQU-2664 (Sam, Nov 19): may this person move a track's volume fader? A
+ * `file.track.set` that sets ONLY `volumeDb` is held to a take's volume floor
+ * (`cell.audio.gain`); every other track setting keeps `file.track.set`'s.
+ * Mirrors sync-worker/src/events/track-editing-authority.ts `trackPatchRoleFloor`.
+ */
+export function canSetTrackVolume(roleLevel: number | null | undefined): boolean {
+  return canPerform("cell.audio.gain", roleLevel)
+}
+
+/**
  * AQU-1000 — CLIENT MIRROR of the server's foreign-comment floors.
  *
  * `REQUIRED_ROLE` above is only half the comment policy. Every comment

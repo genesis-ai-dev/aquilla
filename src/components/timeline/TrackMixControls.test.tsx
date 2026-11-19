@@ -155,7 +155,7 @@ describe("the fader", () => {
     fireEvent.doubleClick(slider)
     expect(onCommit).not.toHaveBeenCalled()
     expect(screen.queryByRole("textbox")).toBeNull()
-    expect(slider.title).toBe("Only maintainers can change a track's volume")
+    expect(slider.title).toBe("Your role can't change a track's volume")
   })
 })
 

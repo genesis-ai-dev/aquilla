@@ -7950,11 +7950,17 @@ export function ProjectWorkspace() {
   hydrateBacktranslationsRef.current = hydrateBacktranslations
 
   // Hydrate persisted BTs on file/project load. Keep local in-flight edits.
+  //
+  // AQU-2654: behind the paint gate, like the file's other secondary reads
+  // (AQU-1326). It used to start on the first commit, before the project's
+  // lanes had loaded, so every open read the default lane's back-translations
+  // and then, once the lane resolved, read the open lane's and threw the first
+  // answer away. By the first cell page the lane is the one being shown.
   useEffect(() => {
-    if (!project?.id || !activeFileId) return
+    if (!project?.id || !activeFileId || !editorFirstPaint) return
     locallyTouchedBtRef.current = new Set()
     void hydrateBacktranslations(activeFileId, "replace")
-  }, [project?.id, activeFileId, activeLane, hydrateBacktranslations])
+  }, [project?.id, activeFileId, activeLane, hydrateBacktranslations, editorFirstPaint])
 
   /**
    * AQU-1408 §1: fetch this file's hand-corrected glosses.
@@ -8018,11 +8024,13 @@ export function ProjectWorkspace() {
   }, [project?.id, getTokenForFile, activeLane])
   hydrateGlossesRef.current = hydrateGlosses
 
+  // AQU-2654: behind the paint gate for the same reason as the BT hydration
+  // above (one read, for the lane that is open, instead of two).
   useEffect(() => {
-    if (!project?.id || !activeFileId) return
+    if (!project?.id || !activeFileId || !editorFirstPaint) return
     locallyTouchedGlossRef.current = new Set()
     void hydrateGlosses(activeFileId, "replace")
-  }, [project?.id, activeFileId, activeLane, hydrateGlosses])
+  }, [project?.id, activeFileId, activeLane, hydrateGlosses, editorFirstPaint])
 
   // Same gate as the AI-completion sparkle: a signed-in Frontier session or a
   // custom endpoint+model (project settings or per-device override) counts as

@@ -405,6 +405,33 @@ describe("lists in a tagged PDF", () => {
       ["Paragraph", "2. Give thanks.", null],
     ])
   })
+
+  // AQU-2680 review finding 1: Word nests each later list in the last item of
+  // the list before, so the tags' depth crept (the partner's 1.1.1–1.1.4 came
+  // in at depths 0, 1, 2, 2). The label's place on the page says the depth.
+  it("takes an item's depth from where its label sits, not from how its tags nest", async () => {
+    const read = await extractPdfImport(buildPdf({
+      pages: [{ runs: [
+        { text: "1.1.1.", x: 74, y: 760, tag: "a" }, { text: "Alexandrian", x: 110, y: 760, tag: "ab" },
+        { text: "1.1.2.", x: 74, y: 746, tag: "b" }, { text: "Caesarean", x: 110, y: 746, tag: "bb" },
+        { text: "o", x: 128, y: 732, tag: "c" }, { text: "A point under it", x: 140, y: 732, tag: "cb" },
+        { text: "1.1.3.", x: 74.5, y: 718, tag: "d" }, { text: "Western", x: 110, y: 718, tag: "db" },
+        { text: "Between the lists.", x: 72, y: 700, tag: "p" },
+        { text: "\u2022", x: 108, y: 686, tag: "e" }, { text: "Further in, and a list of its own", x: 120, y: 686, tag: "eb" },
+      ] }],
+      structure: [{ role: "Document", children: [
+        { role: "L", children: [{ role: "LI", children: [{ role: "Lbl", id: "a" }, { role: "LBody", children: [{ role: "Span", id: "ab" },
+          { role: "L", children: [{ role: "LI", children: [{ role: "Lbl", id: "b" }, { role: "LBody", children: [{ role: "Span", id: "bb" },
+            { role: "L", children: [item("c", "cb"), item("d", "db")] }] }] }] }] }] }] },
+        { role: "P", id: "p" },
+        { role: "L", children: [item("e", "eb")] },
+      ] }],
+    }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.original, s.metadata?.listLevel ?? null])).toEqual([
+      ["Alexandrian", 0], ["Caesarean", 0], ["A point under it", 1], ["Western", 0],
+      ["Between the lists.", null], ["Further in, and a list of its own", 0],
+    ])
+  })
 })
 
 // AQU-2680: bold and italic follow a translation only when a whole paragraph

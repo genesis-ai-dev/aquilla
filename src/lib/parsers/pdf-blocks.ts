@@ -88,6 +88,10 @@ export interface PdfPageContent {
 export interface PdfListItem {
   kind: "bullet" | "number"
   level: number
+  /** AQU-2680 review finding 1: how far the label sits from the page's
+   *  starting edge (the right edge for right-to-left text), in points. Used
+   *  for the depth, then dropped. */
+  indent?: number
 }
 
 export interface PdfParagraph {
@@ -412,8 +416,14 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
       if (role === "Lbl") {
         // AQU-2680: the label is dropped from the text, but says whether the
         // item is numbered ("1.", "iv)", "(a)") or bulleted ("•", "o", "–").
-        const label = clean(joiner.join(contentOf(c)))
-        if (cur?.list && label) cur.list = { ...cur.list, kind: listKind(label) }
+        const labelParts = contentOf(c).filter((p): p is PdfTextPiece & { order: number } => isPiece(p) && p.s.trim() !== "")
+        const label = clean(joiner.join(labelParts))
+        if (cur?.list && label) {
+          // review finding 1: the label's place on the page gives the depth
+          const rtl = labelParts.some((p) => p.dir === "rtl")
+          const indent = rtl ? page.box.x1 - Math.max(...labelParts.map((p) => p.x + p.w)) : Math.min(...labelParts.map((p) => p.x)) - page.box.x0
+          cur.list = { ...cur.list, kind: listKind(label), indent: Math.round(indent * 10) / 10 }
+        }
         continue
       }
       if (role === "L") {
@@ -811,6 +821,35 @@ export function pdfPagesToParagraphs(pages: readonly PdfPageContent[], footnote:
   const anyTags = tagged.some((t) => t.byTags)
   const layout = anyTags && tagged.every((t) => t.byTags) ? null : layoutPageBlocks(pages, joiner, footnote, script)
   const perPage = pages.map((_, i) => (tagged[i].byTags ? tagged[i].blocks : layout![i]))
-  const paragraphs = continueAcrossPages(perPage, joiner).map((p) => ({ ...p, text: lamAlefMarks(p.text) }))
+  const paragraphs = listLevelsByIndent(continueAcrossPages(perPage, joiner).map((p) => ({ ...p, text: lamAlefMarks(p.text) })))
   return { paragraphs, tagged: anyTags }
+}
+
+/** AQU-2680 review finding 1: a list item's depth is where its label sits,
+ *  not how its tags nest (Word nests each later list in the previous list's
+ *  last item, so the tags' depth creeps). Within a run of list items with no
+ *  other paragraph between them, the label indents are ranked, indents within
+ *  LIST_INDENT_SAME points of each other counting as one; the nearest the
+ *  page's edge is depth 0. Each run ranks its own: Word sets each list at its
+ *  own indent, so a later list further in is not deeper. An item with no
+ *  label takes the depth of the item before it. */
+const LIST_INDENT_SAME = 4
+function listLevelsByIndent(paragraphs: PdfParagraph[]): PdfParagraph[] {
+  const out = [...paragraphs]
+  for (let start = 0; start < out.length; start++) {
+    if (!out[start].list) continue
+    let end = start
+    while (end < out.length && out[end].list) end++
+    const indents = [...new Set(out.slice(start, end).flatMap((p) => (p.list!.indent !== undefined ? [p.list!.indent] : [])))].sort((a, b) => a - b)
+    const steps: number[] = []
+    for (const x of indents) if (steps.length === 0 || x - steps[steps.length - 1] > LIST_INDENT_SAME) steps.push(x)
+    let level = 0
+    for (let k = start; k < end; k++) {
+      const { indent, ...list } = out[k].list!
+      if (indent !== undefined) level = Math.min(8, Math.max(0, steps.filter((step) => step <= indent).length - 1))
+      out[k] = { ...out[k], list: { ...list, level } }
+    }
+    start = end - 1
+  }
+  return out
 }

@@ -13,7 +13,7 @@
 // unhelpful) to everyone else.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
@@ -93,6 +93,45 @@ describe("GET /api/v2/users/lookup — email resolution (AQU-2576)", () => {
     // Indistinguishable from an address nobody uses.
     const nobody = await lookup("lead-2576", "nobody@example.com", PROJECT)
     expect(await res.json()).toEqual(await nobody.json())
+  })
+
+  // AQU-2636: the rule above is right, but before the resend button an older
+  // account had no way to satisfy it — its only verification link expired 7
+  // days after sign-up. This is the whole loop through the real producers:
+  // the account mails itself a link, opens it, and the lead's lookup that
+  // 404'd now answers. A hand-stamped email_verified_at would not have caught
+  // a resend route that minted a token the verify route cannot spend.
+  it("resolves once the account verifies that address through the link it mailed itself", async () => {
+    const send = vi.fn(async (_mail: { text: string }) => {})
+    const mailEnv = Object.assign(Object.create(env), {
+      EMAIL: { send },
+      BASE_URL: "https://aquilla.test",
+    })
+    expect((await lookup("lead-2576", "reviewer-2576@partner.org", PROJECT)).status).toBe(404)
+
+    const sent = await app.request(
+      "/api/v2/auth/me/resend-verification",
+      { method: "POST", headers: authHeader(await jwtFor("squatter-2576")) },
+      mailEnv,
+    )
+    expect(sent.status).toBe(200)
+    expect(await sent.json()).toEqual({ sent: true, email: "reviewer-2576@partner.org" })
+
+    const token = send.mock.calls.at(-1)![0].text.match(/verify-email\?token=([a-f0-9]+)/)![1]
+    const verified = await app.request(
+      "/api/v2/auth/verify-email",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      },
+      env,
+    )
+    expect(verified.status).toBe(200)
+
+    const res = await lookup("lead-2576", "reviewer-2576@partner.org", PROJECT)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { username: string }).username).toBe("squatter-2576")
   })
 
   it("still resolves the unverified account by its username", async () => {

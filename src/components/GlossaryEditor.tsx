@@ -18,16 +18,6 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus, Merge } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Field, FieldLabel } from "@/components/ui/field"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
@@ -72,6 +62,7 @@ import {
   replaceLaneRenderings,
 } from "@/lib/terminology/rendering-lane"
 import { importTermbaseFile, termsNotAlreadyListed } from "@/lib/terminology/import-format"
+import { GlossaryAddTermDialog } from "@/components/GlossaryAddTermDialog"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -280,8 +271,6 @@ export function GlossaryEditor({
   const [suggestRequested, setSuggestRequested] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
-  const [newSource, setNewSource] = useState("")
-  const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
   // AQU-2487 (review, Nov 9): what the last term-list import did, in words:
   // how many terms it added and how many the list already had. Cleared by the
@@ -497,14 +486,16 @@ export function GlossaryEditor({
     [project, canManage, persist],
   )
 
-  const handleAddTerm = useCallback(() => {
+  // The form's fields are GlossaryAddTermDialog's own state (AQU-2654): this
+  // runs once per submit, not once per letter. True means the term was taken.
+  const handleAddTerm = useCallback((newSource: string, newRendering: string): boolean => {
     const p = suggestGuard()
-    if (!p) return
+    if (!p) return false
     const source = newSource.trim()
     const rendering = newRendering.trim()
     if (!source || !rendering) {
       setError(t("terminology.editor.errorSourceAndRenderingRequired"))
-      return
+      return false
     }
     const lanes = project?.lanes ?? []
     const activeId = laneIdForLegacyTag(activeLane, lanes)
@@ -521,18 +512,9 @@ export function GlossaryEditor({
     const status = canManage ? "active" : "draft"
     void persist(addConcept(p, { sourceTerm: source, renderings, status }))
     setError(null)
-    setNewSource("")
-    setNewRendering("")
     setAddOpen(false)
-  }, [project, canManage, canSuggest, persist, newSource, newRendering, activeLane])
-
-  function handleAddOpenChange(open: boolean) {
-    setAddOpen(open)
-    if (!open) {
-      setNewSource("")
-      setNewRendering("")
-    }
-  }
+    return true
+  }, [project, canManage, canSuggest, persist, activeLane])
 
   const handleSuggest = useCallback(() => {
     if (!guard()) return
@@ -861,60 +843,12 @@ export function GlossaryEditor({
         </div>
       )}
 
-      <Dialog open={addOpen} onOpenChange={handleAddOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("terminology.editor.addTerm")}</DialogTitle>
-            {/* AQU-872: say which of the two things this form does before it is
-                submitted. Below the floor it files a suggestion, and a
-                translator who expected the term to start being checked would
-                otherwise read the silent draft row as the feature not working. */}
-            <DialogDescription>
-              {canManage
-                ? t("terminology.editor.addTermDescription")
-                : t("terminology.editor.addTermSuggestionDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <Field>
-              <FieldLabel htmlFor="glossary-new-source">
-                {t("terminology.editor.sourceTermLabel")}
-              </FieldLabel>
-              <Input
-                id="glossary-new-source"
-                value={newSource}
-                placeholder={t("terminology.editor.sourceTermPlaceholder")}
-                onChange={(e) => setNewSource(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-                autoFocus
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="glossary-new-rendering">
-                {t("terminology.editor.renderingLabel")}
-              </FieldLabel>
-              <Input
-                id="glossary-new-rendering"
-                value={newRendering}
-                placeholder={t("terminology.editor.renderingLabel")}
-                onChange={(e) => setNewRendering(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-              />
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => handleAddOpenChange(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={handleAddTerm}
-              disabled={!newSource.trim() || !newRendering.trim()}
-            >
-              {t("terminology.editor.addTerm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GlossaryAddTermDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        canManage={canManage}
+        onAdd={handleAddTerm}
+      />
 
       <TerminologyMergeDialog
         open={mergeOpen}

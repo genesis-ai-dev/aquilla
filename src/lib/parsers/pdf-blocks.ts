@@ -593,6 +593,10 @@ const lineEnd = (l: Line) => (l.rtl ? -l.x : l.right)
 /** A page number: digits, or a Roman numeral ("civil" is not one). */
 const PAGE_NUMBER = /^(?:page\s*)?(?:\d+|(?=[ivxlcdm]+$)m{0,4}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/i
 
+/** A label beside its text: a list number or letter ("1.", "(a)", "iv."),
+ *  a bullet, or a short term (up to four words) ending in a colon or dash. */
+const LABEL = /^(?:[•●▪◦○■\-–]|\(?(?:\d{1,3}|[a-z]|[ivxlc]{1,6})[.)]|[^\s:–—-]+(?: [^\s:–—-]+){0,3} ?[:–—-])$/iu
+
 /** The layout reader's blocks, page by page, before page continuation. */
 function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, footnote: FootnoteMarker, script: ArabicScript): PageBlock[][] {
   const pagesLines = pages.map((p) => layoutLines(p, script))
@@ -655,8 +659,13 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
       else rows.push([l])
       return rows.length - 1
     })
+    // AQU-2551 check of fix 2: a row of two lines whose first (in reading
+    // direction) is a label (a list number, or a short term ending in a colon
+    // or dash) is a label and its text, never table cells, even when the
+    // next item's row lines up with it (one-line list items, a glossary).
+    const labelRow = (r: Line[]) => r.length === 2 && LABEL.test([...r].sort((x, y) => lineStart(x) - lineStart(y))[0].text)
     const shareStarts = (a: Line[], b: Line[]) => {
-      if (a.length < 2 || b.length < 2) return false
+      if (a.length < 2 || b.length < 2 || labelRow(a) || labelRow(b)) return false
       const tol = 0.3 * Math.max(...a.map((l) => l.size), ...b.map((l) => l.size))
       return a.filter((x) => b.some((y) => Math.abs(lineStart(x) - lineStart(y)) <= tol)).length >= 2
     }
@@ -686,7 +695,8 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
         // re-review finding 3: a label on its text's baseline ("1.", a
         // glossary's term) runs on into its text, whatever it ends with
         const label = sameBaseline(prev, l)
-        brk = !label && (sizeChange || bigGap || startsItem || indentIn || shortPrev || tocPrev)
+        // a label row (see labelRow) starts its own item
+        brk = !label && (sizeChange || bigGap || startsItem || labelRow(rows[rowOf[k]]) || indentIn || shortPrev || tocPrev)
       }
       if (brk || !blk) {
         blk = { lines: [], size: l.size, topY: l.y }

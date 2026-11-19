@@ -205,6 +205,27 @@ describe("re-review finding 3: a label beside its text is not a table", () => {
     ])
   })
 
+  // AQU-2551 check of fix 2: with one line an item, two items' rows share
+  // their column starts, and the list was read as a table.
+  it("keeps a one-line list item's number, and a one-line glossary term, with its text", async () => {
+    expect(await texts([
+      L(700, "1.", 72), L(700, "Pray daily."), L(686, "2.", 72), L(686, "Give thanks."),
+    ])).toEqual(["1. Pray daily.", "2. Give thanks."])
+    expect(await texts([
+      L(700, "Grace:", 72), L(700, "Favour freely given.", 160), L(686, "Hope:", 72), L(686, "Trust in what is to come.", 160),
+    ])).toEqual(["Grace: Favour freely given.", "Hope: Trust in what is to come."])
+    expect(await texts([
+      L(700, "Faith –", 72), L(700, "Trust in God.", 160), L(686, "Love –", 72), L(686, "Care for others.", 160),
+    ])).toEqual(["Faith – Trust in God.", "Love – Care for others."])
+  })
+
+  it("still reads a table with a numbered first column as a table", async () => {
+    expect(await texts([
+      L(730, "1.", 72), L(730, "Anna", 250), L(730, "Haifa", 430),
+      L(712, "2.", 72), L(712, "Ben", 250), L(712, "Jaffa", 430),
+    ])).toEqual(["1.", "Anna", "Haifa", "2.", "Ben", "Jaffa"])
+  })
+
   it("still reads two rows that share their column starts as a table, a cell a paragraph", async () => {
     expect(await texts([
       L(760, "Before the table.", 72),

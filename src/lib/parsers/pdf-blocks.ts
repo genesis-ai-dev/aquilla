@@ -48,6 +48,11 @@ export interface PdfTextPiece {
   h: number
   eol: boolean
   dir: string
+  /** AQU-2680: pdf.js's name for the piece's font (its `fontName`). */
+  font?: string
+  /** AQU-2680: set in a bold or an italic face (from its font's name). */
+  bold?: boolean
+  italic?: boolean
 }
 
 /** A marked-content bracket from `getTextContent({ includeMarkedContent })`. */
@@ -91,6 +96,11 @@ export interface PdfParagraph {
   heading: string | null
   /** Set on a tagged PDF's list items only; an untagged PDF has no lists. */
   list?: PdfListItem
+  /** AQU-2680: every piece of the paragraph's text is bold (or italic).
+   *  Set only when the whole paragraph is: a word in a sentence has no place
+   *  in the translated sentence. */
+  bold?: true
+  italic?: true
   /** The page the paragraph starts on (1-based). */
   page: number
 }
@@ -313,7 +323,19 @@ class TextJoiner {
 
 // ─── tagged ─────────────────────────────────────────────────────────────────
 
-interface TaggedBlock {
+/** AQU-2680: a paragraph's whole-paragraph bold and italic, from its text pieces. */
+interface WholeStyle { bold?: true; italic?: true }
+
+function wholeStyle(pieces: readonly PdfTextPiece[]): WholeStyle {
+  const visible = pieces.filter((p) => p.s.trim() !== "")
+  if (visible.length === 0) return {}
+  return {
+    ...(visible.every((p) => p.bold) ? { bold: true as const } : {}),
+    ...(visible.every((p) => p.italic) ? { italic: true as const } : {}),
+  }
+}
+
+interface TaggedBlock extends WholeStyle {
   role: string
   text: string
   list?: PdfListItem
@@ -364,7 +386,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
     const text = clean(joiner.join(cur.parts))
     const pieces = cur.parts.filter((p): p is PdfTextPiece & { order: number } => isPiece(p) && p.s.trim() !== "")
     if (text && pieces.length) {
-      blocks.push({ role: cur.role, text, page: page.n, order: Math.min(...pieces.map((p) => p.order)), ...(cur.list ? { list: cur.list } : {}) })
+      blocks.push({ role: cur.role, text, page: page.n, order: Math.min(...pieces.map((p) => p.order)), ...(cur.list ? { list: cur.list } : {}), ...wholeStyle(pieces) })
     }
     cur = null
   }
@@ -466,7 +488,7 @@ function headingContext(role: string): string | null {
 }
 
 /** One page's block, from either reader. */
-interface PageBlock {
+interface PageBlock extends WholeStyle {
   text: string
   page: number
   heading: string | null
@@ -496,13 +518,17 @@ function continueAcrossPages(pages: readonly PageBlock[][], joiner: TextJoiner):
         const joined = /\p{L}[-\u00ad]$/u.test(prev.text) ? joiner.joinHyphen(prev.text, b.text)
           : /\S[–—]$/u.test(prev.text) ? prev.text + b.text
           : `${prev.text} ${b.text}`
-        out[out.length - 1] = { ...prev, text: clean(joined), endPage: b.page }
+        // AQU-2680: the joined paragraph is bold (italic) only if both halves are
+        out[out.length - 1] = { ...prev, text: clean(joined), endPage: b.page, bold: prev.bold && b.bold, italic: prev.italic && b.italic }
         return
       }
       out.push({ ...b, endPage: b.page })
     })
   }
-  return out.map((b) => ({ text: b.text, heading: b.heading, page: b.page, ...(b.list ? { list: b.list } : {}) })).filter((p) => p.text)
+  return out.map((b) => ({
+    text: b.text, heading: b.heading, page: b.page,
+    ...(b.list ? { list: b.list } : {}), ...(b.bold ? { bold: true as const } : {}), ...(b.italic ? { italic: true as const } : {}),
+  })).filter((p) => p.text)
 }
 
 /** The tagged reader's blocks for one page, and whether its tags reach the
@@ -512,7 +538,7 @@ function taggedPageBlocks(page: PdfPageContent, joiner: TextJoiner, footnote: Fo
   const coverage: Coverage = { tagged: 0, untagged: 0 }
   const blocks = readTaggedPage(page, joiner, footnote, coverage, script).map((b): PageBlock => {
     const heading = headingContext(b.role)
-    return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null, ...(b.list ? { list: b.list } : {}) }
+    return { text: heading ? stripHeadingNumber(b.text) : b.text, page: b.page, heading, body: b.role === "P", size: null, ...(b.list ? { list: b.list } : {}), bold: b.bold, italic: b.italic }
   })
   const total = coverage.tagged + coverage.untagged
   return { blocks, byTags: blocks.length > 0 && total > 0 && coverage.tagged / total >= MIN_TAG_COVERAGE }
@@ -537,6 +563,9 @@ interface Line {
    *  right to left when positive. */
   rtlBalance: number
   rtl: boolean
+  /** AQU-2680: every visible piece of the line is bold (italic). */
+  bold: boolean
+  italic: boolean
 }
 
 // Private-use sentinels around a raised footnote number in a line.
@@ -572,7 +601,7 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
       || (!zeroSpace && jump > 3 * h)
     const sup = !!cur && !newLine && h < 0.85 * cur.h && it.y - cur.y > 0.12 * cur.h
     if (newLine || !cur) {
-      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, mark: null, lastReal: null, rtlBalance: 0, rtl: false }
+      cur = { y: it.y, x: it.x, right: it.x + it.w, h, size: 0, sizeChars: new Map(), text: "", prev: null, mark: null, lastReal: null, rtlBalance: 0, rtl: false, bold: true, italic: true }
       lines.push(cur)
     } else if (!sup && cur.prev && !cur.prev.sup && cur.prev.w > 0 && it.w > 0 && gap > 0.15 * h && !/\s$/.test(cur.text) && !/^\s/.test(it.s) && !(cur.mark && marksOnNext(cur.mark, cur.prev, it))) {
       cur.text += " "
@@ -588,6 +617,7 @@ function layoutLines(page: PdfPageContent, script: ArabicScript): Line[] {
     }
     if (sup && /^\s*\d{1,3}\s*$/.test(it.s)) { cur.text += `${MARK_OPEN}${it.s.trim()}${MARK_CLOSE}`; continue }
     cur.text += it.s
+    if (it.s.trim()) { cur.bold &&= it.bold === true; cur.italic &&= it.italic === true }
     cur.rtlBalance += (it.dir === "rtl" ? 1 : -1) * (it.s.match(/\p{L}/gu)?.length ?? 0)
     const k = Math.round(h * 2) / 2
     cur.sizeChars.set(k, (cur.sizeChars.get(k) ?? 0) + it.s.replace(/\s/g, "").length)
@@ -743,7 +773,11 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
       let text = clean(b.lines.reduce((s, l) => (/\p{L}[-­]$/u.test(s) ? joiner.joinHyphen(s, l.text) : /\S[–—]$/u.test(s) ? s + l.text : `${s} ${l.text}`), ""))
       text = text.replace(/^[•●▪◦○■]\s*/, "")
       const isNote = b.size < body * 0.92 && b.topY < lastBodyY && /^\u0001?\d/.test(text)
-      return { text, size: b.size, footnote: isNote, used: false }
+      const style: WholeStyle = {
+        ...(b.lines.every((l) => l.bold) ? { bold: true as const } : {}),
+        ...(b.lines.every((l) => l.italic) ? { italic: true as const } : {}),
+      }
+      return { text, size: b.size, footnote: isNote, used: false, style }
     })
     // put each footnote at its mark, as the Word import does
     const notes = new Map<string, (typeof built)[number] & { body: string }>()
@@ -762,7 +796,7 @@ function layoutPageBlocks(pages: readonly PdfPageContent[], joiner: TextJoiner, 
     }
     return built
       .filter((b) => !(b.footnote && b.used))
-      .map((b): PageBlock => ({ text: b.text.replace(/\u0001(\d+)\u0002/g, "$1"), page: p.n, heading: null, body: !b.footnote, size: b.size }))
+      .map((b): PageBlock => ({ text: b.text.replace(/\u0001(\d+)\u0002/g, "$1"), page: p.n, heading: null, body: !b.footnote, size: b.size, ...b.style }))
       .filter((b) => b.text)
   })
 }

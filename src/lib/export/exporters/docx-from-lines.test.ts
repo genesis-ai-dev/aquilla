@@ -18,7 +18,7 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { prepareImportFile } from "@/lib/import"
 import { extractDocxStrings } from "@/lib/parsers/docx"
-import { pdfOfParagraphs } from "@/lib/parsers/__fixtures__/build-pdf"
+import { buildPdf, pdfOfParagraphs } from "@/lib/parsers/__fixtures__/build-pdf"
 import { docxFromLinesFiles, exportDocxFromLines, linesToParagraphs } from "./docx-from-lines"
 import { scopeCellsForExport } from "../validation-scope"
 
@@ -114,6 +114,19 @@ describe("a Word document from the lines", () => {
     expect(doc).toContain('<w:rPr><w:b/><w:bCs/><w:rtl/></w:rPr><w:t xml:space="preserve">עולם</w:t>')
   })
 
+  // AQU-2680: a whole bold or italic paragraph of the source (a PDF's
+  // subtitle, a quotation) is bold or italic in the translation.
+  it("sets a whole paragraph bold or italic when its import says so", () => {
+    const doc = docxFromLinesFiles([
+      cell({ id: "1", original: "Subtitle", translated: "Subtítulo", paragraphStart: true, metadata: { paragraphBold: true } }),
+      cell({ id: "2", original: "A quote.", translated: "Una cita.", paragraphStart: true, metadata: { paragraphItalic: true } }),
+      cell({ id: "3", original: "Plain.", paragraphStart: true }),
+    ])["word/document.xml"]
+    expect(doc).toContain('<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve">Subtítulo</w:t></w:r>')
+    expect(doc).toContain('<w:r><w:rPr><w:i/><w:iCs/></w:rPr><w:t xml:space="preserve">Una cita.</w:t></w:r>')
+    expect(doc).toContain('<w:r><w:t xml:space="preserve">Plain.</w:t></w:r>')
+  })
+
   it("names the document's language when the export has one", () => {
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "es-419" })["word/styles.xml"]).toContain('<w:lang w:val="es-419"/>')
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "und" })["word/styles.xml"]).not.toContain("w:lang")
@@ -191,6 +204,34 @@ describe("a PDF source comes back as Word", () => {
       { type: "text", context: "Paragraph", text: "A first paragraph that is long enough to wrap onto a second line of the page, so the reader joins it." },
       { type: "text", context: "Paragraph", text: "A second paragraph." },
     ])
+  })
+})
+
+// AQU-2680: a tagged PDF's list and its bold subtitle reach the Word file.
+describe("a PDF's lists and whole-paragraph bold come back as Word", () => {
+  it("numbers the list and sets the subtitle bold", async () => {
+    const pdf = buildPdf({
+      pages: [{ runs: [
+        { text: "A Bold Subtitle", x: 72, y: 770, font: "bold", tag: "s" },
+        { text: "1.", x: 72, y: 730, tag: "l1" }, { text: "Wash", x: 84, y: 730, tag: "b1" },
+        { text: "2.", x: 72, y: 716, tag: "l2" }, { text: "Rinse", x: 84, y: 716, tag: "b2" },
+      ] }],
+      structure: [{ role: "Document", children: [
+        { role: "P", id: "s" },
+        { role: "L", children: [
+          { role: "LI", children: [{ role: "Lbl", id: "l1" }, { role: "LBody", id: "b1" }] },
+          { role: "LI", children: [{ role: "Lbl", id: "l2" }, { role: "LBody", id: "b2" }] },
+        ] },
+      ] }],
+    })
+    const prepared = await prepareImportFile(new File([pdf], "notes.pdf"), { projectId: "p", cellUnit: "sentence" })
+    const cells = prepared.results[0].strings.map((s, i) => cell({
+      id: String(i), original: s.original, type: s.type, context: s.context, paragraphStart: s.paragraphStart, metadata: s.metadata,
+    }))
+    const doc = docxFromLinesFiles(cells)["word/document.xml"]
+    expect(doc).toContain('<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve">A Bold Subtitle</w:t></w:r>')
+    expect(doc).toContain('<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">Wash</w:t>')
+    expect(doc).toContain('<w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t xml:space="preserve">Rinse</w:t>')
   })
 })
 

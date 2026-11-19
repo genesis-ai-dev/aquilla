@@ -20,7 +20,7 @@
  */
 
 import { readFileSync } from "node:fs"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { buildPdf, type PdfFixturePage } from "./__fixtures__/build-pdf"
 import { splitFootnoteAware } from "./docx"
 import { extractPdfImport, PdfReadError } from "./pdf"
@@ -387,6 +387,63 @@ describe("lists in a tagged PDF", () => {
       ["Paragraph", "1. Pray daily.", null],
       ["Paragraph", "2. Give thanks.", null],
     ])
+  })
+})
+
+// AQU-2680: bold and italic follow a translation only when a whole paragraph
+// is bold or italic (a subtitle, a quotation): a bold word inside a sentence
+// has no place in the translated sentence (Sam's pick, question 2).
+describe("whole-paragraph bold and italic", () => {
+  const styled = (structure?: boolean) => buildPdf({
+    pages: [{ runs: [
+      { text: "A Bold Subtitle", x: 72, y: 770, font: "bold", tag: "a" },
+      { text: "An italic quotation that runs", x: 72, y: 730, font: "italic", tag: "b" },
+      { text: "onto a second line.", x: 72, y: 716, font: "italic", tag: "b2" },
+      { text: "Both at once.", x: 72, y: 690, font: "bold-italic", tag: "c" },
+      { text: "Plain text with one", x: 72, y: 660, tag: "d" },
+      { text: "bold", x: 170, y: 660, font: "bold", tag: "d2" },
+      { text: "word in it.", x: 196, y: 660, tag: "d3" },
+    ] }],
+    ...(structure ? { structure: [{ role: "Document", children: [
+      { role: "P", id: "a" },
+      { role: "P", children: [{ role: "Span", id: "b" }, { role: "Span", id: "b2" }] },
+      { role: "P", id: "c" },
+      { role: "P", children: [{ role: "Span", id: "d" }, { role: "Span", id: "d2" }, { role: "Span", id: "d3" }] },
+    ] }] } : {}),
+  })
+  const EXPECTED = [
+    ["A Bold Subtitle", { paragraphBold: true }],
+    ["An italic quotation that runs onto a second line.", { paragraphItalic: true }],
+    ["Both at once.", { paragraphBold: true, paragraphItalic: true }],
+    ["Plain text with one bold word in it.", null],
+  ]
+
+  it("marks a paragraph that is all bold or all italic, in an untagged PDF", async () => {
+    const read = await extractPdfImport(styled(false), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED)
+  })
+
+  it("marks a paragraph that is all bold or all italic, in a tagged PDF", async () => {
+    const read = await extractPdfImport(styled(true), { cellUnit: "paragraph" })
+    expect(read.tagged).toBe(true)
+    expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED)
+  })
+
+  it("imports without bold and italic when reading the fonts runs past the time limit", async () => {
+    // The fonts are read in a second pass over each page's drawing. A page
+    // whose drawing never finishes stands in for a slow or low-memory device.
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs")
+    const task = pdfjs.getDocument({ data: new Uint8Array(styled(false)) })
+    const proto = Object.getPrototypeOf(await (await task.promise).getPage(1)) as { getOperatorList: () => Promise<unknown> }
+    await task.destroy()
+    const spy = vi.spyOn(proto, "getOperatorList").mockImplementation(() => new Promise(() => {}))
+    try {
+      const read = await extractPdfImport(styled(false), { cellUnit: "paragraph", budgetMs: 300 })
+      expect(spy).toHaveBeenCalled()
+      expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED.map(([t]) => [t, null]))
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

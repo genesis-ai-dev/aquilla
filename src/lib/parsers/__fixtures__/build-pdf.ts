@@ -13,6 +13,8 @@ export interface PdfFixtureRun {
   tag?: string
   /** A running header, footer or page number: marked as an Artifact. */
   artifact?: boolean
+  /** AQU-2680: set in Helvetica-Bold, -Oblique or -BoldOblique. */
+  font?: "bold" | "italic" | "bold-italic"
 }
 
 export interface PdfFixturePage {
@@ -53,6 +55,13 @@ export function buildPdf(fixture: PdfFixture): ArrayBuffer {
   const pagesObj = reserve()
   const font = reserve()
   set(font, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
+  const faces = { bold: "Helvetica-Bold", italic: "Helvetica-Oblique", "bold-italic": "Helvetica-BoldOblique" } as const
+  const faceFonts = Object.values(faces).map((name) => {
+    const num = reserve()
+    set(num, `<< /Type /Font /Subtype /Type1 /BaseFont /${name} /Encoding /WinAnsiEncoding >>`)
+    return num
+  })
+  const faceName = (f: PdfFixtureRun["font"]) => (f === "bold" ? "F2" : f === "italic" ? "F3" : f === "bold-italic" ? "F4" : "F1")
   const image = reserve()
   set(image, "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 4 >>\nstream\n\u0000ÿÿ\u0000\nendstream")
 
@@ -65,7 +74,7 @@ export function buildPdf(fixture: PdfFixture): ArrayBuffer {
     let mcid = 0
     const parts: string[] = []
     for (const run of page.runs ?? []) {
-      const text = `BT /F1 ${run.size ?? 11} Tf ${run.x} ${run.y} Td (${escapePdfString(toWinAnsi(run.text))}) Tj ET`
+      const text = `BT /${faceName(run.font)} ${run.size ?? 11} Tf ${run.x} ${run.y} Td (${escapePdfString(toWinAnsi(run.text))}) Tj ET`
       if (run.artifact) parts.push(`/Artifact BMC ${text} EMC`)
       else if (tagged && run.tag) {
         if (mcids.has(run.tag)) throw new Error(`run tag ${run.tag} used twice`)
@@ -80,7 +89,7 @@ export function buildPdf(fixture: PdfFixture): ArrayBuffer {
     set(content, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`)
     set(pageNums[pageIndex],
       `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [${(fixture.mediaBox ?? [0, 0, 595, 842]).join(" ")}] /Contents ${content} 0 R ` +
-      `/Resources << /Font << /F1 ${font} 0 R >> /XObject << /Im1 ${image} 0 R >> >>` +
+      `/Resources << /Font << /F1 ${font} 0 R /F2 ${faceFonts[0]} 0 R /F3 ${faceFonts[1]} 0 R /F4 ${faceFonts[2]} 0 R >> /XObject << /Im1 ${image} 0 R >> >>` +
       (tagged && !fixture.untaggedPages?.includes(pageIndex) ? ` /StructParents ${pageIndex}` : "") + " >>")
   })
   set(pagesObj, `<< /Type /Pages /Kids [${pageNums.map((n) => `${n} 0 R`).join(" ")}] /Count ${pageNums.length} >>`)

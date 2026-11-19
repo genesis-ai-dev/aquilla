@@ -111,6 +111,7 @@ interface RawTextItem {
   type?: string
   id?: string
   tag?: string
+  fontName?: string
 }
 
 function toPageItems(items: readonly RawTextItem[]): PdfPageItem[] {
@@ -130,6 +131,7 @@ function toPageItems(items: readonly RawTextItem[]): PdfPageItem[] {
         h: it.height ?? 0,
         eol: !!it.hasEOL,
         dir: it.dir ?? "ltr",
+        ...(it.fontName ? { font: it.fontName } : {}),
       })
     }
   }
@@ -226,6 +228,8 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     data: new Uint8Array(buffer.slice(0)),
     disableFontFace: true,
     useSystemFonts: false,
+    // AQU-2680: the fonts' own names ("…-Bold", "…Italic"), for bold and italic
+    fontExtraProperties: true,
     verbosity: pdfjs.VerbosityLevel.ERRORS,
     ...(pdfWorker ? { worker: pdfWorker } : {}),
   })
@@ -280,9 +284,58 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
       if (imageOnlyPages.length > 0) throw new PdfReadError("scanned", "PDF is a scanned image with no text")
       throw new PdfReadError("empty", "PDF has no text")
     }
+    await readFontFaces(pages)
     const read = pdfPagesToParagraphs(pages, footnote)
     if (read.paragraphs.length === 0) throw new PdfReadError(imageOnlyPages.length ? "scanned" : "empty", "PDF has no text")
     return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged }
+  }
+
+  /** AQU-2680: mark each text piece bold or italic from its font's name.
+   *  pdf.js hands a font's name over only with a page's drawing (its
+   *  operator list), so this is a second pass over the pages, skipping a page
+   *  whose fonts are all known. It runs inside the read's own time limit: if
+   *  the limit runs out here (a slow or low-memory device, a heavy drawing),
+   *  or a page's drawing fails, the text already read imports as it is, with
+   *  no bold or italic. */
+  async function readFontFaces(pages: PdfPageContent[]): Promise<void> {
+    const faces = new Map<string, { bold: boolean; italic: boolean }>()
+    const fontsOf = (p: PdfPageContent) => new Set(p.items.flatMap((it) => ("s" in it && it.font ? [it.font] : [])))
+    try {
+      for (const p of pages) {
+        const fonts = fontsOf(p)
+        if ([...fonts].every((f) => faces.has(f))) continue
+        const page = await within(doc.getPage(p.n))
+        try {
+          await within(page.getOperatorList())
+        } finally {
+          page.cleanup()
+        }
+        for (const f of fonts) {
+          if (faces.has(f)) continue
+          const font = page.commonObjs.has(f) ? (page.commonObjs.get(f) as { name?: unknown; bold?: unknown; italic?: unknown } | null) : null
+          faces.set(f, fontFace(font))
+        }
+      }
+    } catch {
+      return
+    }
+    for (const p of pages) {
+      p.items = p.items.map((it) => {
+        const face = "s" in it && it.font ? faces.get(it.font) : undefined
+        return face && (face.bold || face.italic) ? { ...it, ...(face.bold ? { bold: true } : {}), ...(face.italic ? { italic: true } : {}) } : it
+      })
+    }
+  }
+}
+
+/** AQU-2680: bold or italic from a font's name ("ABCDEF+Calibri-BoldItalic",
+ *  "TimesNewRomanPS-BoldMT", "Arial,Italic", "MinionPro-It") or pdf.js's own
+ *  flags for a standard font. */
+function fontFace(font: { name?: unknown; bold?: unknown; italic?: unknown } | null): { bold: boolean; italic: boolean } {
+  const name = typeof font?.name === "string" ? font.name.replace(/^[A-Z]{6}\+/, "") : ""
+  return {
+    bold: font?.bold === true || /bold|black|heavy/i.test(name),
+    italic: font?.italic === true || /italic|oblique|[-,]It$/i.test(name),
   }
 }
 
@@ -296,6 +349,13 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
     perPage.set(p.page, k)
     const sourceLocation = { file: `page/${p.page}`, blockPath: `block[${k}]` }
     const segments = splitFootnoteAware(p.text, cellUnit)
+    // AQU-2680: what the Word export needs of the paragraph, on each of its
+    // cells: its list item, and its whole-paragraph bold and italic.
+    const metadata = p.list || p.bold || p.italic ? {
+      ...(p.list ? { list: p.list.kind, listLevel: p.list.level } : {}),
+      ...(p.bold ? { paragraphBold: true } : {}),
+      ...(p.italic ? { paragraphItalic: true } : {}),
+    } : null
     segments.forEach((seg, i) => {
       results.push({
         id: uuid(),
@@ -308,7 +368,7 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
         type: p.heading ? "heading" : "text",
         sourceLocation,
         ...(i === 0 ? { paragraphStart: true } : {}),
-        ...(p.list ? { metadata: { list: p.list.kind, listLevel: p.list.level } } : {}),
+        ...(metadata ? { metadata } : {}),
       })
     })
   }

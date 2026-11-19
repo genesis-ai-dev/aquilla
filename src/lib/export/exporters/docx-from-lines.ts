@@ -17,7 +17,9 @@
 //   * bold and italic marks (`\bd …\bd*`, `\it …\it*`) are bold and
 //     italic runs (AQU-2680);
 //   * a tagged PDF's list items are Word list items, bulleted or numbered at
-//     their depth, Word doing the numbering (AQU-2680).
+//     their depth, Word doing the numbering (AQU-2680);
+//   * a paragraph the import found wholly bold or italic (a PDF's subtitle, a
+//     quotation) is bold or italic (AQU-2680).
 // An untranslated line falls back to its source text, as the other exports do.
 //
 // Valid against the ECMA-376 WordprocessingML schema (document, styles,
@@ -40,6 +42,9 @@ export interface LinesParagraph {
   lines: InlineRun[][]
   /** AQU-2680: a list item (a tagged PDF's), bulleted or numbered, at a depth 0–8. */
   list?: { kind: "bullet" | "number"; level: number }
+  /** AQU-2680: the whole paragraph is bold (italic): a PDF's subtitle, a quotation. */
+  bold?: boolean
+  italic?: boolean
 }
 
 /** AQU-2680: the list item a line's import recorded (`metadata.list`). */
@@ -85,7 +90,11 @@ export function linesToParagraphs(cells: readonly CellData[]): LinesParagraph[] 
       current.lines.push(...runs.slice(1))
     } else {
       const list = style === null ? listOf(cell) : undefined
-      paragraphs.push({ style, lines: runs, ...(list ? { list } : {}) })
+      paragraphs.push({
+        style, lines: runs, ...(list ? { list } : {}),
+        ...(cell.metadata?.paragraphBold === true ? { bold: true } : {}),
+        ...(cell.metadata?.paragraphItalic === true ? { italic: true } : {}),
+      })
     }
     prev = cell
   }
@@ -188,7 +197,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
       if (i > 0) runs += `<w:r>${rPr}<w:br/></w:r>`
       for (const run of line) {
         if (run.kind === "text") {
-          runs += textRuns(run.text, runProps(run.marks, rtl))
+          runs += textRuns(run.text, runProps([...run.marks, ...(p.bold ? ["bold"] : []), ...(p.italic ? ["italic"] : [])], rtl))
           continue
         }
         const note = run.text.trim()

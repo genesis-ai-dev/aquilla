@@ -31,6 +31,7 @@ import { ROLE } from "./events/role-policy"
 import { loadTargetLanes } from "./events/lane-read-wall"
 import { decideLaneWrite, laneReadWallEnabled } from "../../src/lib/lanes/write-wall"
 import { laneScopeAdmitsTag } from "../../src/lib/lanes/scope-ids"
+import type { LaneIdentity } from "../../src/lib/lanes/read-wall"
 
 /** A derived sidecar: rewritable, never somebody's recording. */
 export function isDerivedSidecar(objectName: string): boolean {
@@ -110,36 +111,47 @@ export async function fileScopeRefusal(
 }
 
 /**
- * Every take in this file that has EVER named this stored object, in any
- * state: live, removed (soft, so Undo can bring it back), or a piece of a cut
- * take. `cell_audio` rows are never hard-deleted, so this is the whole history.
+ * Has any take in this file EVER named this stored object, in any state: live,
+ * removed (soft, so Undo can bring it back), or a piece of a cut take?
+ * `cell_audio` rows are never hard-deleted, so this is the whole history. A
+ * piece needs no third test: it plays its take's url, and its take's row
+ * (named by `piece_of`) is itself a row naming the object. Two indexed
+ * lookups (`idx_cell_audio_name`, `idx_cell_audio_url`).
  */
-export async function takesNaming(
+export async function namedByATake(
   db: AquillaDb,
   projectId: string,
   fileId: string,
   objectName: string,
-): Promise<Array<{ createdBy: string | null; laneTag: string }>> {
-  const { results } = await db
+): Promise<boolean> {
+  const row = await db
     .prepare(
-      `SELECT a.created_by, COALESCE(l.legacy_tag, '') AS lane_tag
-         FROM cell_audio a
-         LEFT JOIN lanes l ON l.id = a.lane_id
-        WHERE a.project_id = ? AND a.file_id = ?
-          AND (a.audio_id = ? OR a.url = ? OR a.piece_of = ?)`,
+      `SELECT 1 AS hit FROM cell_audio WHERE project_id = ? AND file_id = ? AND audio_id = ?
+       UNION ALL
+       SELECT 1 FROM cell_audio WHERE project_id = ? AND file_id = ? AND url = ?
+       LIMIT 1`,
     )
-    .bind(projectId, fileId, objectName, `frontier-audio://${objectName}`, objectName)
-    .all<{ created_by: string | null; lane_tag: string }>()
-  return (results ?? []).map((r) => ({ createdBy: r.created_by, laneTag: r.lane_tag }))
+    .bind(projectId, fileId, objectName, projectId, fileId, `frontier-audio://${objectName}`)
+    .first<{ hit: number }>()
+  return row != null
 }
 
 const SIBLING_OWNER_EXTS = [".webm", ".opus", ".mp3"]
 
+/** Who owns a voice's WAV: everyone who made a take that IS the voice. */
+export interface SiblingOwnership {
+  /** Distinct recorders (or, before the take exists, the voice's uploader). */
+  owners: Array<string | null>
+  /** Distinct languages of the takes that are the voice (none before). */
+  laneTags: string[]
+}
+
 /**
  * Whose is this `<base>.wav`? The AI voice beside it, `<base>.webm|opus|mp3`:
- * the take that names it (its recorder and language), or, before that take
- * is attached, whoever uploaded the voice (stamped on its object). Null when
- * nothing owns it: an ordinary recording of its own.
+ * the takes whose OWN name is the voice (never a take that merely plays the
+ * voice's recording under another name), or, before any is attached, whoever
+ * uploaded the voice (stamped on its object). Null when nothing owns it: an
+ * ordinary recording of its own. Computed once per request.
  */
 export async function siblingOwner(
   db: AquillaDb,
@@ -148,16 +160,29 @@ export async function siblingOwner(
   projectId: string,
   fileId: string,
   objectName: string,
-): Promise<{ owner: string | null; laneTag: string | null } | null> {
+): Promise<SiblingOwnership | null> {
   if (!objectName.toLowerCase().endsWith(".wav") || objectName.length <= 4) return null
   const base = objectName.slice(0, -4)
-  for (const ext of SIBLING_OWNER_EXTS) {
-    const takes = await takesNaming(db, projectId, fileId, `${base}${ext}`)
-    if (takes.length > 0) return { owner: takes[0].createdBy, laneTag: takes[0].laneTag }
+  const voices = SIBLING_OWNER_EXTS.map((ext) => `${base}${ext}`)
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT a.created_by, COALESCE(l.legacy_tag, '') AS lane_tag
+         FROM cell_audio a
+         LEFT JOIN lanes l ON l.id = a.lane_id
+        WHERE a.project_id = ? AND a.file_id = ? AND a.audio_id IN (?, ?, ?)`,
+    )
+    .bind(projectId, fileId, ...voices)
+    .all<{ created_by: string | null; lane_tag: string }>()
+  const rows = results ?? []
+  if (rows.length > 0) {
+    return {
+      owners: [...new Set(rows.map((r) => r.created_by))],
+      laneTags: [...new Set(rows.map((r) => r.lane_tag))],
+    }
   }
-  for (const ext of SIBLING_OWNER_EXTS) {
-    const voice = await bucket.head(keyOf(`${base}${ext}`))
-    if (voice) return { owner: voice.customMetadata?.uploadedBy ?? null, laneTag: null }
+  for (const voice of voices) {
+    const stored = await bucket.head(keyOf(voice))
+    if (stored) return { owners: [stored.customMetadata?.uploadedBy ?? null], laneTags: [] }
   }
   return null
 }
@@ -173,23 +198,26 @@ export async function laneRefusal(
   laneTag: string,
   laneReadWall: string | undefined,
   requiredRole: number = ROLE.CONTRIBUTOR,
+  /** The project's lanes, from the caller's per-request cache when it has one. */
+  loadLanes: () => Promise<LaneIdentity[]> = () => loadTargetLanes(db, projectId),
 ): Promise<string | null> {
   if (laneReadWallEnabled(laneReadWall)) {
-    // The wall's own rule: Maintainer+ and platform pass, a grant decides
-    // everyone else (as the events route does).
+    // The wall's own rule: Maintainer+ and platform pass (before anything is
+    // loaded), a grant decides everyone else (as the events route does).
+    if (claims.role >= ROLE.MAINTAINER || claims.src === "platform") return null
     const decision = decideLaneWrite({
       enabled: true,
       role: claims.role,
       src: claims.src,
       laneGrants: claims.laneGrants,
       laneTag,
-      lanes: await loadTargetLanes(db, projectId),
+      lanes: await loadLanes(),
       requiredRole,
     })
     return decision.action === "deny" ? decision.reason : null
   }
   if (!(claims.scopes ?? []).some((s) => s.kind === "lane")) return null
-  const lanes = await loadTargetLanes(db, projectId)
+  const lanes = await loadLanes()
   const laneScopes = (claims.scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
   if (laneScopes.length > 0 && !laneScopeAdmitsTag(laneScopes, lanes, laneTag)) {
     return `lane '${laneTag}' not in scope for audio`
@@ -199,9 +227,9 @@ export async function laneRefusal(
 
 /**
  * May this caller remove the stored object? Null when allowed: only a
- * recording no take has ever named, and no AI voice's WAV. Nobody removes a
- * take's recording through storage (not its recorder, not a Maintainer);
- * the sweep does once nothing names it.
+ * recording no take has ever named, no AI voice's WAV, and no take's
+ * waveform. Nobody removes these through storage (not their recorder, not a
+ * Maintainer); the sweep does once nothing names them.
  */
 export async function removalRefusal(
   db: AquillaDb,
@@ -211,7 +239,8 @@ export async function removalRefusal(
   fileId: string,
   objectName: string,
 ): Promise<string | null> {
-  if ((await takesNaming(db, projectId, fileId, objectName)).length > 0) {
+  const subject = isDerivedSidecar(objectName) ? objectName.slice(0, -".peaks".length) : objectName
+  if (await namedByATake(db, projectId, fileId, subject)) {
     return "a take names this recording; it is not removed through storage"
   }
   if (await siblingOwner(db, bucket, keyOf, projectId, fileId, objectName)) {
@@ -221,45 +250,43 @@ export async function removalRefusal(
 }
 
 /**
- * May this caller write a recording that is NOT stored yet? Null when allowed.
- * Not under a name a take has named (bytes the sweep took from a removed
- * take stay its own); an AI voice's WAV only by the voice's owner or a
- * Maintainer, within their languages.
+ * May this caller write a recording that is NOT stored yet? Null when allowed:
+ * not under a name a take has named (bytes the sweep took from a removed take
+ * stay its own).
  */
 export async function firstWriteRefusal(
   db: AquillaDb,
-  bucket: Pick<R2Bucket, "head">,
-  keyOf: (name: string) => string,
-  claims: Claims,
   projectId: string,
   fileId: string,
   objectName: string,
-  laneReadWall: string | undefined,
 ): Promise<{ status: number; reason: string } | null> {
-  if ((await takesNaming(db, projectId, fileId, objectName)).length > 0) {
+  if (await namedByATake(db, projectId, fileId, objectName)) {
     return { status: 409, reason: "a take already names this recording" }
   }
-  return siblingRefusal(db, bucket, keyOf, claims, projectId, fileId, objectName, laneReadWall)
+  return null
 }
 
-/** An AI voice's WAV: its owner or a Maintainer, within their languages. */
+/**
+ * An AI voice's WAV: written by its one owner or a Maintainer, within every
+ * language the voice is in. Owners who disagree (several takes are the voice,
+ * made by different people) leave it to a Maintainer.
+ */
 export async function siblingRefusal(
   db: AquillaDb,
-  bucket: Pick<R2Bucket, "head">,
-  keyOf: (name: string) => string,
   claims: Claims,
   projectId: string,
-  fileId: string,
-  objectName: string,
+  owned: SiblingOwnership | null,
   laneReadWall: string | undefined,
 ): Promise<{ status: number; reason: string } | null> {
-  const owned = await siblingOwner(db, bucket, keyOf, projectId, fileId, objectName)
   if (!owned) return null
-  if (claims.role < ROLE.MAINTAINER && (!owned.owner || owned.owner !== claims.username)) {
-    return { status: 403, reason: "this is another person's AI voice's full-quality copy" }
+  if (claims.role < ROLE.MAINTAINER) {
+    const [owner, ...others] = owned.owners
+    if (others.length > 0 || !owner || owner !== claims.username) {
+      return { status: 403, reason: "this is another person's AI voice's full-quality copy" }
+    }
   }
-  if (owned.laneTag != null) {
-    const lane = await laneRefusal(db, claims, projectId, owned.laneTag, laneReadWall)
+  for (const laneTag of owned.laneTags) {
+    const lane = await laneRefusal(db, claims, projectId, laneTag, laneReadWall)
     if (lane) return { status: 403, reason: lane }
   }
   return null

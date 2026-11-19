@@ -36,7 +36,7 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artifact"
 import { safeAudioContentType } from "./audio-content-type"
-import { fileScopeRefusal, firstWriteRefusal } from "./audio-write-guard"
+import { fileScopeRefusal, firstWriteRefusal, isDerivedSidecar, siblingOwner, siblingRefusal } from "./audio-write-guard"
 // Type-only: erased at runtime, so this does not create an import cycle
 // with `audio.ts` (which imports this module).
 import type { AudioEnv } from "./audio"
@@ -144,20 +144,26 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
     }
     // The final object's type travels in its own header: this request's
     // Content-Type describes the (empty) create call, not the media.
-    // AQU-2682: a large upload is always a fresh recording. It may not start
-    // over one already stored.
+    // AQU-2682: a waveform sidecar is small and goes up whole, checked.
+    if (isDerivedSidecar(audioId)) {
+      return new Response("a peaks sidecar is not uploaded in parts", { status: 400 })
+    }
+    // A large upload is always a fresh recording. It may not start over one
+    // already stored.
     if (await env.SNAPSHOTS.head(key)) {
       return new Response("audio already stored under this id", { status: 409 })
     }
     // Nor under a name a take has named, nor as someone else's voice's WAV.
-    if (env.AQUILLA_PG) {
-      const taken = await firstWriteRefusal(
-        // A neighbour's key: this key with its own name swapped.
-        env.AQUILLA_PG, env.SNAPSHOTS, (name) => key.slice(0, key.length - audioId.length) + name,
-        verified.claims, projectId, fileId, audioId, env.LANE_READ_WALL,
-      )
-      if (taken) return new Response(taken.reason, { status: taken.status })
-    }
+    if (!env.AQUILLA_PG) return new Response("AQUILLA_PG binding not configured", { status: 500 })
+    const taken = await firstWriteRefusal(env.AQUILLA_PG, projectId, fileId, audioId)
+    if (taken) return new Response(taken.reason, { status: taken.status })
+    const owned = await siblingOwner(
+      // A neighbour's key: this key with its own name swapped.
+      env.AQUILLA_PG, env.SNAPSHOTS, (name) => key.slice(0, key.length - audioId.length) + name,
+      projectId, fileId, audioId,
+    )
+    const notTheirs = await siblingRefusal(env.AQUILLA_PG, verified.claims, projectId, owned, env.LANE_READ_WALL)
+    if (notTheirs) return new Response(notTheirs.reason, { status: notTheirs.status })
     const contentType = safeAudioContentType(request.headers.get("X-Upload-Content-Type"))
     const upload = await env.SNAPSHOTS.createMultipartUpload(key, {
       httpMetadata: { contentType },

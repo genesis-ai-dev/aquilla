@@ -28,7 +28,7 @@ import { handleAudioMultipart, parseAudioMultipartPhase } from "./audio-multipar
 import { adminBearerMatches } from "./lib/admin-secret"
 import {
   digestsOf, fileScopeRefusal, firstWriteRefusal, isDerivedSidecar, isPeaksSidecarBody,
-  removalRefusal, siblingRefusal, storedBytesMatch,
+  removalRefusal, siblingOwner, siblingRefusal, storedBytesMatch,
 } from "./audio-write-guard"
 
 export interface AudioEnv {
@@ -262,7 +262,12 @@ export async function handleAudioRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return withAudioCors(new Response("insufficient role", { status: 403 }))
     }
-    // AQU-2682: within the caller's files.
+    // AQU-2682: the rules below read the database; without it, refuse rather
+    // than weaken (as a removal does).
+    if (!env.AQUILLA_PG) {
+      return withAudioCors(new Response("AQUILLA_PG binding not configured", { status: 500 }))
+    }
+    // Within the caller's files.
     const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
     if (outOfScope) return withAudioCors(new Response(outOfScope, { status: 403 }))
     const artifactId = request.headers.get("X-Artifact-Id")?.trim()
@@ -335,22 +340,19 @@ export async function handleAudioRequest(
     // its owner's. A `.peaks` sidecar is derived and may be rewritten.
     const digests = digestsOf(body)
     const keyOf = (name: string) => audioObjectKey(env, projectId, fileId, name)
-    if (!isDerivedSidecar(audioId) && env.AQUILLA_PG) {
-      const notTheirs = await siblingRefusal(
-        env.AQUILLA_PG, env.SNAPSHOTS, keyOf, verified.claims, projectId, fileId, audioId, env.LANE_READ_WALL,
-      )
+    const pg = env.AQUILLA_PG
+    if (!isDerivedSidecar(audioId)) {
+      // Whose WAV this is, worked out once for the upload.
+      const owned = await siblingOwner(pg, env.SNAPSHOTS, keyOf, projectId, fileId, audioId)
+      const notTheirs = await siblingRefusal(pg, verified.claims, projectId, owned, env.LANE_READ_WALL)
       if (notTheirs) return withAudioCors(new Response(notTheirs.reason, { status: notTheirs.status }))
     }
     const stored = isDerivedSidecar(audioId) ? null : await env.SNAPSHOTS.head(key)
     if (stored && !storedBytesMatch(stored, digests, body.byteLength)) {
       return withAudioCors(new Response("audio already stored under this id", { status: 409 }))
     }
-    // (Every deployed worker binds AQUILLA_PG; a bare local stub without one
-    // keeps the write-once rule above.)
-    if (!stored && !isDerivedSidecar(audioId) && env.AQUILLA_PG) {
-      const taken = await firstWriteRefusal(
-        env.AQUILLA_PG, env.SNAPSHOTS, keyOf, verified.claims, projectId, fileId, audioId, env.LANE_READ_WALL,
-      )
+    if (!stored && !isDerivedSidecar(audioId)) {
+      const taken = await firstWriteRefusal(pg, projectId, fileId, audioId)
       if (taken) return withAudioCors(new Response(taken.reason, { status: taken.status }))
     }
     if (!stored) {

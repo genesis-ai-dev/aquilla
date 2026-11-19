@@ -1492,6 +1492,9 @@ CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE delete
 -- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
 -- per-file audio read and the progress audio CTE both filter on the lane now.
 CREATE INDEX idx_cell_audio_lane ON cell_audio(project_id, file_id, lane_id) WHERE deleted = 0;
+-- AQU-2682 (0206): has any take, live or removed, named this recording?
+CREATE INDEX idx_cell_audio_name ON cell_audio(project_id, file_id, audio_id);
+CREATE INDEX idx_cell_audio_url ON cell_audio(project_id, file_id, url);
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);

@@ -1009,22 +1009,40 @@ export async function authorize<K extends EventKind>(
   if (db != null && AUDIO_SCOPE_KINDS.has(raw.kind) && raw.fileId) {
     const fileRefusal = await fileScopeRefusal(db, tokenClaims, raw.projectId, raw.fileId)
     if (fileRefusal) return { ok: false, status: 403, reason: fileRefusal }
-    const ap = raw.payload as { audioId?: unknown; role?: unknown } | null
-    if (!(raw.kind === 'cell.audio.attach' && ap?.role === 'source')) {
+    // Only look anything up when a language limit can apply at all: below
+    // Maintainer under the wall, or a token with language scopes.
+    const laneLimited = wallOn
+      ? tokenClaims.role < ROLE.MAINTAINER && tokenClaims.src !== 'platform'
+      : (tokenClaims.scopes ?? []).some((sc) => sc.kind === 'lane')
+    const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown } | null
+    if (laneLimited && !(raw.kind === 'cell.audio.attach' && ap?.role === 'source')) {
+      const takeLane = (audioId: string) =>
+        db
+          .prepare(
+            `SELECT COALESCE(l.legacy_tag, '') AS tag, a.role FROM cell_audio a
+               LEFT JOIN lanes l ON l.id = a.lane_id
+              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?`,
+          )
+          .bind(raw.projectId, raw.fileId, raw.cellId, audioId)
+          .first<{ tag: string; role: string }>()
       const audioId = typeof ap?.audioId === 'string' ? ap.audioId : null
-      const stored = audioId && raw.cellId
-        ? await db
-            .prepare(
-              `SELECT COALESCE(l.legacy_tag, '') AS tag, a.role FROM cell_audio a
-                 LEFT JOIN lanes l ON l.id = a.lane_id
-                WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?`,
-            )
-            .bind(raw.projectId, raw.fileId, raw.cellId, audioId)
-            .first<{ tag: string; role: string }>()
-        : null
-      if (stored?.role !== 'source') {
-        const laneTag = stored ? stored.tag : laneOfAudioEvent(raw.payload)
-        const laneRefused = await laneRefusal(db, tokenClaims, raw.projectId, laneTag, laneReadWall, requiredRole)
+      let take = audioId && raw.cellId ? await takeLane(audioId) : null
+      // A new piece is born in its take's language (the projection gives it
+      // its root's lane), so that is the language it is checked in.
+      if (!take && raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {
+        take = await takeLane(ap.pieceOf)
+      }
+      // The shared source clip has no language of its own. Choosing it
+      // un-chooses the dubs of the language the event names, so that is the
+      // language a choice of it is checked in; other edits of it are not
+      // a language's.
+      const sourceClip = take?.role === 'source'
+      if (!sourceClip || raw.kind === 'cell.audio.select') {
+        const laneTag = take && !sourceClip ? take.tag : laneOfAudioEvent(raw.payload)
+        const laneRefused = await laneRefusal(
+          db, tokenClaims, raw.projectId, laneTag, laneReadWall, requiredRole,
+          () => targetLanesFor(db, raw.projectId, settings),
+        )
         if (laneRefused) return { ok: false, status: 403, reason: laneRefused }
       }
     }

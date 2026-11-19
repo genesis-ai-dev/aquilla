@@ -116,16 +116,26 @@ function makeStubBucket() {
   return bucket
 }
 
+/** A project with no takes in it yet, for the rules that ask the database
+ *  whether any take has named a recording (AQU-2682). */
+const emptyProjectDb = () => ({
+  prepare: () => ({
+    bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }),
+  }),
+}) as unknown as AquillaDb
+
 type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeStubBucket>
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
+  AQUILLA_PG?: AquillaDb
 }
 
 function makeEnv(secret: string | undefined = SECRET): StubEnv {
   return {
     SNAPSHOTS: makeStubBucket(),
     SYNC_SECRET_KEY: secret,
+    AQUILLA_PG: emptyProjectDb(),
   }
 }
 

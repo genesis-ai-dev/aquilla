@@ -40,7 +40,7 @@ import {
   useStationTarget,
   type StationTarget,
 } from "@/lib/station/target"
-import { StationEvenLine } from "./StationEvenLine"
+import { StationEvenLine, useEvenLineShown } from "./StationEvenLine"
 import { stationOwnsStep } from "./station-undo"
 import type { StationHost, StationTake } from "./station-host"
 import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice, type SaveHow } from "./StationEdits"
@@ -187,6 +187,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const changedText = useChangedText()
   const unsaved = ed.ops.length > 0
   const calm = ed.sel == null && !hovering && !unsaved
+  const evenLineShown = useEvenLineShown(take, target)
   const tooLong = (ed.pcm?.duration ?? 0) > STATION_EDIT_MAX_SEC
   const line = host.lineName(target.cellId)
   const places = host.placementsOf(take.fileId, take.att.url)
@@ -534,10 +535,11 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             {...(rec.busy ? { status: <StationRecordBar rec={rec} /> } : {})}
             calm={calm}
             hint={editable ? t("editor.station.hint", { mod: modKey() }) : t("editor.station.hintListen")}
+            // AQU-2664 (board 72, evidence 72D): the Even out line, right under
+            // the transport in the hint's place.
+            {...(evenLineShown ? { lead: <StationEvenLine host={host} take={take} target={target} ownDb={ed.level.gainDb} editable={editable && !recording} /> } : {})}
             onMessage={setMessage}
           />
-          {/* AQU-2664 (board 72): one line under the transport. */}
-          <StationEvenLine host={host} take={take} target={target} ownDb={ed.level.gainDb} editable={editable && !recording} />
           <StationHistory
             host={host}
             take={take}

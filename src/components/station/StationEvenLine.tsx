@@ -17,6 +17,18 @@ import { formatOwnVolume } from "@/lib/audio/track-volume"
 import { formatDbValue } from "@/lib/audio/fader-scale"
 import type { StationHost, StationTake } from "./station-host"
 
+/** Whether the take open here shows the line: it is evened, or was evened
+ *  while open here (so a Clear can be followed by "Even out again"). */
+export function useEvenLineShown(take: StationTake, target: { cellId: string; audioId: string }): boolean {
+  const g = takeGain(take.att)
+  const evened = g.evened && g.measured
+  const key = `${target.cellId}\u0000${target.audioId}`
+  const [seenFor, setSeenFor] = useState<string | null>(evened ? key : null)
+  // Adjusted while rendering: this take was evened while open here.
+  if (evened && seenFor !== key) setSeenFor(key)
+  return evened || seenFor === key
+}
+
 export function StationEvenLine({ host, take, target, ownDb, editable }: {
   host: StationHost
   take: StationTake
@@ -31,12 +43,9 @@ export function StationEvenLine({ host, take, target, ownDb, editable }: {
   const evened = g.evened && g.measured
   // Once evened while open here, the line stays (so a Clear can be undone by
   // evening out again); a different take starts afresh.
-  const key = `${target.cellId}\u0000${target.audioId}`
-  const [seenFor, setSeenFor] = useState<string | null>(evened ? key : null)
-  // Adjusted while rendering: this take was evened while open here.
-  if (evened && seenFor !== key) setSeenFor(key)
+  const shown = useEvenLineShown(take, target)
   const [busy, setBusy] = useState(false)
-  if (!evened && seenFor !== key) return null
+  if (!shown) return null
 
   const ref = { cellId: target.cellId, audioId: target.audioId }
   const volume = formatOwnVolume(ownDb)
@@ -66,7 +75,8 @@ export function StationEvenLine({ host, take, target, ownDb, editable }: {
   const link = "cursor-pointer text-sky-700 underline underline-offset-2 hover:text-sky-800 disabled:cursor-default disabled:opacity-50 dark:text-sky-300"
 
   return (
-    <div data-testid="station-even-line" className="flex min-h-[30px] shrink-0 flex-wrap items-center gap-1.5 px-3 pb-2 text-xs">
+    // In the transport's status row (evidence 72D), which brings the padding.
+    <div data-testid="station-even-line" className="flex flex-wrap items-center gap-1.5 text-xs">
       {evened ? (
         <span
           data-testid="station-even-amount"

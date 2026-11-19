@@ -42,6 +42,40 @@ export interface FlushAppliedTracker {
   reset(): void
 }
 
+/**
+ * One answer for a whole batch of own writes (AQU-2654).
+ *
+ * A model response is committed as one package of ~10 drafts in one POST. The
+ * workspace used to follow every package with a file-level cells delta AND a
+ * whole-file audit-stats read, whatever the response had carried — two reads
+ * and two more workspace renders per ten cells, ~37 times over a 362-cell
+ * file. The response already holds each accepted draft's projected row, so
+ * the package is confirmed the way a single commit is: ask per cell, OR the
+ * answers, and let the caller issue each read AT MOST ONCE and only if some
+ * cell still needs it.
+ *
+ * `saved: false` is a draft the server refused, or that went stale and could
+ * not be rebased: its optimistic shadow can only be replaced by the server's
+ * row, so it always asks for both reads. `eventId` may be omitted when the
+ * caller no longer holds it (a draft re-emitted onto a newer head) — the
+ * frame that landed for the cell is then trusted, as in `confirm()`.
+ */
+export function confirmCommittedBatch(
+  tracker: FlushAppliedTracker,
+  writes: ReadonlyArray<{ cellId: string; eventId?: string; saved: boolean }>,
+): { refetchCell: boolean; refetchStats: boolean } {
+  let refetchCell = false
+  let refetchStats = false
+  for (const write of writes) {
+    // Always consume the cell's entry, saved or not, so nothing stale is left
+    // behind for a later commit of the same cell to be matched against.
+    const landed = tracker.confirm(write.cellId, write.eventId)
+    refetchCell ||= !write.saved || landed.refetchCell
+    refetchStats ||= !write.saved || landed.refetchStats
+  }
+  return { refetchCell, refetchStats }
+}
+
 export function createFlushAppliedTracker(opts: {
   liveApplier: LiveApplier
   /** Is this frame's (project, file) the mounted store? */

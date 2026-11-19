@@ -403,7 +403,7 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
 import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
-import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
+import { confirmCommittedBatch, createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -7610,12 +7610,12 @@ export function ProjectWorkspace() {
       }
     }
 
-    // One file-level delta consumes the complete server sequence range and
-    // applies every confirmed draft with one replaceRows/emit cycle. Refresh
-    // audit stats as one projection read too; N targeted reads would feed N
-    // successive audit maps back through CellStore.setRuntime.
-    revalidateCells()
-    revalidateAuditStats()
+    // AQU-2654: a write does not read back what it just wrote — the POST response
+    // landed every accepted draft's row and stats, so each file-level read (never N
+    // targeted ones) goes out at most once, and only for what it did not land.
+    const unconfirmed = confirmCommittedBatch(flushAppliedTracker, prepared.map((item, i) => ({ cellId: item.draft.cell.id, eventId: staleIndexes.has(i) ? undefined : eventIds[i], saved: results[item.index]?.status === "fulfilled" })))
+    if (unconfirmed.refetchCell) revalidateCells()
+    if (unconfirmed.refetchStats) revalidateAuditStats()
     // Live back-translation: this path confirms the whole batch with one file
     // read instead of `confirmCommitted` per cell, so report each saved draft
     // here. A draft that was retried onto a newer head has a new event id this
@@ -7629,7 +7629,7 @@ export function ProjectWorkspace() {
   }, [
     activeLane,
     applyOptimisticTargetEdits,
-    cellStore,
+    cellStore, flushAppliedTracker,
     getActiveCell,
     getTokenForProjectFile,
     laneCellKey,
@@ -7726,7 +7726,7 @@ export function ProjectWorkspace() {
     commitCompletedCells,
     styleInstructionsFor,
     recordAiModelCall,
-    project?.languageProfile,
+    project?.languageProfile, project,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so

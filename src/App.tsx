@@ -42,6 +42,7 @@ import { Toaster } from "@/components/ui/toast"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
+import { CompletionBatchStatusHost } from "@/components/CompletionBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { StorageFullBanner } from "@/components/StorageFullBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
@@ -472,6 +473,9 @@ export default function App() {
           <AiModelConsentDialog />
           <AiModelDownloadChip />
           <AudioBulkProgressBanner />
+          {/* AQU-2654: batch drafting keeps running after the user leaves the
+              editor — its progress, completion and failure follow them. */}
+          <CompletionBatchStatusHost />
           <GlobalAudioShortcuts />
           <VersionBadge />
           <UpdateOnNavigate />

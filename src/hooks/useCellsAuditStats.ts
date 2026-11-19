@@ -13,6 +13,8 @@ import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { contentHash } from "@/lib/dcs/content-hash"
+import { applyOutboxOverlay } from "@/lib/sync/audit-stats-overlay"
+import type { OutboxRecord } from "@/lib/sync/outbox"
 
 export interface CellAuditStats {
   cellId: string
@@ -105,6 +107,11 @@ export interface UseCellsAuditStatsResult {
    *  the `POST /events` response) instead of a targeted GET. Returns false
    *  when nothing was merged (hook disabled, no target row, other file). */
   applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
+  /** AQU-2654: merge the entry an APPLIED validate/unvalidate of the viewer's
+   *  own implies, instead of a targeted GET. `record` is the queued event the
+   *  server just applied. Returns false when the entry cannot be derived
+   *  faithfully (see the implementation) so the caller keeps its read. */
+  applyValidationCellStats: (record: Pick<OutboxRecord, "event">) => boolean
 }
 
 const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
@@ -237,8 +244,16 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const enabledRef = useRef(enabled)
   const laneRef = useRef(lane)
   const generationRef = useRef(0)
+  // AQU-2654: the chain head each cell's entry follows, known synchronously.
+  // `data` only catches up on the next render, and a validation is applied on
+  // the heels of the commit it validates — before that render. Holds the head
+  // of every entry merged since the last full read; a cell not in it reads
+  // its head from the rendered map.
+  const dataRef = useRef(data)
+  const mergedHeadsRef = useRef(new Map<string, string | null>())
 
   fileRef.current = fileId
+  dataRef.current = data
   tokenRef.current = getTokenForFile
   enabledRef.current = enabled
   laneRef.current = lane
@@ -266,6 +281,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
       }
       const { map, complete: sparse } = await fetchCellsAuditStats(fid, token, activeLane)
       if (generationRef.current !== gen) return
+      mergedHeadsRef.current.clear()
       setData(map)
       setComplete(sparse)
       setIsLoading(false)
@@ -282,6 +298,9 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   // lane produced does not describe this one. Mirrors useCells, which likewise
   // re-fetches and re-derives its view on a lane switch.
   useEffect(() => {
+    // Cell ids repeat across files; a head merged for the previous view says
+    // nothing about this one.
+    mergedHeadsRef.current.clear()
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, enabled, lane])
@@ -308,6 +327,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
         // while this was in flight. Either makes the entry describe a view the
         // user is no longer on, and the lane switch has its own reload running.
         if (!stats || fileRef.current !== fid || laneRef.current !== lane) return
+        mergedHeadsRef.current.set(stats.cellId, stats.lastEditEventId)
         setData((prev) => {
           const next = new Map(prev)
           next.set(stats.cellId, stats)
@@ -324,7 +344,9 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     const lane = laneRef.current
     // Whether anything merges depends on the rows alone, so the caller has
     // its answer synchronously while the merge itself runs as an updater.
-    if (!committedStatsRow(cellId, rows, lane)) return false
+    const committedRow = committedStatsRow(cellId, rows, lane)
+    if (!committedRow) return false
+    mergedHeadsRef.current.set(cellId, committedRow.eventId)
     // AQU-2280: merge into React's latest map, never into a snapshot of it.
     // A ref mirroring `data` only catches up on the next render, and the
     // outbox drains the edits queued before a reload at the same moment the
@@ -341,5 +363,42 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     return true
   }, [])
 
-  return { byCellId: data, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  const applyValidationCellStats = useCallback((record: Pick<OutboxRecord, "event">): boolean => {
+    const ev = record.event
+    const cellId = ev.cellId
+    if (!enabledRef.current || !fileRef.current || ev.fileId !== fileRef.current || !cellId) return false
+    if (ev.kind !== "cell.validate" && ev.kind !== "cell.unvalidate") return false
+    const payload = ev.payload as { editEventId?: string; targetLang?: string; targetUsername?: string }
+    const lane = laneRef.current
+    // Another lane's validation leaves this lane's entry as it is: settled,
+    // with nothing to merge (the read it replaces would have said the same).
+    if ((payload.targetLang ?? "") !== lane) return true
+    // Removing someone else's approval is not what the overlay rule models.
+    if (payload.targetUsername && payload.targetUsername !== ev.author) return false
+    // The server counts a validator only against the cell's current head. The
+    // entry is derived only when this client knows that head and it is the
+    // edit the event names; anything else (a cell the sparse read left out, a
+    // head a collaborator moved) keeps the read.
+    const knownHead = mergedHeadsRef.current.has(cellId)
+      ? mergedHeadsRef.current.get(cellId)
+      : dataRef.current.get(cellId)?.lastEditEventId
+    if (!payload.editEventId || knownHead !== payload.editEventId) return false
+    setData((prev) => {
+      // The same rule that drew this event while it was queued, applied to
+      // the server map now that the server has applied it.
+      const base = prev.get(cellId)
+      const merged = applyOutboxOverlay({
+        base: base ? new Map([[cellId, base]]) : new Map<string, CellAuditStats>(),
+        pending: [record as OutboxRecord],
+        lane,
+      }).get(cellId)
+      if (!merged) return prev
+      const next = new Map(prev)
+      next.set(cellId, merged)
+      return next
+    })
+    return true
+  }, [])
+
+  return { byCellId: data, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats, applyValidationCellStats }
 }

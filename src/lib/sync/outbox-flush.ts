@@ -148,7 +148,7 @@ export interface FlushDeps {
   /** Called with the server's `applied[]` frames (parsed) for the events this
    *  flush committed — the author's own write, projected. Also fans out to
    *  `subscribeAppliedEvents` listeners. */
-  onApplied?: (frames: AppliedEventFrame[]) => void
+  onApplied?: (frames: AppliedEventFrame[], sent: ReadonlyMap<string, OutboxRecord>) => void
   /** Called just before non-retryable 4xx rejections are dropped from the
    *  outbox. These arrive inside a 200 and used to disappear behind a
    *  console.error, so a refused write's optimistic UI simply reverted with no
@@ -337,7 +337,9 @@ export type FlushOutboxResult = {
 }
 
 type StaleSiblingsListener = (entries: StaleSiblingEntry[]) => void
-type AppliedListener = (frames: AppliedEventFrame[]) => void
+/** `sent` is the batch the flush posted, by event id — what a frame alone
+ *  does not say about its event (a validation's author and `editEventId`). */
+type AppliedListener = (frames: AppliedEventFrame[], sent: ReadonlyMap<string, OutboxRecord>) => void
 const appliedListeners = new Set<AppliedListener>()
 
 /**
@@ -793,8 +795,9 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
         if (frame) frames.push(frame)
       }
       if (frames.length > 0) {
-        deps.onApplied?.(frames)
-        for (const listener of appliedListeners) listener(frames)
+        const sent = new Map(batch.map((record) => [record.id, record]))
+        deps.onApplied?.(frames, sent)
+        for (const listener of appliedListeners) listener(frames, sent)
       }
     }
     const permanentlyRejectedIds = new Set(

@@ -620,6 +620,71 @@ export async function sendAdminElevationCodeEmail(
   }
 }
 
+/**
+ * AQU-2636: standalone "confirm your email" mail, for the Send verification
+ * link button in account settings. Distinct from the welcome mail, which
+ * carries the same link but only exists at sign-up — an account whose 7-day
+ * sign-up link lapsed had no way to get another one, and since AQU-2634 an
+ * unverified address no longer resolves in Add members or email-bound invites.
+ *
+ * Returns whether the provider accepted it, so the route can tell the caller
+ * the link is on its way rather than claiming it unconditionally. Like every
+ * sender here it swallows the provider error (logged, never reflected).
+ */
+function buildVerificationHtml(verifyUrl: string): string {
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Confirm your email address</h2>
+          <p>Confirm this address so teammates can add you to their projects by
+             email, and so you don't lose access to your Aquilla account.</p>
+          <p style="margin: 24px 0; text-align: center;">
+            <a href="${verifyUrl}"
+               style="display: inline-block; padding: 12px 24px; background-color: #16a34a; color: white; text-decoration: none; border-radius: 6px;">
+              Verify my email
+            </a>
+          </p>
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            This link works once and expires in 7 days. If you asked for a newer
+            link, use that one instead — it replaces this one.
+          </p>
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            If you didn't ask for this, you can ignore it. Nothing changes until
+            the link is opened.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+export async function sendVerificationEmail(
+  env: Env,
+  toEmail: string,
+  verifyUrl: string,
+): Promise<boolean> {
+  if (!env.EMAIL) return false
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
+  try {
+    await env.EMAIL.send({
+      from,
+      replyTo,
+      // Only ever the one address the account already stores. Never a list.
+      to: [toEmail],
+      subject: "Confirm your Aquilla email address",
+      html: buildVerificationHtml(verifyUrl),
+      text: `Confirm your Aquilla email address: ${verifyUrl}\n\nThis link works once and expires in 7 days.`,
+    })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[verify] verification email failed:", message)
+    return false
+  }
+}
+
 export async function sendPasswordResetEmail(
   env: Env,
   toEmail: string,

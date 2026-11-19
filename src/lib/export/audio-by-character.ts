@@ -84,13 +84,16 @@ export interface CharacterPreview {
   key: string
   name: string
   color?: string
-  /** Lines that have a recording AND a place to put it. */
+  /** Lines this export will write: a recording AND, where the deliverable
+   *  lays takes on a timeline, a place to put it. See `PreviewAudioOptions`. */
   clipCount: number
   /** Lines belonging to this character with NOTHING recorded yet. The reason
    *  this preview exists: a character who is entirely unrecorded should be
    *  visible BEFORE the export, not discovered by opening the zip. */
   missingCount: number
-  /** Lines with a recording that cannot be placed, having no start time. */
+  /** Lines with a recording but no start time. The timeline mix cannot place
+   *  these, so there they are NOT in `clipCount`; a by-line export writes them
+   *  anyway (without a timestamp), so there they are in both. */
   untimedCount: number
   /** Sum of known attachment durations; null when any clip lacks durationMs. */
   totalDurationMs: number | null
@@ -279,11 +282,27 @@ export function groupAudioByCharacter(
  * character with nothing recorded appears with a count of zero, before the
  * export runs.
  */
+export interface PreviewAudioOptions {
+  /**
+   * Does the deliverable being previewed need every take to sit on a timeline?
+   *
+   * True (the default) for the by-character mix, which lays each take on
+   * silence at its own second and so has nowhere to put a line with no start
+   * time. False for the by-line export, which copies an untimed take across
+   * as it is — the same preview used to tell a Bible book with a recording on
+   * every verse that "nothing is recorded yet", because no verse has a start
+   * time and so no take counted.
+   */
+  needsTiming?: boolean
+}
+
 export function previewAudioByCharacter(
   cells: CellData[],
   settings: ProjectTtsSettings | undefined,
   resolveName?: ResolveCharacterName,
+  options: PreviewAudioOptions = {},
 ): CharacterPreview[] {
+  const needsTiming = options.needsTiming ?? true
   const order: string[] = []
   const byKey = new Map<string, CharacterPreview>()
   const durationsKnown = new Map<string, boolean>()
@@ -325,7 +344,7 @@ export function previewAudioByCharacter(
 
     if (cell.startTime == null) {
       row.untimedCount += 1
-      continue
+      if (needsTiming) continue
     }
     row.clipCount += 1
     const dur = attachment.durationMs
@@ -468,12 +487,67 @@ export interface ExportAudioArgs {
   decode: (bytes: Uint8Array) => Promise<Float32Array>
   onProgress?: (done: number, total: number) => void
   resolveName?: ResolveCharacterName
+  /**
+   * The whole episode as ONE mono WAV instead of a track per character
+   * (Wendi, 2026-11-17: one file, the length of the episode, every line in
+   * its place). Same placement, same takes — every character's clips simply
+   * land on one track, and the blob that comes back is that WAV, not a zip.
+   */
+  singleTrack?: boolean
+  /** Stops the export between takes. The promise rejects with the signal's
+   *  AbortError, and nothing is downloaded. */
+  signal?: AbortSignal
+}
+
+/**
+ * How long each take costs to fetch and decode, in seconds. Measured on two
+ * real episodes (545 and 963 takes, 265 s and 481 s, 2026-11-17). An estimate
+ * for a person deciding whether to wait, nothing more.
+ */
+export const EXPORT_SECONDS_PER_TAKE = 0.5
+
+export interface EpisodeExportEstimate {
+  /** Takes that will be placed. */
+  clips: number
+  /** How long the file will run. */
+  durationSec: number
+  /** Size of the WAV: 16-bit mono at TARGET_RATE, uncompressed. */
+  bytes: number
+  /** Roughly how long the export takes. */
+  exportSec: number
+}
+
+/**
+ * What the full-episode export will write, before it is run: the file is as
+ * long as the last recorded line's cue, so its size is known up front.
+ */
+export function estimateEpisodeExport(
+  cells: CellData[],
+  settings: ProjectTtsSettings | undefined,
+  resolveName?: ResolveCharacterName,
+): EpisodeExportEstimate {
+  const clips = groupAudioByCharacter(cells, settings, resolveName)
+    .flatMap((g) => g.clips)
+    .filter((c) => c.startSec != null)
+  const durationSec = trackDurationSec(
+    clips.map((c) => ({ startSec: c.startSec!, lengthSec: 0, endSec: c.endSec })),
+  )
+  return {
+    clips: clips.length,
+    durationSec,
+    bytes: clips.length === 0 ? 0 : 44 + Math.round(durationSec * TARGET_RATE) * 2,
+    exportSec: clips.length * EXPORT_SECONDS_PER_TAKE,
+  }
 }
 
 export async function exportAudioByCharacter(
   args: ExportAudioArgs,
 ): Promise<{ blob: Blob; skipped: number; clips: number; characters: number; untimed: number }> {
-  const groups = groupAudioByCharacter(args.cells, args.settings, args.resolveName)
+  const byCharacter = groupAudioByCharacter(args.cells, args.settings, args.resolveName)
+  const groups: CharacterGroup[] = args.singleTrack
+    ? [{ key: "episode", name: "episode", clips: byCharacter.flatMap((g) => g.clips) }]
+    : byCharacter
+  let episode: Blob | null = null
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
@@ -490,6 +564,18 @@ export async function exportAudioByCharacter(
   for (const group of groups) {
     const placed: { pcm: Float32Array; startSec: number; endSec: number | null; raised?: boolean }[] = []
     for (const clip of group.clips) {
+      args.signal?.throwIfAborted()
+      // An untimed line cannot be placed, so it is counted and reported — the
+      // old export glued it on the end, which put words somewhere they were
+      // never spoken. Decided BEFORE the fetch: a Bible book is a thousand
+      // takes with no start time between them, and downloading and decoding
+      // every one only to leave it out was minutes of work for a refusal.
+      if (clip.startSec == null) {
+        untimed++
+        done++
+        args.onProgress?.(done, totalClips)
+        continue
+      }
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
       if (!parsed) { done++; args.onProgress?.(done, totalClips); continue }
@@ -520,11 +606,7 @@ export async function exportAudioByCharacter(
       }
       try {
         const pcm = await pcmPromise
-        // An untimed line cannot be placed. Counted and reported — the old
-        // export glued it on the end, which put words somewhere they were
-        // never spoken.
-        if (pcm && clip.startSec == null) untimed++
-        else if (pcm) {
+        if (pcm) {
           // WHAT THE TIMELINE PLAYS, not everything that was recorded. The
           // decode cache is keyed on the audio id, so one decode serves every
           // cell sharing the clip and each takes its own window out of it —
@@ -540,7 +622,7 @@ export async function exportAudioByCharacter(
           const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
           // AQU-2327: its volume and fades, as the timeline plays them.
           const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
-          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
+          placed.push({ pcm: audible, startSec: clip.startSec, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
         }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
@@ -560,6 +642,10 @@ export async function exportAudioByCharacter(
     const track = placeClips(placed, durationSec, TARGET_RATE)
     if (track.length === 0) continue
     const wav = encodeWavPcm16Chunks([track], TARGET_RATE)
+    if (args.singleTrack) {
+      episode = wav
+      continue
+    }
     // codex-editor's naming, plus its disambiguator for same-named cast.
     // AQU-1461: the stem is the FILE's display name, so an id in it ships in
     // every entry of the zip. Dropped rather than replaced when that is all it
@@ -583,6 +669,15 @@ export async function exportAudioByCharacter(
   // failed to decode". An empty JSZip still generates a perfectly valid 22-byte
   // archive, and handing that to someone as a download is the bug this whole
   // round started from — episode 302's export looked like it worked.
+  if (args.singleTrack) {
+    return {
+      blob: episode ?? new Blob([]),
+      skipped,
+      clips: totalClips,
+      characters: episode ? 1 : 0,
+      untimed,
+    }
+  }
   const characters = Object.keys(zip.files).length
   // DEFLATE on PCM that is mostly silence is worth the seconds it costs: a
   // character with three lines in an hour compresses to almost nothing.

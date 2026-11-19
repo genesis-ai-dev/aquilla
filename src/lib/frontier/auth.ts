@@ -1,3 +1,4 @@
+import { classifyApiHost } from "@/lib/deployment-environment"
 import { sessionClaims as jwtClaims } from "./session-claims"
 import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
@@ -92,7 +93,7 @@ export async function login(
   }
   // AQU-2469: dev.aquilla.app admits only platform admins and its access list.
   if (res.status === 403 && (await readErrorCode(res)) === "dev_access_restricted") {
-    throw new FrontierAuthError(t("auth.login.devAccessRestricted"), 403);
+    throw new FrontierAuthError(t(classifyApiHost(AUTH_BASE) === "preview" ? "auth.login.previewAccessRestricted" : "auth.login.devAccessRestricted"), 403);
   }
   if (!res.ok) {
     // The status stays on the error object for diagnostics; it isn't in the
@@ -329,6 +330,46 @@ export async function verifyEmail(token: string): Promise<void> {
     // next. Drop it and always use our translated fallback.
     throw new FrontierAuthError(t("auth.verifyEmail.verificationFailed"), res.status);
   }
+}
+
+/**
+ * Ask the server to mail the signed-in account a fresh verification link
+ * (AQU-2636). The address is never passed: the server sends only to the one
+ * already stored on the account.
+ *
+ * Server contract: POST /api/v2/auth/me/resend-verification (Bearer)
+ *   200 → { sent: true, email } · 409 → already_verified
+ *   429 → rate_limited · 503 → email_delivery_unavailable
+ *
+ * Resolves with the address the link went to, so the confirmation names it
+ * from the server's answer rather than from stale client state. Rejects with
+ * the server's error code as the message, which the caller maps to a string.
+ */
+export async function resendVerificationEmail(jwt: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE}/api/v2/auth/me/resend-verification`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch {
+    throw new FrontierAuthError("unavailable", 0);
+  }
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  const body = (data ?? {}) as { sent?: boolean; email?: string; error?: string };
+  if (!res.ok || !body.sent) {
+    throw new FrontierAuthError(
+      typeof body.error === "string" ? body.error : "unavailable",
+      res.status,
+    );
+  }
+  return typeof body.email === "string" ? body.email : "";
 }
 
 /**

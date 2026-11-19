@@ -309,7 +309,9 @@ describe('buildEventProjectionStmts — source.cell.metadata.patch', () => {
       stmts,
     )
     expect(stmts).toHaveLength(2)
-    expect(recorded[0].sql).toContain("COALESCE(metadata, '{}'::jsonb) ||")
+    // The merge builds on the stored value read as an object (a link-mirrored
+    // envelope is a JSON string): metadata-patch-stored-shapes.test.ts.
+    expect(recorded[0].sql).toMatch(/metadata = \(CASE WHEN metadata IS NULL THEN '\{\}'::jsonb .* END \|\| \?::text::jsonb\)/)
     expect(recorded[0].sql).toContain("side = 'source'")
     expect(recorded[0].sql).not.toContain('event_id')
     expect(recorded[0].args).toEqual([
@@ -1059,6 +1061,8 @@ describe('isChainMutatingKind', () => {
     'cell.audio.place': false,
     // AQU-1767: a cut makes a second take row; it never moves the text chain.
     'cell.audio.cut': false,
+    // AQU-2492: undoing a cut moves take rows and votes; never the text chain.
+    'cell.audio.uncut': false,
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,

@@ -77,6 +77,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** Service binding to aquilla-sync-worker (wrangler.toml [[env.<env>.services]]).
+   *  Same-zone global fetch to SYNC_WORKER_URL is answered by the zone origin,
+   *  not the Worker (AQU-2216), so in-app agent staging must go through this
+   *  binding when it is present. Unset in local dev, which uses SYNC_WORKER_URL. */
+  SYNC_WORKER?: { fetch: (input: string, init?: RequestInit) => Promise<Response> }
+
   /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
    *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
   POSTHOG_KEY?: string
@@ -164,6 +170,8 @@ export interface Env {
    * Set it "true" in production/staging.
    */
   ADMIN_REQUIRE_ELEVATION?: string
+  /** Dedicated random encryption secret for admin TOTP seeds; distinct per deployment. */
+  ADMIN_TOTP_KEY?: string
   /** Minutes a step-up code is valid for entry. Default: 10. */
   ELEVATION_TTL_MINUTES?: string
   /** Hours an elevated admin session lasts after a successful verify. Default: 6. */

@@ -7,6 +7,8 @@ import {
   parseUsfmLossless,
   serializeUsfmLossless,
 } from "../lib/usfm-lossless"
+import { findUsfmChapter, serializeUsfmChapter } from "../lib/usfm-chapter"
+import { serializeUsfmWithLayout } from "../../../db/shared/usfm-layout"
 
 describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
@@ -376,5 +378,57 @@ describe("serializeUsfmLossless — verse-range labels (AQU-865)", () => {
     expect(out).not.toContain("En el principio")
     expect(verseTokens(out)).toEqual(["4a", "4b", "5"])
     expect(out).toContain("\\v 4a Y vio Dios que la luz era buena,")
+  })
+})
+
+// AQU-2561. The route test covers translations; this covers what it cannot
+// seed through a stubbed database (removals, in-app additions) and the file
+// shapes a hand-written fixture does not have: CRLF line ends, a byte-order
+// mark, a last chapter that runs to the end of the file with no final newline,
+// and `\cl`, which starts with `\c` and is not a chapter.
+describe("serializeUsfmChapter (AQU-2561)", () => {
+  const LINES = [
+    "\\id PSA Test",
+    "\\mt1 Psalms",
+    "\\c 1",
+    "\\cl Psalm 1",
+    "\\q1",
+    "\\v 1 Blessed is the man",
+    "\\v 2 but his delight",
+    "\\c 2",
+    "\\cl Psalm 2",
+    "\\v 1 Why do the nations rage",
+    "\\v 2 The kings of the earth",
+  ]
+  const overrides = new Map([
+    ["PSA 1:2", "mais son plaisir"],
+    ["PSA 2:2", "Les rois de la terre"],
+  ])
+  const edits = {
+    remove: new Set(["PSA 1:1", "PSA 2:1"]),
+    appendAfter: new Map([["PSA 2:2", ["Ajout."]]]),
+  }
+
+  it.each([
+    ["LF", LINES.join("\n")],
+    ["CRLF with a byte-order mark", "\uFEFF" + LINES.join("\r\n") + "\r\n"],
+  ])("matches the whole-file output for every chapter (%s)", (_name, raw) => {
+    const doc = parseUsfmLossless(raw)
+    // AQU-2559: the whole-file export is the layout serializer now, so that
+    // is what a chapter must match.
+    const whole = serializeUsfmWithLayout(doc, overrides, edits)
+    const c1 = whole.indexOf("\\c 1")
+    const c2 = whole.indexOf("\\c 2")
+    const front = whole.slice(0, c1)
+
+    const one = serializeUsfmChapter(doc, findUsfmChapter(raw, 1)!, overrides, edits)
+    const two = serializeUsfmChapter(doc, findUsfmChapter(raw, 2)!, overrides, edits)
+    expect(one.text).toBe(front + whole.slice(c1, c2))
+    expect(two.text).toBe(front + whole.slice(c2))
+    // Together the pieces are the whole file: nothing dropped, nothing doubled.
+    expect(front + one.text.slice(front.length) + two.text.slice(front.length)).toBe(whole)
+    expect(two.text).toContain("Les rois de la terre Ajout.")
+    expect(two.text).not.toContain("Why do the nations rage")
+    expect(findUsfmChapter(raw, 3)).toBeNull()
   })
 })

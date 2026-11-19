@@ -220,6 +220,50 @@ describe("VoicePlaybackBar", () => {
   })
 })
 
+// AQU-2495 (review, Nov 9): after a run has ended the queue still holds the
+// run's lines, which may be a chapter the person has since left, and Next
+// played its first line whatever was now selected or showing; Previous did
+// nothing. With nothing playing, both now step from where the person is: the
+// selected line, else the chapter showing.
+describe("VoicePlaybackBar — Next and Previous with nothing playing (AQU-2495)", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const voiced = (id: string): CellData =>
+    cell({ id, selectedAudioId: `${id}-a`, attachments: { [`${id}-a`]: { url: `blob:${id}`, type: "audio/mpeg" } } })
+  const silent = (id: string): CellData => cell({ id })
+  // The chapter now showing: Ruth 1.
+  const ruth1 = [voiced("r1v1"), silent("r1v2"), voiced("r1v3"), voiced("r1v4")]
+  const bar = (startCellId: string | null) => (
+    <VoicePlaybackBar cells={ruth1} projectId="p" session={session} settings={undefined} startCellId={startCellId} />
+  )
+  const started = () => vi.mocked(startQueue).mock.calls.map(([ctx, from]) => [ctx.cells[from as number]?.id, ctx.cells === ruth1])
+
+  beforeEach(() => { vi.mocked(startQueue).mockClear() })
+
+  it("with a line selected, Next starts the line after it and Previous the one before with anything to play", () => {
+    const { unmount } = render(bar("r1v3"))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(started()).toEqual([["r1v4", true], ["r1v1", true]])
+    unmount()
+  })
+
+  it("with nothing selected, Next starts the chapter's first line and Previous its last", () => {
+    render(bar(null))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(started()).toEqual([["r1v1", true], ["r1v4", true]])
+  })
+
+  it("past either end of the chapter there is nothing to step to, and nothing starts", () => {
+    const { unmount } = render(bar("r1v4"))
+    fireEvent.click(screen.getByLabelText("Next line"))
+    unmount()
+    render(bar("r1v1"))
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(startQueue).not.toHaveBeenCalled()
+  })
+})
+
 // ── Speed reaches the takes, not just whoever owns the clock ────────────────
 //
 // The dubs always fire through the queue's overlay pool no matter which engine
@@ -358,6 +402,17 @@ describe("VoicePlaybackBar — the media view's strip", () => {
     expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
   })
 
+  it("mutes from the speaker itself, without opening a volume popover", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const speaker = screen.getByTestId("transport-volume")
+    expect(speaker).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(speaker)
+    expect(screen.queryByRole("slider", { name: "Volume" })).toBeNull()
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByTestId("transport-volume"))
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("drops the time first on a narrow view (a container query), never the buttons", () => {
     render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
     expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)
@@ -386,6 +441,14 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
   beforeEach(() => {
     transportSource.value = "queue"
     __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("writes hours once the length passes an hour", () => {
+    // 278794 s is what the strip used to print as 4646:34.
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 3661, playing: true, duration: 278794 }))
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("1:01:01 / 77:26:34")
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
   })
 
   it("shows the book's laid-out length before anything plays", () => {

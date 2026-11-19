@@ -4050,3 +4050,424 @@ same sandbox; this run did not re-prove it by re-running trunk, because it has a
 mechanical proof that the failures are not this diff's: **`git diff -U0 -- '*.ts' '*.tsx'`
 filtered to lines that do not begin `//`, `*` or `/*` is empty** — the diff contains zero
 changed non-comment source lines, so there is nothing in it that any spec could execute.
+
+## 2026-11-13 — dead-code run: 12 zero-reference exports in `auth-worker` (the safe half of the queued 23)
+
+**Done this run** (theme 1, dead-code deletion; 8 files counting this ledger, 7 source +
+this one, no test file touched). This is the slice the 2026-11-11 entry queued: of the 23
+worker exports whose name appears exactly once in the whole repo, the ones that are **not**
+in a frozen zone, taken **one package at a time** so only that package's suite joins the
+gate. `auth-worker` was chosen over `sync-worker` because it holds 12 of the safe set
+against `sync-worker`'s 3.
+
+**Deleted** (12 symbols, 58 lines; every one verified at deletion time by
+`git grep -n '\b<name>\b'` across every tracked `.ts`/`.tsx`/`.md`/`.js`/`.mjs`/`.json`
+outside `node_modules`, this ledger excluded — **one hit each, the declaration**, plus a
+second non-word-boundary sweep of the whole tree to catch string/dynamic uses):
+
+- `lib/billing/plans.ts:285 isPaidStatus` — the `active|trialing|past_due` predicate.
+  `BillingStatus` itself stays (used by `billing/apply.ts` and `billing/words.ts`).
+- `lib/billing/stripe.ts:31 addonPriceId` — reads `env.STRIPE_PRICE_ADDON`. The binding and
+  its `Env` field are untouched (wrangler config is a frozen zone); only the unreferenced
+  accessor goes. `StripeConfigError` keeps 8 other callers.
+- `lib/agent/tools/select-cells.ts:139 SelectScope` — superseded in place: the one function
+  that takes a scope declares it **inline** at `:215`
+  (`scope: { fileId: string; range?: RefRange } & RequiredLaneRef`), so the interface was
+  documentation for a shape nothing refers to. `RefRange` stays (5 uses, incl. `tools/read.ts`).
+  Note for future greps: a bare `SelectScope` substring search returns 14 false hits in
+  sync-worker — all of them `audioSelectScopeSql`/`audioSelectScopeBinds`. Word boundaries matter.
+- `lib/langquest/connections.ts:80 ConnectionOut` — `ReturnType<typeof connectionOut>`.
+  **Deliberately judged not a frozen response shape**: it is *derived*, not declarative. The
+  shape is produced by `connectionOut()`, which stays and still returns exactly what it did;
+  deleting an alias that is computed from a surviving function cannot change a wire shape.
+  (Contrast `auth-worker/src/types.ts:498 UserResponse`, left alone below, which *declares* one.)
+- `services/lane-grants.ts:207 applyMemberLaneGrantsForProjects` — a 23-line documented
+  AD-12 function. **Born dead, and this is the one worth a human's eye**:
+  `git log --all -S applyMemberLaneGrantsForProjects -- . ':!auth-worker/src/services/lane-grants.ts'`
+  returns only the commit that added it to *this ledger* — no caller has existed on any ref
+  in this container's history. Its sibling 12 lines above (`applyMigratedMemberLaneGrants`)
+  is the live admission path and is untouched, as are `applyDirectAddLaneGrants` (6 uses) and
+  `resolveProjectRoleShared` (25).
+- `services/org-permissions.ts:302,303,308,309` — `{PROJECT,TEAM}_DIRECTORY_{DEFAULT,MAX}_LIMIT`,
+  four consts that are plain aliases of `ORG_DIRECTORY_{DEFAULT,MAX}_LIMIT`. The two `clamp*`
+  aliases beside them (`clampProjectDirectoryLimit`, `clampTeamDirectoryLimit`) and the two
+  cursor aliases **are** referenced and stay; only the four unused numeric aliases go, and the
+  two doc comments were kept over the surviving aliases they still describe.
+- `services/org-permissions.ts:2945 getMemberProgressViewMinRole` — the single-floor fetch,
+  **superseded by the batched loader, not by a lost feature**. The floor is still enforced:
+  `routes/projects.ts:1363` calls `canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)`
+  with floors from the batched `loadOrgRoleFloors` path (`org-permissions.ts:3217,3224`), and
+  `canViewMemberProgress`/`DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE` keep 7 references between
+  them plus their own `org-permissions.roster-progress.test.ts`. Its sibling
+  `getRosterViewMinRole` has other callers and is untouched. **This check was the point**: a
+  dead resolver next to a live floor is exactly the shape of "the tuning was lost", and it
+  wasn't — the read just moved to the one-fetch-for-both path.
+- `services/source-linking.ts:600,601 SourceLinkConsumes`, `SourceLinkGate` — two string
+  unions nothing imports. `SourceLinkMode` on the line above **stays**: it is cited by a prose
+  comment at `:237` ("or null for a legacy link (see SourceLinkMode)"), so it is a live doc
+  reference even though no type position uses it — which is also why it never appeared in the
+  23. The shared header was trimmed from "link mode/consumes/gate" to "link mode" so the
+  sentence still describes what survives it.
+
+**No helper was orphaned by the deletions** — re-checked after the edit for all nine symbols
+the deleted code called or aliased (`ORG_DIRECTORY_*`, `StripeConfigError`, `connectionOut`,
+`applyDirectAddLaneGrants`, `resolveProjectRoleShared`, `loadOrgSettingsBlob`,
+`extractRoleFloor`, `DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE`): every one still has callers.
+
+**Still deferred, and still for the reasons the 2026-11-11 entry gives** — the 11 frozen-zone
+members of the 23 are untouched and stay queued: the four `sync-worker/src/external/*` ones
+(`cellFieldsBatchFloor`, `staticPatchSettingsFloor`, `eventLaneFields`, `PiiEnv` — published
+Agent API surface), `auth-worker/src/types.ts:498 UserResponse` (declares a route response
+shape; needs a human to say the route no longer returns it),
+`project-do-handlers.ts:320 ProjectDoBroadcastBatch` (DO wire message),
+`__tests__/helpers/cloudflare-workers-stub.ts:23 WorkerEntrypoint` (test helper, which this
+routine may not touch) and `lib/contextual/types.ts:42 REDRAFT_MAX_ITERATIONS` (the standing
+`contextual/tick.ts` invariant warning).
+
+### The `sync-worker` half — DONE 2026-11-16
+
+All three symbols shipped; see the 2026-11-16 entry at the end of this file.
+
+### Sandbox note that cost this run ~25 minutes, for the next run
+
+**`cd auth-worker && npm ci` does not work in this container, with or without
+`--legacy-peer-deps`** — it fails `EUSAGE ... Missing: jose@6.2.17 from lock file`, because
+`auth-worker/package-lock.json` has drifted from its `package.json` (`jose: ^6.2.13`). The
+2026-11-09 entry's advice to add `--legacy-peer-deps` is now out of date: the flag is not the
+problem, the lockfile is. **Use `pnpm install --frozen-lockfile --ignore-workspace` instead**
+(auth-worker carries its own `pnpm-lock.yaml`); it installs in ~2s, leaves `git status` clean
+and leaves both lockfiles untouched, which matters because lockfiles are a frozen zone here.
+Symptom if you skip this: the suite still *runs* and reports **275 of 412 files failed** with
+`Cannot find package '@hono/zod-validator'/'fflate'/'bcryptjs'` — that is a missing-deps
+artifact, **not** a red baseline. With deps present the suite is fully green.
+
+### Gates recorded 2026-11-13 (`origin/dev` `4c7aba04`)
+
+| gate | baseline | after |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — 980 problems, 0 errors | exit 0 — 980 problems, 0 errors; the two runs' output differs **only** in two line numbers (see below) |
+| `pnpm build` | exit 0 (`tsc -b` + `vite build` + brand check) | exit 0 |
+| `pnpm test` | exit 1 — 1 failed / 2396 passed / 2 skipped (2399 files); 1 failed / 27640 passed / 1 expected fail / 23 skipped (27665 tests), 1899.25s | **exit 1 — identical counts**, same single failure, 1642.24s |
+| `cd auth-worker && npm test` | **exit 0** — 412 passed (412 files); 4905 passed / 2 expected fail (4907), 1796.69s | **exit 0 — identical counts**, 1650.00s |
+
+**The lint diff, in full**: `diff` of the two runs returns exactly two lines, both
+pre-existing `no-useless-assignment` warnings in `auth-worker/src/services/source-linking.ts`
+whose line numbers moved by **2** — `787:7`→`785:7` (`files`) and `1112:7`→`1110:7`
+(`cells`) — which is precisely the two type-alias lines deleted above them. Same rule, same
+message, same file, same total (980). No warning appeared, disappeared or changed severity:
+for a deletion diff this is the strongest form the usual "byte-identical" check can take.
+
+The baseline was re-run from scratch on a **stashed-clean tree** after a first attempt
+started before the edits landed; the numbers above are from the clean run, and
+`rm -rf packages/*/dist` preceded the baseline lint as in every run since 2026-08-26.
+
+**The one `pnpm test` failure is the same pre-existing one the 2026-11-09 and 2026-11-11
+entries document** — `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo
+> fails loud when the pick cannot commit, and leaves nothing in progress`. It sets
+`commit.gpgsign=true` with a `gpg.program` that does not exist and expects a throw; in a cloud
+sandbox the commit succeeds anyway. This diff touches no file that test imports (it is
+`scripts/`, the diff is `auth-worker/`), it is frozen by the routine's "a file whose tests are
+already red is frozen" rule, and the fix has to touch the test file — so it is still owed to
+Ryder rather than filed.
+
+### `pnpm test:e2e:smoke` — the first run in this ledger with a real baseline, and what it showed
+
+Earlier entries recorded the smoke suite only on the branch and compared against remembered
+numbers. This run took a **baseline on a detached clean `origin/dev`** as well, which is what
+made the one anomaly below legible. Shard composition has drifted since 2026-11-11 (shard 3
+now runs 38 tests, not 37 — AQU-2553's admin-authenticator spec landed 2026-11-12), so the
+old numbers were no longer a valid comparison anyway.
+
+| run | tree | shard 1 | shard 2 | shard 3 |
+| --- | --- | --- | --- | --- |
+| baseline | clean `origin/dev` | 42 passed / **3 failed** | 33 passed | **38 passed** |
+| after (A) | this branch | 42 passed / **3 failed** | 33 passed | 37 passed / **1 failed** |
+| after (B) | this branch, re-run | 42 passed / **3 failed** | 33 passed | 37 passed / **1 failed** |
+
+**Shard 1's 3 failures are the known pre-existing ones**, unchanged in all three runs:
+`editor/import-and-edit.smoke.spec.ts:339` for srt, vtt and sbv, each a 15s `locator.click`
+timeout. Same file, same line, same three caption formats the 2026-11-09 and 2026-11-11
+entries document.
+
+**Shard 3's single failure is flake, and the proof is that it is a *different test* each
+time**: run A failed `projects/admin-console-billing.smoke.spec.ts:51` (with
+`ENOENT: scandir 'auth-worker/.wrangler/tmp/email'` — a harness artifact, not an assertion),
+run B failed `validation/validate.smoke.spec.ts:137`. Both specs then **passed in isolation
+on this branch** (6/6, exit 0, 43s), and admin-console-billing also passed in isolation on
+clean dev (3/3). Neither file is touched by this diff, and neither imports anything it
+touches. A deterministic breakage does not move between files; a sandbox running three
+Playwright shards in parallel does.
+
+**This is the one place this run cannot say "identical before and after"**, so it says so
+plainly rather than rounding it off. What the diff *can* prove mechanically is stronger than
+the smoke comparison: every deleted symbol had zero references repo-wide (word-boundary grep
+plus a substring sweep), `tsc -b` is green, and **auth-worker's own 412-file / 4905-test
+suite is byte-identical before and after** — if any of these deletions had removed live code,
+that suite is where it would show, and it does not.
+
+**Worth logging for the next run**: `sync-worker/` and `agent-worker/` also ship without
+`node_modules` in a fresh container, and the e2e stack needs them. The first smoke attempt
+failed all three shards at boot with `Could not resolve "partyserver"`; the fix is the same
+`pnpm install --frozen-lockfile --ignore-workspace` used for auth-worker, run in each of
+`sync-worker/` and `agent-worker/`. A second attempt then failed on
+`Address already in use (127.0.0.1:9788)` — a failed shard boot leaves its `wrangler dev`
+behind, and those must be stopped before retrying.
+
+## 2026-11-16 — dead-code run: the three `sync-worker` zero-reference exports (the slice 2026-11-13 queued)
+
+**Done this run** (theme 1, dead-code deletion; 3 files counting this ledger, 2 source +
+this one, **no test file touched**). This closes the `sync-worker` half of the 23 worker
+exports the 2026-11-11 entry found: 47 lines deleted, 0 added, both files in
+`sync-worker/src/events/`.
+
+Every symbol verified at **zero references repo-wide, before and after the edit** — a
+word-boundary `git grep` across every tracked `.ts`/`.tsx`/`.js`/`.mjs`/`.json`/`.md`/`.sql`
+(this ledger excluded) plus a substring sweep of the whole tree minus `node_modules`/`.git`/
+`dist`. One hit each, the declaration itself.
+
+- `events/progress-projection.ts:607 clearSectionProgressStmt` — a per-file
+  `DELETE FROM file_section_progress … AND scope IN ('section','book')`, documented "before a
+  full rebuild in the same transaction". **Superseded, not lost**, and the successor is
+  *broader*: the live full rebuild (`events/rebuild.ts:119`) issues its own project-wide
+  `DELETE FROM file_section_progress WHERE project_id = ?` before replay, and
+  `fullProgressRecomputeStmts` (the live 3-statement bundle, ~40 call sites across
+  `events/*`, `progress-selfheal-cron.ts` and `scripts/*`) rewrites rows through
+  `ON CONFLICT … DO UPDATE` rather than clearing them first. Nothing needed the narrower
+  per-file clear.
+- `events/progress-projection.ts:618 allSectionsProgressRecomputeStmt` — an 8-line
+  pass-through whose entire body was `return sectionsProgressRecomputeStmt(db, projectId,
+  fileId, updatedAt)`. The target **stays and is live** (`events/route.ts:65,1898`, plus 9
+  test files). Deleting a forwarder cannot change what the forwarded-to function does.
+- `events/scoped-search.ts:259 sanitizeFtsAnyTerm` — **the one worth a reviewer's eye, and it
+  checks out.** It built an any-term OR query in the **FTS5** dialect (`"t1" OR "t2"`, and its
+  doc comment still spoke of `bm25`), for AD-14 health-as-confidence retrieval. That feature
+  is very much alive — so the question was whether this was half a live feature. It is not:
+  the any-term retrieval exists in **two Postgres-dialect forms, neither of which calls it**.
+  (1) `neighborTsquery()` at `scoped-search.ts:663`, a *private* helper 4 lines above the live
+  `querySourceNeighbors`, with the **same Unicode class** (`/[\p{L}\p{M}\p{N}]+/gu`), the same
+  `new Set` dedupe and the **same 40-term cap**, emitting `t1 | t2` for
+  `to_tsquery('simple', …)`. (2) The batched `queryFileSourceNeighbors` (AQU-641) rebuilds the
+  same OR-tsquery **in SQL** from each asker's stored `value_tsv` lexemes via
+  `string_agg(… ' | ')`, capped by `MAX_QUERY_TERMS = 40` — whose own comment reads "mirrors
+  the 40-term slice in `querySourceNeighbors`". So the tuning was not lost; the builder was
+  re-expressed in Postgres syntax at the D1→Postgres cutover and the FTS5-shaped JS copy was
+  left behind. Its two siblings in the same file, `sanitizeFtsQuery` (live at `:339`) and
+  `sanitizeFtsExactPhrase` (live at `:560`), survived the cutover because their callers now
+  feed Postgres `phraseto_tsquery`/tsquery — which is exactly why they are **not** in this
+  deletion.
+
+**No helper was orphaned.** Re-checked after the edit: `sectionsProgressRecomputeStmt`,
+`fullProgressRecomputeStmts`, `neighborTsquery`, `querySourceNeighbors`,
+`queryFileSourceNeighbors`, `MAX_QUERY_TERMS`, `tokenizeForConfidence`, `lexicalConfidence`,
+`sanitizeFtsQuery`, `sanitizeFtsExactPhrase` all still have callers, and `AquillaDb` /
+`AquillaStatement` still have 4 uses each in `progress-projection.ts` (no import went unused).
+
+**Frozen-zone check**: `git diff --stat` is 2 files, both `sync-worker/src/events/*.ts`. Zero
+changes under `e2e/`, `**/*.test.ts`, `**/*.spec.ts`, `src/test-setup.ts`, `db/`,
+`**/migrations/`, `**/wrangler*.toml`, `package.json`/any lockfile, `scripts/deploy*`,
+`.github/`. `progress-projection.ts` lives in the projection area, but the frozen rule guards
+projection *behaviour* (the head compare-and-swap, last-write-wins vs first-child); code with
+no call sites executes never. The four `sync-worker/src/external/*` Agent-API symbols stay
+queued and untouched, as do the other 7 frozen-zone members of the 23 the 2026-11-13 entry
+lists.
+
+### Gates recorded 2026-11-16 (`origin/dev` `77ba0219`)
+
+| gate | baseline | after |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — 1061 problems, 0 errors | exit 0 — 1061 problems, 0 errors; **`diff` of the two full outputs is empty — byte-identical** |
+| `pnpm build` | exit 0 (`tsc -b` + `vite build` + brand check) | exit 0 |
+| `cd sync-worker && npm test` | **exit 0** — 326 files passed; 4828 passed / 21 skipped (4849), 1829.86s | **exit 0 — identical counts**, 1812.03s |
+| `pnpm test` | exit 1 — 1 failed / 2439 passed / 2 skipped (2442 files); 1 failed / 28398 passed / 1 expected fail / 23 skipped (28423), 1079.80s | **exit 1 — identical counts**, same single failure, 990.53s |
+| `pnpm test:e2e:smoke` | not re-baselined this run (see below) | s1 42 passed / **3 failed**, s2 33 passed, s3 38 passed |
+
+**The one `pnpm test` failure is the same pre-existing one** the 2026-11-09/11/13 entries
+document: `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > fails
+loud when the pick cannot commit, and leaves nothing in progress`. It sets
+`commit.gpgsign=true` with a nonexistent `gpg.program` and expects a throw; in this sandbox
+the commit succeeds anyway. The diff is `sync-worker/`, that test is `scripts/` — it imports
+nothing this run touched, and it is frozen by the "a file whose tests are already red is
+frozen" rule. Still owed to Ryder rather than filed.
+
+**Smoke, stated plainly**: this run did **not** take a fresh clean-`dev` smoke baseline. The
+numbers above are an exact match for the clean-`origin/dev` baseline the 2026-11-13 entry
+recorded (s1 42 passed / 3 failed, s2 33 passed, s3 38 passed), and s1's 3 failures are the
+documented pre-existing ones — `editor/import-and-edit.smoke.spec.ts:339`, the same file, the
+same line and the same three caption formats (srt, vtt, sbv), each a 15s locator timeout —
+which have now failed on clean `dev` across four consecutive runs. Shard 3, which flaked in
+the 2026-11-13 run, was **fully green** here. A caption-import spec cannot be reached by
+deleting three unreferenced `sync-worker` functions, so a fresh 30-minute baseline was judged
+to add no information; what the diff proves mechanically is stronger anyway — zero references
+repo-wide, byte-identical lint, and sync-worker's own 326-file / 4828-test suite identical
+before and after, which is precisely where live code would have broken.
+
+### Sandbox notes — three of these cost this run real time, read before the next one
+
+**1. NEVER run `pnpm lint` concurrently with any vitest suite.** `pnpm lint` asks for an
+8 GiB heap (`NODE_OPTIONS=--max-old-space-size=8192`) on a 15 GB box. Run alongside the
+sync-worker suite, it was **OOM-killed — `Killed`, exit 137** — *and* took a test worker down
+with it, so the same attempt reported `sync-worker` as "325 passed (326), 1 error,
+`Worker exited unexpectedly with signal SIGKILL` on `import-route.test.ts`". **Neither was a
+real result**: run alone, lint exits 0 and the sync-worker suite is 326/326 green. Serialize
+every gate — the whole chain is ~65 min and that is simply the cost.
+
+**2. `rm -rf packages/*/dist` must precede the *baseline* lint too, not just the after-lint.**
+ESLint's `globalIgnores(['dist', …])` does not reach nested `packages/*/dist` (the standing
+candidate higher in this file), so whether those build artifacts exist changes the total:
+**1063** problems with `packages/idml-roundtrip/dist/{engine,legacy}.js` present, **1061**
+without. A first comparison here showed a spurious 2-warning "improvement" that had nothing
+to do with the diff — both warnings were `Unused eslint-disable directive` inside those dist
+files. Re-run under matched conditions and the outputs are byte-identical.
+
+**3. `pnpm test:e2e:smoke` needs three container fixes, and two of them are not in this
+file yet.** Each failure mode looks like a broken suite and is not:
+- **Worker `node_modules` are absent in a fresh container.** `pnpm install --frozen-lockfile
+  --ignore-workspace` in each of `sync-worker/`, `auth-worker/`, `agent-worker/` (~2s each,
+  leaves `git status` clean, touches no lockfile). The 2026-11-13 note on this still holds.
+- **Playwright's browsers are revision-pinned and the container's are one build off.** The
+  repo's `@playwright/test@1.65.0` looks for `/opt/pw-browsers/chromium-1254/...` and
+  `/opt/pw-browsers/ffmpeg-1013/ffmpeg-linux`; this container ships **chromium-1243** and
+  **ffmpeg-1011**. Symptom: all 3 shards die at boot with "Playwright browser executable is
+  missing", and — after chromium is fixed but not ffmpeg — **7 specs fail with
+  `browserContext.newPage: Executable doesn't exist at /opt/pw-browsers/ffmpeg-1013/
+  ffmpeg-linux`** (auth, onboarding and share-invite specs, none of them really broken). Fix
+  with two symlinks, and **do not run `playwright install`** — this sandbox forbids it and a
+  fresh download will not find the preinstalled browser:
+  `ln -sfn /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1254` and
+  `ln -sfn /opt/pw-browsers/ffmpeg-1011 /opt/pw-browsers/ffmpeg-1013`
+  (the headless shell too, if a shard asks for it:
+  `ln -sfn /opt/pw-browsers/chromium_headless_shell-1243 /opt/pw-browsers/chromium_headless_shell-1254`).
+  Chromium 1243 ran the whole suite with no protocol trouble.
+- **No Postgres is running and Docker is unavailable.** Use the repo's own provisioner —
+  `bash scripts/e2e-pg-native.sh` (AQU-1820) — and export the single `E2E_PG_ADMIN_URL` line
+  it prints on stdout. **Do not hand-start the Debian `16/main` cluster instead**: the
+  Docker-less reset in `scripts/e2e-up.ts` shells out to `psql` with
+  `E2E_PG_ADMIN_URL` defaulting to `postgresql:///postgres`, i.e. over the **local socket as
+  the OS user**, so on a cluster provisioned by hand it dies with
+  `FATAL: role "root" does not exist` and "refusing to run against a stale schema" — which
+  reads like a harness bug and is just a missing role. The script's cluster has it.
+- One residual flake worth knowing: `projects/admin-console-billing.smoke.spec.ts:51` failed
+  once mid-run with `ENOENT: no such file or directory, scandir
+  'auth-worker/.wrangler/tmp/email'` and passed on the next run. The 2026-11-13 entry saw the
+  same harness artifact. Not an assertion failure.
+
+---
+
+## 2026-11-18 run — doc drift: FTS5-era vocabulary in the Postgres search path
+
+**Theme**: comment/doc drift (routine theme 6). This run **completed** the candidate the
+2026-11-16 entry logged at the bottom of this file ("FTS5-era vocabulary in a Postgres search
+path"); that entry is superseded by what follows and should not be picked up again.
+
+**Files touched (7, comments only, zero statements changed)**
+
+| File | What was stale |
+| --- | --- |
+| `sync-worker/src/events/scoped-search.ts` | 17 hits. The choke-point header, the `SearchResultOut.snippet` doc, both sanitizer docs, both query-function docs, and a 10-line block documenting SQLite's `snippet(table, col, start, end, ellipsis, max_tokens)` call directly above SQL that calls `ts_headline`. |
+| `sync-worker/src/events/event-projection.ts` | 5 orphaned `// FTS5 maintenance (pre-DML)/(post-DML)` comments describing index statements that were deleted in the cutover — each was followed by a blank line and then unrelated code. Plus the module-level "FTS statements" note. |
+| `sync-worker/src/events/search-route.ts` | Header claimed "FTS5-backed"; 3 more mentions. |
+| `sync-worker/src/events/rebuild-fts.ts` | Header described "idempotent backfill … delete-then-insert pass in batches of 1000 rows (cursor-paginated by rowid)" for a handler that is a no-op returning zeros. |
+| `sync-worker/src/events/projection-snapshot.ts` | "`cells_fts`/`value_tsv` is a generated column" — `cells_fts` was a virtual table, not a column. |
+| `sync-worker/src/external/search-reads.ts` | One comment on the error mapper. |
+| `sync-worker/src/lib/confidence/lexical-confidence.ts` | Two references to "FTS5's unicode61 tokenizer" as the retrieval tokenizer. |
+
+**Deliberately left alone**, and why — the next doc-drift run should not "finish" these:
+
+- **`sync-worker/src/lib/branching-search/{algorithm,settings}.ts` (22 of the 125 hits).**
+  These implement Okapi BM25 *in TypeScript* (`bm25Score`, `bm25K1`, `bm25B`). The vocabulary
+  is accurate and has nothing to do with SQLite. Not drift.
+- **The two live `fts5` regex arms** — `search-route.ts` `mapSearchError` and
+  `search-reads.ts` `searchFailure`. Changing a pattern that decides 400-vs-500 is a
+  behavior change. `search-route.ts` now carries a one-line note saying the arm is kept for
+  legacy messages and that Postgres does not produce it.
+- **The `rebuild-fts` route path and `handleRebuildFtsRequest`/`RebuildFtsEnv` names.** The
+  endpoint is part of the admin API surface.
+- **The exported names `sanitizeFtsQuery` / `sanitizeFtsExactPhrase`.** Renaming exported
+  symbols across subsystems is explicitly out of scope, and `search-route.ts` re-exports
+  `sanitizeFtsQuery` for the test suite.
+- **`search-reads.ts:250`, the multi-project merge sort comment.** Left untouched on purpose
+  — see the bug below. Rewriting it to the truth would put a correct comment directly above
+  code that contradicts it.
+
+**Something worth knowing that the comments were hiding** — recorded here because the
+sanitizers now say so in their own docs: on Postgres, `sanitizeFtsQuery`'s and
+`sanitizeFtsExactPhrase`'s **return values are only emptiness gates**. `queryScopedSearch`
+and `queryScopedExact` bind the **raw** `q` / `exactText` to `plainto_tsquery` /
+`phraseto_tsquery` and never pass the sanitized string to the database. The quoted output is
+consumed only by `search-read.test.ts` and `scoped-search.test.ts`, which is why the
+functions still have to produce it.
+
+### New candidate — external multi-project search sorts results worst-first (likely bug)
+
+- **Found**: 2026-11-18, while reading `search-reads.ts:250` for the comment sweep above.
+- **The code**: `sync-worker/src/external/search-reads.ts`, the multi-project branch of the
+  external search route:
+
+  ```ts
+  // Rank is FTS5 bm25 (more negative = better), comparable across projects …
+  merged.sort((a, b) => (a.rank === b.rank ? a.projectId.localeCompare(b.projectId) : a.rank - b.rank))
+  ```
+
+  `a.rank - b.rank` sorts **ascending**, which was right under SQLite bm25. The rank these
+  rows actually carry now comes from `queryScopedSearch`, which selects
+  `ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank` and orders by
+  `rank DESC` — **higher is better** under Postgres. So the per-project queries return their
+  best hits first and the merge then reverses them: the least relevant row across all
+  projects lands at offset 0, and a caller paginating the first page gets the worst matches.
+  Single-project search is unaffected (it never reaches this sort).
+- **Why this routine did not fix it**: flipping a sort comparator changes observable output
+  ordering — a behavior change, which this routine forbids, and the fix needs a test that
+  pins the new ordering (also out of scope here). No existing test covers the ordering: the
+  `external-*.test.ts` files contain no assertion on `rank` ordering across projects, which
+  is how it survived the cutover.
+- **Proof a fix would need**: a sync-worker test over two projects asserting the merged
+  ordering is descending by `rank`, plus a check that the `projectId` tiebreak still holds.
+- **Filing status**: this session had **no Linear MCP tooling available**, so it could not be
+  created in `Triage` as the routine requires. **Needs a human to file it** (team Aquilla,
+  status `Triage`, template `Bug Report`).
+
+### Gate results — 2026-11-18
+
+All gates run **serially** (never lint alongside vitest — sandbox note 1 below still holds),
+with `rm -rf packages/*/dist` before both lints so the two are comparable.
+
+| Gate | Baseline (clean `origin/dev`) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1062 problems (0 errors, 1062 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2462 files passed / **1 failed**; 28731 tests passed / **1 failed** | exit 1 — **identical counts, identical single failure** |
+| `cd sync-worker && npm test` | exit 0 — 329 files, 4892 passed / 21 skipped | exit 0 — **identical** |
+| `pnpm test:e2e:smoke` | not re-baselined (see below) | s1 42 passed / 3 failed, s2 33 passed, s3 37 passed / 1 failed |
+
+**The one root-suite failure is pre-existing and environmental.**
+`scripts/release-cut.test.ts` → *"fails loud when the pick cannot commit, and leaves nothing
+in progress"*. The test sets `commit.gpgsign=true` with a deliberately bogus `gpg.program` and
+expects `buildReleaseBranch` to throw; in this container git does not fail on that, so nothing
+is thrown (`expected [Function] to throw an error`). It fails identically before and after the
+diff, and `scripts/` is nowhere near this run's files. Out of scope per the routine — **frozen
+for this run**, not fixed.
+
+**The four e2e failures are the two documented pre-existing sets**, both matched by file, line
+and error text against the 2026-11-13 and 2026-11-16 entries:
+- **s1, 3 failures**, all `editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a
+  15s `locator.click` timeout on `getByRole("button", { name: /Play all/i })` at line 365.
+  That is now **five consecutive runs** failing this way on clean `dev`.
+- **s3, 1 failure**, `projects/admin-console-billing.smoke.spec.ts:51` — the same
+  `ENOENT: no such file or directory, scandir 'auth-worker/.wrangler/tmp/email'` harness
+  artifact at line 77 that the last two entries recorded as passing on a re-run. Not an
+  assertion failure.
+
+A caption-import spec and an email-scandir harness race cannot be reached by rewriting comments
+in `sync-worker`'s search files. The mechanical proof is stronger than the suites anyway:
+`git diff -U0` over the changed `.ts` files, with comment lines filtered out, is **empty** —
+**every changed TypeScript line is a comment**, and sync-worker's own 329-file / 4892-test
+suite is identical before and after.
+
+**Sandbox notes from the 2026-11-16 entry all still hold and were all needed again**: serialize
+lint and vitest; `rm -rf packages/*/dist` before the baseline lint too; worker `node_modules`
+absent in a fresh container (`npm install` in `sync-worker/`, `auth-worker/`, `agent-worker/` —
+**then `git checkout -- */package-lock.json`, because plain `npm install` rewrites them**);
+Playwright browsers one revision off (`ln -sfn /opt/pw-browsers/chromium-1243
+/opt/pw-browsers/chromium-1254`, same for `ffmpeg-1011`→`1013` and
+`chromium_headless_shell-1243`→`1254`); and `bash scripts/e2e-pg-native.sh` for Postgres,
+exporting the single `E2E_PG_ADMIN_URL` line it prints.

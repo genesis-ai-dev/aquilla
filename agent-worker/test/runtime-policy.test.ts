@@ -46,8 +46,8 @@ describe("sandbox runtime policy", () => {
     // 1.x publishes `cloudflare/sandbox:<version>` as a FROM-scratch donor that
     // only carries sandbox-shim; the package and the shim speak a versioned
     // protocol, so the tag must be the package version. It is a named stage
-    // (not a bare `COPY --from=docker.io/...`) so Dependabot's docker ecosystem,
-    // which reads FROM lines only, bumps it together with the npm package.
+    // (not a bare `COPY --from=docker.io/...`) so the pairing is one FROM line
+    // that tooling can read. Bump both together (docs/DEPENDENCY-RULES.md).
     const donor = dockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:(\S+) AS sandbox-shim$/m)
     expect(donor?.[1], "Dockerfile donor stage tag").toBe(version)
     expect(dockerfile).toMatch(

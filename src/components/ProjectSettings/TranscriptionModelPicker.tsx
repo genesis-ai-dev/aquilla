@@ -1,11 +1,16 @@
 // The hosted model picker (spec §2/§6): Automatic, Whisper, Qwen3-ASR,
-// Omnilingual, and the opt-in Omnilingual Zero-Shot. Each named model says
+// Omnilingual, Omnilingual fast, and the opt-in Omnilingual Zero-Shot. Each named model says
 // whether it knows the project's language and lists every language it knows.
 //
 // Preferences is not inside a project, so the project comes from `?project=`
 // (Project Settings → Local AI models links here with it). Without one, the
 // rows still list their languages; only the "Supports …" lines and the
 // zero-shot example count need a project.
+//
+// AQU-2052: the language comes from the LANE, through
+// `transcriptionLanguageCode` — the project-level `targetLanguage` holds the
+// language NAME the create dialog saved ("Spanish"), which matched no catalog,
+// so no "Supports …" line ever appeared.
 
 import { useEffect, useMemo, useState } from "react"
 import { Check, X } from "lucide-react"
@@ -21,10 +26,12 @@ import {
 import { warmZeroShot } from "@/lib/audio/omni-warmup"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { fetchTranscriptionExamples } from "@/lib/audio/transcription-examples"
+import { transcriptionLanguageCode } from "@/lib/audio/transcription-language"
 import {
   setTranscriptionModel, useTranscriptionModel, type TranscriptionModel,
 } from "@/lib/audio/transcription-model"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { readPersistedLaneChoice } from "@/lib/lanes/active-lane-choice"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 const ROWS: ReadonlyArray<{ model: TranscriptionModel; label: MessageKey; description: MessageKey }> = [
@@ -32,6 +39,7 @@ const ROWS: ReadonlyArray<{ model: TranscriptionModel; label: MessageKey; descri
   { model: "whisper", label: "settings.transcription.model.whisper", description: "settings.transcription.model.whisperDescription" },
   { model: "qwen3-asr", label: "settings.transcription.model.qwen", description: "settings.transcription.model.qwenDescription" },
   { model: "omni-ctc", label: "settings.transcription.model.omni", description: "settings.transcription.model.omniDescription" },
+  { model: "omni-fast", label: "settings.transcription.model.omniFast", description: "settings.transcription.model.omniFastDescription" },
   { model: "omni-zs", label: "settings.transcription.model.zeroShot", description: "settings.transcription.model.zeroShotDescription" },
 ]
 
@@ -56,7 +64,19 @@ export function TranscriptionModelPicker() {
 
   const [projectId] = useState(projectIdFromUrl)
   const { project } = useProject(projectId, { enabled: projectId !== "" })
-  const tag = project?.targetLanguage ?? ""
+  // The reader's own lane choice for this project, so Preferences compares the
+  // models against the lane they were last working in.
+  const laneChoice = useMemo(
+    () => (projectId ? readPersistedLaneChoice(projectId) : undefined),
+    [projectId],
+  )
+  const tag = useMemo(
+    () => transcriptionLanguageCode(
+      project?.lanes,
+      laneChoice ? { stored: laneChoice } : {},
+    ),
+    [project?.lanes, laneChoice],
+  )
 
   const [omniCodes, setOmniCodes] = useState<readonly string[] | null>(null)
   useEffect(() => {
@@ -82,13 +102,15 @@ export function TranscriptionModelPicker() {
     "omni-ctc": omniCodes ? omnilingualLanguages(omniCodes, locale) : null,
   }), [locale, omniCodes])
 
-  // A project tagged with a language NAME cannot be matched to any catalog.
-  const codeShaped = /^[A-Za-z]{2,3}([-_][A-Za-z0-9]{1,8})*$/.test(tag)
+  // No code means nothing to compare — a freeform lane label ("Grade 7
+  // English") derives none, and a silent row beats a guessed claim.
   const supports = (row: TranscriptionModel): boolean | null => {
-    if (!codeShaped) return null
+    if (!tag) return null
     if (row === "whisper") return toWhisperCode(tag) !== undefined
     if (row === "qwen3-asr") return toQwenCode(tag) !== undefined
-    if (row === "omni-ctc") return omniCodes ? toOmniCode(tag, omniCodes) !== undefined : null
+    // Fast is the small model of the same Omnilingual CTC family: the same
+    // languages. Its row has the support line but not a second 1,600-row list.
+    if (row === "omni-ctc" || row === "omni-fast") return omniCodes ? toOmniCode(tag, omniCodes) !== undefined : null
     return null
   }
 
@@ -128,7 +150,7 @@ export function TranscriptionModelPicker() {
                 <p className={supported ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>
                   {supported ? <Check className="me-1 inline size-3" /> : <X className="me-1 inline size-3" />}
                   {t(supported ? "settings.transcription.model.supports" : "settings.transcription.model.doesNotSupport",
-                    { language: languageName(tag, locale) })}
+                    { language: languageName(tag ?? "", locale) })}
                 </p>
               )}
               {row.model === "omni-zs" && exampleCount !== null && (

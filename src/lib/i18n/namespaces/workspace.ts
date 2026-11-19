@@ -45,6 +45,8 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store's leader stopped before it opened (src/lib/offline/store.ts).
+    "workspace.offline.bootFailedToast": "Your offline projects couldn't be opened. Restart the app to try again.",
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
     "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
     "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
@@ -66,8 +68,10 @@ export const workspace = defineNamespace({
       one: "{count} change hasn't reached the server — it was refused, so it won't send on its own. It stays saved on this device.",
       other: "{count} changes haven't reached the server, and some were refused and won't send on their own. They all stay saved on this device.",
     }),
-    "workspace.update.unknownDetail": "This device couldn't confirm that every change has reached the server. Anything not yet sent stays saved on this device.",
-    "workspace.update.updateAnyway": "Update anyway",
+    // Says only what is known to be true: unsent work survives the update. Not a warning.
+    "workspace.update.unknownDetail": "Any changes that haven't reached the server yet stay saved on this device.",
+    // Key name predates the wording; "anyway" read as a compromise, so the label is neutral.
+    "workspace.update.updateAnyway": "Update now",
     // Hot web bundle (src/lib/offline/bundle-update.ts): the shell rolled back a bundle that never booted.
     "workspace.update.rolledBackToast": "Aquilla reverted to the previous version after an update failed to start.",
     // Tauri offline mode: the server refuses to sync a downloaded project —
@@ -185,6 +189,12 @@ export const workspace = defineNamespace({
     "workspace.typeahead.addUser": "Add {username}",
     "workspace.typeahead.alreadyMember": "{username} is already a member.",
     "workspace.typeahead.noUserNamed": "No Aquilla user named \"{query}\".",
+    "workspace.typeahead.noAccountWithEmail":
+      "No Aquilla account has verified the email {query}. Add the person by their " +
+      "Aquilla username, send them an invite link, or ask them to verify this " +
+      "address in their account settings.",
+    "workspace.typeahead.emailAlsoWorksHint":
+      "Don't know their username? Enter their email address instead.",
     "workspace.typeahead.inviteByEmailInstead": "Invite by email instead",
     "workspace.typeahead.noScopedMatch": "No match among people who share an org or project with you.",
     "workspace.typeahead.addByExactUsername": "Add \"{query}\" by exact username",
@@ -253,9 +263,18 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.learnMore": "Learn more",
     "workspace.aiConsent.genericModelName": "AI model",
 
-    // -- AiModelDownloadChip --
+    // -- AiModelDownloadChip (toasts) --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
     "workspace.aiDownloadChip.runsInBackground": "Runs in the background — keep working as normal.",
+    "workspace.aiModelToast.downloading": "Downloading AI models",
+    "workspace.aiModelToast.loading": "Loading AI model",
+    "workspace.aiModelToast.loadingNamed": "Loading {model} model",
+    "workspace.aiModelToast.loadingMany": "Loading AI models",
+    "workspace.aiModelToast.starting": "starting…",
+    "workspace.aiModelToast.downloadFailed": "AI model download failed",
+    "workspace.aiModelToast.downloadFailedNamed": "{model} download failed",
+    "workspace.aiModelToast.modelProgress": "{model} {progress}",
+    "workspace.aiModelToast.downloadDetail": "{progress}. Runs in the background — keep working as normal.",
 
     // -- AiSetupDialog --
     "workspace.aiSetup.teamProviderLocked":
@@ -527,7 +546,6 @@ export const workspace = defineNamespace({
       other: "Every «{name}» line in this file ({count})",
     }),
     "workspace.castGutterVoice.scopeEverywhere": "Every «{name}» line, in every episode",
-    "workspace.castGutterVoice.scopeNoCharacter": "This line has no character, so the voice is for this line only.",
     "workspace.castGutterVoice.clearOneFileAtATime": "Choose this line or this file to remove a character.",
 
     // -- hooks/useOpenWorkspace --
@@ -624,6 +642,15 @@ export const workspace = defineNamespace({
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
       },
+      "workspace.offline.bootFailedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when the " +
+          "on-device storage for offline projects failed to open (for example, " +
+          "the files were still in use). Paired with a 'Restart app' action " +
+          "(workspace.offline.leaderStalledRestart); a restart usually fixes it. " +
+          "Two short sentences with periods. Plain language — no 'worker', " +
+          "'store' or 'sync' jargon.",
+      },
       "workspace.offline.preparingToast": {
         description:
           "Title of a progress toast in the Tauri desktop app while the on-device " +
@@ -686,7 +713,7 @@ export const workspace = defineNamespace({
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when some changes made on this device still haven't " +
           "been sent to the server. Reassures that updating keeps them. Paired " +
-          "with an 'Update anyway' action (workspace.update.updateAnyway). " +
+          "with an 'Update now' action (workspace.update.updateAnyway). " +
           "Plain language — no 'queue' or 'sync' jargon.",
         placeholders: {
           count: "How many changes haven't been sent yet.",
@@ -697,7 +724,7 @@ export const workspace = defineNamespace({
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when some unsent changes were refused by the server and " +
           "won't send on their own. Must not promise they'll send after the " +
-          "update. Paired with an 'Update anyway' action " +
+          "update. Paired with an 'Update now' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
           "'sync' jargon.",
         placeholders: {
@@ -708,14 +735,17 @@ export const workspace = defineNamespace({
         description:
           "Secondary line under the 'update ready' toast title in the Tauri " +
           "desktop app when the app couldn't open its local storage to check " +
-          "for unsent changes. Paired with an 'Update anyway' action " +
+          "for unsent changes. Reassures that anything not yet sent is kept " +
+          "on the device; calm, not a warning, and it must not claim that " +
+          "everything was sent. Paired with an 'Update now' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue', " +
           "'store' or 'sync' jargon.",
       },
       "workspace.update.updateAnyway": {
         description:
           "Action button on the 'changes not sent yet' update toast; installs " +
-          "the update and relaunches without waiting. Short imperative.",
+          "the update and relaunches without waiting. Short imperative. " +
+          "Neutral — avoid wording like 'anyway' that suggests a risk.",
       },
       "workspace.update.rolledBackToast": {
         description:
@@ -1060,6 +1090,28 @@ export const workspace = defineNamespace({
         placeholders: { query: "The typed username, already quoted by the template." },
         screenshot: "assign-modal",
       },
+      "workspace.typeahead.noAccountWithEmail": {
+        description:
+          "Shown when the typed text is an email address and the scoped " +
+          "lookup returns no match — the email counterpart of " +
+          "workspace.typeahead.noUserNamed. AQU-2638: the lookup only matches " +
+          "VERIFIED addresses, and it answers the same whether an account uses " +
+          "the address without having verified it or no account uses it at all, " +
+          "so this one sentence has to be true in both cases — say that no " +
+          "account has VERIFIED the address, never that none uses it. It names " +
+          "the three ways forward: add by username, send an invite link, or ask " +
+          "the person to verify the address in their account settings. {query} " +
+          "is the typed address, not quoted by the template.",
+        placeholders: { query: "The typed email address." },
+        screenshot: "assign-modal",
+      },
+      "workspace.typeahead.emailAlsoWorksHint": {
+        description:
+          "Hint under the add-member username field, shown only where the " +
+          "server will resolve an email to an account, telling the person " +
+          "they can type an email address when they don't know the username.",
+        screenshot: "assign-modal",
+      },
       "workspace.typeahead.inviteByEmailInstead": {
         description:
           "Fallback link offered after a username search dead-ends, switching " +
@@ -1337,9 +1389,45 @@ export const workspace = defineNamespace({
       },
       "workspace.aiDownloadChip.runsInBackground": {
         description:
-          "Small reassurance footer at the bottom of the floating AI-model-" +
-          "download status chip while downloads are in progress, noting the " +
-          "user doesn't need to wait around.",
+          "Reassurance that an AI-model download keeps running while the " +
+          "person continues working. Same sentence as workspace.aiModelToast." +
+          "downloadDetail; kept for translators who already have this key.",
+      },
+      "workspace.aiModelToast.loadingNamed": {
+        description:
+          "Title of the toast while one local AI model is loading into memory " +
+          "after its download finished. No progress bar — spinner and close only.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.downloadFailedNamed": {
+        description:
+          "Title of the error toast when one local AI model (Whisper or MMS) " +
+          "fails to download. The description under it is the raw error.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+        },
+      },
+      "workspace.aiModelToast.modelProgress": {
+        description:
+          "One model's line inside the download toast: the model name and " +
+          "either a percent (58%) or the word from workspace.aiModelToast.starting.",
+        placeholders: {
+          model: "Model name, Whisper or MMS. Not translated.",
+          progress: "Either a percent such as 58%, or the translated 'starting…' word.",
+        },
+      },
+      "workspace.aiModelToast.downloadDetail": {
+        description:
+          "Body of the toast shown while local AI model weights are still " +
+          "downloading. Closes once the download finishes. Tells the person " +
+          "they can keep working.",
+        placeholders: {
+          progress:
+            "One or more model lines (name plus percent or 'starting…'), " +
+            "joined with a middot when two models download together.",
+        },
       },
 
       "workspace.aiSetup.title": {
@@ -2243,11 +2331,6 @@ export const workspace = defineNamespace({
           "its lines in every episode (every file of the project) speak with " +
           "this voice, except lines given a voice of their own.",
         placeholders: { name: "The character (speaker) name on this line." },
-      },
-      "workspace.castGutterVoice.scopeNoCharacter": {
-        description:
-          "Shown in place of the three choices when the line has no character: " +
-          "a voice picked here can only be for this line.",
       },
       "workspace.castGutterVoice.clearOneFileAtATime": {
         description:

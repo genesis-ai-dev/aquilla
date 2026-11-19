@@ -3,7 +3,7 @@
 // We hit /api/v2/health once per tab (cached for 60s) so the UI can enable AI
 // controls without every callsite making its own network check.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { subscribeSession } from "@/lib/frontier/session-store"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 
@@ -81,16 +81,33 @@ export function useFrontierHealth(): FrontierHealthState {
   const [available, setAvailable] = useState<boolean>(() => snapshot?.available ?? false)
   const [checking, setChecking] = useState<boolean>(() => !snapshot)
 
-  const probe = useCallback((force = false) => {
+  // What this hook last asked React to show. Every state change below goes
+  // through `show`, which sets only what differs: setting a value React
+  // already holds still costs a render of the host component.
+  const shownRef = useRef({ available, checking })
+  const show = useCallback((next: Partial<FrontierHealthState>) => {
+    const shown = shownRef.current
+    if (next.available !== undefined && next.available !== shown.available) {
+      shown.available = next.available
+      setAvailable(next.available)
+    }
+    if (next.checking !== undefined && next.checking !== shown.checking) {
+      shown.checking = next.checking
+      setChecking(next.checking)
+    }
+  }, [])
+
+  // `quiet`: re-check without showing "checking" — for a re-probe behind an
+  // answer that is already "available" (see the session effect below).
+  const probe = useCallback((force = false, quiet = false) => {
     let cancelled = false
-    setChecking(true)
+    if (!quiet) show({ checking: true })
     checkFrontierHealth(force).then((ok) => {
       if (cancelled) return
-      setAvailable(ok)
-      setChecking(false)
+      show({ available: ok, checking: false })
     })
     return () => { cancelled = true }
-  }, [])
+  }, [show])
 
   useEffect(() => probe(), [probe])
 
@@ -99,8 +116,15 @@ export function useFrontierHealth(): FrontierHealthState {
   // initial probe ran during a transient hiccup — the AI controls would stay
   // off until the TTL elapses or the page is refreshed. Re-probe with a
   // forced refresh on every session change so login flips the controls live.
+  //
+  // AQU-2654: the session store also notifies on every return to the tab (its
+  // focus/visibility reconcile), where nothing about the session changed. The
+  // probe still runs, since it is also how a stale "unavailable" recovers, but
+  // when the service was last seen available it runs quietly: flipping
+  // `checking` on and off re-rendered the workspace twice per return to say
+  // what it already said. A result that differs is applied either way.
   useEffect(() => {
-    return subscribeSession(() => probe(true))
+    return subscribeSession(() => probe(true, snapshot?.available === true))
   }, [probe])
 
   // AQU-1377: recover on reconnect. Nothing used to subscribe to the browser's

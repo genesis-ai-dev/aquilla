@@ -3,7 +3,7 @@
 // is offered, that choosing it stitches, and that the other two still export.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ExportDialog } from "./ExportDialog"
@@ -45,6 +45,7 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => {
   return { ...actual, fetchCellAudio: vi.fn() }
 })
 
+import { toast } from "@/components/ui/toast"
 import { downloadBlob } from "@/lib/export/export-service"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { exportAudioByChapter } from "@/lib/export/audio-chapter"
@@ -215,5 +216,89 @@ describe("the dubbing audio card offers the chapter stitch", () => {
     await waitFor(() => expect(mockChapter).toHaveBeenCalledTimes(1))
     expect(mockByCharacter).not.toHaveBeenCalled()
     expect(mockByLine).not.toHaveBeenCalled()
+  })
+
+  // Wendi, 2026-11-17: the stitched file runs every line together, so an
+  // episode comes out half its length. The dubbing card has to offer the
+  // other single file — the one that keeps each line at its timestamp — and
+  // hand back a WAV, not a zip with one entry to dig out.
+  it("offers Full episode and downloads it as one WAV with every line on one track", async () => {
+    mockByCharacter.mockResolvedValue({
+      blob: new Blob([new Uint8Array([1])], { type: "audio/wav" }),
+      skipped: 0, clips: 2, characters: 1, untimed: 0,
+    })
+    render(<ExportDialog {...dubbing} />)
+    const card = screen.getByTestId("export-audio-card") as HTMLDetailsElement
+    if (!card.open) fireEvent.click(card.querySelector("summary")!)
+    fireEvent.click(screen.getByRole("radio", { name: /^Full episode/ }))
+    // What it will be is said before anything is asked for.
+    expect(screen.getByTestId("export-episode-estimate")).toHaveTextContent(/One file, about 1 minute long/)
+    fireEvent.click(screen.getByRole("button", { name: /Export audio/i }))
+    // An hour of WAV is not something to start by a stray click: it asks first.
+    const confirm = await screen.findByTestId("export-episode-confirm")
+    expect(mockByCharacter).not.toHaveBeenCalled()
+    expect(confirm).toHaveTextContent(/usually takes about 1 minute/)
+    expect(confirm).toHaveTextContent(/You can close this window/)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    await waitFor(() => expect(mockByCharacter).toHaveBeenCalledTimes(1))
+    expect(mockByCharacter).toHaveBeenCalledWith(
+      expect.objectContaining({ singleTrack: true, signal: expect.any(AbortSignal) }),
+    )
+    expect(mockChapter).not.toHaveBeenCalled()
+    expect(mockDownload).toHaveBeenCalledWith(
+      (await mockByCharacter.mock.results[0].value).blob,
+      expect.stringMatching(/_full-episode\.wav$/),
+      analytics,
+    )
+  })
+
+  it("exports nothing when the full-episode confirm step is cancelled", async () => {
+    render(<ExportDialog {...dubbing} />)
+    const card = screen.getByTestId("export-audio-card") as HTMLDetailsElement
+    if (!card.open) fireEvent.click(card.querySelector("summary")!)
+    fireEvent.click(screen.getByRole("radio", { name: /^Full episode/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Export audio/i }))
+    const confirm = await screen.findByTestId("export-episode-confirm")
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByTestId("export-episode-confirm")).not.toBeInTheDocument())
+    expect(mockByCharacter).not.toHaveBeenCalled()
+    expect(mockDownload).not.toHaveBeenCalled()
+  })
+
+  // Cancelled on purpose is not a failure: no download, and no error shown.
+  it("stops a running full-episode export without downloading or reporting an error", async () => {
+    mockByCharacter.mockImplementation(
+      ({ signal }) =>
+        new Promise((_, reject) => {
+          signal!.addEventListener("abort", () => reject(signal!.reason))
+        }),
+    )
+    const addToast = vi.spyOn(toast, "add")
+    render(<ExportDialog {...dubbing} />)
+    const card = screen.getByTestId("export-audio-card") as HTMLDetailsElement
+    if (!card.open) fireEvent.click(card.querySelector("summary")!)
+    fireEvent.click(screen.getByRole("radio", { name: /^Full episode/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Export audio/i }))
+    fireEvent.click(await screen.findByRole("button", { name: "Start export" }))
+    await waitFor(() => expect(mockByCharacter).toHaveBeenCalledTimes(1))
+    expect(await screen.findByTestId("export-keeps-running")).toBeInTheDocument()
+    // The notice in the corner carries the Cancel button; press it.
+    const notice = addToast.mock.calls.at(-1)![0] as { actionProps: { onClick: () => void } }
+    notice.actionProps.onClick()
+    await waitFor(() => expect(screen.queryByTestId("export-keeps-running")).not.toBeInTheDocument())
+    expect(mockDownload).not.toHaveBeenCalled()
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps By character a zip of separate tracks", async () => {
+    render(<ExportDialog {...dubbing} />)
+    const card = screen.getByTestId("export-audio-card") as HTMLDetailsElement
+    if (!card.open) fireEvent.click(card.querySelector("summary")!)
+    fireEvent.click(screen.getByRole("radio", { name: /^By character/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Export audio/i }))
+    await waitFor(() => expect(mockByCharacter).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId("export-episode-confirm")).not.toBeInTheDocument()
+    expect(mockByCharacter).toHaveBeenCalledWith(expect.objectContaining({ singleTrack: false }))
+    expect(mockDownload).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/audio-by-character\.zip$/), analytics)
   })
 })

@@ -543,7 +543,8 @@ describe('artifact parse — stage (REST)', () => {
     // as contentHtml — the two things a lossy text-only extractor would drop.
     expect(commands[0].cells.filter((c) => c.type === 'heading')).toHaveLength(2)
     expect(commands[0].cells[2].contentHtml).toBe(
-      'Plain sentence with an <b>emphasised</b> word & an entity.',
+      // AQU-2539: the importer escapes the text inside its HTML.
+      'Plain sentence with an <b>emphasised</b> word &amp; an entity.',
     )
 
     const commit = (await handleExternalChangesetsRequest(commitReq(leadToken, body.changeset.id), env))!

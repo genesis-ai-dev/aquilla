@@ -240,6 +240,73 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'prepare_orthography_exceptions',
+    description:
+      'Stage a change to the words the project’s spelling rules must LEAVE ALONE as a ' +
+      'changeset (AQU-2642 — the MCP door onto the PatchOrthographyExceptions command). ' +
+      'Use this instead of patch_settings { key: "languageProfile" }: that replaces the whole ' +
+      'profile wholesale, so two people proposing exceptions around the same time is ' +
+      'last-write-wins on a list that records WHO asked for each word. Here you send OPS, and ' +
+      'the list is recomputed at commit from the then-current stored value, so an entry someone ' +
+      'else added meanwhile survives. Only an APPROVED exception affects the converter and the ' +
+      '"Old orthography" check — a pending one is a proposal and changes no text. ' +
+      'Contributor and up may add (lands pending); maintainer and up add as approved, and an ' +
+      'add naming an already-pending word APPROVES it, keeping the original proposer’s ' +
+      'credit. remove is maintainer-only: dropping an approved exception re-exposes the word to ' +
+      'the rules, which rewrites text. Args: projectId (required), ops (required: up to 200 ' +
+      '{ action: "add" | "remove", word, ref? }), ifMatchVersion (optional — unlike ' +
+      'patch_settings this is NOT required, because a version bump under a merge is not a ' +
+      'conflict; pass it to assert nothing changed since you read the profile), changesetId ' +
+      '(optional UUIDv7 for idempotency). A project with no languageProfile.orthography block ' +
+      'is validation_failed — a maintainer sets the rules and the canonical apostrophe ' +
+      'first. Sole command in its changeset. Returns { changesetId, summary, digest, mode, ' +
+      'approvalUrl? } like prepare_translations — nothing is applied until ' +
+      'confirm_changeset (ask mode: a human approves first). Call describe_command({ kind: ' +
+      '"PatchOrthographyExceptions" }) for the folding and no-op rules.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ops: {
+          type: 'array',
+          description:
+            'Up to 200 add/remove ops. Words are compared folded (lowercase, apostrophes ' +
+            'dropped), the way the converter matches, so naming the same word twice is ' +
+            'validation_failed.',
+          items: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', enum: ['add', 'remove'], description: 'add proposes or approves; remove is maintainer-only.' },
+              word: {
+                type: 'string',
+                description:
+                  'The word in the spelling the rules must NOT rewrite (≤ 32 characters, no ' +
+                  'whitespace). Stored with the profile’s canonical apostrophe substituted; ' +
+                  'the rules are deliberately not applied to it.',
+              },
+              ref: {
+                type: 'string',
+                description: 'Where the word was found (a cell id, a verse reference, a note) — shown in the Language profile panel.',
+              },
+            },
+            required: ['action', 'word'],
+            additionalProperties: false,
+          },
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the merge ' +
+            'runs against whatever the list holds at commit; pass it to get plan_stale if the ' +
+            'settings changed since you read them.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'ops'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_set_brief',
     description:
       'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
@@ -250,7 +317,13 @@ const TOOL_SPECS: McpToolSpec[] = [
       'merges them into the live brief (unnamed sections keep their value), reassembles ' +
       'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
       'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
-      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'the copilot. That last part holds only WHILE the project has not written ' +
+      'translationInstructions: once it has, the saved instructions are what every drafting ' +
+      'prompt reads, this write reaches no prompt, and the staged changeset says so with an ' +
+      'inert_write warning (AQU-2425). The brief document still changes — to change what the ' +
+      'AI reads, use patch_settings { key: "translationInstructions" }. Check which case a ' +
+      'project is in with get_prompt_preview → parts.instructions before promising a brief ' +
+      'edit will change the AI. Args: projectId (required), parameters (partial map of section id → ' +
       'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
       'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
       'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
@@ -373,6 +446,34 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'get_help',
+    description:
+      'Read the public Aquilla help site (https://help.aquilla.app), the user guide to the app. ' +
+      'Use it when the user asks how to do something in Aquilla or where a control or setting is ' +
+      'in the interface, for example "where is Export?" or "what can a Viewer do?". This is app ' +
+      'help, not API help: for API commands use describe_command, and for API workflows use ' +
+      'get_skill. Args: page (optional). Omit page for the index ({ site, pages: [{ path, title, ' +
+      'description, section, url }] }). Pass one page path ("/export/", "export" or a full ' +
+      'help.aquilla.app URL) for its Markdown ({ path, title, url, markdown }). Start with the ' +
+      'index, fetch the pages that answer the question, and give the user each page\'s url so they ' +
+      'can read it. The whole site is also in one file at https://help.aquilla.app/llms-full.txt ' +
+      'if you prefer to read everything. An unknown page returns a not_found tool error; a help ' +
+      'site outage returns a job_failed tool error. Reads no project data and needs no projectId. ' +
+      '(REST: GET /api/v1/external/help and GET /api/v1/external/help/:page.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page: {
+          type: 'string',
+          description:
+            'Help page path or URL (e.g. "/export/", "export", "https://help.aquilla.app/export/"). ' +
+            'Omit for the index of all pages.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_project',
     description:
       'Full-text search a project\'s cells (the read/grep primitive). Returns matching ' +
@@ -425,7 +526,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
-      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      '"omni-zs" | "omni-fast". "omni-fast" is the fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot; "auto" never picks it. ' +
+      '"omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
       'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
       'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
       'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
@@ -435,7 +537,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
-      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+      'only go to omni-ctc / omni-zs / omni-fast, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -450,7 +552,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           required: ['data', 'format'],
           additionalProperties: false,
         },
-        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs', 'omni-fast'], description: 'Default "auto". "omni-fast": fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.' },
         language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
         exampleCellIds: {
           type: 'array', items: { type: 'string' },
@@ -475,7 +577,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       type: 'object',
       properties: {
         ...projectIdProp,
-        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc', 'omni-fast'], description: 'Default "omni-zs". "omni-fast" starts in seconds and needs no warm-up.' },
         warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
       },
       required: ['projectId'],
@@ -971,6 +1073,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
       'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
       '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'AQU-2576: `username` may be an email address, and `email` is an accepted alias for ' +
+      'it — the target resolves by username first, then by account email. Do not guess a ' +
+      'handle you were not given. ' +
       'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
       'the credential\'s mode — membership is governance, so every change passes a human at ' +
       'the approvalUrl. You cannot grant a role above your own (permission_denied ' +
@@ -1625,9 +1730,13 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   // AQU-2407: both stage a changeset only; the brief write (and the L1
   // render it pays for) happens at confirm_changeset.
   prepare_set_brief: 'stage',
+  // AQU-2642: stages the exception merge only; the list is recomputed and
+  // written at confirm_changeset.
+  prepare_orthography_exceptions: 'stage',
   regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
+  get_help: 'read',
   search_project: 'read',
   find_similar_cells: 'read',
   transcribe_audio: 'spend',

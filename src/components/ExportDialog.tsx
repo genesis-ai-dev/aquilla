@@ -26,6 +26,16 @@ import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType }
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
@@ -53,7 +63,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, chapterLabelForCell, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterLabelForCell, chapterNumbersByLabel, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -85,7 +95,7 @@ import { buildHtmlProjectZip } from "@/lib/export/exporters/html-project"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { toast } from "@/components/ui/toast"
 
-import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
+import { estimateEpisodeExport, previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { previewAudioByChapter } from "@/lib/export/audio-chapter"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
@@ -117,9 +127,9 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "docx-lines" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-episode" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "docx-lines" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
-type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
+type AudioMode = "audio-by-character" | "audio-episode" | "audio-by-line" | "audio-chapter"
 
 interface FormatOption {
   id: ExportFormat
@@ -267,6 +277,15 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.audioByCharacter.label",
     ext: ".zip",
     descriptionKey: "importExport.format.audioByCharacter.description",
+    lossy: false,
+  },
+  {
+    // The same placement as by character, on ONE track: a single mono WAV
+    // the length of the episode. Sits beside it because it is its sibling.
+    id: "audio-episode",
+    labelKey: "importExport.format.audioEpisode.label",
+    ext: ".wav",
+    descriptionKey: "importExport.dialog.audioEpisodeModeHint",
     lossy: false,
   },
   {
@@ -442,6 +461,10 @@ interface ExportDialogProps {
   targetLanguage?: string
   /** Storage lane for the active target. Distinct from its display language. */
   targetLang?: string
+  /** AQU-2539: the active target's BCP 47 code ("fr-FR"), when one is known.
+   *  The Word export sets it as the proofing language and applies French
+   *  spacing for French. `targetLanguage` above is freeform ("French"). */
+  targetLanguageCode?: string | null
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -508,6 +531,8 @@ interface ExportDialogProps {
 
 /** AQU-2073: how many line pills the unvalidated-audio note shows before "+N more". */
 const UNVALIDATED_LINE_PILLS_SHOWN = 8
+
+const EMPTY_EXPORT_CELLS: CellData[] = []
 
 function profileIdFromCells(cells: readonly CellData[]): string | null {
   for (const cell of cells) {
@@ -579,6 +604,7 @@ export function ExportDialog({
   sourceLanguage = "und",
   targetLanguage = "und",
   targetLang = "",
+  targetLanguageCode = null,
   ttsSettings,
   getToken,
   orgId,
@@ -639,7 +665,7 @@ export function ExportDialog({
    * the format re-renders and simply carries everything.
    */
   const structuralNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     // Word and PowerPoint place content by a per-paragraph locator recorded at
     // import. A file imported before that existed is matched BY POSITION, where
     // an inserted or dropped paragraph shifts every later one onto the wrong
@@ -656,7 +682,7 @@ export function ExportDialog({
       return "importExport.dialog.structuralNoteUnplaceable" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   /**
    * AQU-1423: what this native export does with cells PARKED here ("Hide cell",
@@ -675,7 +701,7 @@ export function ExportDialog({
    * nothing surprising to explain.
    */
   const hiddenNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     if (!hasHiddenCells(cells)) return null
     // No locators means no paragraph can be placed OR dropped, so a hidden cell
     // keeps the client's words here as well — the same answer IDML gives, for a
@@ -691,7 +717,7 @@ export function ExportDialog({
       return "importExport.dialog.hiddenNoteKeepsOriginal" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -809,6 +835,11 @@ export function ExportDialog({
   /** The live export toast, so the catch-all below can turn a spinner that
    *  will never finish into the error it actually was. */
   const exportToastRef = useRef<string | null>(null)
+  // The full-episode export is the one that writes hundreds of megabytes over
+  // several minutes, so it asks first, and can be stopped once it is running.
+  const [episodeConfirmOpen, setEpisodeConfirmOpen] = useState(false)
+  const [episodeRunning, setEpisodeRunning] = useState(false)
+  const exportAbortRef = useRef<AbortController | null>(null)
 
   // Keep the base name in sync when the active file changes (e.g. dialog reopened on a new file).
   useEffect(() => {
@@ -824,7 +855,7 @@ export function ExportDialog({
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
 
-  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const activeProfileId = useMemo(() => (open ? profileIdFromCells(cells) : null), [open, cells])
   const idmlExportOptions = useMemo(
     () => partnerIdmlExportOptionsFor(activeProfileId),
     [activeProfileId],
@@ -853,6 +884,7 @@ export function ExportDialog({
    * back when neither does.
    */
   const audioSourceCells = useMemo(() => {
+    if (!open) return EMPTY_EXPORT_CELLS
     const hasTake = (list: CellData[] | undefined) =>
       list?.some((c) => {
         const id = c.selectedAudioId ?? c.selectedGeneratedVoiceAudioId
@@ -876,7 +908,7 @@ export function ExportDialog({
     if (hasTake(audioCells)) return dropHiddenCells(audioCells!)
     if (hasTake(cells)) return dropHiddenCells(cells)
     return dropHiddenCells(audioCells ?? cells)
-  }, [audioCells, cells])
+  }, [open, audioCells, cells])
 
   /**
    * Is this a DUBBING file?
@@ -909,6 +941,27 @@ export function ExportDialog({
   const recordedLines = useMemo(
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
+  )
+  /**
+   * The same rows for the BY-LINE deliverable, which does not need a timeline.
+   *
+   * `audioPreview` counts only takes the by-character mix can place, so a line
+   * with no start time is not in it. A Bible book is nothing but such lines —
+   * a verse has no second it belongs at — and one preview serving both shapes
+   * told a Luke with a recording on every verse that "nothing is recorded
+   * yet". By line copies an untimed take across as it is, so here it counts.
+   */
+  const linePreview = useMemo(
+    () =>
+      previewAudioByCharacter(audioSourceCells, ttsSettings, resolveCharacterName, {
+        needsTiming: false,
+      }),
+    [audioSourceCells, ttsSettings, resolveCharacterName],
+  )
+  /** Takes on the default row, with or without a start time. */
+  const recordedTakes = useMemo(
+    () => linePreview.reduce((n, c) => n + c.clipCount, 0),
+    [linePreview],
   )
   const chapterPreview = useMemo(
     () => previewAudioByChapter(audioSourceCells, { includeChapterHeadings }),
@@ -1065,7 +1118,7 @@ export function ExportDialog({
 
   // AQU-2183: html does project scope too, through its own orchestrator (a zip
   // of book pages plus an index), not through buildProjectZip's one-entry-per-file shape.
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "docx-lines", "pptx", "idml", "json", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-episode", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "docx-lines", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -1078,11 +1131,15 @@ export function ExportDialog({
    * AQU-465: the formats a chapter can be sliced out of.
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
-   * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
-   * USFM server-side — so there is no cell array to filter, and handing back a
+   * branch of handleExport). The package round-trip formats are deliberately
+   * absent: DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL
+   * document, so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
+   *
+   * USFM is not in this list and is sliceable all the same (AQU-2561): its
+   * original is plain text, so the worker cuts the chapter out of it. That is
+   * a different mechanism with its own condition — see `canScopeToChapter`.
    */
   const chapterScopeFormats = ["txt", "md", "html", "docx-lines", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
@@ -1118,6 +1175,7 @@ export function ExportDialog({
    * metadata sheet, then the project report. Every other project is untouched
    * and keeps the original order.
    */
+  const hasTimedCells = useMemo(() => open && cells.some((c) => c.startTime != null), [open, cells])
   const foldFormats = useMemo(() => {
     const visible = formatOptions.filter((f) => {
       // AQU-2211: the round-trip formats also need the file's original upload.
@@ -1130,10 +1188,13 @@ export function ExportDialog({
       if (f.id === "html") return offersHtmlPage // AQU-2182/AQU-2210: a Bible book only
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
+      // Lines are placed by their timestamps, so a file with none (a Bible
+      // book) has nothing this could write.
+      if (f.id === "audio-episode") return hasTimedCells
       return true
     })
     if (!isDubbingFile) return visible
-    const featured = new Set<string>(["audio-by-character", "audio-by-line", "audio-chapter", nativeFormatId ?? ""])
+    const featured = new Set<string>(["audio-by-character", "audio-episode", "audio-by-line", "audio-chapter", nativeFormatId ?? ""])
     const rest = visible.filter((f) => !featured.has(f.id))
     // The sibling subtitle format leads: a file imported as VTT features VTT
     // and offers SRT here, and the other way round.
@@ -1148,7 +1209,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable, roundTripWord])
+  }, [activeFileType, formatOptions, hasSdbhFiles, hasTimedCells, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable, roundTripWord])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -1294,13 +1355,14 @@ export function ExportDialog({
   }
 
   const distinctVoices = useMemo(() => {
+    if (!open) return []
     const names = new Set<string>()
     for (const c of cells) {
       const v = getCellVoice(c)
       if (v) names.add(v)
     }
     return Array.from(names).sort()
-  }, [cells])
+  }, [open, cells])
 
   // Same Base UI label rule as `chapterItems` below: without `items` the
   // "All voices" option ("") renders an empty trigger.
@@ -1350,8 +1412,8 @@ export function ExportDialog({
   const isRoundTripFormat = format === "usfm" || format === "docx" || format === "pptx" || format === "idml"
 
   const validatedCellCount = useMemo(
-    () => cells.filter((c) => c.status === "validated").length,
-    [cells],
+    () => (open ? cells.filter((c) => c.status === "validated").length : 0),
+    [open, cells],
   )
 
   /**
@@ -1363,8 +1425,8 @@ export function ExportDialog({
    * under "validated only" it is how many lines are about to fall silent.
    */
   const unvalidatedAudioLines = useMemo(
-    () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
-    [audioSourceCells, audioValidationRequirement],
+    () => (open ? unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement) : []),
+    [open, audioSourceCells, audioValidationRequirement],
   )
   /** AQU-2073: those lines named for the note's pills — a line's reference
    *  ("JHN 6:5"), or "L3" the way the by-line export numbers its files. */
@@ -1388,7 +1450,27 @@ export function ExportDialog({
     [audioSourceCells, contentMode, audioValidationRequirement],
   )
 
-  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+  const episodeEstimate = useMemo(
+    () => estimateEpisodeExport(audioExportCells, ttsSettings, resolveCharacterName),
+    [audioExportCells, ttsSettings, resolveCharacterName],
+  )
+  /** "One file, about 52 minutes long (300 MB). Preparing it usually takes about 5 minutes." */
+  const episodeEstimateText =
+    episodeEstimate.clips === 0
+      ? null
+      : t("importExport.dialog.episodeEstimate", {
+          count: Math.max(1, Math.round(episodeEstimate.durationSec / 60)),
+          // Whole megabytes, counted in millions of bytes as Finder and
+          // Explorer count them: "284.8 MB" claims a precision an estimate
+          // does not have.
+          // i18n-exempt "MB" is a unit symbol
+          size: `${formatNumber(Math.max(1, Math.round(episodeEstimate.bytes / 1_000_000)), locale)} MB`,
+          time: t("importExport.dialog.episodeEstimateTime", {
+            count: Math.max(1, Math.round(episodeEstimate.exportSec / 60)),
+          }),
+        })
+
+  const chapterLabels = useMemo(() => (open ? listChapterLabels(cells) : []), [open, cells])
 
   // Base UI resolves the trigger's label from the root's `items`, not from
   // the mounted <SelectItem>s, and falls back to the raw value string when
@@ -1402,10 +1484,17 @@ export function ExportDialog({
     [chapterLabels, t],
   )
 
+  /** AQU-2561: USFM asks the worker for a chapter by number, so it needs the
+   *  labels to map onto distinct numbers. Null on a several-books-in-one file. */
+  const usfmChapterNumbers = useMemo(() => chapterNumbersByLabel(chapterLabels), [chapterLabels])
+
   /** Only offered where it means something: a file with more than one chapter,
-   *  exporting itself (not the project) through a cell-array format. */
+   *  exporting itself (not the project) through a cell-array format — or as
+   *  USFM, when the worker can find the chapter by its number. */
   const canScopeToChapter =
-    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+    effectiveScope === "file" &&
+    chapterLabels.length > 1 &&
+    (supportsChapterScope(format) || (format === "usfm" && usfmChapterNumbers !== null))
   const activeChapter = canScopeToChapter ? chapterFilter : ""
 
   // Drop the chapter on close, on a file switch, and whenever the remembered
@@ -1425,7 +1514,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "docx-lines" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-episode" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "docx-lines" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1473,9 +1562,15 @@ export function ExportDialog({
        * the words as they were heard rather than as they were translated.
        */
        audioCues?: boolean
+      /** The person has said yes to the full-episode export's confirm step. */
+      confirmed?: boolean
     },
   ) {
     if (!activeFileId) return
+    if ((overrideFormat ?? format) === "audio-episode" && !opts?.confirmed && episodeEstimate.clips > 0) {
+      setEpisodeConfirmOpen(true)
+      return
+    }
     // The primary "Download <file>" button passes the native format explicitly
     // and always targets the current file; the footer Export button uses the
     // selected radio format + scope.
@@ -1516,11 +1611,27 @@ export function ExportDialog({
             : `${t("importExport.status.exportedFilesCount", { count: result.exported })}; ${t("importExport.status.skippedOlderImports", { count: result.skipped.length })}`
           setStatus({ kind: "ok", msg })
         } else {
+          // AQU-2561: one chapter, cut out of the original by the worker. As
+          // in the cell-array branch below, the primary "Download <file>"
+          // action (`overrideFormat`) always hands back the whole file,
+          // whatever chapter the fold is showing. The label and the number
+          // travel together: a label with no number is exported whole AND
+          // named whole, never as a whole book under a one-chapter name.
+          const chapterNumber = overrideFormat || !activeChapter ? undefined : usfmChapterNumbers?.get(activeChapter)
+          const chapterLabel = chapterNumber === undefined ? "" : activeChapter
           // AQU-437: use user-chosen stem with .SFM extension.
           const stem = buildExportStem(false)
-          const downloadName = `${stem}.SFM`
+          const downloadName = `${stem}${chapterFilenameSuffix(chapterLabel)}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang, validatedOnly })
+          const result = await downloadSourceFile({
+            projectId,
+            fileId: activeFileId,
+            downloadName,
+            getToken,
+            targetLang,
+            validatedOnly,
+            ...(chapterNumber !== undefined ? { chapter: chapterNumber } : {}),
+          })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -1554,7 +1665,10 @@ export function ExportDialog({
         // AQU-1148: a non-validated cell keeps its place (the package is located
         // through it) but carries no translation, so the exporter leaves that
         // paragraph's original words alone — as it already does when untranslated.
-        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), { removedCells })
+        const result = await exportDocx(rawBytes, scopeRoundTripCells(cells, contentMode), {
+          removedCells,
+          targetLanguage: targetLanguageCode,
+        })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([
@@ -1563,7 +1677,14 @@ export function ExportDialog({
             segment: w.segment,
             detail: w.detail,
           })),
-          ...collectInlineStyleWarnings(cells),
+          // AQU-2539: only paragraphs where a look was actually lost, by their
+          // first words, with the words that lost it.
+          ...(result.lostLooks ?? []).map((l) => ({
+            kind: "look-lost" as const,
+            segment: l.segment,
+            detail: l.words.map((w) => `“${w}”`).join(", "),
+          })),
+          ...collectInlineStyleWarnings(cells, { formattingReportedByExporter: true }),
         ])
         const fileName = `${baseName}.docx`
         setStatus({
@@ -1676,7 +1797,13 @@ export function ExportDialog({
             ? t("importExport.status.downloadedNoTranslations", { fileName })
             : t("importExport.status.downloadedJsonValuesTranslated", { fileName, count: injected }),
         })
-      } else if (fmt === "audio-by-character") {
+      } else if (fmt === "audio-by-character" || fmt === "audio-episode") {
+        // "audio-episode" is the same export with every character on ONE
+        // track: a single WAV the length of the episode, not a zip.
+        const episode = fmt === "audio-episode"
+        const abort = episode ? new AbortController() : null
+        exportAbortRef.current = abort
+        setEpisodeRunning(episode)
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
         // the one export that takes real time — every take is fetched, decoded
         // and laid onto a track — and the dialog's status is only visible while
@@ -1685,7 +1812,12 @@ export function ExportDialog({
         exportToastRef.current = toast.add({
           type: "loading",
           timeout: 0,
-          title: t("importExport.status.preparingCharacterExport"),
+          title: episode
+            ? t("importExport.status.preparingEpisodeExport")
+            : t("importExport.status.preparingCharacterExport"),
+          ...(abort
+            ? { actionProps: { children: t("common.cancel"), onClick: () => abort.abort() } }
+            : {}),
         })
         setStatus({ kind: "busy", msg: t("importExport.status.decodingAudio") })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -1697,6 +1829,8 @@ export function ExportDialog({
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByCharacter({
           cells: audioExportCells,
+          singleTrack: episode,
+          signal: abort?.signal,
           resolveName: resolveCharacterName,
           settings: ttsSettings,
           projectId,
@@ -1726,18 +1860,29 @@ export function ExportDialog({
                     : // Everything is decoded; what is left is rendering the
                       // last character's track and compressing, which on a
                       // long episode is where the wait actually goes.
-                      t("importExport.status.buildingArchive"),
+                      episode
+                      ? t("importExport.status.buildingEpisodeFile")
+                      : t("importExport.status.buildingArchive"),
               })
             }
           },
         })
+        // Past here there is nothing left to stop: the file is built.
+        exportAbortRef.current = null
+        setEpisodeRunning(false)
+        if (exportToastRef.current != null) toast.update(exportToastRef.current, { actionProps: undefined })
         // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
         // a valid archive, and handing one over reads as success.
         if (result.characters === 0) {
+          // Not "could not be read" when nothing was even attempted: takes
+          // with no start time were left out because this shape cannot place
+          // them, and the fix is another shape rather than another try.
           const msg =
             result.clips === 0
               ? "No recordings found in this file, so there is nothing to export."
-              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+              : result.untimed === result.clips
+                ? t("importExport.dialog.nothingTimedToPlace", { count: result.untimed })
+                : `None of the ${result.clips} recordings could be read, so the export would be empty.`
           setStatus({ kind: "error", msg })
           if (exportToastRef.current != null) {
             toast.update(exportToastRef.current, { type: "error", title: msg })
@@ -1748,7 +1893,7 @@ export function ExportDialog({
           return
         }
         const safe = buildExportStem(false) // AQU-437: user-chosen stem
-        downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
+        downloadBlob(result.blob, episode ? `${safe}_full-episode.wav` : `${safe}_audio-by-character.zip`)
         // Say what did NOT make it, in words. An unplaceable take is not a
         // failure to read the audio — it is a line with no time on it, and the
         // fix is in the file rather than in the export.
@@ -1761,9 +1906,13 @@ export function ExportDialog({
             `${result.untimed} recording${result.untimed === 1 ? " has" : "s have"} no timing, so ${result.untimed === 1 ? "it was" : "they were"} left out`,
           )
         }
-        const doneMsg = notes.length
-          ? `Exported audio by character — ${notes.join("; ")}.`
-          : `Exported ${result.characters} character track${result.characters === 1 ? "" : "s"}.`
+        const doneMsg = episode
+          ? notes.length
+            ? `${t("importExport.status.exportedEpisodeAudio")} — ${notes.join("; ")}.`
+            : t("importExport.status.exportedEpisodeAudio")
+          : notes.length
+            ? `Exported audio by character — ${notes.join("; ")}.`
+            : `Exported ${result.characters} character track${result.characters === 1 ? "" : "s"}.`
         setStatus({ kind: "ok", msg: doneMsg })
         if (exportToastRef.current != null) {
           toast.update(exportToastRef.current, { type: "success", title: doneMsg })
@@ -1799,6 +1948,11 @@ export function ExportDialog({
           projectId,
           langCode: targetLanguage || "und",
           fileBase: defaultBaseName,
+          // AQU-2560: a Bible file's takes are named by verse, not by a cast it
+          // does not have. The exporter decides "is this scripture" from the
+          // cells; a dubbing file is never offered the choice, so a cue whose
+          // text happens to read like a reference cannot rename an episode.
+          scriptureNaming: isDubbingFile ? undefined : { projectName },
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           format: lineAudioFormat,
@@ -2205,6 +2359,19 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
+      const cancelled = exportAbortRef.current?.signal.aborted === true
+      exportAbortRef.current = null
+      setEpisodeRunning(false)
+      if (cancelled) {
+        // Stopped on purpose is not a failure, and must not read as one.
+        const msg = t("importExport.status.exportCancelled")
+        setStatus({ kind: "idle" })
+        if (exportToastRef.current != null) {
+          toast.update(exportToastRef.current, { type: "info", title: msg, timeout: 5000, actionProps: undefined })
+          exportToastRef.current = null
+        }
+        return
+      }
       const msg = unplaced > 0
         ? t(
             idmlPlacementKeepsValidation
@@ -2382,15 +2549,30 @@ export function ExportDialog({
    * export audio: inside the Audio card for a dubbing file, under the format
    * list everywhere else.
    */
+  /** What the full-episode export will hand over, said before it is asked for. */
+  const renderEpisodeEstimate = () =>
+    episodeEstimateText && (
+      <p data-testid="export-episode-estimate" className="text-xs leading-relaxed text-muted-foreground">
+        {episodeEstimateText}
+      </p>
+    )
+
   const renderCharacterPreview = () => {
-          const preview = audioPreview
+          // WHICH DELIVERABLE THIS DESCRIBES. A dubbing file picks the shape on
+          // the Audio card, everything else in the format list.
+          const byLine = (isDubbingFile ? audioMode : format) === "audio-by-line"
+          const preview = byLine ? linePreview : audioPreview
           // WHO IS MISSING, not just who is included (codex-editor's lesson,
           // 2026-08-18). The list used to describe only what would be written,
           // so a character with nothing recorded simply was not in it — you
           // found out by opening the zip and noticing an absence.
           const recorded = preview.filter((p) => p.clipCount > 0)
           const unrecorded = preview.filter((p) => p.clipCount === 0)
-          const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
+          // By line writes an untimed take anyway (it just carries no
+          // timestamp), so "cannot be placed" is only true of the mix.
+          const untimedTotal = byLine ? 0 : preview.reduce((n, p) => n + p.untimedCount, 0)
+          // Recordings exist, and not one of them has a second to sit at.
+          const nothingPlaceable = recorded.length === 0 && untimedTotal > 0
           return (
           <div className="flex flex-col gap-1 text-xs" data-testid="export-character-preview">
             <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
@@ -2418,7 +2600,7 @@ export function ExportDialog({
                         <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
                       )}
                       {p.missingCount > 0 && <> · {t("importExport.dialog.stillToRecordCount", { count: p.missingCount })}</>}
-                      {p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
+                      {!byLine && p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
                     </span>
                   </div>
                 ))}
@@ -2427,11 +2609,18 @@ export function ExportDialog({
                     on added tracks "nothing is recorded" is false, and sat one
                     line away from a button that had just refused for the same
                     reason (2026-08-27). Say what is actually true. */}
+                {/* …and on a file whose lines have no start time — a Bible book,
+                    where every verse can be recorded and none of them sits at
+                    a second — "nothing is recorded" is just as false. The
+                    takes are there; this shape has nowhere to put them, and
+                    the two beside it do. */}
                 {recorded.length === 0 && (
-                  <p className="text-muted-foreground">
-                    {addedTrackTakes > 0
-                      ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
-                      : t("importExport.dialog.nothingRecordedYet")}
+                  <p className="text-muted-foreground" data-testid="export-nothing-to-preview">
+                    {nothingPlaceable
+                      ? t("importExport.dialog.nothingTimedToPlace", { count: untimedTotal })
+                      : addedTrackTakes > 0
+                        ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
+                        : t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still
@@ -2454,7 +2643,7 @@ export function ExportDialog({
                     </div>
                   </details>
                 )}
-                {untimedTotal > 0 && (
+                {untimedTotal > 0 && !nothingPlaceable && (
                   <p className="text-muted-foreground">
                     {t("importExport.dialog.untimedRecordingsNote", { count: untimedTotal })}
                   </p>
@@ -2512,6 +2701,8 @@ export function ExportDialog({
       </div>
     )
   }
+
+  if (!open) return <Dialog open={false} onOpenChange={handleOpenChange} />
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -2628,6 +2819,11 @@ export function ExportDialog({
                     hint: "One track per character, every take at its own place on the timeline. All the tracks start at 0:00, so they drop onto a DAW already lined up with each other and with the film. For mixing.",
                   },
                   {
+                    id: "audio-episode" as const,
+                    label: t("importExport.dialog.audioEpisodeModeLabel"),
+                    hint: t("importExport.dialog.audioEpisodeModeHint"),
+                  },
+                  {
                     id: "audio-by-line" as const,
                     label: "By line",
                     hint: "One file per recording, numbered in playing order, each carrying a timestamp a DAW can place it from — plus a manifest listing them all. For reviewing and re-recording individual lines.",
@@ -2670,6 +2866,7 @@ export function ExportDialog({
                 ))}
               </RadioGroup>
               {audioMode === "audio-by-line" && renderLineFormatOption()}
+              {audioMode === "audio-episode" && renderEpisodeEstimate()}
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
               {renderUnvalidatedAudioNote()}
@@ -2679,7 +2876,9 @@ export function ExportDialog({
                 onClick={() => handleExport(audioMode)}
                 // Nothing recorded means nothing to write. Better to say so on a
                 // dead button than to hand someone a refusal after they press it.
-                disabled={!activeFileId || isBusy || (recordedLines === 0 && addedTrackTakes === 0)}
+                // `recordedTakes`, not `recordedLines`: a take with no start
+                // time is still a recording, and by line writes it.
+                disabled={!activeFileId || isBusy || (recordedTakes === 0 && addedTrackTakes === 0)}
                 aria-busy={isBusy}
               >
                 {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
@@ -3145,15 +3344,17 @@ export function ExportDialog({
           // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderLineFormatOption()}
         {/* Who is recorded — on the card for a dubbing file. */}
-        {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
+        {!isDubbingFile && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderCharacterPreview()}
+        {!isDubbingFile && format === "audio-episode"
+          && effectiveScope === "file" && renderEpisodeEstimate()}
         {!isDubbingFile && format === "audio-chapter"
           && effectiveScope === "file" && renderChapterPreview()}
         {/* AQU-965: the same warning on the format-list side — a scripture
             file's chapter stitch has no Audio card to carry it. */}
         {!isDubbingFile
-          && (format === "audio-by-character" || format === "audio-by-line" || format === "audio-chapter")
+          && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line" || format === "audio-chapter")
           && effectiveScope === "file" && renderUnvalidatedAudioNote()}
 
         {/* Lossy warning banner */}
@@ -3300,6 +3501,10 @@ export function ExportDialog({
             )}
             <span className="flex flex-col gap-1">
               <span>{status.msg}</span>
+              {/* i18n-exempt "busy" is an export-status kind tag, not copy */}
+              {status.kind === "busy" && episodeRunning && (
+                <span data-testid="export-keeps-running">{t("importExport.status.exportKeepsRunning")}</span>
+              )}
               {/* i18n-exempt "error" is an export-status kind tag, not copy */}
               {status.kind === "error" && idmlRecovery && (
                 <span className="flex flex-wrap items-center gap-2 pt-1">
@@ -3346,27 +3551,33 @@ export function ExportDialog({
           </div>
         )}
 
-        {/* Inline-style fidelity report: formatting the export could not keep. */}
+        {/* Inline-style fidelity report: formatting the export could not keep.
+            Word paragraphs that lost a look (AQU-2539) get a note of their own,
+            headed in plain words; every other warning keeps the first one. */}
         {/* i18n-exempt "ok" is an export-status kind tag, not copy */}
-        {fidelityWarnings.length > 0 && (status.kind === "ok" || status.kind === "ok-lossy") && (
+        {(status.kind === "ok" || status.kind === "ok-lossy") && ([
+          [fidelityWarnings.filter((w) => w.kind !== "look-lost"), "importExport.dialog.fidelityWarningsHeader"],
+          [fidelityWarnings.filter((w) => w.kind === "look-lost"), "importExport.dialog.lookLostHeader"],
+        ] as const).map(([list, header]) => list.length > 0 && (
           <div
+            key={header}
             role="note"
             className="flex flex-col gap-1 rounded-xl bg-amber-50 px-3 py-2.5 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
           >
             <span className="flex items-center gap-1 font-medium">
               <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-              {t("importExport.dialog.fidelityWarningsHeader", { count: fidelityWarnings.length })}
+              {t(header, { count: list.length })}
             </span>
             <ul className="ms-4 list-disc space-y-0.5">
-              {fidelityWarnings.slice(0, 6).map((w, i) => (
+              {list.slice(0, 6).map((w, i) => (
                 <li key={i}>
                   <span className="font-medium">{w.segment}</span>: {w.detail}
                 </li>
               ))}
-              {fidelityWarnings.length > 6 && <li>{t("importExport.dialog.andMore", { count: fidelityWarnings.length - 6 })}</li>}
+              {list.length > 6 && <li>{t("importExport.dialog.andMore", { count: list.length - 6 })}</li>}
             </ul>
           </div>
-        )}
+        ))}
         <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} />
         </>
         )}
@@ -3403,6 +3614,27 @@ export function ExportDialog({
           )}
         </DialogFooter>
       </DialogContent>
+      <AlertDialog open={episodeConfirmOpen} onOpenChange={setEpisodeConfirmOpen}>
+        <AlertDialogContent data-testid="export-episode-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("importExport.dialog.episodeConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {episodeEstimateText} {t("importExport.dialog.episodeConfirmCloseNote")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setEpisodeConfirmOpen(false)
+                void handleExport("audio-episode", { confirmed: true })
+              }}
+            >
+              {t("importExport.dialog.episodeConfirmStart")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

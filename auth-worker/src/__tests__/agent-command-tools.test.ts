@@ -116,6 +116,47 @@ describe("propose_command — static pre-validation (no HTTP)", () => {
     expect(out).toContain("SYNC_WORKER_URL")
   })
 
+  // The in-app agent's staging call must reach sync-worker through the SYNC_WORKER
+  // service binding when one is configured. A same-zone global fetch to the
+  // public URL is answered by the zone origin, not the Worker, so the agent saw
+  // its staging fail while the changeset never existed (AQU-2216 class).
+  it("stages through the SYNC_WORKER service binding, not a same-zone global fetch", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('p1', 'P', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('p1', 1, 400)",
+    ).run()
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    const bindingCalls: { url: string }[] = []
+    const SYNC_WORKER = {
+      fetch: async (url: string) => {
+        bindingCalls.push({ url })
+        return new Response(
+          JSON.stringify({
+            changeset: { id: "cs-decision", status: "staged", summary: { events: [], warnings: [] } },
+            digest: "sha256:abc",
+            approvalUrl: "https://aquilla.app/approve/cs-decision",
+          }),
+          { status: 200 },
+        )
+      },
+    }
+    const ctx = ctxFor(400, { SYNC_WORKER })
+    const out = await proposeCommandTool(
+      {
+        commands: [
+          { kind: "AddDecision", slug: "pericope-quotes", decision: "Close quotation marks at pericope boundaries." },
+        ],
+      },
+      ctx,
+    )
+    expect(out).not.toMatch(/^error:/)
+    expect(out).toContain("cs-decision")
+    expect(bindingCalls).toHaveLength(1)
+    expect(bindingCalls[0].url).toContain("/api/v1/changesets/p1")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   // AQU-1179: the staged-changeset line is what the person reads before
   // applying the plan, so it must carry the server's plain-language effect
   // label rather than the raw event kind. Older summaries have no label and

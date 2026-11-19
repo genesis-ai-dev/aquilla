@@ -39,6 +39,7 @@ import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
+import { helpIndex, helpPage } from './help-site'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -189,6 +190,14 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'nothing on its own. Call get_skill { name } for the full body before starting the ' +
         'workflow it covers. project-setup: intake template → one ProjectSetup command → one ' +
         'approval → verification receipt.',
+    },
+    // AQU-2581: app help from the public help site, not API documentation.
+    help: {
+      tool: 'get_help',
+      note:
+        'Public app help from https://help.aquilla.app: how to do things in the Aquilla app and where ' +
+        'its controls are. Call get_help with no page for the index, then get_help { page } for one ' +
+        'page. Not API documentation: for commands use describe_command and for API workflows get_skill.',
     },
     projectSettings: {
       readTool: 'get_project_settings',
@@ -621,6 +630,18 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
     })
   }
   return ok({ name: skill.name, title: skill.title, oneLiner: skill.oneLiner, body: skill.body })
+}
+
+// ── get_help ─────────────────────────────────────────────────────────────────
+
+/** AQU-2581: app help from the public help site (help-site.ts). Like get_skill,
+ *  no role gate and no projectId: the pages are public text. The helpers never
+ *  throw, so an outage is a tool error and the other tools are unaffected. */
+async function getHelpTool(env: ExternalEnv, args: Record<string, unknown>): Promise<McpToolResult> {
+  const page = str(args, 'page')
+  const result = page === undefined ? await helpIndex(env) : await helpPage(env, page)
+  if (!result.ok) return fail(result.code, result.message, result.details ? { details: result.details } : undefined)
+  return ok(result.body)
 }
 
 // ── delegated reads ──────────────────────────────────────────────────────────
@@ -1194,6 +1215,39 @@ async function prepareSetBriefTool(
   return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
+/** prepare_orthography_exceptions (AQU-2642 §4): the dedicated MCP door onto
+ *  PatchOrthographyExceptions. Only argument marshalling lives here — the op
+ *  validation, the CONTRIBUTOR/MAINTAINER split, the no-orthography refusal and
+ *  the commit-time merge all stay in commands-orthography-exceptions.ts.
+ *
+ *  `ifMatchVersion` is passed through only when the caller supplied one: the
+ *  merge is the point of this command, so the server must NOT helpfully pin a
+ *  version the caller did not ask to pin (that would turn every concurrent
+ *  entry into a plan_stale). */
+async function prepareOrthographyExceptionsTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!Array.isArray(args.ops) || args.ops.length === 0) {
+    return fail(
+      'validation_failed',
+      'ops must be a non-empty array of { action: "add" | "remove", word, ref? }',
+    )
+  }
+
+  const command = {
+    kind: 'PatchOrthographyExceptions',
+    projectId,
+    ops: args.ops,
+    ...(args.ifMatchVersion !== undefined ? { ifMatchVersion: args.ifMatchVersion } : {}),
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
 /** regenerate_brief_summary (AQU-2407): the dedicated MCP door onto
  *  RegenerateBriefSummary — the agent's equivalent of the in-app "Regenerate
  *  summary" button. The render, its metering and the empty-brief refusal are
@@ -1597,6 +1651,8 @@ export async function callTool(
       return describeCommandTool(args)
     case 'get_skill':
       return getSkillTool(args)
+    case 'get_help':
+      return getHelpTool(env, args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'transcribe_audio':
@@ -1637,6 +1693,8 @@ export async function callTool(
       return patchSettings(env, token, args, ctx)
     case 'prepare_set_brief':
       return prepareSetBriefTool(env, token, args, ctx)
+    case 'prepare_orthography_exceptions':
+      return prepareOrthographyExceptionsTool(env, token, args, ctx)
     case 'regenerate_brief_summary':
       return regenerateBriefSummaryTool(env, token, args, ctx)
     case 'upload_artifact':

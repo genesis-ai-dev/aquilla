@@ -55,6 +55,7 @@ export const obsRoute: ResourceRoute = {
         const ref = frame.group
         const cell: DcsCell = {
           cellId: dcsCellId(`${repo}|${ref}`),
+          unitKey: ref,
           value: frame.original,
           type: frame.type,
           canonicalRef: ref,

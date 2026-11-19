@@ -1,5 +1,5 @@
 /**
- * AQU-1422: "Hide cell" / "Show cell" in the source cell's three-dot menu.
+ * AQU-1422: "Hide cell" / "Show cell" in the source cell's context menu.
  *
  * The rules pinned here, and why each one earns a test:
  *
@@ -178,7 +178,7 @@ const rowEl = (cellId: string) => document.querySelector(`[data-cell-id="${cellI
  *  state ride, because it is the one that spans source, target and gutter. */
 const gridEl = (cellId: string) => rowEl(cellId).querySelector("[data-grid-row]") as HTMLElement
 const openMenu = (cellId: string) => {
-  fireEvent.click(within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`))
+  fireEvent.contextMenu(within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`))
 }
 /** Menus are a popup layer, so entries are found on `screen`, not in the row. */
 const hiddenEntry = () => screen.findByTestId("cell-menu-toggle-hidden")

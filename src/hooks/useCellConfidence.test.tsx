@@ -178,4 +178,23 @@ describe("useCellConfidence request shaping", () => {
     expect(fetchCellConfidence).toHaveBeenCalledTimes(2)
     expect(result.current.healthMap.has("c1")).toBe(false)
   })
+
+  // AQU-2654. WHY: the seeding effect runs on every focus change and every
+  // edit, and wrote a fresh Map each time. A new map identity re-rendered the
+  // workspace and every visible row once more per click and per commit.
+  it("moving focus or re-running with nothing new keeps the same health map", async () => {
+    const cells = [cell("c9", "a", "validated"), cell("c2", "b")]
+    let focusedCellId: string | null = null
+    const { result, rerender } = renderHook(() => useCellConfidence({ ...base, cells, focusedCellId }))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(CONFIDENCE_RESCORE_DEBOUNCE_MS) })
+    const settled = result.current.healthMap
+    expect(settled.get("c9")).toBe(100)
+    for (const next of ["c2", "c9", null]) {
+      focusedCellId = next
+      rerender()
+      await act(async () => { await Promise.resolve() })
+    }
+    expect(result.current.healthMap).toBe(settled)
+  })
 })

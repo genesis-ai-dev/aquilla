@@ -26,6 +26,7 @@ import {
 import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
 import { renderBriefSummary } from './brief-summary-bridge'
+import { briefInertWarnings } from './brief-inert-warning'
 import type {
   ChangesetSummary,
   ExternalEnv,
@@ -250,7 +251,9 @@ export async function prepareSetBrief(
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges: briefChangesPreview(cmd),
-    warnings: [],
+    // AQU-2425: no brief change passes approval silently once the project's
+    // saved Instructions are what every prompt reads.
+    warnings: briefInertWarnings(current.settings),
   }
 
   return stageAndRespond(db, env, {

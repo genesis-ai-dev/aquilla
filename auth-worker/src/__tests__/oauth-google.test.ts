@@ -1,3 +1,4 @@
+import { parseDesktopGoogleCallback } from "../../../shared/desktop-google"
 import { URL as NodeURL } from "node:url"
 import { readFileSync } from "node:fs"
 import { PGlite } from "@electric-sql/pglite"
@@ -50,6 +51,94 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("returns native handoffs through the desktop parser, requiring PKCE and rejecting replay", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    const challenge = await pkceChallenge(verifier)
+    expect((await post("start", {challenge}, "app://localhost")).status).toBe(400)
+    expect((await post("start", {challenge,desktop:true}, "https://evil.example")).status).toBe(400)
+    const begin = await post("start", {challenge,desktop:true}, "app://localhost")
+    expect(begin.status).toBe(200)
+    const auth = new URL((await begin.json() as {authorization_url:string}).authorization_url)
+    const response = await callback(auth)
+    const result = parseDesktopGoogleCallback(response.headers.get("location")!)!
+    expect(result.state).toBe(challenge)
+    expect(result.code).toMatch(/^[a-f0-9]{64}$/)
+    expect((await post("exchange", {code:result.code,verifier:"b".repeat(64)}, "app://localhost")).status).toBe(400)
+    const exchange = await post("exchange", {code:result.code,verifier}, "app://localhost")
+    expect(exchange.status).toBe(200)
+    expect(await exchange.json()).toMatchObject({username:"alice",created:false})
+    expect((await post("exchange", {code:result.code,verifier}, "app://localhost")).status).toBe(400)
+    expect((await callback(auth)).status).toBe(400)
+    const cancelStart = await post("start", {challenge,desktop:true}, "http://app.localhost")
+    const cancelAuth = new URL((await cancelStart.json() as {authorization_url:string}).authorization_url)
+    const cancel = await app.request(`/api/v2/auth/oauth/google/callback?state=${cancelAuth.searchParams.get("state")}&error=access_denied`, {}, testEnv)
+    expect(parseDesktopGoogleCallback(cancel.headers.get("location")!)).toEqual({state:challenge,error:"cancelled"})
+  })
+
+  it("refuses a legacy Google link whose email no longer matches the account", async () => {
+    await seedUser(1,"alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    await env.AQUILLA_PG.prepare("UPDATE users SET email='changed@example.com',password_hash=NULL WHERE id=1").run()
+    const response = await post("exchange",{code:await handoff(),verifier})
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({error:"account_mismatch"})
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM users").first()).toEqual({n:1})
+  })
+
+  it("revokes pending and fresh old-Google access after a verified email change", async () => {
+    await seedUser(1,"alice")
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=? WHERE id=1").bind(await hashPasswordWerkzeugScrypt("a strong password")).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    const pendingCode=await handoff()
+    const jwt=await new JWTService(testEnv).createAccessToken("alice")
+    let mail=""
+    const mailEnv=Object.assign(Object.create(testEnv),{EMAIL:{send:async (m:{text:string})=>{mail=m.text}}})
+    const change=(path:string,body:object)=>app.request("/api/v2/auth/email-change/"+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${jwt}`},body:JSON.stringify(body)},mailEnv)
+    expect((await change("request",{email:"new@example.com",password:"a strong password"})).status).toBe(200)
+    expect((await change("confirm",{token:mail.match(/\b[0-9]{6}\b/)![0]})).status).toBe(200)
+    expect((await post("exchange",{code:pendingCode,verifier})).status).toBe(400)
+    const fresh=await (await post("exchange",{code:await handoff(),verifier})).json() as {step:string;access_token?:string;continuation:string}
+    expect(fresh.step).toBe("signup")
+    expect(fresh.access_token).toBeUndefined()
+    // The old Google identity cannot reclaim the existing username/account.
+    expect((await post("finish",{code:fresh.continuation,verifier,username:"alice"})).status).toBe(409)
+    expect(await env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=1").first()).toEqual({email:"new@example.com"})
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM provider_identities WHERE user_id=1").first()).toEqual({n:0})
+  })
+
+  it.each(["connect", "finish"])("refuses an old %s proof if email changes while waiting for the account lock", async path => {
+    await seedUser(1,"alice")
+    const password="a strong password"
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=? WHERE id=1").bind(await hashPasswordWerkzeugScrypt(password)).run()
+    const jwt=await new JWTService(testEnv).createAccessToken("alice")
+    let code=await handoff()
+    if(path==="finish") code=(await (await post("exchange",{code,verifier})).json() as {continuation:string}).continuation
+    const transact=env.AQUILLA_PG.transaction!.bind(env.AQUILLA_PG)
+    vi.spyOn(env.AQUILLA_PG,"transaction").mockImplementationOnce(async work => {
+      // A concurrent email-change commit lands after password proof was read.
+      await env.AQUILLA_PG.prepare("UPDATE users SET email='new@example.com',session_version=session_version+1 WHERE id=1").run()
+      return transact(work)
+    })
+    const response=await app.request("/api/v2/auth/oauth/google/"+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${jwt}`},body:JSON.stringify({code,verifier,password})},testEnv)
+    expect(response.status).toBe(409)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM provider_identities WHERE user_id=1").first()).toEqual({n:0})
+  })
+
+  it("does not mint a replacement session if email changes during Google exchange", async () => {
+    await seedUser(1,"alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    const original=JWTService.prototype.createAccessTokenWithPayload
+    vi.spyOn(JWTService.prototype,"createAccessTokenWithPayload").mockImplementationOnce(async function(this: JWTService, ...args) {
+      await env.AQUILLA_PG.prepare("UPDATE users SET email='new@example.com',session_version=session_version+1 WHERE id=1").run()
+      await env.AQUILLA_PG.prepare("DELETE FROM provider_identities WHERE user_id=1").run()
+      return original.apply(this,args)
+    })
+    const response=await post("exchange",{code:await handoff(),verifier})
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({error:"session_failed"})
+  })
+
   it("writes welcome verification using the task-owned database handle", async () => {
     const original = postResponse.withPostResponseDb
     const close = vi.fn(async () => {})
@@ -153,8 +242,8 @@ describe("Google login boundary", () => {
     expect((await manage("disconnect", { password })).status).toBe(200)
   })
 
-  it("enforces dev access before signup and linked login, including revocation between steps", async () => {
-    testEnv.DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
+  it.each(["aquilla-dev-identity", "aquilla-auth-preview"])("enforces access on %s before signup and linked login, including revocation between steps", async (worker) => {
+    testEnv.DEPLOYMENT_WORKER_NAME = worker
     const get = vi.fn().mockResolvedValue(null)
     testEnv.DEV_ACCESS_LIST = { get } as unknown as KVNamespace
     const denied = await post("exchange", { code: await handoff(), verifier })

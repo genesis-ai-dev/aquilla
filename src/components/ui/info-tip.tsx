@@ -18,7 +18,7 @@ export function useInfoOpen(): [boolean, () => void] {
   return [open, () => setOpen((o) => !o)]
 }
 
-export function InfoToggle({ open, onToggle, label, controls, testId }: {
+export function InfoToggle({ open, onToggle, label, controls, testId, tabIndex }: {
   open: boolean
   onToggle: () => void
   /** What the (i) explains, for screen readers. */
@@ -26,10 +26,13 @@ export function InfoToggle({ open, onToggle, label, controls, testId }: {
   /** The id(s) of the InfoReveal(s) it opens. */
   controls: string
   testId?: string
+  /** Keep it out of the tab order when a parent menu would otherwise focus it on open. */
+  tabIndex?: number
 }) {
   return (
     <button
       type="button"
+      tabIndex={tabIndex}
       aria-label={label}
       aria-expanded={open}
       aria-controls={controls}

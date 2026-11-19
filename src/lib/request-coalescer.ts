@@ -91,6 +91,68 @@ export function createRequestCoalescer<T>(options: RequestCoalescerOptions = {})
   return coalescer
 }
 
+let turn = 0
+let turnOpen = false
+
+/**
+ * A number that is the same for every call made before the current stack
+ * unwinds, and different afterwards. React runs all the effects of one commit
+ * in one such turn, so "started in this turn" means "started by a sibling that
+ * mounted in the same commit", a few microseconds ago.
+ */
+export function currentSyncTurn(): number {
+  if (!turnOpen) {
+    turnOpen = true
+    turn += 1
+    queueMicrotask(() => {
+      turnOpen = false
+    })
+  }
+  return turn
+}
+
+export interface SameTurnCoalescer<T> {
+  run(key: string, fn: () => Promise<T>): Promise<T>
+}
+
+/**
+ * Shares one request between identical callers that ask in the same
+ * synchronous turn, and only those (AQU-2654).
+ *
+ * This is for a read that several components start when they mount together
+ * AND that the same callers re-run to recover or refresh. A window measured
+ * in milliseconds cannot tell those apart: a refresh that arrives 100 ms
+ * after a request that is hanging would join the hung request, or queue
+ * behind it. A caller in a later turn always gets a request of its own.
+ */
+export function createSameTurnCoalescer<T>(): SameTurnCoalescer<T> {
+  const started = new Map<string, { turn: number; promise: Promise<T> }>()
+  registry.add(() => started.clear())
+  return {
+    run(key, fn) {
+      const now = currentSyncTurn()
+      const existing = started.get(key)
+      if (existing && existing.turn === now) return existing.promise
+      const entry = { turn: now, promise: fn() }
+      started.set(key, entry)
+      const forget = () => {
+        if (started.get(key) === entry) started.delete(key)
+      }
+      entry.promise.then(forget, forget)
+      return entry.promise
+    },
+  }
+}
+
+/**
+ * Module-level shared reads that are not built on a coalescer (the sync-token
+ * mint, the project-settings read) register their reset here, so the one
+ * `afterEach` in src/test-setup.ts clears them too.
+ */
+export function registerSharedStateResetForTests(reset: () => void): void {
+  registry.add(reset)
+}
+
 /** Test-only: drop every coalescer's cache and in-flight state. */
 export function resetAllRequestCoalescersForTests(): void {
   for (const reset of registry) reset()

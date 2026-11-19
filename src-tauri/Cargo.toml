@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.3"
+version = "0.2.4"
 description = "Aquilla desktop shell"
 authors = ["you"]
 license = ""
@@ -27,6 +27,7 @@ tauri-plugin-log = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-dialog = "2"
 url = "2"
 tokio = { version = "1", features = ["full"] }
@@ -50,8 +51,13 @@ flate2 = "1"
 tar = "0.4"
 http = "1"
 
+# Reads the user's title-bar double-click setting (src/titlebar.rs). Same
+# major as tao's, so no second copy is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
+
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 [dev-dependencies]
 tempfile = "3"
@@ -60,3 +66,6 @@ tempfile = "3"
 # Embedded WebDriver server for the e2e smoke suite (e2e/tauri/smoke.spec.ts). Debug-build-only
 # test harness — must never be enabled for the signed release binary tauri-action publishes.
 e2e-webdriver = ["dep:tauri-plugin-wdio-webdriver"]
+
+[target.'cfg(target_os = "macos")'.build-dependencies]
+cc = "1"

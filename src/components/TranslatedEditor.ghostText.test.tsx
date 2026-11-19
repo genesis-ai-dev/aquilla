@@ -47,17 +47,17 @@ async function mount(ghostTextEnabled: boolean, onNavigateCell?: (direction: "pr
 describe("TranslatedEditor — BIA ghost text", () => {
   it("never commits the ghost; Tab accepts it through the normal commit path", async () => {
     const { pm, editor, commits } = await mount(true)
-    await waitFor(() => expect(pm.querySelector("[data-testid='ghost-text']")?.textContent).toBe("my shepherd"))
+    await waitFor(() => expect(pm.querySelector("[data-testid='ghost-text']")?.textContent).toBe("my"))
 
     expect(editor.getText()).toBe("the lord is ")
     act(() => { window.dispatchEvent(new Event("pagehide")) })
     expect(commits.at(-1)?.value).toBe("the lord is ")
-    expect(commits.at(-1)?.valueHtml ?? "").not.toContain("shepherd")
+    expect(commits.at(-1)?.valueHtml ?? "").not.toContain("the lord is my")
 
     act(() => { fireEvent.keyDown(pm, { key: "Tab" }) })
-    expect(editor.getText()).toBe("the lord is my shepherd")
+    expect(editor.getText()).toBe("the lord is my")
     act(() => { window.dispatchEvent(new Event("pagehide")) })
-    expect(commits.at(-1)?.value).toBe("the lord is my shepherd")
+    expect(commits.at(-1)?.value).toBe("the lord is my")
   })
 
   // Regression: in the table the row wires onNavigateCell, whose capture-phase
@@ -67,7 +67,7 @@ describe("TranslatedEditor — BIA ghost text", () => {
     const { pm, editor } = await mount(true, (direction) => { navigations.push(direction) })
     await waitFor(() => expect(pm.querySelector("[data-testid='ghost-text']")).not.toBeNull())
     act(() => { fireEvent.keyDown(pm, { key: "Tab" }) })
-    expect(editor.getText()).toBe("the lord is my shepherd")
+    expect(editor.getText()).toBe("the lord is my")
     expect(navigations).toEqual([])
 
     act(() => { fireEvent.keyDown(pm, { key: "Escape" }) })

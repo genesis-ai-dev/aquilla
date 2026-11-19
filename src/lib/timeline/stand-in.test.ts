@@ -10,6 +10,7 @@ import {
   PACE_OTHER_CPS,
   standInEstimator,
   standInLenSec,
+  standInText,
   STAND_IN_MAX_SEC,
   STAND_IN_MIN_SEC,
 } from "./stand-in"
@@ -90,6 +91,15 @@ describe("the file's own pace", () => {
   it("falls back to each line's script default before then", () => {
     const cells = [line("d", "y".repeat(42))]
     expect(standInEstimator(cells)(cells[0])).toBeCloseTo(42 / PACE_ALPHABETIC_CPS, 5)
+  })
+
+  it("measures a line the same way once the whitespace and the script are folded together", () => {
+    for (const text of ["In the  beginning", "耶和华对何西阿说", "دعني أسألك سؤالاً", "a\u00A0b", ""]) {
+      const cells = [line("a", text)]
+      const collapsed = standInText(cells[0])
+      const expected = standInLenSec(collapsed, defaultPaceCps(collapsed))
+      expect(standInEstimator(cells)(cells[0])).toBeCloseTo(expected, 5)
+    }
   })
 })
 

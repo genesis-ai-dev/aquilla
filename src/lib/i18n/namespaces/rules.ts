@@ -59,6 +59,12 @@ export const rules = defineNamespace({
       "Scripture reference does not match the project's book names or the canon",
     "rules.infraction.builtin.numberFormat":
       "Number is not written the way the target language writes numbers",
+    // AQU-2628: `word` and `suggestion` are raw cell content and the
+    // converter's answer for it — interpolated, never translated.
+    "rules.infraction.builtin.oldOrthography":
+      "Old spelling — this Language lane writes “{word}” as “{suggestion}”",
+    "rules.infraction.builtin.oldOrthographyPlain":
+      "Old spelling — this word uses letters the Language lane's orthography replaced",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -124,6 +130,11 @@ export const rules = defineNamespace({
     "rules.builtin.numberFormat.name": "Number format",
     "rules.builtin.numberFormat.description":
       "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
+    "rules.builtin.oldOrthography.name": "Old orthography",
+    "rules.builtin.oldOrthography.description":
+      "Words in the translation are spelled in the Language lane's own orthography. Dormant until the Language profile records one; approved exceptions are never flagged.",
+    "rules.builtinChecks.orthography.needsProfile":
+      "Needs the Language profile's spelling rules",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -686,6 +697,38 @@ export const rules = defineNamespace({
         description:
           "One-line description under that check's name in the built-in checks list. The check is " +
           "off by default because it needs the target language to be known.",
+      },
+      "rules.builtin.oldOrthography.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a word still " +
+          "spelled the way the language's PREVIOUS alphabet spelled it, after an alphabet reform. " +
+          "Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.oldOrthography.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check does " +
+          "nothing until the project records its spelling rules in the Language profile.",
+      },
+      "rules.infraction.builtin.oldOrthography": {
+        description:
+          "Finding shown on a row when a word in the translation is spelled the way the language's " +
+          "previous alphabet spelled it.",
+        placeholders: {
+          word: "The word exactly as the translator typed it. Never translated.",
+          suggestion: "The same word in the new spelling, from the project's own rules. Never translated.",
+        },
+      },
+      "rules.infraction.builtin.oldOrthographyPlain": {
+        description:
+          "The same finding, for the rare case where the new spelling of the word could not be " +
+          "worked out. Keep it short.",
+      },
+      "rules.builtinChecks.orthography.needsProfile": {
+        description:
+          "Amber note under the 'Old orthography' row in the built-in checks list, saying the check " +
+          "is asleep because the project has not recorded its spelling rules yet.",
+        maxLength: 48,
       },
       "rules.infraction.builtin.numberFormat": {
         description:

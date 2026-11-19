@@ -16,7 +16,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import { useRules } from "@/hooks/useRules"
 import { useProjectInfractions } from "@/hooks/useProjectInfractions"
 import { withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
-import { laneCheckOverrides, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
+import { laneCheckOverrides, laneOrthography, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { RulesSurface } from "@/components/RulesSurface"
@@ -158,6 +158,11 @@ export function RulesSettingsSection({
         rules,
         laneCheckOverrides(project, activeLane ?? ""),
         lanePunctuation(project, activeLane ?? "").conventions,
+        // AQU-2628: as on the Rules page — without the project's spelling
+        // rules the old-orthography check would count zero here.
+        undefined,
+        undefined,
+        laneOrthography(project),
       ),
     [rules, project, activeLane],
   )

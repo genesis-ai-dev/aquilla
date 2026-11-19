@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { deploymentExpectation } from "./cloudflare-deployment-manifest.mjs"
+import { runVerifiedDeployment } from "./cloudflare-version-deploy.mjs"
 import {
   validateActiveDeployment,
   validateProductionDeployment,
@@ -45,6 +46,36 @@ function identityVersion(
 }
 
 describe("Worker deployment verifier", () => {
+  it.each(["production", "development"] as const)("blocks promotion when %s Google login configuration is incomplete or wrong", async (environment) => {
+    const names = ["ALGORITHM", "GOOGLE_LOGIN_CLIENT_ID", "GOOGLE_LOGIN_REDIRECT_URI", "GOOGLE_LOGIN_APP_ORIGINS", "GOOGLE_LOGIN_CLIENT_SECRET"]
+    for (const name of names) {
+      for (const failure of ["missing", "wrong-type", "empty", "wrong-value"] as const) {
+        // Secret values cannot be read back. Their presence and type are checked.
+        if (name === "GOOGLE_LOGIN_CLIENT_SECRET" && (failure === "empty" || failure === "wrong-value")) continue
+        const version = identityVersion(environment)
+        const binding = version.resources.bindings.find((entry) => entry.name === name)
+        expect(binding, `${name} must be required by the manifest`).toBeDefined()
+        if (failure === "missing") version.resources.bindings = version.resources.bindings.filter((entry) => entry.name !== name)
+        else if (failure === "wrong-type") binding!.type = "json"
+        else binding!.text = failure === "empty" ? "" : "incorrect-environment-value"
+        const promoteVersion = vi.fn()
+        await expect(runVerifiedDeployment({
+          surface: "identity", environment, sourceId: "test-config",
+          upload: vi.fn().mockResolvedValue(PRODUCTION_VERSION_ID),
+          verifyVersion: async (surface, targetEnvironment, id) => {
+            expect([surface, targetEnvironment, id]).toEqual(["identity", environment, PRODUCTION_VERSION_ID])
+            return verifyWorkerVersion("identity", environment, PRODUCTION_VERSION_ID, {
+              run: vi.fn().mockResolvedValue(JSON.stringify(version)), log: vi.fn(),
+            })
+          },
+          promoteVersion,
+          verifyDeployment: vi.fn(),
+        })).rejects.toThrow(name)
+        expect(promoteVersion).not.toHaveBeenCalled()
+      }
+    }
+  })
+
   it("accepts the production identity version at 100% traffic", () => {
     expect(
       validateProductionDeployment(

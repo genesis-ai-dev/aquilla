@@ -1,6 +1,7 @@
 // Generic change detection for re-importing a file whose cells have STABLE ids
-// (lifted out of the Door43 delta, src/lib/dcs/delta.ts, so any importer can
-// use it — the DCS adapter and Smart Extensions' files.upsert both do).
+// (lifted out of the old Door43 delta so any importer can use it; Smart
+// Extensions' files.upsert does. Door43 itself now posts file revisions,
+// src/lib/dcs/revision.ts).
 //
 // Given what the importer parsed now and what the project currently holds,
 // classify every cell:

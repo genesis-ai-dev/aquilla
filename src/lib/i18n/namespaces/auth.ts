@@ -33,6 +33,41 @@ const INVITE_COUNT_PLACEHOLDER =
 
 export const auth = defineNamespace({
   keys: {
+    "auth.emailChange.accountChanged": "Your account changed during verification. Start again.",
+    "auth.emailChange.admin_verification_required": "Verify your admin session under Admin → Platform → My admin security, then try again.",
+    "auth.emailChange.administrator_coordination_required": "This account uses a configured administrator address. Contact the Aquilla team before changing it.",
+    "auth.emailChange.destination_dev_access_required": "Ask an admin to add the new email to the dev access list before changing it.",
+    "auth.emailChange.email_unavailable": "That email cannot be used. Choose another address or contact support.",
+    "auth.emailChange.email_unchanged": "Enter a different email address.",
+    "auth.emailChange.incorrect_password": "That Aquilla password is incorrect. Try again.",
+    "auth.emailChange.ownership_proof_required": "Your account could not be verified. Check your Aquilla password or verify with your linked Google account again.",
+    "auth.emailChange.email_delivery_unavailable": "We could not send the verification email. Your account email has not changed. Try again later.",
+    "auth.emailChange.invalid_or_expired_code": "That code is invalid or expired. Request a new verification email.",
+    "auth.emailChange.rate_limited": "Too many attempts. Please wait before trying again.",
+    "auth.emailChange.restart": "Start again",
+    "auth.emailChange.failed": "Aquilla could not process this request. Please try again shortly.",
+    "auth.emailChange.networkError": "We could not reach Aquilla. Check your connection and try again.",
+    "auth.emailChange.serviceUnavailable": "Email changes are temporarily unavailable. Please try again later.",
+    "auth.emailChange.sessionRequired": "Please log in again before changing your email.",
+    "auth.emailChange.password_required": "Set an Aquilla password first. You’ll use it with your new email after Google is disconnected. Your email and Google login stay unchanged until you verify the new email.",
+    "auth.emailChange.unlinkWarningTitle": "Google login will be disconnected",
+    "auth.emailChange.unlinkWarning": "When you confirm your new email, Google login will be disconnected from this account. Log in with your new email and Aquilla password afterward. Your projects and permissions will stay the same.",
+    "auth.emailChange.success": "Your email has been changed. You have been logged out of this account. Log in with your new email and Aquilla password.",
+    "auth.emailChange.intro": "Verify your account, then enter the code sent to your new email. Your current email stays in place until you confirm. You will need to log in again afterward.",
+    "auth.emailChange.code": "Verification code",
+    "auth.emailChange.address": "New email",
+    "auth.emailChange.password": "Aquilla password",
+    "auth.emailChange.google": "Verify with Google",
+    "auth.emailChange.back": "Back to login methods",
+    "auth.emailChange.sent": "A verification code was sent to",
+    "auth.emailChange.expiry": "It expires in 15 minutes.",
+    "auth.emailChange.confirm": "Confirm email change",
+    "auth.emailChange.send": "Send verification email",
+    "auth.emailChange.googleFailed": "Could not start Google verification. Try again.",
+    "auth.emailChange.title": "Change account email",
+    "auth.emailChange.action": "Change email",
+    "auth.emailChange.accountEmail": "Account email",
+
     "auth.methods.title": "Login methods",
     "auth.methods.description": "Manage how you log in to your Aquilla account.",
     "auth.methods.passwordSet": "Aquilla password: set",
@@ -54,9 +89,26 @@ export const auth = defineNamespace({
     "auth.methods.connectFailed": "Google could not be connected. Check your Aquilla password and use the matching Google email. No account was switched or created.",
     "auth.methods.back": "Back to login methods",
     "auth.google.continue": "Continue with Google",
+    "auth.google.or": "or",
     "auth.google.redirecting": "Opening Google…",
     "auth.google.privacy": "Google is contacted only when you continue. Analytics sharing is a separate choice.",
-    "auth.google.startFailed": "Google login could not start. Check your connection and browser storage, or use your password.",
+    "auth.google.startFailed": "We couldn’t open Google login. Try again. If this keeps happening, contact the Aquilla team.",
+    "auth.google.desktopUnsupported": "Google login isn’t available in the desktop app yet. Use Aquilla in your web browser to log in with Google.",
+    "auth.google.privateSession": "Use a private Google sign-in session",
+    "auth.google.desktopWaitingTitle": "Signing in with Google",
+    "auth.google.desktopClosed": "The Google sign-in window was closed.",
+    "auth.google.desktopExpired": "This Google sign-in request has expired.",
+    "auth.google.desktopWaitingHint": "Finish signing in with Google to continue in Aquilla.",
+    "auth.google.cancelAndSwitch": "Cancel and use another method",
+    "auth.google.desktopWaiting": "Finish signing in with Google in your browser, then return to Aquilla. You can cancel and try again if the request expires.",
+    "auth.google.browserOpenFailed": "We couldn’t open your browser. Try Google login again.",
+    "auth.google.startOrigin": "Google login isn’t available from this app or address. Open Aquilla in your web browser and try again.",
+    "auth.google.startOffline": "You’re offline. Connect to the internet, then try Google login again.",
+    "auth.google.startStorage": "This browser couldn’t save the information needed for Google login. Try another browser or allow site storage for Aquilla.",
+    "auth.google.startTimeout": "Aquilla took too long to respond. Try Google login again in a moment.",
+    "auth.google.startNetwork": "We couldn’t reach Aquilla to start Google login. Check your connection and try again.",
+    "auth.google.startRateLimited": "There have been too many login attempts. Wait a few minutes, then try again.",
+    "auth.google.startService": "Aquilla couldn’t start Google login right now. Please try again in a moment.",
     "auth.google.chooseUsername": "Create an Aquilla Account",
     "auth.google.linkTitle": "Connect Google to your account",
     "auth.google.usernameNote": "Choose your permanent Aquilla username. Your Google account will be used to log in.",
@@ -66,6 +118,11 @@ export const auth = defineNamespace({
     "auth.google.cancelled": "Google login was cancelled. You can try again or use your password.",
     "auth.google.invalidPassword": "That password did not match. Nothing has been linked.",
     "auth.google.identityTaken": "That username or email is already reserved. Use your existing account or choose another username.",
+    "auth.settings.loginRequired": "Log in to manage your account",
+    "auth.settings.loginDescription": "Your account settings will appear here after you log in.",
+    "auth.google.checkingAvailability": "Checking Google login availability…",
+    "auth.google.previewDisabled": "Google login is disabled in CI previews. Use your Aquilla password, or use Google login on dev.",
+    "auth.google.notConfigured": "Google login isn’t set up for this environment yet. Contact the Aquilla team to enable it.",
     "auth.google.unavailable": "Google login is temporarily unavailable. Check your connection and try again.",
     "auth.google.retryAvailability": "Retry Google login availability",
     "auth.google.rateLimited": "Too many attempts. Wait a few minutes before trying again.",
@@ -89,8 +146,9 @@ export const auth = defineNamespace({
     "auth.login.createAccountLink": "Create an account",
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
+    "auth.login.previewAccessRestricted": "Access to CI previews is restricted. Ask the Aquilla team to add you to the dev access list.",
     "auth.login.devAccessRestricted":
-      "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list.",
+      "Access to dev is restricted. Ask the Aquilla team to add you to the dev access list.",
     "auth.login.accountTransitionFailed":
       "We signed you in, but couldn't safely finish switching accounts. Your previous account's data is still isolated. Retry to finish the switch.",
     "auth.login.onboardingMigrationFailed":
@@ -187,6 +245,22 @@ export const auth = defineNamespace({
     "auth.join.invalidInviteLink": "Invalid invite link",
     "auth.join.networkError": "Couldn't reach the server. Check your connection and try again.",
     "auth.join.wrongEmail": "This invite was sent to a different email address.",
+    "auth.join.wrongEmailInvited": "This invite is for {email}.",
+    "auth.join.wrongEmailSignedInWithEmail": "You're signed in as {username} ({email}).",
+    "auth.join.wrongEmailSignedIn": "You're signed in as {username}.",
+    "auth.join.wrongEmailAskOwner":
+      "Sign out and sign in with the invited address, or ask the project owner to add " +
+      "your account \u201C{username}\u201D directly.",
+    "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
+    "auth.join.emailUnverified": "Verify your email address to accept this invite.",
+    "auth.join.emailUnverifiedInvited":
+      "This invite was sent to {email}, and this account hasn\u2019t confirmed that " +
+      "address yet.",
+    "auth.join.emailUnverifiedBody":
+      "This invite was sent to an email address this account hasn\u2019t confirmed yet.",
+    "auth.join.emailUnverifiedNext":
+      "Send yourself a verification link, open it, then come back to this invite and " +
+      "accept.",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -226,6 +300,19 @@ export const auth = defineNamespace({
     "auth.verifyEmail.confirmedBody": "Thanks — your email address is confirmed.",
     "auth.verifyEmail.goToApp": "Go to Aquilla",
     "auth.verifyEmail.couldntVerify": "Couldn't verify",
+    "auth.verifyEmail.statusVerified": "Email verified",
+    "auth.verifyEmail.statusUnverified": "Email not verified",
+    "auth.verifyEmail.unverifiedWhy":
+      "Verify this address so teammates can add you to a project by email.",
+    "auth.verifyEmail.sendLink": "Send verification link",
+    "auth.verifyEmail.sending": "Sending…",
+    "auth.verifyEmail.linkSent": "Verification link sent to {email}. Open it to confirm this address.",
+    "auth.verifyEmail.already_verified": "This address is already verified.",
+    "auth.verifyEmail.rate_limited":
+      "Too many verification emails were sent. Try again later.",
+    "auth.verifyEmail.email_delivery_unavailable":
+      "We could not send the verification email. Try again later.",
+    "auth.verifyEmail.sendFailed": "We could not send the verification email. Try again.",
     "auth.verifyEmail.stillUsable":
       "You can still use Aquilla — verification isn't required to sign in.",
 
@@ -250,6 +337,40 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.emailChange.accountChanged": { description: "Email change proof was invalidated by a concurrent account update." },
+      "auth.emailChange.admin_verification_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.administrator_coordination_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.destination_dev_access_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.email_unavailable": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.email_unchanged": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.incorrect_password": { description: "Incorrect existing Aquilla password when changing account email." },
+      "auth.emailChange.ownership_proof_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.email_delivery_unavailable": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.invalid_or_expired_code": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.rate_limited": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.restart": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.networkError": { description: "Network failure or timeout during email change." },
+      "auth.emailChange.serviceUnavailable": { description: "Email change endpoint is unavailable on the server." },
+      "auth.emailChange.sessionRequired": { description: "Session rejected during email change." },
+      "auth.emailChange.failed": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.password_required": { description: "Password prerequisite for a verified email change." },
+      "auth.emailChange.unlinkWarning": { description: "Warn that confirming an email change removes Google login." },
+      "auth.emailChange.success": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.intro": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.code": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.address": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.password": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.google": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.back": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.sent": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.expiry": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.confirm": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.send": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.googleFailed": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.title": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.action": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+      "auth.emailChange.accountEmail": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
+
       "auth.methods.title": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
       "auth.methods.description": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
       "auth.methods.passwordSet": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
@@ -271,9 +392,26 @@ export const auth = defineNamespace({
       "auth.methods.connectFailed": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
       "auth.methods.back": { description: "Account login-method management. Aquilla and Google are product names; do not translate them." },
       "auth.google.continue": { description: "Google OAuth continue text. First-party login UI; no automatic provider contact." },
+      "auth.google.or": { description: "Divider between Google login and the username/password form. Indicates alternative login methods, not a sequence of required steps." },
       "auth.google.redirecting": { description: "Google OAuth redirecting text. First-party login UI; no automatic provider contact." },
       "auth.google.privacy": { description: "Google OAuth privacy text. First-party login UI; no automatic provider contact." },
       "auth.google.startFailed": { description: "Google OAuth startFailed text. First-party login UI; no automatic provider contact." },
+      "auth.google.desktopUnsupported": { description: "Desktop cannot complete the web OAuth callback; web login does not sign the desktop app in." },
+      "auth.google.privateSession": { description: "Optional private browser session for Google login on compatible desktop builds." },
+      "auth.google.desktopWaitingTitle": { description: "Status while desktop Google authentication is pending." },
+      "auth.google.desktopClosed": { description: "The user dismissed the desktop Google sign-in window." },
+      "auth.google.desktopExpired": { description: "The desktop Google login attempt expired." },
+      "auth.google.desktopWaitingHint": { description: "Instructions while waiting for Google authentication." },
+      "auth.google.cancelAndSwitch": { description: "Cancel the pending Google login and show other login methods." },
+      "auth.google.desktopWaiting": { description: "Desktop waiting for system-browser Google sign-in; cancellation invalidates the local attempt." },
+      "auth.google.browserOpenFailed": { description: "Native system browser failed to open for Google login." },
+      "auth.google.startOrigin": { description: "OAuth start request rejected because the app origin is not allowed. Do not blame storage or network." },
+      "auth.google.startOffline": { description: "Actionable Google login start failure: startOffline. Do not imply the user has an Aquilla password." },
+      "auth.google.startStorage": { description: "Actionable Google login start failure: startStorage. Do not imply the user has an Aquilla password." },
+      "auth.google.startTimeout": { description: "Actionable Google login start failure: startTimeout. Do not imply the user has an Aquilla password." },
+      "auth.google.startNetwork": { description: "Actionable Google login start failure: startNetwork. Do not imply the user has an Aquilla password." },
+      "auth.google.startRateLimited": { description: "Actionable Google login start failure: startRateLimited. Do not imply the user has an Aquilla password." },
+      "auth.google.startService": { description: "Actionable Google login start failure: startService. Do not imply the user has an Aquilla password." },
       "auth.google.chooseUsername": { description: "Google OAuth chooseUsername text. First-party login UI; no automatic provider contact." },
       "auth.google.linkTitle": { description: "Google OAuth linkTitle text. First-party login UI; no automatic provider contact." },
       "auth.google.usernameNote": { description: "Google OAuth usernameNote text. First-party login UI; no automatic provider contact." },
@@ -283,6 +421,11 @@ export const auth = defineNamespace({
       "auth.google.cancelled": { description: "Google OAuth cancelled text. First-party login UI; no automatic provider contact." },
       "auth.google.invalidPassword": { description: "Google OAuth invalidPassword text. First-party login UI; no automatic provider contact." },
       "auth.google.identityTaken": { description: "Google OAuth identityTaken text. First-party login UI; no automatic provider contact." },
+      "auth.settings.loginRequired": { description: "Centered signed-out account settings heading." },
+      "auth.settings.loginDescription": { description: "Signed-out guidance shared by account preference pages." },
+      "auth.google.checkingAvailability": { description: "First-party availability check; button stays visible and disabled until ready." },
+      "auth.google.previewDisabled": { description: "Explains intentionally disabled Google button in CI previews; password login still requires dev access." },
+      "auth.google.notConfigured": { description: "Google explicitly disabled by this environment, not a network failure." },
       "auth.google.unavailable": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
       "auth.google.retryAvailability": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
       "auth.google.rateLimited": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
@@ -291,12 +434,8 @@ export const auth = defineNamespace({
       "auth.google.unavailableRestart": { description: "First-party Google login recovery message; retry never contacts Google automatically." },
       "auth.google.failed": { description: "Google OAuth failed text. First-party login UI; no automatic provider contact." },
       "auth.google.back": { description: "Google OAuth back text. First-party login UI; no automatic provider contact." },
-      "auth.login.devAccessRestricted": {
-        description:
-          "Shown under the sign-in form when the password was right but the account " +
-          "may not use the team's internal test site. 'dev.aquilla.app' is a web " +
-          "address: never translate it. 'The Aquilla team' means the people who run Aquilla.",
-      },
+      "auth.login.previewAccessRestricted": { description: "CI preview access refusal; previews use the same dev access list." },
+      "auth.login.devAccessRestricted": { description: "Development site access refusal; ask the Aquilla team for dev access." },
       "auth.login.title": {
         description:
           "Heading of the sign-in form. Short imperative/label phrase naming the " +
@@ -769,7 +908,74 @@ export const auth = defineNamespace({
       "auth.join.wrongEmail": {
         description:
           "Error shown when accepting fails because the invite is bound to a " +
-          "different email address than the signed-in account's.",
+          "different email address than the signed-in account's. Fallback for " +
+          "a server that does not name the invited address; otherwise " +
+          "auth.join.wrongEmailInvited is shown.",
+      },
+      "auth.join.wrongEmailInvited": {
+        description:
+          "Headline of the email-mismatch rejection, naming the address the " +
+          "invite was minted for. {email} is already masked by the server " +
+          "(for example 'n…a@proton.me') and is rendered in bold.",
+        placeholders: { email: "The masked invited address, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailSignedInWithEmail": {
+        description:
+          "Second line of the email-mismatch rejection, naming the account " +
+          "the person is signed in as. {username} is shown in full and bold " +
+          "(it is what a project owner needs to add them directly); {email} " +
+          "is that account's own address, masked before display.",
+        placeholders: {
+          username: "The signed-in username, rendered as bold markup.",
+          email: "The signed-in account's masked email address.",
+        },
+      },
+      "auth.join.wrongEmailSignedIn": {
+        description:
+          "Same as auth.join.wrongEmailSignedInWithEmail, for a session that " +
+          "carries no email claim — the username alone.",
+        placeholders: { username: "The signed-in username, rendered as bold markup." },
+      },
+      "auth.join.wrongEmailAskOwner": {
+        description:
+          "The two ways out of an email-mismatch rejection: sign in with the " +
+          "invited address, or have the project owner add this account by its " +
+          "username. {username} is quoted by the template.",
+        placeholders: { username: "The signed-in username, quoted by the template." },
+      },
+      "auth.join.wrongEmailSignOut": {
+        description:
+          "Button on the email-mismatch rejection that signs the person out " +
+          "so they can sign back in with the address the invite was sent to.",
+      },
+      "auth.join.emailUnverified": {
+        description:
+          "Heading on the join page when accepting was refused because the signed-in " +
+          "account has never confirmed the email address the invite was sent to. The " +
+          "account is the right one \u2014 this is not the wrong-address rejection " +
+          "(auth.join.wrongEmail).",
+      },
+      "auth.join.emailUnverifiedInvited": {
+        description:
+          "Detail under auth.join.emailUnverified. {email} is the signed-in account's " +
+          "own address, masked (\u201Cn\u2026a@proton.me\u201D) and rendered inline " +
+          "\u2014 never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The signed-in account's own email address, masked. It is also the address " +
+            "the invite was sent to, which is why the invite matched this account at all.",
+        },
+      },
+      "auth.join.emailUnverifiedBody": {
+        description:
+          "Stands in for auth.join.emailUnverifiedInvited when the session carries no " +
+          "email address to name.",
+      },
+      "auth.join.emailUnverifiedNext": {
+        description:
+          "One line under auth.join.emailUnverified saying what to do: use the send " +
+          "button below it, open the emailed link, then return here and accept. Makes " +
+          "clear that verifying alone does not join the project.",
       },
       "auth.join.noLongerValidFresh": {
         description:
@@ -927,6 +1133,59 @@ export const auth = defineNamespace({
       },
       "auth.verifyEmail.couldntVerify": {
         description: "Error heading shown when the verification link could not be processed.",
+      },
+      "auth.verifyEmail.statusVerified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has been confirmed. Read-only — there is no action next to it.",
+      },
+      "auth.verifyEmail.statusUnverified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has not been confirmed yet.",
+      },
+      "auth.verifyEmail.unverifiedWhy": {
+        description:
+          "One line under auth.verifyEmail.statusUnverified saying why confirming the " +
+          "address matters: an unconfirmed address cannot be found by a project owner " +
+          "adding members by email.",
+      },
+      "auth.verifyEmail.sendLink": {
+        description:
+          "Button in account settings that emails a fresh verification link to the " +
+          "account's own address.",
+      },
+      "auth.verifyEmail.sending": {
+        description: "Label on auth.verifyEmail.sendLink while the request is in flight.",
+      },
+      "auth.verifyEmail.linkSent": {
+        description:
+          "Confirmation after the link was emailed. {email} is the account's own email " +
+          "address, rendered inline — never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The account's own email address, the only address the link is ever sent to.",
+        },
+      },
+      "auth.verifyEmail.already_verified": {
+        description:
+          "Shown instead of a confirmation when the address turned out to be verified " +
+          "already (for example it was confirmed in another tab).",
+      },
+      "auth.verifyEmail.rate_limited": {
+        description:
+          "Shown when the send button has been used too many times in a short period, " +
+          "so no further email was sent.",
+      },
+      "auth.verifyEmail.email_delivery_unavailable": {
+        description:
+          "Shown when Aquilla could not hand the verification email to its mail " +
+          "provider, so nothing was sent.",
+      },
+      "auth.verifyEmail.sendFailed": {
+        description:
+          "Generic failure for the send-verification-link button when no more specific " +
+          "reason is known (e.g. the network dropped).",
       },
       "auth.verifyEmail.stillUsable": {
         description:

@@ -678,10 +678,15 @@ export const importExport = defineNamespace({
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
+    // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
+    // longer says it is dropped. Wording approved by Ryder on the ticket
+    // (2026-11-03). The format is offered for a Bible book only (ExportDialog's
+    // `offersHtmlPage`), so there is no sentence for non-scripture files.
     "importExport.format.html.description":
       "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
-      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
-      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
+      "section headings, with paragraphs and poetry lines as the book lays them out and each " +
+      "chapter's footnotes listed at its end. For reviewers and printing. Untranslated lines show " +
+      "their source text, marked. Not for re-import.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -723,6 +728,29 @@ export const importExport = defineNamespace({
     "importExport.format.audioChapter.description":
       "One continuous WAV per chapter, with the verse recordings joined end to end in verse " +
       "order. For community check — play the chapter straight through outside the editor.",
+    "importExport.format.audioEpisode.label": "Full episode audio",
+    "importExport.dialog.audioEpisodeModeLabel": "Full episode",
+    "importExport.dialog.audioEpisodeModeHint":
+      "One mono file, as long as the episode, with every character's lines at their own place on " +
+      "the timeline and silence in between. Starts at 0:00, so it lines up with the film.",
+    "importExport.status.preparingEpisodeExport": "Preparing the full-episode file…",
+    "importExport.status.buildingEpisodeFile": "Building the episode file…",
+    "importExport.status.exportedEpisodeAudio": "Exported the full episode as one audio file.",
+    "importExport.dialog.episodeEstimate": plural({
+      one: "One file, about {count} minute long ({size}). {time}",
+      other: "One file, about {count} minutes long ({size}). {time}",
+    }),
+    "importExport.dialog.episodeEstimateTime": plural({
+      one: "Preparing it usually takes about {count} minute.",
+      other: "Preparing it usually takes about {count} minutes.",
+    }),
+    "importExport.dialog.episodeConfirmTitle": "Export the full episode?",
+    "importExport.dialog.episodeConfirmCloseNote":
+      "You can close this window and keep working while it is prepared. A notice in the corner " +
+      "shows progress, lets you cancel, and tells you when the download starts.",
+    "importExport.dialog.episodeConfirmStart": "Start export",
+    "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
+    "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
@@ -882,6 +910,13 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    // A Bible book: a recording on every verse, and no verse with a start
+    // time. "Nothing is recorded yet" was false there — the by-character mix
+    // just has nowhere to put a take that sits at no second.
+    "importExport.dialog.nothingTimedToPlace": plural({
+      one: "{count} recording has no start time, so it cannot be placed on a character track. Export by line or as chapter audio to include it.",
+      other: "{count} recordings have no start time, so they cannot be placed on character tracks. Export by line or as chapter audio to include them.",
+    }),
     "importExport.dialog.nothingOnMainTrack": plural({
       one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
       other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
@@ -1001,6 +1036,12 @@ export const importExport = defineNamespace({
       other: "{count} segments lost inline formatting in this export",
     }),
     "importExport.dialog.andMore": "…and {count} more",
+    // AQU-2539: a Word export lists the paragraphs where words with their own
+    // look (bold, italic, a highlight…) were changed by the translation.
+    "importExport.dialog.lookLostHeader": plural({
+      one: "In {count} paragraph, some words lost their bold, italic or other look because the translation changed them.",
+      other: "In {count} paragraphs, some words lost their bold, italic or other look because the translation changed them.",
+    }),
     "importExport.dialog.exportAgain": "Export again",
 
     // — Export dialog: handleExport status messages —
@@ -1096,6 +1137,11 @@ export const importExport = defineNamespace({
         "TN file parsed but no valid note rows were found — check that the first three columns are " +
         "book, chapter, and verse. ({count} rows skipped due to missing canonical reference)",
     }),
+    "importExport.errors.tnFileNameHoldsBooks":
+      "The file name holds more than one book ({books}), so the notes can't be filed under one. " +
+      "Rename the file so it names one book, such as {example}.",
+    "importExport.errors.tnFileNameNoBook":
+      "The file name doesn't give the book the way unfoldingWord names its files. Rename the file to name one book, such as tn_GEN.tsv.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
@@ -1437,6 +1483,14 @@ export const importExport = defineNamespace({
     "importExport.reimport.updated": plural({
       one: "{count} cell updated",
       other: "{count} cells updated",
+    }),
+    "importExport.reimport.missing": plural({
+      one: "{count} cell no longer in the file",
+      other: "{count} cells no longer in the file",
+    }),
+    "importExport.reimport.updateHidesMissing": plural({
+      one: "Update this file hides the {count} cell that is no longer in the file, along with its translation.",
+      other: "Update this file hides the {count} cells that are no longer in the file, along with their translations.",
     }),
     "importExport.reimport.analysis": "Analysis",
     "importExport.reimport.noChanges": "Nothing in this file has changed.",
@@ -2685,6 +2739,11 @@ export const importExport = defineNamespace({
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, one file per recorded line, or one continuous file per chapter.",
       },
+      "importExport.dialog.nothingTimedToPlace": {
+        description:
+          "Shown in the Export dialog's by-character audio preview, and as the refusal if the export is run anyway, when the file has recordings but none of its lines has a start time (typically a Bible book, where verses are recorded but not timed). The by-character export lays each recording at its own second on a track, so it cannot place these; 'by line' and 'chapter audio' are the two other audio export shapes in the same dialog, which can.",
+        placeholders: { count: "Number of recordings that have no start time." },
+      },
       "importExport.dialog.nothingOnMainTrack": {
         description:
           "Shown in the by-character preview when the default Target audio row " +
@@ -2735,6 +2794,13 @@ export const importExport = defineNamespace({
       "importExport.dialog.andMore": {
         description: "Truncation notice at the end of the fidelity-warnings list.",
         placeholders: { count: "Number of additional warnings not shown." },
+      },
+      "importExport.dialog.lookLostHeader": {
+        description:
+          "Heading of a note shown after a Word export. Below it, each paragraph is named by its first words, " +
+          "followed by the words that lost their look. Words that the translation kept unchanged keep their look, " +
+          "so only changed words are listed.",
+        placeholders: { count: "Number of paragraphs listed." },
       },
       "importExport.status.downloadingCount": {
         description: "Busy-status message while downloading a project-scope USFM zip, file by file.",
@@ -2834,6 +2900,22 @@ export const importExport = defineNamespace({
           chapters: "Number of chapter files the export will produce.",
         },
       },
+      "importExport.dialog.episodeEstimate": {
+        description:
+          "Shown under the full-episode audio export option and in its confirm step: what the " +
+          "one exported audio file will be, before the person starts it.",
+        placeholders: {
+          count: "Length of the audio file in whole minutes.",
+          size: "The file's size, already formatted with its unit (for example 300 MB).",
+          time: "A full sentence saying how long the export usually takes.",
+        },
+      },
+      "importExport.dialog.episodeEstimateTime": {
+        description:
+          "A sentence placed after the full-episode export's size estimate, saying how long " +
+          "building the file usually takes.",
+        placeholders: { count: "Estimated preparation time in whole minutes." },
+      },
       "importExport.status.exportedAudioChapters": {
         description:
           "Success-status message after stitching verse recordings into one continuous file per chapter.",
@@ -2931,6 +3013,18 @@ export const importExport = defineNamespace({
       "importExport.errors.tnNoValidRowsWithSkipped": {
         description: "Thrown when a Translation Notes TSV parsed to zero valid rows, and some rows were skipped for a known reason (missing reference).",
         placeholders: { count: "Number of rows skipped for missing a canonical reference." },
+      },
+      "importExport.errors.tnFileNameHoldsBooks": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name holds more than one book code, so the book can't be read from the name (for example tn_GEN_rev.tsv). Shown instead of the 'no valid note rows' message.",
+        placeholders: {
+          books: "The book codes found in the file name, comma-separated (e.g. 'GEN, REV') — not translated.",
+          example: "A file name naming one book the person could rename to (e.g. 'tn_GEN.tsv') — not translated.",
+        },
+      },
+      "importExport.errors.tnFileNameNoBook": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name doesn't give one book where unfoldingWord puts it: right after 'tn' (tn_GEN.tsv) or as 'NN-BOOK' at the start (01-GEN.tsv). The name may hold no book at all, or one in another place (GEN_tn.tsv), so the sentence says how it falls short, not that it has no book. Shown instead of the 'no valid note rows' message. 'tn_GEN.tsv' is an example file name: keep it as it is.",
       },
       "importExport.errors.biblicaNoStudyNotes": {
         description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",
@@ -4034,6 +4128,20 @@ export const importExport = defineNamespace({
           "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
         placeholders: {
           count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.missing": {
+        description:
+          "Heading inside the re-import Analysis window for cells that are in the file now and are not in the uploaded document. The list of those cells follows it. Shown only when there is at least one.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updateHidesMissing": {
+        description:
+          "One line under the three re-import buttons, shown only when the uploaded document no longer has some cells. Says what the primary button does with them; the two copy buttons do not hide anything. 'Update this file' must match the importExport.reimport.update button label.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
         },
       },
       "importExport.reimport.analysis": {

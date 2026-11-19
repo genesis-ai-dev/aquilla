@@ -49,6 +49,21 @@ style rules, receipt-only and all-or-nothing; see AGENT-API.md's AQU-2195 addend
 { kind: 'RemoveMember', projectId: string, username: string }
 ```
 
+**AQU-2576 — `username` may be an email address, and `email` is an accepted alias for
+it.** The target is resolved by username first (case-insensitive, unchanged), then, when
+the identifier contains an `@`, against the account's login email (case-insensitive;
+`users.email` is UNIQUE on `LOWER(email)`, so at most one account matches, and an
+ambiguous database fails closed as `user_not_found`). An agent handed a person's email —
+the normal case when staffing a project — no longer has to guess a handle or walk other
+projects' rosters to find one. Nothing else changes: the floor, the grant cap and the
+target cap are all evaluated on the resolved account.
+
+Only a **verified** address resolves (`users.email_verified_at IS NOT NULL`; pen test
+2026-11-17). Registration stores an address without proving it, so an unverified match
+could be an account that registered the invitee's address first. Such an account answers
+`user_not_found` by email — the same as an address nobody uses — and is still reachable
+by its username. The invite-by-email link remains the path for everyone else.
+
 Receipt-only (a `project_members` row write, not events). Membership kinds batch with each
 other — max 25, one command per person — but never with another kind. Prepare **forces
 ask-mode** regardless of the credential's mode: every membership change a machine proposes

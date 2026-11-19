@@ -351,14 +351,16 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (15) ───────────────────────────────────────────────────────
+  // ── decides (17) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
   "changeset-approvals.ts": "decides", // OPS-47
+  "email-change.ts": "decides", // AQU-957: moving an admin email grant requires active elevation; bootstrap grants require operator coordination.
   "credentials.ts": "decides", // OPS-44 (a PAT outlives the session)
   "invites.ts": "decides",
   "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
+  "member-scopes.ts": "decides", // OPS-56 (the lane grant rows the read wall enforces, written by one PUT)
   "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
   "org-settings.ts": "decides", // D7 (the org's live vendor keys)
   "orgs.ts": "decides",
@@ -373,12 +375,11 @@ const LEDGER: Record<string, LedgerState> = {
   "langquest.ts": "delegates",
   "monday.ts": "delegates",
 
-  // ── undecided (33) — the open queue, not a clean bill ──────────────────
+  // ── undecided (32) — the open queue, not a clean bill ──────────────────
   // OPS-48's ranked remainder, with its write counts. source-linking.ts was
-  // the head of this list and is now decided (OPS-51), and
-  // termbase-subscriptions.ts was the next head and is now decided (OPS-53);
-  // these seven are what OPS-48 left, in its order.
-  "member-scopes.ts": "undecided", // OPS-48: 2 writes — and its `scopes` array is uncapped (cf. OPS-54)
+  // the head of this list and is now decided (OPS-51), then
+  // termbase-subscriptions.ts (OPS-53), then member-scopes.ts (OPS-56);
+  // these six are what OPS-48 left, in its order. knowledge.ts is the head.
   "knowledge.ts": "undecided", // OPS-48: 2 writes
   "team-handoffs.ts": "undecided", // OPS-48: 1 write
   "project-settings.ts": "undecided", // OPS-48: 1 write
@@ -504,8 +505,12 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // where connector support access is granted, so it gates on
     // hasActiveElevation at consent rather than joining the undecided queue;
     // 18 of 51.
+    // 11-12: AQU-957 adds email-change.ts with elevation before moving admin grants; 19 of 52.
+    // 11-16: OPS-56 promotes member-scopes.ts — the lane grant rows the read
+    // wall enforces are written here, and the PUT's two downstream level
+    // guards now read the de-escalated role; 20 of 52.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 15, delegates: 3, undecided: 33 })
+      .toEqual({ decides: 17, delegates: 3, undecided: 32 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

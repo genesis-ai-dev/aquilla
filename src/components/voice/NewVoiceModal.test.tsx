@@ -600,6 +600,46 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(saved.designPreviewAudioId).toMatch(/^design-preview-.+\.wav$/)
   })
 
+  // AQU-2487 (review, Nov 9): from a project's Voices panel with no file
+  // open, Voice design refused with "Open a project file before designing a
+  // voice." The design, the saved voice and its preview clip all belong to
+  // the project, so no file has to be open (as on the Clone voice tab).
+  it("designs and saves a voice when no file is open", async () => {
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    vi.mocked(publishInworldVoice).mockResolvedValue("ws__design-voice-a")
+    vi.mocked(uploadVoiceReference).mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({
+      provider: "inworld",
+      projectId: "p1",
+      fileId: null,
+      session: { jwt: "tok", username: "dev" } as FrontierSession,
+    })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.type(screen.getByLabelText("Describe the voice"), DESIGN_PROMPT)
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(await screen.findByText("Preview 1")).toBeTruthy()
+    expect(screen.queryByText("Open a project file before designing a voice.")).toBeNull()
+    expect(designInworldVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "_voices" }),
+      expect.any(Function),
+    )
+    create("British narrator")
+    await waitFor(() => {
+      expect(publishInworldVoice).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: "p1", fileId: "_voices", voiceId: "ws__design-voice-a" }),
+        expect.any(Function),
+      )
+    })
+    expect(screen.queryByText("Open a project file before designing a voice.")).toBeNull()
+    expect(uploadVoiceReference).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "_voices", blob: expect.any(Blob) }),
+    )
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
   it("shows the next step when publishing a designed voice gets the bare 502 (AQU-1755)", async () => {
     vi.mocked(designInworldVoice).mockResolvedValue([
       { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },

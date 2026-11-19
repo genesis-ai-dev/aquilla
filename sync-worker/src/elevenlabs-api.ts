@@ -8,6 +8,8 @@
 // Endpoints used (https://elevenlabs.io/docs/api-reference):
 //   GET  /v1/user/subscription            …/user/subscription/get
 //   GET  /v2/voices                       …/voices/search
+//   GET  /v1/shared-voices                …/voices/voice-library/get-shared
+//   POST /v1/voices/add/{owner}/{voice}   …/voices/voice-library/share
 //   GET  /v1/models                       …/models/list
 //   POST /v1/text-to-speech/{voice_id}    …/text-to-speech/convert
 //   POST /v1/voice-changer/{voice_id}     …/speech-to-speech/convert
@@ -40,6 +42,7 @@ export const ELEVENLABS_STS_MODEL = "eleven_multilingual_sts_v2"
  * the account's list with this one so a model the key can't use never shows.
  */
 export const ELEVENLABS_TTS_MODELS: readonly { id: string; name: string }[] = [
+  { id: "eleven_v4", name: "Eleven v4" },
   { id: "eleven_multilingual_v2", name: "Multilingual v2" },
   { id: "eleven_v3", name: "Eleven v3" },
   { id: "eleven_flash_v2_5", name: "Flash v2.5" },
@@ -52,6 +55,7 @@ export const ELEVENLABS_MAX_TEXT_CHARS = 5000
 export type ElevenLabsErrorCode =
   | "elevenlabs_key_missing"
   | "elevenlabs_invalid_key"
+  | "elevenlabs_missing_permission"
   | "elevenlabs_quota_exceeded"
   | "elevenlabs_clone_not_allowed"
   | "elevenlabs_rate_limited"
@@ -61,18 +65,21 @@ export type ElevenLabsErrorCode =
 export class ElevenLabsUpstreamError extends Error {
   readonly status: number
   readonly code: ElevenLabsErrorCode
-  constructor(status: number, code: ElevenLabsErrorCode, message: string) {
+  /** The permission a restricted key lacks (`elevenlabs_missing_permission` only). */
+  readonly permission: string | null
+  constructor(status: number, code: ElevenLabsErrorCode, message: string, permission: string | null = null) {
     super(message)
     this.name = "ElevenLabsUpstreamError"
     this.status = status
     this.code = code
+    this.permission = permission
   }
 }
 
 /** The JSON body every ElevenLabs failure is answered with. */
 export function elevenLabsErrorResponse(err: ElevenLabsUpstreamError): Response {
   return Response.json(
-    { error: err.code, message: err.message },
+    { error: err.code, message: err.message, ...(err.permission ? { permission: err.permission } : {}) },
     { status: err.status, ...(err.status === 429 ? { headers: { "Retry-After": "30" } } : {}) },
   )
 }
@@ -103,9 +110,12 @@ function readDetail(bodyText: string): UpstreamDetail {
 }
 
 /**
- * Map an upstream failure to our status + code. Order matters: quota is
- * checked before the generic 401, because ElevenLabs' legacy envelope answers
- * an exhausted account with 401 + status "quota_exceeded".
+ * Map an upstream failure to our status + code. Order matters: quota and a
+ * missing permission are checked before the generic 401, because ElevenLabs
+ * answers both with a 401 — an exhausted account as status "quota_exceeded",
+ * and a restricted key that may not make this call as status
+ * "missing_permissions" ("…missing the permission user_read…"). That key is
+ * valid, so it must not read as a rejected one.
  */
 export function mapElevenLabsError(
   upstreamStatus: number,
@@ -121,6 +131,15 @@ export function mapElevenLabsError(
     || /quota_exceeded|insufficient_credits|character_limit/.test(codes)
   ) {
     return new ElevenLabsUpstreamError(402, "elevenlabs_quota_exceeded", "ElevenLabs account is out of characters")
+  }
+  if (/missing_permissions/.test(codes)) {
+    const permission = detail.message.match(/missing the permission[s]? ([a-z0-9_]+)/i)?.[1]?.toLowerCase() ?? null
+    return new ElevenLabsUpstreamError(
+      403,
+      "elevenlabs_missing_permission",
+      permission ? `ElevenLabs API key is missing the permission ${permission}` : "ElevenLabs API key is missing a permission",
+      permission,
+    )
   }
   if (upstreamStatus === 401) {
     return new ElevenLabsUpstreamError(401, "elevenlabs_invalid_key", "ElevenLabs rejected the API key")
@@ -191,9 +210,12 @@ export interface ElevenLabsAccount {
   tier: string
   characterCount: number
   characterLimit: number
-  canClone: boolean
+  /** Null when the key may not read the account, so the plan is unknown. */
+  canClone: boolean | null
   /** Unix seconds; null when the plan has no reset. */
   resetAtUnix: number | null
+  /** False when the key may not read the account: the counts above are zeros, not a quota. */
+  quotaKnown: boolean
 }
 
 const num = (v: unknown, fallback = 0) => (typeof v === "number" && Number.isFinite(v) ? v : fallback)
@@ -207,6 +229,23 @@ export async function getElevenLabsAccount(config: ElevenLabsConfig): Promise<El
     characterLimit: num(json.character_limit),
     canClone: json.can_use_instant_voice_cloning === true,
     resetAtUnix: typeof json.next_character_count_reset_unix === "number" ? json.next_character_count_reset_unix : null,
+    quotaKnown: true,
+  }
+}
+
+/**
+ * The account for the connected line, and the check a pasted key passes to
+ * connect. A restricted key need not carry `user_read`: nothing but the quota
+ * line and the plan's cloning flag come from the account, so such a key
+ * connects on the strength of listing voices and reports its quota as unknown.
+ */
+export async function connectElevenLabsAccount(config: ElevenLabsConfig): Promise<ElevenLabsAccount> {
+  try {
+    return await getElevenLabsAccount(config)
+  } catch (err) {
+    if (!(err instanceof ElevenLabsUpstreamError) || err.code !== "elevenlabs_missing_permission") throw err
+    await listElevenLabsVoices(config, { pageSize: 1 })
+    return { tier: "", characterCount: 0, characterLimit: 0, canClone: null, resetAtUnix: null, quotaKnown: false }
   }
 }
 
@@ -265,6 +304,81 @@ export async function listElevenLabsVoices(
   const voices = Array.isArray(json.voices) ? json.voices.flatMap((v) => voiceRow(v) ?? []) : []
   const nextPageToken = json.has_more === true && typeof json.next_page_token === "string" ? json.next_page_token : null
   return { voices, nextPageToken }
+}
+
+/** A voice in ElevenLabs' public voice library (AQU-2577), not yet in the account. */
+export interface ElevenLabsLibraryVoiceRow {
+  id: string
+  /** The sharing user's public id: the add call needs it beside the voice id. */
+  ownerId: string
+  name: string
+  labels: Record<string, string>
+  previewUrl: string | null
+  description: string | null
+  /** Already saved to this account. */
+  added: boolean
+}
+
+function libraryVoiceRow(raw: unknown): ElevenLabsLibraryVoiceRow | null {
+  if (!raw || typeof raw !== "object") return null
+  const v = raw as Record<string, unknown>
+  if (typeof v.voice_id !== "string" || !v.voice_id || typeof v.public_owner_id !== "string" || !v.public_owner_id) return null
+  const labels: Record<string, string> = {}
+  for (const [label, field] of [["language", "language"], ["accent", "accent"], ["gender", "gender"], ["age", "age"], ["descriptive", "descriptive"], ["use_case", "use_case"]] as const) {
+    const value = v[field]
+    if (typeof value === "string" && value.trim()) labels[label] = value.trim()
+  }
+  return {
+    id: v.voice_id,
+    ownerId: v.public_owner_id,
+    name: typeof v.name === "string" && v.name.trim() ? v.name.trim() : v.voice_id,
+    labels,
+    previewUrl: typeof v.preview_url === "string" && v.preview_url ? v.preview_url : null,
+    description: typeof v.description === "string" && v.description.trim() ? v.description.trim() : null,
+    added: v.is_added_by_user === true,
+  }
+}
+
+export interface ElevenLabsLibraryPage {
+  voices: ElevenLabsLibraryVoiceRow[]
+  /** The next page index, or null on the last page. */
+  nextPage: number | null
+}
+
+/** Search ElevenLabs' public voice library. */
+export async function searchElevenLabsLibrary(
+  config: ElevenLabsConfig,
+  opts: { search?: string; language?: string; gender?: string; age?: string; page?: number; pageSize?: number },
+): Promise<ElevenLabsLibraryPage> {
+  const page = Math.max(0, Math.floor(opts.page ?? 0))
+  const params = new URLSearchParams({ page_size: String(Math.min(100, Math.max(1, opts.pageSize ?? 30))), page: String(page) })
+  if (opts.search) params.set("search", opts.search)
+  if (opts.language) params.set("language", opts.language)
+  if (opts.gender) params.set("gender", opts.gender)
+  if (opts.age) params.set("age", opts.age)
+  const res = await upstream(config, `/v1/shared-voices?${params.toString()}`, { method: "GET" }, "elevenLabsMetadata", "read")
+  const json = (await res.json()) as { voices?: unknown; has_more?: unknown }
+  const voices = Array.isArray(json.voices) ? json.voices.flatMap((v) => libraryVoiceRow(v) ?? []) : []
+  return { voices, nextPage: json.has_more === true ? page + 1 : null }
+}
+
+/** Save a library voice to the caller's account, under `name`. Returns its voice id there. */
+export async function addElevenLabsLibraryVoice(
+  config: ElevenLabsConfig,
+  args: { ownerId: string; voiceId: string; name: string },
+): Promise<string> {
+  const res = await upstream(
+    config,
+    `/v1/voices/add/${encodeURIComponent(args.ownerId)}/${encodeURIComponent(args.voiceId)}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ new_name: args.name }) },
+    "elevenLabsMetadata",
+    "read",
+  )
+  const json = (await res.json()) as { voice_id?: unknown }
+  if (typeof json.voice_id !== "string" || !json.voice_id) {
+    throw new ElevenLabsUpstreamError(502, "elevenlabs_failed", "ElevenLabs add voice failed: no voice id returned")
+  }
+  return json.voice_id
 }
 
 export interface ElevenLabsModelRow {

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { getExpiredSessionJwt, onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { AlertTriangle, Building2, Check, Home, Laptop, Plus, SearchIcon } from "lucide-react"
@@ -407,6 +408,7 @@ function OrgSwitcherOption({
 }
 
 export function OrgSwitcher() {
+  const rejectedJwt = useSyncExternalStore(onSessionExpired, getExpiredSessionJwt)
   const { t } = useI18n()
   const {
     orgs,
@@ -553,6 +555,7 @@ export function OrgSwitcher() {
   // a retry affordance instead. Checked before the empty-membership case so a
   // failure never reads as "you have no organizations" — and before the
   // directory-failure case below, because retryOrgLoad re-issues both fetches.
+  if (jwt && rejectedJwt === jwt) return null // Shared session recovery explains why organizations cannot load.
   if (error) {
     return (
       <button

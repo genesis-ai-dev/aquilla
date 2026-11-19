@@ -152,6 +152,8 @@ export const AUDIO_COUNTING_EVENT_KINDS = [
   'cell.audio.select',
   'cell.audio.remove',
   'cell.audio.cut',
+  // AQU-2492: removes the cut's piece and moves the take's votes.
+  'cell.audio.uncut',
   'cell.audio.validate',
   'cell.audio.unvalidate',
 ] as const
@@ -599,27 +601,6 @@ export function fileProgressRecomputeStmt(
     projectId, fileId, projectId,   // watermark
     projectId, fileId, updatedAt,   // insert
   )
-}
-
-/** Delete all section rows before a full rebuild in the same transaction. */
-export function clearSectionProgressStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-): AquillaStatement {
-  return db
-    .prepare(`DELETE FROM file_section_progress WHERE project_id = ? AND file_id = ? AND scope IN ('section', 'book')`)
-    .bind(projectId, fileId)
-}
-
-/** Rebuild every meaningful canonical section for a file. */
-export function allSectionsProgressRecomputeStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-  updatedAt: number,
-): AquillaStatement {
-  return sectionsProgressRecomputeStmt(db, projectId, fileId, updatedAt)
 }
 
 /**

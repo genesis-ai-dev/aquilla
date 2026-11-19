@@ -14,6 +14,7 @@ import {
   folderMembers,
   FOLDER_DROP_INDENT_PX,
   folderReachInPx,
+  contentFileIdsOfShownTracks,
   hiddenTracksOf,
   orderForScopeAppend,
   resolveDropTarget,
@@ -646,5 +647,15 @@ describe("buildTrackRows — hidden tracks (AQU-1684)", () => {
   it("lists only hidden tracks that still exist, and never a folder", () => {
     expect(hiddenTracksOf(tracks, new Set(["a2", "f", "deleted-long-ago"])).map((t) => t.id)).toEqual(["a2"])
     expect(hiddenTracksOf(tracks, null)).toEqual([])
+  })
+
+  it("does not name a hidden track's content file", () => {
+    const withFiles = [
+      { id: "captions", contentFileId: "file-captions" },
+      { id: "hidden-captions", contentFileId: "file-hidden" },
+      { id: "plain" },
+    ]
+    expect(contentFileIdsOfShownTracks(withFiles, new Set(["hidden-captions"]))).toEqual(["file-captions"])
+    expect(contentFileIdsOfShownTracks(withFiles, null)).toEqual(["file-captions", "file-hidden"])
   })
 })

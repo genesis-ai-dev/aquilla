@@ -1,10 +1,10 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
+import { StatTile, StatBar } from "@/components/progress/StatTiles"
 import { useState, useEffect, useCallback, useMemo, useRef, useId } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InfoNote } from "@/components/ui/info-note"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-controls"
@@ -14,7 +14,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
+import { preloadWorkspace, useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -48,6 +48,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
+import { readPortfolioRowSeed } from "@/lib/frontier/portfolio-seed"
 import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -122,6 +123,7 @@ import {
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextLinkBadge } from "@/components/paratext/ParatextLinkBadge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
@@ -168,7 +170,7 @@ import {
 } from "@/hooks/useProjectSettings"
 import { toast } from "@/components/ui/toast"
 import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
-import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
+import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 
 function ProjectOverviewSkeleton() {
@@ -246,48 +248,6 @@ function MetaFieldEditButton({
   )
 }
 
-// ── Stat tiles (big %) ────────────────────────────────────────────────────────
-
-/**
- * AQU-1764 (Sam, 2026-10-13, "Layout A, softest"): the number is in the text
- * colour, and the colour lives in a small swatch before the label — the same
- * tone that measure's bar below is drawn in (AI drafted: the stripes). The
- * numbers used to be amber, violet, emerald and sky, four colours that meant
- * nothing anywhere else.
- */
-function StatTile({ label, pct, tone, muted = false, tooltip }: {
-  label: string
-  pct: number
-  tone: ProgressTone
-  /** A cross-language figure while one language is selected: greyed, swatch faded. */
-  muted?: boolean
-  /** What the figure measures. AQU-2260 (Sam, Oct 29): it opens on a click of
-   *  the (i) by the label, in a note anchored to it; the tile no longer
-   *  explains itself on hover. */
-  tooltip?: string
-}) {
-  const t = useT()
-  return (
-    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${muted ? "text-muted-foreground/60" : "text-foreground"}`}>
-        {`${progressPercentOfFraction(pct)}%`}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span
-          aria-hidden
-          data-progress-swatch={tone}
-          className={cn("h-1.5 w-3.5 shrink-0 rounded-full", PROGRESS_BG[tone], muted && "opacity-40")}
-        />
-        {label}
-        {tooltip ? (
-          <InfoNote label={t("common.aboutAria", { name: label })} iconClassName="h-3 w-3" align="center">
-            {tooltip}
-          </InfoNote>
-        ) : null}
-      </p>
-    </div>
-  )
-}
 
 // ── Lane filter tabs (AQU-538 §3.3) ───────────────────────────────────────────
 // SegmentTabs needs a non-empty string value; map null/"All" and the default
@@ -308,43 +268,6 @@ function tabToLaneTag(tab: string): string | null {
   return tab
 }
 
-// ── Stat bar ──────────────────────────────────────────────────────────────────
-
-/**
- * One measure, one bar, one colour, starting at zero (AQU-1764, "Layout A"):
- * the card keeps a separate bar per measure, so each reads by its length alone,
- * in that measure's tone from the shared progress palette.
- */
-function StatBar({ label, value, total, tone, suffix }: {
-  label: string
-  value: number
-  total: number
-  tone: ProgressTone
-  suffix?: string
-}) {
-  const pct = progressPercent(value, total)
-  return (
-    <div className="flex items-center gap-3" data-testid={`stat-bar-${tone}`}>
-      {/* w-28, not w-20: "Audio Validated" (AQU-1764 added its bar) is the
-          longest label and wrapped onto two lines at 80px. */}
-      <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
-      <div className="flex flex-1 items-center gap-2">
-        <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-          <span
-            className={`block h-full rounded-full transition-all ${PROGRESS_BG[tone]}`}
-            style={{ width: `${pct}%` }}
-          />
-        </span>
-        <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-          {pct}%
-        </span>
-      </div>
-      <span className="w-28 shrink-0 text-end text-[11px] tabular-nums text-muted-foreground/70">
-        {value}/{total}{suffix ? ` ${suffix}` : ""}
-      </span>
-    </div>
-  )
-}
 
 // ── Per-file mini-bars ────────────────────────────────────────────────────────
 
@@ -493,7 +416,9 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
-  const [audio, setAudio] = useState<PortfolioProject | null>(null)
+  // The portfolio row the list this page was opened from was already showing.
+  // `loadRow` below still reads the org's portfolio and replaces it.
+  const [audio, setAudio] = useState<PortfolioProject | null>(() => readPortfolioRowSeed(jwt, id))
   const [files, setFiles] = useState<FileSummary[]>([])
   // fileId → display name for the autopilot panel, which knows runs by file id
   // only (its rollup comes from the run table, not the file list).
@@ -1287,6 +1212,7 @@ export function ProjectOverview() {
       const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
       let cellId: string | null = null
       if (wanted) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
@@ -1330,6 +1256,7 @@ export function ProjectOverview() {
       if (!id) return
       let cellId: string | null = null
       if (unit.sectionKey && getPlanToken) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
@@ -1987,6 +1914,7 @@ export function ProjectOverview() {
                         roleLevel={project?.syncRole?.level ?? null}
                         onSynced={() => void refresh()}
                       />
+                      <ParatextLinkBadge projectId={id} />
                     </div>
                     {/* Language pair */}
                     {languagePair && (

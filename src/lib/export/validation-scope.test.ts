@@ -23,6 +23,7 @@ interface TestCell {
   id: string
   status: "empty" | "unvalidated" | "validated"
   translated: string
+  translatedHtml?: string
   hidden?: boolean
   metadata?: Record<string, unknown> | null
 }
@@ -94,6 +95,13 @@ describe("scopeRoundTripCells (docx / pptx / idml injectors)", () => {
     const scoped = scopeRoundTripCells(MIXED, "validated-only")
     expect(scoped.map((c) => c.id)).toEqual(["a", "b", "c"])
     expect(scoped.map((c) => c.translated)).toEqual(["Aprobado", "", ""])
+  })
+
+  it("clears a non-validated cell's marked translation too", () => {
+    // A drafted cell can carry its translation with marks (translatedHtml);
+    // the injectors write that one first, so it must go as well.
+    const marked = [{ ...cell("b", "unvalidated", "Borrador"), translatedHtml: "<p><strong>Borrador</strong></p>" }]
+    expect(scopeRoundTripCells(marked, "validated-only")).toEqual([{ ...marked[0], translated: "", translatedHtml: "" }])
   })
 
   it("does not mutate the caller's cells — they still feed warnings + telemetry", () => {

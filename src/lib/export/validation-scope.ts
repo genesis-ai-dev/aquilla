@@ -159,7 +159,7 @@ function keepParagraphStarts<T extends ScopableCell>(cells: T[], keep: (cell: T)
  * words alone". Cleared as a COPY: the caller's array feeds the fidelity
  * warnings and the IDML telemetry too, and neither should see a blanked cell.
  */
-export function scopeRoundTripCells<T extends ScopableCell & { translated: string }>(
+export function scopeRoundTripCells<T extends ScopableCell & { translated: string; translatedHtml?: string }>(
   cells: T[],
   mode: ExportContentMode,
 ): T[] {
@@ -172,7 +172,9 @@ export function scopeRoundTripCells<T extends ScopableCell & { translated: strin
   // Identity return for the common file: nothing parked and no validation
   // filter, so today's exports stay byte-identical.
   if (mode === "current" && cells.every(contributes)) return cells
-  return cells.map((c) => (contributes(c) ? c : { ...c, translated: "" }))
+  // The translation with its marks goes too: the injectors write it first.
+  return cells.map((c) =>
+    contributes(c) ? c : { ...c, translated: "", ...(c.translatedHtml !== undefined ? { translatedHtml: "" } : {}) })
 }
 
 /** What `hiddenRoundTripRemovals` hands the docx/pptx injectors. Structurally

@@ -6,6 +6,7 @@ import type {
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { NumberFormatConventions } from "../../../db/shared/number-format"
+import type { OrthographyProfile } from "../../../db/shared/orthography"
 import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 import type { ProjectBookName } from "./builtin-run-context"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
@@ -54,6 +55,7 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "length-ratio": "rules.builtin.lengthRatio.name",
   "scripture-reference": "rules.builtin.scriptureReference.name",
   "number-format": "rules.builtin.numberFormat.name",
+  "old-orthography": "rules.builtin.oldOrthography.name",
   "bkp:N1": "bibleChecks.n1.name",
   "bkp:N2": "bibleChecks.n2.name",
   // AQU-1697: the name autopilot already shows for this check.
@@ -108,6 +110,7 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "length-ratio": "rules.builtin.lengthRatio.description",
   "scripture-reference": "rules.builtin.scriptureReference.description",
   "number-format": "rules.builtin.numberFormat.description",
+  "old-orthography": "rules.builtin.oldOrthography.description",
   "bkp:N1": "bibleChecks.n1.description",
   "bkp:N2": "bibleChecks.n2.description",
   "bkp:M3": "bibleChecks.m3.description",
@@ -163,6 +166,9 @@ export const BOOK_NAME_CHECK_IDS: readonly BuiltinCheckId[] = ["scripture-refere
 /** AQU-2430: the checks that judge a number by the target language's format. */
 export const NUMBER_FORMAT_CHECK_IDS: readonly BuiltinCheckId[] = ["number-format"]
 
+/** AQU-2628: the check that judges a word by the lane's own spelling rules. */
+export const ORTHOGRAPHY_CHECK_IDS: readonly BuiltinCheckId[] = ["old-orthography"]
+
 export interface ResolveBuiltinRulesOptions {
   /**
    * AQU-1688: the project's Bible data checks enrichment is on
@@ -197,6 +203,14 @@ export interface ResolveBuiltinRulesOptions {
    * same way. Omitted or null leaves that check silent.
    */
   numberFormat?: NumberFormatConventions | null
+  /**
+   * AQU-2628: the active target lane's orthography, from `laneOrthography`
+   * (src/lib/lqa/lane-builtin-checks.ts). Stamped onto the old-orthography
+   * check so the underline, the Issues tab and Check file all judge a word
+   * by the same rules the converter used. Omitted or null leaves that check
+   * silent, which is every project without the Language profile slot.
+   */
+  orthography?: OrthographyProfile | null
 }
 
 /**
@@ -215,6 +229,7 @@ export function withBuiltinOverrides(
   punctuation?: PunctuationConventions | null,
   bookNames?: readonly ProjectBookName[] | null,
   numberFormat?: NumberFormatConventions | null,
+  orthography?: OrthographyProfile | null,
 ): TranslationRule[] {
   return rules.map((rule) => {
     if (rule.check.type !== "builtin") return rule
@@ -232,6 +247,7 @@ export function withBuiltinOverrides(
         ...(punctuation && PUNCTUATION_CHECK_IDS.includes(checkId) ? { punctuation } : {}),
         ...(bookNames?.length && BOOK_NAME_CHECK_IDS.includes(checkId) ? { bookNames } : {}),
         ...(numberFormat && NUMBER_FORMAT_CHECK_IDS.includes(checkId) ? { numberFormat } : {}),
+        ...(orthography && ORTHOGRAPHY_CHECK_IDS.includes(checkId) ? { orthography } : {}),
       },
     }
   })
@@ -267,6 +283,9 @@ export function resolveBuiltinRules(
           : {}),
         ...(options.numberFormat && NUMBER_FORMAT_CHECK_IDS.includes(id)
           ? { numberFormat: options.numberFormat }
+          : {}),
+        ...(options.orthography && ORTHOGRAPHY_CHECK_IDS.includes(id)
+          ? { orthography: options.orthography }
           : {}),
       },
     }

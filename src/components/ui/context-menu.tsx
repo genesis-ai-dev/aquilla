@@ -103,17 +103,31 @@ function ContextMenuTrigger({
   )
 }
 
+/**
+ * Under the pointer, left edge on the click, opening downward. A context menu
+ * otherwise flips above the cursor, or slides up until the click sits on its
+ * bottom edge — a timeline chip at the bottom of the window always loses that.
+ * Neither axis is corrected, so the top stays under the click and the list
+ * scrolls in the space below it.
+ */
+const CONTEXT_MENU_COLLISION = {
+  side: "none",
+  align: "none",
+  fallbackAxisSide: "none",
+} as const
+
 function ContextMenuContent({
   className,
   align = "start",
-  alignOffset = 4,
-  side = "right",
-  sideOffset = 0,
+  alignOffset = 0,
+  side = "bottom",
+  sideOffset = 4,
+  collisionAvoidance = CONTEXT_MENU_COLLISION,
   ...props
 }: ContextMenuPrimitive.Popup.Props &
   Pick<
     ContextMenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "collisionAvoidance"
   >) {
   const instant = React.useContext(ContextMenuInstantContext)
 
@@ -125,6 +139,7 @@ function ContextMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        collisionAvoidance={collisionAvoidance}
       >
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
@@ -134,11 +149,11 @@ function ContextMenuContent({
           // `data-instant="click"` for every mouse-driven context menu (a
           // `contextmenu` event has `detail === 0`, which its keyboard-press
           // heuristic reads as a keyboard press), so a bare `data-instant`
-          // selector would delete every entrance. `animate-none!` beats the
-          // enter/exit utilities regardless of the order Tailwind emits them in.
+          // selector would delete every entrance. `transition-none!` beats the
+          // open/close transition regardless of the order Tailwind emits them in.
           className={cn(
             POPUP_BASE,
-            "min-w-36 data-[instant=trigger-change]:animate-none!",
+            "min-w-36 data-[instant=trigger-change]:transition-none!",
             className,
           )}
           {...props}

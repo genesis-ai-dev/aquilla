@@ -7,7 +7,7 @@
 // durable server-side workflow; closing the tab changes nothing. All strings
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, lazy, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, PencilSparkles, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -32,8 +32,13 @@ import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
 import { CONVERSATION_PARAM, runThreadId } from "@/lib/agent/team-channel"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
+
+// The activity inspector (process graph, run history) opens from the pill; its
+// code loads after the workspace paints instead of inside the workspace chunk.
+const AutopilotActivityInspector = lazy(() =>
+  import("./AutopilotActivityInspector").then((m) => ({ default: m.AutopilotActivityInspector })),
+)
 
 interface PillProps {
   projectId: string
@@ -561,16 +566,18 @@ function ContextualRunPillScoped({
           </span>
         )}
       </div>
-      <AutopilotActivityInspector
-        key={`${projectId}:${fileId}:${activeLane}`}
-        projectId={projectId}
-        open={inspectorOpen}
-        onOpenChange={setInspectorOpen}
-        focusRunId={runId}
-        focusFileId={fileId}
-        fallbackRun={inspectorRun}
-        canControl={canControl}
-      />
+      <Suspense fallback={null}>
+        <AutopilotActivityInspector
+          key={`${projectId}:${fileId}:${activeLane}`}
+          projectId={projectId}
+          open={inspectorOpen}
+          onOpenChange={setInspectorOpen}
+          focusRunId={runId}
+          focusFileId={fileId}
+          fallbackRun={inspectorRun}
+          canControl={canControl}
+        />
+      </Suspense>
     </>
   )
 }

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import type { CellStore } from "@/hooks/useActiveCellStore"
-import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { BacktranslationActionSource, BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { ProjectPresenceStore, TargetPresenceSelection } from "@/lib/sync/presence-store"
@@ -22,7 +22,7 @@ import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
 import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
-import { compareAddresses, parseRef } from "@/lib/pericope/sections"
+import { compareAddresses, parseRef, type VerseAddress } from "@/lib/pericope/sections"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import type { ToolCellStructure } from "@/lib/tools/editor-services"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
@@ -32,6 +32,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import type { ToolEditorServices } from "@/lib/tools/editor-services"
 import type { ToolRev4Services } from "@/lib/tools/host-handlers-rev4"
 import { suggestFor, recordSuggestionFeedback, setSuggestionMemory } from "@/lib/tools/suggestions"
+import { markedPreviewText } from "@/lib/completion/docx-marks"
 import type { ToolOrigin } from "../../../shared/tools/manifest"
 import type {
   ToolBacktranslation,
@@ -85,7 +86,7 @@ export interface ExtensionEditorServicesArgs {
   /** apiRev 5: the project's decay warn threshold (cellNeedsAttention). */
   decayWarnThreshold?: number
   openAiSetup: () => void
-  runBacktranslation: (cell: CellData, source: "read-back" | "refresh" | "regenerate") => Promise<void> | void
+  runBacktranslation: (cell: CellData, source: BacktranslationActionSource) => Promise<void> | void
   saveBacktranslation: (cell: CellData, text: string, polished: boolean) => void
   openHistory: (cellId: string) => void
   openAttachment: (cellId: string, attachmentId: string) => void
@@ -256,13 +257,19 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
   const pericopeSuggestions = usePericopeSuggestions(pericopeResume)
   const pericopes = useMemo<ToolPericope[]>(() => {
     const store = args.store
-    const ids = store.getCellIds()
+    const byBook = new Map<string, { id: string; address: VerseAddress }[]>()
+    for (const id of store.getCellIds()) {
+      const parsed = parseRef(store.getCellView(id)?.group ?? "")
+      if (!parsed) continue
+      const list = byBook.get(parsed.book)
+      if (list) list.push({ id, address: parsed.address })
+      else byBook.set(parsed.book, [{ id, address: parsed.address }])
+    }
     const out: ToolPericope[] = []
     for (const s of pericopeSuggestions) {
-      const cellId = ids.find((id) => {
-        const parsed = parseRef(store.getCellView(id)?.group ?? "")
-        return Boolean(parsed && parsed.book === s.book && compareAddresses(parsed.address, s.start) >= 0 && compareAddresses(parsed.address, s.end) <= 0)
-      })
+      const cellId = byBook.get(s.book)?.find((row) =>
+        compareAddresses(row.address, s.start) >= 0 && compareAddresses(row.address, s.end) <= 0,
+      )?.id
       if (!cellId) continue
       out.push({
         key: s.key,
@@ -298,7 +305,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
     }
     const ai: ToolCellSignals["ai"] = {}
     for (const [cellId, phase] of args.completing) {
-      ai[cellId] = { phase: phase === "searching" ? "searching" : phase === "aligning" ? "aligning" : "generating", preview: args.previews.get(cellId) ?? null, error: null }
+      ai[cellId] = { phase: phase === "searching" ? "searching" : phase === "aligning" ? "aligning" : "generating", preview: markedPreviewText(args.store.getCellView(cellId), args.previews.get(cellId)) ?? null, error: null }
     }
     for (const [cellId, error] of args.errors) ai[cellId] = { phase: ai[cellId]?.phase ?? null, preview: ai[cellId]?.preview ?? null, error }
     return {

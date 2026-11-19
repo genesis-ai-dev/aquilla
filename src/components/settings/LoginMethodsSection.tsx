@@ -1,7 +1,7 @@
+import { EmailChangeForm } from "./EmailChangeForm"
 import { Spinner } from "@/components/ui/spinner"
-import { Link } from "react-router-dom"
-import { loginPath } from "@/lib/navigation/login-path"
-import { useEffect, useState } from "react"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
+import { useEffect, useRef, useState } from "react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,8 @@ import { RevealableInput } from "@/components/ui/revealable-input"
 import { SettingsGroup, SettingsRow, SettingsBlock } from "@/components/ui/page"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
+import { resendVerificationEmail } from "@/lib/frontier/auth"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export function LoginMethodsSection() {
   const { active } = useAccounts()
@@ -17,31 +19,95 @@ export function LoginMethodsSection() {
 }
 function AccountLoginMethods({ jwt, username }: { jwt: string; username: string }) {
   const t = useT()
-  const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
+  const [changingEmail, setChangingEmail] = useState(false)
+  const [methods, setMethods] = useState<{ email: string; password: boolean; email_verified: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
+  const previousPassword = useRef<boolean | null>(null)
   const [sessionExpired, setSessionExpired] = useState(false)
+  const [refreshing, setRefreshing] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false), [password, setPassword] = useState("")
   const [recovering, setRecovering] = useState(false), [revision, setRevision] = useState(0)
+  // AQU-2636: the account's own verification status, and the one button that
+  // can fix it. `notice` holds either the confirmation naming the address the
+  // link went to, or the reason nothing was sent.
+  const [verifying, setVerifying] = useState(false)
+  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null)
+  const sendVerificationLink = () => {
+    if (verifying) return
+    setVerifying(true); setNotice(null)
+    void resendVerificationEmail(jwt)
+      .then(email => {
+        setNotice({ text: t("auth.verifyEmail.linkSent", { email }), failed: false })
+        // The address may have been verified in another tab while this ran.
+        setRevision(n => n + 1)
+      })
+      .catch(reason => {
+        // The server answers with a stable code (already_verified,
+        // rate_limited, email_delivery_unavailable); anything else is a
+        // transport failure and gets the generic line.
+        const code = reason instanceof Error ? reason.message : ""
+        const known = ["already_verified", "rate_limited", "email_delivery_unavailable"]
+        setNotice({
+          text: t(known.includes(code) ? (`auth.verifyEmail.${code}` as MessageKey) : "auth.verifyEmail.sendFailed"),
+          failed: true,
+        })
+        if (code === "already_verified") setRevision(n => n + 1)
+      })
+      .finally(() => setVerifying(false))
+  }
   useEffect(() => {
     let current = true
-    setMethods(null); setError(false); setSessionExpired(false)
+    setRefreshing(true); setError(false); setSessionExpired(false)
     void googleRequest<NonNullable<typeof methods>>("methods", undefined, jwt)
-      .then(value => { if (current) setMethods(value) })
-      .catch(reason => { if (current) { setError(true); setSessionExpired(reason instanceof Error && reason.message === "session_expired") } })
+      .then(value => {
+        if (!current) return
+        if (previousPassword.current === false && value.password) setRecovering(false)
+        // AQU-2636: returning from the emailed link refreshes this read, and
+        // the row then says verified — so drop the "link sent" line rather
+        // than leaving it under a status it has already outlived.
+        if (value.email_verified) setNotice(null)
+        previousPassword.current = value.password
+        setMethods(value)
+      })
+      .catch(reason => {
+        if (!current) return
+        const rejected = reason instanceof Error && reason.message === "session_expired"
+        setError(true)
+        setSessionExpired(rejected)
+        if (rejected) void notifySessionExpiredIfCurrent(jwt)
+      })
+      .finally(() => { if (current) setRefreshing(false) })
     return () => { current = false }
   }, [jwt, revision])
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (document.visibilityState === "visible") setRevision(n => n + 1)
+    }
+    window.addEventListener("focus", refreshOnReturn)
+    document.addEventListener("visibilitychange", refreshOnReturn)
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn)
+      document.removeEventListener("visibilitychange", refreshOnReturn)
+    }
+  }, [])
+  if (sessionExpired) return null // The shared recovery banner owns this state.
   return <SettingsGroup>
-      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t(sessionExpired ? "auth.sessionExpired.message" : "auth.methods.failed")}</p></SettingsBlock>}
+      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t("auth.methods.failed")}</p><Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button></SettingsBlock>}
       {!methods && !error && <SettingsBlock><Spinner /></SettingsBlock>}
-      {!methods && error && <SettingsBlock>{sessionExpired
-        ? <Link className="underline" to={loginPath({ next: "/preferences/login-methods", add: true })}>{t("auth.sessionExpired.signInAgain")}</Link>
-        : <Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
-      }</SettingsBlock>}
       {methods && <>
+        <SettingsRow label={methods.email} description={t("auth.emailChange.accountEmail")} control={<Button size="sm" variant="outline" disabled={refreshing || error} onClick={() => { setRecovering(false); setChangingEmail(true) }}>{t("auth.emailChange.action")}</Button>} />
+        <SettingsRow
+          className="flex-wrap items-center"
+          label={t(methods.email_verified ? "auth.verifyEmail.statusVerified" : "auth.verifyEmail.statusUnverified")}
+          description={methods.email_verified ? undefined : t("auth.verifyEmail.unverifiedWhy")}
+          control={!methods.email_verified && <Button size="sm" variant="outline" disabled={refreshing || error || verifying} onClick={sendVerificationLink}>{t(verifying ? "auth.verifyEmail.sending" : "auth.verifyEmail.sendLink")}</Button>}
+        />
+        {notice && <SettingsBlock><p role="status" className={notice.failed ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{notice.text}</p></SettingsBlock>}
+        {changingEmail && <SettingsBlock><EmailChangeForm jwt={jwt} passwordAvailable={methods.password} googleLinked={methods.google} statusUnavailable={refreshing || error} onSetPassword={() => { setChangingEmail(false); setRecovering(true) }} onBack={() => setChangingEmail(false)} /></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
-          control={<Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
+          control={!(changingEmail && !methods.password) && <Button size="sm" variant="outline" disabled={refreshing || error} onClick={() => { setChangingEmail(false); setRecovering(true) }}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
         {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm account={{ email: methods.email, jwt }} backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
         <SettingsRow
@@ -72,7 +138,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
         </form></SettingsBlock>}
         <SettingsBlock className="flex flex-col items-start gap-3">
           <p className="text-xs text-muted-foreground">{t("auth.google.privacy")}</p>
-          <Button size="sm" variant="ghost" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
+          {!error && <Button size="sm" variant="ghost" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>}
         </SettingsBlock>
       </>}
   </SettingsGroup>

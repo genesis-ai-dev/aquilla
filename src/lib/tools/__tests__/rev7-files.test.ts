@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   byRef: [] as Array<CellRow & { fileId: string }>,
   bulk: [] as unknown[],
   emitted: [] as Array<{ kind: string; input: Record<string, unknown> }>,
+  revisions: [] as Array<Record<string, unknown>>,
   seq: 0,
 }))
 
@@ -44,7 +45,21 @@ vi.mock("@/lib/sync/events-emit", () => {
   }
 })
 vi.mock("@/lib/sync/source-export", () => ({ fetchRawOriginalSource: vi.fn(async () => ({ bytes: new TextEncoder().encode("\\id TIT").buffer, rawOriginal: true })) }))
-vi.mock("@/lib/sync/source-upload", () => ({ uploadSourceOriginal: vi.fn(async () => ({})) }))
+vi.mock("@/lib/sync/source-upload", () => ({
+  uploadSourceOriginal: vi.fn(async () => ({})),
+  sha256Hex: vi.fn(async () => "e".repeat(64)),
+}))
+vi.mock("@/lib/sync/revision-import", () => ({
+  postFileRevision: vi.fn(async (args: Record<string, unknown>) => {
+    state.revisions.push(args)
+    return {
+      noop: false,
+      revisionN: 2,
+      counts: { equal: 1, changed: 1, moved: 0, inserted: 1, deleted: 1 },
+      cellIds: { abc1: "held-1", abc2: "held-2", abc3: "minted-by-the-revision" },
+    }
+  }),
+}))
 
 import { LiveFilesData, extensionCellId, extensionDataFileId, extensionFileId, upsertHash } from "../live-data-files"
 import { createFilesHandlers } from "../host-handlers-files"
@@ -75,6 +90,7 @@ beforeEach(() => {
   state.byRef = []
   state.bulk = []
   state.emitted = []
+  state.revisions = []
   state.seq = 0
 })
 
@@ -127,6 +143,32 @@ describe("files.upsert", () => {
     expect(del.input).toMatchObject({ cellId: extensionCellId(fileId, "gone"), parentId: `head-${extensionCellId(fileId, "gone")}` })
     expect((ext.input.extension as { meta: unknown }).meta).toEqual({ sha: "s2" })
     expect(flush).toHaveBeenCalled()
+  })
+
+  it("refreshes a revisioned file as ONE revision paired by cell key, and reports the ids that landed", async () => {
+    // AQU-2459: on a file whose source side is a revision chain, cells a
+    // revision inserted do not carry this extension's derived ids. Matching by
+    // id there would delete and re-create them, hiding their translations, so
+    // the refresh must not emit per-cell events at all.
+    const fileId = extensionFileId("p1", "uw:tn:TIT")
+    state.files = [{ fileId, name: "TIT notes", role: null, cellCount: 3, revisioned: true, extension: { kind: "normal", tags: ["uw", "uw:tn"], owner: "importer", group: "uw:TIT", meta: { sha: "s1" } } } as unknown as FileSummary]
+    const { handlers } = make()
+    const out = (await handlers["files.upsert"]({ ...spec, cells: [...spec.cells, { key: "abc3", value: "Note three", ref: "TIT 1:3" }] })) as { cellIds: Record<string, string> }
+
+    expect(state.emitted.map((e) => e.kind)).toEqual([])
+    expect(state.revisions).toHaveLength(1)
+    const sent = state.revisions[0] as { fileId: string; toolOrigin: unknown; realign: boolean; revision: { stamp: string; units: Array<{ unitKey: string; positional: boolean }>; cellKeys: Record<string, string> } }
+    expect(sent.fileId).toBe(fileId)
+    expect(sent.revision.units.map((u) => [u.unitKey, u.positional])).toEqual([["abc1", false], ["abc2", false], ["abc3", false]])
+    // A file adopted from this extension's own earlier import keeps its ids.
+    expect(sent.revision.cellKeys[extensionCellId(fileId, "abc1")]).toBe("abc1")
+    expect(sent.revision.stamp).toBe("extension:importer@3")
+    // The write is attributed to the (verified) extension, like every other.
+    expect(sent.toolOrigin).toEqual(ORIGIN)
+    expect(sent.realign).toBe(true)
+    expect(out).toMatchObject({ created: false, creates: 1, commits: 1, deletes: 1, unchanged: 1 })
+    // Anchors must use what landed, not what the extension would have derived.
+    expect(out.cellIds.abc3).toBe("minted-by-the-revision")
   })
 
   it("is a no-op when nothing changed", async () => {

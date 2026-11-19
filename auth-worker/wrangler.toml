@@ -294,6 +294,12 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# In-app agent changeset staging (propose_command) reaches sync-worker through
+# this binding, not the zone URL: same-zone global fetch never reaches the Worker.
+[[env.production.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker"
+
 [[env.production.send_email]]
 name = "EMAIL"
 
@@ -317,6 +323,10 @@ tag = "v2"
 new_sqlite_classes = ["KnowledgeIndexDriver"]
 
 [env.production.vars]
+# Dedicated production login client; no Google request is made before user activation.
+GOOGLE_LOGIN_CLIENT_ID = "688714906958-u6ml2k74knt4uf1n4as3tu2mfl5c8ruo.apps.googleusercontent.com"
+GOOGLE_LOGIN_REDIRECT_URI = "https://api.aquilla.app/identity/api/v2/auth/oauth/google/callback"
+GOOGLE_LOGIN_APP_ORIGINS = "https://aquilla.app"
 # Omnilingual ASR on Modal (infra/modal/omni_asr.py). Hosted transcription for
 # languages Whisper lacks, plus the zero-shot opt-in. Empty = Automatic keeps
 # Whisper auto-detect for those languages and an explicit Omnilingual choice
@@ -440,6 +450,10 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 [[env.development.r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
+
+[[env.development.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker-dev"
 
 # AQU-2469: the dev access list (src/services/dev-access.ts). One key per
 # lower-cased email; platform admins edit it under Admin → Platform → Dev

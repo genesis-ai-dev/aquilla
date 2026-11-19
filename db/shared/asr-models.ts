@@ -11,18 +11,20 @@
 // both agree on every tag, so the copies cannot drift silently.
 
 /** Our model ids (spec table). "auto" is resolved by pickAsrModel. */
-export const ASR_MODELS = ["whisper", "qwen3-asr", "omni-ctc", "omni-zs"] as const
+export const ASR_MODELS = ["whisper", "qwen3-asr", "omni-ctc", "omni-zs", "omni-fast"] as const
 export type AsrModel = typeof ASR_MODELS[number]
 export const ASR_MODEL_CHOICES = ["auto", ...ASR_MODELS] as const
 export type AsrModelChoice = typeof ASR_MODEL_CHOICES[number]
 
-export const isOmniModel = (model: AsrModel): model is "omni-ctc" | "omni-zs" =>
-  model === "omni-ctc" || model === "omni-zs"
+/** "omni-fast" is Omnilingual CTC 300M on CPU: one forward pass gives text
+ *  and timings, with no GPU queue. Explicit only — pickAsrModel never picks it. */
+export const isOmniModel = (model: AsrModel): model is "omni-ctc" | "omni-zs" | "omni-fast" =>
+  model === "omni-ctc" || model === "omni-zs" || model === "omni-fast"
 
 /** Longest audio one request may carry, per model. Omnilingual rejects 40 s
  *  and up; ZS was trained on ≤30 s clips, so callers window at 30 s. */
 export const ASR_WINDOW_SECONDS: Record<AsrModel, number> = {
-  "whisper": 60, "qwen3-asr": 60, "omni-ctc": 30, "omni-zs": 30,
+  "whisper": 60, "qwen3-asr": 60, "omni-ctc": 30, "omni-zs": 30, "omni-fast": 30,
 }
 
 const WHISPER_TWO_LETTER = new Set<string>([
@@ -188,7 +190,7 @@ export function toQwenCode(tag: string | undefined | null): string | undefined {
   return head === "yue" ? "yue" : "zh"
 }
 
-/** Automatic routing (spec §1). Never picks zero-shot.
+/** Automatic routing (spec §1). Never picks zero-shot or fast.
  *  1. Chinese variety → qwen3-asr. 2. Whisper language → whisper.
  *  3. Any other language code → omni-ctc (Omnilingual covers 1,600+; CTC needs
  *     no language conditioning, so an unlisted code is still served).

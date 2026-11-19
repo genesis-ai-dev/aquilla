@@ -1168,7 +1168,6 @@ export const pt: Catalog = {
   "editor.row.mediaInsertReason": "Não é possível adicionar células ao áudio importado.",
   "editor.row.mediaRemoveReason": "Esta linha faz parte da gravação original, então não pode ser removida.",
   "editor.row.idmlReason": "Os arquivos IDML mantêm o layout original, então não é possível adicionar nem remover células.",
-  "editor.row.maintainerOnlyReason": "Somente um mantenedor pode remover uma linha importada.",
   "editor.removeCell.title": "Remover esta célula?",
   "editor.removeCell.confirmLabel": "Removê-la",
   "editor.removeCell.lead": "Isto remove a célula e tudo o que há nela:",

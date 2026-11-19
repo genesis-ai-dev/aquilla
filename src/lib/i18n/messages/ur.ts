@@ -1209,7 +1209,6 @@ export const ur: Catalog = {
   "editor.row.mediaInsertReason": "درآمد شدہ آڈیو میں خانے شامل نہیں ہو سکتے۔",
   "editor.row.mediaRemoveReason": "یہ قطار اصل ریکارڈنگ کا ٹکڑا ہے، اس لیے نہیں ہٹائی جا سکتی۔",
   "editor.row.idmlReason": "IDML فائلیں اپنی اصل ترتیب رکھتی ہیں، اس لیے خانے شامل یا ہٹائے نہیں جا سکتے۔",
-  "editor.row.maintainerOnlyReason": "درآمد شدہ سطر صرف نگہدار ہٹا سکتا ہے۔",
   "editor.removeCell.title": "یہ خانہ ہٹائیں؟",
   "editor.removeCell.confirmLabel": "ہٹا دیں",
   "editor.removeCell.lead": "یہ خانہ اور اس پر موجود سب ہٹاتا ہے:",

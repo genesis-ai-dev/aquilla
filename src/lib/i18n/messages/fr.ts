@@ -983,7 +983,6 @@ export const fr: Catalog = {
   "editor.row.mediaInsertReason": "Impossible d'ajouter des cellules à un audio importé.",
   "editor.row.mediaRemoveReason": "Cette rangée fait partie de l'enregistrement original, elle ne peut donc pas être supprimée.",
   "editor.row.idmlReason": "Les fichiers IDML conservent leur mise en page d'origine, les cellules ne peuvent donc pas être ajoutées ni supprimées.",
-  "editor.row.maintainerOnlyReason": "Seul un mainteneur peut supprimer une ligne importée.",
   "editor.removeCell.title": "Supprimer cette cellule ?",
   "editor.removeCell.confirmLabel": "Supprimer",
   "editor.removeCell.lead": "Ceci supprime la cellule et tout ce qui s'y rattache :",

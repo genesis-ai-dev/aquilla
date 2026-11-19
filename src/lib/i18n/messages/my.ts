@@ -982,7 +982,6 @@ export const my: Catalog = {
   "editor.row.mediaInsertReason": "တင်သွင်းထားသော အသံသို့ ဆဲလ်များ မထည့်နိုင်ပါ။",
   "editor.row.mediaRemoveReason": "ဤအတန်းသည် မူရင်းအသံသွင်းမှု၏ အစိတ်အပိုင်းဖြစ်သဖြင့် ဖယ်ရှား၍ မရပါ။",
   "editor.row.idmlReason": "IDML ဖိုင်များသည် မူလအပြင်အဆင်ကို ထိန်းထားသဖြင့် ဆဲလ်များ ထည့်ခြင်း၊ ဖယ်ခြင်း မလုပ်နိုင်ပါ။",
-  "editor.row.maintainerOnlyReason": "တင်သွင်းထားသော စာကြောင်းကို ထိန်းသိမ်းသူသာ ဖယ်ရှားနိုင်သည်။",
   "editor.removeCell.title": "ဤဆဲလ်ကို ဖယ်ရှားမလား။",
   "editor.removeCell.confirmLabel": "ဖယ်ရှားမည်",
   "editor.removeCell.lead": "၎င်းသည် ဆဲလ်နှင့် ၎င်းပေါ်ရှိ အရာအားလုံးကို ဖယ်ရှားမည်-",

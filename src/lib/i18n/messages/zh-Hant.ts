@@ -982,7 +982,6 @@ export const zh_Hant: Catalog = {
   "editor.row.mediaInsertReason": "無法在匯入的音訊中新增儲存格。",
   "editor.row.mediaRemoveReason": "此列是原始錄音的一部分，因此無法移除。",
   "editor.row.idmlReason": "IDML 檔案會保留原有版面，因此無法新增或移除儲存格。",
-  "editor.row.maintainerOnlyReason": "只有維護者可以移除匯入的行。",
   "editor.removeCell.title": "要移除此儲存格嗎？",
   "editor.removeCell.confirmLabel": "移除",
   "editor.removeCell.lead": "這會移除儲存格及其上的所有內容：",

@@ -1797,7 +1797,6 @@ export const editor = defineNamespace({
       "This row is a piece of the original recording, so it can\u2019t be removed.",
     "editor.row.idmlReason":
       "IDML files keep their original layout, so cells can\u2019t be added or removed.",
-    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
     // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
     // fragments below — a resolved-and-concatenated list, the house idiom (see
     // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,

@@ -5,8 +5,7 @@
 // instrument for a matrix of ranks, tiers and file kinds.
 
 import { describe, it, expect } from "vitest"
-import { canEditCells, canRemoveImportedCells, cellPlacement, isImportedRow, rowActionAvailability } from "./cell-editing-gate"
-import { userLineOrigin } from "@/lib/timeline/user-line-origin"
+import { canEditCells, rowActionAvailability } from "./cell-editing-gate"
 import { ROLE } from "@/lib/frontier/roles"
 
 const subject = (over: Partial<Parameters<typeof canEditCells>[0]> = {}) => ({
@@ -50,49 +49,6 @@ describe("canEditCells", () => {
   })
 })
 
-describe("canRemoveImportedCells", () => {
-  it("needs MAINTAINER on top of the tier", () => {
-    // An imported cell is the client's own work. A lead admitted by a lower
-    // tier may add cells and take back their own lines, not remove imports.
-    expect(
-      canRemoveImportedCells(subject({ floor: ROLE.PROJECT_LEAD, roleLevel: ROLE.PROJECT_LEAD })),
-    ).toBe(false)
-    expect(
-      canRemoveImportedCells(subject({ floor: ROLE.PROJECT_LEAD, roleLevel: ROLE.MAINTAINER })),
-    ).toBe(true)
-  })
-
-  it("is refused when the project never opted in, maintainer or not", () => {
-    // Rank never substitutes for opt-in; the first gate runs first.
-    expect(canRemoveImportedCells(subject({ floor: null, roleLevel: ROLE.OWNER }))).toBe(false)
-  })
-})
-
-describe("cellPlacement", () => {
-  it("a time-ordered file places into gaps", () => {
-    expect(cellPlacement({ orderedBy: "time" })).toBe("gaps")
-  })
-
-  it("everything else places anywhere", () => {
-    expect(cellPlacement({ orderedBy: "sequence" })).toBe("anywhere")
-  })
-
-  it("needs NO footage to be gap-constrained", () => {
-    // A subtitle file's cues are timed whether or not a video is attached.
-    // Round 1 required `coreMediaUrl` and left a footage-less cue sheet with
-    // nothing; this function can no longer even ask, which is the point.
-    expect(Object.keys({ orderedBy: "time" } as Parameters<typeof cellPlacement>[0]))
-      .not.toContain("hasMedia")
-  })
-
-  it("never consults the timing mode — placement follows the source's clock", () => {
-    // A Free-mode cue sheet is still gap-constrained, which is what makes a
-    // Free -> Original switch a non-event: inserts are born timed either way.
-    expect(Object.keys({ orderedBy: "time" } as Parameters<typeof cellPlacement>[0]))
-      .not.toContain("timingMode")
-  })
-})
-
 describe("rowActionAvailability", () => {
   // Round 3's rule: a row that cannot take an action still SHOWS the control,
   // disabled, with the reason. `null` here means available.
@@ -102,8 +58,6 @@ describe("rowActionAvailability", () => {
     isIdmlCell: false,
     gapAbove: true,
     gapBelow: true,
-    isImported: true,
-    canRemoveImported: true,
     ...over,
   })
 
@@ -134,7 +88,7 @@ describe("rowActionAvailability", () => {
   it("a structural refusal outranks a clearance one", () => {
     // A maintainer-only removal is not the useful thing to say about a row that
     // is a piece of audio.
-    expect(rowActionAvailability(row({ isMediaCell: true, canRemoveImported: false })).remove)
+    expect(rowActionAvailability(row({ isMediaCell: true })).remove)
       .toBe("media")
   })
 
@@ -170,73 +124,16 @@ describe("rowActionAvailability", () => {
   })
 
   describe("removal", () => {
-    it("is maintainer work on an imported line", () => {
-      expect(rowActionAvailability(row({ isImported: true, canRemoveImported: false })).remove)
-        .toBe("maintainerOnly")
+    it("is open on any line the viewer is allowed to restructure", () => {
+      // AQU-2632: imported lines follow the project's tier like every other
+      // line. Who the tier admits is answered by `canEditCells`, before the
+      // control is drawn, so a row that reaches here is removable.
+      expect(rowActionAvailability(row()).remove).toBeNull()
     })
 
-    it("is open on a line somebody added here, whatever their rank", () => {
-      // Taking your own empty line back is never gated on rank.
-      expect(rowActionAvailability(row({ isImported: false, canRemoveImported: false })).remove)
-        .toBeNull()
+    it("does not block INSERTS or removal on an ordinary row", () => {
+      const out = rowActionAvailability(row())
+      expect([out.above, out.below, out.remove]).toEqual([null, null, null])
     })
-
-    it("does not block INSERTS when removal is refused", () => {
-      const out = rowActionAvailability(row({ isImported: true, canRemoveImported: false }))
-      expect([out.above, out.below]).toEqual([null, null])
-    })
-  })
-})
-
-// AQU-1068 review round. Matthew: "after recording audio and then trying to
-// remove the cell, I wasn't able to."
-//
-// Both surfaces used to ask `isUserAddedLine(cell) && isLineEmpty(cell)`, so a
-// line became the client's imported content the moment its author put anything
-// in it. The server never agreed — `isUserInsertedCell` reads the origin marker
-// and nothing else — so the client was refusing a delete the server allows.
-describe("isImportedRow", () => {
-  const added = { metadata: { aquillaOrigin: userLineOrigin() } as Record<string, unknown> }
-
-  it("says a line somebody added here is not imported", () => {
-    expect(isImportedRow(added)).toBe(false)
-  })
-
-  it("STAYS not-imported once that line has content — the review bug", () => {
-    // Emptiness is not part of the question. Whatever the author has since
-    // typed, recorded or had translated into their own line, it is still
-    // their line.
-    expect(isImportedRow({ ...added, original: "typed after the fact" } as never)).toBe(false)
-    expect(isImportedRow({ ...added, translated: "drafted" } as never)).toBe(false)
-    expect(isImportedRow({
-      ...added,
-      attachments: { "take-x-1": { isDeleted: false } },
-    } as never)).toBe(false)
-  })
-
-  it("says an imported row IS imported", () => {
-    expect(isImportedRow({ metadata: null })).toBe(true)
-    expect(isImportedRow({})).toBe(true)
-    expect(isImportedRow({ metadata: { aquillaImport: { displayLabel: "1" } } })).toBe(true)
-  })
-
-  it("does not mistake some other origin marker for a user insert", () => {
-    expect(isImportedRow({ metadata: { aquillaOrigin: { kind: "import" } } })).toBe(true)
-  })
-
-  it("keeps a contributor's own recorded line removable, and imported rows not", () => {
-    // The composed rule, as both surfaces ask it.
-    const asContributor = (cell: Parameters<typeof isImportedRow>[0]) =>
-      rowActionAvailability({
-        placement: "anywhere",
-        isMediaCell: false,
-        isIdmlCell: false,
-        gapAbove: true,
-        gapBelow: true,
-        isImported: isImportedRow(cell),
-        canRemoveImported: false,
-      }).remove
-    expect(asContributor({ ...added, attachments: { "take-x-1": { isDeleted: false } } } as never)).toBeNull()
-    expect(asContributor({ metadata: null })).toBe("maintainerOnly")
   })
 })

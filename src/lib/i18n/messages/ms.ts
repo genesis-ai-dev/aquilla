@@ -976,7 +976,6 @@ export const ms: Catalog = {
   "editor.row.mediaInsertReason": "Sel tidak boleh ditambah pada audio yang diimport.",
   "editor.row.mediaRemoveReason": "Baris ini ialah sebahagian daripada rakaman asal, jadi tidak boleh dialih keluar.",
   "editor.row.idmlReason": "Fail IDML mengekalkan reka letak asalnya, jadi sel tidak boleh ditambah atau dialih keluar.",
-  "editor.row.maintainerOnlyReason": "Hanya penyelenggara boleh mengalih keluar baris yang diimport.",
   "editor.removeCell.title": "Alih keluar sel ini?",
   "editor.removeCell.confirmLabel": "Alih keluar",
   "editor.removeCell.lead": "Ini mengalih keluar sel dan semua yang ada padanya:",

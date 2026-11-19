@@ -1821,7 +1821,6 @@ export const importExport = defineNamespace({
         description:
           "Preview notice after importing a PDF in which some pages are scanned images with no text. Their text pages are imported; these pages are not. Count-governed.",
         placeholders: {
-          count: "Number of image-only pages; also governs the plural form.",
           pages: "The page numbers, comma-separated (\"2, 5, 9\") — not translated.",
         },
       },

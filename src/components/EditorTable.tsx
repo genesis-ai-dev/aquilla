@@ -586,6 +586,8 @@ export function applyRowOverlays(
         // AQU-2664: the reading and the evened-out target, for the same reason.
         ...(attachment.loudnessLufs != null ? { loudnessLufs: attachment.loudnessLufs } : {}),
         ...(attachment.truePeakDb != null ? { truePeakDb: attachment.truePeakDb } : {}),
+        ...(attachment.loudnessFromMs != null ? { loudnessFromMs: attachment.loudnessFromMs } : {}),
+        ...(attachment.loudnessToMs != null ? { loudnessToMs: attachment.loudnessToMs } : {}),
         ...(attachment.evenTargetLufs != null ? { evenTargetLufs: attachment.evenTargetLufs } : {}),
       }
     }

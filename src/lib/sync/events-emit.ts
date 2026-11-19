@@ -1170,7 +1170,7 @@ export interface CellAudioMeasureInput {
   durationMs: number
   /** AQU-2664: the recording's loudness (LUFS) and true peak (dBTP), both or
    *  neither; the server fills them only when NULL. */
-  loudness?: { loudnessLufs: number; truePeakDb: number }
+  loudness?: { loudnessLufs: number; truePeakDb: number; loudnessFromMs?: number | null; loudnessToMs?: number | null }
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -1195,7 +1195,14 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     payload: {
       audioId: input.audioId,
       durationMs: intMs(input.durationMs),
-      ...(input.loudness ? { loudnessLufs: input.loudness.loudnessLufs, truePeakDb: input.loudness.truePeakDb } : {}),
+      ...(input.loudness
+        ? {
+            loudnessLufs: input.loudness.loudnessLufs,
+            truePeakDb: input.loudness.truePeakDb,
+            ...(input.loudness.loudnessFromMs !== undefined ? { loudnessFromMs: input.loudness.loudnessFromMs == null ? null : intMs(input.loudness.loudnessFromMs) } : {}),
+            ...(input.loudness.loudnessToMs !== undefined ? { loudnessToMs: input.loudness.loudnessToMs == null ? null : intMs(input.loudness.loudnessToMs) } : {}),
+          }
+        : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

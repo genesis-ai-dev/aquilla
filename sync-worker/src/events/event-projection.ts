@@ -2176,6 +2176,8 @@ case 'cell.audio.attach': {
               -- its own volume). The same url keeps it.
               loudness_lufs      = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_lufs END,
               true_peak_db       = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.true_peak_db END,
+              loudness_from_ms   = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_from_ms END,
+              loudness_to_ms     = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_to_ms END,
               mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
               voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
@@ -2592,14 +2594,14 @@ case 'cell.audio.attach': {
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
               created_by, role, target_offset_ms, recordings_offset_ms, piece_of,
-              loudness_lufs, true_peak_db, even_target_lufs
+              loudness_lufs, true_peak_db, loudness_from_ms, loudness_to_ms, even_target_lufs
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
                    ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
                    a.created_by, a.role, a.target_offset_ms, a.recordings_offset_ms,
                    COALESCE(a.piece_of, a.audio_id),
-                   a.loudness_lufs, a.true_peak_db, a.even_target_lufs
+                   a.loudness_lufs, a.true_peak_db, a.loudness_from_ms, a.loudness_to_ms, a.even_target_lufs
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'
@@ -2830,20 +2832,28 @@ case 'cell.audio.attach': {
           )
           .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
       )
-      // AQU-2664: the recording's loudness and true peak, both or neither,
-      // fill-only for the same reason: the bytes of an audio id never change.
+      // AQU-2664: the loudness and true peak of the take's WINDOW of the
+      // recording, both or neither, with the window they measured. The same
+      // window again is a no-op (a replay, a second device); another window
+      // (the take was cut or trimmed since) replaces the old reading.
       if (p.loudnessLufs !== undefined || p.truePeakDb !== undefined) {
         const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
-        if (!ok(p.loudnessLufs) || !ok(p.truePeakDb)) {
+        const okMs = (v: unknown) => v == null || ok(v)
+        if (!ok(p.loudnessLufs) || !ok(p.truePeakDb) || !okMs(p.loudnessFromMs) || !okMs(p.loudnessToMs)) {
           throw new Error(`cell.audio.measure event ${event.id} has a malformed loudness reading`)
         }
+        const from = p.loudnessFromMs == null ? null : Math.round(p.loudnessFromMs)
+        const to = p.loudnessToMs == null ? null : Math.round(p.loudnessToMs)
         stmts.push(
           db
             .prepare(
-              `UPDATE cell_audio SET loudness_lufs = COALESCE(loudness_lufs, ?), true_peak_db = COALESCE(true_peak_db, ?)
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              `UPDATE cell_audio SET loudness_lufs = ?, true_peak_db = ?, loudness_from_ms = ?, loudness_to_ms = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND (loudness_lufs IS NULL
+                       OR loudness_from_ms IS DISTINCT FROM ?::bigint
+                       OR loudness_to_ms IS DISTINCT FROM ?::bigint)`,
             )
-            .bind(p.loudnessLufs, p.truePeakDb, event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(p.loudnessLufs, p.truePeakDb, from, to, event.projectId, event.fileId, event.cellId, p.audioId, from, to),
         )
       }
       return ['cell_audio']

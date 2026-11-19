@@ -7,8 +7,13 @@
 --                     measured once in the browser; NULL = not measured yet;
 --                     -70 = nothing above the silence gate.
 --   true_peak_db      the recording's 4x oversampled true peak, dBTP.
---                     Both written only by cell.audio.measure, fill-only:
---                     the bytes of an audio id never change.
+--   loudness_from_ms  the window of the recording those two measured (a cut
+--   loudness_to_ms    piece's, an import section's kept part; to NULL = the
+--                     end). Each take is measured over its own window (Sam).
+--                     All four written only by cell.audio.measure: a reading
+--                     of the same window is a no-op, of another window it
+--                     replaces the old one. A re-attach with a new url
+--                     clears them (a new recording).
 --   even_target_lufs  the loudness this take is evened out to; NULL = not
 --                     evened out. Written only by cell.audio.even: evening
 --                     out is its own stage, BEFORE the take's own volume and
@@ -21,4 +26,6 @@
 
 ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS loudness_lufs REAL;
 ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS true_peak_db REAL;
+ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS loudness_from_ms BIGINT;
+ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS loudness_to_ms BIGINT;
 ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS even_target_lufs REAL;

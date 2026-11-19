@@ -119,7 +119,12 @@ export interface CodexCellAttachment {
    *  once (cell.audio.measure); absent = not measured yet. */
   loudnessLufs?: number | null;
   truePeakDb?: number | null;
-  /** AQU-2664: the loudness this take is evened out to (cell.audio.gain);
+  /** AQU-2664: the window of the recording the reading measured, ms (to
+   *  absent = the end). A reading of another window than the take's kept
+   *  part is stale: it still plays, and the next Even out measures again. */
+  loudnessFromMs?: number | null;
+  loudnessToMs?: number | null;
+  /** AQU-2664: the loudness this take is evened out to (cell.audio.even);
    *  absent = not evened out. lib/audio/take-gain.ts turns it into a gain. */
   evenTargetLufs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,

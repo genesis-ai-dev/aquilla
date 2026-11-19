@@ -20,6 +20,11 @@ describe("evening out on the wire", () => {
     expect(last()).toMatchObject({ kind: "cell.audio.measure", payload: { audioId: "a1", durationMs: 4181, loudnessLufs: -27.4, truePeakDb: -9.2 } })
   })
 
+  it("a measure states the window of the recording it measured", async () => {
+    await emitCellAudioMeasure({ ...where, durationMs: 900, loudness: { loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 120.4, loudnessToMs: null } })
+    expect(last().payload).toMatchObject({ loudnessFromMs: 120, loudnessToMs: null })
+  })
+
   it("a measure without a reading is the duration backfill it always was", async () => {
     await emitCellAudioMeasure({ ...where, durationMs: 900 })
     expect(last().payload).toEqual({ audioId: "a1", durationMs: 900 })

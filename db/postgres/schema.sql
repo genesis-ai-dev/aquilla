@@ -1166,6 +1166,9 @@ CREATE TABLE cell_audio (
     -- The correction is worked out from these; the recording never changes.
     loudness_lufs      REAL,
     true_peak_db       REAL,
+    -- the window of the recording the reading measured (to NULL = the end)
+    loudness_from_ms   BIGINT,
+    loudness_to_ms     BIGINT,
     even_target_lufs   REAL,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );

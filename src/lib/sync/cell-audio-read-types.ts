@@ -46,6 +46,9 @@ export interface AudioAttachmentOut {
    *  measured once; and the target it is evened out to. Absent = none. */
   loudnessLufs?: number | null
   truePeakDb?: number | null
+  /** The window of the recording the reading measured, ms. */
+  loudnessFromMs?: number | null
+  loudnessToMs?: number | null
   evenTargetLufs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the

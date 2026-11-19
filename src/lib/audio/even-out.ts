@@ -42,6 +42,16 @@ export interface TakeRef {
 export interface LoudnessFields {
   loudnessLufs: number
   truePeakDb: number
+  /** The window of the recording it measured, ms (to null = the end). */
+  loudnessFromMs?: number | null
+  loudnessToMs?: number | null
+}
+
+/** Is this take's reading of another window than its kept part (it was cut
+ *  or trimmed since)? It still plays; Even out measures it again. */
+export function readingIsStale(att: CodexCellAttachment): boolean {
+  if (att.loudnessLufs == null) return false
+  return (att.loudnessFromMs ?? 0) !== (att.trimStartMs ?? 0) || (att.loudnessToMs ?? null) !== (att.trimEndMs ?? null)
 }
 
 /** What the actions need from the workspace. */
@@ -158,8 +168,12 @@ export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[],
     result.gone++
     return false
   })
-  // Measure what has no reading, one take at a time (one decode in memory).
-  const toMeasure = live.filter((t) => host.readTake(t.cellId, t.audioId)?.loudnessLufs == null)
+  // Measure what has no reading, or a reading of another window, one take at
+  // a time (one decode in memory).
+  const toMeasure = live.filter((t) => {
+    const att = host.readTake(t.cellId, t.audioId)
+    return att != null && (att.loudnessLufs == null || readingIsStale(att))
+  })
   let done = 0
   if (toMeasure.length > 0) opts.onProgress?.(0, toMeasure.length)
   const readings = new Map<string, LoudnessFields>()
@@ -183,8 +197,10 @@ export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[],
       result.gone++
       continue
     }
-    const reading = att.loudnessLufs != null ? null : readings.get(`${t.cellId}\u0000${t.audioId}`)
-    const loudness = att.loudnessLufs ?? reading?.loudnessLufs ?? null
+    // A fresh reading wins over a stale one; a stale one that couldn't be
+    // refreshed still serves.
+    const reading = readings.get(`${t.cellId}\u0000${t.audioId}`) ?? null
+    const loudness = reading?.loudnessLufs ?? att.loudnessLufs ?? null
     if (loudness == null) {
       result.unmeasured++
       continue
@@ -346,7 +362,10 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
     if (!part || signal.aborted) return null
     const r = await meter(part, TARGET_RATE)
     if (signal.aborted) return null
-    return { reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb }, durationMs }
+    return {
+      reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: att.trimStartMs ?? 0, loudnessToMs: att.trimEndMs ?? null },
+      durationMs,
+    }
   }
 
   return async (cellId, audioId, att, signal) => {

@@ -76,7 +76,7 @@ async function stored(audioId: string): Promise<Stored> {
   return { loudness: n(r.loudness_lufs), peak: n(r.true_peak_db), target: n(r.even_target_lufs), gain: n(r.gain_db), duration: n(r.duration_ms) }
 }
 
-type ReadAtt = { loudnessLufs?: number; truePeakDb?: number; evenTargetLufs?: number; gainDb?: number }
+type ReadAtt = { loudnessLufs?: number; truePeakDb?: number; evenTargetLufs?: number; gainDb?: number; loudnessFromMs?: number; loudnessToMs?: number }
 async function read(): Promise<Record<string, ReadAtt>> {
   const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
   const res = await handleCellAudioReadRequest(
@@ -131,6 +131,49 @@ describe('a take\'s loudness (cell.audio.measure)', () => {
     const stmts: AquillaStatement[] = []
     expect(() => buildEventProjectionStmts(h.db, event('cell.audio.measure', { audioId: 'a', durationMs: 1, loudnessLufs: 'loud', truePeakDb: -3 }), stmts)).toThrow(/malformed/)
     expect(() => buildEventProjectionStmts(h.db, event('cell.audio.measure', { audioId: 'a', durationMs: 1, loudnessLufs: -20 }), stmts)).toThrow(/malformed/)
+  })
+})
+
+// Sam, Nov 19: a reading belongs to the WINDOW of the recording it measured
+// (a cut piece, an import's section). It records that window; a reading of
+// another window replaces it, the same window again changes nothing.
+describe('a reading of a window', () => {
+  const win = async (audioId: string) => {
+    const r = (await h.pg.query<Record<string, unknown>>(
+      `SELECT loudness_from_ms, loudness_to_ms FROM cell_audio WHERE audio_id = $1`, [audioId])).rows[0]
+    return [n(r.loudness_from_ms), n(r.loudness_to_ms)]
+  }
+
+  it('stores the window it measured, and every device reads it back', async () => {
+    await attach('take-a')
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 200, loudnessToMs: 3_000 })
+    expect(await win('take-a')).toEqual([200, 3_000])
+    expect((await read())['take-a']).toMatchObject({ loudnessLufs: -20, loudnessFromMs: 200, loudnessToMs: 3_000 })
+  })
+
+  it('a reading of another window replaces it; the same window again is a no-op', async () => {
+    await attach('take-a')
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 0, loudnessToMs: null })
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -9, truePeakDb: -1, loudnessFromMs: 0, loudnessToMs: null })
+    expect(await stored('take-a')).toMatchObject({ loudness: -20 })
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -26, truePeakDb: -12, loudnessFromMs: 0, loudnessToMs: 2_000 })
+    expect(await stored('take-a')).toMatchObject({ loudness: -26, peak: -12 })
+    expect(await win('take-a')).toEqual([0, 2_000])
+  })
+
+  it('a cut leaves both pieces the whole take\'s reading, with its window, for the next Even out to refresh', async () => {
+    await attach('take-a')
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 0, loudnessToMs: null })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' })
+    expect(await win('take-b')).toEqual([0, null])
+    expect(await stored('take-b')).toMatchObject({ loudness: -20 })
+  })
+
+  it('a swapped recording clears the window with the reading', async () => {
+    await attach('take-a')
+    await project('cell.audio.measure', { audioId: 'take-a', durationMs: 4_600, loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 100, loudnessToMs: 900 })
+    await project('cell.audio.attach', { audioId: 'take-a', url: 'https://r2.invalid/other', slot: 'recording', durationMs: 4_600 })
+    expect(await win('take-a')).toEqual([null, null])
   })
 })
 

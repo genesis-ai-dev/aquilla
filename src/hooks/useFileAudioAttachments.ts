@@ -725,6 +725,8 @@ export function mergeCellsWithAudio(
         // AQU-2664: its loudness reading and evened-out target.
         ...(a.loudnessLufs != null ? { loudnessLufs: a.loudnessLufs } : {}),
         ...(a.truePeakDb != null ? { truePeakDb: a.truePeakDb } : {}),
+        ...(a.loudnessFromMs != null ? { loudnessFromMs: a.loudnessFromMs } : {}),
+        ...(a.loudnessToMs != null ? { loudnessToMs: a.loudnessToMs } : {}),
         ...(a.evenTargetLufs != null ? { evenTargetLufs: a.evenTargetLufs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),

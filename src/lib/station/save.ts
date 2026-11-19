@@ -112,12 +112,12 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
   // over the part of it that line plays (on the page, yielding). If it can't
   // be, it is simply unmeasured: it plays at its own volume until Even out
   // measures it.
-  const measureKept = async (p: VersionPlacement): Promise<{ loudnessLufs: number; truePeakDb: number } | null> => {
+  const measureKept = async (p: VersionPlacement): Promise<{ loudnessLufs: number; truePeakDb: number; loudnessFromMs: number; loudnessToMs: number | null } | null> => {
     try {
       const a = Math.max(0, Math.round(((p.trimStartMs ?? 0) / 1000) * args.rate))
       const b = p.trimEndMs != null ? Math.min(args.samples.length, Math.round((p.trimEndMs / 1000) * args.rate)) : args.samples.length
       const r = await measureLoudnessYielding([args.samples.subarray(a, Math.max(a, b))], args.rate)
-      return { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb }
+      return { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: p.trimStartMs ?? 0, loudnessToMs: p.trimEndMs }
     } catch {
       return null
     }

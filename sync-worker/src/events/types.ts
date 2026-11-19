@@ -734,12 +734,6 @@ export interface EventPayloads {
     laneId?: string
   }
   /**
-   * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
-   * fades in ms — always all three stated, null meaning none (0 dB, no fade),
-   * for the reason `cell.audio.trim` states both ends. Like a trim they never
-   * change the recording, set nothing else, and keep the take's approvals.
-   */
-  /**
    * AQU-2664: the loudness (LUFS) this take is evened out to, null = not
    * evened out — always stated. Its own stage, BEFORE the take's own volume
    * and fades (Sam, Nov 19: "I do not want normalization to override volume
@@ -756,6 +750,12 @@ export interface EventPayloads {
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
   }
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
+   * fades in ms — always all three stated, null meaning none (0 dB, no fade),
+   * for the reason `cell.audio.trim` states both ends. Like a trim they never
+   * change the recording, set nothing else, and keep the take's approvals.
+   */
   'cell.audio.gain': {
     audioId: string
     gainDb: number | null
@@ -915,6 +915,10 @@ export interface EventPayloads {
      *  and true peak (dBTP), both or neither. Fill-only, like the duration. */
     loudnessLufs?: number
     truePeakDb?: number
+    /** AQU-2664: the window of the recording it measured, ms (to null = the
+     *  end). A reading of another window replaces the stored one. */
+    loudnessFromMs?: number | null
+    loudnessToMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

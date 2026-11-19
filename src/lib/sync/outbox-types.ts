@@ -625,9 +625,12 @@ export interface OutboxEventPayloads {
   "cell.audio.measure": {
     audioId: string
     durationMs: number
-    /** AQU-2664: the recording's loudness and true peak, both or neither. */
+    /** AQU-2664: the recording's loudness and true peak, both or neither,
+     *  and the window of it they measured (to null = the end). */
     loudnessLufs?: number
     truePeakDb?: number
+    loudnessFromMs?: number | null
+    loudnessToMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

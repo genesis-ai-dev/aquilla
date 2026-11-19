@@ -116,6 +116,24 @@ describe("even out", () => {
     expect(takeGainDb(w.store.c1.a)).toBeCloseTo(10, 6)
   })
 
+  // Sam, Nov 19: a reading belongs to the window it measured. A take cut or
+  // trimmed since is measured again over its new window.
+  it("measures again a take whose reading is of another window (cut or trimmed since)", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14, loudnessFromMs: 0, loudnessToMs: null, trimEndMs: 2000 } } })
+    w.readings.a = { loudnessLufs: -20, truePeakDb: -8 }
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(w.measured).toEqual(["a"])
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(4, 6)
+  })
+
+  it("FALLBACK: a stale reading that can't be refreshed still evens the take out", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14, loudnessFromMs: 0, trimStartMs: 500 } } })
+    w.readings.a = null
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(r).toMatchObject({ evened: 1, unmeasured: 0 })
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(12, 6)
+  })
+
   it("FALLBACK: a take that can't be measured is skipped, counted, and plays at its own volume", async () => {
     const w = workspace({ c1: { a: { gainDb: -2 } }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } } })
     w.readings.a = null // decode failed, too big for the device, or the network gave up
@@ -305,7 +323,7 @@ describe("measuring a take", () => {
     const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => sine(-24, 2), emit })
     const r = await measure("c1", "take-1", att)
     expect(Math.abs(r!.loudnessLufs - -24)).toBeLessThan(0.5)
-    expect(emit).toHaveBeenCalledWith("c1", "take-1", expect.objectContaining({ loudnessLufs: r!.loudnessLufs, truePeakDb: r!.truePeakDb }), 2000)
+    expect(emit).toHaveBeenCalledWith("c1", "take-1", expect.objectContaining({ loudnessLufs: r!.loudnessLufs, truePeakDb: r!.truePeakDb, loudnessFromMs: 0, loudnessToMs: null }), 2000)
   })
 
   it("decodes a recording shared by several takes once", async () => {

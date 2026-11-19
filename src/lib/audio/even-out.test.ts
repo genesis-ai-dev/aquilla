@@ -471,6 +471,20 @@ describe("one Even out at a time, each with its own measurer (review M2)", () =>
     expect(q.busy()).toBe(false)
   })
 
+  it("tells a Clear that waits behind a run, as it tells a run", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 } } })
+    const q = createEvenOutQueue()
+    const host = { ...w.host, queue: q }
+    let release: () => void = () => {}
+    const blocker = q.run(() => new Promise<void>((resolve) => { release = resolve }))
+    const onWaiting = vi.fn()
+    const cleared = clearEvenOut(host, [{ cellId: "c1", audioId: "a" }], { onWaiting })
+    expect(onWaiting).toHaveBeenCalledOnce()
+    release()
+    await blocker
+    expect((await cleared).cleared).toBe(1)
+  })
+
   it("keeps going after a run that fails", async () => {
     const q = createEvenOutQueue()
     await expect(q.run(async () => { throw new Error("x") })).rejects.toThrow("x")

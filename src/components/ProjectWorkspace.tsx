@@ -4678,7 +4678,7 @@ export function ProjectWorkspace() {
     [evenOutHost],
   )
   const handleClearEvenOut = useCallback(
-    (takes: readonly TakeRef[]) => (evenOutHost ? clearEvenOut(evenOutHost, takes) : Promise.resolve(null)),
+    (takes: readonly TakeRef[], opts?: { onWaiting?: () => void }) => (evenOutHost ? clearEvenOut(evenOutHost, takes, opts) : Promise.resolve(null)),
     [evenOutHost],
   )
 
@@ -21219,7 +21219,7 @@ export function ProjectWorkspace() {
           scopes={evenOutWindow.scopes}
           start={evenOutWindow.start}
           run={(takes, opts) => handleEvenOut(takes, { ...opts, markAsRun: true })}
-          clear={(takes) => handleClearEvenOut(takes)}
+          clear={(takes, opts) => handleClearEvenOut(takes, opts)}
           onRan={handleEvenOutRan}
           onCleared={handleEvenOutCleared}
         />

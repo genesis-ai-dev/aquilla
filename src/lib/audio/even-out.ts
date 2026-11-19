@@ -314,8 +314,8 @@ async function evenOutMeasured(
 }
 
 /** Take evening out off `takes`: each plays at its own volume again. */
-export async function clearEvenOut(host: EvenOutHost, takes: readonly TakeRef[]): Promise<ClearResult> {
-  if (host.queue) return host.queue.run(() => clearEvenOutNow(host, takes))
+export async function clearEvenOut(host: EvenOutHost, takes: readonly TakeRef[], opts: { onWaiting?: () => void } = {}): Promise<ClearResult> {
+  if (host.queue) return host.queue.run(() => clearEvenOutNow(host, takes), opts.onWaiting)
   return clearEvenOutNow(host, takes)
 }
 

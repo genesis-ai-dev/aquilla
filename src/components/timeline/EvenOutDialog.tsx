@@ -32,7 +32,7 @@ export interface EvenOutDialogProps {
   start: EvenOutPick
   targetLufs?: number
   run(takes: readonly TakeRef[], opts: Pick<EvenOutOptions, "signal" | "onProgress" | "onWaiting">): Promise<EvenOutResult | null>
-  clear(takes: readonly TakeRef[]): Promise<ClearResult | null>
+  clear(takes: readonly TakeRef[], opts?: { onWaiting?: () => void }): Promise<ClearResult | null>
   /** The run ended (done or cancelled): the workspace shows its toast. */
   onRan(result: EvenOutResult, scope: EvenOutScope): void
   onCleared(result: ClearResult, scope: EvenOutScope): void
@@ -47,6 +47,8 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
   const [infoOpen, setInfoOpen] = useState(false)
   const [running, setRunning] = useState<{ done: number; total: number } | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Re-check N3: a Clear in flight (maybe waiting behind a run).
+  const [clearing, setClearing] = useState(false)
   const abort = useRef<AbortController | null>(null)
 
   // A fresh window each time it opens, on the scope it was opened from
@@ -106,8 +108,17 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
   }
 
   const doClear = async () => {
-    if (!scope || running || scope.evened.length === 0) return
-    const r = await clear(scope.evened)
+    if (!scope || running || clearing || scope.evened.length === 0) return
+    setClearing(true)
+    setNote(null)
+    let r: ClearResult | null
+    try {
+      // Re-check N3: like a run, a Clear waiting its turn says so.
+      r = await clear(scope.evened, { onWaiting: () => setNote(t("editor.evenOut.waiting")) })
+    } finally {
+      setClearing(false)
+    }
+    setNote(null)
     if (!r) {
       setNote(t("editor.evenOut.failed"))
       return
@@ -121,7 +132,7 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
   }
 
   const pct = running && running.total > 0 ? Math.round((running.done / running.total) * 100) : 0
-  const finished = note != null && !running
+  const finished = note != null && !running && !clearing
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} modal={false} disablePointerDismissal>
@@ -191,7 +202,7 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
         ) : (
           <div className="flex items-center gap-2">
             {scope && scope.evened.length > 0 ? (
-              <Button type="button" variant="ghost" className="px-1.5 text-foreground/80" onClick={() => void doClear()}>
+              <Button type="button" variant="ghost" className="px-1.5 text-foreground/80" disabled={clearing} onClick={() => void doClear()}>
                 <RotateCcw aria-hidden className="size-3.5" />
                 {t("editor.evenOut.clear", { count: scope.evened.length })}
               </Button>
@@ -200,7 +211,7 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}
             </Button>
-            <Button type="button" disabled={n === 0} onClick={() => void go()} className={cn(n === 0 && "opacity-50")}>
+            <Button type="button" disabled={n === 0 || clearing} onClick={() => void go()} className={cn(n === 0 && "opacity-50")}>
               {t("editor.evenOut.run", { count: n })}
             </Button>
           </div>

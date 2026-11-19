@@ -74,7 +74,7 @@ describe("the Even out window", () => {
     expect(screen.queryByRole("button", { name: /^Clear/ })).toBeNull()
     fireEvent.click(screen.getByRole("radio", { name: /Jesus/ }))
     fireEvent.click(screen.getByRole("button", { name: "Clear 93" }))
-    await waitFor(() => expect(p.clear).toHaveBeenCalledWith(evenedTrack.evened))
+    await waitFor(() => expect(p.clear).toHaveBeenCalledWith(evenedTrack.evened, expect.anything()))
     await waitFor(() => expect(p.onCleared).toHaveBeenCalled())
     expect(vi.mocked(p.onCleared).mock.calls[0][1]).toBe(evenedTrack)
     expect(p.onOpenChange).toHaveBeenCalledWith(false)
@@ -122,6 +122,23 @@ describe("the Even out window", () => {
     fireEvent.click(screen.getByRole("button", { name: "Even out 212 takes" }))
     expect(screen.getByText("Another Even out is still running. This one starts when it ends.")).toBeInTheDocument()
     await act(async () => finish(result({ evened: 212 })))
+  })
+
+  // Re-check N3: a Clear waiting behind a run says so, and can't be pressed twice.
+  it("says so when a Clear waits for an Even out still running, and holds its buttons", async () => {
+    let finish: (r: { cleared: number; gone: number; failed: number }) => void = () => {}
+    const clear = vi.fn((_t: readonly TakeRef[], opts?: { onWaiting?: () => void }) => {
+      opts?.onWaiting?.()
+      return new Promise<{ cleared: number; gone: number; failed: number }>((resolve) => { finish = resolve })
+    })
+    setup({ start: "track", scopes: [FILE, { ...TRACK, evened: refs(93) }], clear })
+    fireEvent.click(screen.getByRole("button", { name: "Clear 93" }))
+    expect(screen.getByText("Another Even out is still running. This one starts when it ends.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Clear 93" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Even out 93 takes" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Clear 93" }))
+    expect(clear).toHaveBeenCalledOnce()
+    await act(async () => finish({ cleared: 93, gone: 0, failed: 0 }))
   })
 
   it("never blocks the editor: no dimmer, and the page stays clickable", () => {

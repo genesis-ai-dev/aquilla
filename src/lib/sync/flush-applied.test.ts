@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { CellRow } from "./cells-read-types"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import { createLiveApplier, type AppliedEventFrame } from "./live-apply"
-import { createFlushAppliedTracker, isStatsDerivableKind } from "./flush-applied"
+import { confirmCommittedBatch, createFlushAppliedTracker, isStatsDerivableKind } from "./flush-applied"
 
 function row(cellId: string, side: "source" | "target", value: string, eventId: string): CellRow {
   return {
@@ -106,6 +106,68 @@ describe("createFlushAppliedTracker", () => {
     tracker.onFrames([frame({ serverSeq: 10, rows: NEW_ROWS })])
     tracker.reset()
     expect(tracker.confirm("c1", "E1")).toEqual({ refetchCell: true, refetchStats: true })
+  })
+})
+
+// AQU-2654: a batch-drafted chunk is ten commits in one POST. It must cost no
+// confirming read when the response carried all ten, and at most ONE of each
+// when it did not — never a pair of file-level GETs per chunk regardless.
+describe("confirmCommittedBatch", () => {
+  const CELLS = ["c1", "c2", "c3"]
+  const sources = CELLS.map((id) => row(id, "source", `source ${id}`, `S-${id}`))
+  const landedFrame = (id: string) => frame({
+    id: `E-${id}`, cell: id, serverSeq: 10,
+    rows: [row(id, "source", `source ${id}`, `S-${id}`), row(id, "target", `draft ${id}`, `E-${id}`)],
+  })
+
+  it("needs NO read when the response landed every draft of the chunk", () => {
+    const { tracker, store } = setup(sources)
+    tracker.onFrames(CELLS.map(landedFrame))
+
+    expect(confirmCommittedBatch(
+      tracker,
+      CELLS.map((cellId) => ({ cellId, eventId: `E-${cellId}`, saved: true })),
+    )).toEqual({ refetchCell: false, refetchStats: false })
+    for (const id of CELLS) expect(store.getCellView(id)?.targetEventId).toBe(`E-${id}`)
+  })
+
+  it("asks for each read once when one draft's frame is missing", () => {
+    const { tracker } = setup(sources)
+    tracker.onFrames([landedFrame("c1"), landedFrame("c3")])
+
+    expect(confirmCommittedBatch(
+      tracker,
+      CELLS.map((cellId) => ({ cellId, eventId: `E-${cellId}`, saved: true })),
+    )).toEqual({ refetchCell: true, refetchStats: true })
+  })
+
+  it("asks for both reads when a draft was refused, even though the rest landed", () => {
+    const { tracker } = setup(sources)
+    tracker.onFrames([landedFrame("c1"), landedFrame("c2")])
+
+    expect(confirmCommittedBatch(tracker, [
+      { cellId: "c1", eventId: "E-c1", saved: true },
+      { cellId: "c2", eventId: "E-c2", saved: true },
+      { cellId: "c3", eventId: "E-c3", saved: false },
+    ])).toEqual({ refetchCell: true, refetchStats: true })
+  })
+
+  it("trusts the landed frame for a draft whose event id the caller no longer holds", () => {
+    const { tracker } = setup(sources)
+    tracker.onFrames(CELLS.map(landedFrame))
+
+    expect(confirmCommittedBatch(
+      tracker,
+      CELLS.map((cellId) => ({ cellId, saved: true })),
+    )).toEqual({ refetchCell: false, refetchStats: false })
+  })
+
+  it("consumes every entry, so a later commit of the same cell is not matched against this chunk", () => {
+    const { tracker } = setup(sources)
+    tracker.onFrames(CELLS.map(landedFrame))
+    confirmCommittedBatch(tracker, CELLS.map((cellId) => ({ cellId, eventId: `E-${cellId}`, saved: true })))
+
+    expect(tracker.confirm("c1", "E-c1")).toEqual({ refetchCell: true, refetchStats: true })
   })
 })
 

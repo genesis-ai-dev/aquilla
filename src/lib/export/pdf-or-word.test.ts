@@ -14,7 +14,7 @@ import { extractDocxStrings } from "@/lib/parsers/docx"
 import { exportPdfOrWord } from "./pdf-or-word"
 import type { PrintableWindow } from "./print-window"
 
-const SENTENCE = "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF."
+const SENTENCE = "Printing isn't available here, so this is the Word file. Save it as PDF from Word or Pages, or open this page in Safari or Chrome."
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const INSTAGRAM = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.0.0"
 const ANDROID_WEBVIEW = "Mozilla/5.0 (Linux; Android 14; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36"
@@ -93,7 +93,7 @@ describe("a PDF from the print window, or the Word file", () => {
 
   it("words the sentence through the app's messages", () => {
     expect(t("importExport.status.pdfFellBackToWord")).toBe(SENTENCE)
-    expect(t("importExport.status.pdfChooseSaveAsPdf")).toBe('The print window is open. Choose "Save as PDF" there to save the file.')
+    expect(t("importExport.status.pdfChooseSaveAsPdf")).toBe('In the print window, choose "Save as PDF" to save the file.')
   })
 })
 

@@ -24,6 +24,18 @@ export interface PrintOptions {
   userAgent?: string
   /** How long the page may take to load before printing counts as unavailable. */
   loadTimeoutMs?: number
+  /** AQU-2680 re-check finding 5: called once the page is ready, before the
+   *  print window opens, so the caller's message is on screen first (Chrome's
+   *  print window holds the page until it closes). The page is let paint it. */
+  beforePrint?: () => void
+}
+
+/** Let the page paint what `beforePrint` put up. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => setTimeout(resolve, 0))
+    else setTimeout(resolve, 0)
+  })
 }
 
 /** Built-in browsers of other apps, where `print()` is a silent no-op.
@@ -76,6 +88,10 @@ export async function printHtml(html: string, options?: PrintOptions): Promise<b
   if (!win || typeof win.print !== "function") {
     close()
     return false
+  }
+  if (options?.beforePrint) {
+    options.beforePrint()
+    await nextPaint()
   }
   try {
     win.addEventListener?.("afterprint", close)

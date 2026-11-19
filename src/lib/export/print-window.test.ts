@@ -21,6 +21,15 @@ describe("printing from the hidden frame", () => {
     expect(calls).toEqual(["focus", "print"])
   })
 
+  // AQU-2680 re-check finding 5: the caller's message goes up, and the page
+  // paints it, before the print window opens.
+  it("lets the caller show its message before printing", async () => {
+    const calls: string[] = []
+    const win = { focus: () => calls.push("focus"), print: () => calls.push("print") } as PrintableWindow
+    await printHtml("<p>x</p>", { userAgent: CHROME, open: async () => ({ win, close: vi.fn() }), beforePrint: () => { calls.push("message") } })
+    expect(calls).toEqual(["message", "focus", "print"])
+  })
+
   it("prints from a sandboxed frame that may print but runs no scripts", async () => {
     const printing = printHtml("<p>x</p>", { userAgent: CHROME, loadTimeoutMs: 1000 })
     const frame = document.querySelector("iframe")!

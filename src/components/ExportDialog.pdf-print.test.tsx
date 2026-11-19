@@ -32,6 +32,7 @@ function props(type: string, name: string, hasOriginal: boolean | undefined) {
   }
 }
 
+const CHOOSE = 'In the print window, choose "Save as PDF" to save the file.'
 const radio = (label: RegExp) => screen.queryByRole("radio", { name: label })
 function openFoldIfClosed() {
   if (screen.queryByRole("radiogroup", { name: "Export format" })) return
@@ -67,12 +68,29 @@ describe("ExportDialog: PDF from the print window (AQU-2680)", () => {
     render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)
     fireEvent.click(radio(/^PDF \(\.pdf\)/)!)
     fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
-    await waitFor(() => expect(screen.getByText('The print window is open. Choose "Save as PDF" there to save the file.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(CHOOSE)).toBeInTheDocument())
     const [page] = mockPrint.mock.calls[0] as [string]
     expect(page).toContain("<title>notes</title>")
     expect(page).toContain("<h1>Capítulo uno</h1>")
     expect(page).toContain('<html lang="es">')
     expect(mockDownload).not.toHaveBeenCalled()
+  })
+
+  // AQU-2680 re-check finding 5: Chrome's print window holds the page until
+  // it closes, so the message is on screen before it opens, worded to be
+  // true before and after.
+  it("shows the Save as PDF message before the print window opens", async () => {
+    let shownBeforePrint = false
+    mockPrint.mockImplementation(async (_page, options) => {
+      options?.beforePrint?.()
+      shownBeforePrint = screen.queryByText(CHOOSE) !== null
+      return true
+    })
+    render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)
+    fireEvent.click(radio(/^PDF \(\.pdf\)/)!)
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockPrint).toHaveBeenCalled())
+    expect(shownBeforePrint).toBe(true)
   })
 
   // AQU-2680 re-check finding 3: Gmail, Slack, X, LinkedIn and Telegram on
@@ -98,6 +116,6 @@ describe("ExportDialog: PDF from the print window (AQU-2680)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
     await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
     expect(mockDownload.mock.calls[0][1]).toBe("notes.docx")
-    expect(await screen.findByText("The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF.")).toBeInTheDocument()
+    expect(await screen.findByText("Printing isn't available here, so this is the Word file. Save it as PDF from Word or Pages, or open this page in Safari or Chrome.")).toBeInTheDocument()
   })
 })

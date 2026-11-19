@@ -759,12 +759,13 @@ export const importExport = defineNamespace({
     // AQU-2680: the notes list at the end of the HTML page export and the PDF's print page.
     "importExport.htmlPage.notes": "Notes",
     "importExport.htmlPage.backToText": "Back to text",
-    // AQU-2680: the PDF export opened the print window; the person saves the PDF there.
-    "importExport.status.pdfChooseSaveAsPdf": "The print window is open. Choose \"Save as PDF\" there to save the file.",
+    // AQU-2680: the PDF export opens the print window; the person saves the PDF there. Shown before
+    // it opens and still there after it closes (re-check finding 5), so it is worded for both.
+    "importExport.status.pdfChooseSaveAsPdf": "In the print window, choose \"Save as PDF\" to save the file.",
     // AQU-2680 re-check finding 3: beside the print message, for a browser that cannot print but doesn't say so.
     "importExport.dialog.pdfOrDownloadWord": "Or download the Word file",
     // AQU-2680: printing is not available here (another app's built-in browser), so the PDF export saved the Word file.
-    "importExport.status.pdfFellBackToWord": "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF.",
+    "importExport.status.pdfFellBackToWord": "Printing isn't available here, so this is the Word file. Save it as PDF from Word or Pages, or open this page in Safari or Chrome.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +

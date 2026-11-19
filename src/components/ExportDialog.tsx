@@ -23,6 +23,7 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 
 import { ExtensionExports } from "@/components/tools/ExtensionExports"
 import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
+import { flushSync } from "react-dom"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -2294,12 +2295,22 @@ export function ExportDialog({
             // cannot print, the Word file is saved instead, with how to make
             // the PDF from it. A cancel in the print window saves nothing.
             const { exportPdfOrWord } = await import("@/lib/export/pdf-or-word")
-            const result = await exportPdfOrWord(filteredCells, { title: baseName, lang: targetLanguage })
-            setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
-            if (result.kind === "print") {
+            // AQU-2680 re-check finding 5: the message is up before the
+            // print window opens, as Chrome's holds the page until it closes.
+            const showPrintMessage = () => {
               setStatus({ kind: "ok", msg: t("importExport.status.pdfChooseSaveAsPdf") })
               setPdfWordFallback({ cells: filteredCells, name: `${baseName}.docx` })
+            }
+            const result = await exportPdfOrWord(filteredCells, {
+              title: baseName,
+              lang: targetLanguage,
+              print: { beforePrint: () => flushSync(showPrintMessage) },
+            })
+            setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
+            if (result.kind === "print") {
+              showPrintMessage()
             } else {
+              setPdfWordFallback(null)
               downloadBlob(result.blob, `${baseName}.docx`)
               setStatus({ kind: "ok", msg: result.notice })
             }

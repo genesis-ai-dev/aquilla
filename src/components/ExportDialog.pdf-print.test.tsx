@@ -93,6 +93,45 @@ describe("ExportDialog: PDF from the print window (AQU-2680)", () => {
     expect(shownBeforePrint).toBe(true)
   })
 
+  // AQU-2680 browser pass: the status sits at the foot of a long, scrolling
+  // dialog (about 2,100px down), so it is brought into view when it is set,
+  // before the print window opens. The same rule serves every format.
+  it("brings the Save as PDF message into view before the print window opens", async () => {
+    const scrolled: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      let inViewBeforePrint = false
+      mockPrint.mockImplementation(async (_page, options) => {
+        options?.beforePrint?.()
+        inViewBeforePrint = scrolled.some((el) => el.textContent?.includes(CHOOSE))
+        return true
+      })
+      render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)
+      fireEvent.click(radio(/^PDF \(\.pdf\)/)!)
+      fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+      await waitFor(() => expect(mockPrint).toHaveBeenCalled())
+      expect(inViewBeforePrint).toBe(true)
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it("brings another format's status into view too", async () => {
+    const scrolled: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)
+      fireEvent.click(radio(/^New Word document \(\.docx\)/)!)
+      fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+      await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(scrolled.some((el) => el.getAttribute("role") === "status" && /notes\.docx/.test(el.textContent ?? ""))).toBe(true))
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
   // AQU-2680 re-check finding 3: Gmail, Slack, X, LinkedIn and Telegram on
   // iPhone have no print and don't say so; the Word file is always one click
   // away beside the print message, so nobody is stuck.

@@ -22,7 +22,7 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // all camera angles.
 
 import { ExtensionExports } from "@/components/tools/ExtensionExports"
-import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { flushSync } from "react-dom"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -1250,6 +1250,15 @@ export function ExportDialog({
     | { kind: "ok"; msg: string }
     | { kind: "ok-lossy"; msg: string; lossyVerseCount: number }
   >({ kind: "idle" })
+  // AQU-2680 browser pass: the status sits at the foot of a long, scrolling
+  // dialog, so whenever it is set it is brought into view, before the page
+  // paints (the PDF's print window opens right after). Progress ticks of a
+  // busy status don't scroll again, so a long export doesn't fight the person.
+  const statusRef = useRef<HTMLDivElement>(null)
+  const statusScrollKey = status.kind === "busy" ? status.kind : `${status.kind}:${"msg" in status ? status.msg : ""}`
+  useLayoutEffect(() => {
+    statusRef.current?.scrollIntoView?.({ block: "nearest" })
+  }, [statusScrollKey])
   // Inline-style fidelity report for the last export (parity run: users must
   // see when formatting could not be carried into edited translations).
   const [fidelityWarnings, setFidelityWarnings] = useState<ExportFidelityWarning[]>([])
@@ -3520,6 +3529,7 @@ export function ExportDialog({
         {/* i18n-exempt "idle" is an export-status kind tag, not copy */}
         {status.kind !== "idle" && (
           <div
+            ref={statusRef}
             role="status"
             aria-live="polite"
             className={

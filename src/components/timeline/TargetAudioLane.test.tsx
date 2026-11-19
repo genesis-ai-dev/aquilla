@@ -1622,10 +1622,11 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(one().style.width).toBe("28px")
         expect(parseFloat(one().style.width) + 8).toBeLessThanOrEqual(parseFloat(slot().style.width))
         expect(one()).toHaveAttribute("aria-haspopup", "menu")
-        // At rest its glyph is the mic (Record is the menu's first item); a
-        // plus would read as "add a line here".
-        expect(glyph(one())).toMatch(/lucide-mic\b/)
-        expect(glyph(one())).not.toMatch(/plus/)
+        // At rest its glyph is a small downward caret (Sam, Nov 19): it opens
+        // a menu. Not the mic (only one of its two choices), not a plus (reads
+        // as "add a line here").
+        expect(glyph(one())).toMatch(/lucide-chevron-down\b/)
+        expect(glyph(one())).not.toMatch(/lucide-mic\b|plus/)
         expect(one().getAttribute("aria-label")).toBe("Record or make speech for this line")
         // Invisible at rest like the pair, lit with the pointer on the line.
         expect(one()).not.toHaveAttribute("data-hot")

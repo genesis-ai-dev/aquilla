@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTimelineOriginPx } from "./timeline-origin"
 import type { ReactNode } from "react"
-import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronDown, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -2579,9 +2579,9 @@ export function TargetAudioLane({
                   ),
                 }}
               >
-                {/* At rest the mic: Record is the menu's first item, and a
-                    plus would read as "add a line here" on this timeline. */}
-                {busy || picked ? speechGlyph : <Mic style={iconStyle} aria-hidden />}
+                {/* At rest a small downward caret (Sam, Nov 19): the button
+                    opens a menu of two. Picked shows ✨, busy the spinner. */}
+                {busy || picked ? speechGlyph : <ChevronDown style={iconStyle} aria-hidden />}
               </TimelineSlotButton>
             ) : offersRecord ? (
               <TimelineSlotButton

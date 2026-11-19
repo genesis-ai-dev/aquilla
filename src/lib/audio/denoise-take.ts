@@ -18,7 +18,7 @@ import {
 import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioEven } from "@/lib/sync/events-emit"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
@@ -72,6 +72,9 @@ export interface DenoiseTakeArgs {
     gainDb?: number | null
     fadeInMs?: number | null
     fadeOutMs?: number | null
+    /** AQU-2664: the loudness it is evened out to, carried to the cleaned
+     *  take. Its new audio is unmeasured until Even out measures it. */
+    evenTargetLufs?: number | null
   }
 }
 
@@ -173,6 +176,9 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
         ...lane, author,
       })
     }
+    if (src?.evenTargetLufs != null) {
+      await emitCellAudioEven({ projectId, fileId, cellId, audioId: fullAudioId, evenTargetLufs: src.evenTargetLufs, ...lane, author })
+    }
   } catch (emitErr) {
     dropUpload()
     throw emitErr
@@ -196,6 +202,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     ...(src?.gainDb != null ? { gainDb: src.gainDb } : {}),
     ...(src?.fadeInMs != null ? { fadeInMs: src.fadeInMs } : {}),
     ...(src?.fadeOutMs != null ? { fadeOutMs: src.fadeOutMs } : {}),
+    ...(src?.evenTargetLufs != null ? { evenTargetLufs: src.evenTargetLufs } : {}),
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
   if (args.history) {
@@ -274,6 +281,10 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
             ...lane, author,
           })
         : null
+      // AQU-2664: each cleaned piece keeps its piece's evening out.
+      if (piece.evenTargetLufs != null) {
+        await emitCellAudioEven({ projectId, fileId, cellId, audioId, evenTargetLufs: piece.evenTargetLufs, ...lane, author })
+      }
       injectOptimisticAudioAttachment(fileId, cellId, {
         audioId,
         url: result.url,
@@ -288,6 +299,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
         ...(piece.label ? { label: piece.label } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...(piece.evenTargetLufs != null ? { evenTargetLufs: piece.evenTargetLufs } : {}),
       }, placeP ?? eventId)
     }
   } catch (emitErr) {

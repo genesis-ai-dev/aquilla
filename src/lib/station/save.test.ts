@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[] }))
+const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[], even: [] as unknown[], measure: [] as unknown[] }))
 vi.mock("@/lib/audio/upload", () => ({
   buildAudioId: (seed: string) => `audio-${seed}`,
   uploadCellAudio: vi.fn(async (a: { audioId: string }) => ({ audioId: a.audioId, ext: "wav", url: `frontier-audio://${a.audioId}.wav` })),
@@ -12,6 +12,9 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async (x: unknown) => (calls.attach.push(x), "ev")),
   emitCellAudioPlace: vi.fn(async (x: unknown) => (calls.place.push(x), "ev")),
   emitCellAudioRemove: vi.fn(async (x: unknown) => (calls.remove.push(x), "ev")),
+  emitCellAudioGain: vi.fn(async () => "ev"),
+  emitCellAudioEven: vi.fn(async (x: unknown) => (calls.even.push(x), "ev")),
+  emitCellAudioMeasure: vi.fn(async (x: unknown) => (calls.measure.push(x), "ev")),
 }))
 
 import { historyView, matchingSteps, resetHistoryForTests, setHistoryScope } from "@/lib/history/history"
@@ -35,6 +38,29 @@ describe("Save as new version", () => {
     calls.attach.length = 0
     calls.place.length = 0
     calls.remove.length = 0
+    calls.even.length = 0
+    calls.measure.length = 0
+  })
+
+  // AQU-2664 review M3: an evened-out take's new version stays evened out,
+  // and its new audio is measured (it is in memory already).
+  it("carries the evening out to the new version and measures its audio", async () => {
+    const tone = Float32Array.from({ length: 48000 }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000))
+    const res = await saveStationVersion({
+      projectId: "p",
+      samples: tone,
+      rate: 48000,
+      placements: [{ ...base, evenTargetLufs: -16 }, { ...base, cellId: "c316", fromAudioId: "t1.webm" }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+    })
+    expect(calls.even).toEqual([expect.objectContaining({ cellId: "c331", audioId: res.audioIds[0], evenTargetLufs: -16 })])
+    expect(calls.measure).toHaveLength(2)
+    const m = calls.measure[0] as { loudness: { loudnessLufs: number; truePeakDb: number }; audioId: string }
+    expect(m.audioId).toBe(res.audioIds[0])
+    expect(m.loudness.truePeakDb).toBeCloseTo(-20, 1)
+    expect(m.loudness.loudnessLufs).toBeLessThan(-10)
   })
 
   it("attaches the new version on each line, pointing back at the take it replaces, keeping track, name, trim and place", async () => {

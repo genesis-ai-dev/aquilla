@@ -22,7 +22,8 @@ import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/uplo
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { recordTakeAdded, type PieceStretch, type TakeRemoveData } from "@/lib/history/take-steps"
-import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioEven, emitCellAudioGain, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
+import { measureLoudnessYielding } from "@/lib/audio/loudness"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 
 /** One line the new version goes on, and how it sits there. */
@@ -49,6 +50,9 @@ export interface VersionPlacement {
   pieceOf?: string | null
   /** Its volume and fades (AQU-2327), carried over to the new take. */
   level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
+  /** AQU-2664: the loudness the take it replaces is evened out to, carried
+   *  over (its own volume above reads relative to it). */
+  evenTargetLufs?: number | null
   /** AQU-2492 (review, Nov 9), finding 8: who had approved the take it
    *  replaces, for the step that removes it ("over"). */
   approvedBy?: readonly string[]
@@ -104,6 +108,20 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
   const lane = args.targetLang ? { targetLang: args.targetLang } : {}
   const over = args.mode === "over"
   const changes = args.changes ? { ...args.changes, ...(over ? { over: true } : {}) } : over ? { kinds: [], usedOn: args.placements.map((p) => p.cellId), over: true } : null
+  // AQU-2664: the new audio is in hand, so each line's take is measured now,
+  // over the part of it that line plays (on the page, yielding). If it can't
+  // be, it is simply unmeasured: it plays at its own volume until Even out
+  // measures it.
+  const measureKept = async (p: VersionPlacement): Promise<{ loudnessLufs: number; truePeakDb: number } | null> => {
+    try {
+      const a = Math.max(0, Math.round(((p.trimStartMs ?? 0) / 1000) * args.rate))
+      const b = p.trimEndMs != null ? Math.min(args.samples.length, Math.round((p.trimEndMs / 1000) * args.rate)) : args.samples.length
+      const r = await measureLoudnessYielding([args.samples.subarray(a, Math.max(a, b))], args.rate)
+      return { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb }
+    } catch {
+      return null
+    }
+  }
   const ids: string[] = []
   let attached = 0
   try {
@@ -136,6 +154,13 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
           const lvl = p.level
           if (lvl && (lvl.gainDb != null || lvl.fadeInMs != null || lvl.fadeOutMs != null)) {
             await emitCellAudioGain({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, ...lvl, ...lane, author: args.author })
+          }
+          const reading = await measureKept(p)
+          if (reading) {
+            await emitCellAudioMeasure({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, durationMs, loudness: reading, ...lane, author: args.author })
+          }
+          if (p.evenTargetLufs != null) {
+            await emitCellAudioEven({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, evenTargetLufs: p.evenTargetLufs, ...lane, author: args.author })
           }
           // AQU-2267: both places, so neither timing moves.
           const placeP =
@@ -171,6 +196,8 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               ...(p.level?.gainDb != null ? { gainDb: p.level.gainDb } : {}),
               ...(p.level?.fadeInMs != null ? { fadeInMs: p.level.fadeInMs } : {}),
               ...(p.level?.fadeOutMs != null ? { fadeOutMs: p.level.fadeOutMs } : {}),
+              ...(reading ?? {}),
+              ...(p.evenTargetLufs != null ? { evenTargetLufs: p.evenTargetLufs } : {}),
             },
             placeP ?? eventId,
           )

@@ -37,7 +37,14 @@ void holdLeaderLock(
     onSteal: (ms) => warnLeader("warn", `took '${lockName}' after waiting ${ms} ms — its holder never let go`),
   },
 ).catch((error: unknown) => {
-  warnLeader("error", "leader worker stopped", error)
+  // AbortError once granted means a newer leader took the lock from this one
+  // (see STEAL_LOCK_MS in leader-lock.ts): expected, not a crash. It still
+  // stops below, which closes the files for the new leader.
+  if (error instanceof DOMException && error.name === "AbortError") {
+    warnLeader("warn", `a newer leader took '${lockName}' — stopping this one`)
+  } else {
+    warnLeader("error", "leader worker stopped", error)
+  }
   // Rethrown uncaught, so it fires `error` on the page's Worker object. That's
   // the only failure the adapter listens for before the leader says it's
   // ready (a rejection here would leave the page's boot waiting forever), and

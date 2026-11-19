@@ -37,6 +37,12 @@ const SLOW_LOCK_MS = 5_000
  * window, so a holder this old is a leftover. Taking the lock isn't taking
  * the files: the leader still waits for the OPFS handles to be free before it
  * boots (see opfs-handles.ts), so a holder that's still alive is never raced.
+ *
+ * The leader the lock is taken from stops (its lock request rejects with
+ * AbortError, see livestore.worker.ts), which is what frees the files. That's
+ * only safe because of the one window: with a second window or any other live
+ * store user, a slow but live leader would be killed here and its page left
+ * with a store whose writes go nowhere. Remove the steal before adding one.
  */
 const STEAL_LOCK_MS = 30_000
 

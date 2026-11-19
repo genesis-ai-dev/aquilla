@@ -6697,6 +6697,7 @@ export const ha: Catalog = {
   "knowledgeBase.upload": "Ku loda takarda",
   "knowledgeBase.uploading": "Ana loda takarda…",
   "knowledgeBase.uploadSuccess": "An loda {name}.",
+  "knowledgeBase.uploadTruncated": "An loda {name}, amma yana da tsawo sosai: haruffa miliyan 2 na farko kawai aka karanta.",
   "knowledgeBase.uploadError": "An kasa loda {name}. Ku sake gwadawa.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, ko PDF · har 25 MB (DOCX da PDF har 2 MB)",
   "knowledgeBase.emptyTitle": "Babu takardun ilimi tukuna",

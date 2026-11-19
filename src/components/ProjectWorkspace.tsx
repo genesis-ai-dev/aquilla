@@ -2529,14 +2529,15 @@ export function ProjectWorkspace() {
   useEffect(() => { flushAppliedTracker.reset() }, [flushAppliedTracker, activeFileId])
   useEffect(
     () => subscribeAppliedEvents((frames, sent) => {
-      flushAppliedTracker.onFrames(frames, sent)
+      // One response is one announcement, however many frames it carries.
+      cellStore.batch(() => flushAppliedTracker.onFrames(frames, sent))
       // AQU-2654: the server is pushing these writes' progress numbers; the
       // pending overlay's drain must not read them back.
       for (const frame of frames) {
         if (frame.progressPushed && frame.file) expectPushedFileProgress(frame.project, frame.file)
       }
     }),
-    [flushAppliedTracker],
+    [cellStore, flushAppliedTracker],
   )
   /** Post-flush confirmation for a single committed cell: refetch only what
    *  the POST response did not already land (older server, >cap batch,
@@ -10215,6 +10216,11 @@ export function ProjectWorkspace() {
               // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
               // Prevents the bail-out that left cells visually locked after a
               // lease-expiry sweep (which broadcasts a lone lock.released frame).
+              // AQU-2654: a release of a cell this map never held — every one
+              // of this user's OWN releases, since own claims are not entered
+              // above — changes nothing anyone sees, and must not cost a
+              // workspace render on each cell switch.
+              if (!cellLockHoldersRef.current.has(msg.cellId)) return
               const next = applyLockReleased(cellLockHoldersRef.current, msg.cellId)
               cellLockHoldersRef.current = next
               setCellLockHolders(next)

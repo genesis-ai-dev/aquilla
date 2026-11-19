@@ -411,3 +411,82 @@ describe('only someone with every language may declare source audio', () => {
     expect(await full('take-rita.webm')).toMatchObject({ role: 'dub', url: 'frontier-audio://take-rita.webm', created_by: 'rita' })
   })
 })
+
+// ---- A Project Lead's source media ("Upload a recording to make lines",
+// attaching a film or recording by url): under the wall he may declare source
+// audio when his own grants cover every language of the project.
+const LEAD_ALL = { ...RAVI, laneGrants: [{ lane: 'cc33dd44', level: 500 }, { lane: ES, level: 500 }] }
+const newSource = (who: Who, url = `frontier-audio://${who.username}-src.webm`) =>
+  ev('cell.audio.attach', F, 'c2', who.username, { audioId: `${who.username}-src.webm`, url, slot: 'recording', role: 'source' })
+
+describe('a Project Lead with every language may attach source media', () => {
+  it('a linked film from a Project Lead with grants on every language is allowed', async () => {
+    await ritaChosenEs()
+    expect(await send(LEAD_ALL, [newSource(LEAD_ALL, 'https://example.org/film.mp4')], { wall: true })).toEqual([])
+    expect(await full('ravi-src.webm')).toMatchObject({ role: 'source', url: 'https://example.org/film.mp4' })
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+  it('a Project Lead limited to some languages is refused', async () => {
+    await ritaChosenEs()
+    expect(await send(LEAD_AR, [newSource(LEAD_AR)], { wall: true })).toEqual(refused)
+    expect(await full('ravi-src.webm')).toBeUndefined()
+  })
+  it('a Project Lead with no grants at all is refused under the wall', async () => {
+    await ritaChosenEs()
+    expect(await send(RAVI, [newSource(RAVI)], { wall: true })).toEqual(refused)
+  })
+  it('an Arabic-only contributor is refused', async () => {
+    await ritaChosenEs()
+    expect(await send(ARABIC, [newSource(ARABIC)], { wall: true })).toEqual(refused)
+  })
+  it('a Maintainer with one grant passes, as before', async () => {
+    await ritaChosenEs()
+    const maxAr = { ...MAX, laneGrants: [{ lane: 'cc33dd44', level: 600 }] }
+    expect(await send(maxAr, [newSource(maxAr)], { wall: true })).toEqual([])
+  })
+  it('wall off, an unscoped Project Lead is allowed, as before', async () => {
+    await ritaChosenEs()
+    expect(await send(RAVI, [newSource(RAVI)])).toEqual([])
+  })
+})
+
+// ---- Below Maintainer, a re-attach of the source clip may only add words or
+// choose it: the url, the slot and the trim window stay as they are.
+const sourceRow = async (audioId = 'src.webm') =>
+  (await h.pg.query<Record<string, unknown>>(`SELECT slot, url, trim_start_ms, trim_end_ms, timings_json FROM cell_audio WHERE audio_id = $1`, [audioId])).rows[0]
+const WORDS = { wordsOnly: true, timings: [{ word: 'hi', start: 0, end: 2, t0: 0, t1: 0.5 }], transcription: 'hi' }
+
+describe('below Maintainer, a re-attach of the source clip only adds words or chooses it', () => {
+  it('moving it to another slot is refused', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { slot: 'generatedVoice', wordsOnly: true })], { wall: true })).toEqual(refused)
+    expect(await sourceRow()).toMatchObject({ slot: 'recording', trim_start_ms: null })
+  })
+  it('setting its trim window is refused, from a Project Lead with every language too', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { wordsOnly: true, trimStartMs: 5000, trimEndMs: 5001 })], { wall: true })).toEqual(refused)
+    expect(await send(LEAD_ALL, [reattachSource(LEAD_ALL, { trimStartMs: 5000, trimEndMs: 5001 })], { wall: true })).toEqual(refused)
+    expect(await sourceRow()).toMatchObject({ trim_start_ms: null, trim_end_ms: null })
+  })
+  it('transcription and transcript save (same url and slot, words) still land', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { ...WORDS, durationMs: 1234 })], { wall: true })).toEqual([])
+    expect(await send(SPANISH, [reattachSource(SPANISH, WORDS)], { wall: true })).toEqual([])
+    expect((await sourceRow()).timings_json).not.toBeNull()
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+  it('a piece of the source clip keeps its window; echoing that same window is fine', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(OWNER, [ev('cell.audio.attach', F, 'c1', 'owner', { audioId: 'src-p.webm', url: 'frontier-audio://src.webm', slot: 'recording', role: 'source', pieceOf: 'src.webm', trimStartMs: 0, trimEndMs: 100 })])).toEqual([])
+    const piece = (extra: Record<string, unknown>) =>
+      ev('cell.audio.attach', F, 'c1', 'mallory', { audioId: 'src-p.webm', url: 'frontier-audio://src.webm', slot: 'recording', ...WORDS, ...extra })
+    expect(await send(ARABIC, [piece({ trimStartMs: 0, trimEndMs: 100 })], { wall: true })).toEqual([])
+    expect(await send(ARABIC, [piece({ trimStartMs: 0, trimEndMs: 900 })], { wall: true })).toEqual(refused)
+    expect(await sourceRow('src-p.webm')).toMatchObject({ trim_start_ms: 0, trim_end_ms: 100 })
+  })
+  it('a Maintainer may still move it or set its window', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(MAX, [reattachSource(MAX, { slot: 'generatedVoice', trimStartMs: 10, trimEndMs: 20 })])).toEqual([])
+    expect(await sourceRow()).toMatchObject({ slot: 'generatedVoice', trim_start_ms: 10, trim_end_ms: 20 })
+  })
+})

@@ -17,7 +17,7 @@ import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-aut
 import { laneOfAudioEvent, laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
-import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { decideLaneWrite, effectiveRoleInLane, laneReadWallEnabled, revealingGrantLevel } from '../../../src/lib/lanes/write-wall'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import {
@@ -832,22 +832,35 @@ export async function authorize<K extends EventKind>(
     return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
   }
 
-  // AQU-2682: the shared source clip's recording is what every language
-  // hears, so replacing it (a re-attach with another url) needs the level
-  // that imports source audio: Maintainer. A re-attach that keeps the url
-  // (words only, or choosing it) is held to the rules above and below.
+  // AQU-2682: the shared source clip is what every language hears. Below
+  // Maintainer, a re-attach of it may only add words or choose it: the same
+  // url, the same slot, and no new trim window (an attach's trims overwrite
+  // the stored ones; echoing them unchanged is fine). Transcription and
+  // transcript save send the stored url and slot back, so they still land.
+  // The choice itself is held to the language rules below.
   if (db != null && raw.kind === 'cell.audio.attach' && raw.cellId && tokenClaims.role < ROLE.MAINTAINER) {
-    const ap = raw.payload as { audioId?: unknown; url?: unknown } | null
+    const ap = raw.payload as {
+      audioId?: unknown; url?: unknown; slot?: unknown; trimStartMs?: unknown; trimEndMs?: unknown
+    } | null
     if (typeof ap?.audioId === 'string' && ap.audioId) {
       const existing = await db
         .prepare(
-          `SELECT url FROM cell_audio
+          `SELECT url, slot, trim_start_ms, trim_end_ms FROM cell_audio
             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ? AND role = 'source'`,
         )
         .bind(raw.projectId, raw.fileId, raw.cellId, ap.audioId)
-        .first<{ url: string | null }>()
-      if (existing && existing.url !== (typeof ap.url === 'string' ? ap.url : null)) {
-        return { ok: false, status: 403, reason: "replacing the source audio's recording requires maintainer" }
+        .first<{ url: string | null; slot: string; trim_start_ms: number | null; trim_end_ms: number | null }>()
+      if (existing) {
+        const movesTrim = (sent: unknown, stored: number | null) =>
+          sent != null && Number(sent) !== (stored == null ? null : Number(stored))
+        if (
+          existing.url !== (typeof ap.url === 'string' ? ap.url : null) ||
+          existing.slot !== ap.slot ||
+          movesTrim(ap.trimStartMs, existing.trim_start_ms) ||
+          movesTrim(ap.trimEndMs, existing.trim_end_ms)
+        ) {
+          return { ok: false, status: 403, reason: 'changing the source audio requires maintainer; others may only add words to it or choose it' }
+        }
       }
     }
   }
@@ -1035,10 +1048,20 @@ export async function authorize<K extends EventKind>(
       ? tokenClaims.role < ROLE.MAINTAINER && tokenClaims.src !== 'platform'
       : (tokenClaims.scopes ?? []).some((sc) => sc.kind === 'lane')
     const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown; wordsOnly?: unknown } | null
-    // Source audio acts in every language at once, so only someone not
-    // limited to particular languages may declare it.
+    // Source audio acts in every language at once, so declaring it needs
+    // access to every language. Under the wall that is the caller's own
+    // grants: one on each of the project's target lanes (a Project Lead set
+    // up on every language keeps "Upload a recording" and attaching media).
+    // With the wall off, any lane scope limits the caller.
     if (laneLimited && raw.kind === 'cell.audio.attach' && ap?.role === 'source') {
-      return { ok: false, status: 403, reason: 'marking a clip as source audio requires access to every language' }
+      const coversEveryLane = wallOn &&
+        (await targetLanesFor(db, raw.projectId, settings)).every((lane) => {
+          const effective = effectiveRoleInLane(tokenClaims.role, revealingGrantLevel(tokenClaims.laneGrants, lane.id))
+          return effective != null && effective >= requiredRole
+        })
+      if (!coversEveryLane) {
+        return { ok: false, status: 403, reason: 'marking a clip as source audio requires access to every language' }
+      }
     }
     if (laneLimited) {
       const takeLane = (audioId: string) =>

@@ -201,7 +201,8 @@ import {
   archivedProjectNotice,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
-import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
+import { useWorkspaceSearchController } from "@/hooks/useWorkspaceSearch"
+import { WorkspaceSearchState } from "./search/WorkspaceSearchState"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
@@ -6710,15 +6711,15 @@ export function ProjectWorkspace() {
     search: runSearch,
     searchParallelPassages: runSearchPassages,
     clear: clearSearchResults,
-    results: searchResults,
-    loading: searchLoading,
-    ready: searchReady,
+    // AQU-2654: the results live in this store, not in workspace state — a
+    // search redraws the surfaces under <WorkspaceSearchState>, not this.
+    store: searchStore,
     // AQU-646 stage 2: the UNFILTERED list, unlike everything else fed from
     // `project.files`. The server's FTS index has the audio-cue siblings'
     // transcripts in it whether or not this client lists the files, so the
     // hook has to be able to RECOGNISE a sibling to drop its hits — hand it
     // the already-hidden list and it would only see an unknown file id.
-  } = useWorkspaceSearch({ projectId: project?.id ?? null, getToken: getTokenForFile, files: hydratedProject?.files || [] })
+  } = useWorkspaceSearchController({ projectId: project?.id ?? null, getToken: getTokenForFile, files: hydratedProject?.files || [] })
 
   // Merge: AD-14 (this branch) retired the composite-health `penalties` path.
   // Comments handlers take main's Phase 2c-gamma rip — threads/messages lived
@@ -18844,6 +18845,7 @@ export function ProjectWorkspace() {
               />
             }
             searchPanel={
+              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
               <SearchDockPanel
                 activeFileId={activeFileId}
                 activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
@@ -18874,6 +18876,7 @@ export function ProjectWorkspace() {
                 getJwt={() => jwtRef.current}
                 canonicalRef={focusedCellCanonicalRef}
               />
+              )}</WorkspaceSearchState>
             }
           />
         }
@@ -19326,6 +19329,7 @@ export function ProjectWorkspace() {
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
+                <WorkspaceSearchState store={searchStore}>{({ results: searchResults }) => (
                 <SearchResultsView
                   query={searchExpandedQuery}
                   results={searchResults}
@@ -19335,6 +19339,7 @@ export function ProjectWorkspace() {
                   }}
                   onClose={() => setSearchExpandedQuery(null)}
                 />
+                )}</WorkspaceSearchState>
               </div>
             )}
             {/* Contextual drafting pill (flag-gated, discourse files only) —
@@ -20818,6 +20823,7 @@ export function ProjectWorkspace() {
           onAcknowledge={acknowledgeLaneArchived}
         />
       )}
+      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -20843,6 +20849,7 @@ export function ProjectWorkspace() {
         initialQuery={parallelSeedQuery}
         initialFind={parallelSeedFind}
       />
+      )}</WorkspaceSearchState>
       {project && (
         <CloneVoiceModalHost
           open={makeCharacterOpen}

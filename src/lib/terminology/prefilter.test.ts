@@ -432,7 +432,7 @@ function vary(random: () => number, script: Script, base: string): string {
   return out
 }
 
-function randomTerm(random: () => number, script: Script, words: string[]): string {
+function randomTerm(random: () => number, words: string[]): string {
   let term = pick(random, words)
   if (random() < 0.15) term += pick(random, [" ", "-", "־", "'"]) + pick(random, words)
   const star = random()
@@ -454,10 +454,10 @@ describe("randomized: every concept the regex matches is a candidate", () => {
       if (fold < 0.4) match.foldMarks = true
       else if (fold < 0.6) match.foldMarks = false
       if (random() < 0.3) match.affixes = random() < 0.5
-      if (random() < 0.3) match.forms = [randomTerm(random, script, words), ...(random() < 0.3 ? [" "] : [])]
+      if (random() < 0.3) match.forms = [randomTerm(random, words), ...(random() < 0.3 ? [" "] : [])]
       if (random() < 0.15) match.excludedForms = [pick(random, words)]
       return {
-        sourceTerm: randomTerm(random, script, words),
+        sourceTerm: randomTerm(random, words),
         ...(Object.keys(match).length > 0 ? { match } : {}),
         ...(random() < 0.15 ? { caseSensitive: true } : {}),
       }

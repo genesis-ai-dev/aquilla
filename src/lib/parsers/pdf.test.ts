@@ -432,6 +432,29 @@ describe("lists in a tagged PDF", () => {
       ["Between the lists.", null], ["Further in, and a list of its own", 0],
     ])
   })
+
+  // AQU-2680 review finding 4: an item whose text sits in a paragraph of its
+  // own (LI > Lbl + LBody > P) lost its list.
+  it("keeps an item a list item when its text sits in a paragraph inside it", async () => {
+    const read = await extractPdfImport(buildPdf({
+      pages: [{ runs: [
+        { text: "\u2022", x: 72, y: 760, tag: "l1" }, { text: "Wash the cups first.", x: 84, y: 760, tag: "b1" },
+        { text: "\u2022", x: 72, y: 746, tag: "l2" }, { text: "Dry them after.", x: 84, y: 746, tag: "b2" },
+        { text: "A second paragraph of the same item.", x: 84, y: 732, tag: "b3" },
+      ] }],
+      structure: [{ role: "Document", children: [
+        { role: "L", children: [
+          { role: "LI", children: [{ role: "Lbl", id: "l1" }, { role: "LBody", children: [{ role: "P", id: "b1" }] }] },
+          { role: "LI", children: [{ role: "Lbl", id: "l2" }, { role: "LBody", children: [{ role: "P", id: "b2" }, { role: "P", id: "b3" }] }] },
+        ] },
+      ] }],
+    }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.context, s.original, meta(s)])).toEqual([
+      ["List Paragraph", "Wash the cups first.", { list: "bullet", listLevel: 0 }],
+      ["List Paragraph", "Dry them after.", { list: "bullet", listLevel: 0 }],
+      ["Paragraph", "A second paragraph of the same item.", null],
+    ])
+  })
 })
 
 // AQU-2680: bold and italic follow a translation only when a whole paragraph

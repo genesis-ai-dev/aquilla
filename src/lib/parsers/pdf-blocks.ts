@@ -462,11 +462,16 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
       if (BLOCK_ROLES.has(role)) {
         const outer = cur?.role
         const outerList = cur?.list
+        // review finding 4: LI > Lbl + LBody > P: the item's first paragraph,
+        // opened before the item has any text, is the list item
+        const takesList = role !== "LI" && outer === "LI" && outerList !== undefined
+          && !cur!.parts.some((p) => isPiece(p) && p.s.trim() !== "")
         flush()
-        cur = { role, parts: [], ...(role === "LI" ? { list: { kind: "bullet" as const, level: Math.min(8, Math.max(0, listDepth - 1)) } } : {}) }
+        const list = role === "LI" ? { kind: "bullet" as const, level: Math.min(8, Math.max(0, listDepth - 1)) } : takesList ? outerList : undefined
+        cur = { role, parts: [], ...(list ? { list } : {}) }
         visit(c, true)
         flush()
-        if (outer && inBlock) cur = { role: outer, parts: [], ...(outerList ? { list: outerList } : {}) }
+        if (outer && inBlock) cur = { role: outer, parts: [], ...(outerList && !takesList ? { list: outerList } : {}) }
         continue
       }
       visit(c, inBlock)

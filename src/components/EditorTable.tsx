@@ -22,6 +22,7 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
+  MoreHorizontal,
   Bold,
   VolumeX,
   Eye,
@@ -330,6 +331,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -4230,13 +4232,14 @@ function CellTimestampsPopover({
 }
 
 /**
- * The timestamps popover anchors to a corner of the source column. The context
- * menu itself does not render a DOM node, so the anchor has to be placed inside
- * the column (the `relative` box) by the column, not by this wrapper.
+ * The menu's visible button and the timestamps popover both sit in a corner of
+ * the source column. The context menu itself does not render a DOM node, so
+ * they have to be placed inside the column (the `relative` box) by the column,
+ * not by this wrapper.
  */
 const CellMenuAnchorContext = React.createContext<React.ReactNode>(null)
 
-/** The timestamps popover, placed inside the source column so it anchors there. */
+/** The menu button and the timestamps popover, placed inside the source column. */
 function CellMenuAnchorSlot() {
   return React.useContext(CellMenuAnchorContext)
 }
@@ -4244,10 +4247,17 @@ function CellMenuAnchorSlot() {
 /**
  * AQU-1068 item 5: THE source cell's menu.
  *
- * Right-click (or long-press) the source cell. The entries are the ones that
- * used to live on the corner pencil and then the three-dot button: edit the
- * source text, edit timestamps, insert a row either side, split at quotes,
- * hide, remove.
+ * Right-click (or long-press) the source cell, or press the three-dot button
+ * in its corner. The entries are the ones that used to live on the corner
+ * pencil: edit the source text, edit timestamps, insert a row either side,
+ * split at quotes, hide, remove.
+ *
+ * ONE MENU, TWO WAYS IN. The button was dropped when the menu moved to a
+ * right-click, and an owner who had just opened add/remove to contributors then
+ * could not find the entries at all — nothing on screen says a cell answers a
+ * right-click. So the button is back, and it opens the SAME context menu
+ * (see `openFromButton`) rather than a second copy of the list that could
+ * drift from it.
  *
  * Every entry follows round 4's rule: an action this row cannot take is
  * RENDERED, disabled, with its reason — an absent control cannot tell you
@@ -4332,6 +4342,11 @@ function CellSourceMenu({
 }) {
   const t = useT()
   const [timesOpen, setTimesOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  // Was the menu open when this press began? Pressing the button while its
+  // menu is open dismisses the menu first (an outside press), so the click
+  // that follows must not open it again — the button toggles, as it used to.
+  const openAtPressRef = useRef(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
   // AQU-1422: the park entry sits with the structural block below (it changes
@@ -4343,18 +4358,88 @@ function CellSourceMenu({
     || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
   if (!offered) return children
 
-  const anchor = timestamps ? (
-    <CellTimestampsPopover
-      cellId={cellId}
-      open={timesOpen}
-      onOpenChange={setTimesOpen}
-      {...timestamps}
-    />
-  ) : null
+  /**
+   * Open the context menu from the button, at the button.
+   *
+   * The context menu has no "open here" call of its own: its trigger places
+   * the popup from the `contextmenu` event it is handed. So the button hands it
+   * one, aimed at its own lower corner — the trigger is the source column this
+   * button sits inside, and the event bubbles to it. That is the same path a
+   * right-click takes, which is what keeps the two ways in from drifting.
+   */
+  const openFromButton = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // The row selects itself on a click; reaching for the menu is not that.
+    event.stopPropagation()
+    const closedByThisPress = openAtPressRef.current
+    openAtPressRef.current = false
+    // `detail` is 0 for a keyboard press, which has no pointer-down of its own
+    // and so must not inherit the last one's answer.
+    if (closedByThisPress && event.detail !== 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    event.currentTarget.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left,
+        clientY: rect.bottom,
+      }),
+    )
+  }
+
+  const anchor = (
+    <>
+      <button
+        type="button"
+        data-testid={`cell-menu-button-${cellId}`}
+        data-selection-ignore=""
+        aria-label={t("editor.cellMenu.trigger")}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title={t("editor.cellMenu.trigger")}
+        onPointerDown={() => { openAtPressRef.current = menuOpen }}
+        // A mouse press must not move focus here. The source column lights up
+        // like an open editor on `focus-within`, and a closing menu hands focus
+        // back to wherever it was — so a focused button would leave the cell
+        // looking as if it were being edited, and would take the caret out of
+        // a translation the user was in the middle of. Tab still reaches it.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={openFromButton}
+        className={cn(
+          // Floated over the column's corner so it costs no layout. `right`,
+          // not `end`: the context line beside it is forced LTR and keeps its
+          // label on the left, so the right corner is the free one whichever
+          // way the source text runs.
+          "absolute right-1 top-1 flex size-5 shrink-0 items-center justify-center rounded-md",
+          // AQU-1134: the term action rail pops up over this corner and must
+          // render in FRONT of it. Both layers are owned by
+          // source-cell-layers.ts — don't hand-edit this one.
+          SOURCE_CELL_MENU_Z,
+          "text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground",
+          // Present but quiet until the row is reached for. An open menu (or
+          // an open source editor) pins it, so the button does not fade out
+          // from under its own menu. A touch screen has no hover to reveal it
+          // with, so it simply stays visible there.
+          menuOpen || sourceEditing
+            ? "bg-primary/10 text-primary opacity-100"
+            : "opacity-0 focus-visible:opacity-100 pointer-coarse:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
+        )}
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {timestamps && (
+        <CellTimestampsPopover
+          cellId={cellId}
+          open={timesOpen}
+          onOpenChange={setTimesOpen}
+          {...timestamps}
+        />
+      )}
+    </>
+  )
 
   return (
     <CellMenuAnchorContext.Provider value={anchor}>
-      <ContextMenu>
+      <ContextMenu onOpenChange={(open) => setMenuOpen(open)}>
         <ContextMenuTrigger
           // The trigger's own class is `select-none`. Source text has to stay
           // selectable (add-to-termbase / Ask AI), so this wins the merge.
@@ -9074,9 +9159,10 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Source column. Right-click opens the cell menu (edit source, hide,
-            insert, timestamps). The wrapper renders no DOM of its own, so this
-            div stays the grid item. */}
+        {/* Source column. Right-click, or the three-dot button in its corner,
+            opens the cell menu (edit source, hide, insert, timestamps). The
+            wrapper renders no DOM of its own, so this div stays the grid
+            item. */}
         <CellSourceMenu
           cellId={cell.id}
           sourceEditing={sourceEditing}

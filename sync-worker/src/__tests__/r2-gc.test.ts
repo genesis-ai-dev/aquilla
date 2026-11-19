@@ -382,6 +382,21 @@ describe("sweepOrphanedR2Objects", () => {
     expect(bucket._has("projects/p1/files/f1/audio/take-superseded.wav")).toBe(false)
   })
 
+  it("keeps a WAV whose only live take sits in another file and plays it from here", async () => {
+    // The take's own row is in f2, but its url plays f1's object, so f1's WAV
+    // sibling is still the full-quality copy of what that take plays.
+    await seed("cell_audio", [
+      take({ file_id: "f2", audio_id: "take-moved.webm", url: "/audio/p1/f1/take-live.webm" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-live.webm" },
+      { key: "projects/p1/files/f1/audio/take-live.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.webm")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.wav")).toBe(true)
+  })
+
   it("collects a WAV no live take shares a base with", async () => {
     await seed("cell_audio", [take()])
     const bucket = makeStubBucket([

@@ -496,6 +496,11 @@ export class CellStore {
   // enter the paired view (`targetById`/`order`). Always empty for N=1.
   private otherLaneTargetRows: CellRow[] = []
   private pendingOverlay = new Map<string, PendingOverlay>()
+  // AQU-2654: see `batch()`.
+  private batchDepth = 0
+  private batchedCellIds: Set<string> | null = null
+  private batchedList = false
+  private batchedAll = false
   private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
@@ -859,6 +864,36 @@ export class CellStore {
     this.listVersion++
     this.fileVersion++
     this.emit(clearedIds)
+  }
+
+  /**
+   * AQU-2654: apply several mutations as ONE announcement. Every mutator
+   * still updates rows, versions and derived indexes as it runs — reads
+   * inside the batch see each step — but listeners are told once, when the
+   * outermost batch ends, with the union of the cells that changed. Landing
+   * one applied frame is three mutations (confirm the shadow, mark the cell
+   * fresh, replace its rows); announced one by one that was three passes over
+   * every subscriber for a single event.
+   */
+  batch<T>(run: () => T): T {
+    this.batchDepth++
+    try {
+      return run()
+    } finally {
+      if (--this.batchDepth === 0) this.flushBatch()
+    }
+  }
+
+  private flushBatch(): void {
+    const cells = this.batchedCellIds
+    const list = this.batchedList
+    const all = this.batchedAll
+    this.batchedCellIds = null
+    this.batchedList = false
+    this.batchedAll = false
+    if (cells) this.emitCells(cells)
+    if (list) this.emitList()
+    if (all) this.emitAll()
   }
 
   subscribeList = (listener: () => void): (() => void) => {
@@ -3123,19 +3158,38 @@ export class CellStore {
   }
 
   private emit(changedIds: Iterable<string>): void {
-    for (const id of changedIds) {
-      const listeners = this.cellListeners.get(id)
-      if (listeners) for (const listener of Array.from(listeners)) listener()
+    if (this.batchDepth > 0) {
+      const batched = (this.batchedCellIds ??= new Set<string>())
+      for (const id of changedIds) batched.add(id)
+      this.batchedList = true
+      this.batchedAll = true
+      return
     }
+    this.emitCells(changedIds)
     this.emitList()
     this.emitAll()
   }
 
+  private emitCells(changedIds: Iterable<string>): void {
+    for (const id of changedIds) {
+      const listeners = this.cellListeners.get(id)
+      if (listeners) for (const listener of Array.from(listeners)) listener()
+    }
+  }
+
   private emitList(): void {
+    if (this.batchDepth > 0) {
+      this.batchedList = true
+      return
+    }
     for (const listener of Array.from(this.listListeners)) listener()
   }
 
   private emitAll(): void {
+    if (this.batchDepth > 0) {
+      this.batchedAll = true
+      return
+    }
     for (const listener of Array.from(this.allListeners)) listener()
   }
 }
@@ -3801,9 +3855,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
             continue
           }
           exhaustedByDiscard = false
-          store.clearConfirmedShadows(rows, startSeq)
-          store.markCellFresh(cellId)
-          store.replaceRowsForCell(cellId, rows)
+          store.batch(() => {
+            store.clearConfirmedShadows(rows, startSeq)
+            store.markCellFresh(cellId)
+            store.replaceRowsForCell(cellId, rows)
+          })
           refreshCellsCacheFromStore()
           return
         }
@@ -3914,8 +3970,50 @@ export function useCellView(store: CellStore, cellId: string): CellViewModel | n
   return useMemo(() => readAtVersion(version, () => store.getCellView(cellId)), [cellId, store, version])
 }
 
+/**
+ * How long a whole-file subscriber waits before it is told the store changed.
+ * See `useCellStoreVersion`.
+ */
+export const WHOLE_FILE_NOTIFY_MS = 32
+
+/**
+ * `store.subscribeAll`, told at most once per `WHOLE_FILE_NOTIFY_MS`.
+ * Exported for the test that pins the property.
+ */
+export function subscribeAllCoalesced(store: Pick<CellStore, "subscribeAll">, listener: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const unsubscribe = store.subscribeAll(() => {
+    if (timer !== null) return
+    timer = setTimeout(() => {
+      timer = null
+      listener()
+    }, WHOLE_FILE_NOTIFY_MS)
+  })
+  return () => {
+    unsubscribe()
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
+/**
+ * The store's whole-file version, for components that derive something from
+ * EVERY cell (the workspace, the table shell).
+ *
+ * AQU-2654: such a component re-renders its whole tree, so it is told about a
+ * burst of store changes once, a couple of frames later, instead of once per
+ * mutation. One commit mutates the store five or six times (the optimistic
+ * edit, the pending overlay per outbox change, the applied rows, the audit
+ * diff), usually next to a React state update for the same event; each
+ * synchronous notification was its own full render, and a second one when the
+ * state update rendered. Waiting lets the state update's render read the new
+ * version (the snapshot is always live — only the wake-up is late), so the
+ * two become one. Rows are NOT affected: they subscribe per cell
+ * (`useCellView`) and to the list (`useCellIds`), both told synchronously, so
+ * an edit still shows in its row at once.
+ */
 export function useCellStoreVersion(store: CellStore): number {
-  return useSyncExternalStore(store.subscribeAll, store.getAllVersion, () => 0)
+  const subscribe = useCallback((listener: () => void) => subscribeAllCoalesced(store, listener), [store])
+  return useSyncExternalStore(subscribe, store.getAllVersion, () => 0)
 }
 
 export function useCellStoreViews(store: CellStore): CellViewModel[] {

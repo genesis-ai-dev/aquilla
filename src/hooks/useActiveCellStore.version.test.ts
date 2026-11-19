@@ -11,11 +11,11 @@
 // data change could land exactly on an already-rendered number and the row
 // stayed stale until remount, while the footer (subscribeAll → fileVersion)
 // kept updating.
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { mergeCellsDelta } from "@/lib/sync/cells-cache"
 import type { CellAuditStats } from "./useCellsAuditStats"
-import { CellStore } from "./useActiveCellStore"
+import { CellStore, WHOLE_FILE_NOTIFY_MS, subscribeAllCoalesced } from "./useActiveCellStore"
 
 function stats(cellId: string, activeValidators: string[]): CellAuditStats {
   return {
@@ -424,5 +424,96 @@ describe("CellStore per-cell versions", () => {
 
     expect(store.getMemorySnapshot().optimisticEdits).toBe(1)
     expect(store.getCellView("a")?.translated).toBe("Shared text")
+  })
+})
+
+// AQU-2654. WHY: one applied frame is three store mutations, one commit five
+// or six, and each announced itself — a full pass over every subscriber, and
+// for the workspace (which subscribes to the whole file) a full render, per
+// mutation. Measured: 15 workspace renders for one committed cell.
+describe("CellStore announcements (AQU-2654)", () => {
+  function loaded(): CellStore {
+    const store = new CellStore()
+    runtime(store, new Map())
+    store.replaceRows([row("a", "source", "Hello"), row("a", "target", "old"), row("b", "source", "World")])
+    return store
+  }
+
+  it("mutations inside one batch are announced once, with every cell that changed", () => {
+    const store = loaded()
+    let all = 0
+    let list = 0
+    let cellA = 0
+    let cellB = 0
+    store.subscribeAll(() => { all++ })
+    store.subscribeList(() => { list++ })
+    store.subscribeCell("a", () => { cellA++ })
+    store.subscribeCell("b", () => { cellB++ })
+
+    store.batch(() => {
+      store.applyOptimisticTargetEdit("a", { value: "new" })
+      // Reads inside the batch see each step: only the telling waits.
+      expect(store.getCellView("a")?.translated).toBe("new")
+      store.clearConfirmedShadows([row("a", "target", "new", { eventId: "E1" })], store.getWriteSeq())
+      store.replaceRowsForCell("a", [row("a", "source", "Hello"), row("a", "target", "new", { eventId: "E1" })])
+      store.applyOptimisticTargetEdit("b", { value: "second" })
+      expect(all).toBe(0)
+      expect(cellA).toBe(0)
+    })
+
+    expect(all).toBe(1)
+    expect(list).toBe(1)
+    expect(cellA).toBe(1)
+    expect(cellB).toBe(1)
+    expect(store.getCellView("a")?.targetEventId).toBe("E1")
+  })
+
+  it("a nested batch announces when the OUTERMOST one ends, and a throwing batch still announces", () => {
+    const store = loaded()
+    let all = 0
+    store.subscribeAll(() => { all++ })
+    store.batch(() => {
+      store.batch(() => store.applyOptimisticTargetEdit("a", { value: "one" }))
+      expect(all).toBe(0)
+      store.applyOptimisticTargetEdit("a", { value: "two" })
+    })
+    expect(all).toBe(1)
+    expect(() => store.batch(() => {
+      store.applyOptimisticTargetEdit("a", { value: "three" })
+      throw new Error("boom")
+    })).toThrow("boom")
+    // The mutation happened, so subscribers must hear of it.
+    expect(all).toBe(2)
+    store.applyOptimisticTargetEdit("a", { value: "four" })
+    expect(all).toBe(3)
+  })
+
+  it("a whole-file subscriber is told once for a burst, while the row is told at once", () => {
+    vi.useFakeTimers()
+    try {
+      const store = loaded()
+      let wholeFile = 0
+      let rowA = 0
+      const unsubscribe = subscribeAllCoalesced(store, () => { wholeFile++ })
+      store.subscribeCell("a", () => { rowA++ })
+      const before = store.getAllVersion()
+      store.applyOptimisticTargetEdit("a", { value: "one" })
+      store.applyOptimisticTargetEdit("a", { value: "two" })
+      store.applyOptimisticTargetEdit("a", { value: "three" })
+      // The row's own subscription is synchronous: the edit shows immediately.
+      expect(rowA).toBe(3)
+      // The snapshot is live — a render that happens meanwhile reads it…
+      expect(store.getAllVersion()).toBeGreaterThan(before)
+      // …and the whole-file wake-up is one, a couple of frames later.
+      expect(wholeFile).toBe(0)
+      vi.advanceTimersByTime(WHOLE_FILE_NOTIFY_MS)
+      expect(wholeFile).toBe(1)
+      store.applyOptimisticTargetEdit("a", { value: "four" })
+      unsubscribe()
+      vi.advanceTimersByTime(WHOLE_FILE_NOTIFY_MS)
+      expect(wholeFile).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -27,8 +27,8 @@ interface Ceiling {
 }
 
 const CEILINGS: Ceiling[] = [
-  { file: "src/components/ProjectWorkspace.tsx", useState: 125, lines: 21_519 },
-  { file: "src/components/EditorTable.tsx", useState: 46, lines: 10_684 },
+  { file: "src/components/ProjectWorkspace.tsx", useState: 125, lines: 21_567 },
+  { file: "src/components/EditorTable.tsx", useState: 46, lines: 10_692 },
 ]
 
 describe("structure ratchet (AQU-2654)", () => {

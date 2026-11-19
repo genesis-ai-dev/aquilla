@@ -403,7 +403,7 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
 import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
-import { confirmCommittedBatch, createFlushAppliedTracker } from "@/lib/sync/flush-applied"
+import { confirmCommittedBatch, createFlushAppliedTracker, type FlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -563,7 +563,7 @@ import {
 } from "@/lib/progress/editor-lane-progress"
 import { laneCountsAudio, laneRowDelivers } from "@/lib/lanes/lane-delivers"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
+import { applyPushedFileProgress, expectPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
@@ -2138,6 +2138,7 @@ export function ProjectWorkspace() {
     revalidate: revalidateAuditStats,
     revalidateCellStats,
     applyCommittedCellStats,
+    applyValidationCellStats,
   } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
@@ -2376,14 +2377,34 @@ export function ProjectWorkspace() {
   // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
   // to the server, do ONE soft refetch to reconcile the read model and clear the
   // optimistic shadows an import left behind (no per-cell fan-out).
-  const activeFilePendingCommits = useMemo(
+  const activeFilePendingCommitIds = useMemo(
     () =>
-      outboxRecords.filter(
-        (r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit",
-      ).length,
+      outboxRecords
+        .filter((r) => r.event.fileId === activeFileId && r.event.kind === "target.cell.commit")
+        .map((r) => r.event.id),
     [outboxRecords, activeFileId],
   )
-  useReconcileOnDrain(activeFilePendingCommits, activeFileId, revalidateCells)
+  const activeFilePendingCommits = activeFilePendingCommitIds.length
+  // AQU-2654: the commits that drained are remembered by id, because a commit
+  // whose applied frame already landed its rows (the POST response, or its
+  // own echo) has nothing left to reconcile — the refetch after it was a
+  // read-back of what the write had just returned. Only a drain that includes
+  // a commit NOT landed that way (an import past the frame cap, an older
+  // worker, a flush another tab ran) still does the one soft refetch.
+  const flushAppliedTrackerRef = useRef<FlushAppliedTracker | null>(null)
+  const drainingCommitIdsRef = useRef<{ fileId: string | null; ids: Set<string> }>({ fileId: null, ids: new Set() })
+  useEffect(() => {
+    const draining = drainingCommitIdsRef.current
+    if (draining.fileId !== activeFileId) drainingCommitIdsRef.current = { fileId: activeFileId, ids: new Set(activeFilePendingCommitIds) }
+    else for (const id of activeFilePendingCommitIds) draining.ids.add(id)
+  }, [activeFileId, activeFilePendingCommitIds])
+  const reconcileDrainedCommits = useCallback(() => {
+    const drained = drainingCommitIdsRef.current.ids
+    drainingCommitIdsRef.current = { fileId: drainingCommitIdsRef.current.fileId, ids: new Set() }
+    if (drained.size > 0 && flushAppliedTrackerRef.current?.landed(drained)) return
+    revalidateCells()
+  }, [revalidateCells])
+  useReconcileOnDrain(activeFilePendingCommits, activeFileId, reconcileDrainedCommits)
 
   // QA-BUG-1: zero-file self-heal for live-linked projects. The lazy-pull
   // trigger in useStaleSourceCells only fires once a FILE is open — a
@@ -2496,13 +2517,27 @@ export function ProjectWorkspace() {
       liveApplier,
       isActive: (pid, fid) => pid === project?.id && fid === activeFileIdRef.current,
       applyCommittedCellStats,
+      // AQU-2654: a validation is settled from the event that was sent, so
+      // the commit + self-validation of one edit costs no stats read either.
+      applyValidationCellStats,
+      revalidateCellStats,
+      lookupSentEvent: async (eventId) => (await getOutboxRecords([eventId]))[0] ?? null,
     }),
-    [liveApplier, project?.id, applyCommittedCellStats],
+    [liveApplier, project?.id, applyCommittedCellStats, applyValidationCellStats, revalidateCellStats],
   )
+  flushAppliedTrackerRef.current = flushAppliedTracker
   useEffect(() => { flushAppliedTracker.reset() }, [flushAppliedTracker, activeFileId])
   useEffect(
-    () => subscribeAppliedEvents((frames) => flushAppliedTracker.onFrames(frames)),
-    [flushAppliedTracker],
+    () => subscribeAppliedEvents((frames, sent) => {
+      // One response is one announcement, however many frames it carries.
+      cellStore.batch(() => flushAppliedTracker.onFrames(frames, sent))
+      // AQU-2654: the server is pushing these writes' progress numbers; the
+      // pending overlay's drain must not read them back.
+      for (const frame of frames) {
+        if (frame.progressPushed && frame.file) expectPushedFileProgress(frame.project, frame.file)
+      }
+    }),
+    [cellStore, flushAppliedTracker],
   )
   /** Post-flush confirmation for a single committed cell: refetch only what
    *  the POST response did not already land (older server, >cap batch,
@@ -9868,6 +9903,7 @@ export function ProjectWorkspace() {
                 // already on their way in this same batch — the refetch would
                 // only race them to the same answer.
                 if (!msg.progressPushed) invalidateFileProgress(pid, msg.file, activeLaneRef.current)
+                else if (isOwnWriteEcho(msg, currentUsername)) expectPushedFileProgress(pid, msg.file)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -9928,7 +9964,11 @@ export function ProjectWorkspace() {
               // remain visually stale after the progress count turns green.
               // The committing handler's earlier refresh can race the app-shell
               // outbox drain; this frame only arrives after projection commits.
+              // AQU-2654: the echo of this user's OWN validation is settled
+              // below by `flushAppliedTracker.onOwnEcho`, which shares one
+              // answer with the POST response instead of each reading.
               if (
+                !ownWrite &&
                 msg.file === activeFileIdRef.current &&
                 (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate")
               ) {
@@ -9961,6 +10001,9 @@ export function ProjectWorkspace() {
               const liveResult = msg.file === activeFileIdRef.current
                 ? liveApplier.apply(msg)
                 : "refetch"
+              if (ownWrite && msg.file === activeFileIdRef.current) {
+                flushAppliedTrackerRef.current?.onOwnEcho(msg, liveResult)
+              }
               if (liveResult !== "applied" && (!ownWrite || !alreadyApplied)) {
                 // A model response or collaborator burst arrives as several
                 // frames. Consume the file's server-sequence range once so
@@ -10173,6 +10216,11 @@ export function ProjectWorkspace() {
               // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
               // Prevents the bail-out that left cells visually locked after a
               // lease-expiry sweep (which broadcasts a lone lock.released frame).
+              // AQU-2654: a release of a cell this map never held — every one
+              // of this user's OWN releases, since own claims are not entered
+              // above — changes nothing anyone sees, and must not cost a
+              // workspace render on each cell switch.
+              if (!cellLockHoldersRef.current.has(msg.cellId)) return
               const next = applyLockReleased(cellLockHoldersRef.current, msg.cellId)
               cellLockHoldersRef.current = next
               setCellLockHolders(next)

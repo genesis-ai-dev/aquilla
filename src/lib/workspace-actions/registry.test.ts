@@ -594,3 +594,31 @@ describe("an Audio language's file menu", () => {
     expect(ids({ audioCounts })).toEqual(expect.arrayContaining(["run-completions", "complete-all", "batch-validate", "synth-all"]))
   })
 })
+
+// AQU-2664 (board 71A): "Even out loudness…" in Run on this file, after Change
+// voice and before Split at quotes. It opens the window; no confirmation.
+describe("even-out", () => {
+  const action = () => workspaceActions.find((a) => a.id === "even-out")!
+  const withRole = (level: number) => ({ ...project, syncRole: { level, name: "test", source: "server" as const, fetchedAt: "2026-01-01T00:00:00Z" } })
+
+  it("sits after Change voice and before Split at quotes", () => {
+    const ids = workspaceActions.map((a) => a.id)
+    expect(ids.indexOf("even-out")).toBe(ids.indexOf("change-voice-all") + 1)
+    expect(ids.indexOf("split-quotes")).toBe(ids.indexOf("even-out") + 1)
+    expect(t(action().labelKey)).toBe("Even out loudness…")
+  })
+
+  it("is offered on a file with takes, to a contributor and up", () => {
+    expect(action().isAvailable(ctx({ activeFileId: "f1", evenOutTakes: () => 0 }))).toBe(false)
+    expect(action().isAvailable(ctx({ activeFileId: "f1", evenOutTakes: () => 4 }))).toBe(true)
+    expect(action().isAvailable(ctx({ project: withRole(200), activeFileId: "f1", evenOutTakes: () => 4 }))).toBe(false)
+    expect(action().isAvailable(ctx({ project: withRole(400), activeFileId: "f1", evenOutTakes: () => 4 }))).toBe(true)
+  })
+
+  it("opens the window with no confirmation", () => {
+    const openEvenOut = vi.fn()
+    expect(action().requiresConfirmation).toBeUndefined()
+    action().run(ctx({ activeFileId: "f1" }), { openEvenOut } as never)
+    expect(openEvenOut).toHaveBeenCalledOnce()
+  })
+})

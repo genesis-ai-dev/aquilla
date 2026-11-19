@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote, EqualApproximately } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -244,6 +244,14 @@ export const workspaceActions: WorkspaceAction[] = [
       confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
     },
     run: (_c, args) => args.runChangeVoiceAll(),
+  },
+  {
+    // AQU-2664 (board 71A): "Even out loudness…" with the other bulk audio
+    // runs, after Change voice. No confirmation: it opens the Even out window,
+    // which is where the scope is chosen and the count shown.
+    id: "even-out", labelKey: "editor.evenOut.menuItem", icon: EqualApproximately, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.audio.even") && (c.evenOutTakes?.() ?? 0) > 0,
+    run: (_c, args) => args.openEvenOut(),
   },
   {
     // AQU-1759: the row menu's "Split at quotes", for every line of the file

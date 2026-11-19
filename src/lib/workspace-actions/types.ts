@@ -58,6 +58,9 @@ export interface WorkspaceActionContext {
    *  become. A thunk for the reason `batchValidateSummary` is one: it walks the
    *  whole file, and only the confirmation needs it. */
   quoteSplitSummary?: () => { rows: number; lines: number }
+  /** AQU-2664: how many takes the file holds that Even out can act on. A
+   *  thunk: the workspace works it out further down than this context. */
+  evenOutTakes?: () => number
 }
 
 export interface WorkspaceActionRunArgs {
@@ -74,6 +77,8 @@ export interface WorkspaceActionRunArgs {
   runChangeVoiceAll: () => void
   /** AQU-1759: split every line of the file that holds more than one speaker. */
   runSplitAtQuotes: () => void
+  /** AQU-2664 (board 71A): open the Even out window on the whole file. */
+  openEvenOut: () => void
   navigate: NavigateFunction
 }
 

@@ -710,7 +710,12 @@ export interface TimelineEditorProps {
    * tracks holding takes are in it); `open` opens the one Even out window on
    * these tracks. Absent for anyone who may not even takes out.
    */
-  evenOut?: { states: ReadonlyMap<string, EvenState>; open(trackIds: readonly string[]): void }
+  evenOut?: {
+    states: ReadonlyMap<string, EvenState>
+    open(trackIds: readonly string[]): void
+    /** The tracks selected here, so the file menu's window can offer them. */
+    selectionChanged?(trackIds: readonly string[]): void
+  }
   /**
    * AQU-1566 (Sam's option b): turn this caption track into the file's own
    * rows. The workspace passes it only on a linked video with no rows, to a
@@ -1667,6 +1672,13 @@ export function TimelineEditor({
 
   const selectedTrackIds = selectedIdsInOrder(trackSelection, selectableTrackIds)
   const selectedTrackIdSet = new Set(selectedTrackIds)
+  // AQU-2664: the workspace's Even out window offers the selection when it is
+  // opened from the file menu.
+  const selectionKey = selectedTrackIds.join("\u0000")
+  const reportSelection = evenOut?.selectionChanged
+  useEffect(() => {
+    reportSelection?.(selectionKey ? selectionKey.split("\u0000") : [])
+  }, [selectionKey, reportSelection])
 
   /** Fold a click on a track row into the selection. */
   function selectTrack(trackId: string, mods: SelectMods | undefined) {

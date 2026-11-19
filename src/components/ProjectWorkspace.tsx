@@ -285,14 +285,16 @@ import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { clearEvenOut, evenOutTakes, makeTakeMeasurer, type EvenOutHost, type EvenOutOptions, type TakeRef } from "@/lib/audio/even-out"
+import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
+import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
+import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
+import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, undoStepById, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, fileMayFollowTiming, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
@@ -702,6 +704,9 @@ import {
   useVisibleCellIds as useEditorViewportVisibleCellIds,
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
+
+/** AQU-2664: a loudness for a toast, with a real minus ("−16"). */
+const lufsWord = (v: number) => (v < 0 ? `−${Math.abs(v)}` : `${v}`)
 
 // The Voices panel holds the clip inspector and Make speech, which are cramped
 // at the width the file list wants. It opens wider and keeps its own remembered
@@ -13012,6 +13017,10 @@ export function ProjectWorkspace() {
     return { rows: cellIds.length, lines }
   }, [quoteSplitFileCandidates])
 
+  // AQU-2664: the Even out window's takes and opener, set further down (the
+  // cells that carry the takes are worked out there).
+  const evenOutCellsRef = useRef<CellData[]>([])
+  const openEvenOutRef = useRef<(trackIds: readonly string[]) => void>(() => {})
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -13024,6 +13033,8 @@ export function ProjectWorkspace() {
     batchValidateSummary,
     canSplitAtQuotes,
     quoteSplitSummary,
+    // AQU-2664: read through a ref — the takes are worked out further down.
+    evenOutTakes: () => takesToEvenOut(evenOutCellsRef.current).length,
   }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
@@ -13560,6 +13571,7 @@ export function ProjectWorkspace() {
     // AQU-1759: every line the confirmation counted, through the row action's
     // own path — one read, one optimistic apply, one batch.
     runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
+    openEvenOut: () => openEvenOutRef.current([]),
     navigate,
   }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, batchValidateChunk, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
 
@@ -15125,6 +15137,93 @@ export function ProjectWorkspace() {
       return next.size === 0 ? null : { fileId: current.fileId, volumes: next }
     })
   }, [serverTimelineTracks, pendingTrackVolumes, activeFileId])
+
+  // ── AQU-2664 (boards 71–73): the Even out window and its ways in ─────────
+  // The cells that carry this file's takes: the cue sibling's, merged, on a
+  // dubbing file; else the file's own (the list every export reads too).
+  const evenOutCells = audioCueCells ?? audioMergedCells
+  evenOutCellsRef.current = evenOutCells
+  const canEvenOut = canPerform("cell.audio.even", project?.syncRole?.level ?? null)
+  /** Each track's ≈ (board 74), for the tracks holding takes. */
+  const evenOutStates = useMemo(() => evenOutTrackStates(evenOutCells, timelineTracks), [evenOutCells, timelineTracks])
+  /** The tracks selected on the timeline, as it last reported them. */
+  const evenOutSelection = useRef<readonly string[]>([])
+  const [evenOutReq, setEvenOutReq] = useState<EvenOutRequest | null>(null)
+  const evenOutWindow = useMemo(
+    () => (evenOutReq ? evenOutScopes(evenOutCells, timelineTracks, evenOutReq) : null),
+    [evenOutReq, evenOutCells, timelineTracks],
+  )
+  const openEvenOut = useCallback((trackIds: readonly string[]) => {
+    setEvenOutReq({ trackIds: [...trackIds], selection: [...evenOutSelection.current] })
+  }, [])
+  openEvenOutRef.current = openEvenOut
+  const timelineEvenOut = useMemo(
+    () => (canEvenOut
+      ? { states: evenOutStates, open: openEvenOut, selectionChanged: (ids: readonly string[]) => { evenOutSelection.current = ids } }
+      : undefined),
+    [canEvenOut, evenOutStates, openEvenOut],
+  )
+  /** A toast with Undo for a run or a clear (board 73): Undo, or ⌘Z, takes
+   *  the whole step back. */
+  const evenOutToast = useCallback((title: string, stepId: string | null | undefined) => {
+    const id = `even-out:${stepId ?? Date.now()}`
+    let settled = false
+    const undo = stepId
+      ? () => {
+          if (settled) return
+          settled = true
+          toast.close(id)
+          void undoStepById(stepId).then((r) => { if (r) reportHistory("undo", r) })
+        }
+      : null
+    toast.add({
+      id,
+      title,
+      timeout: 10_000,
+      ...(undo ? { data: { undo }, actionProps: { children: t("editor.evenOut.undo"), onClick: () => undo() } } : {}),
+    })
+  }, [reportHistory, t])
+  const handleEvenOutRan = useCallback((r: EvenOutResult) => {
+    if (r.evened === 0 && !r.stepId) return
+    const held = r.held.length
+    const title = t("editor.evenOut.doneToast", { count: r.evened, lufs: lufsWord(r.targetLufs) })
+      + (held > 0 ? ` ${t("editor.evenOut.heldToast", { count: held })}` : "")
+    evenOutToast(title, r.stepId)
+  }, [evenOutToast, t])
+  const handleEvenOutCleared = useCallback((r: ClearResult, scope: EvenOutScope) => {
+    if (r.cleared === 0) return
+    const title = scope.pick === "file"
+      ? t("editor.evenOut.clearedFile", { count: r.cleared })
+      : scope.pick === "track"
+        ? t("editor.evenOut.clearedTrack", { track: scope.names[0] ?? "", count: r.cleared })
+        : t("editor.evenOut.clearedTracks", { count: r.cleared })
+    evenOutToast(title, r.stepId)
+  }, [evenOutToast, t])
+  /** The Station's Clear on one take (board 73D), with its toast. */
+  const handleClearOneTake = useCallback(async (cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => {
+    const r = await handleClearEvenOut([{ cellId, audioId }])
+    if (r && r.cleared > 0) evenOutToast(t("editor.evenOut.clearedTake", names), r.stepId)
+    return r
+  }, [handleClearEvenOut, evenOutToast, t])
+  const handleClearOneTakeRef = useRef(handleClearOneTake)
+  handleClearOneTakeRef.current = handleClearOneTake
+
+  // QUESTION 89 — the ONE switch (lib/audio/even-out.ts AUTO_EVEN_CHANGED_TAKES),
+  // read here and nowhere else. OFF: nothing happens (today's behaviour). ON: a
+  // new, cut or trimmed take on an evened track is evened out quietly, one
+  // batch at a time, with no toast and no window.
+  const autoEvenBusy = useRef(false)
+  const autoEvenKey = useMemo(
+    () => autoEvenCandidates(evenOutCells, AUTO_EVEN_CHANGED_TAKES).map((r) => `${r.cellId}\u0000${r.audioId}`).join("|"),
+    [evenOutCells],
+  )
+  useEffect(() => {
+    if (!autoEvenKey || autoEvenBusy.current || !canEvenOut) return
+    const takes = autoEvenCandidates(evenOutCellsRef.current, AUTO_EVEN_CHANGED_TAKES)
+    if (takes.length === 0) return
+    autoEvenBusy.current = true
+    void handleEvenOut(takes).finally(() => { autoEvenBusy.current = false })
+  }, [autoEvenKey, canEvenOut, handleEvenOut])
   useEffect(() => {
     if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
     const known = new Set(serverTimelineTracks.map((tr) => tr.id))
@@ -20047,6 +20146,9 @@ export function ProjectWorkspace() {
                     // AQU-2664 (board 74): a track's volume, on the same
                     // clearance as its colour (how it sounds).
                     onSetTrackVolume={canReorderTracks ? handleSetTrackVolume : undefined}
+                    // AQU-2664 (boards 71, 74): each track's ≈ and the Even out
+                    // window, for anyone who may even takes out.
+                    evenOut={timelineEvenOut}
                     // AQU-1566: a caption track already on an empty linked
                     // video becomes its rows. Maintainer, no switch.
                     onPromoteTrackToRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
@@ -21071,6 +21173,19 @@ export function ProjectWorkspace() {
       </Suspense>
       {/* AQU-1486: "Validate the repeated rows too?" and the bulk conflict picker. */}
       {repetitionDialogs}
+      {/* AQU-2664 (board 71): the one Even out window. */}
+      {evenOutWindow ? (
+        <EvenOutDialog
+          open={evenOutReq != null}
+          onOpenChange={(o) => { if (!o) setEvenOutReq(null) }}
+          scopes={evenOutWindow.scopes}
+          start={evenOutWindow.start}
+          run={(takes, opts) => handleEvenOut(takes, opts)}
+          clear={(takes) => handleClearEvenOut(takes)}
+          onRan={handleEvenOutRan}
+          onCleared={handleEvenOutCleared}
+        />
+      ) : null}
       {/* Label-import / direction-role results use toast (see toast.add above). */}
       <Suspense fallback={null}>
         <ExportDialog

@@ -3,7 +3,7 @@
 // Every source is mono at the same rate (the app decodes everything to
 // 48 kHz mono, decode-mono.ts), so a segment is a plain copy.
 
-import { dbToGain, gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
+import { clipDb, dbToGain, gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
 
 export interface PcmSource {
   data: Float32Array
@@ -33,7 +33,7 @@ export function applyClipMix(samples: Float32Array, rate: number, clip: ClipMix)
   const a = Math.max(0, Math.min(samples.length, Math.round(clip.trimA * rate)))
   const b = Math.max(a, Math.min(samples.length, Math.round(clip.trimB * rate)))
   const out = samples.slice(a, b)
-  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
   if (flat) return out
   for (let i = 0; i < out.length; i++) out[i] *= gainAt((a + i) / rate, clip)
   return out
@@ -45,10 +45,10 @@ export function applyClipMix(samples: Float32Array, rate: number, clip: ClipMix)
  * the kept part still plays, at the clip's volume.
  */
 export function mixWhole(samples: Float32Array, rate: number, clip: ClipMix): Float32Array {
-  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
   if (flat) return samples
   const out = new Float32Array(samples.length)
-  const g0 = Math.pow(10, (clip.gainDb || 0) / 20)
+  const g0 = Math.pow(10, clipDb(clip) / 20)
   const a = Math.round(clip.trimA * rate)
   const b = Math.round(clip.trimB * rate)
   for (let i = 0; i < samples.length; i++) out[i] = samples[i] * (i >= a && i <= b ? gainAt(i / rate, clip) : g0)
@@ -103,7 +103,7 @@ export function viewPeaks(
       }
     }
     const t = (c0 + c1) / 2
-    const g = !clip ? 1 : t >= clip.trimA && t <= clip.trimB ? gainAt(t, clip) : dbToGain(clip.gainDb)
+    const g = !clip ? 1 : t >= clip.trimA && t <= clip.trimB ? gainAt(t, clip) : dbToGain(clipDb(clip))
     out[i] = Math.min(1, m * scale * g)
   }
   return out

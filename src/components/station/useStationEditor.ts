@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import {
   clampTrim,
+  clipDb,
   lengthOf,
   mapWindow,
   MIN_KEPT_SEC,
@@ -26,6 +27,7 @@ import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, typ
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
 import { previewCanMix, StationPreview } from "@/lib/station/preview"
 import { mixWhole, renderSegments, type PcmSource } from "@/lib/station/render"
+import { stationLevelOf } from "@/lib/station/station-level"
 import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
 
@@ -150,9 +152,12 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   )
   const [liveLevel, setLiveLevel] = useState<{ gainDb: number; fadeIn: number; fadeOut: number } | null>(null)
   const level = liveLevel ?? stored
+  // AQU-2664: the evening-out correction plays and draws under the volume
+  // line, as on the timeline; the line itself stays the take's own volume.
+  const { correctionDb } = stationLevelOf(take.att)
   const clip: ClipMix = useMemo(
-    () => ({ trimA, trimB, fadeIn: level.fadeIn, fadeOut: level.fadeOut, gainDb: level.gainDb }),
-    [trimA, trimB, level.fadeIn, level.fadeOut, level.gainDb],
+    () => ({ trimA, trimB, fadeIn: level.fadeIn, fadeOut: level.fadeOut, gainDb: level.gainDb, correctionDb }),
+    [trimA, trimB, level.fadeIn, level.fadeOut, level.gainDb, correctionDb],
   )
   /** Save the level as one Undo step (`take.gain`). */
   const commitLevel = useCallback(
@@ -230,7 +235,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // volume line doesn't render on every move).
   useEffect(() => {
     if (!pcm) return
-    const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+    const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
     // A plain recording plays from its own bytes (no re-encode: slice 12),
     // its volume and fades applied by the mixer.
     // Only a long one, and never a recorder's webm: a MediaRecorder webm has
@@ -238,7 +243,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     // and webm play from a WAV render instead.
     const playOriginal = pcm.original && pcm.duration > STATION_LONG_SEC && !pcm.original.type.includes("webm")
     if (ops.length === 0 && playOriginal && pcm.original && (flat || previewCanMix())) {
-      preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+      preview.setLevel(flat ? null : { gainDb: clipDb(clip), fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
       preview.setBlob(pcm.original, { mix: previewCanMix() })
       return
     }
@@ -252,7 +257,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       // The mixer applies the volume and fades (and guards the peak); with no
       // AudioContext they are baked into the samples instead.
       if (previewCanMix()) {
-        preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+        preview.setLevel(flat ? null : { gainDb: clipDb(clip), fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
         preview.setSamples(whole, pcm.rate, { mix: true })
       } else preview.setSamples(mixWhole(whole, pcm.rate, clip), pcm.rate)
     }, 150)

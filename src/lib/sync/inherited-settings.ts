@@ -64,12 +64,16 @@ export const INHERIT_FIELD_KEYS: Record<InheritFieldId, readonly string[]> = {
  * project, not to the next one in the chain. AQU-2305: so does the import
  * floor — it is a permission, resolved against the DOWNSTREAM project's own
  * org (a link can cross orgs), and copying it would let an upstream maintainer
- * lock the people of another project out of their imports.
+ * lock the people of another project out of their imports. AQU-2309: so does
+ * the milestone floor — it is a permission of this project, and copying it
+ * would let an upstream maintainer decide who may divide the next project's
+ * files.
  */
 export const INHERIT_NEVER_KEYS = [
   "validationNamedUsers",
   "validationNamedUsersAudio",
   "importMinRole",
+  "milestoneFloor",
   "sourceLanguage",
   "targetLanguage",
   "targetLanes",

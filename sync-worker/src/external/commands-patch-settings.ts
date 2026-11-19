@@ -89,6 +89,10 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   // AQU-2408: who may type a label on a cell. Lowering it to Project lead
   // widens who can rename what a cell is called, so it is stricter-only too.
   'cellLabelFloor',
+  // AQU-2309: who may set and edit milestones. Lowering it to Project lead
+  // widens who can rename a division the whole team navigates by, so an
+  // agent may only raise it.
+  'milestoneFloor',
   // AQU-1180: the switch that hides translator identity from agents. An agent
   // able to flip this could talk a human into approving a settings changeset
   // that turns its own team's names back on.

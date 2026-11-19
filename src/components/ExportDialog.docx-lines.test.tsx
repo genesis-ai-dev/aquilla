@@ -8,6 +8,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
 import { extractDocxStrings } from "@/lib/parsers/docx"
+import JSZip from "jszip"
 
 vi.mock("@/lib/export/export-service", () => ({
   downloadBlob: vi.fn(),
@@ -40,7 +41,8 @@ function props(type: string, name: string, hasOriginal: boolean | undefined) {
     activeFileType: type,
     activeFileHasOriginalSource: hasOriginal,
     projectFiles: [{ id: "f1", name, type }],
-    targetLanguage: "es",
+    targetLanguage: "Spanish",
+    targetLanguageCode: "es" as string | null,
     getToken: async () => "token",
   }
 }
@@ -80,6 +82,23 @@ describe("ExportDialog — New Word document from the lines (AQU-2551)", () => {
       ["heading", "Capítulo uno"],
       ["text", "Primera línea. Segunda línea."],
     ])
+  })
+
+  // AQU-2680 browser pass: the lane's language NAME ("Spanish") is not a
+  // language Word knows; the code is written, and only when one is known.
+  it.each([
+    ["es", '<w:lang w:val="es"/>'],
+    [null, null],
+  ] as const)("records the lane's language code (%s) in the Word file, never its name", async (code, expected) => {
+    render(<ExportDialog {...props("pdf", "notes.pdf", true)} targetLanguageCode={code} />)
+    fireEvent.click(radio(/^New Word document \(\.docx\)/)!)
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
+    const zip = await JSZip.loadAsync(await (mockDownload.mock.calls[0][0] as Blob).arrayBuffer())
+    const styles = await zip.file("word/styles.xml")!.async("string")
+    expect(styles).not.toContain("Spanish")
+    if (expected) expect(styles).toContain(expected)
+    else expect(styles).not.toContain("<w:lang")
   })
 
   it.each([

@@ -28,7 +28,7 @@ function props(type: string, name: string, hasOriginal: boolean | undefined) {
   return {
     open: true, onOpenChange: vi.fn(), cells: CELLS, projectId: "p1", projectName: "Notes",
     activeFileId: "f1", activeFileName: name, activeFileType: type, activeFileHasOriginalSource: hasOriginal,
-    projectFiles: [{ id: "f1", name, type }], targetLanguage: "es", getToken: async () => "token",
+    projectFiles: [{ id: "f1", name, type }], targetLanguage: "Spanish", targetLanguageCode: "es" as string | null, getToken: async () => "token",
   }
 }
 
@@ -74,6 +74,19 @@ describe("ExportDialog: PDF from the print window (AQU-2680)", () => {
     expect(page).toContain("<h1>Capítulo uno</h1>")
     expect(page).toContain('<html lang="es">')
     expect(mockDownload).not.toHaveBeenCalled()
+  })
+
+  // AQU-2680 browser pass: the print page carries the lane's language code,
+  // and none when the lane's language has no known code, never its name.
+  it("leaves the print page's language out when the lane's language has no known code", async () => {
+    mockPrint.mockResolvedValue(true)
+    render(<ExportDialog {...props("pdf", "notes.pdf", true)} targetLanguageCode={null} />)
+    fireEvent.click(radio(/^PDF \(\.pdf\)/)!)
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    await waitFor(() => expect(mockPrint).toHaveBeenCalled())
+    const [page] = mockPrint.mock.calls[0] as [string]
+    expect(page).toContain("<html>")
+    expect(page).not.toContain("Spanish")
   })
 
   // AQU-2680 re-check finding 5: Chrome's print window holds the page until

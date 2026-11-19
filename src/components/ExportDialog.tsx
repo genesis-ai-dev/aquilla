@@ -2296,7 +2296,8 @@ export function ExportDialog({
           case "docx-lines": {
             // AQU-2551: built from the same scoped lines as the text formats.
             const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
-            blob = await exportDocxFromLines(filteredCells, { lang: targetLanguage })
+            // AQU-2680 browser pass: the lane's language code ("es"), never its name ("Spanish"); none when unknown.
+            blob = await exportDocxFromLines(filteredCells, { lang: targetLanguageCode ?? undefined })
             break
           }
           case "pdf": {
@@ -2312,7 +2313,7 @@ export function ExportDialog({
             }
             const result = await exportPdfOrWord(filteredCells, {
               title: baseName,
-              lang: targetLanguage,
+              lang: targetLanguageCode ?? undefined,
               print: { beforePrint: () => flushSync(showPrintMessage) },
             })
             setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
@@ -3603,7 +3604,7 @@ export function ExportDialog({
                     onClick={() => {
                       void (async () => {
                         const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
-                        downloadBlob(await exportDocxFromLines(pdfWordFallback.cells, { lang: targetLanguage }), pdfWordFallback.name)
+                        downloadBlob(await exportDocxFromLines(pdfWordFallback.cells, { lang: targetLanguageCode ?? undefined }), pdfWordFallback.name)
                       })()
                     }}
                   >

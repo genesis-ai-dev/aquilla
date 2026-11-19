@@ -620,3 +620,82 @@ describe("useCellsAuditStats — a committed cell landing beside the full read (
     expect(result.current.complete).toBe(true)
   })
 })
+
+// AQU-2654 — "a background refresh must not flip visible state".
+describe("useCellsAuditStats — a revalidation is quiet (AQU-2654)", () => {
+  const respond = (cells: unknown[]) => new Response(JSON.stringify({ cells }), { status: 200 })
+
+  it("shows no loading state and keeps the map when the file's stats did not change", async () => {
+    // A new response, parsed into new objects, per read.
+    global.fetch = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE)) as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    let renders = 0
+    const { result } = renderHook(() => {
+      const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN })
+      renders += 1
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const mapBefore = result.current.byCellId
+    const rendersBefore = renders
+    seenLoading.length = 0
+
+    act(() => result.current.revalidate())
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2))
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+
+    expect(result.current.byCellId).toBe(mapBefore)
+    expect(seenLoading).not.toContain(true)
+    expect(renders).toBe(rendersBefore)
+  })
+
+  it("replaces only the cells whose stats changed", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE))
+    global.fetch = fetchMock as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    const { result } = renderHook(() => {
+      const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN })
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const first = result.current.byCellId.get("cell-1")
+    const second = result.current.byCellId.get("cell-2")
+    seenLoading.length = 0
+
+    // Someone validated cell-2 while this tab was away.
+    fetchMock.mockImplementation(async () => respond([
+      STATS_RESPONSE[0],
+      { ...STATS_RESPONSE[1], activeValidators: ["carol"] },
+    ]))
+    act(() => result.current.revalidate())
+    await waitFor(() => expect(result.current.byCellId.get("cell-2")?.activeValidators).toEqual(["carol"]))
+
+    expect(result.current.byCellId.get("cell-1")).toBe(first)
+    expect(result.current.byCellId.get("cell-2")).not.toBe(second)
+    expect(seenLoading).not.toContain(true)
+  })
+
+  it("a different lane is a load, not a revalidation", async () => {
+    global.fetch = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE)) as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    const { result, rerender } = renderHook(
+      ({ lane }: { lane: string }) => {
+        const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN, lane })
+        seenLoading.push(state.isLoading)
+        return state
+      },
+      { initialProps: { lane: "French" } },
+    )
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    seenLoading.length = 0
+    rerender({ lane: "Spanish" })
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(seenLoading).toContain(true)
+  })
+})

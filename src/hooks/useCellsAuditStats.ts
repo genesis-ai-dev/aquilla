@@ -231,13 +231,63 @@ async function fetchCellAuditStats(
   return mergeStatsRows(body.cells, lane).get(cellId) ?? null
 }
 
+/**
+ * AQU-2654: the whole-file read's answer, merged onto the map on screen. A
+ * cell whose stats did not change keeps its object, and a file where nothing
+ * changed keeps its map: a focus revalidation used to hand every row a new
+ * stats object, so every row rendered to show the same pills.
+ */
+function reuseUnchangedStats(
+  prev: Map<string, CellAuditStats>,
+  next: Map<string, CellAuditStats>,
+): Map<string, CellAuditStats> {
+  if (prev.size === 0) return next
+  let changed = prev.size !== next.size
+  const merged = new Map<string, CellAuditStats>()
+  for (const [cellId, stats] of next) {
+    const before = prev.get(cellId)
+    if (before && (before === stats || JSON.stringify(before) === JSON.stringify(stats))) {
+      merged.set(cellId, before)
+    } else {
+      merged.set(cellId, stats)
+      changed = true
+    }
+  }
+  return changed ? merged : prev
+}
+
 export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {
   const { enabled, fileId, getTokenForFile, lane = "" } = opts
 
   const [data, setData] = useState<Map<string, CellAuditStats>>(EMPTY_AUDIT_STATS)
   const [complete, setComplete] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isError, setIsError] = useState(false)
+  const [isLoading, setIsLoadingState] = useState(false)
+  const [isError, setIsErrorState] = useState(false)
+  // Set only when they differ from what was last asked for: setting what React
+  // already holds can still cost a render of the host (the workspace).
+  const flagsRef = useRef({ isLoading: false, isError: false })
+  const setIsLoading = useCallback((next: boolean) => {
+    if (flagsRef.current.isLoading === next) return
+    flagsRef.current.isLoading = next
+    setIsLoadingState(next)
+  }, [])
+  const setIsError = useCallback((next: boolean) => {
+    if (flagsRef.current.isError === next) return
+    flagsRef.current.isError = next
+    setIsErrorState(next)
+  }, [])
+  // AQU-2654: the (file, lane) whose whole-file answer is on screen. A read
+  // behind it is a revalidation (the focus wave): it shows no loading state
+  // and replaces only what differs.
+  const loadedKeyRef = useRef<string | null>(null)
+  // The map and the `complete` flag as last rendered, so a revalidation that
+  // changes neither can skip the state update altogether. The map can lag a
+  // cell merge that is queued but not rendered yet; a read equal to the lagging
+  // map is older than that merge, and leaving the merge in place is right.
+  const renderedRef = useRef({ data, complete })
+  useEffect(() => {
+    renderedRef.current = { data, complete }
+  }, [data, complete])
 
   const fileRef = useRef(fileId)
   const tokenRef = useRef(getTokenForFile)
@@ -261,6 +311,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const doFetch = useCallback(async () => {
     const fid = fileRef.current
     if (!enabledRef.current || !fid) {
+      loadedKeyRef.current = null
       setData(EMPTY_AUDIT_STATS)
       setComplete(false)
       setIsLoading(false)
@@ -269,7 +320,9 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     }
     const gen = ++generationRef.current
     const activeLane = laneRef.current
-    setIsLoading(true)
+    const loadKey = `${fid}\u0000${activeLane}`
+    const revalidating = loadedKeyRef.current === loadKey
+    if (!revalidating) setIsLoading(true)
     setIsError(false)
     try {
       const token = await tokenRef.current(fid)
@@ -282,8 +335,13 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
       const { map, complete: sparse } = await fetchCellsAuditStats(fid, token, activeLane)
       if (generationRef.current !== gen) return
       mergedHeadsRef.current.clear()
-      setData(map)
-      setComplete(sparse)
+      const rendered = renderedRef.current
+      if (!revalidating) setData(map)
+      else if (reuseUnchangedStats(rendered.data, map) !== rendered.data) {
+        setData((prev) => reuseUnchangedStats(prev, map))
+      }
+      loadedKeyRef.current = loadKey
+      if (!revalidating || rendered.complete !== sparse) setComplete(sparse)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -291,7 +349,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
       setIsError(true)
       setIsLoading(false)
     }
-  }, [])
+  }, [setIsLoading, setIsError])
 
   // AQU-1506: `lane` reloads too. Which row of a cell answers "who validated
   // this" is a per-lane question resolved at merge time, so the map a previous

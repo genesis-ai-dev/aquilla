@@ -218,6 +218,98 @@ describe("useStaleSourceCells", () => {
     }
   })
 
+  // AQU-2654: the settle read exists for a read that raced the sync's writes.
+  // A sync that says it wrote nothing (no link, or caught up) raced nothing.
+  it("sends no settle read after a sync that did nothing", async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+        ranSync: false, cellsMirrored: 0, filesMirrored: 0, fromSeq: 0, toSeq: 0, skippedHashEqual: 0, windows: 0, more: false,
+      }), { status: 200 }))
+      fetchMock.mockResolvedValue(makeResponse(["c1"]))
+      renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }))
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps the settle read after a sync that ran, or that has more to do", async () => {
+    vi.useFakeTimers()
+    try {
+      const answers = [
+        { ranSync: true, cellsMirrored: 0, filesMirrored: 0, more: false },
+        { ranSync: false, cellsMirrored: 0, filesMirrored: 0, more: true },
+      ]
+      for (const [i, answer] of answers.entries()) {
+        fetchMock.mockReset()
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(answer), { status: 200 }))
+        fetchMock.mockResolvedValue(makeResponse(["c1"]))
+        const { unmount } = renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: `f${i}`, getToken }))
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+        await vi.advanceTimersByTimeAsync(2600)
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
+        unmount()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // AQU-2654: "a background refresh must not flip visible state".
+  it("a revalidation that finds the same staleness shows no loading state and keeps every identity", async () => {
+    fetchMock.mockImplementation(async () => makeResponse(["c1", "c2"], {
+      tombstonedCellIds: ["t1"],
+      behindSeq: { upstream: 9, cursor: 4 },
+    }))
+    const seenLoading: boolean[] = []
+    let renders = 0
+    const { result } = renderHook(() => {
+      const state = useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken })
+      renders += 1
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.lastSuccessfulFetchKey).toBe("p1\u0000f1"))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const before = result.current
+    const rendersBefore = renders
+    seenLoading.length = 0
+
+    act(() => result.current.refetch())
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.staleCellIds).toBe(before.staleCellIds)
+    expect(result.current.tombstonedCellIds).toBe(before.tombstonedCellIds)
+    expect(result.current.upstreamStaleCellIds).toBe(before.upstreamStaleCellIds)
+    expect(result.current.behindSeq).toBe(before.behindSeq)
+    expect(seenLoading).not.toContain(true)
+    expect(renders).toBe(rendersBefore)
+  })
+
+  it("a revalidation that finds a change applies it, still without a loading state", async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(["c1"]))
+    const seenLoading: boolean[] = []
+    const { result } = renderHook(() => {
+      const state = useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken })
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.staleCellIds.has("c1")).toBe(true))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const tombstonedBefore = result.current.tombstonedCellIds
+    seenLoading.length = 0
+
+    fetchMock.mockResolvedValueOnce(makeResponse(["c1", "c9"]))
+    act(() => result.current.refetch())
+    await waitFor(() => expect(result.current.staleCellIds.has("c9")).toBe(true))
+    expect(result.current.tombstonedCellIds).toBe(tombstonedBefore)
+    expect(seenLoading).not.toContain(true)
+  })
+
   // QA-BUG-2 (AQU-479 push accelerator): syncNow is the awaitable path the
   // link.upstream-changed handler uses so it can revalidate CELLS after the
   // sync resolves, not just the staleness badge.

@@ -52,6 +52,14 @@ export const MAX_EVEN_RAISE_DB = 12
 export const MAX_EVEN_CUT_DB = 20
 /** No take is raised by evening out past this true peak. */
 export const PEAK_CEILING_DBTP = -1
+/**
+ * Sam, question 93: a mono file plays on both speakers, so it is heard about
+ * 3 dB louder than one channel measures (BS.1770's dual mono). An export with
+ * "Mono loudness: as a single-channel meter reads it" evens a mono take this
+ * much hotter, so a single-channel meter reads the target. Playback never
+ * does: only an export stamps `monoLoudness` (export/mono-loudness.ts).
+ */
+export const MONO_METER_OFFSET_DB = 10 * Math.log10(2)
 
 /** The stored fields the rule reads (CodexCellAttachment / AudioAttachmentOut). */
 export interface TakeGainFields {
@@ -63,6 +71,10 @@ export interface TakeGainFields {
   truePeakDb?: number | null
   /** The target it was evened out to, LUFS (cell.audio.even); null = not evened out. */
   evenTargetLufs?: number | null
+  /** Question 93: set by an export only. "meter": a mono take evened so a
+   *  single-channel meter reads the target (MONO_METER_OFFSET_DB hotter);
+   *  absent or "heard": as heard, as playback always is. */
+  monoLoudness?: "heard" | "meter" | null
 }
 
 export type GainStage = { stage: "evenOut" | "ownVolume"; db: number }
@@ -94,8 +106,13 @@ export function evenOutCorrection(att: TakeGainFields | null | undefined): { cor
   const peak = num(att?.truePeakDb)
   const target = num(att?.evenTargetLufs)
   if (target == null || loudness == null || loudness <= SILENT_LUFS) return { correctionDb: 0, wantedDb: 0, held: null }
-  const wantedDb = target - loudness
-  let correctionDb = Math.max(-MAX_EVEN_CUT_DB, Math.min(MAX_EVEN_RAISE_DB, wantedDb))
+  // Question 93: an export read on a single-channel meter wants a mono take
+  // 3 dB hotter. Added AFTER the +12 / −20 range, which bounds evening out
+  // itself (the range is about not raising hiss); the peak ceiling below
+  // still holds the sum.
+  const meter = att?.monoLoudness === "meter" ? MONO_METER_OFFSET_DB : 0
+  const wantedDb = target - loudness + meter
+  let correctionDb = Math.max(-MAX_EVEN_CUT_DB, Math.min(MAX_EVEN_RAISE_DB, target - loudness)) + meter
   let held: TakeGain["held"] = correctionDb !== wantedDb ? "range" : null
   if (correctionDb > 0) {
     // An unknown peak can't be raised safely.

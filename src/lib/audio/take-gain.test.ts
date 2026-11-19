@@ -5,7 +5,7 @@
 // The correction depends on the recording and the target ALONE, so a user's
 // volume reads relative to the evened level: 0 dB means "as evened".
 import { describe, expect, it } from "vitest"
-import { DEFAULT_EVEN_TARGET_LUFS, MAX_EVEN_CUT_DB, MAX_EVEN_RAISE_DB, PEAK_CEILING_DBTP, takeGain, takeGainDb, waveLevelScale } from "./take-gain"
+import { DEFAULT_EVEN_TARGET_LUFS, MAX_EVEN_CUT_DB, MAX_EVEN_RAISE_DB, MONO_METER_OFFSET_DB, PEAK_CEILING_DBTP, takeGain, takeGainDb, waveLevelScale } from "./take-gain"
 import { SILENT_LUFS } from "./loudness"
 
 describe("a take's gain", () => {
@@ -123,5 +123,30 @@ describe("the height a clip's waveform is drawn at", () => {
   it("never draws below 0.12 or above full", () => {
     expect(waveLevelScale({ loudnessLufs: -60, truePeakDb: -50 })).toBe(0.12)
     expect(waveLevelScale({ loudnessLufs: -10, truePeakDb: 0, gainDb: 6 })).toBe(1)
+  })
+})
+
+// Sam, question 93: "Mono loudness" in the export — as heard (default), or as
+// a single-channel meter reads it (+3 dB on an evened mono take).
+describe("mono loudness as a meter reads it (question 93)", () => {
+  const take = { loudnessLufs: -26, truePeakDb: -16, evenTargetLufs: -16 }
+
+  it("raises an evened mono take by the dual-mono 3 dB, and nothing else", () => {
+    expect(MONO_METER_OFFSET_DB).toBeCloseTo(10 * Math.log10(2), 6)
+    expect(takeGainDb({ ...take, monoLoudness: "meter" }) - takeGainDb(take)).toBeCloseTo(MONO_METER_OFFSET_DB, 6)
+    expect(takeGainDb({ ...take, monoLoudness: "heard" })).toBe(takeGainDb(take))
+  })
+
+  it("leaves a take that isn't evened alone", () => {
+    expect(takeGainDb({ loudnessLufs: -26, truePeakDb: -14, gainDb: -2, monoLoudness: "meter" })).toBe(-2)
+  })
+
+  it("is still held by the peak ceiling, and marked as held", () => {
+    // Evening out alone fits (+9 to a −3 dBTP peak); the extra 3 dB would pass −1 dBTP.
+    const hot = { loudnessLufs: -25, truePeakDb: -12, evenTargetLufs: -16 }
+    expect(takeGain(hot).held).toBeNull()
+    const g = takeGain({ ...hot, monoLoudness: "meter" })
+    expect(g.held).toBe("peak")
+    expect(g.correctionDb).toBeCloseTo(PEAK_CEILING_DBTP - hot.truePeakDb, 6)
   })
 })

@@ -334,8 +334,8 @@ export async function readPdfForm(
       ctrl.enqueue(chunk)
     },
   }))
-  let file: FormDataEntryValue | null
-  let text: FormDataEntryValue | null
+  let file: ReturnType<FormData["get"]>
+  let text: ReturnType<FormData["get"]>
   try {
     const form = await new Response(capped ?? null, { headers: { "content-type": headers.get("content-type") ?? "" } }).formData()
     file = form.get("file")

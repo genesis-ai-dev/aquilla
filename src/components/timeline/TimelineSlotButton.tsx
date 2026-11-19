@@ -26,6 +26,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
 
+/** A slot menu opens after the pointer rests this long on its button... */
+const MENU_HOVER_OPEN_MS = 150
+/** ...and closes this long after the pointer leaves the button and the menu. */
+const MENU_HOVER_CLOSE_MS = 200
+
 export function TimelineSlotButton({
   testId,
   label,
@@ -66,8 +71,9 @@ export function TimelineSlotButton({
   picked?: boolean
   /** AQU-2663: the button opens this menu instead of acting itself (the one
    *  button on a line too narrow for the pair). The app's dropdown menu, so
-   *  Enter/Space open it, the arrows move and Esc closes. While it is open
-   *  the tooltip stays shut. */
+   *  Enter/Space open it, the arrows move and Esc closes; a click opens it,
+   *  and so does resting a mouse on the button. While it is open the tooltip
+   *  stays shut. */
   menu?: { open: boolean; onOpenChange(open: boolean): void; content: ReactNode }
   /** Handed the click, for callers that read Shift/Ctrl/⌘. Unused with `menu`. */
   onClick?(e: MouseEvent<HTMLButtonElement>): void
@@ -113,7 +119,17 @@ export function TimelineSlotButton({
   return (
     <DropdownMenu open={menu.open} onOpenChange={menu.onOpenChange}>
       <AppTooltip content={label} disabled={menu.open}>
-        <DropdownMenuTrigger render={button} />
+        {/* Sam, Nov 19: "open on click or hover. Hovering specifically over
+            the button that shows up." Base UI's own hover-open, on the
+            BUTTON: an intent delay so passing over does not pop it, a grace
+            after leaving, the way into the menu kept open (safe polygon),
+            and mouse only, so touch opens it by tapping. */}
+        <DropdownMenuTrigger
+          render={button}
+          openOnHover
+          delay={MENU_HOVER_OPEN_MS}
+          closeDelay={MENU_HOVER_CLOSE_MS}
+        />
       </AppTooltip>
       {/* Portalled, but React still bubbles its events up the component
           tree: a press or right-click in the menu must not reach the track

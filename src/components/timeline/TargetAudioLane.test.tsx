@@ -1754,6 +1754,98 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(onTrackContextMenu).not.toHaveBeenCalled()
       })
 
+      // Sam, Nov 19: "Let's have it open on click or hover. Hovering
+      // specifically over the button that shows up." The app's dropdown opens
+      // on hovering the BUTTON (not the line) after a 150ms intent delay,
+      // stays open while the pointer travels into the menu, and closes 200ms
+      // after it leaves both. Mouse only: touch opens it by tapping.
+      describe("opens on hovering the button", () => {
+        beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: false }) })
+        afterEach(() => { vi.useRealTimers() })
+        // Plain events: user-event's pointer API stalls under fake timers.
+        const hover = (el: Element, pointerType = "mouse") => {
+          fireEvent.pointerOver(el, { pointerType })
+          fireEvent.pointerEnter(el, { pointerType })
+          fireEvent.mouseOver(el)
+          fireEvent.mouseEnter(el)
+          fireEvent.pointerMove(el, { pointerType })
+          fireEvent.mouseMove(el)
+        }
+        const unhover = (el: Element) => {
+          fireEvent.pointerOut(el, { pointerType: "mouse" })
+          fireEvent.pointerLeave(el, { pointerType: "mouse" })
+          fireEvent.mouseOut(el)
+          fireEvent.mouseLeave(el)
+        }
+        const wait = (ms: number) => act(async () => { vi.advanceTimersByTime(ms) })
+        const menu = () => screen.queryByRole("menu")
+
+        it("after a 150ms intent delay", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+          hover(one())
+          await wait(100)
+          expect(menu()).toBeNull()
+          await wait(80)
+          expect(menu()).not.toBeNull()
+        })
+
+        it("not when the pointer passes over and leaves before the delay", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+          hover(one())
+          await wait(80)
+          unhover(one())
+          await wait(500)
+          expect(menu()).toBeNull()
+        })
+
+        it("not from hovering the line beside the button", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+          fireEvent.pointerEnter(slot(), { pointerType: "mouse" })
+          fireEvent.mouseEnter(slot())
+          fireEvent.mouseMove(slot())
+          await wait(500)
+          expect(menu()).toBeNull()
+          expect(one()).toHaveAttribute("data-hot", "true")
+        })
+
+        it("stays open into the menu, closes after a grace once the pointer leaves both, and a return in the grace keeps it", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+          hover(one())
+          await wait(200)
+          const item = screen.getByRole("menuitem", { name: "Record" })
+          hover(item)
+          await wait(500)
+          expect(menu()).not.toBeNull()
+          // Out, and back within the grace.
+          unhover(item)
+          await wait(100)
+          hover(one())
+          await wait(500)
+          expect(menu()).not.toBeNull()
+          // Out of both for longer than the grace.
+          unhover(one())
+          await wait(300)
+          expect(menu()).toBeNull()
+        })
+
+        it("not on touch: a touch pointer over the button opens nothing until it taps", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [narrow()] })} />)
+          hover(one(), "touch")
+          await wait(500)
+          expect(menu()).toBeNull()
+          fireEvent.click(one())
+          await wait(0)
+          expect(menu()).not.toBeNull()
+        })
+
+        it("a line with one action has no menu to hover open", async () => {
+          render(<TargetAudioLane {...wired({ emptyCells: [emptyCell("c9", 30, 31)] })} />)
+          hover(screen.getByTestId("tl-target-empty-c9-record"))
+          await wait(500)
+          expect(menu()).toBeNull()
+        })
+      })
+
       it("Shift+Enter on Make speech adds or removes from the keyboard too", async () => {
         const user = userEvent.setup()
         const props = wired({ emptyCells: [narrow()] })

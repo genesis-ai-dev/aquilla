@@ -381,7 +381,7 @@ import { nextFolderName } from "@/lib/timeline/track-names"
 import { paintTrackWrites, unpaintTrackWrites, type TrackOverlays, type TrackWritePatch } from "@/lib/timeline/track-paint"
 import { applyPendingOrders, applyPendingScopes, renormaliseOrders, settledPendingOrders, settledPendingScopes, withoutPendingOrder, withPendingScopeOrders, type PendingTrackScope } from "@/lib/timeline/track-reorder"
 import { applyPendingColors, settledPendingColors, withPendingColors, withoutPendingColors } from "@/lib/timeline/track-colors"
-import { applyPendingVolumes, applyTrackVolumes, settledPendingVolumes } from "@/lib/audio/track-volume"
+import { applyPendingVolumes, applyTrackVolumes, settledPendingVolumes, withoutPendingVolume, type PendingVolume } from "@/lib/audio/track-volume"
 import { toStoredVolume } from "@/lib/audio/track-volume-store"
 import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
@@ -15113,8 +15113,9 @@ export function ProjectWorkspace() {
   // so the fader doesn't spring back while the write travels.
   const [pendingTrackVolumes, setPendingTrackVolumes] = useState<{
     fileId: string
-    volumes: Map<string, number>
+    volumes: Map<string, PendingVolume>
   } | null>(null)
+  const trackVolumeWriteId = useRef(0)
   /** Saves the "Move to" moves still queued (`saveQueuedTrackMoves`, below).
    *  A drag's write calls it first, so the outbox holds writes in the order
    *  they were made and a held move can never land over a later drag. */
@@ -16418,15 +16419,19 @@ export function ProjectWorkspace() {
       if (!fileId) return
       // Stored: nothing for 0 dB, the number, or "-inf" for silence (fader-scale.ts).
       const volumeDb = toStoredVolume(db)
+      // Review S3: remember what the read said, so a colleague's newer value
+      // settles this write too (the fader then shows theirs).
+      const readBefore = serverTracksRef.current.find((tr) => tr.id === trackId)?.volumeDb ?? 0
+      const id = ++trackVolumeWriteId.current
       setPendingTrackVolumes((current) => {
         const volumes = new Map(current?.fileId === fileId ? current.volumes : [])
-        volumes.set(trackId, db)
+        volumes.set(trackId, { db, readBefore, id })
         return { fileId, volumes }
       })
+      // A refused write takes back only itself, never a newer one.
       const revert = () => setPendingTrackVolumes((current) => {
         if (!current || current.fileId !== fileId) return current
-        const volumes = new Map(current.volumes)
-        volumes.delete(trackId)
+        const volumes = withoutPendingVolume(current.volumes, trackId, id)
         return volumes.size === 0 ? null : { fileId, volumes }
       })
       recordTrackChanges("editor.history.stepTrackVolume", [{ trackId, after: { volumeDb } }])

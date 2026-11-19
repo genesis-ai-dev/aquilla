@@ -78,25 +78,44 @@ export function withTrackVolumes(cells: CellData[], overrides: PersistedTrackOve
 }
 
 /** A volume written here that the project read hasn't shown yet: drawn now,
- *  so the fader doesn't jump back while the write travels. */
-export function applyPendingVolumes(tracks: TimelineTrack[], pending: ReadonlyMap<string, number>): TimelineTrack[] {
+ *  so the fader doesn't jump back while the write travels. `readBefore` is
+ *  what the read said when it was written; `id` names the write. */
+export interface PendingVolume {
+  db: number
+  readBefore: number
+  id: number
+}
+
+export function applyPendingVolumes(tracks: TimelineTrack[], pending: ReadonlyMap<string, PendingVolume>): TimelineTrack[] {
   if (pending.size === 0) return tracks
   return tracks.map((tr) => {
-    if (!pending.has(tr.id)) return tr
-    const db = pending.get(tr.id)!
+    const p = pending.get(tr.id)
+    if (!p) return tr
     const next = { ...tr }
-    if (db) next.volumeDb = db
+    if (p.db) next.volumeDb = p.db
     else delete next.volumeDb
     return next
   })
 }
 
-/** The pending volumes the read now shows (or overrules): drop these. */
-export function settledPendingVolumes(pending: ReadonlyMap<string, number>, tracks: readonly TimelineTrack[]): string[] {
+/**
+ * The pending volumes to drop now: the read shows yours (your write landed),
+ * or shows a value that is neither yours nor the one before (review S3: a
+ * colleague's newer write — the fader then shows theirs), or the track is gone.
+ */
+export function settledPendingVolumes(pending: ReadonlyMap<string, PendingVolume>, tracks: readonly TimelineTrack[]): string[] {
   const out: string[] = []
-  for (const [id, db] of pending) {
+  for (const [id, p] of pending) {
     const tr = tracks.find((t) => t.id === id)
-    if (!tr || (tr.volumeDb ?? 0) === db) out.push(id)
+    const read = tr?.volumeDb ?? 0
+    if (!tr || read === p.db || read !== p.readBefore) out.push(id)
   }
   return out
+}
+
+/** A refused write takes back only itself, never a newer one on the same track. */
+export function withoutPendingVolume(pending: ReadonlyMap<string, PendingVolume>, trackId: string, writeId: number): Map<string, PendingVolume> {
+  const next = new Map(pending)
+  if (next.get(trackId)?.id === writeId) next.delete(trackId)
+  return next
 }

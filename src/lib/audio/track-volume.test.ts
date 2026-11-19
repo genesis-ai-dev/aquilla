@@ -5,6 +5,8 @@ import {
   applyPendingVolumes,
   applyTrackVolumes,
   settledPendingVolumes,
+  withoutPendingVolume,
+  type PendingVolume,
   formatOwnVolume,
   trackVolumeForSlot,
   trackVolumeOverrides,
@@ -104,14 +106,35 @@ describe("exports: every clip carries its track's volume", () => {
 })
 
 describe("a volume written here, before the read shows it", () => {
-  it("is drawn at once, and dropped when the read agrees", () => {
+  const w = (db: number, readBefore: number, id = 1): PendingVolume => ({ db, readBefore, id })
+
+  it("is drawn at once", () => {
     const tracks = [track("target-audio", "target-audio", -9), track("trk-music", "audio")]
-    const pending = new Map([["target-audio", 0], ["trk-music", -3]])
-    const drawn = applyPendingVolumes(tracks, pending)
+    const drawn = applyPendingVolumes(tracks, new Map([["target-audio", w(0, -9)], ["trk-music", w(-3, 0)]]))
     expect(drawn[0].volumeDb).toBeUndefined()
     expect(drawn[1].volumeDb).toBe(-3)
     expect(tracks[0].volumeDb).toBe(-9)
-    expect(settledPendingVolumes(pending, tracks)).toEqual([])
-    expect(settledPendingVolumes(pending, drawn)).toEqual(["target-audio", "trk-music"])
+  })
+
+  it("settles when the read shows it (your own write landed)", () => {
+    const pending = new Map([["trk-music", w(-3, 0)]])
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio")])).toEqual([])
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio", -3)])).toEqual(["trk-music"])
+  })
+
+  // Review S3: a colleague's newer value wins; the fader shows it.
+  it("settles when the read shows a value that is neither the one before nor yours", () => {
+    const pending = new Map([["trk-music", w(-3, 0)]])
+    expect(settledPendingVolumes(pending, [track("trk-music", "audio", -6)])).toEqual(["trk-music"])
+  })
+
+  it("settles when the track is gone", () => {
+    expect(settledPendingVolumes(new Map([["trk-music", w(-3, 0)]]), [])).toEqual(["trk-music"])
+  })
+
+  it("takes back only its own write, not a newer one", () => {
+    const pending = new Map([["trk-music", w(-6, 0, 2)]])
+    expect(withoutPendingVolume(pending, "trk-music", 1).get("trk-music")?.db).toBe(-6)
+    expect(withoutPendingVolume(pending, "trk-music", 2).has("trk-music")).toBe(false)
   })
 })

@@ -2508,6 +2508,7 @@ export function ProjectOverview() {
                 <OverviewLaneTable
                   projectId={id}
                   projectName={project?.name}
+                  orgName={orgs.find((org) => org.id === portfolioOrgId)?.name ?? (activeOrg?.id === portfolioOrgId ? activeOrg.name : null)}
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={activeProjectLanes}

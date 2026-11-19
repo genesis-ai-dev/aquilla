@@ -2313,7 +2313,7 @@ export const hi: Catalog = {
   "audio.batchVoice.title": "आवाज़ बनाएँ",
   "audio.batchVoice.tooltip": "{count} चुनी पंक्तियों में से हर एक के लिए एक आवाज़ में टेक बनाएँ",
   "audio.batchVoice.needTranslated": "कम से कम एक अनुवादित पंक्ति चुनें",
-  "audio.batchVoice.rowName": "पंक्ति {number}",
+  "editor.line.rowName": "पंक्ति {number}",
   "audio.batchVoice.voiceLabel": "उपयोग की आवाज़",
   "audio.batchVoice.existingLabel": "पंक्तियाँ जिनका पहले से बना ऑडियो है",
   "audio.batchVoice.existingSkip": "उन्हें जैसे हैं वैसे छोड़ें",

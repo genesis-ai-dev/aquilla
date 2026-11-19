@@ -2388,7 +2388,7 @@ export const ur: Catalog = {
   "audio.batchVoice.title": "آواز بنائیں",
   "audio.batchVoice.tooltip": "{count} منتخب سطروں میں سے ہر ایک کے لیے ایک آواز میں ٹیک بنائیں",
   "audio.batchVoice.needTranslated": "کم از کم ایک ترجمہ شدہ سطر منتخب کریں",
-  "audio.batchVoice.rowName": "قطار {number}",
+  "editor.line.rowName": "قطار {number}",
   "audio.batchVoice.voiceLabel": "استعمال کی آواز",
   "audio.batchVoice.existingLabel": "سطریں جن کے پاس پہلے سے بنائی ہوئی آڈیو ہے",
   "audio.batchVoice.existingSkip": "انہیں جوں کا توں چھوڑ دیں",

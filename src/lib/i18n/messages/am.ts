@@ -2389,7 +2389,7 @@ export const am: Catalog = {
   "audio.batchVoice.title": "ድምጽ ያመንጩ",
   "audio.batchVoice.tooltip": "ለተመረጡት {count} መስመሮች እያንዳንዱ ቀረጻ ያመንጩ፣ በአንድ ድምጽ",
   "audio.batchVoice.needTranslated": "ቢያንስ አንድ የተተረጎመ መስመር ይምረጡ",
-  "audio.batchVoice.rowName": "ረድፍ {number}",
+  "editor.line.rowName": "ረድፍ {number}",
   "audio.batchVoice.voiceLabel": "የሚጠቀሙት ድምጽ",
   "audio.batchVoice.existingLabel": "አስቀድመው የተመነጨ ድምጽ ያላቸው መስመሮች",
   "audio.batchVoice.existingSkip": "እንደነበሩ ይተዋቸው",

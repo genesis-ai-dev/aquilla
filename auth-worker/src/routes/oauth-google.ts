@@ -12,8 +12,9 @@ import { JWTService } from "../auth/jwt"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, ipIdentifier, recordAuthEvent } from "../utils/rate-limit"
 import { verifyPassword } from "../utils/password"
-import { devAccessRefusal, legacyD1Config } from "./auth"
-import { hasLegacyIdentityCollision } from "../services/frontier-d1"
+import { devAccessRefusal, legacyD1Config, legacyMigrationRuntime } from "./auth"
+import { migrateLegacyUserCandidate, verifyLegacyUserForLogin, LegacyUserMigrationError } from "../services/legacy-user-migration"
+import { findLegacyUsersByIdentifier, hasLegacyIdentityCollision } from "../services/frontier-d1"
 import { withPostResponseDb } from "../lib/post-response-db"
 import { sendWelcomeEmail } from "../services/email"
 import { parseAdminEmails } from "../middleware/platform-admin"
@@ -207,6 +208,16 @@ routes.post("/exchange", zValidator("json", proof), async c => {
     try { return c.json(await session(c.env, account.username, account.id, false, false, account.session_version)) }
     catch { return c.json({ error: "session_failed" }, 503) }
   }
+  if (!account) {
+    try {
+      const d1 = legacyD1Config(c.env)
+      const matches = d1 ? await findLegacyUsersByIdentifier(d1, flow.email) : []
+      if (matches.length > 0) {
+        if (matches.length !== 1 || matches[0].email.toLowerCase() !== flow.email.toLowerCase()) return c.json({ error: "identity_taken" }, 409)
+        return c.json({ continuation: nextCode, step: "legacy", email: flow.email })
+      }
+    } catch { return c.json({ error: "unavailable" }, 503) }
+  }
   return c.json({ continuation: nextCode, step: account ? "link" : "signup", email: flow.email, ...(account ? { username: account.username } : {}) })
 })
 
@@ -226,12 +237,44 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
   if (await countRecentEvents(c.env.AQUILLA_PG, "social_link", ip, { onlyFailures: false }) >= 20 || await countRecentEvents(c.env.AQUILLA_PG, "social_link", ownerKey, { onlyFailures: false }) >= 8) return c.json({ error: "rate_limited" }, 429)
   await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ip, true)
   await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ownerKey, true)
-  const { account, linked, mismatch } = await accountFor(c.env.AQUILLA_PG, flow)
+  const current = await accountFor(c.env.AQUILLA_PG, flow)
+  let account = current.account
+  const { linked, mismatch } = current
   if (mismatch) return c.json({ error: "account_mismatch" }, 409)
   // Apply the same dev-only access policy as password login, before writes or JWTs.
   const access = await checkDevAccess(c.env, account?.email ?? flow.email)
   if (!access.allowed) return devAccessRefusal(c, access.reason)
   if (linked) return c.json({ error: "restart" }, 409)
+  if (!account && password && !username) {
+    try {
+      const runtime = legacyMigrationRuntime(c.env)
+      const source = runtime && await verifyLegacyUserForLogin(flow.email, password, runtime)
+      if (!runtime || !source || source.email.toLowerCase() !== flow.email.toLowerCase()) return c.json({ error: "invalid_password" }, 401)
+      let version: number | undefined
+      const migrated = await migrateLegacyUserCandidate(c.env.AQUILLA_PG, source, runtime, "jit", undefined, async (tx, userId) => {
+        const claim = await tx.prepare(`UPDATE social_login_flows SET status='consumed',code_hash=NULL
+          WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now() RETURNING subject`)
+          .bind(hash, challenge).first<{ subject: string }>()
+        if (!claim) throw new LegacyUserMigrationError("conflict", "Google continuation expired")
+        await tx.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES ('google',?,?)").bind(claim.subject, userId).run()
+        const user = await tx.prepare("SELECT session_version FROM users WHERE id=?").bind(userId).first<{session_version:number}>()
+        if (!user) throw new Error("Missing migrated account")
+        version = user.session_version
+      })
+      if (migrated.created) {
+        try { return c.json(await session(c.env, migrated.username, migrated.userId, false, true, version)) }
+        catch { return c.json({ error: "session_failed" }, 503) }
+      }
+      // Another importer committed first. Use the current password and session
+      // version via the normal linking path, never the stale Frontier proof.
+      const refreshed = await accountFor(c.env.AQUILLA_PG, flow)
+      account = refreshed.account
+      if (!account || Number(account.id) !== Number(migrated.userId) || refreshed.linked || refreshed.mismatch) return c.json({ error: "restart" }, 409)
+    } catch (error) {
+      if (error instanceof LegacyUserMigrationError && error.code === "conflict") return c.json({ error: "restart" }, 409)
+      return c.json({ error: "unavailable" }, 503)
+    }
+  }
   if (account) {
     // Require proof of the existing Aquilla account, not merely matching email.
     if (!password || !(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)

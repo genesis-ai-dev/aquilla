@@ -2393,7 +2393,7 @@ export const bn: Catalog = {
   "audio.batchVoice.title": "কণ্ঠ তৈরি করুন",
   "audio.batchVoice.tooltip": "নির্বাচিত {count}টি লাইনের প্রতিটির জন্য একটি কণ্ঠে একটি টেক তৈরি করুন",
   "audio.batchVoice.needTranslated": "অন্তত একটি অনূদিত লাইন নির্বাচন করুন",
-  "audio.batchVoice.rowName": "সারি {number}",
+  "editor.line.rowName": "সারি {number}",
   "audio.batchVoice.voiceLabel": "যে কণ্ঠ ব্যবহার হবে",
   "audio.batchVoice.existingLabel": "যে লাইনে ইতিমধ্যে তৈরি অডিও আছে",
   "audio.batchVoice.existingSkip": "যেমন আছে রাখুন",

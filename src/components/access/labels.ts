@@ -1,6 +1,6 @@
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { roleNameKey } from "@/lib/frontier/roles"
-import { formatScopePath } from "@/lib/access/scope-path"
+import { formatScopePath, viaTeamName } from "@/lib/access/scope-path"
 import type { GrantOrigin } from "@/lib/access/types"
 
 /** AQU-1352 §3.7 rule 1: the badge text for a grant origin. Never a number. */
@@ -12,10 +12,18 @@ export function originLabel(t: TFunction, origin: GrantOrigin): string {
       return t("org.accessModelLegend.creator.label")
     case "platform":
       return t("org.access.origin.platform")
-    case "inherited":
-      return origin.from?.length
-        ? t("org.access.origin.inheritedFrom", { path: formatScopePath(origin.from) })
+    case "inherited": {
+      const from = origin.from ?? []
+      const team = viaTeamName(from)
+      const scope = formatScopePath(from)
+      if (team) {
+        const via = `${t("org.membersPage.sourceViaTeam")} ${team}`
+        return scope ? `${scope} · ${via}` : via
+      }
+      return scope
+        ? t("org.access.origin.inheritedFrom", { path: scope })
         : t("org.access.origin.inherited")
+    }
   }
 }
 

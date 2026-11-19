@@ -456,3 +456,92 @@ describe("measuring a take", () => {
     expect(await measure("c1", "a", att)).not.toBeNull()
   })
 })
+
+// Re-check M1: a recording shared by several takes (cut pieces, an import's
+// sections) is downloaded once per run, however its takes are interleaved
+// with others; one whose download failed is not tried again for its other
+// takes in that run.
+describe("a shared recording across interleaved takes", () => {
+  const tone = (seconds: number) => Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
+  function hostWith(takes: Record<string, Record<string, Partial<CodexCellAttachment>>>, fetchBytes: (att: CodexCellAttachment) => Promise<Uint8Array>) {
+    const store: Record<string, Record<string, CodexCellAttachment>> = {}
+    for (const [c, atts] of Object.entries(takes)) {
+      store[c] = {}
+      for (const [id, a] of Object.entries(atts)) store[c][id] = { type: "audio", durationMs: 4000, ...a } as CodexCellAttachment
+    }
+    const readTake = (c: string, id: string) => store[c]?.[id] ?? null
+    const measure = makeTakeMeasurer({
+      fetchBytes: (att) => fetchBytes(att),
+      decode: async () => tone(4),
+      emit: async (c, id, r) => { Object.assign(store[c][id], r) },
+      meter: async (pcm, rate) => (await import("./loudness")).measureLoudness([pcm], rate),
+    })
+    const host: EvenOutHost = { readTake, applyEven: async (c, id, t) => { store[c][id].evenTargetLufs = t }, measure, release: () => measure.release() }
+    return { host, store }
+  }
+  const interleaved = {
+    c1: { u1: { url: "frontier-audio://U.mp3", trimEndMs: 2000 }, v1: { url: "frontier-audio://V1.wav" } },
+    c2: { u2: { url: "frontier-audio://U.mp3", trimStartMs: 2000 }, v2: { url: "frontier-audio://V2.wav" } },
+    c3: { u3: { url: "frontier-audio://U.mp3", trimStartMs: 1000, trimEndMs: 3000 } },
+  }
+  const refs = [
+    { cellId: "c1", audioId: "u1" }, { cellId: "c1", audioId: "v1" },
+    { cellId: "c2", audioId: "u2" }, { cellId: "c2", audioId: "v2" },
+    { cellId: "c3", audioId: "u3" },
+  ]
+
+  it("downloads U once, though its takes are mixed with others", async () => {
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => { fetched.push(att.url); return new Uint8Array([1]) })
+    const r = await evenOutTakes(host, refs)
+    expect(r).toMatchObject({ evened: 5, unmeasured: 0 })
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(1)
+    expect(fetched).toHaveLength(3)
+  })
+
+  it("a recording whose download failed is skipped for its other takes in that run, counted as skipped", async () => {
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => {
+      fetched.push(att.url)
+      if (att.url.endsWith("U.mp3")) throw new Error("network gave up")
+      return new Uint8Array([1])
+    })
+    const r = await evenOutTakes(host, refs)
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(1)
+    expect(r).toMatchObject({ evened: 2, unmeasured: 3, skipped: 3 })
+  })
+
+  it("a recording whose download ran out of time is skipped for its other takes too", async () => {
+    vi.useFakeTimers()
+    try {
+      let fetches = 0
+      const measure = makeTakeMeasurer({
+        fetchBytes: () => { fetches++; return new Promise(() => {}) },
+        decode: async () => tone(4), emit: async () => {}, timeoutMs: 1000,
+      })
+      const att = { url: "frontier-audio://slow.mp3", type: "audio", durationMs: 4000 } as CodexCellAttachment
+      const first = measure("c1", "a", { ...att, trimEndMs: 2000 })
+      await vi.advanceTimersByTimeAsync(1001)
+      expect(await first).toBeNull()
+      expect(await measure("c2", "b", { ...att, trimStartMs: 2000 })).toBeNull()
+      expect(fetches).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a later run tries the failed recording again", async () => {
+    let fail = true
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => {
+      fetched.push(att.url)
+      if (fail && att.url.endsWith("U.mp3")) throw new Error("offline")
+      return new Uint8Array([1])
+    })
+    await evenOutTakes(host, refs)
+    fail = false
+    const r = await evenOutTakes(host, refs)
+    expect(r.unmeasured).toBe(0)
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(2)
+  })
+})

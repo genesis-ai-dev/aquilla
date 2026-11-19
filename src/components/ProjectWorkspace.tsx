@@ -4612,6 +4612,29 @@ export function ProjectWorkspace() {
     const projectId = project.id
     const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
     const touched = new Set<string>()
+    const measure = makeTakeMeasurer({
+      fetchBytes: async (att, where, signal) => {
+        const ref = parseFrontierAudioUrl(att.url)
+        const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
+        if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
+        return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
+      },
+      decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
+      decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
+      emit: async (cellId, audioId, reading, durationMs) => {
+        const owner = resolveTakeCellRef.current(cellId)
+        const att = owner?.cell.attachments?.[audioId]
+        if (!owner || !att) return
+        const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+        const p = emitCellAudioMeasure({
+          projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        })
+        injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
+        await p
+      },
+    })
     return {
       readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
       applyEven: async (cellId, audioId, target) => {
@@ -4628,29 +4651,10 @@ export function ProjectWorkspace() {
       allowed: canPerform("cell.audio.even", project.syncRole?.level ?? null),
       fileId: activeFileId,
       fileName: activeFileNameRef.current,
-      measure: makeTakeMeasurer({
-        fetchBytes: async (att, where, signal) => {
-          const ref = parseFrontierAudioUrl(att.url)
-          const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
-          if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
-          return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
-        },
-        decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
-        decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
-        emit: async (cellId, audioId, reading, durationMs) => {
-          const owner = resolveTakeCellRef.current(cellId)
-          const att = owner?.cell.attachments?.[audioId]
-          if (!owner || !att) return
-          const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
-          const p = emitCellAudioMeasure({
-            projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
-            ...(activeLane ? { targetLang: activeLane } : {}),
-            author: currentUsername,
-          })
-          injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
-          await p
-        },
-      }),
+      measure,
+      // The run is over: the decoded recording goes, and failed recordings are
+      // tried again next run.
+      release: () => measure.release(),
     }
   }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername, getTokenForProjectFile])
   const handleEvenOut = useCallback(

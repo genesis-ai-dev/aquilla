@@ -7749,6 +7749,7 @@ export function ProjectWorkspace() {
     styleInstructionsFor,
     recordAiModelCall,
     project?.languageProfile,
+    project?.id,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so

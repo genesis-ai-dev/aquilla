@@ -403,3 +403,42 @@ describe('AQU-2549: a join brings in the source lines the own file lacks', () =>
     })
   }
 })
+
+// AQU-2549 re-check, finding 1: a file that once followed this source, was
+// detached and drifted, is joined again. One of its rows still carries a source
+// line's id (U) from the earlier join, and the match now pairs that row with a
+// DIFFERENT source line (V). Writing U as a new line under its own id landed on
+// that same row, so U went missing from the file.
+describe('AQU-2549: a re-join keeps a source line whose id a drifted row still holds', () => {
+  it('writes the source line in as a row of its own, and its later edits land there', async () => {
+    const { t, reader, revise } = await setup()
+    try {
+      await revise(BSB, UP_GD, 'b', LINES(NEW_NOTE))
+      const up = await loadFileSourceLines(t.db, BSB, UP_GD)
+      const U = up[1].cellId
+      // The own file lacks the source's line 1; the row where line 2 sits still
+      // holds line 1's id.
+      let anchor: string | null = null
+      for (const [i, value] of LINES(NEW_NOTE).entries()) {
+        if (i === 1) continue
+        const cellId = i === 2 ? U : `own-${i}`
+        await emit(t, LANG, 'source.cell.create', { fileId: OWN_GD, cellId, payload: { cellId, anchorCellId: anchor, value } })
+        anchor = cellId
+      }
+      await link(t, { files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+
+      const ordered = async () => (await loadFileSourceLines(t.db, LANG, OWN_GD)).map((line) => line.value)
+      expect(await ordered()).toEqual(LINES(NEW_NOTE))
+
+      await emit(t, BSB, 'source.cell.commit', {
+        fileId: UP_GD, cellId: U, parentId: (await sourceOf(t, BSB, UP_GD)).find((c) => c.cell_id === U)!.event_id,
+        payload: { value: 'The Creation of the World' },
+      })
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+      expect(await ordered()).toEqual(LINES(NEW_NOTE).map((v, i) => (i === 1 ? 'The Creation of the World' : v)))
+    } finally {
+      await t.close()
+    }
+  })
+})

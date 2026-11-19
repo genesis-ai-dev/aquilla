@@ -349,12 +349,25 @@ async function adoptFile(
   // re-anchored on it, so the new line slots in where the upstream has it
   // instead of forking the order. Every other matched line keeps the anchor it
   // has — the file's own order, which its own unmatched lines hang off.
+  //
+  // AQU-2549: a file that once followed this source, was detached and drifted,
+  // can still hold a row under a source line's id while the match pairs that
+  // row with a different line. The new line then takes a row id of its own,
+  // standing in for the upstream's (so the forward fold finds it through the
+  // mapping), instead of landing on that row and going missing.
   const localOf = new Map(match.pairs.map((pair) => [pair.upstreamCellId, pair.cellId]))
+  const localIds = new Set(localLines.map((line) => line.cellId))
+  const newIdOf = new Map(
+    upstreamLines
+      .filter((line) => !localOf.has(line.cellId))
+      .map((line) => [
+        line.cellId,
+        localIds.has(line.cellId) ? mirrorEventId(`adopt-new-cell:${fileId}:${line.cellId}`) : line.cellId,
+      ]),
+  )
   const lines: Array<{ upstreamCellId: string; cellId: string; paired: boolean }> = [
     ...match.pairs.map((pair) => ({ upstreamCellId: pair.upstreamCellId, cellId: pair.cellId, paired: true })),
-    ...upstreamLines
-      .filter((line) => !localOf.has(line.cellId))
-      .map((line) => ({ upstreamCellId: line.cellId, cellId: line.cellId, paired: false })),
+    ...[...newIdOf].map(([upstreamCellId, cellId]) => ({ upstreamCellId, cellId, paired: false })),
   ]
   const now = Date.now()
   let mirrored = 0
@@ -383,8 +396,8 @@ async function adoptFile(
       const value = row.value ?? ''
       const anchor = row.anchor_cell_id
       const anchorCellId = pair.paired
-        ? (anchor && !localOf.has(anchor) ? anchor : null)
-        : (anchor ? localOf.get(anchor) ?? anchor : null)
+        ? (anchor && !localOf.has(anchor) ? newIdOf.get(anchor) ?? anchor : null)
+        : (anchor ? localOf.get(anchor) ?? newIdOf.get(anchor) ?? anchor : null)
       const payload: EventPayloads['source.cell.mirror'] = {
         value,
         valueHtml: row.value_html ?? undefined,

@@ -115,13 +115,17 @@ export function isHiddenFromExport(cell: ScopableCell): boolean {
 export function scopeCellsForExport<T extends ScopableCell>(
   cells: T[],
   mode: ExportContentMode,
+  /** AQU-2551 re-review finding 7: the dialog's own filters (voice, chapter)
+   *  drop lines here, through the same paragraph-start carry, never before. */
+  alsoKeep?: (cell: T) => boolean,
 ): T[] {
   // AQU-1423: hidden cells go in BOTH modes — parking a cell is not a choice
   // about this download. Checked first so the identity return below still holds
   // for the overwhelmingly common file that has nothing parked.
   const hidden = cells.some(isHiddenFromExport)
-  if (mode === "current") return hidden ? keepParagraphStarts(cells, (c) => !isHiddenFromExport(c)) : cells
-  return keepParagraphStarts(cells, (c) => isValidatedForExport(c) && !isHiddenFromExport(c))
+  if (mode === "current" && !hidden && !alsoKeep) return cells
+  const scoped = (c: T) => !isHiddenFromExport(c) && (mode === "current" || isValidatedForExport(c))
+  return keepParagraphStarts(cells, alsoKeep ? (c) => scoped(c) && alsoKeep(c) : scoped)
 }
 
 /**

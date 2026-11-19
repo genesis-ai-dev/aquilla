@@ -53,7 +53,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { chapterFilenameSuffix, chapterLabelForCell, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
   DEFAULT_EXPORT_CONTENT_MODE,
   dropHiddenCells,
@@ -1323,12 +1323,12 @@ export function ExportDialog({
   }, [open])
 
   /**
-   * Apply the voice filter to a cell array.
-   * When voiceFilter is empty, all cells are returned.
+   * Does a cell pass the voice filter? An empty voiceFilter passes every cell.
+   * AQU-2551 re-review finding 7: a predicate, so the line it drops goes
+   * through scopeCellsForExport's paragraph-start carry.
    */
-  function applyVoiceFilter(cs: CellData[]): CellData[] {
-    if (!voiceFilter) return cs
-    return cs.filter((c) => getCellVoice(c) === voiceFilter)
+  function keepsVoice(c: CellData): boolean {
+    return !voiceFilter || getCellVoice(c) === voiceFilter
   }
 
   // AQU-465: Chapter scope — the middle ground between "current file" and
@@ -2094,7 +2094,9 @@ export function ExportDialog({
         // them.
         const filteredCells = opts?.audioCues
           ? dropHiddenCells(audioCells ?? [])
-          : scopeCellsForExport([...filterCellsByChapter(applyVoiceFilter(cells), chapter)], contentMode)
+          : scopeCellsForExport(cells, contentMode, voiceFilter || chapter
+            ? (c) => keepsVoice(c) && (!chapter || chapterLabelForCell(c) === chapter)
+            : undefined)
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising

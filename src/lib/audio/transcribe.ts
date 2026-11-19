@@ -20,6 +20,7 @@ import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { injectOptimisticAudioWords } from "@/lib/audio/audio-attachments-bus"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
@@ -644,6 +645,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // Decision 11: the take was undone while it was being transcribed. A
       // re-attach would bring it back (see undone-takes.ts), so the timings
       // stay in memory only.
+      const asrHeard = raw.text.trim()
       if (!wasTakeUndone(audioId)) await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
@@ -695,6 +697,15 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // the re-attach can never deselect another language's take.
         ...(!isSourceSegment && targetLang ? { targetLang } : {}),
         author: session?.username ?? "local",
+      }).then((eventId) => {
+        // AQU-2654: the take's words, on every surface showing it, from the
+        // write just queued — not from a flush and a re-read of the file. A
+        // fresh transcription is never an AI cleanup, so the mark goes.
+        injectOptimisticAudioWords(cell.fileId, cell.id, audioId, {
+          timings,
+          ...(asrHeard ? { asrText: asrHeard, asrModel: raw.model ?? "unknown" } : {}),
+          transcriptAi: null,
+        }, eventId)
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
       })

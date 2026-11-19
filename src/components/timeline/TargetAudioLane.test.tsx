@@ -1432,6 +1432,11 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
 
       rerender(<TargetAudioLane {...props} pickedGhostIds={new Set(["c9"])} />)
       expect(speech()).toHaveAttribute("aria-pressed", "true")
+      // Review S1: the pressed state is SEEN, not only announced — primary
+      // glyph and outline. The mic is not a toggle and says nothing.
+      expect(speech().className).toMatch(/(^| )aria-pressed:text-primary( |$)/)
+      expect(speech().className).toMatch(/(^| )aria-pressed:ring-primary\/50( |$)/)
+      expect(rec()).not.toHaveAttribute("aria-pressed")
       rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
       expect(speech()).toBeDisabled()
       expect(speech()).toHaveAttribute("data-busy", "true")

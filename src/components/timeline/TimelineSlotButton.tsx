@@ -76,6 +76,9 @@ export function TimelineSlotButton({
           // slot is already under the pointer, so a transition only lags it.
           hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
           "hover:text-foreground disabled:cursor-progress",
+          // AQU-2663: a toggle's ON state (a line picked for Make speech) is
+          // seen, not only announced. Inert on buttons that pass no `pressed`.
+          "aria-pressed:text-primary aria-pressed:ring-primary/50",
           "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
         ].join(" ")}
       >

@@ -13018,6 +13018,10 @@ export function ProjectWorkspace() {
   // AQU-2664: the Even out window's takes and opener, set further down (the
   // cells that carry the takes are worked out there).
   const evenOutCellsRef = useRef<CellData[]>([])
+  // The file menu's "Even out loudness…" shows while the file holds takes;
+  // counted further down (where the cells are) and kept here so the menu
+  // updates when it changes.
+  const [evenOutTakeCount, setEvenOutTakeCount] = useState(0)
   const handleClearOneTakeRef = useRef<(cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => Promise<ClearResult | null>>(async () => null)
   const openEvenOutRef = useRef<(trackIds: readonly string[]) => void>(() => {})
   const actionCtx = useMemo(() => ({
@@ -13033,8 +13037,8 @@ export function ProjectWorkspace() {
     canSplitAtQuotes,
     quoteSplitSummary,
     // AQU-2664: read through a ref — the takes are worked out further down.
-    evenOutTakes: () => takesToEvenOut(evenOutCellsRef.current).length,
-  }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
+    evenOutTakes: () => evenOutTakeCount,
+  }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary, evenOutTakeCount])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -15145,6 +15149,8 @@ export function ProjectWorkspace() {
   // dubbing file; else the file's own (the list every export reads too).
   const evenOutCells = audioCueCells ?? audioMergedCells
   evenOutCellsRef.current = evenOutCells
+  const evenOutTakesInFile = useMemo(() => takesToEvenOut(evenOutCells).length, [evenOutCells])
+  useEffect(() => { setEvenOutTakeCount(evenOutTakesInFile) }, [evenOutTakesInFile])
   const canEvenOut = canPerform("cell.audio.even", project?.syncRole?.level ?? null)
   /** Each track's ≈ (board 74), for the tracks holding takes. */
   const evenOutStates = useMemo(() => evenOutTrackStates(evenOutCells, timelineTracks), [evenOutCells, timelineTracks])

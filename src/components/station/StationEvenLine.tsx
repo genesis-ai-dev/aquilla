@@ -9,7 +9,7 @@
 // evened while open here shows no line.
 
 import { EqualApproximately } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { takeGain } from "@/lib/audio/take-gain"
@@ -30,17 +30,12 @@ export function StationEvenLine({ host, take, target, ownDb, editable }: {
   const evened = g.evened && g.measured
   // Once evened while open here, the line stays (so a Clear can be undone by
   // evening out again); a different take starts afresh.
-  const [seen, setSeen] = useState(evened)
   const key = `${target.cellId}\u0000${target.audioId}`
-  const [seenKey, setSeenKey] = useState(key)
-  useEffect(() => {
-    if (seenKey !== key) {
-      setSeenKey(key)
-      setSeen(evened)
-    } else if (evened && !seen) setSeen(true)
-  }, [key, seenKey, evened, seen])
+  const [seenFor, setSeenFor] = useState<string | null>(evened ? key : null)
+  // Adjusted while rendering: this take was evened while open here.
+  if (evened && seenFor !== key) setSeenFor(key)
   const [busy, setBusy] = useState(false)
-  if (!evened && !(seen && seenKey === key)) return null
+  if (!evened && seenFor !== key) return null
 
   const ref = { cellId: target.cellId, audioId: target.audioId }
   const volume = formatOwnVolume(ownDb)

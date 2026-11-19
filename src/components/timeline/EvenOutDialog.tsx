@@ -14,7 +14,7 @@
 // it, the scope radios, the target box with its click (i), and the footer.
 
 import { LoaderCircle, RotateCcw } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { InfoReveal, InfoToggle } from "@/components/ui/info-tip"
@@ -49,13 +49,17 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
   const [note, setNote] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
 
-  // A fresh window each time it opens, on the scope it was opened from.
-  useEffect(() => {
-    if (!open) return
-    setPick(start)
-    setNote(null)
-    setInfoOpen(false)
-  }, [open, start])
+  // A fresh window each time it opens, on the scope it was opened from
+  // (adjusted while rendering, not in an effect).
+  const [shownFor, setShownFor] = useState<{ open: boolean; start: EvenOutPick }>({ open, start })
+  if (shownFor.open !== open || shownFor.start !== start) {
+    setShownFor({ open, start })
+    if (open) {
+      setPick(start)
+      setNote(null)
+      setInfoOpen(false)
+    }
+  }
 
   const scope = scopes.find((s) => s.pick === pick) ?? scopes[0]
   const n = scope?.takes.length ?? 0
@@ -75,17 +79,12 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
     abort.current = ac
     setNote(null)
     setRunning({ done: 0, total: n })
-    let r: EvenOutResult | null = null
-    try {
-      r = await run(scope.takes, {
-        signal: ac.signal,
-        // Takes that already have a reading count as done: they are not
-        // measured again (board 71G).
-        onProgress: (done, toMeasure) => setRunning({ done: n - toMeasure + done, total: n }),
-      })
-    } catch {
-      r = null
-    }
+    const r: EvenOutResult | null = await run(scope.takes, {
+      signal: ac.signal,
+      // Takes that already have a reading count as done: they are not
+      // measured again (board 71G).
+      onProgress: (done, toMeasure) => setRunning({ done: n - toMeasure + done, total: n }),
+    }).catch(() => null)
     abort.current = null
     setRunning(null)
     if (!r) {

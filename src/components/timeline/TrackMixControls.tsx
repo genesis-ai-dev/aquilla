@@ -126,7 +126,12 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
   disabled?: boolean
 }) {
   const t = useT()
-  const [local, setLocal] = useState<number | null>(null)
+  // What was drawn here, and the saved value it was drawn over: a saved value
+  // from anywhere (this write coming back, another person, an Undo) takes
+  // over from it.
+  const [drawn, setDrawn] = useState<{ over: number; v: number } | null>(null)
+  const local = drawn && drawn.over === db ? drawn.v : null
+  const setLocal = (v: number) => setDrawn({ over: db, v })
   const [dragging, setDragging] = useState(false)
   const [hover, setHover] = useState(false)
   const [typing, setTyping] = useState(false)
@@ -135,9 +140,6 @@ export function TrackFader({ name, testKey, db, onLive, onCommit, disabled = fal
   const keyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const typedRef = useRef<HTMLInputElement>(null)
 
-  // A saved value from anywhere (this write coming back, another person, an
-  // Undo) takes over from what was drawn here.
-  useEffect(() => { setLocal(null) }, [db])
   useEffect(() => () => {
     if (frame.current != null) cancelAnimationFrame(frame.current)
     if (keyTimer.current) clearTimeout(keyTimer.current)

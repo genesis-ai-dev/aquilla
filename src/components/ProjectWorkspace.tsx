@@ -15209,7 +15209,8 @@ export function ProjectWorkspace() {
     })
   }, [reportHistory, t])
   const handleEvenOutRan = useCallback((r: EvenOutResult) => {
-    if (r.evened === 0 && !r.stepId) return
+    // Nothing changed (every take was already at the target): no toast.
+    if (!(r.changed ?? r.evened)) return
     evenOutToast(ranToastText(r, t), r.stepId)
   }, [evenOutToast, t])
   const handleEvenOutCleared = useCallback((r: ClearResult, scope: EvenOutScope) => {

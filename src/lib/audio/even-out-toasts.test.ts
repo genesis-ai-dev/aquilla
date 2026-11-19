@@ -14,6 +14,11 @@ const held = (n: number) => Array.from({ length: n }, (_, i) => ({ cellId: `c${i
 const scope = (pick: EvenOutScope["pick"], names: string[] = []): EvenOutScope => ({ pick, names, trackCount: names.length, takes: [], evened: [] })
 
 describe("the toasts", () => {
+  it("counts the takes the run changed, as History does (evidence 73A/B)", () => {
+    expect(ranToastText(run({ evened: 10, changed: 8, held: held(1), heldChanged: 1 }), t)).toBe("8 takes evened out to −16 LUFS. 1 couldn’t go all the way up; it’s marked.")
+    expect(ranToastText(run({ evened: 10, changed: 8, held: held(2), heldChanged: 0 }), t)).toBe("8 takes evened out to −16 LUFS.")
+  })
+
   it("after a run (73A)", () => {
     expect(ranToastText(run({ evened: 212, held: held(9) }), t)).toBe("212 takes evened out to −16 LUFS. 9 couldn’t go all the way up; they’re marked.")
     expect(ranToastText(run({ evened: 3 }), t)).toBe("3 takes evened out to −16 LUFS.")

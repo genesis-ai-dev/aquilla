@@ -337,6 +337,23 @@ describe("the run as the UI shows it (boards 71–73)", () => {
     expect(clears.undo).toHaveLength(1)
   })
 
+  // Evidence 73A/B: the toast and History count the same takes — the ones
+  // this run changed. A take already evened to the target is unchanged.
+  it("counts only the takes the run changed, as History does", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 } },
+      c2: { b: { loudnessLufs: -20, truePeakDb: -8 } },
+      c3: { c: { loudnessLufs: -30, truePeakDb: -4 } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }, { cellId: "c3", audioId: "c" }])
+    expect(r.evened).toBe(3)
+    expect(r.changed).toBe(2)
+    expect(historyView().nextUndo?.labelParams).toEqual({ count: r.changed })
+    // The held one is counted among the changed ones.
+    expect(r.heldChanged).toBe(1)
+  })
+
   it("has no step to undo when nothing changed", async () => {
     const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 } } })
     const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])

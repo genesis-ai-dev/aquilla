@@ -126,6 +126,11 @@ export interface EvenOutResult {
   notAllowed?: true
   /** The run's undo step (a toast's Undo takes it back); null when nothing changed. */
   stepId?: string | null
+  /** Takes this run changed (written): the History step's count, and the
+   *  toast's. `evened` also counts takes that already were at the target. */
+  changed?: number
+  /** Of `held`, the ones this run changed. */
+  heldChanged?: number
 }
 
 export interface ClearResult {
@@ -143,8 +148,8 @@ export interface ClearResult {
  * step is recorded as the writes start (an Undo pressed meanwhile waits for
  * them) and, once they end, holds only the takes that were written.
  */
-async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEvenData[]): Promise<{ failed: number; stepId: string | null }> {
-  if (parts.length === 0) return { failed: 0, stepId: null }
+async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEvenData[]): Promise<{ failed: number; stepId: string | null; landed: Set<string> }> {
+  if (parts.length === 0) return { failed: 0, stepId: null, landed: new Set<string>() }
   const landed = new Set<string>()
   const key = (d: { cellId: string; audioId: string }) => `${d.cellId}\u0000${d.audioId}`
   let stepId: string | null = null
@@ -182,7 +187,7 @@ async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEv
   // The step is named with its count (board 73: "Even out loudness · 212 takes").
   stepId = recordGroup({ labelKey, labelParams: { count: parts.length }, fileId: host.fileId ?? null, fileName: host.fileName ?? null }, steps, { pending: writes })
   await writes
-  return { failed: parts.length - landed.size, stepId: landed.size > 0 ? stepId : null }
+  return { failed: parts.length - landed.size, stepId: landed.size > 0 ? stepId : null, landed }
 }
 
 /** Even out `takes` to the target, measuring any that have no reading yet. */
@@ -308,6 +313,11 @@ async function evenOutMeasured(
   const written = await applyAsOneStep(host, "editor.history.stepEvenOut", parts)
   result.failed = written.failed
   result.stepId = written.stepId
+  // Evidence 73A/B: what the toast counts — the takes this run changed (the
+  // History step's count), and the held ones among them.
+  const k = (t: TakeRef) => `${t.cellId}\u0000${t.audioId}`
+  result.changed = written.landed.size
+  result.heldChanged = result.held.filter((h) => written.landed.has(k(h))).length
   result.evened -= result.failed
   result.skipped = result.unmeasured + result.silent + result.gone
   return result

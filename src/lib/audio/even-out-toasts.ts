@@ -10,8 +10,11 @@ export const lufsWord = (v: number) => (v < 0 ? `−${Math.abs(v)}` : `${v}`)
 
 /** "212 takes evened out to −16 LUFS. 9 couldn’t go all the way up; they’re marked." */
 export function ranToastText(r: EvenOutResult, t: TFunction): string {
-  const done = t("editor.evenOut.doneToast", { count: r.evened, lufs: lufsWord(r.targetLufs) })
-  return r.held.length > 0 ? `${done} ${t("editor.evenOut.heldToast", { count: r.held.length })}` : done
+  // Evidence 73A/B: the takes this run changed, as History counts them.
+  const count = r.changed ?? r.evened
+  const held = r.heldChanged ?? r.held.length
+  const done = t("editor.evenOut.doneToast", { count, lufs: lufsWord(r.targetLufs) })
+  return held > 0 ? `${done} ${t("editor.evenOut.heldToast", { count: held })}` : done
 }
 
 /** "Jesus: 93 takes no longer evened. Their own volumes and the track’s are kept." */

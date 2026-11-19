@@ -326,6 +326,23 @@ describe("a tagged PDF read by its tags", () => {
   })
 })
 
+/** AQU-2680: a cell's metadata without the page size (pinned on its own below). */
+function meta(s: { metadata?: Record<string, unknown> }): Record<string, unknown> | null {
+  const { pageSize: _pageSize, ...rest } = s.metadata ?? {}
+  return Object.keys(rest).length ? rest : null
+}
+
+// AQU-2680: the Word file takes the PDF's page size.
+describe("the page size", () => {
+  it("is kept on each page's first line, in points", async () => {
+    const read = await extractPdfImport(buildPdf({ mediaBox: [0, 0, 612, 792], pages: [
+      { runs: [{ text: "First page one.", x: 72, y: 700 }, { text: "First page two, far below.", x: 72, y: 600 }] },
+      { runs: [{ text: "Second page.", x: 72, y: 700 }] },
+    ] }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => s.metadata?.pageSize ?? null)).toEqual([{ width: 612, height: 792 }, null, { width: 612, height: 792 }])
+  })
+})
+
 // AQU-2680: a tagged PDF's lists are lists, so the Word file can number them.
 // The label is still dropped from the text (question 55); it says only
 // whether the list is bulleted or numbered.
@@ -358,7 +375,7 @@ describe("lists in a tagged PDF", () => {
 
   it("marks each item a list paragraph, bulleted or numbered, at its depth", async () => {
     const read = await extractPdfImport(listed(), { cellUnit: "paragraph" })
-    expect(read.strings.map((s) => [s.context, s.original, s.metadata ?? null])).toEqual([
+    expect(read.strings.map((s) => [s.context, s.original, meta(s)])).toEqual([
       ["Paragraph", "Before the list.", null],
       ["List Paragraph", "Bread for the whole week, bought from the baker on the corner of our street. It is bought fresh each morning, before the shop gets busy with people. Then it is carried home in a cloth bag and kept in the cool box.", { list: "bullet", listLevel: 0 }],
       ["List Paragraph", "Rye", { list: "bullet", listLevel: 1 }],
@@ -372,7 +389,7 @@ describe("lists in a tagged PDF", () => {
   it("marks every sentence of an item on the Sentence setting", async () => {
     const read = await extractPdfImport(listed(), { cellUnit: "sentence" })
     const bread = read.strings.filter((s) => s.metadata?.listLevel === 0 && s.metadata?.list === "bullet").slice(0, 2)
-    expect(bread.map((s) => [s.context, s.metadata, s.paragraphStart ?? false])).toEqual([
+    expect(bread.map((s) => [s.context, meta(s), s.paragraphStart ?? false])).toEqual([
       ["List Paragraph", { list: "bullet", listLevel: 0 }, true],
       ["List Paragraph", { list: "bullet", listLevel: 0 }, false],
     ])
@@ -383,7 +400,7 @@ describe("lists in a tagged PDF", () => {
       { text: "1.", x: 72, y: 700 }, { text: "Pray daily.", x: 120, y: 700 },
       { text: "2.", x: 72, y: 686 }, { text: "Give thanks.", x: 120, y: 686 },
     ] }] }), { cellUnit: "paragraph" })
-    expect(read.strings.map((s) => [s.context, s.original, s.metadata ?? null])).toEqual([
+    expect(read.strings.map((s) => [s.context, s.original, meta(s)])).toEqual([
       ["Paragraph", "1. Pray daily.", null],
       ["Paragraph", "2. Give thanks.", null],
     ])
@@ -420,13 +437,13 @@ describe("whole-paragraph bold and italic", () => {
 
   it("marks a paragraph that is all bold or all italic, in an untagged PDF", async () => {
     const read = await extractPdfImport(styled(false), { cellUnit: "paragraph" })
-    expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED)
+    expect(read.strings.map((s) => [s.original, meta(s)])).toEqual(EXPECTED)
   })
 
   it("marks a paragraph that is all bold or all italic, in a tagged PDF", async () => {
     const read = await extractPdfImport(styled(true), { cellUnit: "paragraph" })
     expect(read.tagged).toBe(true)
-    expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED)
+    expect(read.strings.map((s) => [s.original, meta(s)])).toEqual(EXPECTED)
   })
 
   it("imports without bold and italic when reading the fonts runs past the time limit", async () => {
@@ -440,7 +457,7 @@ describe("whole-paragraph bold and italic", () => {
     try {
       const read = await extractPdfImport(styled(false), { cellUnit: "paragraph", budgetMs: 300 })
       expect(spy).toHaveBeenCalled()
-      expect(read.strings.map((s) => [s.original, s.metadata ?? null])).toEqual(EXPECTED.map(([t]) => [t, null]))
+      expect(read.strings.map((s) => [s.original, meta(s)])).toEqual(EXPECTED.map(([t]) => [t, null]))
     } finally {
       spy.mockRestore()
     }

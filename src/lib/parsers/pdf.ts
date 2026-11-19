@@ -143,7 +143,7 @@ const hasText = (items: readonly PdfPageItem[]) => items.some((it) => "s" in it 
 /** Read a PDF into import cells. Throws `PdfReadError` for a PDF it refuses. */
 export async function extractPdfImport(buffer: ArrayBuffer, options?: PdfParseOptions): Promise<PdfImport> {
   const read = await readPdfParagraphs(buffer, (text) => createUsfmFootnoteMarker({ caller: "+", text }), options?.budgetMs)
-  return { strings: paragraphsToStrings(read.paragraphs, options?.cellUnit), imageOnlyPages: read.imageOnlyPages, tagged: read.tagged }
+  return { strings: paragraphsToStrings(read.paragraphs, read.pageSizes, options?.cellUnit), imageOnlyPages: read.imageOnlyPages, tagged: read.tagged }
 }
 
 /** AQU-2551: a PDF's plain text, one paragraph per line, for the rule import
@@ -156,10 +156,15 @@ export async function extractPdfText(buffer: ArrayBuffer, options?: Pick<PdfPars
   return read.paragraphs.map((p) => p.text).join("\n")
 }
 
+/** AQU-2680: a page's size in points, as it is shown (rotation applied). */
+interface PdfPageSize { width: number; height: number }
+
 interface PdfParagraphsRead {
   paragraphs: ReturnType<typeof pdfPagesToParagraphs>["paragraphs"]
   imageOnlyPages: number[]
   tagged: boolean
+  /** By page number, for the pages with text. */
+  pageSizes: Map<number, PdfPageSize>
 }
 
 async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) => string, budgetMs = READ_BUDGET_MS): Promise<PdfParagraphsRead> {
@@ -262,6 +267,7 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     const paintOps = imagePaintOps(pdfjs)
     const pages: PdfPageContent[] = []
     const imageOnlyPages: number[] = []
+    const pageSizes = new Map<number, PdfPageSize>()
     for (let n = 1; n <= doc.numPages; n++) {
       const page = await within(doc.getPage(n))
       try {
@@ -275,6 +281,9 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
         }
         const tree = (await within(page.getStructTree().catch(() => null))) as PdfStructNode | null
         const [x0, y0, x1, y1] = page.view
+        const round = (v: number) => Math.round(v * 100) / 100
+        const turned = page.rotate % 180 !== 0
+        pageSizes.set(n, { width: round(Math.abs(turned ? y1 - y0 : x1 - x0)), height: round(Math.abs(turned ? x1 - x0 : y1 - y0)) })
         pages.push({ n, box: { x0: Math.min(x0, x1), y0: Math.min(y0, y1), x1: Math.max(x0, x1), y1: Math.max(y0, y1) }, items, tree })
       } finally {
         page.cleanup()
@@ -287,7 +296,7 @@ async function readPdfParagraphs(buffer: ArrayBuffer, footnote: (text: string) =
     await readFontFaces(pages)
     const read = pdfPagesToParagraphs(pages, footnote)
     if (read.paragraphs.length === 0) throw new PdfReadError(imageOnlyPages.length ? "scanned" : "empty", "PDF has no text")
-    return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged }
+    return { paragraphs: read.paragraphs, imageOnlyPages, tagged: read.tagged, pageSizes }
   }
 
   /** AQU-2680: mark each text piece bold or italic from its font's name.
@@ -341,7 +350,7 @@ function fontFace(font: { name?: unknown; bold?: unknown; italic?: unknown } | n
 
 /** Paragraphs → cells, with the Word import's splitter: one cell per
  *  paragraph on the Paragraph setting, sentences on the Sentence setting. */
-function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>["paragraphs"], cellUnit: CellUnit = "sentence"): TranslatableString[] {
+function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>["paragraphs"], pageSizes: ReadonlyMap<number, PdfPageSize>, cellUnit: CellUnit = "sentence"): TranslatableString[] {
   const results: TranslatableString[] = []
   const perPage = new Map<number, number>()
   for (const p of paragraphs) {
@@ -351,12 +360,13 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
     const segments = splitFootnoteAware(p.text, cellUnit)
     // AQU-2680: what the Word export needs of the paragraph, on each of its
     // cells: its list item, and its whole-paragraph bold and italic.
-    const metadata = p.list || p.bold || p.italic ? {
-      ...(p.list ? { list: p.list.kind, listLevel: p.list.level } : {}),
-      ...(p.bold ? { paragraphBold: true } : {}),
-      ...(p.italic ? { paragraphItalic: true } : {}),
-    } : null
+    const list = p.list ? { list: p.list.kind, listLevel: p.list.level } : {}
+    const style = { ...(p.bold ? { paragraphBold: true } : {}), ...(p.italic ? { paragraphItalic: true } : {}) }
     segments.forEach((seg, i) => {
+      // AQU-2680: the page size rides on each page's first line, so the Word
+      // export finds it even when some lines are left out of the export.
+      const size = k === 1 && i === 0 ? pageSizes.get(p.page) : undefined
+      const metadata = { ...list, ...style, ...(size ? { pageSize: size } : {}) }
       results.push({
         id: uuid(),
         original: seg.text,
@@ -368,7 +378,7 @@ function paragraphsToStrings(paragraphs: ReturnType<typeof pdfPagesToParagraphs>
         type: p.heading ? "heading" : "text",
         sourceLocation,
         ...(i === 0 ? { paragraphStart: true } : {}),
-        ...(metadata ? { metadata } : {}),
+        ...(Object.keys(metadata).length ? { metadata } : {}),
       })
     })
   }

@@ -127,6 +127,16 @@ describe("a Word document from the lines", () => {
     expect(doc).toContain('<w:r><w:t xml:space="preserve">Plain.</w:t></w:r>')
   })
 
+  // AQU-2680: a PDF's page size; A4 when the import recorded none.
+  it("takes the page size the import recorded, else A4", () => {
+    const letter = docxFromLinesFiles([cell({ original: "Hi.", paragraphStart: true, metadata: { pageSize: { width: 612, height: 792 } } })])["word/document.xml"]
+    expect(letter).toContain('<w:pgSz w:w="12240" w:h="15840"/>')
+    const landscape = docxFromLinesFiles([cell({ original: "Hi.", metadata: { pageSize: { width: 842, height: 595 } } })])["word/document.xml"]
+    expect(landscape).toContain('<w:pgSz w:w="16840" w:h="11900" w:orient="landscape"/>')
+    expect(docxFromLinesFiles([cell({ original: "Hi." })])["word/document.xml"]).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
+    expect(docxFromLinesFiles([cell({ original: "Hi.", metadata: { pageSize: { width: "x", height: 5 } } })])["word/document.xml"]).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
+  })
+
   it("names the document's language when the export has one", () => {
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "es-419" })["word/styles.xml"]).toContain('<w:lang w:val="es-419"/>')
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "und" })["word/styles.xml"]).not.toContain("w:lang")

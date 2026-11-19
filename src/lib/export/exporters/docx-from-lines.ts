@@ -19,7 +19,9 @@
 //   * a tagged PDF's list items are Word list items, bulleted or numbered at
 //     their depth, Word doing the numbering (AQU-2680);
 //   * a paragraph the import found wholly bold or italic (a PDF's subtitle, a
-//     quotation) is bold or italic (AQU-2680).
+//     quotation) is bold or italic (AQU-2680);
+//   * the page is the size the import recorded (a PDF's first page), else A4
+//     (AQU-2680).
 // An untranslated line falls back to its source text, as the other exports do.
 //
 // Valid against the ECMA-376 WordprocessingML schema (document, styles,
@@ -165,8 +167,27 @@ function numberingXml(numberedLists: number): string {
     `${nums}</w:numbering>`
 }
 
+/** AQU-2680: the page size a line's import recorded (a PDF's, in points),
+ *  when it is a plausible page (1 to 22 inches a side). */
+function pageSizeOf(cells: readonly CellData[]): { width: number; height: number } | null {
+  for (const cell of cells) {
+    const size = cell.metadata?.pageSize as { width?: unknown; height?: unknown } | undefined
+    const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 72 && v <= 1584
+    if (size && ok(size.width) && ok(size.height)) return { width: size.width, height: size.height }
+  }
+  return null
+}
+
+/** The page: the recorded size, else A4 (in twentieths of a point). */
+function pageSizeXml(size: { width: number; height: number } | null): string {
+  if (!size) return `<w:pgSz w:w="11906" w:h="16838"/>`
+  const w = Math.round(size.width * 20)
+  const h = Math.round(size.height * 20)
+  return `<w:pgSz w:w="${w}" w:h="${h}"${w > h ? ` w:orient="landscape"` : ""}/>`
+}
+
 /** The document and footnote parts for these paragraphs. */
-export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
+export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: { width: number; height: number } | null = null): Built {
   const footnotes: string[] = []
   const body: string[] = []
   let anyList = false
@@ -213,7 +234,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
     })
     body.push(`<w:p>${pPr}${runs}</w:p>`)
   }
-  const sectPr = `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
+  const sectPr = `<w:sectPr>${pageSizeXml(pageSize)}` +
     `<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>`
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>${body.join("")}${sectPr}</w:body></w:document>`
@@ -279,7 +300,7 @@ export interface DocxFromLinesOptions {
 
 /** Every part of the package, by its path. */
 export function docxFromLinesFiles(cells: readonly CellData[], options?: DocxFromLinesOptions): Record<string, string> {
-  const { documentXml, footnotesXml, numberingXml } = buildDocxParts(linesToParagraphs(cells))
+  const { documentXml, footnotesXml, numberingXml } = buildDocxParts(linesToParagraphs(cells), pageSizeOf(cells))
   const rels = [
     `<Relationship Id="rId1" Type="${R_NS}/styles" Target="styles.xml"/>`,
     `<Relationship Id="rId2" Type="${R_NS}/settings" Target="settings.xml"/>`,

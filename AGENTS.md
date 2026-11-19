@@ -152,7 +152,7 @@ is checkable in a diff without a profiler:
    frame carries the result. The same `GET` from two subscribers is one shared read.
 3. **No new state in `ProjectWorkspace.tsx` or `EditorTable.tsx`.** State lives in the
    smallest component that needs it, or in a store read through a selector.
-   `scripts/perf/structure-ratchet.test.ts` fails when either file gains a `useState` or lines.
+   `scripts/perf/structure-ratchet.test.ts` fails when either file gains a `useState`.
 4. **Closed is unmounted.** A dialog, popover, menu or tooltip that is not open renders
    nothing. One overlay per list, told which row it is for — never one per row.
 5. **A list row's props are stable.** No object, array, map or closure built in the parent's

@@ -751,6 +751,8 @@ export const importExport = defineNamespace({
     "importExport.dialog.episodeConfirmStart": "Start export",
     "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
     "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
+    // AQU-2680: the PDF export saved the Word file instead (offline, no converter, a failure or the time limit).
+    "importExport.status.pdfFellBackToWord": "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
@@ -2990,6 +2992,9 @@ export const importExport = defineNamespace({
       },
       "importExport.errors.pdfReaderFailed": {
         description: "Shown when the app's PDF reader itself failed to load (often a page left open across an update), so the PDF was not read. Reloading the page fixes it; the PDF is not at fault.",
+      },
+      "importExport.status.pdfFellBackToWord": {
+        description: "Shown after a PDF export when the PDF could not be made (offline, the converter failed or took too long), so the app saved the translation as a Word file instead. Word and Pages are the programs; the person opens the file there and saves it as a PDF.",
       },
       "importExport.errors.pdfTooComplex": {
         description: "Shown when a PDF takes too long to read (a damaged or deliberately crafted file), so the app stopped reading it. Saving it again from the program that made it (Word, InDesign…) usually gives a normal PDF; the person can also import that program's own document instead.",

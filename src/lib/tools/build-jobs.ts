@@ -9,8 +9,7 @@
 import { useSyncExternalStore } from "react"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 import type { ToolRequirement } from "../../../shared/tools/requirements"
-import { runBuildFlow, type BuildPhase } from "./build-flow"
-import { runToolSmoke } from "./smoke"
+import type { BuildPhase } from "./build-flow"
 import { buildToolAttempt } from "./tools-api"
 
 export interface BuildCandidate {
@@ -117,11 +116,14 @@ export async function startBuild(
   }
   let finished: ProjectBuildState | null = null
   try {
+    // The build loop and the smoke frame (lint, SDK, srcdoc) load on the first
+    // build, not at app boot: BuildJobNotifier keeps this module on the eager path.
+    const { runBuildFlow } = await import("./build-flow")
     const result = await runBuildFlow(
       opts.request,
       {
         attempt: (body) => buildToolAttempt(jwt, projectId, body),
-        smoke: (source, manifest) => runToolSmoke(source, manifest),
+        smoke: async (source, manifest) => (await import("./smoke")).runToolSmoke(source, manifest),
         onPhase: (phase) => patch({ phase }),
       },
       base ? { source: base.source, manifest: base.manifest } : undefined,

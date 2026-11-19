@@ -90,6 +90,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.place": ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   "cell.audio.cut": ROLE.CONTRIBUTOR,
+  // AQU-2492: undoing a cut needs what cutting it needed.
+  "cell.audio.uncut": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.
@@ -125,14 +127,15 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
-  // AQU-2308: hand-set milestones. MAINTAINER, matching file.track.set — a
-  // division relayouts the navigator for everyone who opens the file. This
-  // mirror matters more than it looks: `canPerform` fails OPEN on a kind it
-  // has never heard of (see the AQU-646 note below), so without these two rows
-  // the cell menu would offer "Set a new milestone…" to a contributor and the
-  // server's 403 would be the only thing stopping them.
-  "file.milestone.set": ROLE.MAINTAINER,
-  "file.milestone.remove": ROLE.MAINTAINER,
+  // AQU-2308 / AQU-2309: hand-set milestones. PROJECT_LEAD is the static
+  // floor — the lowest rung the project's milestoneFloor can admit. The tier
+  // itself (maintainer unless opened) is canSetMilestones, not this table.
+  // This mirror matters more than it looks: `canPerform` fails OPEN on a kind
+  // it has never heard of (see the AQU-646 note below), so without these two
+  // rows the cell menu would offer "Set a new milestone…" to a contributor
+  // and the server's 403 would be the only thing stopping them.
+  "file.milestone.set": ROLE.PROJECT_LEAD,
+  "file.milestone.remove": ROLE.PROJECT_LEAD,
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.

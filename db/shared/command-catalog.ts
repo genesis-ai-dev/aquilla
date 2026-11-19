@@ -206,6 +206,27 @@ Gotchas:
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "translationInstructions", "value": "Plain register for rural youth; keep divine names as in the 1999 Bible." }], "ifMatchVersion": 7 }\``,
   },
   {
+    kind: 'PatchOrthographyExceptions',
+    title: 'Patch orthography exceptions',
+    oneLiner: 'Propose or approve words the lane’s spelling rules must leave alone.',
+    minRoleLevel: CONTRIBUTOR,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### PatchOrthographyExceptions
+Params: \`{ projectId, ops: [{ action: "add" | "remove", word, ref? }], ifMatchVersion? }\` — sole command; stage it with the \`prepare_orthography_exceptions\` MCP tool or a REST changeset. At most 200 ops per changeset.
+Adds and removes entries in \`languageProfile.orthography.exceptions\` — the words the lane's spelling rules must NOT rewrite (\`Isʼhoq\`, \`asʼhob\`: Uzbek words where \`s\` and \`h\` are separate sounds, so the \`sh→ş\` rule would corrupt them). Only an **approved** entry affects the converter and the "Old orthography" check; a \`pending\` one is a proposal and changes no text.
+Why this and not \`PatchSettings { key: "languageProfile" }\`: PatchSettings replaces the key wholesale, so two people proposing exceptions around the same time is last-write-wins on a list that records WHO asked for each word. This command carries ops, and the list is recomputed at COMMIT from the then-current stored value, so a concurrent entry survives.
+Roles: contributor and up may \`add\` — it lands \`pending\`. Maintainer and up \`add\` as \`approved\`, and an \`add\` naming a word that is already pending APPROVES it (the original proposer keeps \`by\`). \`remove\` is maintainer-only: dropping an approved exception re-exposes the word to the rules, which rewrites text.
+Gotchas:
+- \`ifMatchVersion\` is OPTIONAL here, unlike PatchSettings/SetBrief: a settings-version bump under a merge is not a conflict, it is the case the merge exists for. Pass it to assert nothing changed since you read the profile (\`plan_stale\` on drift). The write itself is still version-guarded, and a lost race re-reads and re-merges.
+- A project with no \`languageProfile.orthography\` block is \`validation_failed\`: the rules and the canonical apostrophe are a maintainer decision, set with \`PatchSettings { key: "languageProfile" }\` first.
+- Words are compared FOLDED (lowercase, apostrophes dropped), because that is how the converter matches: \`Ishoq\`, \`Is'hoq\` and \`ISʼHOQ\` are one exception. Naming the same word twice in one changeset is \`validation_failed\`.
+- The stored word keeps YOUR spelling with the profile's canonical apostrophe substituted. The rules are deliberately not applied to it — an exception exists because they must not touch this word.
+- An op whose state already holds (adding an approved word, removing an absent one) is a NO-OP, not an error; the receipt's \`orthographyExceptions.words\` names each outcome. A plan where EVERY op is a no-op stages with an \`inert_write\` warning.
+- The merged list caps at 2000 words.
+Example: \`{ "kind": "PatchOrthographyExceptions", "projectId": "p1", "ops": [{ "action": "add", "word": "asʼhob", "ref": "GEN 1:4" }] }\``,
+  },
+  {
     kind: 'SetBrief',
     title: 'Set translation brief',
     oneLiner: 'Write the project’s translation brief, section by section.',

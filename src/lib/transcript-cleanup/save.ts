@@ -19,6 +19,7 @@ import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { learnFromTranscriptCorrection } from "@/lib/store/transcript-corrections-store"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { injectOptimisticAudioWords } from "@/lib/audio/audio-attachments-bus"
 
 export interface TranscriptSaveArgs {
   projectId: string
@@ -38,7 +39,11 @@ export interface TranscriptSaveArgs {
 }
 
 /** Queues the save. Resolves once the attach is in the outbox; returns false
- *  when there is nothing to save onto (no timings, no clip url). */
+ *  when there is nothing to save onto (no timings, no clip url).
+ *
+ *  AQU-2654: the take's new words are then handed to the file's audio read
+ *  (`injectOptimisticAudioWords`), so every surface showing this take has them
+ *  at once. No caller needs to flush and re-read the file to see its own save. */
 export async function saveTranscript(args: TranscriptSaveArgs): Promise<boolean> {
   const { owner, attachment, timings, text } = args
   if (timings.length === 0 || !attachment.url) return false
@@ -63,12 +68,14 @@ export async function saveTranscript(args: TranscriptSaveArgs): Promise<boolean>
     }
   }
 
-  await emitCellAudioAttach({
+  const eventId = await emitCellAudioAttach({
     ...clipFields(args),
     timings: nextTimings,
     ...(textBecomesCellText ? { transcription: text } : {}),
     ...(args.ai ? { transcriptAi: args.ai } : {}),
   })
+  // A save without the AI mark clears it on the server (see the header).
+  injectOptimisticAudioWords(owner.fileId, owner.id, args.audioId, { timings: nextTimings, transcriptAi: args.ai ?? null }, eventId)
   return true
 }
 
@@ -90,6 +97,11 @@ function clipFields({ projectId, owner, audioId, attachment, targetLang, author 
     ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
     ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
     ...(targetLang ? { targetLang } : {}),
+    // AQU-2491 (review, Nov 9): a transcript is words ABOUT a take. Saving or
+    // clearing one never makes that take the chosen one (a correction on an
+    // older take in the list, a cleanup that finishes after the line was
+    // re-recorded), and never brings back a take deleted meanwhile.
+    wordsOnly: true,
     author,
   }
 }
@@ -103,11 +115,13 @@ function clipFields({ projectId, owner, audioId, attachment, targetLang, author 
 export async function clearTranscript(args: ClipArgs): Promise<boolean> {
   const { owner, attachment } = args
   if (!attachment.url) return false
-  await emitCellAudioAttach({
+  const asrModel = attachment.asrModel ?? "none"
+  const eventId = await emitCellAudioAttach({
     ...clipFields(args),
     timings: [],
-    asr: { text: "", model: attachment.asrModel ?? "none" },
+    asr: { text: "", model: asrModel },
     ...(isSourceSegmentSelected(owner) ? { transcription: "" } : {}),
   })
+  injectOptimisticAudioWords(owner.fileId, owner.id, args.audioId, { timings: [], asrText: "", asrModel, transcriptAi: null }, eventId)
   return true
 }

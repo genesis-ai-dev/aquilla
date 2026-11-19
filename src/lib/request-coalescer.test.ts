@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { createRequestCoalescer } from "./request-coalescer"
+import { createRequestCoalescer, createSameTurnCoalescer } from "./request-coalescer"
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -88,5 +88,48 @@ describe("createRequestCoalescer", () => {
     const c = createRequestCoalescer<number>({ cacheTtlMs: 30_000 })
     await expect(c.run("k", () => Promise.reject(new Error("nope")))).rejects.toThrow("nope")
     expect(await c.run("k", () => Promise.resolve(7))).toBe(7)
+  })
+})
+
+// AQU-2654
+describe("createSameTurnCoalescer", () => {
+  it("shares one request between callers in the same synchronous turn", async () => {
+    const c = createSameTurnCoalescer<number>()
+    const fn = vi.fn(async () => 1)
+    const results = await Promise.all([c.run("k", fn), c.run("k", fn), c.run("k", fn)])
+    expect(results).toEqual([1, 1, 1])
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps keys apart", async () => {
+    const c = createSameTurnCoalescer<string>()
+    const fn = vi.fn(async () => "x")
+    await Promise.all([c.run("a", fn), c.run("b", fn)])
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it("a caller in a later turn gets its own request, even while the first is still in flight", async () => {
+    const c = createSameTurnCoalescer<number>()
+    let settleFirst!: (value: number) => void
+    let calls = 0
+    const fn = vi.fn(() => (++calls === 1 ? new Promise<number>((resolve) => { settleFirst = resolve }) : Promise.resolve(calls)))
+
+    const hanging = c.run("k", fn)
+    await Promise.resolve() // the turn ends
+    // A refresh or a recovery: never queued behind, or answered by, the old one.
+    expect(await c.run("k", fn)).toBe(2)
+    expect(fn).toHaveBeenCalledTimes(2)
+    settleFirst(1)
+    expect(await hanging).toBe(1)
+  })
+
+  it("a rejection reaches everyone who shared it and is not kept", async () => {
+    const c = createSameTurnCoalescer<number>()
+    const failing = vi.fn(() => Promise.reject(new Error("nope")))
+    const [a, b] = await Promise.allSettled([c.run("k", failing), c.run("k", failing)])
+    expect(a.status).toBe("rejected")
+    expect(b.status).toBe("rejected")
+    expect(failing).toHaveBeenCalledTimes(1)
+    expect(await c.run("k", async () => 7)).toBe(7)
   })
 })

@@ -29,7 +29,7 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
-import { hasPlayableAudio, startQueue } from "@/lib/audio/play-queue"
+import { hasAnyPlayableAudio, startQueue } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -355,8 +355,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // with no audio and carries on, so this is a count for the button's badge and
   // the has-anything-to-play test — not a filter on what is handed to the queue
   // (dropping the silent lines would be the same run, one highlight short).
+  // AQU-2495 (review, Nov 9): each line counted the way the queue plays it,
+  // so following the recordings a line recorded only on an added track counts.
   const playableSelectedCount = useMemo(
-    () => playbackRange.filter(hasPlayableAudio).length,
+    () => playbackRange.filter((c) => hasAnyPlayableAudio([c])).length,
     [playbackRange],
   )
 
@@ -601,7 +603,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || !onVoiceTogether) return
     setRunning({ kind: "voice" })
     try {
-      await onVoiceTogether(selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()))
+      // AQU-2492 (review, Nov 9), finding 2: with their audio merged in. Its
+      // Undo gives each line back the voice it played before, read off these
+      // cells, and store cells carry no audio: a line with its own AI voice
+      // was left silent.
+      await onVoiceTogether(selectedCellsWithAudio.filter((c) => c.type !== "paratext" && c.translated.trim()))
     } catch (err) {
       // A failed "Voice together" used to end here as an unhandled rejection
       // with nothing on screen. The rows keep their own error badge with "Try
@@ -632,7 +638,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, onVoiceTogether, isBusy, t, project.id, analytics])
+  }, [selectedCellsWithAudio, onVoiceTogether, isBusy, t, project.id, analytics])
 
   const onValidate = useCallback(async () => {
     if (isBusy) return

@@ -13,6 +13,70 @@ stays down (**reminder**), or **recovers**.
 One failed check never pages anyone. One alert covers one outage; the team is
 not pinged each minute.
 
+## The stuck-session check (AQU-2611)
+
+Separate from the uptime targets, and it does not behave like them: it reads a
+**count** off the database rather than an up/down state.
+
+| Event | When | Mentions the team? |
+|---|---|---|
+| 🔴 stuck | `STUCK_SESSIONS_THRESHOLD` (5) or more origin sessions sit `active` in `ClientRead` for over 30 s | Yes |
+| 🟠 still stuck | every `STUCK_SESSIONS_REPEAT_MINUTES` (10) while it holds | Yes |
+| 🟢 cleared | the count falls back under the threshold | No |
+
+There is no three-tick ramp here, unlike a target going down: a healthy database
+has **zero** such sessions, so five of them is already the outage and waiting
+three more minutes only wastes the warning. The alert carries the count and the
+leading text of the stuck statement, because that text names the route that
+leaks.
+
+Why it exists: on 2026-11-13 and 2026-11-16 production ran out of Hyperdrive
+origin connections with up to 55 of 60 sessions parked mid-statement, and every
+uptime target stayed green throughout — `/sync/health` runs `SELECT 1` on a
+fresh handle, which succeeds right up to the moment the origin has no
+connection left. The leak is only visible from the server's side of the socket.
+
+The count comes from sync-worker's `GET /admin/db/stuck-sessions`
+(`sync-worker/src/db-stuck-sessions-route.ts`); this Worker deliberately carries
+no Hyperdrive binding and no database driver. Configure it per profile:
+
+```toml
+STUCK_SESSIONS_URL = "https://api.aquilla.app/sync/admin/db/stuck-sessions"
+STUCK_SESSIONS_THRESHOLD = "5"
+STUCK_SESSIONS_REPEAT_MINUTES = "10"   # 0 disables the repeat
+```
+
+plus the `SYNC_ADMIN_TOKEN` secret — that environment's sync-worker
+`ADMIN_SECRET`:
+
+```bash
+npx wrangler secret put SYNC_ADMIN_TOKEN --env production
+```
+
+**Set the secret before deploying a profile that carries the URL.** A URL with
+no bearer, or a probe that cannot be read, fails the cron run and skips the
+heartbeat (so the external dead-man's switch notices) — it is never reported as
+a healthy database. Uptime alerts still go out on such a run. Leaving
+`STUCK_SESSIONS_URL` unset turns the check off entirely.
+
+`GET /status` reports the check's stored state alongside the targets. It never
+reports the bearer.
+
+**Verify the probe once per environment**, because the one failure mode this
+check cannot report itself is a predicate that can never match:
+
+```bash
+curl --fail-with-body -H "Authorization: Bearer $SYNC_ADMIN_TOKEN" \
+  https://api.aquilla.app/sync/admin/db/stuck-sessions
+```
+
+`n` is the alerting count and should be `0` on a healthy database.
+`observableBackends` must be **nonzero** — it counts the other sessions whose
+state this role is allowed to read, and a zero there means `pg_stat_activity`
+is hiding the columns the predicate needs. `backendsAnyApplication` is the same
+predicate without the `application_name` filter; nonzero beside a zero `n`
+means the driver's application name is not arriving.
+
 ## What it checks
 
 | Target | Production URL | Healthy when |
@@ -99,7 +163,7 @@ stops, or when it found an outage but could not post to Discord.
 ## Develop
 
 ```bash
-npm test           # state machine, probe, Discord payload, tick
+npm test           # state machine, probe, Discord payload, tick, stuck sessions
 npm run type-check
 npm run dev        # wrangler dev --test-scheduled; then
 curl "http://localhost:8787/__scheduled?cron=*+*+*+*+*"

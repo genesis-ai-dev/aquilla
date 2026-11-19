@@ -8,10 +8,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildEventProjectionStmts,
+  coerceIntegerMsPayload,
   isChainMutatingKind,
   type PersistedEvent,
 } from '../events/event-projection'
+import { LINE_ROOM_MAX_MS } from '../events/line-room-authority'
 import { REQUIRED_ROLE } from '../events/role-policy'
+import { isLockedTimingEvent } from '../events/timing-authority'
 
 interface RecordedStmt {
   sql: string
@@ -169,5 +172,106 @@ describe('cell.lane.retime — target_offset_ms', () => {
     expect(recorded).toHaveLength(1)
     expect(recorded[0].sql).toContain("jsonb_build_object('target_start_ms'")
     expect(recorded[0].sql).not.toContain('target_offset_ms')
+  })
+})
+
+// AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the recordings.
+// One number per line PER LANGUAGE (whether a line is recorded is per
+// language), merged into the source row's metadata like the keys above, under
+// a key that carries the language: `recordings_room_ms` for the default one,
+// `recordings_room_ms:<tag>` for any other. The client reads the same key
+// (src/lib/timeline/line-room.ts).
+describe('cell.lane.retime — recordingsRoomMs', () => {
+  it("the default language's room is stored under the plain key", () => {
+    const { db, recorded } = makeRecordingDb()
+    const touches = buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 1500 }), [])
+    expect(touches).toContain('cells')
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain('jsonb_build_object(?::text, ?::bigint)')
+    expect(recorded[0].sql).toContain("side = 'source'")
+    expect(recorded[0].args.slice(0, 2)).toEqual(['recordings_room_ms', 1500])
+  })
+
+  it("another language's room is stored under its own key, so two languages never share one", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 800, targetLang: 'fr' }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].args.slice(0, 2)).toEqual(['recordings_room_ms:fr', 800])
+  })
+
+  it('the language tag is bound, never written into the SQL', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 800, targetLang: "x'; DROP TABLE cells; --" }), [])
+    expect(recorded[0].sql).not.toContain('DROP')
+    expect(recorded[0].args[0]).toBe("recordings_room_ms:x'; DROP TABLE cells; --")
+  })
+
+  it('a room of exactly 0 writes: the line has no room, which is not "no room stored"', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 0 }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].args.slice(0, 2)).toEqual(['recordings_room_ms', 0])
+  })
+
+  it('null clears it: the line is back at its natural length', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: null, targetLang: 'fr' }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain('metadata - ?::text')
+    expect(recorded[0].args[0]).toBe('recordings_room_ms:fr')
+  })
+
+  it('a negative or corrupt room is skipped, and rounds to whole ms', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: -5 }), [])
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 'wide' } as Record<string, unknown>), [])
+    expect(recorded).toHaveLength(0)
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 1234.6 }), [])
+    expect(recorded[0].args[1]).toBe(1235)
+  })
+
+  it('it is the recordist\'s own work: the timing lock does not cover it', () => {
+    expect(isLockedTimingEvent('cell.lane.retime', { recordingsRoomMs: 0 })).toBe(false)
+  })
+
+  it('an event without it leaves every room alone', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100 }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).not.toContain('?::text')
+  })
+})
+
+// AQU-2432 (review, Nov 9): a bad room is refused for that field only. A
+// number too large for the column used to fail the cast, and with it the whole
+// batch of events it was flushed in; now it is skipped like a negative one,
+// and the event's other keys still land.
+describe('cell.lane.retime — recordingsRoomMs, refused for that field only', () => {
+  it('an absurdly large room is skipped, not sent to the database', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 1e30 }), [])
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 9e15 }), [])
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: LINE_ROOM_MAX_MS + 1 }), [])
+    expect(recorded).toHaveLength(0)
+  })
+
+  it('a day is the most a room can be, and is stored', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: LINE_ROOM_MAX_MS }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].args.slice(0, 2)).toEqual(['recordings_room_ms', LINE_ROOM_MAX_MS])
+  })
+
+  it("a bad room leaves the event's other keys to land", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100, recordingsRoomMs: 1e30 }), [])
+    buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100, recordingsRoomMs: Number.NaN }), [])
+    expect(recorded).toHaveLength(2)
+    for (const r of recorded) expect(r.sql).toContain("'subtitle_start_ms'")
+  })
+
+  it('a fractional room is rounded on the way in, with the other ms keys', () => {
+    const ev = coerceIntegerMsPayload(makeEvent({ recordingsRoomMs: 1234.6 }))
+    expect((ev.payload as { recordingsRoomMs: number }).recordingsRoomMs).toBe(1235)
   })
 })

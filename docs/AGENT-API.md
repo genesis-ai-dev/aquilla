@@ -1271,10 +1271,14 @@ Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.
 `{ text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }`.
 Times are seconds from the start of the whole clip.
 
-**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs`.
+**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs` | `omni-fast`.
 `auto` picks Whisper for its 99 languages, Qwen3-ASR for Chinese varieties, and
-Omnilingual CTC for any other language code. It never picks zero-shot. `language`
+Omnilingual CTC for any other language code. It never picks zero-shot or fast. `language`
 (BCP-47) defaults to the lane's language code.
+
+**Fast (`omni-fast`).** A fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.
+It needs no warm-up. A service that does not have it yet runs the call as `omni-ctc`,
+and the reply's `model` says so.
 
 **Zero-shot (`omni-zs`).** It learns the language from up to 10 of the lane's own
 takes that have a transcript (2–30 s each). By default the examples are ranked by
@@ -1300,7 +1304,7 @@ and project credit admission still apply.
 **Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
 Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
 a word is not split. A stored compressed take (webm/ogg) cannot be decoded in a
-Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`, because
+Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`/`omni-fast`, because
 OpenRouter does not document webm input.
 
 **Errors.**
@@ -1528,3 +1532,52 @@ with the answers, and the provenance fields are whatever the agent typed.
 - **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
   because the brief lives *inside* the settings blob and an agent that found
   `patch_settings` first had no reason to look further.
+
+## Status addendum (2026-11-17, AQU-2642 §4 — the orthography exception list is merged, not replaced)
+
+AQU-2628 gave a project's target lane a spelling configuration
+(`languageProfile.orthography`: the digraphs the alphabet replaced, its canonical
+apostrophe, and the words those rules must leave alone). The exception list was writable
+only through `PatchSettings { key: 'languageProfile' }` — a wholesale replace. That makes
+proposing one word a read-modify-write of the whole profile, and two people doing it around
+the same time is last-write-wins on a list where **every entry records who asked for the
+word and whether a maintainer approved it**. Losing one of those entries to a race, with
+nothing to say it happened, is not an acceptable outcome; the version guard turns the race
+into a `plan_stale` the caller has to retry, which is only half an answer when the two
+writes never actually conflicted.
+
+- **`PatchOrthographyExceptions { projectId, ops: [{ action: "add" | "remove", word, ref? }],
+  ifMatchVersion? }`** — sole command, receipt-only. It carries **ops, not a list**, and the
+  list is recomputed **at commit** from the then-current stored value, so an entry someone
+  else wrote while the plan waited for approval survives it. At most 200 ops per changeset;
+  the merged list caps at the profile's 2000.
+- **Roles are resolved live, and the acting role decides the STATUS** — the command cannot
+  assert one. `contributor` (400+) proposes: the entry lands `pending`, which is inert, so
+  it changes no text and silences no flag. `maintainer` (600+) adds as `approved`, and an
+  add naming an already-pending word **is** the approval — the entry keeps the original
+  proposer's `by` / `ref`, because it records who found the word, not who approved it.
+  `remove` is maintainer-only: dropping an approved exception re-exposes the word to the
+  rules, which rewrites text.
+- **`ifMatchVersion` is OPTIONAL, and here that is a design statement rather than an
+  ergonomic one.** A settings-version bump under a merge is not a conflict — it is the case
+  the merge exists for — so pinning is how a caller *asserts* nothing moved since it read
+  the profile (`plan_stale` at prepare), not a precondition of writing. The write itself is
+  still version-guarded (`patchProjectSettingsShared` pinned to the version read in the same
+  commit pass), so the rest of the blob can never be clobbered; a lost race re-reads and
+  re-merges, up to three times, and then marks the changeset stale rather than overwriting.
+- **An op whose state already holds is a no-op, not an error.** Approving an approved word or
+  removing an absent one is reported in the receipt's `orthographyExceptions.words` and
+  leaves the rest of the batch to apply; a plan where *every* op is a no-op stages with an
+  `inert_write` warning and commits without bumping the settings version. Words are compared
+  **folded** (case-insensitively, with apostrophe variants treated as one mark) because that
+  is how the converter matches, so one word can never sit in the list twice.
+- **A project with no `languageProfile.orthography` block is refused**, at prepare and again
+  at commit. The rules and the canonical apostrophe are a maintainer's decision — this
+  command never seeds one from a single word.
+- **`prepare_orthography_exceptions`** is the MCP door onto it; `mcp-handlers.ts` marshals
+  arguments and nothing else. The merge is pure and lives in
+  `db/shared/orthography-exceptions.ts`, so the prepare preview, the commit write, the
+  supersede predicate and the in-app affordance all run one rule table.
+- The **reviewer-facing** half — **Propose exception** / **Add as exception** beside Fix in
+  the violation panel — is still open on AQU-2642 §1. The rules above are enforced on the
+  write, so whichever surface adds the button inherits them.

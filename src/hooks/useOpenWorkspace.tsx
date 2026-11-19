@@ -27,6 +27,18 @@ import { useT } from "@/lib/i18n/I18nProvider"
  * so no *other* control can be clicked mid-transition, and it disappears the
  * moment the transition commits or aborts.
  */
+/**
+ * Start fetching the workspace's code now. For an open that has to ask the
+ * server something before it knows its URL (the plan's "first open cell"):
+ * the two waits then overlap instead of running one after the other. The
+ * route's own `lazy()` import resolves from the same module record.
+ */
+export function preloadWorkspace(): void {
+  void import("@/components/ProjectWorkspace").catch(() => {
+    // The route's own import reports a failed chunk; this is only a head start.
+  })
+}
+
 export function useOpenWorkspace() {
   const t = useT()
   const navigate = useNavigate()

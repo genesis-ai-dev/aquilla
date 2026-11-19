@@ -42,7 +42,11 @@ function load(
 
   const entry: CacheEntry = existing ?? { ids: new Set(), fetchedAt: 0, inFlight: null }
   entry.inFlight = getToken(fileId)
-    .then((token) => (token ? fetchProjectFiles(projectId, token) : []))
+    .then((token) => {
+      // Session restoration is not an authoritative empty file listing.
+      if (!token) throw new Error("Original source flags await a session")
+      return fetchProjectFiles(projectId, token)
+    })
     .then((rows) => {
       entry.ids = new Set(rows.filter((row) => row.hasOriginalSource).map((row) => row.fileId))
       entry.fetchedAt = Date.now()

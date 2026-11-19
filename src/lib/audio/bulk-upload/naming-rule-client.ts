@@ -2,6 +2,7 @@
 // and the outline go up; the answer is re-checked here with parseNamingRule
 // before anything uses it.
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { MAX_REFUSAL_CHARS } from "../../../../shared/recording-naming-rule"
 import { isSavableRule, parseNamingRule, type NamingRule, type ProjectBooks, type RuleFailure } from "./naming-rule"
 
 export const NAMING_RULE_URL = `${AUTH_BASE}/api/v1/import/recording-names`
@@ -24,11 +25,23 @@ interface Call {
   signal?: AbortSignal
 }
 
+/**
+ * AQU-2496 (review, Nov 9): when the server refuses the assistant's answer and
+ * says why, the question goes back once more with that reason. Asked again
+ * without it, the assistant gave the same unusable answer every time. The
+ * second ask is a call of its own (its own key, billed on its own), taken
+ * from the folder's two with `anotherCall`; with none left, or no reason
+ * given, the first refusal stands.
+ */
 export async function askForNamingRule(opts: Call & {
   names: readonly string[]
   outline: string
   previous?: NamingRule
   failures?: readonly RuleFailure[]
+  /** Why the server refused the last answer for these names. */
+  refused?: string
+  /** Takes one more of the folder's calls; false when none is left. */
+  anotherCall?: () => boolean
 }): Promise<NamingRule> {
   let response: Response
   try {
@@ -46,6 +59,7 @@ export async function askForNamingRule(opts: Call & {
         names: opts.names,
         outline: opts.outline,
         ...(opts.previous && opts.failures?.length ? { previous: withoutVersion(opts.previous), failures: opts.failures.slice(0, 40) } : {}),
+        ...(opts.refused ? { refused: opts.refused.slice(0, MAX_REFUSAL_CHARS) } : {}),
       }),
       signal: opts.signal,
     })
@@ -53,6 +67,11 @@ export async function askForNamingRule(opts: Call & {
     throw new NamingRuleError("failed", e instanceof Error ? e.message : String(e))
   }
   if (!response.ok) {
+    if (response.status === 502 && !opts.refused && opts.anotherCall) {
+      const refusal = await response.json().catch(() => null) as { error?: unknown; reason?: unknown } | null
+      const reason = refusal?.error === "invalid_naming_rule" && typeof refusal.reason === "string" ? refusal.reason.trim() : ""
+      if (reason && !opts.signal?.aborted && opts.anotherCall()) return askForNamingRule({ ...opts, refused: reason, anotherCall: undefined })
+    }
     const problem: NamingRuleProblem = response.status === 402 || response.status === 429 ? "limit" : response.status === 503 ? "unavailable" : "failed"
     throw new NamingRuleError(problem, `Naming rule request failed (${response.status})`)
   }

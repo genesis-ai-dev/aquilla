@@ -305,6 +305,7 @@ export function SpreadsheetImportPanel({
         sheet={selectedSheet}
         onConfirm={handleMappingConfirm}
         onCancel={onCancel}
+        error={error}
       />
     )
   }

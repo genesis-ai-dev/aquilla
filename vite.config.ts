@@ -120,11 +120,17 @@ export default defineConfig(({ mode }) => ({
           "dist/version.json",
           JSON.stringify({ sha: buildSha, branch: buildBranch, builtAt: buildDate }),
         )
+        // Desktop window behaviour this build handles. The Tauri shell reads it
+        // from a downloaded hot bundle before building the window and turns a
+        // feature on only when it is listed, since that bundle may predate the
+        // shell (src-tauri/src/hot_bundle/mod.rs `serves_feature`).
+        // "mac-titlebar-overlay": src/hooks/useMacTitlebarOverlay.ts.
+        writeFileSync("dist/shell-features.json", JSON.stringify(["mac-titlebar-overlay"]))
       },
     },
   ],
-  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
-  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
+  // format: "es" is required by LiveStore's web adapter (its leader worker entry
+  // is an ES module, imported via the `?worker` suffix in src/lib/offline/store.ts).
   worker: {
     format: "es",
   },
@@ -183,6 +189,12 @@ export default defineConfig(({ mode }) => ({
       "@livestore/livestore",
       "@livestore/adapter-web",
       "@livestore/react",
+      // Imported only by the leader worker (livestore.worker.ts), which the
+      // crawler doesn't reach either. Pre-bundled with the rest so the first
+      // boot doesn't re-optimize, and so Effect resolves to one shared chunk.
+      "@livestore/adapter-web/worker",
+      "@livestore/utils/effect",
+      "@livestore/common", // opfs-handles.ts (storage format version)
     ],
   },
   build: {
@@ -286,6 +298,7 @@ export default defineConfig(({ mode }) => ({
             "scripts/lib/playwright-loader-env.test.ts",
             "scripts/lib/listening-pids.test.ts",
             "scripts/lib/desktop-bundle.test.ts",
+            "scripts/lib/desktop-release.test.ts",
             // Owned by the "qa-biblica-python" project below: a Node-env test
             // that shells out to the QA runner's Python suite (AQU-2365).
             "agents/**",

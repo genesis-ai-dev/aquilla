@@ -1,7 +1,7 @@
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import { beforeEach, describe, expect, it } from "vitest"
-import { cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, tables } from "./schema"
+import { CELL_COLUMNS, cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, tables } from "./schema"
 
 let store: Store<typeof schema>
 let storeId = 0
@@ -92,6 +92,36 @@ describe("cells", () => {
     const rows = store.query(tables.cells.select().where({ projectId: "proj1", fileId: "file1" }))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ value: "In the beginning...", validated: true })
+  })
+
+  it("writes every cells column through the raw upsert, and a batch updates in place", () => {
+    // The cell materializers bypass the query builder (memory), so their
+    // column list must track the table's.
+    expect([...CELL_COLUMNS].sort()).toEqual(Object.keys(tables.cells.sqliteDef.columns).sort())
+
+    const full = {
+      ...cellArgs,
+      side: "target" as const,
+      targetLang: "nl",
+      laneId: "lane-nl",
+      sourceEventId: "src-evt",
+      validated: true,
+      aiDrafted: true,
+      sequenceIndex: 7,
+      hidden: true,
+    }
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "file1", rows: [full] }))
+    const id = cellRowId("proj1", "file1", "GEN 1:1", "target", "lane-nl")
+    expect(store.query(tables.cells.select().where({ id }).first())).toEqual({ id, ...full, laneKey: "lane-nl" })
+
+    // A row sent without `hidden` (pre-AQU-1422 payload) lands it false, as the builder did.
+    const { hidden: _h, ...withoutHidden } = full
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "file1", rows: [{ ...withoutHidden, value: "new" }] }))
+    expect(store.query(tables.cells.select().where({ id }).first())).toMatchObject({ value: "new", hidden: false })
+    expect(store.query(tables.cells.select())).toHaveLength(1)
+
+    store.commit(events.cellsRemoved({ projectId: "proj1", fileId: "file1", cells: [{ cellId: "GEN 1:1", side: "target", laneKey: "lane-nl" }] }))
+    expect(store.query(tables.cells.select())).toHaveLength(0)
   })
 
   it("removes a cell by its logical key", () => {
@@ -186,6 +216,33 @@ describe("event queue", () => {
 
     store.commit(events.eventDequeued({ id: "q1" }))
     expect(store.query(tables.eventQueue.select())).toHaveLength(0)
+  })
+
+  const queued = (id: string) => ({
+    id,
+    projectId: "proj1",
+    fileId: "file1",
+    cellId: "GEN 1:1",
+    kind: "target.cell.commit",
+    payload: { text: id },
+    parentId: null,
+    author: "dev@local.test",
+    schemaVersion: 1,
+    clientTs: new Date("2026-01-01T00:00:00Z"),
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+  })
+
+  it("queues a batch, and an id already queued doesn't cost the rest of it", () => {
+    store.commit(events.eventQueued(queued("q1")))
+    store.commit(events.eventQueueStatusSet({ id: "q1", status: "flushing" }))
+    store.commit(events.eventsQueued({ rows: [queued("q2"), queued("q1"), queued("q3"), queued("q3")] }))
+    store.commit(events.eventQueued(queued("q2")))
+    expect(store.query(tables.eventQueue.select("id", "status").orderBy("id", "asc"))).toEqual([
+      // A re-enqueue leaves the queued row as it was — a write in flight stays in flight.
+      { id: "q1", status: "flushing" },
+      { id: "q2", status: "pending" },
+      { id: "q3", status: "pending" },
+    ])
   })
 })
 

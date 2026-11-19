@@ -25,6 +25,20 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => ({
   removeProjectMember,
 }))
 
+// AQU-2654: counts RoleDialog renders, to hold that a cell nobody has opened
+// carries no dialog. The real dialog still renders underneath.
+const roleDialogRendered = vi.hoisted(() => vi.fn())
+vi.mock("@/components/access/RoleDialog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/access/RoleDialog")>()
+  return {
+    ...actual,
+    RoleDialog: (props: Parameters<typeof actual.RoleDialog>[0]) => {
+      roleDialogRendered()
+      return actual.RoleDialog(props)
+    },
+  }
+})
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -73,12 +87,24 @@ const direct = (level: number): MatrixCell => ({
 })
 
 beforeEach(() => {
+  roleDialogRendered.mockClear()
   addProjectMember.mockReset()
   addProjectMember.mockResolvedValue({})
   removeProjectMember.mockReset()
 })
 
 describe("MembersMatrixCellEditor — the one role dialog (AQU-2289)", () => {
+  it("a cell that has never opened its dialog renders none, populated or empty (AQU-2654)", async () => {
+    renderCell(direct(ROLE.CONTRIBUTOR), ROLE.PROJECT_LEAD)
+    renderCell(undefined, ROLE.OWNER, "dave")
+    expect(roleDialogRendered).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("role-dialog")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Add dave to project" }))
+    expect(await screen.findByTestId("role-dialog")).toBeInTheDocument()
+    expect(roleDialogRendered).toHaveBeenCalled()
+  })
+
   it("an editable cell's Change role opens the dialog with the project list, capped at the caller's role", async () => {
     renderCell(direct(ROLE.CONTRIBUTOR), ROLE.PROJECT_LEAD)
     fireEvent.click(screen.getByRole("button", { name: "Edit carol's role on this project" }))

@@ -130,6 +130,43 @@ describe("makeAudioSyncTokenFetcher — shared module-level cache", () => {
     expect(mockedFetchSyncToken).not.toHaveBeenCalled()
   })
 
+  // AQU-2654: the file's token is one credential, whoever asks for it. The
+  // audio reads (attachments, milestones) minted it a second and third time
+  // on every file open, beside the editor's own mint.
+  it("uses the mint the editor already made for the file instead of minting again", async () => {
+    const { makeSyncTokenMinter } = await import("@/lib/sync/sync-token")
+    const originalFetch = global.fetch
+    // The editor's minter reaches the real fetchSyncToken, hence the network.
+    const network = vi.fn(async () => new Response(JSON.stringify({ token: "editor-token", expiresIn: 900, role: ROLE })))
+    global.fetch = network as unknown as typeof fetch
+    try {
+      const session = makeSession()
+      const editorMint = makeSyncTokenMinter(() => session.jwt, "proj-1", "file-1")
+      const audio = makeAudioSyncTokenFetcher(() => session)
+      // Asked together, as an open file does.
+      const [editor, forAudio] = await Promise.all([editorMint(), audio("proj-1", "file-1")])
+
+      expect(editor.token).toBe("editor-token")
+      expect(forAudio).toBe("editor-token")
+      expect(network).toHaveBeenCalledTimes(1)
+      expect(mockedFetchSyncToken).not.toHaveBeenCalled()
+      // Another file is another credential.
+      expect(await audio("proj-1", "file-2")).toBe("minted-1")
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it("two audio reads asked together send one mint", async () => {
+    const session = makeSession()
+    const [a, b] = await Promise.all([
+      makeAudioSyncTokenFetcher(() => session)("proj-1", "file-1"),
+      makeAudioSyncTokenFetcher(() => session)("proj-1", "file-1"),
+    ])
+    expect(a).toBe(b)
+    expect(mockedFetchSyncToken).toHaveBeenCalledTimes(1)
+  })
+
   it("re-mints once the cached token enters the refresh safety window", async () => {
     vi.useFakeTimers()
     try {

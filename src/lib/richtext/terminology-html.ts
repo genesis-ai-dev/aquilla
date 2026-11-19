@@ -25,7 +25,8 @@
  */
 
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
-import { findConceptMatches } from "@/lib/terminology/match"
+import { candidateConcepts, findConceptMatches } from "@/lib/terminology/match"
+import { activeConceptsOf } from "@/lib/terminology/source-lookup"
 
 /** Class pair the delegated click handler and the shared highlight style key off. */
 export const TERM_HIGHLIGHT_CLASS = "term-chip-host terminology-highlight"
@@ -87,7 +88,8 @@ function findNonOverlappingMatches(
   termMatching?: TermMatchingSettings,
 ): TermMatch[] {
   const found: TermMatch[] = []
-  for (const concept of concepts) {
+  // AQU-2654: only the concepts that can match this text, found in one pass.
+  for (const concept of candidateConcepts(text, concepts, termMatching)) {
     // AQU-1272: the whole concept, not just its headword string — the formatted
     // source path recognises the same occurrences as the plain one.
     for (const m of findConceptMatches(text, concept, termMatching)) {
@@ -133,7 +135,9 @@ export function decorateTermsInHtml(
   options: DecorateTermsOptions = {},
 ): string {
   if (!html) return ""
-  const active = (concepts ?? []).filter((c) => c.status === "active")
+  // One active list per termbase array (AQU-2654), so the matcher's candidate
+  // index is shared by every cell instead of rebuilt for each.
+  const active = concepts ? activeConceptsOf(concepts) : []
   if (active.length === 0) return html
   // No DOM (SSR, a worker) → render the sanitized html plain rather than throw.
   // Losing a highlight is recoverable; losing the source text is not.

@@ -25,6 +25,7 @@ import {
   type PlanImportCommand,
   type ProjectLifecycleCommand,
   type RegenerateBriefSummaryCommand,
+  type PatchOrthographyExceptionsCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type StructureCommand,
@@ -37,6 +38,7 @@ import {
   type MembershipCommand,
 } from './commands-membership'
 import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
+import { commitPatchOrthographyExceptions } from './commands-orthography-exceptions'
 import { commitSetBrief } from './commands-set-brief'
 import { commitRegenerateBriefSummary } from './commands-regenerate-brief'
 import { commitProjectSetup } from './commit-project-setup'
@@ -303,6 +305,15 @@ export async function commitChangesetCore(
   )
   if (lifecycleCmd) {
     return commitProjectLifecycle(db, env, cred, cs, lifecycleCmd, channel, ctx)
+  }
+  // AQU-2642 PatchOrthographyExceptions: receipt-only — merges its add/remove
+  // ops into the THEN-CURRENT exception list and writes the languageProfile key
+  // back under the version guard, so a concurrent entry is never clobbered.
+  const orthographyExceptionsCmd = cs.commands.find(
+    (c): c is PatchOrthographyExceptionsCommand => c.kind === 'PatchOrthographyExceptions',
+  )
+  if (orthographyExceptionsCmd) {
+    return commitPatchOrthographyExceptions(db, cred, cs, orthographyExceptionsCmd, channel)
   }
   // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
   // writes it back as the translationBrief settings key.

@@ -50,6 +50,18 @@
 // goes through the confirm step like a stop or a resume. Only a link that
 // consumes the upstream's SOURCE offers it. Not offered on a stopped file: a
 // resume already brings the upstream's text into the same file.
+//
+// A change that is SAVED but whose files have not all arrived (the add answers
+// `complete: false`) is not a failure and is not shown as one. The addition is
+// recorded server-side and any sync of the link finishes it, so the dialog runs
+// that sync itself — the link flow's own self-heal (`triggerLinkSync`, AQU-476)
+// — and closes when the files are in. This is the ordinary path wherever the
+// server's own trigger does not reach the sync worker, not a rare one: before
+// it, the dialog answered every such add with a red "try again" over a Confirm
+// button that repeated the request and the sentence. Only when the files are
+// still not in after that does the dialog say so, in a step of its own with
+// nothing left to confirm: the change is saved, the files are on their way, and
+// "Check again" looks for them.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle } from "lucide-react"
@@ -67,7 +79,12 @@ import {
 import { ReplaceFileOption, replaceOfferedFor } from "@/components/UpstreamFileChoiceList"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
-import { addLinkedSourceFiles, loadLinkedSourceFileState, stopLinkedSourceFiles } from "@/lib/sync/archive"
+import {
+  addLinkedSourceFiles,
+  loadLinkedSourceFileState,
+  stopLinkedSourceFiles,
+  triggerLinkSync,
+} from "@/lib/sync/archive"
 import { loadLinkSourcePreview, type LinkSourcePreview } from "@/lib/sync/link-source-preview"
 import { fetchLinkedFileCopies } from "@/lib/sync/link-join-copy"
 import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
@@ -135,8 +152,16 @@ export function ChooseLinkedFilesDialog({
   const [picked, setPicked] = useState<Set<string>>(new Set())
   // AQU-1562: followed upstream file ids the lead has UNCHECKED, to stop.
   const [unpicked, setUnpicked] = useState<Set<string>>(new Set())
-  const [view, setView] = useState<"list" | "confirm">("list")
+  // "arriving": the change is saved and its files are still coming in.
+  const [view, setView] = useState<"list" | "confirm" | "arriving">("list")
   const [applying, setApplying] = useState(false)
+  // The save has gone through and the dialog is now bringing its files in.
+  const [bringingIn, setBringingIn] = useState(false)
+  // The upstream files a saved change is still waiting on, by name, and whether
+  // the lead has looked for them again since — so a second look that finds the
+  // same thing reads as an answer rather than as a button that did nothing.
+  const [arriving, setArriving] = useState<{ ids: string[]; names: string[] } | null>(null)
+  const [checkedAgain, setCheckedAgain] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const files = useMemo(() => preview?.files ?? [], [preview])
   // AQU-1679: the picked upstream files set to replace the project's own
@@ -218,6 +243,8 @@ export function ChooseLinkedFilesDialog({
     setUnpicked(new Set())
     resetReplace()
     setView("list")
+    setArriving(null)
+    setCheckedAgain(false)
     setError(null)
   }, [onOpenChange, resetReplace])
 
@@ -339,9 +366,42 @@ export function ChooseLinkedFilesDialog({
     [isFollowed],
   )
 
+  /**
+   * Sync the link from here, then ask the server whether `ids` have joined it.
+   * A file joins the selection only once it has arrived whole (and, for a
+   * replace, after its join), so being in the selection is the whole answer.
+   * Never throws: a sync or a read that fails is "not in yet".
+   */
+  async function bringIn(token: string, ids: readonly string[]): Promise<boolean> {
+    await triggerLinkSync(token, projectId)
+    try {
+      const state = await loadLinkedSourceFileState(token, projectId)
+      const followedNow = state.fileIds
+      return followedNow === null || ids.every((id) => followedNow.includes(id))
+    } catch {
+      return false
+    }
+  }
+
+  async function handleCheckAgain() {
+    if (!jwt || applying || !arriving) return
+    setApplying(true)
+    try {
+      if (await bringIn(jwt, arriving.ids)) {
+        close()
+        onApplied()
+        return
+      }
+      setCheckedAgain(true)
+    } finally {
+      setApplying(false)
+    }
+  }
+
   async function handleApply() {
     if (!jwt || applying || !hasChanges || emptiesSelection) return
     setApplying(true)
+    setBringingIn(false)
     setError(null)
     // Stopping first, so an add lands on the narrowed selection rather than
     // being undone by it — and so a refused stop changes nothing at all.
@@ -354,23 +414,34 @@ export function ChooseLinkedFilesDialog({
       if (picked.size > 0) {
         // AQU-1679: the pairs ride with the add. Three arguments when there are
         // none, so the request is the one AQU-1560 made.
+        const ids = [...picked]
         const pairs = replacing.map((f) => ({ upstreamFileId: f.id, fileId: replaceTargetOf(f.id) as string }))
         const result =
           pairs.length > 0
-            ? await addLinkedSourceFiles(jwt, projectId, [...picked], pairs)
-            : await addLinkedSourceFiles(jwt, projectId, [...picked])
-        if (!result.complete) {
-          // Nothing is half-added: the files are not in the project yet, and the
-          // same press resumes where the server stopped. A stop that already
-          // went through is in effect, so the card is refreshed regardless.
-          setError(t("projectSettings.sourceLink.chooseFilesIncomplete"))
-          if (stoppedAnything) onApplied()
-          return
-        }
-        // The pairs are recorded server-side; the workspace places each IDML
-        // file's kept translations into its new source once the join has run.
+            ? await addLinkedSourceFiles(jwt, projectId, ids, pairs)
+            : await addLinkedSourceFiles(jwt, projectId, ids)
+        // The pairs are recorded server-side, whether or not the join has run
+        // yet: the workspace syncs the link before it places an IDML file's
+        // kept translations into its new source, so — as in the link flow —
+        // this rides on the request's success, not on the files' arrival.
         if (pairs.length > 0) {
           markAdoptedFilesForIdmlAlignment(projectId, pairs.map((pair) => pair.fileId))
+        }
+        if (!result.complete) {
+          // Saved, and not in yet. Nothing is half-added (a file joins the link
+          // only once it has arrived whole) and nothing needs asking for again:
+          // any sync of the link carries on from where the last one stopped, so
+          // run one from here and see.
+          setBringingIn(true)
+          if (!(await bringIn(jwt, ids))) {
+            setArriving({ ids, names: named(picked) })
+            setCheckedAgain(false)
+            setView("arriving")
+            // A stop that already went through is in effect, so the card is
+            // refreshed regardless.
+            if (stoppedAnything) onApplied()
+            return
+          }
         }
       }
       close()
@@ -380,10 +451,13 @@ export function ChooseLinkedFilesDialog({
       if (stoppedAnything) onApplied()
     } finally {
       setApplying(false)
+      setBringingIn(false)
     }
   }
 
   const confirming = view === "confirm"
+  // The files a saved change is still waiting on; null on every other step.
+  const waitingOn = view === "arriving" ? arriving : null
 
   return (
     <Dialog
@@ -397,17 +471,40 @@ export function ChooseLinkedFilesDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {confirming
-              ? t("projectSettings.sourceLink.chooseFilesConfirmTitle")
-              : t("projectSettings.sourceLink.chooseFilesTitle")}
+            {waitingOn
+              ? t("projectSettings.sourceLink.chooseFilesArrivingTitle", { count: waitingOn.names.length })
+              : confirming
+                ? t("projectSettings.sourceLink.chooseFilesConfirmTitle")
+                : t("projectSettings.sourceLink.chooseFilesTitle")}
           </DialogTitle>
-          {!confirming && (
+          {!confirming && !waitingOn && (
             <DialogDescription>{t("projectSettings.sourceLink.chooseFilesDescription")}</DialogDescription>
           )}
         </DialogHeader>
 
         <div className="space-y-3 py-1">
-          {confirming ? (
+          {waitingOn ? (
+            // Saved, not a failure: said in the dialog's ordinary voice, with
+            // nothing to confirm and nothing in red.
+            <div className="space-y-2">
+              <ul className="list-inside list-disc text-sm font-medium">
+                {waitingOn.names.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+              <p className="text-sm text-muted-foreground">
+                {t("projectSettings.sourceLink.chooseFilesArrivingBody", { count: waitingOn.names.length })}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {t("projectSettings.sourceLink.chooseFilesArrivingCloseNote")}
+              </p>
+              {checkedAgain && !applying && (
+                <p className="text-sm" role="status">
+                  {t("projectSettings.sourceLink.chooseFilesArrivingStillNote", { count: waitingOn.names.length })}
+                </p>
+              )}
+            </div>
+          ) : confirming ? (
             <>
               {stopNames.length > 0 && (
                 <div className="space-y-1">
@@ -625,14 +722,24 @@ export function ChooseLinkedFilesDialog({
             onClick={() => (confirming ? setView("list") : close())}
             disabled={applying}
           >
-            {confirming
-              ? t("common.back")
-              : t("projectSettings.linkSource.cancelButton")}
+            {waitingOn
+              ? t("common.close")
+              : confirming
+                ? t("common.back")
+                : t("projectSettings.linkSource.cancelButton")}
           </Button>
-          {confirming ? (
+          {waitingOn ? (
+            <Button onClick={() => void handleCheckAgain()} disabled={applying || !jwt}>
+              {applying
+                ? t("projectSettings.sourceLink.chooseFilesArrivingCheckingButton")
+                : t("projectSettings.sourceLink.chooseFilesArrivingCheckButton")}
+            </Button>
+          ) : confirming ? (
             <Button onClick={() => void handleApply()} disabled={applying || !jwt || replaceUnresolved}>
               {applying
-                ? t("projectSettings.sourceLink.chooseFilesApplyingButton")
+                ? bringingIn
+                  ? t("projectSettings.sourceLink.chooseFilesBringingInButton")
+                  : t("projectSettings.sourceLink.chooseFilesApplyingButton")
                 : t("common.confirm")}
             </Button>
           ) : (
@@ -643,7 +750,9 @@ export function ChooseLinkedFilesDialog({
               {needsConfirm
                 ? t("projectSettings.sourceLink.chooseFilesReviewButton")
                 : applying
-                  ? t("projectSettings.sourceLink.chooseFilesAddingButton")
+                  ? bringingIn
+                    ? t("projectSettings.sourceLink.chooseFilesBringingInButton")
+                    : t("projectSettings.sourceLink.chooseFilesAddingButton")
                   : t("projectSettings.sourceLink.chooseFilesAddButton")}
             </Button>
           )}

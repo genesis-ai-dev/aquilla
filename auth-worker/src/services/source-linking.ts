@@ -25,6 +25,7 @@ import { ensureProjectLanes } from "../../../db/shared/lanes"
 import { applyLinkedFileProvenance, type LinkedFilePair } from "../../../db/shared/link-file-provenance"
 import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { Env } from "../types"
+import { syncWorkerFetch } from "../lib/sync-worker-fetch"
 import { linkSourceBlobPointers } from "../../../db/shared/link-source-blob"
 import {
   loadFileSourceLines,
@@ -54,9 +55,18 @@ export function makeEventId(): string {
  * Best-effort but now AWAITED by the caller (QA-BUG-1: a fire-and-forget
  * trigger left freshly created live links with 0 files/cells and no client
  * signal that seeding hadn't happened). Returns true iff the sync-worker
- * responded 2xx with `ranSync: true` or a mirrored count — false on any
- * config/network/non-2xx failure, so the route can surface `seeded: false`
- * and the client can fall back to its own self-heal trigger.
+ * responded 2xx — false on any config/network/non-2xx failure, so the route
+ * can surface `seeded: false` and the client can fall back to its own
+ * self-heal trigger.
+ *
+ * Sent through `syncWorkerFetch`, i.e. the `SYNC_WORKER` service binding on the
+ * deployed environments. A plain fetch to `SYNC_WORKER_URL` is not delivered to
+ * the sync worker there (see lib/sync-worker-fetch.ts), which leaves the
+ * "awaited" sync un-run: the link answers `seeded: false`, a "Choose files" add
+ * answers `complete: false`, and the files arrive only when a browser next
+ * syncs the link itself. A non-2xx answer is logged with its status and the
+ * transport used, so a trigger that is not landing can be found in the logs
+ * rather than inferred from what is missing in them.
  */
 export async function triggerLinkSeedSync(
   env: Env,
@@ -81,13 +91,23 @@ export async function triggerLinkSeedSync(
       env.SYNC_SECRET_KEY,
       "HS256",
     )
-    const res = await fetch(
+    const res = await syncWorkerFetch(
+      env,
       `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/api/v1/projects/${encodeURIComponent(downstreamProjectId)}/link/sync`,
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },
     )
+    if (!res.ok) {
+      console.warn(
+        `triggerLinkSeedSync: sync worker answered HTTP ${res.status} for ${downstreamProjectId} ` +
+          `(via ${env.SYNC_WORKER ? "service binding" : "url"})`,
+      )
+    }
     return res.ok
   } catch (err) {
-    console.warn(`triggerLinkSeedSync failed for ${downstreamProjectId}:`, err)
+    console.warn(
+      `triggerLinkSeedSync failed for ${downstreamProjectId} (via ${env.SYNC_WORKER ? "service binding" : "url"}):`,
+      err,
+    )
     return false
   }
 }

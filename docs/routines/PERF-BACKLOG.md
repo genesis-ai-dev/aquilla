@@ -119,6 +119,18 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 35. `TypedText` ticks every 30 ms during a pass: most of the 407 commits left in "transcribe all".
 36. The quantise loop runs on the main thread (73 ms at 4× for a 60 s window).
 
+## The harness itself
+
+37. **`plain.open.componentRenders` is not stable enough for its budget.** Five runs of one tree
+    on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
+    and 9,077 was the budget commit itself. Find what makes the open's render count depend on
+    timing before trusting a breach of it.
+38. **The first run after seeding is not representative.** With fixtures seeded in the same
+    run, `plain.commit` measured 28 row renders and 3 requests (a whole-file
+    `GET …/files/:id/cells` after one cell commit); every later run of the same tree measured
+    10–11 and 2. Either the benchmark should discard a warm-up commit, or a first commit on a
+    new project really does re-read the file and that is a defect — not traced.
+
 ## Needs a person, not the routine
 
 - **Batch drafting dies with the tab.** It is now honest and resumable, but a closed laptop stops

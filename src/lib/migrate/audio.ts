@@ -174,10 +174,12 @@ export function audioAttachEvent(cellId: string, a: AudioImport, opts: AudioEven
   }
 }
 
-// Pin the legacy active take. Emitted once per cell AFTER all that cell's
-// cell.audio.attach events, because each attach auto-selects its own row — so
-// without this the last-attached take would end up active. All legacy takes are
-// recordings, so the slot is always "recording".
+// Pin the take Codex has explicitly selected. Emitted once per cell AFTER all
+// that cell's cell.audio.attach events. It takes effect once: the id is keyed
+// on (cell, take), so every later run's copy is dropped as a replay. That is
+// why the attaches must not move the selection themselves (see
+// buildCellAudioEvents in audio-copy.ts). All legacy takes are recordings, so
+// the slot is always "recording".
 export function audioSelectEvent(
   cellId: string,
   aquillaAudioId: string,

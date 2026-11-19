@@ -20,7 +20,7 @@
 // keys off it any more, and a class that looks load-bearing but is not is worse
 // than no class. The lane's `useHotSlot` (slot-hover.ts) is the whole mechanism.
 
-import type { ReactNode } from "react"
+import type { MouseEvent, ReactNode } from "react"
 
 import { AppTooltip } from "@/components/ui/tooltip"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
@@ -30,6 +30,8 @@ export function TimelineSlotButton({
   label,
   hot,
   sizePx = SLOT_BUTTON_MAX_PX,
+  pressed,
+  busy = false,
   onClick,
   children,
 }: {
@@ -43,7 +45,13 @@ export function TimelineSlotButton({
    *  rows are and how wide this slot is, and this button does not. Defaults to
    *  the size it was hard-coded to before the vertical zoom existed. */
   sizePx?: number
-  onClick(): void
+  /** AQU-2663: a toggle's state (Make speech's "this line is picked"). Absent:
+   *  not a toggle, no `aria-pressed`. */
+  pressed?: boolean
+  /** AQU-2663: its work is running — disabled, and the caller swaps the glyph. */
+  busy?: boolean
+  /** Handed the click, for callers that read Shift/Ctrl/⌘. */
+  onClick(e: MouseEvent<HTMLButtonElement>): void
   children: ReactNode
 }) {
   return (
@@ -53,10 +61,13 @@ export function TimelineSlotButton({
         aria-label={label}
         data-testid={testId}
         data-hot={hot ? "true" : undefined}
+        data-busy={busy ? "true" : undefined}
+        aria-pressed={pressed}
+        disabled={busy}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
-          onClick()
+          onClick(e)
         }}
         style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
         className={[
@@ -64,7 +75,7 @@ export function TimelineSlotButton({
           // The button arrives with the pointer, not before. No fade: the
           // slot is already under the pointer, so a transition only lags it.
           hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
-          "hover:text-foreground",
+          "hover:text-foreground disabled:cursor-progress",
           "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
         ].join(" ")}
       >

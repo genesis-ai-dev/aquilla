@@ -734,7 +734,7 @@ export const audio = defineNamespace({
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
     "audio.makeSpeech.title": "Make speech",
     "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
-    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to pick lines there.",
+    "audio.makeSpeech.ghostHint": "Or click ✨ beside the record button on an empty line of the timeline to pick lines there.",
     "audio.makeSpeech.pickedCount": plural({
       one: "{count} line picked",
       other: "{count} lines picked",
@@ -3298,7 +3298,7 @@ export const audio = defineNamespace({
         description: "Note at the bottom of the Add a voice panel.",
       },
       "audio.makeSpeech.ghost": {
-        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
+        description: "Tooltip and accessible label of the sparkle button beside the record button on an empty line of the timeline. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
       },
       "audio.makeSpeech.pickedCount": {
         description: "Heading in the Make speech panel above the list of lines the user picked on the timeline.",
@@ -3319,7 +3319,7 @@ export const audio = defineNamespace({
         placeholders: { count: "How many lines have no translation yet." },
       },
       "audio.makeSpeech.ghostHint": {
-        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked by clicking their empty (ghost) clips on the timeline.",
+        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked on the timeline, with the sparkle (✨) button beside the record button on an empty line.",
       },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",

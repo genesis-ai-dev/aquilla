@@ -1282,31 +1282,139 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
-  // AQU-2577: a line with words and no speech shows the ghost of its clip. A
-  // click picks that line and generates nothing; Shift-click adds to the pick.
-  // The record button stays beside it. A line with nothing to say has no
-  // ghost, and a line being made cannot be picked again.
-  it("draws a ghost clip that picks the line, and Shift-click picks several", () => {
-    const onPickGhost = vi.fn()
-    const onOpenRecording = vi.fn()
-    const onSelect = vi.fn()
-    const worded = { ...emptyCell("c9"), translated: "هذا كان في البدء عند الله." } as CellData
-    const silent = emptyCell("c10", 40, 46)
-    const props = { ...base, items: [], emptyCells: [worded, silent], onSelect, onOpenRecording, onPickGhost }
-    const { rerender } = render(<TargetAudioLane {...props} />)
-    expect(screen.queryByTestId("tl-target-ghost-c10")).toBeNull()
-    fireEvent.click(screen.getByTestId("tl-target-ghost-c9"))
-    expect(onPickGhost).toHaveBeenLastCalledWith("c9", { additive: false })
-    expect(onSelect).toHaveBeenCalledWith("c9")
-    fireEvent.click(screen.getByTestId("tl-target-ghost-c9"), { shiftKey: true })
-    expect(onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
-    expect(onOpenRecording).not.toHaveBeenCalled()
-    expect(screen.getByTestId("tl-target-empty-c9-record")).toBeInTheDocument()
+  // AQU-2663 (Sam, Nov 19): AQU-2577's "make speech for this line" stays, but
+  // as a SIBLING of the record button — the same TimelineSlotButton, same size
+  // and class, lit by the same hot slot, side by side — instead of a dashed
+  // ghost clip under it. A click picks the line and generates nothing;
+  // Shift-click adds to the pick. A line with nothing to say gets no Make
+  // speech, and a line being made cannot be picked again.
+  describe("Make speech beside the record button (AQU-2663)", () => {
+    const worded = (id: string, startTime = 30, endTime = 36) =>
+      ({ ...emptyCell(id, startTime, endTime), translated: "هذا كان في البدء عند الله." }) as CellData
+    const wired = (over: Record<string, unknown> = {}) => ({
+      ...base,
+      items: [],
+      emptyCells: [worded("c9")],
+      onSelect: vi.fn(),
+      onOpenRecording: vi.fn(),
+      onPickGhost: vi.fn(),
+      ...over,
+    })
+    const rec = () => screen.getByTestId("tl-target-empty-c9-record")
+    const speech = () => screen.getByTestId("tl-target-empty-c9-speech")
 
-    rerender(<TargetAudioLane {...props} pickedGhostIds={new Set(["c9"])} />)
-    expect(screen.getByTestId("tl-target-ghost-c9")).toHaveAttribute("aria-pressed", "true")
-    rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
-    expect(screen.getByTestId("tl-target-ghost-c9")).toBeDisabled()
+    it("draws no ghost clip", () => {
+      render(<TargetAudioLane {...wired()} />)
+      expect(screen.queryByTestId("tl-target-ghost-c9")).toBeNull()
+      expect(document.querySelector(".border-dashed")).toBeNull()
+      expect(screen.getByTestId("tl-target-empty-c9").querySelectorAll("button")).toHaveLength(2)
+    })
+
+    it("sits side by side with the record button, never over it", () => {
+      render(<TargetAudioLane {...wired()} />)
+      const slot = screen.getByTestId("tl-target-empty-c9")
+      // Same flex row, in order, record first: neither is taken out of flow.
+      const row = rec().parentElement!
+      expect(speech().parentElement).toBe(row)
+      expect(slot.contains(row)).toBe(true)
+      expect(row.className).toMatch(/\bflex\b/)
+      expect(row.className).toMatch(/\bgap-1\b/)
+      expect(row.className).not.toMatch(/flex-col/)
+      expect(rec().compareDocumentPosition(speech()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      for (const b of [rec(), speech()]) {
+        expect(b.className).not.toMatch(/\babsolute\b|\binset-0\b/)
+        expect(b.className).toMatch(/\bshrink-0\b/)
+      }
+      // The pair is centred on the line, not pushed into a corner.
+      expect(slot.className).toMatch(/\bjustify-center\b/)
+      expect(slot.className).not.toMatch(/justify-end/)
+      // Bounds: two fixed squares 4px apart in a row — the second starts past
+      // the first's right edge.
+      const w = parseFloat(rec().style.width)
+      const gapPx = 4
+      const recBox = { left: 0, right: w }
+      const speechBox = { left: w + gapPx, right: w + gapPx + parseFloat(speech().style.width) }
+      expect(speechBox.left).toBeGreaterThan(recBox.right)
+    })
+
+    it("is the same size, shape and class as the record button", () => {
+      render(<TargetAudioLane {...wired()} />)
+      expect(speech().style.width).toBe(rec().style.width)
+      expect(speech().style.height).toBe(rec().style.height)
+      expect(speech().className).toBe(rec().className)
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+      expect(speech().className).toBe(rec().className)
+      expect(speech().getAttribute("aria-label")).toBe("Pick this line to make its speech. Shift-click to pick several.")
+    })
+
+    it("shows and hides together with the record button", () => {
+      const { rerender } = render(<TargetAudioLane {...wired()} />)
+      const slot = screen.getByTestId("tl-target-empty-c9")
+      expect(rec()).not.toHaveAttribute("data-hot")
+      expect(speech()).not.toHaveAttribute("data-hot")
+      expect(speech().className).toMatch(/\bopacity-0\b/)
+      fireEvent.pointerEnter(slot)
+      expect(rec()).toHaveAttribute("data-hot", "true")
+      expect(speech()).toHaveAttribute("data-hot", "true")
+      fireEvent.pointerLeave(slot)
+      expect(rec()).not.toHaveAttribute("data-hot")
+      expect(speech()).not.toHaveAttribute("data-hot")
+      fireEvent.pointerEnter(slot)
+      rerender(<TargetAudioLane {...wired()} viewStartSec={12} viewEndSec={112} />)
+      expect(speech()).not.toHaveAttribute("data-hot")
+    })
+
+    it("on a narrow line keeps both buttons, at full size, centred and overhanging", () => {
+      // 0.5s at 40px/s = a 20px line, narrower than the pair.
+      render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", 30, 30.5)] })} />)
+      const slot = screen.getByTestId("tl-target-empty-c9")
+      expect(parseFloat(slot.style.width)).toBeCloseTo(20)
+      expect(rec().style.width).toBe("28px")
+      expect(speech().style.width).toBe("28px")
+      expect(slot.className).toMatch(/\bjustify-center\b/)
+      expect(slot.className).not.toMatch(/overflow-hidden/)
+    })
+
+    it("on a short row shrinks with the record button", () => {
+      render(
+        <RowMetricsContext.Provider value={{ rowH: 30, chipH: 22, chipPad: chipPadPx(30) }}>
+          <TargetAudioLane {...wired()} />
+        </RowMetricsContext.Provider>,
+      )
+      expect(rec().style.width).toBe("18px")
+      expect(speech().style.width).toBe("18px")
+    })
+
+    it("picks the line like dev's ghost did, and Shift-click picks several", () => {
+      const props = wired({ emptyCells: [worded("c9"), emptyCell("c10", 40, 46)] })
+      const { rerender } = render(<TargetAudioLane {...props} />)
+      // A line with nothing to say has only its record button.
+      expect(screen.queryByTestId("tl-target-empty-c10-speech")).toBeNull()
+      expect(screen.getByTestId("tl-target-empty-c10-record")).toBeInTheDocument()
+      fireEvent.click(speech())
+      expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: false })
+      expect(props.onSelect).toHaveBeenCalledWith("c9")
+      props.onSelect.mockClear()
+      fireEvent.click(speech(), { shiftKey: true })
+      expect(props.onPickGhost).toHaveBeenLastCalledWith("c9", { additive: true })
+      expect(props.onSelect).not.toHaveBeenCalled()
+      expect(props.onOpenRecording).not.toHaveBeenCalled()
+
+      rerender(<TargetAudioLane {...props} pickedGhostIds={new Set(["c9"])} />)
+      expect(speech()).toHaveAttribute("aria-pressed", "true")
+      rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
+      expect(speech()).toBeDisabled()
+      expect(speech()).toHaveAttribute("data-busy", "true")
+    })
+
+    it("follows the record button's permission: neither is drawn when the lane is read-only", () => {
+      const { rerender } = render(<TargetAudioLane {...wired({ editable: false })} />)
+      expect(screen.queryByTestId("tl-target-empty-c9-record")).toBeNull()
+      expect(screen.queryByTestId("tl-target-empty-c9-speech")).toBeNull()
+      rerender(<TargetAudioLane {...wired()} />)
+      expect(rec()).toBeInTheDocument()
+      expect(speech()).toBeInTheDocument()
+    })
   })
 
   it("is absent when read-only, unwired, or the section is a sliver", () => {

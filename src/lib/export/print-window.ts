@@ -13,6 +13,7 @@
 /** A frame's window, as far as printing needs it. */
 export interface PrintableWindow {
   print: () => void
+  focus?: () => void
   addEventListener?: (type: "afterprint", listener: () => void) => void
 }
 
@@ -75,6 +76,9 @@ export async function printHtml(html: string, options?: PrintOptions): Promise<b
   }
   try {
     win.addEventListener?.("afterprint", close)
+    // AQU-2680 re-check finding 4: Safari prints the focused window, which
+    // without this can be the app's page rather than the frame.
+    win.focus?.()
     win.print()
     return true
   } catch {

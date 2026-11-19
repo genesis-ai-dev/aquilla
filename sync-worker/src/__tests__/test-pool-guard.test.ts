@@ -20,8 +20,8 @@ function heldDb() {
     run: () => new Promise((ok) => release.push(() => ok(result))),
   }
   const db = {
-    prepare: () => statement,
-    batch: () => new Promise((ok) => release.push(() => ok([result]))),
+    prepare: (_sql: string) => statement,
+    batch: (_statements: unknown[]) => new Promise((ok) => release.push(() => ok([result]))),
   }
   return { db, releaseAll: () => release.splice(0).forEach((r) => r()) }
 }

@@ -102,7 +102,7 @@ export function guardPoolOverflow<T extends object>(db: T, limit = DEFAULT_POOL_
   let active = 0
   const wrap = <O extends object>(target: O): O =>
     new Proxy(target, {
-      get(obj, prop, receiver) {
+      get(obj, prop) {
         const value = Reflect.get(obj, prop, obj) as unknown
         if (typeof value !== "function") return value
         const name = String(prop)

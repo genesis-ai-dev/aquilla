@@ -442,3 +442,43 @@ describe('AQU-2549: a re-join keeps a source line whose id a drifted row still h
     }
   })
 })
+
+// AQU-2549 re-check, finding 2: on a replace made at link time, the first sync
+// replays the upstream's history. A line the join wrote in as a new line is
+// already stamped at the join's head, so that history has nothing to say about
+// it — but the fold wrote one more mirror for each, which the projection
+// dropped and which stayed in the log for "Upstream changes".
+describe('AQU-2549: a replace at link time writes one mirror per line, new lines included', () => {
+  for (const how of ['one step (file.revision)', 'line by line'] as const) {
+    it(`source imported ${how}`, async () => {
+      const { t, reader, revise } = await setup()
+      try {
+        await revise(LANG, OWN_GD, 'a', LINES(OLD_NOTE).filter((_, i) => i !== 1 && i !== 5))
+        if (how === 'line by line') {
+          let anchor: string | null = null
+          for (const [i, value] of LINES(NEW_NOTE).entries()) {
+            const cellId = `up-${i}`
+            // The two lines the own file lacks were drafted, then corrected.
+            const draft = i === 1 || i === 5 ? `${value} (draft)` : value
+            await emit(t, BSB, 'source.cell.create', { fileId: UP_GD, cellId, payload: { cellId, anchorCellId: anchor, value: draft } })
+            if (draft !== value) await emit(t, BSB, 'source.cell.commit', { fileId: UP_GD, cellId, payload: { value } })
+            anchor = cellId
+          }
+        } else {
+          await revise(BSB, UP_GD, 'b', LINES(NEW_NOTE))
+        }
+        await link(t, { files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
+        // Windows small enough to stop between a draft and its correction.
+        await mirrorSync(t.db, LANG, { readRevisionManifest: reader, windowEvents: 2 })
+
+        const mirrors = await t.pg.query<{ n: string }>(
+          `SELECT COUNT(*) n FROM events WHERE project_id = $1 AND file_id = $2 AND kind = 'source.cell.mirror'`,
+          [LANG, OWN_GD],
+        )
+        expect(Number(mirrors.rows[0].n)).toBe(LINES(NEW_NOTE).length)
+      } finally {
+        await t.close()
+      }
+    })
+  }
+})

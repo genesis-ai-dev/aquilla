@@ -2715,7 +2715,13 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // history; without this each joined line would be re-mirrored once per
     // window that touched it — events the projection's monotonic guard drops
     // anyway, but which would sit in the log and in "Upstream changes".
-    if (joinedCellId !== undefined && local?.upstreamSeq != null && cell.seq <= local.upstreamSeq) {
+    // AQU-2549: the same for a line the join wrote in as a new line, under the
+    // upstream's own id: it has no mapping, but its row in the joined file
+    // carries the join's stamp just the same.
+    if (
+      (joinedCellId !== undefined || adopted?.has(cell.fileId)) &&
+      local?.upstreamSeq != null && cell.seq <= local.upstreamSeq
+    ) {
       skippedHashEqual++
       continue
     }

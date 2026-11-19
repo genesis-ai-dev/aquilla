@@ -31,6 +31,9 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
   await page.goto("/login")
   await injectSession(page, await ensureAuthState("alice"))
   await page.goto("/preferences/login-methods")
+  const preferences = page.getByTestId("preferences-dialog")
+  await expect(preferences.getByRole("heading", { name: "Login methods", exact: true })).toBeVisible()
+  await expect(page.getByTestId("account-login-security")).toHaveCount(1)
   await expect(
     page.getByRole("button", {
       name: "Set up an authenticator app",
@@ -134,4 +137,17 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
     body: await page.screenshot(),
     contentType: "image/png",
   })
+  await preferences.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(page).toHaveURL(/\/orgs\//)
+  await expect(page.getByTestId("account-login-security")).toHaveCount(0)
+})
+
+test("a signed-out Login methods link offers login in a single Preferences dialog", async ({ page }) => {
+  await page.goto("/preferences/login-methods?backup=1")
+  const dialog = page.getByTestId("preferences-dialog")
+  await expect(dialog).toHaveCount(1)
+  await expect(page.getByTestId("account-login-security")).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Log in", exact: true }).click()
+  await expect(page).toHaveURL(/\/login\?next=/)
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/preferences/login-methods?backup=1")
 })

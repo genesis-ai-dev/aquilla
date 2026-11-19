@@ -88,6 +88,9 @@ export interface PdfPageContent {
 export interface PdfListItem {
   kind: "bullet" | "number"
   level: number
+  /** AQU-2680 review findings 2, 3 and 7: the dropped label as printed ("1.",
+   *  "a)", "1.1.3.", "iv."); none on an item that has no label. */
+  label?: string
   /** AQU-2680 review finding 1: how far the label sits from the page's
    *  starting edge (the right edge for right-to-left text), in points. Used
    *  for the depth, then dropped. */
@@ -422,7 +425,7 @@ function readTaggedPage(page: PdfPageContent, joiner: TextJoiner, footnote: Foot
           // review finding 1: the label's place on the page gives the depth
           const rtl = labelParts.some((p) => p.dir === "rtl")
           const indent = rtl ? page.box.x1 - Math.max(...labelParts.map((p) => p.x + p.w)) : Math.min(...labelParts.map((p) => p.x)) - page.box.x0
-          cur.list = { ...cur.list, kind: listKind(label), indent: Math.round(indent * 10) / 10 }
+          cur.list = { ...cur.list, kind: listKind(label), label, indent: Math.round(indent * 10) / 10 }
         }
         continue
       }
@@ -525,10 +528,13 @@ function continueAcrossPages(pages: readonly PageBlock[][], joiner: TextJoiner):
   for (const blocks of pages) {
     blocks.forEach((b, i) => {
       const prev = out[out.length - 1]
+      // AQU-2680 review finding 3: a list item with no label at the top of a
+      // page is the rest of the previous page's last item
+      const restOfItem = i === 0 && prev?.list !== undefined && b.list !== undefined && !b.list.label && b.page === prev.endPage + 1
       if (
-        i === 0 && prev && prev.body && b.body && b.page === prev.endPage + 1
+        restOfItem || (i === 0 && prev && prev.body && b.body && b.page === prev.endPage + 1
         && (prev.size === null || b.size === null || prev.size === b.size)
-        && !endsSentence(prev.text)
+        && !endsSentence(prev.text))
       ) {
         const joined = /\p{L}[-\u00ad]$/u.test(prev.text) ? joiner.joinHyphen(prev.text, b.text)
           : /\S[–—]$/u.test(prev.text) ? prev.text + b.text

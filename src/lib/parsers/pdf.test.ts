@@ -455,6 +455,31 @@ describe("lists in a tagged PDF", () => {
       ["Paragraph", "A second paragraph of the same item.", null],
     ])
   })
+
+  // AQU-2680 review finding 3: an item that runs onto the next page came in
+  // as two items, the second half a bullet (three in the partner's PDF).
+  it("keeps an item that runs onto the next page as one item", async () => {
+    const read = await extractPdfImport(buildPdf({
+      pages: [
+        { runs: [{ text: "1.", x: 72, y: 100, tag: "n1" }, { text: "The first step goes on and", x: 84, y: 100, tag: "b1" }] },
+        { runs: [
+          { text: "ends on the next page.", x: 84, y: 760, tag: "b1b" },
+          { text: "2.", x: 72, y: 746, tag: "n2" }, { text: "Second step.", x: 84, y: 746, tag: "b2" },
+        ] },
+      ],
+      structure: [{ role: "Document", children: [
+        { role: "L", children: [
+          { role: "LI", children: [{ role: "Lbl", id: "n1" }, { role: "LBody", id: "b1" }] },
+          { role: "LI", children: [{ role: "LBody", id: "b1b" }] },
+          { role: "LI", children: [{ role: "Lbl", id: "n2" }, { role: "LBody", id: "b2" }] },
+        ] },
+      ] }],
+    }), { cellUnit: "paragraph" })
+    expect(read.strings.map((s) => [s.original, s.metadata?.list, s.metadata?.listLevel])).toEqual([
+      ["The first step goes on and ends on the next page.", "number", 0],
+      ["Second step.", "number", 0],
+    ])
+  })
 })
 
 // AQU-2680: bold and italic follow a translation only when a whole paragraph

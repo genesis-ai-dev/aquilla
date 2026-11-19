@@ -312,7 +312,7 @@ describe('AQU-2549 part 1: joining a copy that already arrived into the project\
 
   // WHY: the route refuses a copy with translations of its own; the sync must
   // never delete one either, whatever the record says.
-  it('keeps a copy that has translations of its own', async () => {
+  it('keeps a copy that has translations of its own, and does not join', async () => {
     const { t, reader } = await copyArrived()
     try {
       const copyLine = (await sourceOf(t, LANG, COPY_GD)).find((c) => c.value === NEW_NOTE)!
@@ -323,6 +323,22 @@ describe('AQU-2549 part 1: joining a copy that already arrived into the project\
       await recordJoin(t)
       await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
       expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy').sort()).toEqual(['copy', 'own'])
+      // Review finding 3: and the join does not happen, so the copy keeps
+      // getting the source's updates and the own file is left as it was.
+      expect((await sourceOf(t, LANG, OWN_GD)).map((c) => c.value)).not.toContain(NEW_NOTE)
+      const record = await t.pg.query<{ source_link_adopt: string | null }>(
+        `SELECT source_link_adopt FROM projects WHERE id = $1`, [LANG],
+      )
+      expect(record.rows[0].source_link_adopt).toBeNull()
+      const up = await sourceOf(t, BSB, UP_GD)
+      const last = up.find((c) => c.value === LINES(NEW_NOTE)[9])!
+      await emit(t, BSB, 'source.cell.commit', {
+        fileId: UP_GD, cellId: last.cell_id, parentId: last.event_id,
+        payload: { value: 'So Abram departed, as the LORD had told him.' },
+      })
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+      expect((await sourceOf(t, LANG, COPY_GD)).map((c) => c.value)).toContain('So Abram departed, as the LORD had told him.')
+      expect((await sourceOf(t, LANG, OWN_GD)).map((c) => c.value)).not.toContain('So Abram departed, as the LORD had told him.')
     } finally {
       await t.close()
     }

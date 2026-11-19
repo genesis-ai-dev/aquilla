@@ -168,8 +168,15 @@ export async function runAdoption(db: AquillaDb, args: RunAdoptionArgs): Promise
       return { status: 'more', adoption, cellsMirrored, filesAdopted }
     }
     const fileId = adoption.files[upstreamFileId]
+    const copyFileId = args.copyFileIdOf?.(upstreamFileId)
     let joined = false
-    if (fileId) {
+    // AQU-2549: a copy that got translations of its own between the lead's
+    // click and this sync is not joined: deleting it would lose the team's
+    // work, and keeping it beside a joined file would leave it silently cut off
+    // from the source. The copy stays the linked file, as before the click.
+    if (fileId && copyFileId && copyFileId !== fileId && (await joinedCopyOf(db, downstreamProjectId, copyFileId))?.translated) {
+      console.warn(`link adopt: copy ${copyFileId} has translations of its own; not joining it into ${fileId}`)
+    } else if (fileId) {
       const mirrored = await adoptFile(db, {
         downstreamProjectId, upstreamProjectId, upstreamFileId, fileId, head, mirrorEventId,
       })
@@ -178,10 +185,10 @@ export async function runAdoption(db: AquillaDb, args: RunAdoptionArgs): Promise
       // AQU-2549: "Join into my existing file" — the upstream file had already
       // arrived as a mirrored copy. Now that the project's own file follows it,
       // the copy goes to Recently deleted.
-      if (joined && args.copyFileIdOf) {
+      if (joined && copyFileId) {
         await removeJoinedCopy(db, {
           downstreamProjectId,
-          copyFileId: args.copyFileIdOf(upstreamFileId),
+          copyFileId,
           fileId,
           mirrorEventId,
         })
@@ -212,6 +219,26 @@ export async function runAdoption(db: AquillaDb, args: RunAdoptionArgs): Promise
   return { status: 'done', adoption, cellsMirrored, filesAdopted }
 }
 
+/** AQU-2549: the live mirrored copy of an upstream file, and whether anyone
+ *  has translated a line of it; null when there is no such copy. */
+async function joinedCopyOf(
+  db: AquillaDb,
+  downstreamProjectId: string,
+  copyFileId: string,
+): Promise<{ id: string; translated: boolean } | null> {
+  return db
+    .prepare(
+      `SELECT f.id,
+              EXISTS (SELECT 1 FROM cells c
+                       WHERE c.project_id = f.project_id AND c.file_id = f.id
+                         AND c.side = 'target' AND COALESCE(c.value, '') <> '') AS translated
+         FROM files f
+        WHERE f.project_id = ? AND f.id = ? AND f.deleted_at IS NULL`,
+    )
+    .bind(downstreamProjectId, copyFileId)
+    .first<{ id: string; translated: boolean }>()
+}
+
 /**
  * AQU-2549: soft-delete the mirrored copy of an upstream file that one of the
  * project's own files now follows. A copy that is not there (the usual replace,
@@ -225,17 +252,7 @@ async function removeJoinedCopy(
 ): Promise<void> {
   const { downstreamProjectId, copyFileId, fileId, mirrorEventId } = args
   if (copyFileId === fileId) return
-  const copy = await db
-    .prepare(
-      `SELECT f.id,
-              EXISTS (SELECT 1 FROM cells c
-                       WHERE c.project_id = f.project_id AND c.file_id = f.id
-                         AND c.side = 'target' AND COALESCE(c.value, '') <> '') AS translated
-         FROM files f
-        WHERE f.project_id = ? AND f.id = ? AND f.deleted_at IS NULL`,
-    )
-    .bind(downstreamProjectId, copyFileId)
-    .first<{ id: string; translated: boolean }>()
+  const copy = await joinedCopyOf(db, downstreamProjectId, copyFileId)
   if (!copy) return
   if (copy.translated) {
     console.warn(`link adopt: copy ${copyFileId} has translations of its own; keeping it beside ${fileId}`)

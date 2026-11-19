@@ -7,6 +7,7 @@ import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { HistoryResult } from "@/lib/history/history"
 import type { TakeLevel } from "@/lib/history/take-steps"
+import type { EvenOutOptions, EvenOutResult, TakeRef } from "@/lib/audio/even-out"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { InsertChoice } from "./StationEdits"
 
@@ -36,6 +37,12 @@ export interface StationHost {
   trim(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): Promise<void>
   /** AQU-2327: the take's volume and fades, as one Undo step (`take.gain`). */
   setLevel(cellId: string, audioId: string, level: TakeLevel): Promise<void>
+  /** AQU-2664: even out these takes' loudness (default −16 LUFS) as one Undo
+   *  step, measuring any not yet measured; null when there is no project.
+   *  Build the list with `takesToEvenOut` (a file, a track, tracks). */
+  evenOut?(takes: readonly TakeRef[], opts?: EvenOutOptions): Promise<EvenOutResult | null>
+  /** AQU-2664: take evening out off these takes, as one Undo step. */
+  clearEvenOut?(takes: readonly TakeRef[]): Promise<{ cleared: number; gone: number } | null>
   /** Item 2 / slice 9: clean the take's noise into a new version (the Remove
    *  noise action, keeping its track, kept part and places); its new id. */
   removeNoise(cellId: string, audioId: string): Promise<string | null>

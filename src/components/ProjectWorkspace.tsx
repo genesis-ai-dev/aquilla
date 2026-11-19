@@ -285,6 +285,7 @@ import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { clearEvenOut, evenOutTakes, makeTakeMeasurer, type EvenOutHost, type EvenOutOptions, type TakeRef } from "@/lib/audio/even-out"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
@@ -324,7 +325,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioEven, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -4574,6 +4575,74 @@ export function ProjectWorkspace() {
       await applyTakeGain(cellId, audioId, level)
     },
     [applyTakeGain, readTake, activeFileId],
+  )
+
+  // AQU-2664: a take's evened-out target, alone — the trim's order again.
+  // Never its volume or fades: evening out is the stage before them.
+  const applyTakeEven = useCallback(
+    async (cellId: string, audioId: string, targetLufs: number | null) => {
+      if (!project?.id) return
+      const owner = resolveTakeCellRef.current(cellId)
+      const att = owner?.cell.attachments?.[audioId]
+      if (!owner || !att) return
+      const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const p = emitCellAudioEven({
+        projectId: project.id, fileId: owner.fileId, cellId, audioId, evenTargetLufs: targetLufs,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), evenTargetLufs: targetLufs }, p)
+      await p
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(owner.fileId)
+    },
+    [project?.id, currentUsername, getTokenForProjectFile, activeLane],
+  )
+  // AQU-2664: "Even out" and "Clear" over a set of takes — the engine's action
+  // API (lib/audio/even-out.ts); the UI that calls it is designed separately
+  // and reaches it through the Station host (`evenOut`, `clearEvenOut`).
+  // Takes with no reading are measured once here; one that can't be is
+  // skipped and plays at its own volume (the fallback).
+  const evenOutHost = useMemo<EvenOutHost | null>(() => {
+    if (!project?.id) return null
+    const projectId = project.id
+    const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
+    return {
+      readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
+      applyEven: applyTakeEven,
+      fileId: activeFileId,
+      fileName: activeFileNameRef.current,
+      measure: makeTakeMeasurer({
+        fetchBytes: async (att, where) => {
+          const ref = parseFrontierAudioUrl(att.url)
+          const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
+          if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
+          return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken })
+        },
+        decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
+        emit: async (cellId, audioId, reading, durationMs) => {
+          const owner = resolveTakeCellRef.current(cellId)
+          const att = owner?.cell.attachments?.[audioId]
+          if (!owner || !att) return
+          const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+          const p = emitCellAudioMeasure({
+            projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
+            ...(activeLane ? { targetLang: activeLane } : {}),
+            author: currentUsername,
+          })
+          injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
+          await p
+        },
+      }),
+    }
+  }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername])
+  const handleEvenOut = useCallback(
+    (takes: readonly TakeRef[], opts?: EvenOutOptions) => (evenOutHost ? evenOutTakes(evenOutHost, takes, opts) : Promise.resolve(null)),
+    [evenOutHost],
+  )
+  const handleClearEvenOut = useCallback(
+    (takes: readonly TakeRef[]) => (evenOutHost ? clearEvenOut(evenOutHost, takes) : Promise.resolve(null)),
+    [evenOutHost],
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
@@ -14228,6 +14297,8 @@ export function ProjectWorkspace() {
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
       setLevel: handleGainTarget,
+      evenOut: handleEvenOut,
+      clearEvenOut: handleClearEvenOut,
       removeNoise: async (cellId, audioId) => {
         const cur = readTake(cellId, audioId)
         if (!cur || !frontierSession) return null
@@ -14318,7 +14389,7 @@ export function ProjectWorkspace() {
         return out
       },
     }
-  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, handleEvenOut, handleClearEvenOut, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
   // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
   // and — while the Station's tab shows — follow the take you click.
   const handleEditInStation = useCallback((cellId: string, audioId: string) => {
@@ -17007,6 +17078,7 @@ export function ProjectWorkspace() {
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
+        applyEven: (cellId, audioId, target) => applyTakeEven(cellId, audioId, target),
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId, c.pieceVoters),
         uncut: applyTakeUncut,
@@ -17169,7 +17241,7 @@ export function ProjectWorkspace() {
     })
     return unregister
   }, [
-    readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    readTake, applyTakeTrim, applyTakeGain, applyTakeEven, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
     applyLineRooms, readLineRoom,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,

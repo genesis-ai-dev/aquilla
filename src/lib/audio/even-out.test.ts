@@ -1,0 +1,303 @@
+// AQU-2664: the actions the UI calls — "even out" over a set of takes (a
+// file, a track, several tracks) and "clear" — as ONE undo step each, and the
+// measuring behind them, with its fallback: a take that can't be measured
+// plays at its own volume and is skipped, and the action says how many.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { clearEvenOut, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type EvenOutHost } from "./even-out"
+import { takeStepHandlers, type TakeStepContext } from "@/lib/history/take-steps"
+import { historyReady, historyView, redoLast, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
+import { takeGainDb } from "./take-gain"
+import { TARGET_RATE } from "./decode-mono"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { CellData } from "@/hooks/useCells"
+
+type Att = CodexCellAttachment & { [k: string]: unknown }
+
+/** A little workspace: takes by cell, writes applied in place. */
+function workspace(takes: Record<string, Record<string, Partial<Att>>>) {
+  const store: Record<string, Record<string, Att>> = {}
+  for (const [cellId, atts] of Object.entries(takes)) {
+    store[cellId] = {}
+    for (const [id, a] of Object.entries(atts)) store[cellId][id] = { url: `frontier-audio://${id}.wav`, type: "audio", slot: "recording", ...a } as Att
+  }
+  const readTake = (cellId: string, audioId: string) => {
+    const a = store[cellId]?.[audioId]
+    return a && !a.isDeleted ? a : null
+  }
+  // The take's own volume is never the action's to write; a call here fails the test.
+  const applyGain = vi.fn(async () => {
+    throw new Error("evening out wrote the take's own volume")
+  })
+  const applyEven = vi.fn(async (cellId: string, audioId: string, target: number | null) => {
+    store[cellId][audioId].evenTargetLufs = target
+  })
+  const measured: string[] = []
+  const readings: Record<string, { loudnessLufs: number; truePeakDb: number } | null> = {}
+  const host: EvenOutHost = {
+    readTake,
+    applyEven,
+    measure: async (cellId, audioId) => {
+      measured.push(audioId)
+      const r = readings[audioId]
+      if (!r) return null
+      Object.assign(store[cellId][audioId], r)
+      return r
+    },
+  }
+  const ctx = {
+    readTake, selectedIn: () => null, applyTrim: async () => {}, applyGain, applyEven, applyPlace: async () => {},
+    cut: async () => true, uncut: async () => {}, select: async () => {}, remove: async () => {}, rename: async () => {},
+  } as unknown as TakeStepContext
+  return { store, host, ctx, applyGain, applyEven, measured, readings }
+}
+
+let unregister: (() => void) | null = null
+beforeEach(async () => {
+  resetHistoryForTests()
+  await clearHistoryStoreForTests()
+  setHistoryScope("p1", "sam")
+  await historyReady()
+})
+afterEach(() => {
+  unregister?.()
+  unregister = null
+})
+
+describe("even out", () => {
+  it("sets every measured take to the target, as ONE undo step", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14 } },
+      c2: { b: { loudnessLufs: -10, truePeakDb: -2, gainDb: -1 } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    expect(r).toMatchObject({ evened: 2, skipped: 0, targetLufs: -16 })
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(12, 6)
+    expect(takeGainDb(w.store.c2.b)).toBeCloseTo(-7, 6) // its own -1 dB on top of -6
+    expect(w.store.c2.b.gainDb).toBe(-1) // its own volume is left as it was
+    expect(historyView().undoSteps).toHaveLength(1)
+    expect(historyView().undoSteps[0].labelKey).toBe("editor.history.stepEvenOut")
+  })
+
+  it("undo puts every take back as it was, and redo evens them out again", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14 } },
+      c2: { b: { loudnessLufs: -20, truePeakDb: -8, evenTargetLufs: -23 } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    await undoLast()
+    expect(w.store.c1.a.evenTargetLufs).toBeNull()
+    expect(w.store.c2.b.evenTargetLufs).toBe(-23)
+    expect(takeGainDb(w.store.c1.a)).toBe(0)
+    await redoLast()
+    expect(w.store.c1.a.evenTargetLufs).toBe(-16)
+    expect(w.store.c2.b.evenTargetLufs).toBe(-16)
+  })
+
+  it("takes a target the caller names", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } } })
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }], { targetLufs: -23 })
+    expect(r.targetLufs).toBe(-23)
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(5, 6)
+  })
+
+  it("measures a take that has no reading yet, once", async () => {
+    const w = workspace({ c1: { a: {} }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } } })
+    w.readings.a = { loudnessLufs: -26, truePeakDb: -12 }
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    expect(w.measured).toEqual(["a"])
+    expect(r.evened).toBe(2)
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(10, 6)
+  })
+
+  it("FALLBACK: a take that can't be measured is skipped, counted, and plays at its own volume", async () => {
+    const w = workspace({ c1: { a: { gainDb: -2 } }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } } })
+    w.readings.a = null // decode failed, too big for the device, or the network gave up
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    expect(r).toMatchObject({ evened: 1, skipped: 1, unmeasured: 1 })
+    expect(w.store.c1.a.evenTargetLufs).toBeUndefined()
+    expect(takeGainDb(w.store.c1.a)).toBe(-2)
+  })
+
+  it("FALLBACK: a measurement that throws is a skip, never a failed action", async () => {
+    const w = workspace({ c1: { a: {} }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } } })
+    w.host.measure = async () => { throw new Error("decode failed") }
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    expect(r).toMatchObject({ evened: 1, skipped: 1, unmeasured: 1 })
+  })
+
+  it("skips a silent take, and a take that is gone, and says so", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -70, truePeakDb: -100 } } })
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c9", audioId: "zz" }])
+    expect(r).toMatchObject({ evened: 0, skipped: 2, silent: 1, gone: 1 })
+    expect(w.applyEven).not.toHaveBeenCalled()
+    expect(historyView().undoSteps).toHaveLength(0)
+  })
+
+  it("lists the takes it could only raise part of the way (the peak or the range)", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -4 } }, c2: { b: { loudnessLufs: -20, truePeakDb: -8 } } })
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+    expect(r.held).toEqual([{ cellId: "c1", audioId: "a", reason: "peak", shortDb: 9 }])
+  })
+
+  it("stops measuring when cancelled, and evens out what it has", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -20, truePeakDb: -8 } }, c2: { b: {} } })
+    w.readings.b = { loudnessLufs: -20, truePeakDb: -8 }
+    const abort = new AbortController()
+    abort.abort()
+    const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }], { signal: abort.signal })
+    expect(w.measured).toEqual([])
+    expect(r).toMatchObject({ evened: 1, skipped: 1, unmeasured: 1 })
+  })
+
+  it("reports progress while measuring", async () => {
+    const w = workspace({ c1: { a: {} }, c2: { b: {} } })
+    w.readings.a = { loudnessLufs: -20, truePeakDb: -8 }
+    w.readings.b = { loudnessLufs: -20, truePeakDb: -8 }
+    const seen: Array<[number, number]> = []
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }], { onProgress: (d, t) => seen.push([d, t]) })
+    expect(seen).toEqual([[0, 2], [1, 2], [2, 2]])
+  })
+})
+
+// Sam, Nov 19: "I do not want normalization to override volume automation."
+describe("evening out is its own stage, before every volume the person sets", () => {
+  it("a take's own volume and fades, and the track volume, survive a run, a re-run and a clear untouched", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14, gainDb: -4.5, fadeInMs: 250, fadeOutMs: 800 } },
+      c2: { b: { loudnessLufs: -12, truePeakDb: -2, gainDb: 3, fadeOutMs: 120, slot: "track-2" } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    const tracks = { recording: -6, "track-2": 2 } // the file's track volumes
+    const own = () => [w.store.c1.a, w.store.c2.b].map((a) => [a.gainDb, a.fadeInMs, a.fadeOutMs])
+    const before = own()
+    const refs = [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }]
+    await evenOutTakes(w.host, refs)
+    expect(own()).toEqual(before)
+    await evenOutTakes(w.host, refs, { targetLufs: -23 })
+    expect(own()).toEqual(before)
+    await clearEvenOut(w.host, refs)
+    expect(own()).toEqual(before)
+    await undoLast()
+    await undoLast()
+    await redoLast()
+    expect(own()).toEqual(before)
+    expect(tracks).toEqual({ recording: -6, "track-2": 2 })
+    expect(w.applyGain).not.toHaveBeenCalled()
+    // Only the evened-out target ever moved.
+    expect(w.applyEven.mock.calls.every((c) => c.length === 3)).toBe(true)
+  })
+
+  it("the take's own volume reads relative to the evened level: 0 dB is 'as evened'", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } } })
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(12, 6)
+    w.store.c1.a.gainDb = -3 // the Station's line, after
+    expect(takeGainDb(w.store.c1.a)).toBeCloseTo(9, 6)
+  })
+})
+
+describe("clear", () => {
+  it("takes evening out off every take as ONE step, and undo puts it back", async () => {
+    const w = workspace({
+      c1: { a: { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16, gainDb: -1 } },
+      c2: { b: { loudnessLufs: -20, truePeakDb: -8, evenTargetLufs: -16 } },
+      c3: { c: { loudnessLufs: -20, truePeakDb: -8 } },
+    })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    const r = await clearEvenOut(w.host, [{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }, { cellId: "c3", audioId: "c" }])
+    expect(r).toMatchObject({ cleared: 2 })
+    expect(takeGainDb(w.store.c1.a)).toBe(-1) // back to its own volume
+    expect(w.store.c2.b.evenTargetLufs).toBeNull()
+    expect(historyView().undoSteps[0].labelKey).toBe("editor.history.stepClearEvenOut")
+    await undoLast()
+    expect(w.store.c1.a.evenTargetLufs).toBe(-16)
+    expect(w.store.c2.b.evenTargetLufs).toBe(-16)
+  })
+
+  it("an undo leaves alone a take whose target someone changed since", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } } })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])
+    w.store.c1.a.evenTargetLufs = -23 // a colleague evened it out to another level
+    await undoLast()
+    expect(w.store.c1.a.evenTargetLufs).toBe(-23)
+  })
+})
+
+describe("which takes", () => {
+  const cells = [
+    { id: "c1", attachments: {
+      a: { url: "u", type: "audio", slot: "recording" },
+      gone: { url: "u", type: "audio", slot: "recording", isDeleted: true },
+      film: { url: "u", type: "audio", role: "source" },
+    } },
+    { id: "c2", attachments: { b: { url: "u", type: "audio", slot: "track-2" }, pic: { url: "u", type: "image" } } },
+  ] as unknown as CellData[]
+
+  it("a file: every live take, never the film's own sound", () => {
+    expect(takesToEvenOut(cells)).toEqual([{ cellId: "c1", audioId: "a" }, { cellId: "c2", audioId: "b" }])
+  })
+
+  it("a track or tracks: the takes on them", () => {
+    expect(takesToEvenOut(cells, { slots: ["track-2"] })).toEqual([{ cellId: "c2", audioId: "b" }])
+    expect(takesToEvenOut(cells, { slots: ["recording", "track-2"] })).toHaveLength(2)
+  })
+})
+
+describe("measuring a take", () => {
+  const sine = (lufs: number, seconds: number) => {
+    const a = Math.pow(10, (lufs + 10 * Math.log10(2)) / 20)
+    return Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => a * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
+  }
+  const att = { url: "frontier-audio://take-1.wav", type: "audio", durationMs: 2000 } as CodexCellAttachment
+
+  it("decodes the take, measures it, and stores the reading", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => sine(-24, 2), emit })
+    const r = await measure("c1", "take-1", att)
+    expect(Math.abs(r!.loudnessLufs - -24)).toBeLessThan(0.5)
+    expect(emit).toHaveBeenCalledWith("c1", "take-1", expect.objectContaining({ loudnessLufs: r!.loudnessLufs, truePeakDb: r!.truePeakDb }), 2000)
+  })
+
+  it("measures a recording shared by several takes once", async () => {
+    const decode = vi.fn(async () => sine(-24, 1))
+    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode, emit: async () => {} })
+    await measure("c1", "p1", att)
+    await measure("c2", "p2", att)
+    expect(decode).toHaveBeenCalledTimes(1)
+  })
+
+  it("FALLBACK: no reading when the bytes can't be fetched or decoded", async () => {
+    const failFetch = makeTakeMeasurer({ fetchBytes: async () => { throw new Error("offline") }, decode: async () => sine(-24, 1), emit: async () => {} })
+    expect(await failFetch("c1", "a", att)).toBeNull()
+    const failDecode = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => { throw new Error("bad audio") }, emit: async () => {} })
+    expect(await failDecode("c1", "a", att)).toBeNull()
+  })
+
+  it("FALLBACK: a take too long to decode on this device is not fetched at all", async () => {
+    const fetchBytes = vi.fn(async () => new Uint8Array([1]))
+    const measure = makeTakeMeasurer({ fetchBytes, decode: async () => sine(-24, 1), emit: async () => {}, pcmBudgetBytes: 1_000_000 })
+    expect(await measure("c1", "a", { ...att, durationMs: 60_000 })).toBeNull()
+    expect(fetchBytes).not.toHaveBeenCalled()
+  })
+
+  it("FALLBACK: a fetch slower than the limit gives up", async () => {
+    vi.useFakeTimers()
+    try {
+      const measure = makeTakeMeasurer({ fetchBytes: () => new Promise(() => {}), decode: async () => sine(-24, 1), emit: async () => {}, timeoutMs: 1000 })
+      const p = measure("c1", "a", att)
+      await vi.advanceTimersByTimeAsync(1001)
+      expect(await p).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("FALLBACK: a reading that can't be saved still counts for this session", async () => {
+    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => sine(-24, 1), emit: async () => { throw new Error("outbox full") } })
+    expect(await measure("c1", "a", att)).not.toBeNull()
+  })
+})

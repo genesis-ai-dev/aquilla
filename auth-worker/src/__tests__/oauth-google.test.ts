@@ -9,6 +9,7 @@ import app from "../index"
 import { JWTService } from "../auth/jwt"
 import { pkceChallenge } from "../routes/oauth-google"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
+import { applyLegacyUserMigration } from "../services/legacy-user-migration"
 import * as legacy from "../services/frontier-d1"
 import { ipIdentifier } from "../utils/rate-limit"
 import * as postResponse from "../lib/post-response-db"
@@ -331,6 +332,42 @@ describe("Google login boundary", () => {
     expect(await env.AQUILLA_PG.prepare("SELECT email_verified_at FROM users WHERE username='alice'").first()).toEqual({ email_verified_at: null })
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM provider_identities").first()).toEqual({ n: 1 })
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM email_verification_tokens").first()).toEqual({ n: 1 })
+  })
+  it.each(["nightly first", "nightly during access lookup", "Google first", "provider conflict"])("preserves one legacy identity and atomic grants: %s", async order => {
+    const code = await handoff()
+    const password = "legacy-password-example"
+    const source = { id: 701, gitlab_user_id: 77, username: "codex-alice", email: "alice@example.com",
+      password_hash: await hashPasswordWerkzeugScrypt(password), created_at: null, updated_at: null }
+    Object.assign(testEnv, { LEGACY_USER_MIGRATION_ENABLED: "true", FRONTIER_D1_ACCOUNT_ID: "test",
+      FRONTIER_D1_DATABASE_ID: "test", FRONTIER_D1_API_TOKEN: "test", GITLAB_URL: "https://gitlab.example", GITLAB_ADMIN_TOKEN: "test" })
+    vi.spyOn(legacy, "findLegacyUsersByIdentifier").mockResolvedValue([source])
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!String(url).startsWith("https://gitlab.example/")) throw Error("unexpected migration fetch")
+      if (order === "nightly during access lookup" && String(url).includes("/memberships")) expect((await nightly()).created).toBe(true)
+      return Response.json([])
+    }))
+    const pending = await (await post("exchange", { code, verifier })).json() as { step: string; continuation: string }
+    expect(pending.step).toBe("legacy")
+    const body = { code: pending.continuation, verifier, password }
+    expect((await post("finish", { ...body, password: "wrong" })).status).toBe(401)
+    const nightly = () => applyLegacyUserMigration(env.AQUILLA_PG, source, { confirmedMembershipCount: 0, orgMemberships: [], teamUuids: [], projectMemberships: [], conflicts: [] }, "scheduled")
+    if (order === "nightly first") expect((await nightly()).created).toBe(true)
+    if (order === "provider conflict") {
+      await env.AQUILLA_PG.exec("CREATE FUNCTION reject_google() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test failure'; END $$")
+      await env.AQUILLA_PG.exec("CREATE TRIGGER reject_google BEFORE INSERT ON provider_identities FOR EACH ROW EXECUTE FUNCTION reject_google()")
+      try {
+        expect((await post("finish", body)).status).toBeGreaterThanOrEqual(400)
+        for (const table of ["users", "legacy_identity_links", "provider_identities"])
+          expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 0 })
+      } finally { await env.AQUILLA_PG.exec("DROP TRIGGER reject_google ON provider_identities"); await env.AQUILLA_PG.exec("DROP FUNCTION reject_google()") }
+    }
+    const response = await post("finish", body)
+    expect(await response.json()).toMatchObject({ username: source.username })
+    expect(response.status).toBe(200)
+    expect((await nightly()).created).toBe(false)
+    for (const table of ["users", "legacy_identity_links", "provider_identities"])
+      expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 1 })
+    expect((await post("finish", body)).status).toBe(400)
   })
   it("fails closed on legacy reservations and throttles social starts independently", async () => {
     const code = await handoff()

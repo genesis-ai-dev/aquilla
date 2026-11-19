@@ -83,10 +83,10 @@ function GoogleSignInReturn() {
         void googleRequest<GoogleSession>("finish", { code: pending.continuation, verifier: attempt.verifier, ...(pending.step === "signup" ? { username } : { password }) })
           .then(finish).catch(err => setError(err instanceof Error ? err.message : "failed")).finally(() => { setPassword(""); setBusy(false) })
       }}>
-        <p className="text-sm text-muted-foreground">{t(pending.step === "signup" ? "auth.google.usernameNote" : "auth.google.linkNote")}</p>
+        <p className="text-sm text-muted-foreground">{t(pending.step === "signup" ? "auth.google.usernameNote" : pending.step === "legacy" ? "auth.google.legacyNote" : "auth.google.linkNote")}</p>
         <FieldGroup><Field><FieldLabel htmlFor="google-account">{t("common.email")}</FieldLabel><Input id="google-account" value={pending.email} readOnly /></Field>
         {pending.step === "signup" ? <Field><FieldLabel htmlFor="google-username">{t("auth.signup.usernameLabel")}</FieldLabel><Input id="google-username" required minLength={3} maxLength={50} autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} /></Field>
-          : <Field><FieldLabel htmlFor="google-password">{t("auth.google.passwordLabel")}</FieldLabel><RevealableInput id="google-password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></Field>}
+          : <Field><FieldLabel htmlFor="google-password">{t(pending.step === "legacy" ? "auth.google.codexPassword" : "auth.google.passwordLabel")}</FieldLabel><RevealableInput id="google-password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></Field>}
         </FieldGroup>
         <Button type="submit" disabled={busy}>{t(pending.step === "signup" ? "auth.signup.submitDefault" : "auth.google.linkSubmit")}</Button>
         {pending.step === "link" && <Button type="button" variant="link" onClick={() => setRecovering(true)}>{t("auth.login.forgotPasswordLink")}</Button>}

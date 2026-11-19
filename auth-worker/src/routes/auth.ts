@@ -172,7 +172,7 @@ export function legacyD1Config(
   }
 }
 
-function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+export function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
   const d1 = legacyD1Config(env)
   if (!d1) return null
 

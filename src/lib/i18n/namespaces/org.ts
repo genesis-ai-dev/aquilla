@@ -548,6 +548,12 @@ export const org = defineNamespace({
     "org.projectOverview.offlineDownloading": "Downloading…",
     "org.projectOverview.offlineDownloadingProgress": "Downloading… ({done}/{total} files)",
     "org.projectOverview.offlineReadyBadge": "Available offline",
+    // Offline org pages — Tauri desktop only (OfflineProjectsPage).
+    "org.offlineProjects.description": "Projects downloaded to this computer",
+    "org.offlineProjects.banner": "You're offline. Only projects downloaded to this computer can be opened.",
+    "org.offlineProjects.emptyTitle": "No downloaded projects here",
+    "org.offlineProjects.emptyDescription": "Use “Make available offline” on a project while you're connected to work on it without a connection.",
+    "org.offlineProjects.syncedAt": "Synced {when}",
     "org.projectOverview.saveMediaOffline": "Save audio for offline",
     "org.projectOverview.offlineMediaSaving": "Saving audio {done}/{total}",
     "org.projectOverview.offlineMediaSaved": plural({
@@ -4128,6 +4134,13 @@ export const org = defineNamespace({
         description:
           "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
         maxLength: 16,
+      },
+      "org.offlineProjects.syncedAt": {
+        description:
+          "Desktop app, offline: trailing note on each row of the downloaded-projects list (OfflineProjectsPage), saying when that project's offline copy last caught up with the server.",
+        placeholders: {
+          when: "A relative time from the app's formatter, e.g. \"3 hours ago\" or \"yesterday\".",
+        },
       },
       "org.projectOverview.offlineDownloadingProgress": {
         description:

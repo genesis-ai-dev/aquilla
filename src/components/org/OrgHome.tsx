@@ -8,6 +8,7 @@ import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import { OfflineProjectsPage } from "./OfflineProjectsPage"
 import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -170,6 +171,12 @@ function useOrgSummaryColumns(): ColumnDef<OrgPortfolioSummary>[] {
 }
 
 export function OrgHome() {
+  const { offline } = useActiveOrg()
+  // Desktop, offline: the dashboard's rollups are server-only.
+  return offline ? <OfflineProjectsPage orgId={null} /> : <OrgHomeOnline />
+}
+
+function OrgHomeOnline() {
   const { t } = useI18n()
   const orgSummaryColumns = useOrgSummaryColumns()
   const {

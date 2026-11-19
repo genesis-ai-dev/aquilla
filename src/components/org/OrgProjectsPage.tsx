@@ -8,6 +8,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
+import { OfflineProjectsPage } from "./OfflineProjectsPage"
 import { ProjectSortMenu } from "./ProjectSortMenu"
 import {
   PM_FILTER_ALL,
@@ -59,6 +60,11 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
  * directory instead.
  */
 export function OrgProjectsPage() {
+  const { offline, activeOrgId } = useActiveOrg()
+  return offline ? <OfflineProjectsPage orgId={activeOrgId} /> : <OrgProjectsOnline />
+}
+
+function OrgProjectsOnline() {
   const { t } = useI18n()
   const {
     activeOrg,

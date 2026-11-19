@@ -107,12 +107,12 @@ export function evenOutCorrection(att: TakeGainFields | null | undefined): { cor
   const target = num(att?.evenTargetLufs)
   if (target == null || loudness == null || loudness <= SILENT_LUFS) return { correctionDb: 0, wantedDb: 0, held: null }
   // Question 93: an export read on a single-channel meter wants a mono take
-  // 3 dB hotter. Added AFTER the +12 / −20 range, which bounds evening out
-  // itself (the range is about not raising hiss); the peak ceiling below
-  // still holds the sum.
+  // 3 dB hotter. Re-check S3 (Sam): the +12 dB cap is about not raising hiss,
+  // so it bounds the whole raise, the 3 dB included; the peak ceiling below
+  // still holds the sum. A take either stops is `held`.
   const meter = att?.monoLoudness === "meter" ? MONO_METER_OFFSET_DB : 0
   const wantedDb = target - loudness + meter
-  let correctionDb = Math.max(-MAX_EVEN_CUT_DB, Math.min(MAX_EVEN_RAISE_DB, target - loudness)) + meter
+  let correctionDb = Math.max(-MAX_EVEN_CUT_DB, Math.min(MAX_EVEN_RAISE_DB, wantedDb))
   let held: TakeGain["held"] = correctionDb !== wantedDb ? "range" : null
   if (correctionDb > 0) {
     // An unknown peak can't be raised safely.

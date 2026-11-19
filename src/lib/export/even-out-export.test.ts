@@ -28,11 +28,12 @@ function sineAt(lufs: number, seconds = 3): Float32Array {
 
 const QUIET = -26
 const LOUD = -10
-const pcmOf: Record<string, Float32Array> = { quiet: sineAt(QUIET), loud: sineAt(LOUD) }
+const MID = -22
+const pcmOf: Record<string, Float32Array> = { quiet: sineAt(QUIET), loud: sineAt(LOUD), mid: sineAt(MID) }
 const reading = (lufs: number) => measureLoudness([sineAt(lufs)], TARGET_RATE)
 
-function cell(id: string, take: "quiet" | "loud", at: number, even: boolean, type = "cue"): CellData {
-  const r = reading(take === "quiet" ? QUIET : LOUD)
+function cell(id: string, take: "quiet" | "loud" | "mid", at: number, even: boolean, type = "cue"): CellData {
+  const r = reading(take === "quiet" ? QUIET : take === "mid" ? MID : LOUD)
   return {
     id, fileId: "f1", original: "", translated: "", context: "", group: "MAT 1:" + at,
     type, status: "unvalidated", validationStatus: "none",
@@ -196,11 +197,12 @@ describe("a track's volume in an export (review M3)", () => {
 // mono take reads −16 LUFS on a meter that counts its one channel once (3 dB
 // under the as-heard reading), in every path, raised exactly once.
 describe("mono loudness as a meter reads it, in every export (question 93)", () => {
+  // A −22 LUFS take: +6 dB to even out, +3 for the meter, inside the +12 cap.
   const meterRead = (pcm: Float32Array) => measureLoudness([pcm], TARGET_RATE).integratedLufs - 10 * Math.log10(2)
 
   it("by line: −16 on a single-channel meter; a take not evened is as recorded", async () => {
     const result = await exportAudioPerLine({
-      cells: withMonoLoudness([cell("c1", "quiet", 10, true), cell("c2", "quiet", 20, false)], "meter"),
+      cells: withMonoLoudness([cell("c1", "mid", 10, true), cell("c2", "quiet", 20, false)], "meter"),
       settings: SETTINGS, projectId: "p1", langCode: "es", format: "wav", decode, fetchBytes,
     })
     const zip = await JSZip.loadAsync(result.blob)
@@ -211,7 +213,7 @@ describe("mono loudness as a meter reads it, in every export (question 93)", () 
 
   it("by chapter: −16 on a single-channel meter", async () => {
     const result = await exportAudioByChapter({
-      cells: withMonoLoudness([cell("v1", "quiet", 1, true, "verse")], "meter"),
+      cells: withMonoLoudness([cell("v1", "mid", 1, true, "verse")], "meter"),
       projectId: "p1", fetchBytes, decode,
     })
     expect(Math.abs(meterRead(await samplesOf(new Uint8Array(await result.blob.arrayBuffer()))) - -16)).toBeLessThan(0.5)
@@ -219,7 +221,7 @@ describe("mono loudness as a meter reads it, in every export (question 93)", () 
 
   it("by character: −16 on a single-channel meter", async () => {
     const result = await exportAudioByCharacter({
-      cells: withMonoLoudness([cell("c1", "quiet", 1, true)], "meter"),
+      cells: withMonoLoudness([cell("c1", "mid", 1, true)], "meter"),
       settings: SETTINGS, projectId: "p1", langCode: "es", fetchBytes, decode,
     })
     const zip = await JSZip.loadAsync(result.blob)

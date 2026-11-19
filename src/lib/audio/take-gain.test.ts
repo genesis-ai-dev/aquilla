@@ -129,7 +129,7 @@ describe("the height a clip's waveform is drawn at", () => {
 // Sam, question 93: "Mono loudness" in the export — as heard (default), or as
 // a single-channel meter reads it (+3 dB on an evened mono take).
 describe("mono loudness as a meter reads it (question 93)", () => {
-  const take = { loudnessLufs: -26, truePeakDb: -16, evenTargetLufs: -16 }
+  const take = { loudnessLufs: -24, truePeakDb: -16, evenTargetLufs: -16 }
 
   it("raises an evened mono take by the dual-mono 3 dB, and nothing else", () => {
     expect(MONO_METER_OFFSET_DB).toBeCloseTo(10 * Math.log10(2), 6)
@@ -139,6 +139,17 @@ describe("mono loudness as a meter reads it (question 93)", () => {
 
   it("leaves a take that isn't evened alone", () => {
     expect(takeGainDb({ loudnessLufs: -26, truePeakDb: -14, gainDb: -2, monoLoudness: "meter" })).toBe(-2)
+  })
+
+  // Re-check S3 (Sam): the +12 dB cap is about hiss, so it holds the whole
+  // raise — the evening and the 3 dB together — and a take it stops is held.
+  it("caps the total raise at +12 dB, and marks the take held", () => {
+    const quiet = { loudnessLufs: -26, truePeakDb: -30, evenTargetLufs: -16 }
+    expect(takeGain(quiet).held).toBeNull()
+    const g = takeGain({ ...quiet, monoLoudness: "meter" })
+    expect(g.correctionDb).toBe(MAX_EVEN_RAISE_DB)
+    expect(g.held).toBe("range")
+    expect(g.wantedDb - g.correctionDb).toBeCloseTo(10 + MONO_METER_OFFSET_DB - 12, 6)
   })
 
   it("is still held by the peak ceiling, and marked as held", () => {

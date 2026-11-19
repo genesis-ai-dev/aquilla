@@ -109,6 +109,10 @@ export interface RunAdoptionArgs {
   /** `deterministicMirrorEventId` bound to the downstream — passed in so this
    *  module does not import link-sync.ts, which imports it. */
   mirrorEventId: (key: string) => string
+  /** AQU-2549: `deterministicDownstreamFileId` bound to the downstream — the id
+   *  a mirrored copy of an upstream file has here. Passed in for the same reason
+   *  as `mirrorEventId`. */
+  copyFileIdOf?: (upstreamFileId: string) => string
   outOfBudget: () => boolean
 }
 
@@ -171,6 +175,17 @@ export async function runAdoption(db: AquillaDb, args: RunAdoptionArgs): Promise
       })
       joined = mirrored !== null
       cellsMirrored += mirrored ?? 0
+      // AQU-2549: "Join into my existing file" — the upstream file had already
+      // arrived as a mirrored copy. Now that the project's own file follows it,
+      // the copy goes to Recently deleted.
+      if (joined && args.copyFileIdOf) {
+        await removeJoinedCopy(db, {
+          downstreamProjectId,
+          copyFileId: args.copyFileIdOf(upstreamFileId),
+          fileId,
+          mirrorEventId,
+        })
+      }
     }
 
     const files: Record<string, string> = { ...adoption.files }
@@ -195,6 +210,74 @@ export async function runAdoption(db: AquillaDb, args: RunAdoptionArgs): Promise
     if (joined) filesAdopted++
   }
   return { status: 'done', adoption, cellsMirrored, filesAdopted }
+}
+
+/**
+ * AQU-2549: soft-delete the mirrored copy of an upstream file that one of the
+ * project's own files now follows. A copy that is not there (the usual replace,
+ * made at link time) is nothing to do. A copy with translations of its own is
+ * kept: the join route refuses that case, and this is the last guard against
+ * deleting a team's work.
+ */
+async function removeJoinedCopy(
+  db: AquillaDb,
+  args: { downstreamProjectId: string; copyFileId: string; fileId: string; mirrorEventId: (key: string) => string },
+): Promise<void> {
+  const { downstreamProjectId, copyFileId, fileId, mirrorEventId } = args
+  if (copyFileId === fileId) return
+  const copy = await db
+    .prepare(
+      `SELECT f.id,
+              EXISTS (SELECT 1 FROM cells c
+                       WHERE c.project_id = f.project_id AND c.file_id = f.id
+                         AND c.side = 'target' AND COALESCE(c.value, '') <> '') AS translated
+         FROM files f
+        WHERE f.project_id = ? AND f.id = ? AND f.deleted_at IS NULL`,
+    )
+    .bind(downstreamProjectId, copyFileId)
+    .first<{ id: string; translated: boolean }>()
+  if (!copy) return
+  if (copy.translated) {
+    console.warn(`link adopt: copy ${copyFileId} has translations of its own; keeping it beside ${fileId}`)
+    return
+  }
+  const now = Date.now()
+  const serverSeq = await allocateSeqRange(db, downstreamProjectId, 1)
+  const event: PersistedEvent<'file.delete'> = {
+    id: mirrorEventId(`join-remove-copy:${copyFileId}:${fileId}`),
+    schemaVersion: ADOPT_SCHEMA_VERSION,
+    projectId: downstreamProjectId,
+    fileId: copyFileId,
+    cellId: null,
+    parentId: null,
+    kind: 'file.delete',
+    author: ADOPT_AUTHOR,
+    payload: {},
+    clientTs: now,
+    serverTs: now,
+    serverSeq,
+  }
+  const stmts: AquillaStatement[] = [
+    buildBulkEventInsertStmt(db, [
+      {
+        id: event.id,
+        schemaVersion: event.schemaVersion,
+        projectId: event.projectId,
+        fileId: event.fileId,
+        cellId: null,
+        parentId: null,
+        kind: event.kind,
+        author: event.author,
+        payloadJson: '{}',
+        clientTs: now,
+        serverTs: now,
+        serverSeq,
+      },
+    ]),
+  ]
+  buildEventProjectionStmts(db, event, stmts)
+  stmts.push(buildSettleSeqRangeStmt(db, downstreamProjectId, serverSeq))
+  await db.batch(stmts)
 }
 
 /**

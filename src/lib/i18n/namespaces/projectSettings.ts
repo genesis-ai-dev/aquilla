@@ -834,6 +834,28 @@ export const projectSettings = defineNamespace({
     // later slice). The dialog reuses the link flow's count sentence, scope
     // notes and same-name warning, so the two read the same.
     "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    // ── AQU-2549: join a copy the link brought in into the project's own file.
+    "projectSettings.sourceLink.joinButton": "Join a copy into my file",
+    "projectSettings.sourceLink.joinTitle": "Join a copy into my existing file",
+    "projectSettings.sourceLink.joinDescription":
+      "Your file takes the source project's text and keeps its translations and validations. " +
+      "The copy goes to Recently deleted.",
+    "projectSettings.sourceLink.joinLoading": "Looking for copies…",
+    "projectSettings.sourceLink.joinLoadFailed": "Couldn't load the copies. Close this and try again.",
+    "projectSettings.sourceLink.joinNoCopies": "This project has no copies from the source project to join.",
+    "projectSettings.sourceLink.joinCopyLabel": "Copy from the source project",
+    "projectSettings.sourceLink.joinTargetLabel": "Your file to join it into",
+    "projectSettings.sourceLink.joinCopyTranslated":
+      "{name} can't be joined because it has translations of its own, which would end up on a deleted file.",
+    "projectSettings.sourceLink.joinNoMatch": plural({
+      one: "These two files are not the same material: {same} of {count} line matches, so they can't be joined.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines match, so they can't be joined.",
+    }),
+    "projectSettings.sourceLink.joinConfirm": "Join",
+    "projectSettings.sourceLink.joinJoining": "Joining…",
+    "projectSettings.sourceLink.joinIncomplete":
+      "The copy is still being joined. This can take a moment for a big file.",
     "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
     "projectSettings.sourceLink.chooseFilesDescription":
       "Files this link follows are checked. Check more of the source project's " +
@@ -2958,6 +2980,50 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.joinButton": {
+        description:
+          "Button on the Source link card (live link to the source project's source, " +
+          "Project Lead or higher). Opens a dialog to join a second copy of a file, " +
+          "which the link brought in, into the project's own file.",
+      },
+      "projectSettings.sourceLink.joinTitle": { description: "Title of the join dialog." },
+      "projectSettings.sourceLink.joinDescription": {
+        description:
+          "What joining does: the project's own file takes the source project's text and " +
+          "keeps its translations and validations; the copy is moved to Recently deleted " +
+          "(the app's name for the bin of deleted files).",
+      },
+      "projectSettings.sourceLink.joinLoading": { description: "While the dialog reads the list of copies." },
+      "projectSettings.sourceLink.joinLoadFailed": { description: "The list of copies could not be read." },
+      "projectSettings.sourceLink.joinNoCopies": {
+        description: "The project holds no copy of a source project file that could be joined.",
+      },
+      "projectSettings.sourceLink.joinCopyLabel": {
+        description: "Accessible name of the picker of copies the link brought in.",
+      },
+      "projectSettings.sourceLink.joinTargetLabel": {
+        description: "Accessible name of the picker of the project's own files the copy joins into.",
+      },
+      "projectSettings.sourceLink.joinCopyTranslated": {
+        description:
+          "Refusal: the copy has translations made on it, so it cannot be joined (joining " +
+          "removes the copy).",
+        placeholders: { name: "The copy's file name \u2014 never translated." },
+      },
+      "projectSettings.sourceLink.joinNoMatch": {
+        description:
+          "Refusal in the join dialog when fewer than half of the lines are identical: the " +
+          "two files are not the same text, so the copy cannot be joined into this file.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.sourceLink.joinConfirm": { description: "Confirm button of the join dialog." },
+      "projectSettings.sourceLink.joinJoining": { description: "Confirm button while the join runs." },
+      "projectSettings.sourceLink.joinIncomplete": {
+        description: "The join was recorded but the sync has not finished it yet (a big file).",
       },
       "projectSettings.sourceLink.chooseFilesButton": {
         description:

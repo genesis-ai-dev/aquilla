@@ -2052,6 +2052,7 @@ async function foldMirrorSync(
       expectedRaw: link.source_link_adopt!,
       head,
       mirrorEventId: (key) => deterministicMirrorEventId(downstreamProjectId, key),
+      copyFileIdOf: (upstreamFileId) => deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
       outOfBudget: () => now() >= deadline,
     })
     total.ranSync = true

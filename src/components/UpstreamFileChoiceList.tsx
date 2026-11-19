@@ -215,7 +215,14 @@ export function ReplaceFileOption({
 /** AQU-1679: what replacing this file's source will do, in the server's own
  *  numbers — or why it cannot be done. Shared with "Choose files"
  *  (ChooseLinkedFilesDialog), which offers the same option on an existing link. */
-export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefined }) {
+export function ReplaceMatchNote({
+  state,
+  join,
+}: {
+  state: ReplaceMatchState | undefined
+  /** AQU-2549: in the join dialog, where there is no option to turn off. */
+  join?: boolean
+}) {
   const t = useT()
   if (!state || state.status === "loading") {
     return (
@@ -244,7 +251,10 @@ export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefin
   if (!match.canReplace) {
     return (
       <p className="text-xs text-destructive" role="alert">
-        {t("projectSettings.linkSource.replaceNoMatch", { same: match.same, count: lines })}
+        {t(join ? "projectSettings.sourceLink.joinNoMatch" : "projectSettings.linkSource.replaceNoMatch", {
+          same: match.same,
+          count: lines,
+        })}
       </p>
     )
   }

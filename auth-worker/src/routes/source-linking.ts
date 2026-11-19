@@ -18,6 +18,11 @@
 //                                         stop following some of them, keeping
 //                                         them as this project's own copies
 //                                                           (project_lead+)
+//   GET    /:projectId/link-source/copies the link's mirrored copies and
+//                                         the files they could join into
+//                                                           (project_lead+)
+//   POST   /:projectId/link-source/join   join a copy into the project's own
+//                                         file              (project_lead+)
 //   POST   /:projectId/detach-source      clear upstream    (project_lead+)
 //   DELETE /:projectId                    blocked-if-downstreams owner-only
 //
@@ -37,7 +42,7 @@
 // returns the linked-target ids so the client can render a confirmation
 // dialog before POSTing /:projectId/archive.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import {
@@ -60,6 +65,7 @@ import {
   loadProjectWithSource,
   loadLinkFileIds,
   loadLinkFileIdsRaw,
+  loadLinkedFileCopies,
   loadStoppedUpstreamFileIds,
   loadUpstreamFileIds,
   matchFilesForReplace,
@@ -811,6 +817,154 @@ sourceLinking.post(
     // AQU-1679: echoed only when pairs were sent — an add that replaces nothing
     // answers exactly what it did before this slice.
     return c.json({ projectId, added, fileIds: after, ...(replaceFiles ? { replaceFiles } : {}), complete })
+  },
+)
+
+// ──────────────────────────────────────────────────────────────────────────
+// GET  /:projectId/link-source/copies  (AQU-2549)
+// POST /:projectId/link-source/join    (AQU-2549)
+//
+// "Join into my existing file". A project can hold a mirrored copy of an
+// upstream file it had already imported on its own: a whole-project link
+// brings a matching new file in as a copy, a replace was left off, or the
+// duplicate is older than the replace. Joining records the same pair
+// AQU-1679's replace records (`source_link_adopt`), and the mirror sync does
+// the rest: the project's own file takes the upstream's source line by line,
+// keeping its translations and validations, and the copy goes to Recently
+// deleted (sync-worker events/link-adopt.ts).
+//
+// Refused: a copy with translations of its own (Sam's pick, Nov 14 — joining
+// would leave that work on a deleted file), and two files that are not the
+// same material (the half-the-lines check every replace makes).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The checks both routes share: a lead, on a live link to the upstream's source. */
+async function joinableLink(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  write: boolean,
+): Promise<{ ok: true; upstreamId: string } | { ok: false; res: Response }> {
+  const user = c.get("user")
+  const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
+  if (!role) return { ok: false, res: c.json({ error: "not found or no access" }, 403) }
+  if (role.level < LINK_MIN_ROLE) {
+    return { ok: false, res: c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403) }
+  }
+  // OPS-51: the join writes to the link, like adding files; the list is a read.
+  if (write) {
+    const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, { includeArchived: true })
+    if (!effective || effective.level < LINK_MIN_ROLE) {
+      return {
+        ok: false,
+        res: c.json({ error: "elevation required to change a link's files with platform-admin access" }, 403),
+      }
+    }
+  }
+  const project = await loadProjectWithSource(c.env, projectId)
+  if (!project) return { ok: false, res: c.json({ error: "project not found" }, 404) }
+  const upstreamId = project.source_project_id
+  if (!upstreamId) return { ok: false, res: c.json({ error: "project is not linked to a source" }, 409) }
+  if (project.source_link_mode !== "live" || project.source_link_consumes === "target") {
+    return {
+      ok: false,
+      res: c.json({ error: "only a live link to the upstream's source can join a copy" }, 409),
+    }
+  }
+  if (write) {
+    // The join reads the upstream's lines into this project: the caller must
+    // still be able to see the upstream now (same rule as adding files).
+    const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, upstreamId)
+    if (!sourceRole) {
+      return { ok: false, res: c.json({ error: "not found or no access to source project" }, 403) }
+    }
+  }
+  return { ok: true, upstreamId }
+}
+
+sourceLinking.get("/:projectId/link-source/copies", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") as string
+  const link = await joinableLink(c, projectId, false)
+  if (!link.ok) return link.res
+  const adoption = await loadLinkAdoption(c.env, projectId)
+  const { copies, ownFiles } = await loadLinkedFileCopies(c.env, projectId, link.upstreamId, adoption?.files ?? null)
+  return c.json({ projectId, copies, ownFiles })
+})
+
+const joinCopySchema = z.object({
+  /** The mirrored copy to remove. */
+  copyFileId: z.string().min(1).max(256),
+  /** The project's own file that takes the source. */
+  fileId: z.string().min(1).max(256),
+})
+
+sourceLinking.post(
+  "/:projectId/link-source/join",
+  authMiddleware,
+  zValidator("json", joinCopySchema),
+  async (c) => {
+    const projectId = c.req.param("projectId") as string
+    const { copyFileId, fileId } = c.req.valid("json")
+    const link = await joinableLink(c, projectId, true)
+    if (!link.ok) return link.res
+    const upstreamId = link.upstreamId
+
+    const current = await loadLinkAdoptionRaw(c.env, projectId)
+    if (!current.ok) {
+      console.error(`link-source/join: source_link_adopt unreadable for ${projectId}`)
+      return c.json({ error: "joining a copy is not available yet" }, 503)
+    }
+    const existing = parseSourceLinkAdoption(current.raw)
+    const { copies, ownFiles } = await loadLinkedFileCopies(c.env, projectId, upstreamId, existing?.files ?? null)
+    const copy = copies.find((f) => f.fileId === copyFileId)
+    if (!copy) return c.json({ error: "that file is not a copy from the source project" }, 404)
+    if (!ownFiles.some((f) => f.id === fileId)) {
+      return c.json({ error: "the file to join into must be one of this project's own files" }, 400)
+    }
+    if (copy.translated) {
+      return c.json(
+        { error: "the copy has translations of its own", reason: "copyHasTranslations" },
+        409,
+      )
+    }
+    const [match] = await matchFilesForReplace(c.env, {
+      projectId,
+      sourceProjectId: upstreamId,
+      pairs: [{ upstreamFileId: copy.upstreamFileId, fileId }],
+    })
+    if (!match?.canReplace) {
+      return c.json({ error: "the two files are not the same material", match }, 422)
+    }
+
+    // A compare-and-set against the column as read: the mirror sync writes it
+    // too. The sync this triggers finds the pair pending and joins it.
+    const next = serializeSourceLinkAdoption({
+      files: { ...(existing?.files ?? {}), [copy.upstreamFileId]: fileId },
+      pending: [...new Set([...(existing?.pending ?? []), copy.upstreamFileId])],
+    })
+    try {
+      const res = await c.env.AQUILLA_PG.prepare(
+        `UPDATE projects SET source_link_adopt = ?
+          WHERE id = ? AND source_link_adopt IS NOT DISTINCT FROM ?`,
+      )
+        .bind(next, projectId, current.raw)
+        .run()
+      if (Number(res.meta?.changes ?? 0) === 0) {
+        return c.json({ error: "the link changed while joining; try again" }, 409)
+      }
+    } catch (err) {
+      console.error("link-source/join adopt UPDATE failed:", err)
+      return c.json({ error: "could not join the copy" }, 500)
+    }
+
+    await triggerLinkSeedSync(c.env, projectId)
+    const stillJoining = (await loadLinkAdoption(c.env, projectId))?.pending ?? []
+    return c.json({
+      projectId,
+      copyFileId,
+      fileId,
+      match,
+      complete: !stillJoining.includes(copy.upstreamFileId),
+    })
   },
 )
 

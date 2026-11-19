@@ -4,6 +4,9 @@
 // the BSB source project into a language project that had imported the file on
 // its own. These tests pin the server half of the fixes:
 //
+//   - "Join into my existing file": a copy the link already mirrored in is
+//     joined into the project's own file (part 1). The route records the pair
+//     the sync joins (the sync half is in sync-worker link-sync-join-copy.test.ts).
 //   - While the source project's import of the file is still running, the file
 //     is staged (soft-deleted until it publishes). The comparison said "only 0
 //     of 0 lines match"; it now says the file is still importing.
@@ -12,6 +15,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { deterministicDownstreamFileId } from "../services/source-linking"
 
 const DOWN = "proj-2549-portuguese"
 const UP = "proj-2549-bsb"
@@ -131,5 +135,113 @@ describe("POST /link-source/match while the source project is still importing th
     const deleted = await match()
     expect(deleted).toMatchObject({ missing: true, canReplace: false })
     expect(deleted).not.toHaveProperty("importing")
+  })
+})
+
+describe("Join into my existing file (AQU-2549 part 1)", () => {
+  const COPY_GD = deterministicDownstreamFileId(DOWN, UP_GD)
+
+  /** A whole-project live link that has mirrored the upstream file in as a copy. */
+  async function linkedWithCopy(copyLines: readonly string[] = LINES): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      `UPDATE projects SET source_project_id = ?, source_link_mode = 'live', source_link_consumes = 'source',
+              source_link_gate = 'validated', source_link_cursor = 10 WHERE id = ?`,
+    )
+      .bind(UP, DOWN)
+      .run()
+    await seedFile(DOWN, COPY_GD, "3 Genesis–Deuteronomy", "up", copyLines)
+  }
+
+  async function adoptRaw(): Promise<string | null> {
+    const row = await env.AQUILLA_PG.prepare("SELECT source_link_adopt FROM projects WHERE id = ?")
+      .bind(DOWN)
+      .first<{ source_link_adopt: string | null }>()
+    return row?.source_link_adopt ?? null
+  }
+
+  async function copies(): Promise<Response> {
+    return app.request(
+      `/api/v2/projects/${DOWN}/link-source/copies`,
+      { headers: authHeader(await jwtFor("lead")) },
+      env,
+    )
+  }
+
+  // WHY: Joel's project held two "Genesis–Deuteronomy" files after a
+  // whole-project link and nothing could put the corrected source onto the one
+  // his team translated.
+  it("lists the copy with the same-named own file, and records the join the sync performs", async () => {
+    await linkedWithCopy()
+
+    const listed = await copies()
+    expect(listed.status).toBe(200)
+    expect(await listed.json()).toMatchObject({
+      copies: [{ fileId: COPY_GD, upstreamFileId: UP_GD, translated: false, suggestedFileId: OWN_GD }],
+      ownFiles: [{ id: OWN_GD, name: "3 Genesis–Deuteronomy" }],
+    })
+
+    const res = await post("/link-source/join", { copyFileId: COPY_GD, fileId: OWN_GD })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ match: { same: 4, canReplace: true } })
+    expect(JSON.parse((await adoptRaw())!)).toEqual({ files: { [UP_GD]: OWN_GD }, pending: [UP_GD] })
+  })
+
+  // WHY (Sam's pick, Nov 14): joining would leave the copy's own translations
+  // on a deleted file. Refused, and the reason is said.
+  it("refuses a copy that has translations of its own", async () => {
+    await linkedWithCopy()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at)
+       VALUES (?, ?, 'up-2', 'target', 'No princípio', 'e-t-1', 3000)`,
+    )
+      .bind(DOWN, COPY_GD)
+      .run()
+
+    const res = await post("/link-source/join", { copyFileId: COPY_GD, fileId: OWN_GD })
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ reason: "copyHasTranslations" })
+    expect(await adoptRaw()).toBeNull()
+  })
+
+  // WHY: the half-the-lines check every replace makes still holds.
+  it("refuses two files that are not the same material", async () => {
+    await linkedWithCopy()
+    await env.AQUILLA_PG.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(DOWN, OWN_GD).run()
+    await seedFile(DOWN, "file-2549-other", "Psalms", "ps", ["Psalm 1", "Blessed is the man", "who does not walk", "Selah"])
+
+    const res = await post("/link-source/join", { copyFileId: COPY_GD, fileId: "file-2549-other" })
+    expect(res.status).toBe(422)
+    expect(await res.json()).toMatchObject({ match: { canReplace: false } })
+    expect(await adoptRaw()).toBeNull()
+  })
+
+  // WHY: a file the project imported itself is not a copy; "joining" it would
+  // delete the team's own file.
+  it("refuses a file that is not a copy from the source project", async () => {
+    await linkedWithCopy()
+    const res = await post("/link-source/join", { copyFileId: OWN_GD, fileId: COPY_GD })
+    expect(res.status).toBe(404)
+    expect(await adoptRaw()).toBeNull()
+  })
+
+  it("is for a Project Lead or higher", async () => {
+    await linkedWithCopy()
+    await seedUser(2, "translator")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 2, 300, 1)",
+    )
+      .bind(DOWN)
+      .run()
+    const res = await app.request(
+      `/api/v2/projects/${DOWN}/link-source/join`,
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("translator")),
+        body: JSON.stringify({ copyFileId: COPY_GD, fileId: OWN_GD }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    expect(await adoptRaw()).toBeNull()
   })
 })

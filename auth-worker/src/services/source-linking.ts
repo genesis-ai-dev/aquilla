@@ -633,6 +633,77 @@ export async function matchFilesForReplace(
   return matches
 }
 
+/** AQU-2549: a mirrored copy of an upstream file, as "Join into my existing
+ *  file" lists it. */
+export interface LinkedFileCopy {
+  /** The copy's own id here. */
+  fileId: string
+  name: string
+  /** The upstream file it mirrors. */
+  upstreamFileId: string
+  /** Someone translated on the copy itself: it cannot be joined. */
+  translated: boolean
+  /** The project's own file with the same name, when exactly one has it. */
+  suggestedFileId?: string
+}
+
+/**
+ * AQU-2549: the copies a live link has mirrored into this project, and the
+ * project's own files they could be joined into.
+ *
+ * A copy is found by its identity (`deterministicDownstreamFileId`), never by
+ * name, for the reason `loadStoppedUpstreamFileIds` gives. Not a copy: a file
+ * the link already follows INTO (adopted). An own file that already follows
+ * an upstream file is not offered either — one file follows one upstream file.
+ */
+export async function loadLinkedFileCopies(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<{ copies: LinkedFileCopy[]; ownFiles: Array<{ id: string; name: string }> }> {
+  const adopted = adoptedFileIdOf ?? {}
+  const upstreamOfCopy = new Map<string, string>()
+  for (const upstreamFileId of await loadUpstreamFileIds(env, upstreamProjectId)) {
+    if (adopted[upstreamFileId]) continue
+    upstreamOfCopy.set(deterministicDownstreamFileId(projectId, upstreamFileId), upstreamFileId)
+  }
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT f.id, f.name,
+            EXISTS (SELECT 1 FROM cells c
+                     WHERE c.project_id = f.project_id AND c.file_id = f.id
+                       AND c.side = 'target' AND COALESCE(c.value, '') <> '') AS translated
+       FROM files f
+      WHERE f.project_id = ? AND f.deleted_at IS NULL
+      ORDER BY f.created_at, f.id`,
+  )
+    .bind(projectId)
+    .all<{ id: string; name: string; translated: boolean }>()
+  const adoptedOwn = new Set(Object.values(adopted))
+  const ownFiles: Array<{ id: string; name: string }> = []
+  const copyRows: Array<{ id: string; name: string; translated: boolean }> = []
+  for (const row of results ?? []) {
+    if (upstreamOfCopy.has(row.id)) copyRows.push(row)
+    else if (!adoptedOwn.has(row.id)) ownFiles.push({ id: row.id, name: row.name })
+  }
+  const ownByName = new Map<string, string[]>()
+  for (const f of ownFiles) {
+    const key = f.name.toLowerCase()
+    ownByName.set(key, [...(ownByName.get(key) ?? []), f.id])
+  }
+  const copies = copyRows.map((row): LinkedFileCopy => {
+    const same = ownByName.get(row.name.toLowerCase()) ?? []
+    return {
+      fileId: row.id,
+      name: row.name,
+      upstreamFileId: upstreamOfCopy.get(row.id)!,
+      translated: row.translated === true,
+      ...(same.length === 1 ? { suggestedFileId: same[0] } : {}),
+    }
+  })
+  return { copies, ownFiles }
+}
+
 /** AQU-1560: the upstream's current (non-deleted) file ids. */
 export async function loadUpstreamFileIds(env: Env, upstreamProjectId: string): Promise<string[]> {
   const { results } = await env.AQUILLA_PG.prepare(

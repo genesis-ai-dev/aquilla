@@ -251,3 +251,79 @@ describe('AQU-2549 part 4: after a replace, only lines whose source changed read
     })
   }
 })
+
+describe('AQU-2549 part 1: joining a copy that already arrived into the project\'s own file', () => {
+  /** A whole-project link brings the corrected file in as a copy, beside the
+   *  project's own one-step import with its translations. */
+  async function copyArrived() {
+    const ctx = await setup()
+    const { t, reader, revise } = ctx
+    await revise(LANG, OWN_GD, 'a', LINES(OLD_NOTE))
+    await translate(t, OWN_GD)
+    await revise(BSB, UP_GD, 'b', LINES(NEW_NOTE))
+    await link(t, null)
+    await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+    expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy').sort()).toEqual(['copy', 'own'])
+    return ctx
+  }
+
+  /** What POST /link-source/join records: the pair, pending a join. */
+  async function recordJoin(t: TestDb): Promise<void> {
+    await t.pg.query(`UPDATE projects SET source_link_adopt = $2 WHERE id = $1`, [
+      LANG,
+      JSON.stringify({ files: { [UP_GD]: OWN_GD }, pending: [UP_GD] }),
+    ])
+  }
+
+  // WHY: Joel's project ended up with two "Genesis–Deuteronomy" files and no
+  // way to put the corrected source onto the one his team translated.
+  it('gives the own file the source, removes the copy, and keeps translations and validations', async () => {
+    const { t, reader } = await copyArrived()
+    try {
+      const before = await targetsAndValidators(t)
+      await recordJoin(t)
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+
+      expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy')).toEqual(['own'])
+      expect((await sourceOf(t, LANG, OWN_GD)).map((c) => c.value)).toContain(NEW_NOTE)
+      expect(await staleValues(t)).toEqual([NEW_NOTE])
+      expect(await targetsAndValidators(t)).toEqual(before)
+      // In Recently deleted, not gone.
+      const copy = await t.pg.query<{ deleted_at: string | null }>(
+        `SELECT deleted_at FROM files WHERE project_id = $1 AND id = $2`, [LANG, COPY_GD],
+      )
+      expect(copy.rows[0]?.deleted_at).not.toBeNull()
+
+      // From now on the upstream's edits reach the own file.
+      const up = await sourceOf(t, BSB, UP_GD)
+      const last = up.find((c) => c.value === LINES(NEW_NOTE)[9])!
+      await emit(t, BSB, 'source.cell.commit', {
+        fileId: UP_GD, cellId: last.cell_id, parentId: last.event_id,
+        payload: { value: 'So Abram departed, as the LORD had told him.' },
+      })
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+      expect((await sourceOf(t, LANG, OWN_GD)).map((c) => c.value)).toContain('So Abram departed, as the LORD had told him.')
+      expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy')).toEqual(['own'])
+    } finally {
+      await t.close()
+    }
+  })
+
+  // WHY: the route refuses a copy with translations of its own; the sync must
+  // never delete one either, whatever the record says.
+  it('keeps a copy that has translations of its own', async () => {
+    const { t, reader } = await copyArrived()
+    try {
+      const copyLine = (await sourceOf(t, LANG, COPY_GD)).find((c) => c.value === NEW_NOTE)!
+      await emit(t, LANG, 'target.cell.commit', {
+        fileId: COPY_GD, cellId: copyLine.cell_id, parentId: copyLine.event_id,
+        payload: { value: 'PT: nota', sourceEventId: copyLine.event_id },
+      })
+      await recordJoin(t)
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+      expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy').sort()).toEqual(['copy', 'own'])
+    } finally {
+      await t.close()
+    }
+  })
+})

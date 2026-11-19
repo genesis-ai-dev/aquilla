@@ -4574,7 +4574,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "勾选上方的文件即可将其添加到此关联，取消勾选则停止跟随。",
   "projectSettings.sourceLink.chooseFilesAddButton": "添加文件",
   "projectSettings.sourceLink.chooseFilesAddingButton": "正在添加文件…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "文件未能全部到达，因此尚未添加到关联。请重试以完成引入。",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "已停止跟随",
   "projectSettings.sourceLink.chooseFilesReviewButton": "审阅更改",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "确认对此关联的更改",

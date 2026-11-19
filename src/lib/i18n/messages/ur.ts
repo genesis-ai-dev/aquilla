@@ -5440,7 +5440,6 @@ export const ur: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "اس لنک میں شامل کرنے کے لیے اوپر فائل نشان زد کریں، یا پیروی روکنے کے لیے نشان ہٹائیں۔",
   "projectSettings.sourceLink.chooseFilesAddButton": "فائلیں شامل کریں",
   "projectSettings.sourceLink.chooseFilesAddingButton": "فائلیں شامل ہو رہی ہیں…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "فائلیں پہنچ کر ختم نہیں ہوئیں، اس لیے ابھی لنک میں شامل نہیں۔ انہیں لانے کے لیے دوبارہ کوشش کریں۔",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "پیروی رک گئی",
   "projectSettings.sourceLink.chooseFilesReviewButton": "تبدیلیوں کا جائزہ",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "لنک کی ان تبدیلیوں کی تصدیق کریں",

@@ -4654,7 +4654,6 @@ export const id: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Centang file di atas untuk menambahkannya ke tautan ini, atau hapus centang untuk berhenti mengikutinya.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Tambahkan file",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Menambahkan file…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "File belum selesai masuk, jadi belum ditambahkan ke tautan. Coba lagi untuk menyelesaikan pemasukannya.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "berhenti diikuti",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Tinjau perubahan",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Konfirmasi perubahan pada tautan ini",

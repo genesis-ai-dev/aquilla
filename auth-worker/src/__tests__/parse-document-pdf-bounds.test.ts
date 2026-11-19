@@ -404,6 +404,21 @@ describe("extractTextFromPdf — ordinary PDFs read as before (AQU-2594)", () =>
     }
   })
 
+  it("still reads the Flate pages after ten ASCII85-and-Flate ones it cannot decode", () => {
+    // Distiller-era files encode content streams as [/ASCII85Decode /FlateDecode].
+    // The extractor decodes only Flate, so these fail; each failure used to
+    // spend the inflation budget, and ten of them left nothing for the pages after.
+    const ascii85 = strToU8("9jqo^BlbD-BleB1DJ+*+F(f,q/0JhKF<GL>Cj@.4Gp$d7F!,L7@<6@)/0JDEF<G%<+EV:2F!,O<".repeat(40) + "~>")
+    const encoded = concat([
+      strToU8(`<< /Length ${ascii85.length} /Filter [/ASCII85Decode /FlateDecode] >>\nstream\n`),
+      ascii85,
+      strToU8("\nendstream\nendobj\n"),
+    ])
+    const page = flateStreamObject(zlibSync(strToU8("BT (Page after the encoded ones) Tj ET")))
+    const pdf = concat([strToU8("%PDF-1.4\n"), ...Array.from({ length: 10 }, () => encoded), page, strToU8("%%EOF")])
+    expect(extractTextFromPdf(pdf)).toBe("Page after the encoded ones")
+  })
+
   it("finds exactly the text the old regex scan found, on 20,000 generated inputs", () => {
     for (let seed = 1; seed <= 20_000; seed++) {
       const random = prng(seed)

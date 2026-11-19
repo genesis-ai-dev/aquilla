@@ -389,6 +389,10 @@ function inflatePdfStreams(bytes: Uint8Array, raw: string, work: PdfWorkBudget):
     // Images and embedded font programs inflate to binary that can never hold
     // text operators — skip them so they don't consume the budget.
     if (/\/Subtype\s*\/Image|\/FontFile/.test(dict)) continue
+    // AQU-2594: nor can a stream that needs another filter as well as Flate
+    // ([/ASCII85Decode /FlateDecode], as Distiller wrote): it fails to inflate,
+    // and each failure spends the inflation budget the later pages need.
+    if (/\/(?:ASCIIHex|ASCII85|LZW|RunLength)Decode/.test(dict)) continue
 
     const dataStart = match.index + match[0].length
     const dataEnd = raw.indexOf("endstream", dataStart)

@@ -26,6 +26,7 @@ import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artif
 import { safeAudioContentType } from "./audio-content-type"
 import { handleAudioMultipart, parseAudioMultipartPhase } from "./audio-multipart"
 import { adminBearerMatches } from "./lib/admin-secret"
+import { digestsOf, fileScopeRefusal, isDerivedSidecar, removalRefusal, storedBytesMatch } from "./audio-write-guard"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
@@ -34,6 +35,9 @@ export interface AudioEnv {
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
+  /** AQU-2682: the lane wall switch, so a removal follows the same lane rules
+   *  the events route does. */
+  LANE_READ_WALL?: string
 }
 
 export { safeAudioContentType }
@@ -208,6 +212,17 @@ export async function handleAudioRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return withAudioCors(new Response("insufficient role", { status: 403 }))
     }
+    // AQU-2682: within the caller's files, and only bytes no live take plays
+    // unless the caller recorded that take or is a Maintainer.
+    const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
+    if (outOfScope) return withAudioCors(new Response(outOfScope, { status: 403 }))
+    if (!isDerivedSidecar(audioId)) {
+      if (!env.AQUILLA_PG) {
+        return withAudioCors(new Response("AQUILLA_PG binding not configured", { status: 500 }))
+      }
+      const refused = await removalRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId, audioId, env.LANE_READ_WALL)
+      if (refused) return withAudioCors(new Response(refused, { status: 403 }))
+    }
     await env.SNAPSHOTS.delete(key)
     return withAudioCors(Response.json({ ok: true }))
   }
@@ -243,6 +258,9 @@ export async function handleAudioRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return withAudioCors(new Response("insufficient role", { status: 403 }))
     }
+    // AQU-2682: within the caller's files.
+    const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
+    if (outOfScope) return withAudioCors(new Response(outOfScope, { status: 403 }))
     const artifactId = request.headers.get("X-Artifact-Id")?.trim()
     if (artifactId && !UUID_RE.test(artifactId)) {
       return withAudioCors(new Response("invalid artifact id", { status: 400 }))
@@ -302,9 +320,21 @@ export async function handleAudioRequest(
       }
       existing = checked.existing
     }
-    await env.SNAPSHOTS.put(key, body, {
-      httpMetadata: { contentType },
-    })
+    // AQU-2682: a recording is written ONCE. The same bytes again are a retry
+    // (nothing to write); other bytes under a stored name are refused, so no
+    // take's audio can be replaced under its approvals. A `.peaks` sidecar is
+    // derived and may be rewritten.
+    const digests = digestsOf(body)
+    const stored = isDerivedSidecar(audioId) ? null : await env.SNAPSHOTS.head(key)
+    if (stored && !storedBytesMatch(stored, digests, body.byteLength)) {
+      return withAudioCors(new Response("audio already stored under this id", { status: 409 }))
+    }
+    if (!stored) {
+      await env.SNAPSHOTS.put(key, body, {
+        httpMetadata: { contentType },
+        customMetadata: { sha256: digests.sha256 },
+      })
+    }
     if (artifactId) {
       const written = await writeAudioArtifactRows({
         env,

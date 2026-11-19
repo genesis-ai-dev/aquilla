@@ -4639,7 +4639,8 @@ export const sw: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Kama inavyosikika",
   "importExport.dialog.monoLoudnessMeter": "Kama mita ya chaneli moja inavyosoma",
   "importExport.dialog.monoLoudnessInfoLabel": "Kuhusu nguvu ya sauti ya mono",
-  "importExport.dialog.monoLoudnessInfo": "Faili ya mono hucheza kwenye spika zote mbili, kwa hiyo inasikika takriban 3 dB juu zaidi kuliko kipimo cha chaneli moja. Chagua kipimo cha mita ikiwa uwasilishaji hukagua faili za mono kwa mita ya nguvu ya sauti.",
+  "importExport.dialog.monoLoudnessInfo": "Faili ya mono hucheza kwenye spika zote mbili, kwa hiyo inasikika takriban 3 dB juu zaidi kuliko kipimo cha chaneli moja. Chagua kipimo cha mita ikiwa uwasilishaji hukagua faili za mono kwa mita ya nguvu ya sauti. Leo kila uhamishaji ni mono, na rekodi zilizosawazishwa pekee ndizo hubadilika.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"Rekodi {count} haiwezi kupanda hadi kipimo cha mita; ingepotoka au mzomo ungeongezeka sana.","other":"Rekodi {count} haziwezi kupanda hadi kipimo cha mita; zingepotoka au mzomo ungeongezeka sana."},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "Kwa uwasilishaji wa utangazaji. Ikiwa haijachaguliwa, hunakili kila rekodi kama ilivyohifadhiwa, ambayo inaweza kuwa imebanwa au kuwa na kiwango cha chini cha sampuli.",
   "importExport.dialog.chapterStitchPreview": "{clips} aya zilizorekodiwa · sura {chapters}",
   "importExport.status.stitchingChapterAudio": "Inaunganisha sauti ya sura…",
@@ -8614,4 +8615,5 @@ export const sw: Catalog = {
   "transcribe.stop": "Simamisha",
   "transcribe.empty": "Faili hii bado haina sauti. Rekodi au ingiza sauti, kisha rudi ili kuinukuu.",
   "transcribe.signIn": "Ingia ili kunukuu",
+  "recordingsUpload.banner.evenOutTrack": "Sawazisha wimbo ulingane",
 }

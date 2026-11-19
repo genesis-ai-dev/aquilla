@@ -4545,7 +4545,8 @@ export const hi: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "जैसा सुनाई देता है",
   "importExport.dialog.monoLoudnessMeter": "जैसा एक-चैनल मीटर पढ़ता है",
   "importExport.dialog.monoLoudnessInfoLabel": "मोनो तेज़ी के बारे में",
-  "importExport.dialog.monoLoudnessInfo": "मोनो फ़ाइल दोनों स्पीकरों पर चलती है, इसलिए वह एक चैनल के मापे से लगभग 3 dB ज़्यादा तेज़ सुनाई देती है। अगर डिलीवरी में मोनो फ़ाइलें तेज़ी मीटर पर जाँची जाती हैं, तो मीटर की रीडिंग चुनें।",
+  "importExport.dialog.monoLoudnessInfo": "मोनो फ़ाइल दोनों स्पीकरों पर चलती है, इसलिए वह एक चैनल के मापे से लगभग 3 dB ज़्यादा तेज़ सुनाई देती है। अगर डिलीवरी में मोनो फ़ाइलें तेज़ी मीटर पर जाँची जाती हैं, तो मीटर की रीडिंग चुनें। आज हर एक्सपोर्ट मोनो है, और सिर्फ़ बराबर किए गए टेक बदलते हैं।",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} टेक मीटर की रीडिंग तक नहीं बढ़ सकता; वह फट जाएगा या सरसराहट बहुत बढ़ जाएगी।","other":"{count} टेक मीटर की रीडिंग तक नहीं बढ़ सकते; वे फट जाएँगे या सरसराहट बहुत बढ़ जाएगी।"},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "प्रसारण वितरण के लिए। बंद हर रिकॉर्डिंग जैसी सहेजी गई वैसी कॉपी करता है, जो संपीड़ित या कम नमूना दर की हो सकती है।",
   "importExport.dialog.chapterStitchPreview": "{clips} आयतें रिकॉर्ड · {chapters} अध्याय",
   "importExport.status.stitchingChapterAudio": "अध्याय ऑडियो जोड़ा जा रहा है…",
@@ -8263,4 +8264,5 @@ export const hi: Catalog = {
   "bibleVoices.pack.invalid": "इस पुस्तक का बाइबल डेटा पढ़ा नहीं जा सका।",
   "bibleVoices.orphaned.heading": {"forms":{"one":"{count} आवाज़ सुधार अब बाइबल डेटा से मेल नहीं खाता:","other":"{count} आवाज़ सुधार अब बाइबल डेटा से मेल नहीं खाते:"},"countVar":"count"},
   "bibleVoices.orphaned.remove": "हटाएँ",
+  "recordingsUpload.banner.evenOutTrack": "मेल के लिए ट्रैक बराबर करें",
 }

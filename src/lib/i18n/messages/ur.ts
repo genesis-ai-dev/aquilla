@@ -4638,7 +4638,8 @@ export const ur: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "جیسا سنائی دیتا ہے",
   "importExport.dialog.monoLoudnessMeter": "جیسا ایک چینل والا میٹر پڑھتا ہے",
   "importExport.dialog.monoLoudnessInfoLabel": "مونو بلندی کے بارے میں",
-  "importExport.dialog.monoLoudnessInfo": "مونو فائل دونوں اسپیکروں پر چلتی ہے، اس لیے ایک چینل کی پیمائش سے تقریباً 3 dB زیادہ بلند سنائی دیتی ہے۔ اگر ڈیلیوری میں مونو فائلیں بلندی میٹر پر جانچی جاتی ہیں تو میٹر کی ریڈنگ چنیں۔",
+  "importExport.dialog.monoLoudnessInfo": "مونو فائل دونوں اسپیکروں پر چلتی ہے، اس لیے ایک چینل کی پیمائش سے تقریباً 3 dB زیادہ بلند سنائی دیتی ہے۔ اگر ڈیلیوری میں مونو فائلیں بلندی میٹر پر جانچی جاتی ہیں تو میٹر کی ریڈنگ چنیں۔ آج ہر ایکسپورٹ مونو ہے، اور صرف برابر کیے گئے ٹیکس بدلتے ہیں۔",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} ٹیک میٹر کی ریڈنگ تک نہیں بڑھ سکتا؛ وہ پھٹ جائے گا یا سرسراہٹ بہت بڑھ جائے گی۔","other":"{count} ٹیکس میٹر کی ریڈنگ تک نہیں بڑھ سکتے؛ وہ پھٹ جائیں گے یا سرسراہٹ بہت بڑھ جائے گی۔"},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "نشریاتی ادائیگی کے لیے۔ بند ہو تو ہر ریکارڈنگ جیسی محفوظ ہوئی نقل ہوتی ہے، جو دبی ہو یا کم نمونہ شرح پر ہو سکتی ہے۔",
   "importExport.dialog.chapterStitchPreview": "{clips} آیات ریکارڈ · {chapters} ابواب",
   "importExport.status.stitchingChapterAudio": "باب کی آڈیو جوڑی جا رہی ہے…",
@@ -8610,4 +8611,5 @@ export const ur: Catalog = {
   "transcribe.stop": "رکیں",
   "transcribe.empty": "اس فائل کی ابھی آڈیو نہیں۔ آڈیو ریکارڈ یا درآمد کریں، پھر نقل کے لیے واپس آئیں۔",
   "transcribe.signIn": "نقل کے لیے لاگ ان کریں",
+  "recordingsUpload.banner.evenOutTrack": "ملانے کے لیے ٹریک برابر کریں",
 }

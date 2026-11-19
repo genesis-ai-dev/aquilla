@@ -3967,7 +3967,8 @@ export const fr: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Tel qu’on l’entend",
   "importExport.dialog.monoLoudnessMeter": "Tel qu’un mesureur à un canal le lit",
   "importExport.dialog.monoLoudnessInfoLabel": "À propos du niveau mono",
-  "importExport.dialog.monoLoudnessInfo": "Un fichier mono joue sur les deux haut-parleurs, il semble donc environ 3 dB plus fort que ce que mesure un canal. Choisissez la lecture du mesureur si une livraison vérifie les fichiers mono sur un mesureur de niveau.",
+  "importExport.dialog.monoLoudnessInfo": "Un fichier mono joue sur les deux haut-parleurs, il semble donc environ 3 dB plus fort que ce que mesure un canal. Choisissez la lecture du mesureur si une livraison vérifie les fichiers mono sur un mesureur de niveau. Aujourd’hui, chaque export est en mono, et seules les prises égalisées changent.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} prise ne peut pas monter jusqu’à la lecture du mesureur ; elle saturerait ou ferait trop monter le souffle.","many":"{count} prises ne peuvent pas monter jusqu’à la lecture du mesureur ; elles satureraient ou feraient trop monter le souffle.","other":"{count} prises ne peuvent pas monter jusqu’à la lecture du mesureur ; elles satureraient ou feraient trop monter le souffle."},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "{clips} versets enregistrés · {chapters} chapitres",
   "importExport.status.stitchingChapterAudio": "Assemblage de l’audio des chapitres…",
   "importExport.status.exportedAudioChapters": {"forms":{"one":"{count} chapitre exporté sous forme de fichier audio continu.","many":"{count} de chapitres exportés sous forme de fichiers audio continus.","other":"{count} chapitres exportés sous forme de fichiers audio continus."},"countVar":"count"},
@@ -6245,4 +6246,5 @@ export const fr: Catalog = {
   "segmentation.loadFailed": "Impossible de charger la segmentation de ce fichier.",
   "segmentation.saveFailed": "Impossible d'enregistrer. {message}",
   "segmentation.readOnly": "La modification de la division d'un fichier nécessite le rôle Responsable de projet ou supérieur.",
+  "recordingsUpload.banner.evenOutTrack": "Égaliser la piste pour l’accorder",
 }

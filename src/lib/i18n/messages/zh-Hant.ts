@@ -3999,7 +3999,8 @@ export const zh_Hant: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "按聽到的",
   "importExport.dialog.monoLoudnessMeter": "按單聲道表頭的讀數",
   "importExport.dialog.monoLoudnessInfoLabel": "關於單聲道響度",
-  "importExport.dialog.monoLoudnessInfo": "單聲道檔案在兩個揚聲器上播放，所以聽起來比單個聲道測得的響約 3 dB。如果交付時用響度表檢查單聲道檔案，請選擇表頭讀數。",
+  "importExport.dialog.monoLoudnessInfo": "單聲道檔案在兩個揚聲器上播放，所以聽起來比單個聲道測得的響約 3 dB。如果交付時用響度表檢查單聲道檔案，請選擇表頭讀數。 目前所有匯出都是單聲道，並且只有已統一響度的錄音會改變。",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"other":"{count} 條錄音無法提升到表頭讀數；會失真或讓底噪太大。"},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "已錄製 {clips} 節 · {chapters} 章",
   "importExport.status.stitchingChapterAudio": "正在串接章節音訊…",
   "importExport.status.exportedAudioChapters": {"forms":{"other":"已將 {count} 章匯出為連續音訊檔。"},"countVar":"count"},
@@ -6225,4 +6226,5 @@ export const zh_Hant: Catalog = {
   "segmentation.loadFailed": "無法載入這個檔案的分段設定。",
   "segmentation.saveFailed": "無法儲存。{message}",
   "segmentation.readOnly": "變更檔案的劃分方式需要專案負責人以上的角色。",
+  "recordingsUpload.banner.evenOutTrack": "統一音軌響度以匹配",
 }

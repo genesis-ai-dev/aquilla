@@ -3984,7 +3984,8 @@ export const th: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "ตามที่ได้ยิน",
   "importExport.dialog.monoLoudnessMeter": "ตามที่มิเตอร์ช่องเดียวอ่านได้",
   "importExport.dialog.monoLoudnessInfoLabel": "เกี่ยวกับความดังของโมโน",
-  "importExport.dialog.monoLoudnessInfo": "ไฟล์โมโนเล่นออกลำโพงทั้งสองข้าง จึงฟังดังกว่าที่วัดจากช่องเดียวประมาณ 3 dB เลือกค่าจากมิเตอร์หากงานส่งมอบตรวจไฟล์โมโนด้วยมิเตอร์วัดความดัง",
+  "importExport.dialog.monoLoudnessInfo": "ไฟล์โมโนเล่นออกลำโพงทั้งสองข้าง จึงฟังดังกว่าที่วัดจากช่องเดียวประมาณ 3 dB เลือกค่าจากมิเตอร์หากงานส่งมอบตรวจไฟล์โมโนด้วยมิเตอร์วัดความดัง ตอนนี้ทุกการส่งออกเป็นโมโน และเปลี่ยนเฉพาะเทคที่ปรับความดังแล้ว",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"other":"{count} เทคเพิ่มไม่ถึงค่าของมิเตอร์ได้ เพราะจะแตกหรือเสียงซ่าดังเกินไป"},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "บันทึกแล้ว {clips} ข้อ · {chapters} บท",
   "importExport.status.stitchingChapterAudio": "กำลังต่อเสียงรายบท…",
   "importExport.status.exportedAudioChapters": {"forms":{"other":"ส่งออก {count} บทเป็นไฟล์เสียงต่อเนื่องแล้ว"},"countVar":"count"},
@@ -6207,4 +6208,5 @@ export const th: Catalog = {
   "segmentation.loadFailed": "โหลดการแบ่งตอนของไฟล์นี้ไม่สำเร็จ",
   "segmentation.saveFailed": "บันทึกไม่สำเร็จ {message}",
   "segmentation.readOnly": "การเปลี่ยนวิธีแบ่งไฟล์ต้องมีบทบาทหัวหน้าโปรเจกต์ขึ้นไป",
+  "recordingsUpload.banner.evenOutTrack": "ปรับความดังทั้งแทร็กให้เข้ากัน",
 }

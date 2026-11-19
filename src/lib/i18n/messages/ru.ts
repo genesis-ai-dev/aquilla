@@ -4031,7 +4031,8 @@ export const ru: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Как слышно",
   "importExport.dialog.monoLoudnessMeter": "Как показывает одноканальный измеритель",
   "importExport.dialog.monoLoudnessInfoLabel": "О громкости моно",
-  "importExport.dialog.monoLoudnessInfo": "Моно-файл звучит в обоих динамиках, поэтому кажется примерно на 3 дБ громче, чем показывает один канал. Выберите показание измерителя, если при сдаче моно-файлы проверяют измерителем громкости.",
+  "importExport.dialog.monoLoudnessInfo": "Моно-файл звучит в обоих динамиках, поэтому кажется примерно на 3 дБ громче, чем показывает один канал. Выберите показание измерителя, если при сдаче моно-файлы проверяют измерителем громкости. Сейчас любой экспорт — моно, и меняются только выровненные дубли.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} дубль нельзя поднять до показания измерителя: он исказится или слишком поднимется шум.","few":"{count} дубля нельзя поднять до показания измерителя: они исказятся или слишком поднимется шум.","many":"{count} дублей нельзя поднять до показания измерителя: они исказятся или слишком поднимется шум.","other":"{count} дубля нельзя поднять до показания измерителя: они исказятся или слишком поднимется шум."},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "Записано стихов: {clips} · глав: {chapters}",
   "importExport.status.stitchingChapterAudio": "Склейка аудио глав…",
   "importExport.status.exportedAudioChapters": {"forms":{"one":"Экспортирована {count} глава в виде непрерывного аудиофайла.","few":"Экспортировано {count} главы в виде непрерывных аудиофайлов.","many":"Экспортировано {count} глав в виде непрерывных аудиофайлов.","other":"Экспортировано {count} главы в виде непрерывных аудиофайлов."},"countVar":"count"},
@@ -6340,4 +6341,5 @@ export const ru: Catalog = {
   "segmentation.loadFailed": "Не удалось загрузить разбиение этого файла.",
   "segmentation.saveFailed": "Не удалось сохранить. {message}",
   "segmentation.readOnly": "Для изменения способа разбиения файла нужна роль руководителя проекта или выше.",
+  "recordingsUpload.banner.evenOutTrack": "Выровнять дорожку под них",
 }

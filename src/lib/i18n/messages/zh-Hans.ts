@@ -3998,7 +3998,8 @@ export const zh_Hans: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "按听到的",
   "importExport.dialog.monoLoudnessMeter": "按单声道表头的读数",
   "importExport.dialog.monoLoudnessInfoLabel": "关于单声道响度",
-  "importExport.dialog.monoLoudnessInfo": "单声道文件在两个扬声器上播放，所以听起来比单个声道测得的响约 3 dB。如果交付时用响度表检查单声道文件，请选择表头读数。",
+  "importExport.dialog.monoLoudnessInfo": "单声道文件在两个扬声器上播放，所以听起来比单个声道测得的响约 3 dB。如果交付时用响度表检查单声道文件，请选择表头读数。 目前所有导出都是单声道，并且只有已统一响度的录音会改变。",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"other":"{count} 条录音无法提升到表头读数；会失真或让底噪太大。"},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "已录制 {clips} 节 · {chapters} 章",
   "importExport.status.stitchingChapterAudio": "正在拼接章节音频…",
   "importExport.status.exportedAudioChapters": {"forms":{"other":"已将 {count} 章导出为连续音频文件。"},"countVar":"count"},
@@ -6223,4 +6224,5 @@ export const zh_Hans: Catalog = {
   "segmentation.loadFailed": "无法加载这个文件的分段设置。",
   "segmentation.saveFailed": "无法保存。{message}",
   "segmentation.readOnly": "变更文件的划分方式需要项目负责人以上的角色。",
+  "recordingsUpload.banner.evenOutTrack": "统一音轨响度以匹配",
 }

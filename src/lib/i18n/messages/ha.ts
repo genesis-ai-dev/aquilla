@@ -4644,7 +4644,8 @@ export const ha: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Kamar yadda ake ji",
   "importExport.dialog.monoLoudnessMeter": "Kamar yadda mitar tasha ɗaya ke karantawa",
   "importExport.dialog.monoLoudnessInfoLabel": "Game da ƙarfin sautin mono",
-  "importExport.dialog.monoLoudnessInfo": "Fayil na mono yana kunna a lasifika biyu, saboda haka yana jin kamar ya fi ma'aunin tasha ɗaya da kusan 3 dB. Zaɓi karatun mita idan isarwa tana duba fayilolin mono da mitar ƙarfin sauti.",
+  "importExport.dialog.monoLoudnessInfo": "Fayil na mono yana kunna a lasifika biyu, saboda haka yana jin kamar ya fi ma'aunin tasha ɗaya da kusan 3 dB. Zaɓi karatun mita idan isarwa tana duba fayilolin mono da mitar ƙarfin sauti. Yau kowane fitarwa mono ne, kuma rikodin da aka daidaita kawai ke canzawa.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"Rikodi {count} ba zai iya hawa zuwa karatun mita ba; zai lalace ko hayaniya ta yi yawa.","other":"Rikodi {count} ba za su iya hawa zuwa karatun mita ba; za su lalace ko hayaniya ta yi yawa."},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "Don bayarwar watsa. Kashe yana kwafa kowane naɗa yadda aka ajiye shi, wanda zai iya zama matsattsaku ko ƙaramin ƙimar samfur.",
   "importExport.dialog.chapterStitchPreview": "ayoyi {clips} an naɗa · babobi {chapters}",
   "importExport.status.stitchingChapterAudio": "Ana ɗinki sautin babi…",
@@ -8614,4 +8615,5 @@ export const ha: Catalog = {
   "transcribe.stop": "Ku tsaya",
   "transcribe.empty": "Wannan fayil ba shi da sauti tukuna. Ku naɗa ko ku shigo da sauti, sannan ku dawo don rubuta sautinsa.",
   "transcribe.signIn": "Ku shiga don rubuta sauti",
+  "recordingsUpload.banner.evenOutTrack": "Daidaita waƙar don ta dace",
 }

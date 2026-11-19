@@ -4521,7 +4521,8 @@ export const pt: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Como se ouve",
   "importExport.dialog.monoLoudnessMeter": "Como um medidor de um canal lê",
   "importExport.dialog.monoLoudnessInfoLabel": "Sobre a intensidade mono",
-  "importExport.dialog.monoLoudnessInfo": "Um arquivo mono toca nos dois alto-falantes, então soa cerca de 3 dB mais alto do que um canal mede. Escolha a leitura do medidor se uma entrega verifica arquivos mono num medidor de intensidade.",
+  "importExport.dialog.monoLoudnessInfo": "Um arquivo mono toca nos dois alto-falantes, então soa cerca de 3 dB mais alto do que um canal mede. Escolha a leitura do medidor se uma entrega verifica arquivos mono num medidor de intensidade. Hoje toda exportação é mono, e só os takes nivelados mudam.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} take não consegue subir até a leitura do medidor; distorceria ou aumentaria demais o chiado.","many":"{count} takes não conseguem subir até a leitura do medidor; distorceriam ou aumentariam demais o chiado.","other":"{count} takes não conseguem subir até a leitura do medidor; distorceriam ou aumentariam demais o chiado."},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "Para entrega de transmissão. Desativado, copia cada gravação como foi salva, que pode estar comprimida ou com uma taxa de amostragem mais baixa.",
   "importExport.dialog.chapterStitchPreview": "{clips} versículos gravados · {chapters} capítulos",
   "importExport.status.stitchingChapterAudio": "Unindo o áudio de capítulo…",
@@ -8218,4 +8219,5 @@ export const pt: Catalog = {
   "bibleVoices.pack.invalid": "Não foi possível ler os dados da Bíblia deste livro.",
   "bibleVoices.orphaned.heading": {"forms":{"one":"{count} correção de voz já não corresponde aos dados da Bíblia:","many":"{count} correções de voz já não correspondem aos dados da Bíblia:","other":"{count} correções de voz já não correspondem aos dados da Bíblia:"},"countVar":"count"},
   "bibleVoices.orphaned.remove": "Remover",
+  "recordingsUpload.banner.evenOutTrack": "Nivelar a faixa para combinar",
 }

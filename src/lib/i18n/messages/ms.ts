@@ -3965,7 +3965,8 @@ export const ms: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Seperti yang didengar",
   "importExport.dialog.monoLoudnessMeter": "Seperti dibaca meter satu saluran",
   "importExport.dialog.monoLoudnessInfoLabel": "Tentang kekuatan bunyi mono",
-  "importExport.dialog.monoLoudnessInfo": "Fail mono dimainkan pada kedua-dua pembesar suara, jadi ia kedengaran kira-kira 3 dB lebih kuat daripada ukuran satu saluran. Pilih bacaan meter jika penghantaran menyemak fail mono pada meter kekuatan bunyi.",
+  "importExport.dialog.monoLoudnessInfo": "Fail mono dimainkan pada kedua-dua pembesar suara, jadi ia kedengaran kira-kira 3 dB lebih kuat daripada ukuran satu saluran. Pilih bacaan meter jika penghantaran menyemak fail mono pada meter kekuatan bunyi. Kini setiap eksport ialah mono, dan hanya rakaman yang diseragamkan berubah.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"other":"{count} rakaman tidak dapat naik ke bacaan meter; ia akan herot atau desisnya terlalu kuat."},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "{clips} ayat dirakam · {chapters} bab",
   "importExport.status.stitchingChapterAudio": "Menyambung audio bab…",
   "importExport.status.exportedAudioChapters": {"forms":{"other":"{count} bab telah dieksport sebagai fail audio berterusan."},"countVar":"count"},
@@ -6178,4 +6179,5 @@ export const ms: Catalog = {
   "segmentation.loadFailed": "Tidak dapat memuatkan segmentasi fail ini.",
   "segmentation.saveFailed": "Tidak dapat menyimpan. {message}",
   "segmentation.readOnly": "Mengubah cara fail dibahagi memerlukan peranan Ketua Projek atau ke atas.",
+  "recordingsUpload.banner.evenOutTrack": "Seragamkan trek supaya sepadan",
 }

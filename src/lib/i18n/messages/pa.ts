@@ -4639,7 +4639,8 @@ export const pa: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "ਜਿਵੇਂ ਸੁਣਦਾ ਹੈ",
   "importExport.dialog.monoLoudnessMeter": "ਜਿਵੇਂ ਇੱਕ-ਚੈਨਲ ਮੀਟਰ ਪੜ੍ਹਦਾ ਹੈ",
   "importExport.dialog.monoLoudnessInfoLabel": "ਮੋਨੋ ਉੱਚਤਾ ਬਾਰੇ",
-  "importExport.dialog.monoLoudnessInfo": "ਮੋਨੋ ਫ਼ਾਈਲ ਦੋਹਾਂ ਸਪੀਕਰਾਂ ’ਤੇ ਚੱਲਦੀ ਹੈ, ਇਸ ਲਈ ਇੱਕ ਚੈਨਲ ਦੇ ਮਾਪ ਨਾਲੋਂ ਲਗਭਗ 3 dB ਵੱਧ ਉੱਚੀ ਸੁਣਦੀ ਹੈ। ਜੇ ਡਿਲੀਵਰੀ ਵਿੱਚ ਮੋਨੋ ਫ਼ਾਈਲਾਂ ਉੱਚਤਾ ਮੀਟਰ ’ਤੇ ਜਾਂਚੀਆਂ ਜਾਂਦੀਆਂ ਹਨ, ਤਾਂ ਮੀਟਰ ਦੀ ਰੀਡਿੰਗ ਚੁਣੋ।",
+  "importExport.dialog.monoLoudnessInfo": "ਮੋਨੋ ਫ਼ਾਈਲ ਦੋਹਾਂ ਸਪੀਕਰਾਂ ’ਤੇ ਚੱਲਦੀ ਹੈ, ਇਸ ਲਈ ਇੱਕ ਚੈਨਲ ਦੇ ਮਾਪ ਨਾਲੋਂ ਲਗਭਗ 3 dB ਵੱਧ ਉੱਚੀ ਸੁਣਦੀ ਹੈ। ਜੇ ਡਿਲੀਵਰੀ ਵਿੱਚ ਮੋਨੋ ਫ਼ਾਈਲਾਂ ਉੱਚਤਾ ਮੀਟਰ ’ਤੇ ਜਾਂਚੀਆਂ ਜਾਂਦੀਆਂ ਹਨ, ਤਾਂ ਮੀਟਰ ਦੀ ਰੀਡਿੰਗ ਚੁਣੋ। ਅੱਜ ਹਰ ਐਕਸਪੋਰਟ ਮੋਨੋ ਹੈ, ਅਤੇ ਸਿਰਫ਼ ਬਰਾਬਰ ਕੀਤੇ ਟੇਕ ਬਦਲਦੇ ਹਨ।",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} ਟੇਕ ਮੀਟਰ ਦੀ ਰੀਡਿੰਗ ਤੱਕ ਨਹੀਂ ਵਧ ਸਕਦਾ; ਉਹ ਫਟ ਜਾਵੇਗਾ ਜਾਂ ਸਰਸਰਾਹਟ ਬਹੁਤ ਵਧ ਜਾਵੇਗੀ।","other":"{count} ਟੇਕ ਮੀਟਰ ਦੀ ਰੀਡਿੰਗ ਤੱਕ ਨਹੀਂ ਵਧ ਸਕਦੇ; ਉਹ ਫਟ ਜਾਣਗੇ ਜਾਂ ਸਰਸਰਾਹਟ ਬਹੁਤ ਵਧ ਜਾਵੇਗੀ।"},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "ਬ੍ਰਾਡਕਾਸਟ ਪੇਸ਼ਕਾਰੀ ਲਈ. ਬੰਦ ਹੋਣ ਉੱਤੇ ਹਰ ਰਿਕਾਰਡਿੰਗ ਉਵੇਂ ਕਾਪੀ ਹੁੰਦੀ ਹੈ ਜਿਵੇਂ ਸੰਭਾਲੀ ਗਈ ਸੀ, ਜੋ ਸੰਕੁਚਿਤ ਜਾਂ ਘੱਟ ਸੈਂਪਲ ਰੇਟ ਉੱਤੇ ਹੋ ਸਕਦੀ ਹੈ.",
   "importExport.dialog.chapterStitchPreview": "{clips} ਆਇਤਾਂ ਰਿਕਾਰਡ · {chapters} ਅਧਿਆਇ",
   "importExport.status.stitchingChapterAudio": "ਅਧਿਆਇ ਆਡੀਓ ਜੋੜਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
@@ -8623,4 +8624,5 @@ export const pa: Catalog = {
   "transcribe.stop": "ਰੋਕੋ",
   "transcribe.empty": "ਇਸ ਫ਼ਾਈਲ ਵਿੱਚ ਹਾਲੇ ਕੋਈ ਆਡੀਓ ਨਹੀਂ. ਆਡੀਓ ਰਿਕਾਰਡ ਜਾਂ ਇੰਪੋਰਟ ਕਰੋ, ਫਿਰ ਲਿਪੀਅੰਤਰ ਲਈ ਵਾਪਸ ਆਓ.",
   "transcribe.signIn": "ਲਿਪੀਅੰਤਰ ਲਈ ਦਾਖਲ ਹੋਵੋ",
+  "recordingsUpload.banner.evenOutTrack": "ਮੇਲ ਲਈ ਟਰੈਕ ਬਰਾਬਰ ਕਰੋ",
 }

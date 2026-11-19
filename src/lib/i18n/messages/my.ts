@@ -3983,7 +3983,8 @@ export const my: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "ကြားရသည့်အတိုင်း",
   "importExport.dialog.monoLoudnessMeter": "ချန်နယ်တစ်ခု မီတာ ဖတ်သည့်အတိုင်း",
   "importExport.dialog.monoLoudnessInfoLabel": "မိုနို အသံကျယ်အကြောင်း",
-  "importExport.dialog.monoLoudnessInfo": "မိုနိုဖိုင်သည် စပီကာ နှစ်လုံးလုံးတွင် ဖွင့်သဖြင့် ချန်နယ်တစ်ခုက တိုင်းသည်ထက် 3 dB ခန့် ပိုကျယ်ပါသည်။ ပို့ဆောင်ရာတွင် မိုနိုဖိုင်များကို အသံကျယ်တိုင်းကိရိယာဖြင့် စစ်ပါက မီတာဖတ်ချက်ကို ရွေးပါ။",
+  "importExport.dialog.monoLoudnessInfo": "မိုနိုဖိုင်သည် စပီကာ နှစ်လုံးလုံးတွင် ဖွင့်သဖြင့် ချန်နယ်တစ်ခုက တိုင်းသည်ထက် 3 dB ခန့် ပိုကျယ်ပါသည်။ ပို့ဆောင်ရာတွင် မိုနိုဖိုင်များကို အသံကျယ်တိုင်းကိရိယာဖြင့် စစ်ပါက မီတာဖတ်ချက်ကို ရွေးပါ။ ယနေ့ ထုတ်ယူမှုတိုင်းသည် မိုနိုဖြစ်ပြီး ညီအောင်လုပ်ထားသော အသံသွင်းချက်များသာ ပြောင်းပါသည်။",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"other":"အသံသွင်းချက် {count} ခုကို မီတာဖတ်ချက်အထိ မမြှင့်နိုင်ပါ၊ ပုံပျက်မည် သို့မဟုတ် ဆူညံသံ အလွန်တက်မည်။"},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "ကျမ်းပိုဒ် {clips} ပိုဒ် အသံသွင်းပြီး · အခန်း {chapters} ခန်း",
   "importExport.status.stitchingChapterAudio": "အခန်းအသံကို ဆက်နေသည်…",
   "importExport.status.exportedAudioChapters": {"forms":{"other":"အခန်း {count} ခန်းကို ဆက်တိုက်အသံဖိုင်များအဖြစ် ထုတ်ယူပြီးပါပြီ။"},"countVar":"count"},
@@ -6201,4 +6202,5 @@ export const my: Catalog = {
   "segmentation.loadFailed": "ဤဖိုင်၏ အပိုင်းခွဲခြင်းကို တင်၍မရပါ။",
   "segmentation.saveFailed": "သိမ်း၍မရပါ။ {message}",
   "segmentation.readOnly": "ဖိုင်ခွဲပုံ ပြောင်းရန် ပရောဂျက် ခေါင်းဆောင် အခန်းကဏ္ဍ သို့မဟုတ် အထက် လိုအပ်သည်။",
+  "recordingsUpload.banner.evenOutTrack": "ကိုက်ညီအောင် လမ်းကြောင်းကို ညီအောင်လုပ်ရန်",
 }

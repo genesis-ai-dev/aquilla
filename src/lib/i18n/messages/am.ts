@@ -4648,7 +4648,8 @@ export const am: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "እንደሚሰማው",
   "importExport.dialog.monoLoudnessMeter": "ባለ አንድ ቻናል መለኪያ እንደሚያነበው",
   "importExport.dialog.monoLoudnessInfoLabel": "ስለ ሞኖ ጩኸት",
-  "importExport.dialog.monoLoudnessInfo": "የሞኖ ፋይል በሁለቱም ድምፅ ማጉያዎች ይጫወታል፤ ስለዚህ አንድ ቻናል ከሚለካው በ3 dB ያህል ከፍ ብሎ ይሰማል። ርክክቡ የሞኖ ፋይሎችን በጩኸት መለኪያ የሚፈትሽ ከሆነ የመለኪያውን ንባብ ይምረጡ።",
+  "importExport.dialog.monoLoudnessInfo": "የሞኖ ፋይል በሁለቱም ድምፅ ማጉያዎች ይጫወታል፤ ስለዚህ አንድ ቻናል ከሚለካው በ3 dB ያህል ከፍ ብሎ ይሰማል። ርክክቡ የሞኖ ፋይሎችን በጩኸት መለኪያ የሚፈትሽ ከሆነ የመለኪያውን ንባብ ይምረጡ። ዛሬ እያንዳንዱ ወደ ውጭ የሚላክ ፋይል ሞኖ ነው፤ የሚለወጡትም የተስተካከሉ ቀረጻዎች ብቻ ናቸው።",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} ቀረጻ እስከ መለኪያው ንባብ ሊጨመር አይችልም፤ ይዛባል ወይም ጫጫታው በጣም ይጨምራል።","other":"{count} ቀረጻዎች እስከ መለኪያው ንባብ ሊጨመሩ አይችሉም፤ ይዛባሉ ወይም ጫጫታው በጣም ይጨምራል።"},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "ለስርጭት ማድረስ። ሲጠፋ እያንዳንዱ ቀረጻ እንደተቀመጠ ይቀዳል፣ ይህም የተጨመቀ ወይም በዝቅተኛ ናሙና ፍጥነት ሊሆን ይችላል።",
   "importExport.dialog.chapterStitchPreview": "{clips} ጥቅሶች ተቀድተዋል · {chapters} ምዕራፎች",
   "importExport.status.stitchingChapterAudio": "የምዕራፍ ድምጽ በመገጣጠም ላይ…",
@@ -8631,4 +8632,5 @@ export const am: Catalog = {
   "transcribe.stop": "ያቁሙ",
   "transcribe.empty": "ይህ ፋይል እስካሁን ድምጽ የለውም። ድምጽ ይቅዱ ወይም ያስመጡ፣ ከዚያ ለመገልበጥ ተመልሰው ይምጡ።",
   "transcribe.signIn": "ለመገልበጥ ይግቡ",
+  "recordingsUpload.banner.evenOutTrack": "እንዲመሳሰሉ ትራኩን አስተካክል",
 }

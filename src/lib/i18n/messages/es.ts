@@ -4519,7 +4519,8 @@ export const es: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "Como se oye",
   "importExport.dialog.monoLoudnessMeter": "Como lo lee un medidor de un canal",
   "importExport.dialog.monoLoudnessInfoLabel": "Sobre el volumen mono",
-  "importExport.dialog.monoLoudnessInfo": "Un archivo mono suena por los dos altavoces, así que se oye unos 3 dB más fuerte de lo que mide un canal. Elige la lectura del medidor si una entrega revisa archivos mono con un medidor de volumen.",
+  "importExport.dialog.monoLoudnessInfo": "Un archivo mono suena por los dos altavoces, así que se oye unos 3 dB más fuerte de lo que mide un canal. Elige la lectura del medidor si una entrega revisa archivos mono con un medidor de volumen. Hoy todas las exportaciones son mono, y solo cambian las tomas igualadas.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count} toma no puede subir del todo hasta la lectura del medidor; se distorsionaría o subiría demasiado el ruido.","many":"{count} tomas no pueden subir del todo hasta la lectura del medidor; se distorsionarían o subirían demasiado el ruido.","other":"{count} tomas no pueden subir del todo hasta la lectura del medidor; se distorsionarían o subirían demasiado el ruido."},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "Para entrega de emisión. Desactivado, copia cada grabación tal como se guardó, que puede estar comprimida o tener una frecuencia de muestreo más baja.",
   "importExport.dialog.chapterStitchPreview": "{clips} versículos grabados · {chapters} capítulos",
   "importExport.status.stitchingChapterAudio": "Uniendo el audio de capítulo…",
@@ -8214,4 +8215,5 @@ export const es: Catalog = {
   "bibleVoices.pack.invalid": "No se pudieron leer los datos de la Biblia de este libro.",
   "bibleVoices.orphaned.heading": {"forms":{"one":"{count} corrección de voz ya no coincide con los datos de la Biblia:","many":"{count} correcciones de voz ya no coinciden con los datos de la Biblia:","other":"{count} correcciones de voz ya no coinciden con los datos de la Biblia:"},"countVar":"count"},
   "bibleVoices.orphaned.remove": "Quitar",
+  "recordingsUpload.banner.evenOutTrack": "Igualar la pista para que coincida",
 }

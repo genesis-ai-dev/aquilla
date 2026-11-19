@@ -3993,7 +3993,8 @@ export const ar: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "كما يُسمع",
   "importExport.dialog.monoLoudnessMeter": "كما يقرؤه مقياس أحادي القناة",
   "importExport.dialog.monoLoudnessInfoLabel": "عن ارتفاع الأحادي",
-  "importExport.dialog.monoLoudnessInfo": "يُشغَّل الملف الأحادي على السماعتين، فيبدو أعلى بنحو 3 dB مما تقيسه قناة واحدة. اختر قراءة المقياس إذا كان التسليم يفحص الملفات الأحادية بمقياس ارتفاع.",
+  "importExport.dialog.monoLoudnessInfo": "يُشغَّل الملف الأحادي على السماعتين، فيبدو أعلى بنحو 3 dB مما تقيسه قناة واحدة. اختر قراءة المقياس إذا كان التسليم يفحص الملفات الأحادية بمقياس ارتفاع. كل تصدير اليوم أحادي، ولا يتغير إلا التسجيلات الموحَّدة الصوت.",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"zero":"لا يمكن رفع {count} تسجيل إلى قراءة المقياس؛ سيتشوّه أو يرتفع الهسيس كثيرًا.","one":"لا يمكن رفع تسجيل واحد ({count}) إلى قراءة المقياس؛ سيتشوّه أو يرتفع الهسيس كثيرًا.","two":"لا يمكن رفع تسجيلين ({count}) إلى قراءة المقياس؛ سيتشوّهان أو يرتفع الهسيس كثيرًا.","few":"لا يمكن رفع {count} تسجيلات إلى قراءة المقياس؛ ستتشوّه أو يرتفع الهسيس كثيرًا.","many":"لا يمكن رفع {count} تسجيلًا إلى قراءة المقياس؛ ستتشوّه أو يرتفع الهسيس كثيرًا.","other":"لا يمكن رفع {count} تسجيل إلى قراءة المقياس؛ ستتشوّه أو يرتفع الهسيس كثيرًا."},"countVar":"count"},
   "importExport.dialog.chapterStitchPreview": "{clips} آية مسجّلة · {chapters} فصل",
   "importExport.status.stitchingChapterAudio": "جارٍ ضم صوت الفصول…",
   "importExport.status.exportedAudioChapters": {"forms":{"zero":"تم تصدير {count} فصل كملفات صوتية متصلة.","one":"تم تصدير فصل واحد ({count}) كملف صوتي متصل.","two":"تم تصدير فصلين ({count}) كملفين صوتيين متصلين.","few":"تم تصدير {count} فصول كملفات صوتية متصلة.","many":"تم تصدير {count} فصلًا كملفات صوتية متصلة.","other":"تم تصدير {count} فصل كملفات صوتية متصلة."},"countVar":"count"},
@@ -6214,4 +6215,5 @@ export const ar: Catalog = {
   "segmentation.loadFailed": "تعذّر تحميل تقسيم هذا الملف.",
   "segmentation.saveFailed": "تعذّر الحفظ. {message}",
   "segmentation.readOnly": "تغيير كيفية تقسيم الملف يتطلّب دور قائد المشروع أو أعلى.",
+  "recordingsUpload.banner.evenOutTrack": "وحّد صوت المسار ليطابقها",
 }

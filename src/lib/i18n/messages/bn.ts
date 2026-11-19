@@ -4655,7 +4655,8 @@ export const bn: Catalog = {
   "importExport.dialog.monoLoudnessHeard": "যেমন শোনা যায়",
   "importExport.dialog.monoLoudnessMeter": "যেমন এক-চ্যানেল মিটার পড়ে",
   "importExport.dialog.monoLoudnessInfoLabel": "মোনো জোর সম্পর্কে",
-  "importExport.dialog.monoLoudnessInfo": "মোনো ফাইল দুটো স্পিকারেই বাজে, তাই এক চ্যানেলের মাপের চেয়ে প্রায় 3 dB বেশি জোরে শোনায়। ডেলিভারিতে মোনো ফাইল জোর-মিটারে যাচাই হলে মিটারের পাঠ বেছে নিন।",
+  "importExport.dialog.monoLoudnessInfo": "মোনো ফাইল দুটো স্পিকারেই বাজে, তাই এক চ্যানেলের মাপের চেয়ে প্রায় 3 dB বেশি জোরে শোনায়। ডেলিভারিতে মোনো ফাইল জোর-মিটারে যাচাই হলে মিটারের পাঠ বেছে নিন। এখন প্রতিটি এক্সপোর্ট মোনো, আর শুধু সমান করা টেকগুলো বদলায়।",
+  "importExport.dialog.monoLoudnessHeld": {"forms":{"one":"{count}টি টেক মিটারের পাঠ পর্যন্ত বাড়ানো যায় না; ফেটে যাবে বা হিস খুব বেড়ে যাবে।","other":"{count}টি টেক মিটারের পাঠ পর্যন্ত বাড়ানো যায় না; ফেটে যাবে বা হিস খুব বেড়ে যাবে।"},"countVar":"count"},
   "importExport.dialog.lineAudioWavHint": "সম্প্রচার ডেলিভারির জন্য। বন্ধ থাকলে প্রতিটি রেকর্ডিং যেমন সংরক্ষিত তেমন কপি হয়, যা সংকুচিত বা কম স্যাম্পল রেটের হতে পারে।",
   "importExport.dialog.chapterStitchPreview": "{clips} পদ রেকর্ড · {chapters} অধ্যায়",
   "importExport.status.stitchingChapterAudio": "অধ্যায় অডিও জোড়া হচ্ছে…",
@@ -8645,4 +8646,5 @@ export const bn: Catalog = {
   "transcribe.stop": "থামুন",
   "transcribe.empty": "এই ফাইলে এখনো কোনো অডিও নেই। অডিও রেকর্ড বা আমদানি করুন, তারপর প্রতিলিপি করতে ফিরুন।",
   "transcribe.signIn": "প্রতিলিপি করতে সাইন ইন করুন",
+  "recordingsUpload.banner.evenOutTrack": "মেলাতে ট্র্যাক সমান করুন",
 }

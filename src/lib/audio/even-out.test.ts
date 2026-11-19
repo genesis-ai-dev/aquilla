@@ -325,6 +325,18 @@ describe("the run as the UI shows it (boards 71–73)", () => {
     expect(c.stepId).toBe(historyView().nextUndo?.id)
   })
 
+  it("marks a run from the window as a run, so the Station's own Undo leaves it to ⌘Z (board 73C)", async () => {
+    const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14 } } })
+    unregister = registerStepKinds(takeStepHandlers(w.ctx))
+    await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }], { markAsRun: true })
+    const { matchingSteps } = await import("@/lib/history/history")
+    const runParts = matchingSteps((kind, data) => kind === "take.even" && (data as { run?: boolean }).run === true)
+    expect(runParts.undo).toHaveLength(1)
+    await clearEvenOut(w.host, [{ cellId: "c1", audioId: "a" }])
+    const clears = matchingSteps((kind, data) => kind === "take.even" && !(data as { run?: boolean }).run)
+    expect(clears.undo).toHaveLength(1)
+  })
+
   it("has no step to undo when nothing changed", async () => {
     const w = workspace({ c1: { a: { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 } } })
     const r = await evenOutTakes(w.host, [{ cellId: "c1", audioId: "a" }])

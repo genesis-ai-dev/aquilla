@@ -81,6 +81,9 @@ export interface EvenOutOptions {
   signal?: AbortSignal
   /** Measuring progress: takes looked at so far, of how many need measuring. */
   onProgress?: (done: number, total: number) => void
+  /** A run over a file or tracks (the window, or the q89 switch): its steps
+   *  are ⌘Z's to take back, not the Station's own Undo (board 73C). */
+  markAsRun?: boolean
 }
 
 export interface EvenOutResult {
@@ -218,7 +221,7 @@ export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[],
     const g = evenOutCorrection({ ...att, ...(reading ?? {}), evenTargetLufs: targetLufs })
     if (g.held) result.held.push({ ...t, reason: g.held, shortDb: Math.round((g.wantedDb - g.correctionDb) * 10) / 10 })
     result.evened++
-    if (before !== targetLufs) parts.push({ ...t, before, after: targetLufs })
+    if (before !== targetLufs) parts.push({ ...t, before, after: targetLufs, ...(opts.markAsRun ? { run: true as const } : {}) })
   }
   const written = await applyAsOneStep(host, "editor.history.stepEvenOut", parts)
   result.failed = written.failed

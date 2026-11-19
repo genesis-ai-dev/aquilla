@@ -91,3 +91,14 @@ describe("the Station's (i)", () => {
     expect(screen.getByTestId("station-controls-info").textContent).toContain("Comes before your volume")
   })
 })
+
+describe("the Station's own Undo (board 73C)", () => {
+  it("takes back the Station's changes and a Clear, but not a run of Even out", async () => {
+    const { stationOwnsStep } = await import("./StationPanel")
+    const mine = stationOwnsStep("c694", "t2.webm")
+    expect(mine("take.gain", { cellId: "c694", audioId: "t2.webm" })).toBe(true)
+    expect(mine("take.even", { cellId: "c694", audioId: "t2.webm", before: -16, after: null })).toBe(true)
+    expect(mine("take.even", { cellId: "c694", audioId: "t2.webm", before: null, after: -16, run: true })).toBe(false)
+    expect(mine("take.gain", { cellId: "c1", audioId: "x" })).toBe(false)
+  })
+})

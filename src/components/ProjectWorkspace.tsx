@@ -288,6 +288,7 @@ import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
 import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
 import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
+import { clearedToastText, ranToastText } from "@/lib/audio/even-out-toasts"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
@@ -704,9 +705,6 @@ import {
   useVisibleCellIds as useEditorViewportVisibleCellIds,
   useTrackedCellRef as useEditorViewportTrackedCellRef,
 } from "@/hooks/useEditorViewportStore"
-
-/** AQU-2664: a loudness for a toast, with a real minus ("−16"). */
-const lufsWord = (v: number) => (v < 0 ? `−${Math.abs(v)}` : `${v}`)
 
 // The Voices panel holds the clip inspector and Make speech, which are cramped
 // at the width the file list wants. It opens wider and keeps its own remembered
@@ -15189,19 +15187,11 @@ export function ProjectWorkspace() {
   }, [reportHistory, t])
   const handleEvenOutRan = useCallback((r: EvenOutResult) => {
     if (r.evened === 0 && !r.stepId) return
-    const held = r.held.length
-    const title = t("editor.evenOut.doneToast", { count: r.evened, lufs: lufsWord(r.targetLufs) })
-      + (held > 0 ? ` ${t("editor.evenOut.heldToast", { count: held })}` : "")
-    evenOutToast(title, r.stepId)
+    evenOutToast(ranToastText(r, t), r.stepId)
   }, [evenOutToast, t])
   const handleEvenOutCleared = useCallback((r: ClearResult, scope: EvenOutScope) => {
     if (r.cleared === 0) return
-    const title = scope.pick === "file"
-      ? t("editor.evenOut.clearedFile", { count: r.cleared })
-      : scope.pick === "track"
-        ? t("editor.evenOut.clearedTrack", { track: scope.names[0] ?? "", count: r.cleared })
-        : t("editor.evenOut.clearedTracks", { count: r.cleared })
-    evenOutToast(title, r.stepId)
+    evenOutToast(clearedToastText(r, scope, t), r.stepId)
   }, [evenOutToast, t])
   /** The Station's Clear on one take (board 73D), with its toast. */
   const handleClearOneTake = useCallback(async (cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => {
@@ -15225,7 +15215,7 @@ export function ProjectWorkspace() {
     const takes = autoEvenCandidates(evenOutCellsRef.current, AUTO_EVEN_CHANGED_TAKES)
     if (takes.length === 0) return
     autoEvenBusy.current = true
-    void handleEvenOut(takes).finally(() => { autoEvenBusy.current = false })
+    void handleEvenOut(takes, { markAsRun: true }).finally(() => { autoEvenBusy.current = false })
   }, [autoEvenKey, canEvenOut, handleEvenOut])
   useEffect(() => {
     if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
@@ -21183,7 +21173,7 @@ export function ProjectWorkspace() {
           onOpenChange={(o) => { if (!o) setEvenOutReq(null) }}
           scopes={evenOutWindow.scopes}
           start={evenOutWindow.start}
-          run={(takes, opts) => handleEvenOut(takes, opts)}
+          run={(takes, opts) => handleEvenOut(takes, { ...opts, markAsRun: true })}
           clear={(takes) => handleClearEvenOut(takes)}
           onRan={handleEvenOutRan}
           onCleared={handleEvenOutCleared}

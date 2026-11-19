@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -613,13 +613,7 @@ export function StationHeader({
   // change to THIS recording, even if you have changed other things since;
   // ⌘Z stays the project's newest step. Unsaved edits go first.
   const view = useSyncExternalStore(subscribeHistory, historyView, historyView)
-  const mine = useCallback(
-    (_kind: string, data: unknown) => {
-      const d = data as { cellId?: string; audioId?: string } | null
-      return d?.cellId === cellId && (d.audioId === undefined || d.audioId === audioId)
-    },
-    [cellId, audioId],
-  )
+  const mine = useMemo(() => stationOwnsStep(cellId, audioId), [cellId, audioId])
   const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
   const canUndo = unsaved || step != null
   const undoTip = unsaved
@@ -719,6 +713,17 @@ export function StationHeader({
       ) : null}
     </div>
   )
+}
+
+/** Is this step one the Station's own Undo takes back: a change to the take
+ *  open here — but not a run of Even out over a file or tracks (board 73C:
+ *  that is ⌘Z's), while a Clear made here is. */
+export function stationOwnsStep(cellId: string, audioId: string) {
+  return (kind: string, data: unknown): boolean => {
+    const d = data as { cellId?: string; audioId?: string; run?: boolean } | null
+    if (kind === "take.even" && d?.run) return false
+    return d?.cellId === cellId && (d.audioId === undefined || d.audioId === audioId)
+  }
 }
 
 /** ⌘ on a Mac, Ctrl+ elsewhere, before a letter in the Station's key lists. */

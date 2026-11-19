@@ -65,7 +65,15 @@ export interface TakeLevel { gainDb: number | null; fadeInMs: number | null; fad
 /** AQU-2664: evening a take out (or clearing it): the loudness it is evened
  *  out to before and after, null = not evened out. Its own step, as it is its
  *  own stage: it never carries or checks the take's volume and fades. */
-export interface TakeEvenData { cellId: string; audioId: string; before: number | null; after: number | null }
+export interface TakeEvenData {
+  cellId: string
+  audioId: string
+  before: number | null
+  after: number | null
+  /** AQU-2664 (board 73C): part of a run of Even out over a file or tracks — ⌘Z's
+   *  to take back, never the Station's own Undo (a Clear there is). */
+  run?: true
+}
 /** A change to a take's volume or fades (the Station's volume line and corners). */
 export interface TakeGainData { cellId: string; audioId: string; before: TakeLevel; after: TakeLevel }
 /** AQU-2267: a take's place in each timing, as stored (null = not placed there). */

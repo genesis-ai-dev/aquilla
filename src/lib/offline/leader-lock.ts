@@ -32,17 +32,28 @@ export const leaderLockName = (storeId: string): string => `livestore-tab-lock-$
 const SLOW_LOCK_MS = 5_000
 /**
  * How long the leader waits before taking the lock from whoever holds it. A
- * holder that's been frozen or suspended (WKWebView after unload, a v0.2.4
- * page during a hot-bundle update) never lets go, and the desktop app has one
- * window, so a holder this old is a leftover. Taking the lock isn't taking
- * the files: the leader still waits for the OPFS handles to be free before it
- * boots (see opfs-handles.ts), so a holder that's still alive is never raced.
+ * holder that's been frozen or suspended never lets go, and the desktop app
+ * has one window, so a holder this old is a leftover. Taking the lock isn't
+ * taking the files: the leader still waits for the OPFS handles to be free
+ * before it boots (see opfs-handles.ts), so a holder that's still alive is
+ * never raced.
  *
- * The leader the lock is taken from stops (its lock request rejects with
- * AbortError, see livestore.worker.ts), which is what frees the files. That's
- * only safe because of the one window: with a second window or any other live
- * store user, a slow but live leader would be killed here and its page left
- * with a store whose writes go nowhere. Remove the steal before adding one.
+ * What the steal recovers from is a holder that has the lock but not the
+ * files: a frozen v0.2.4 page in the bfcache (it held the lock in the page,
+ * and the bfcache guard terminated its worker), or a leader still waiting
+ * here itself. A live leader the lock is taken from stops on its own (its
+ * lock request rejects with AbortError and livestore.worker.ts rethrows it,
+ * which closes the runner), which frees its files.
+ *
+ * A *frozen* leader that still has the files open is beyond reach: it runs
+ * nothing, so nothing here can make it close them. The OPFS wait then times
+ * out and the boot fails; OfflineLeaderWatchdog has already offered an app
+ * restart by then, which is the only way out (the WebContent process exits).
+ *
+ * The steal is only safe because of the one window: with a second window or
+ * any other live store user, a slow but live leader would be killed here and
+ * its page left with a store whose writes go nowhere. Remove the steal before
+ * adding one.
  */
 const STEAL_LOCK_MS = 30_000
 
@@ -50,8 +61,8 @@ export interface HoldLeaderLockOptions {
   locks?: LockManager | undefined
   slowAfterMs?: number
   stealAfterMs?: number
-  onSlow?: (waitedMs: number) => void
-  onSteal?: (waitedMs: number) => void
+  onSlow: (waitedMs: number) => void
+  onSteal: (waitedMs: number) => void
 }
 
 /**
@@ -70,9 +81,9 @@ export async function holdLeaderLock(
     locks = globalThis.navigator?.locks,
     slowAfterMs = SLOW_LOCK_MS,
     stealAfterMs = STEAL_LOCK_MS,
-    onSlow = (waitedMs) => console.warn(`[offline] leader still waiting for '${name}' after ${waitedMs} ms — another leader holds the OPFS files`),
-    onSteal = (waitedMs) => console.warn(`[offline] leader took '${name}' after waiting ${waitedMs} ms — its holder never let go`),
-  }: HoldLeaderLockOptions = {},
+    onSlow,
+    onSteal,
+  }: HoldLeaderLockOptions,
 ): Promise<void> {
   if (!locks) throw new Error("The offline store needs the Web Locks API (navigator.locks)")
   let granted = false

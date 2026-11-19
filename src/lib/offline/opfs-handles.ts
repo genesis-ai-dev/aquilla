@@ -10,10 +10,15 @@
 // was still alive. So the leader worker opens and closes each file itself
 // first, and waits while any of them is busy.
 //
+// Only the files the pool opens are probed: the top level of the current
+// storage format's directory. Older format directories and `archive/` are
+// never opened by a leader, and probing them would only slow every boot.
+//
 // Only a dedicated worker can open sync access handles, which is where this runs.
+import { liveStoreStorageFormatVersion } from "@livestore/common"
 
 /** LiveStore names its OPFS directory `livestore-<storeId>@<storage format version>`. */
-export const opfsStoreDirPrefix = (storeId: string): string => `livestore-${storeId}@`
+export const opfsStoreDir = (storeId: string): string => `livestore-${storeId}@${liveStoreStorageFormatVersion}`
 
 /** The bits of the OPFS API this needs; structural so tests can fake it. */
 export interface OpfsFile {
@@ -32,7 +37,7 @@ export interface WaitForOpfsFilesOptions {
   timeoutMs?: number
   /** First retry delay; doubles up to 1 s. */
   retryMs?: number
-  onBusy?: (file: string) => void
+  onBusy: (file: string) => void
   sleep?: (ms: number) => Promise<void>
   now?: () => number
 }
@@ -40,23 +45,37 @@ export interface WaitForOpfsFilesOptions {
 const BUSY = new Set(["NoModificationAllowedError", "InvalidStateError"])
 
 const isBusy = (error: unknown): boolean => error instanceof DOMException && BUSY.has(error.name)
+// A file removed between listing and opening (the old leader cleaning up) can't be held by anyone.
+const isGone = (error: unknown): boolean => error instanceof DOMException && error.name === "NotFoundError"
 
-/** Returns the path of the first file another context has open, or null when all are free. */
-async function findBusyFile(dir: OpfsDir, path: string): Promise<string | null> {
+/** Returns the path of the first pool file another context has open, or null when all are free. */
+async function findBusyFile(dir: OpfsDir): Promise<string | null> {
   for await (const entry of dir.values()) {
-    const entryPath = `${path}/${entry.name}`
-    if (entry.kind === "directory") {
-      const busy = await findBusyFile(entry, entryPath)
-      if (busy !== null) return busy
-      continue
-    }
+    if (entry.kind !== "file") continue
     try {
       const handle = await entry.createSyncAccessHandle()
       handle.close()
     } catch (error) {
-      if (isBusy(error)) return entryPath
+      if (isBusy(error)) return `${dir.name}/${entry.name}`
+      if (isGone(error)) continue
       throw error
     }
+  }
+  return null
+}
+
+/** The store's pool directory, or null when there's none yet (first boot) or OPFS is out of reach. */
+async function findStoreDir(root: () => Promise<OpfsDir>, name: string): Promise<OpfsDir | null> {
+  let rootDir: OpfsDir
+  try {
+    rootDir = await root()
+  } catch {
+    // No OPFS (or no access to it): nothing can be holding its files, and
+    // LiveStore's own check falls back to in-memory storage from here.
+    return null
+  }
+  for await (const entry of rootDir.values()) {
+    if (entry.kind === "directory" && entry.name === name) return entry
   }
   return null
 }
@@ -65,7 +84,7 @@ const defaultRoot = async (): Promise<OpfsDir> =>
   (await navigator.storage.getDirectory()) as unknown as OpfsDir
 
 /**
- * Resolves once every file under the store's OPFS directories can be opened.
+ * Resolves once every file in the store's OPFS pool directory can be opened.
  * Rejects after `timeoutMs` if one stays busy, so a leader that never lets go
  * fails the boot (visibly, see livestore.worker.ts) rather than hanging it.
  */
@@ -75,22 +94,18 @@ export async function waitForOpfsFilesFree(
     root = defaultRoot,
     timeoutMs = 30_000,
     retryMs = 50,
-    onBusy = (file) => console.warn(`[offline] leader waiting for another leader to close ${file}`),
+    onBusy,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = Date.now,
-  }: WaitForOpfsFilesOptions = {},
+  }: WaitForOpfsFilesOptions,
 ): Promise<void> {
-  const prefix = opfsStoreDirPrefix(storeId)
+  const dirName = opfsStoreDir(storeId)
   const startedAt = now()
   let delay = retryMs
   let reported = false
   for (;;) {
-    let busy: string | null = null
-    for await (const entry of (await root()).values()) {
-      if (entry.kind !== "directory" || !entry.name.startsWith(prefix)) continue
-      busy = await findBusyFile(entry, entry.name)
-      if (busy !== null) break
-    }
+    const dir = await findStoreDir(root, dirName)
+    const busy = dir === null ? null : await findBusyFile(dir)
     if (busy === null) return
     if (!reported) {
       reported = true

@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { opfsStoreDirPrefix, waitForOpfsFilesFree, type OpfsDir, type OpfsFile } from "./opfs-handles"
+import { liveStoreStorageFormatVersion } from "@livestore/common"
+import { opfsStoreDir, waitForOpfsFilesFree, type OpfsDir, type OpfsFile } from "./opfs-handles"
 
 const busyError = () => new DOMException("held elsewhere", "NoModificationAllowedError")
 
@@ -40,19 +41,54 @@ describe("waitForOpfsFilesFree", () => {
     const source = readFileSync(join(dist, "web-worker/common/persisted-sqlite.js"), "utf8")
     // Just the template, so a reformat or renamed const upstream doesn't fail this.
     expect(source).toContain("`livestore-${storeId}@${liveStoreStorageFormatVersion}`")
-    expect(opfsStoreDirPrefix("aquilla-offline")).toBe("livestore-aquilla-offline@")
+    expect(opfsStoreDir("aquilla-offline")).toBe(`livestore-aquilla-offline@${liveStoreStorageFormatVersion}`)
   })
 
-  it("resolves at once when every file of the store opens, and closes what it opened", async () => {
+  it("resolves at once when every pool file opens, and closes what it opened", async () => {
     const a = file("a")
     const b = file("b")
-    const other = file("x", () => true)
-    const root = dir("", [dir("livestore-s@6", [a, dir("archive", [b])]), dir("unrelated", [other]), other])
+    const root = dir("", [dir("livestore-s@6", [a, b])])
     const onBusy = vi.fn()
     await waitForOpfsFilesFree("s", { root: async () => root, onBusy, sleep: noSleep })
     expect(a.opened).toBe(1)
     expect(b.opened).toBe(1)
     expect(onBusy).not.toHaveBeenCalled()
+  })
+
+  it("probes only the pool: not archive/, older formats or other directories", async () => {
+    const busy = () => file("x", () => true)
+    const archived = file("archived")
+    const root = dir("", [
+      dir("livestore-s@6", [file("pool-1"), dir("archive", [archived, busy()])]),
+      dir("livestore-s@5", [busy()]),
+      dir("unrelated", [busy()]),
+      busy(),
+    ])
+    const onBusy = vi.fn()
+    await waitForOpfsFilesFree("s", { root: async () => root, onBusy, sleep: noSleep })
+    expect(archived.opened).toBe(0)
+    expect(onBusy).not.toHaveBeenCalled()
+  })
+
+  it("resolves when the store has no directory yet", async () => {
+    await expect(waitForOpfsFilesFree("s", { root: async () => dir("", []), onBusy: () => {} })).resolves.toBeUndefined()
+  })
+
+  it("leaves a missing OPFS to LiveStore's own fallback", async () => {
+    const root = () => Promise.reject(new DOMException("no", "SecurityError"))
+    await expect(waitForOpfsFilesFree("s", { root, onBusy: () => {} })).resolves.toBeUndefined()
+  })
+
+  it("skips a file the old leader removed after it was listed", async () => {
+    const gone: OpfsFile = {
+      kind: "file",
+      name: "pool-1",
+      createSyncAccessHandle: () => Promise.reject(new DOMException("gone", "NotFoundError")),
+    }
+    const next = file("pool-2")
+    const root = dir("", [dir("livestore-s@6", [gone, next])])
+    await waitForOpfsFilesFree("s", { root: async () => root, onBusy: () => {}, sleep: noSleep })
+    expect(next.opened).toBe(1)
   })
 
   it("waits while another leader has a file open, and says which", async () => {
@@ -91,7 +127,7 @@ describe("waitForOpfsFilesFree", () => {
       createSyncAccessHandle: () => Promise.reject(new DOMException("no", "NotAllowedError")),
     }
     const root = dir("", [dir("livestore-s@6", [broken])])
-    await expect(waitForOpfsFilesFree("s", { root: async () => root, sleep: noSleep })).rejects.toMatchObject({
+    await expect(waitForOpfsFilesFree("s", { root: async () => root, onBusy: () => {}, sleep: noSleep })).rejects.toMatchObject({
       name: "NotAllowedError",
     })
   })

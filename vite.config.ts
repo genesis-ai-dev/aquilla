@@ -194,6 +194,7 @@ export default defineConfig(({ mode }) => ({
       // boot doesn't re-optimize, and so Effect resolves to one shared chunk.
       "@livestore/adapter-web/worker",
       "@livestore/utils/effect",
+      "@livestore/common", // opfs-handles.ts (storage format version)
     ],
   },
   build: {

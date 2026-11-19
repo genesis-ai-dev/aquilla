@@ -45,10 +45,13 @@ void holdLeaderLock(
   } else {
     warnLeader("error", "leader worker stopped", error)
   }
-  // Rethrown uncaught, so it fires `error` on the page's Worker object. That's
-  // the only failure the adapter listens for before the leader says it's
-  // ready (a rejection here would leave the page's boot waiting forever), and
-  // it shuts the session down so getOfflineStore() rejects with it.
+  // Rethrown uncaught, so it fires `error` here first: the runner
+  // (BrowserWorkerRunner) listens for that on `self` and closes, which closes
+  // the databases and their OPFS handles without waiting on the page. It then
+  // fires on the page's Worker object. That's the only failure the adapter
+  // listens for before the leader says it's ready (a rejection here would
+  // leave the page's boot waiting forever), and it shuts the session down so
+  // getOfflineStore() rejects with it.
   setTimeout(() => {
     throw error
   })

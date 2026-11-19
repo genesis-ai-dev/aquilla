@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest"
 import { holdLeaderLock, leaderLockName } from "./leader-lock"
 import { STORE_ID } from "./store-id"
 
+const quiet = { onSlow: () => {}, onSteal: () => {} }
+
 /** Exclusive-only LockManager: grants in request order, one holder per name; supports `signal` and `steal`. */
 function fakeLocks() {
   const held = new Map<string, () => void>()
@@ -93,8 +95,8 @@ describe("holdLeaderLock", () => {
     const { locks, isHeld } = fakeLocks()
     const oldLeader = controllableLeader()
     const newLeader = controllableLeader()
-    const oldDone = holdLeaderLock("l", oldLeader.run, { locks })
-    const newDone = holdLeaderLock("l", newLeader.run, { locks })
+    const oldDone = holdLeaderLock("l", oldLeader.run, { locks, ...quiet })
+    const newDone = holdLeaderLock("l", newLeader.run, { locks, ...quiet })
     await settled()
     expect(oldLeader.run).toHaveBeenCalledOnce()
     expect(newLeader.run).not.toHaveBeenCalled()
@@ -113,7 +115,7 @@ describe("holdLeaderLock", () => {
   it("lets go of the lock when the leader crashes, and passes the error on", async () => {
     const { locks, isHeld } = fakeLocks()
     const leader = controllableLeader()
-    const done = holdLeaderLock("l", leader.run, { locks })
+    const done = holdLeaderLock("l", leader.run, { locks, ...quiet })
     await settled()
     const error = new Error("boom")
     leader.crash(error)
@@ -129,8 +131,8 @@ describe("holdLeaderLock", () => {
       const waiter = controllableLeader()
       const blockerSlow = vi.fn()
       const onSlow = vi.fn()
-      void holdLeaderLock("l", blocker.run, { locks, slowAfterMs: 1000, onSlow: blockerSlow })
-      const done = holdLeaderLock("l", waiter.run, { locks, slowAfterMs: 1000, onSlow })
+      void holdLeaderLock("l", blocker.run, { locks, ...quiet, slowAfterMs: 1000, onSlow: blockerSlow })
+      const done = holdLeaderLock("l", waiter.run, { locks, ...quiet, slowAfterMs: 1000, onSlow })
       await vi.advanceTimersByTimeAsync(1000)
       expect(onSlow).toHaveBeenCalledWith(1000)
       expect(blockerSlow).not.toHaveBeenCalled()
@@ -152,7 +154,7 @@ describe("holdLeaderLock", () => {
       const stuck = controllableLeader()
       const leader = controllableLeader()
       const onSteal = vi.fn()
-      const stuckDone = holdLeaderLock("l", stuck.run, { locks, onSlow: () => {} })
+      const stuckDone = holdLeaderLock("l", stuck.run, { locks, ...quiet })
       const stuckSettled = stuckDone.catch((error: unknown) => error)
       const done = holdLeaderLock("l", leader.run, { locks, slowAfterMs: 1000, stealAfterMs: 5000, onSlow: () => {}, onSteal })
       await vi.advanceTimersByTimeAsync(4999)
@@ -176,7 +178,7 @@ describe("holdLeaderLock", () => {
       const { locks } = fakeLocks()
       const leader = controllableLeader()
       const onSteal = vi.fn()
-      const done = holdLeaderLock("l", leader.run, { locks, stealAfterMs: 1000, onSteal })
+      const done = holdLeaderLock("l", leader.run, { locks, ...quiet, stealAfterMs: 1000, onSteal })
       await vi.advanceTimersByTimeAsync(5000)
       const error = new DOMException("leader gave up", "AbortError")
       leader.crash(error)
@@ -190,14 +192,14 @@ describe("holdLeaderLock", () => {
   it("rejects when the lock request fails, instead of hanging", async () => {
     const error = new DOMException("denied", "SecurityError")
     const locks = { request: () => Promise.reject(error) } as unknown as LockManager
-    await expect(holdLeaderLock("l", vi.fn(), { locks })).rejects.toBe(error)
+    await expect(holdLeaderLock("l", vi.fn(), { locks, ...quiet })).rejects.toBe(error)
   })
 
   it("rejects without Web Locks", async () => {
     vi.stubGlobal("navigator", {})
     try {
       const leader = vi.fn()
-      await expect(holdLeaderLock("l", leader)).rejects.toThrow(/navigator\.locks/)
+      await expect(holdLeaderLock("l", leader, quiet)).rejects.toThrow(/navigator\.locks/)
       expect(leader).not.toHaveBeenCalled()
     } finally {
       vi.unstubAllGlobals()

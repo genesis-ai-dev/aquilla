@@ -138,6 +138,38 @@ Both routes 404 unless `WRANGLER_LOCAL=1`; prod `wrangler.toml` never sets it. *
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 
+## Interaction performance — every action is instant or honestly in the background
+
+A click that takes 800 ms is a defect, the same as a wrong value. The cause in this app is
+never one slow function: it is **React commits per action × tree rendered per commit × work
+done in render** (measured in AQU-2654; `docs/decisions/0013-interaction-cost-is-commits-times-tree.md`
+has the numbers and the full list). When you write or review UI code, apply these — each one
+is checkable in a diff without a profiler:
+
+1. **One user action is one state transition.** Do not `setState` on both sides of an
+   `await`, and do not let a store emit once per mutation of one event. Batch, then announce once.
+2. **A write does not read back what it just wrote.** The write's response or its applied
+   frame carries the result. The same `GET` from two subscribers is one shared read.
+3. **No new state in `ProjectWorkspace.tsx` or `EditorTable.tsx`.** State lives in the
+   smallest component that needs it, or in a store read through a selector.
+   `scripts/perf/structure-ratchet.test.ts` fails when either file gains a `useState` or lines.
+4. **Closed is unmounted.** A dialog, popover, menu or tooltip that is not open renders
+   nothing. One overlay per list, told which row it is for — never one per row.
+5. **A list row's props are stable.** No object, array, map or closure built in the parent's
+   render is passed to a memoized row.
+6. **Render does not compile, parse, scan or sort.** No `new RegExp`, no walk over every cell
+   or every glossary term in a component body or a per-keystroke handler. Cache on the identity
+   of the inputs (by content, when callers build the input in render), or do it when the user asks.
+7. **Long work is honest.** Anything that outlives the gesture that started it shows progress,
+   shows completion, and fails loudly.
+
+Measure with **`pnpm perf:interaction`** (`scripts/perf/README.md` → "Interaction benchmark").
+It counts React commits, component renders and requests per action and enforces
+`scripts/perf/interaction-budgets.json`. If your change touches the editor's commit, focus,
+open or tab-return path, run it before and after and put the changed numbers in the PR. A
+budget is lowered when a number improves and is not raised to make a change pass. The nightly
+routine (`docs/routines/PERF-NIGHTLY.md`) runs it against `dev` and fixes what regressed.
+
 ## Slow-request logs — treat them as failures
 
 `auth-worker`, `sync-worker` and `agent-worker` each log any request that takes

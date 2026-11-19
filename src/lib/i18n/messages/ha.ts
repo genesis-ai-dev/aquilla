@@ -2361,7 +2361,7 @@ export const ha: Catalog = {
   "audio.batchVoice.title": "Ku ƙirƙiri murya",
   "audio.batchVoice.tooltip": "Ku ƙirƙiri ɗauka ga kowane layi {count} da aka zaɓa, a murya ɗaya",
   "audio.batchVoice.needTranslated": "Ku zaɓi aƙalla layi ɗaya da aka fassara",
-  "audio.batchVoice.rowName": "jere {number}",
+  "editor.line.rowName": "jere {number}",
   "audio.batchVoice.voiceLabel": "Muryar da za a yi amfani",
   "audio.batchVoice.existingLabel": "Layukan da suka riga sun sami sautin da aka ƙirƙira",
   "audio.batchVoice.existingSkip": "Ku bar su yadda suke",

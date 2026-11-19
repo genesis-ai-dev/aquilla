@@ -2355,7 +2355,7 @@ export const sw: Catalog = {
   "audio.batchVoice.title": "Tengeneza sauti",
   "audio.batchVoice.tooltip": "Tengeneza toleo kwa kila mstari kati ya mistari {count} iliyochaguliwa, kwa sauti moja",
   "audio.batchVoice.needTranslated": "Chagua angalau mstari mmoja uliotafsiriwa",
-  "audio.batchVoice.rowName": "safu {number}",
+  "editor.line.rowName": "safu {number}",
   "audio.batchVoice.voiceLabel": "Sauti ya kutumia",
   "audio.batchVoice.existingLabel": "Mistari yenye sauti iliyotengenezwa tayari",
   "audio.batchVoice.existingSkip": "Acha kama ilivyo",

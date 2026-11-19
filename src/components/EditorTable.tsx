@@ -289,13 +289,10 @@ import {
   type EditorParallelBiblesConfig,
 } from "./parallel-bibles/EditorBibleColumns"
 import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineNumberLabel, scriptureNumberingOf } from "@/lib/cells/line-name"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
-import {
-  cellNumberLabel,
-  importDisplayLabel,
-  verseRangeLabel,
-} from "@/lib/scripture-reference"
+import { verseRangeLabel } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
@@ -2766,11 +2763,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
   // A file of chapters numbers its lines by verse; anything else counts them.
-  const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
-    item.kind === "chapter"
-    || item.kind === "chapter-range"
-    || item.kind === "preface"
-  )), [milestoneNavigationItems])
+  const scriptureNumbering = useMemo(() => scriptureNumberingOf(milestoneNavigationItems), [milestoneNavigationItems])
 
   // Numbering and paragraph groups depend on structure/validation, not save
   // timestamps or ordinary text edits. One version scan serves both caches;
@@ -8209,17 +8202,8 @@ function EditorRow({
   const issueSummary = issueLines.length > 0
     ? issueLines.map(formatCellIssueLine).join(". ")
     : issueHint
-  const numberLabel = cellNumberLabel({
-    lineNumbersEnabled,
-    cellType: cell.type,
-    canonicalRef: cell.group,
-    sourceCanonicalRef: cell.globalReferences?.[0],
-    scriptureNumbering,
-    rowIndex,
-    contentNumber,
-    displayLabel: importDisplayLabel(cell.metadata),
-    versePart,
-  })
+  // AQU-2278: the same function a line's name reads its number from.
+  const numberLabel = lineNumberLabel(cell, { contentNumber, versePart, scriptureNumbering, rowIndex }, lineNumbersEnabled)
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
   // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
   // the same set whose number pill is suppressed, so the two left-edge

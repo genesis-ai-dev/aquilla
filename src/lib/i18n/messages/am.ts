@@ -1182,7 +1182,6 @@ export const am: Catalog = {
   "editor.row.mediaInsertReason": "ወደ የገባ ድምጽ ሕዋሳት መጨመር አይቻልም።",
   "editor.row.mediaRemoveReason": "ይህ ረድፍ የመጀመሪያው ቀረጻ ቁራጭ ነው፣ ስለዚህ ሊወገድ አይችልም።",
   "editor.row.idmlReason": "የ IDML ፋይሎች የመጀመሪያ አቀማመጣቸውን ይጠብቃሉ፣ ስለዚህ ሕዋሳት ሊጨመሩ ወይም ሊወገዱ አይችሉም።",
-  "editor.row.maintainerOnlyReason": "የገባ መስመር ማስወገድ የሚችለው ጠባቂ ብቻ ነው።",
   "editor.removeCell.title": "ይህ ሕዋስ ይወገድ?",
   "editor.removeCell.confirmLabel": "ያስወግዱት",
   "editor.removeCell.lead": "ይህ ሕዋሱን እና በእሱ ላይ ያለውን ሁሉ ያስወግዳል፦",

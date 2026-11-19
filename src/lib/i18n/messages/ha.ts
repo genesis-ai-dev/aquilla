@@ -1182,7 +1182,6 @@ export const ha: Catalog = {
   "editor.row.mediaInsertReason": "Ba za a iya ƙara ƙwayoyi ga sautin da aka shigo da shi ba.",
   "editor.row.mediaRemoveReason": "Wannan jere yanki ne na rikodin asali, don haka ba za a iya cire shi ba.",
   "editor.row.idmlReason": "Fayilolin IDML suna kiyaye tsarinsu na asali, don haka ba za a iya ƙara ko cire ƙwayoyi ba.",
-  "editor.row.maintainerOnlyReason": "Mai kula kawai ne zai iya cire layin da aka shigo da shi.",
   "editor.removeCell.title": "A cire wannan ƙwaya?",
   "editor.removeCell.confirmLabel": "Ku cire shi",
   "editor.removeCell.lead": "Wannan yana cire ƙwayar da duk abin da ke kanta:",

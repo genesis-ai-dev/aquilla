@@ -352,9 +352,7 @@ import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
-  canRemoveImportedCells as canRemoveImportedCellsGate,
   cellPlacement,
-  isImportedRow,
   rowActionAvailability,
   type RowActionReason,
 } from "@/lib/cell-editing-gate"
@@ -14425,7 +14423,6 @@ export function ProjectWorkspace() {
       project?.sourceLinkMode === "live" || dcsCursorLoading || dcsCursor !== null,
   }
   const canEditLines = canEditCells(cellEditingSubject)
-  const canRemoveImportedCells = canRemoveImportedCellsGate(cellEditingSubject)
   /**
    * WHERE can a cell go in this file? Answered from the FILE, never from which
    * panel happens to be open — see cell-editing-gate.ts for why that
@@ -14492,11 +14489,6 @@ export function ProjectWorkspace() {
         isIdmlCell: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) != null,
         gapAbove: gaps.gapAbove,
         gapBelow: gaps.gapBelow,
-        // A line somebody added here is theirs to take back at any rank;
-        // anything else is the client's own content. One shared definition —
-        // see `isImportedRow` for why it no longer asks about emptiness.
-        isImported: isImportedRow(cell),
-        canRemoveImported: canRemoveImportedCells,
       })
       // The label answers the ACTION the user reached for, not the row's
       // nature — a dead insert is a question about a NEW cell, so the media
@@ -14510,16 +14502,14 @@ export function ProjectWorkspace() {
               : t("editor.row.mediaRemoveReason")
             : reason === "idml"
               ? t("editor.row.idmlReason")
-              : reason === "noRoom"
-                ? t("editor.row.noRoomReason")
-                : t("editor.row.maintainerOnlyReason")
+              : t("editor.row.noRoomReason")
       return {
         above: label("insert", out.above),
         below: label("insert", out.below),
         remove: label("remove", out.remove),
       }
     },
-    [placement, canRemoveImportedCells, t],
+    [placement, t],
   )
 
   /**
@@ -19430,10 +19420,6 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canEditLines}
-                    // The second gate: an imported line is the client's own
-                    // work, so taking one back is maintainer-only whatever
-                    // tier the project runs.
-                    canRemoveImportedCells={canRemoveImportedCells}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     // AQU-646 stage 2: the audio VTT. The import writes cells,
                     // so it sits behind the SAME source.* floor as the add-line

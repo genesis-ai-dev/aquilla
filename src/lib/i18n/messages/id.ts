@@ -960,7 +960,6 @@ export const id: Catalog = {
   "editor.row.mediaInsertReason": "Sel tidak dapat ditambahkan ke audio hasil impor.",
   "editor.row.mediaRemoveReason": "Baris ini adalah bagian dari rekaman asli, jadi tidak dapat dihapus.",
   "editor.row.idmlReason": "File IDML mempertahankan tata letak aslinya, jadi sel tidak dapat ditambah atau dihapus.",
-  "editor.row.maintainerOnlyReason": "Hanya pengelola yang dapat menghapus baris hasil impor.",
   "editor.removeCell.title": "Hapus sel ini?",
   "editor.removeCell.confirmLabel": "Hapus",
   "editor.removeCell.lead": "Ini menghapus sel beserta semua yang ada padanya:",

@@ -953,7 +953,6 @@ export const th: Catalog = {
   "editor.row.mediaInsertReason": "เพิ่มเซลล์ให้เสียงที่นำเข้าไม่ได้",
   "editor.row.mediaRemoveReason": "แถวนี้เป็นส่วนหนึ่งของการบันทึกต้นฉบับ จึงลบไม่ได้",
   "editor.row.idmlReason": "ไฟล์ IDML คงเค้าโครงเดิมไว้ จึงเพิ่มหรือลบเซลล์ไม่ได้",
-  "editor.row.maintainerOnlyReason": "เฉพาะผู้ดูแลเท่านั้นที่ลบบรรทัดที่นำเข้าได้",
   "editor.removeCell.title": "ลบเซลล์นี้หรือไม่?",
   "editor.removeCell.confirmLabel": "ลบเลย",
   "editor.removeCell.lead": "การดำเนินการนี้จะลบเซลล์และทุกอย่างในเซลล์:",

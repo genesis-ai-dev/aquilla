@@ -910,7 +910,9 @@ export interface EventPayloads {
   // a no-op, so the event is idempotent and can never overwrite fresher data.
   'cell.audio.measure': {
     audioId: string
-    durationMs: number
+    /** AQU-2664: may be left out (or 0) by a loudness reading whose take's
+     *  length isn't known; nothing is then stored — never a 0. */
+    durationMs?: number
     /** AQU-2664: the recording's integrated loudness (LUFS, -70 = silent)
      *  and true peak (dBTP), both or neither. Fill-only, like the duration. */
     loudnessLufs?: number

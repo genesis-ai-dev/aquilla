@@ -1166,8 +1166,9 @@ export interface CellAudioMeasureInput {
   fileId: string
   cellId: string
   audioId: string
-  /** The clip's decoded length. The server fills only a NULL duration. */
-  durationMs: number
+  /** The clip's decoded length. The server fills only a NULL duration.
+   *  AQU-2664: left out when not known (null, 0) — never stored as 0. */
+  durationMs?: number | null
   /** AQU-2664: the recording's loudness (LUFS) and true peak (dBTP), both or
    *  neither; the server fills them only when NULL. */
   loudness?: { loudnessLufs: number; truePeakDb: number; loudnessFromMs?: number | null; loudnessToMs?: number | null }
@@ -1194,7 +1195,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     author: input.author,
     payload: {
       audioId: input.audioId,
-      durationMs: intMs(input.durationMs),
+      ...(input.durationMs != null && input.durationMs > 0 ? { durationMs: intMs(input.durationMs) } : {}),
       ...(input.loudness
         ? {
             loudnessLufs: input.loudness.loudnessLufs,

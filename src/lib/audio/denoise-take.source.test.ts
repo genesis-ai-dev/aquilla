@@ -14,7 +14,12 @@ vi.mock("./bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
 const tone = vi.hoisted(() => Float32Array.from({ length: 48000 }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000)))
 vi.mock("./decode-mono", () => ({ TARGET_RATE: 48000, decodeToMono48k: vi.fn(async () => tone.slice()) }))
 vi.mock("./denoise", () => ({ denoiseMono48k: vi.fn(async () => ({ blob: new Blob(["x"], { type: "audio/webm" }), durationMs: 1000, mimeType: "audio/webm" })) }))
-vi.mock("./audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
+const trims = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("./audio-attachments-bus", () => ({
+  injectOptimisticAudioAttachment: vi.fn(),
+  injectOptimisticAudioTrim: vi.fn((_f: string, _c: string, att: Record<string, unknown>) => trims.push(att)),
+  notifyAudioAttachmentsChanged: vi.fn(),
+}))
 vi.mock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "jwt" }))
 vi.mock("./project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("./transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
@@ -73,6 +78,8 @@ describe("Remove noise on a whole take", () => {
     expect(m.audioId).toBe("dn-x.webm")
     expect(m.loudness).toMatchObject({ loudnessFromMs: 250, loudnessToMs: 900 })
     expect(m.loudness.truePeakDb).toBeCloseTo(-20, 0)
+    // Re-check S4: shown on the page at once, carrying what the take carries.
+    await vi.waitFor(() => expect(trims.some((t) => t.loudnessFromMs === 250 && typeof t.loudnessLufs === "number" && t.evenTargetLufs === -16)).toBe(true))
   })
 
   it("never holds the save up: it resolves while the measuring is still going", async () => {

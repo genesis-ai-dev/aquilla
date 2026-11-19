@@ -26,6 +26,7 @@ import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { newPieceAudioId } from "./cut-take"
 import {
   injectOptimisticAudioAttachment,
+  injectOptimisticAudioTrim,
   notifyAudioAttachmentsChanged,
 } from "./audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -143,7 +144,7 @@ async function cleanAndUpload(args: {
 async function measureCleaned(
   blob: Blob,
   where: { projectId: string; fileId: string; cellId: string; author: string; targetLang?: string },
-  takes: ReadonlyArray<{ audioId: string; trimStartMs?: number | null; trimEndMs?: number | null }>,
+  takes: ReadonlyArray<{ audioId: string; trimStartMs?: number | null; trimEndMs?: number | null; out: AudioAttachmentOut }>,
 ): Promise<void> {
   try {
     const pcm = await decodeToMono48k(new Uint8Array(await blob.arrayBuffer()))
@@ -153,12 +154,16 @@ async function measureCleaned(
       const b = t.trimEndMs != null ? Math.min(pcm.length, Math.round((t.trimEndMs / 1000) * TARGET_RATE)) : pcm.length
       // A copy: the worker takes (transfers) what it measures.
       const r = await loudnessClient().measure([pcm.slice(a, Math.max(a, b))], TARGET_RATE)
-      await emitCellAudioMeasure({
+      const reading = { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: t.trimStartMs ?? 0, loudnessToMs: t.trimEndMs ?? null }
+      const ev = emitCellAudioMeasure({
         projectId: where.projectId, fileId: where.fileId, cellId: where.cellId, audioId: t.audioId, durationMs,
-        loudness: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: t.trimStartMs ?? 0, loudnessToMs: t.trimEndMs ?? null },
+        loudness: reading,
         ...(where.targetLang ? { targetLang: where.targetLang } : {}),
         author: where.author,
       })
+      // Shown on the page at once, not only once the outbox has flushed.
+      injectOptimisticAudioTrim(where.fileId, where.cellId, { ...t.out, ...reading }, ev)
+      await ev
     }
     notifyAudioAttachmentsChanged(where.fileId)
   } catch {
@@ -220,7 +225,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
 
   // 5. Optimistically surface the cleaned take so it shows without waiting for
   //    the outbox flush + projection round-trip.
-  injectOptimisticAudioAttachment(fileId, cellId, {
+  const cleanedOut: AudioAttachmentOut = {
     audioId: fullAudioId,
     url: result.url,
     slot,
@@ -237,10 +242,11 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     ...(src?.fadeInMs != null ? { fadeInMs: src.fadeInMs } : {}),
     ...(src?.fadeOutMs != null ? { fadeOutMs: src.fadeOutMs } : {}),
     ...(src?.evenTargetLufs != null ? { evenTargetLufs: src.evenTargetLufs } : {}),
-  }, attachEventId)
+  }
+  injectOptimisticAudioAttachment(fileId, cellId, cleanedOut, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
   void measureCleaned(blob, { projectId, fileId, cellId, author, ...(args.targetLang ? { targetLang: args.targetLang } : {}) }, [
-    { audioId: fullAudioId, trimStartMs: src?.trimStartMs, trimEndMs: src?.trimEndMs },
+    { audioId: fullAudioId, trimStartMs: src?.trimStartMs, trimEndMs: src?.trimEndMs, out: cleanedOut },
   ])
   if (args.history) {
     recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
@@ -289,6 +295,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
     audioId: i === 0 ? fullAudioId : newPieceAudioId(cellId, fullAudioId),
   }))
   const rootId = born[0].audioId
+  const outs = new Map<string, AudioAttachmentOut>()
   let attached = 0
   try {
     for (const { piece, audioId } of born) {
@@ -322,7 +329,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
       if (piece.evenTargetLufs != null) {
         await emitCellAudioEven({ projectId, fileId, cellId, audioId, evenTargetLufs: piece.evenTargetLufs, ...lane, author })
       }
-      injectOptimisticAudioAttachment(fileId, cellId, {
+      const out: AudioAttachmentOut = {
         audioId,
         url: result.url,
         slot: piece.slot,
@@ -337,7 +344,9 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         ...(piece.label ? { label: piece.label } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
         ...(piece.evenTargetLufs != null ? { evenTargetLufs: piece.evenTargetLufs } : {}),
-      }, placeP ?? eventId)
+      }
+      outs.set(audioId, out)
+      injectOptimisticAudioAttachment(fileId, cellId, out, placeP ?? eventId)
     }
   } catch (emitErr) {
     // Nothing of the cleaned take reached the outbox: drop the upload. Once a
@@ -347,7 +356,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
   }
   notifyAudioAttachmentsChanged(fileId)
   void measureCleaned(blob, { projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}) },
-    born.map(({ piece, audioId }) => ({ audioId, trimStartMs: piece.trimStartMs, trimEndMs: piece.trimEndMs })))
+    born.filter(({ audioId }) => outs.has(audioId)).map(({ piece, audioId }) => ({ audioId, trimStartMs: piece.trimStartMs, trimEndMs: piece.trimEndMs, out: outs.get(audioId)! })))
   if (args.history) {
     recordTakeAdded(
       "denoise",

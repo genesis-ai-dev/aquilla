@@ -289,6 +289,7 @@ import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes
 import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
 import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
 import { clearedToastText, ranToastText } from "@/lib/audio/even-out-toasts"
+import { flushEvenOutWrites } from "@/lib/audio/even-out-flush"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
@@ -4586,7 +4587,7 @@ export function ProjectWorkspace() {
   // `flush: false` (the Even out action) queues the write and leaves the one
   // outbox flush to the action, so 300 takes are not 300 round trips.
   const applyTakeEven = useCallback(
-    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<string | null> => {
+    async (cellId: string, audioId: string, targetLufs: number | null, opts?: { flush?: boolean }): Promise<{ fileId: string; eventId: string } | null> => {
       if (!project?.id) return null
       const owner = resolveTakeCellRef.current(cellId)
       const att = owner?.cell.attachments?.[audioId]
@@ -4598,11 +4599,11 @@ export function ProjectWorkspace() {
         author: currentUsername,
       })
       injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), evenTargetLufs: targetLufs }, p)
-      await p
-      if (opts?.flush === false) return owner.fileId
+      const eventId = await p
+      if (opts?.flush === false) return { fileId: owner.fileId, eventId }
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(owner.fileId)
-      return owner.fileId
+      return { fileId: owner.fileId, eventId }
     },
     [project?.id, currentUsername, getTokenForProjectFile, activeLane],
   )
@@ -4616,15 +4617,42 @@ export function ProjectWorkspace() {
     const projectId = project.id
     const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
     const touched = new Set<string>()
+    const written: string[] = []
+    const measure = makeTakeMeasurer({
+      fetchBytes: async (att, where, signal) => {
+        const ref = parseFrontierAudioUrl(att.url)
+        const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
+        if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
+        return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
+      },
+      decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
+      decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
+      emit: async (cellId, audioId, reading, durationMs) => {
+        const owner = resolveTakeCellRef.current(cellId)
+        const att = owner?.cell.attachments?.[audioId]
+        if (!owner || !att) return
+        const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+        const p = emitCellAudioMeasure({
+          projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        })
+        injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
+        await p
+      },
+    })
     return {
       readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
       applyEven: async (cellId, audioId, target) => {
-        const fileId = await applyTakeEven(cellId, audioId, target, { flush: false })
-        if (!fileId) throw new Error("even out: the take is gone")
-        touched.add(fileId)
+        const w = await applyTakeEven(cellId, audioId, target, { flush: false })
+        if (!w) throw new Error("even out: the take is gone")
+        touched.add(w.fileId)
+        written.push(w.eventId)
       },
+      // Every write out before the action ends: round after round of the
+      // outbox, not one batch of 100 (even-out-flush.ts).
       flush: async () => {
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await flushEvenOutWrites(written.splice(0), { getTokenForFile: getTokenForProjectFile })
         for (const f of touched) notifyAudioAttachmentsChanged(f)
         touched.clear()
       },
@@ -4632,29 +4660,10 @@ export function ProjectWorkspace() {
       allowed: canPerform("cell.audio.even", project.syncRole?.level ?? null),
       fileId: activeFileId,
       fileName: activeFileNameRef.current,
-      measure: makeTakeMeasurer({
-        fetchBytes: async (att, where, signal) => {
-          const ref = parseFrontierAudioUrl(att.url)
-          const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
-          if (!ref || !fileId) throw new Error("audio fetch: this take has no stored audio")
-          return fetchCellAudio({ projectId, fileId, audioId: ref.audioId, ext: ref.ext, getSyncToken, ...(signal ? { signal } : {}) })
-        },
-        decode: async (bytes) => (await import("@/lib/audio/decode-mono")).decodeToMono48k(bytes),
-        decodeWindow: async (bytes, startSec, endSec) => (await import("@/lib/audio/mp3-window")).decodeMp3Window(bytes, startSec, endSec),
-        emit: async (cellId, audioId, reading, durationMs) => {
-          const owner = resolveTakeCellRef.current(cellId)
-          const att = owner?.cell.attachments?.[audioId]
-          if (!owner || !att) return
-          const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
-          const p = emitCellAudioMeasure({
-            projectId, fileId: owner.fileId, cellId, audioId, durationMs, loudness: reading,
-            ...(activeLane ? { targetLang: activeLane } : {}),
-            author: currentUsername,
-          })
-          injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...reading }, p)
-          await p
-        },
-      }),
+      measure,
+      // The run is over: the decoded recording goes, and failed recordings are
+      // tried again next run.
+      release: () => measure.release(),
     }
   }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername, getTokenForProjectFile])
   const handleEvenOut = useCallback(

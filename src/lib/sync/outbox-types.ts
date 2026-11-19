@@ -624,7 +624,8 @@ export interface OutboxEventPayloads {
   // measuring an arbitrary take can never change which take is active.
   "cell.audio.measure": {
     audioId: string
-    durationMs: number
+    /** AQU-2664: left out when not known (never 0). */
+    durationMs?: number
     /** AQU-2664: the recording's loudness and true peak, both or neither,
      *  and the window of it they measured (to null = the end). */
     loudnessLufs?: number

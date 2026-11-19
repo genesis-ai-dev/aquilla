@@ -16,14 +16,15 @@
 // chooses the new take in its slot. All of it is ONE Undo step.
 
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment, injectOptimisticAudioTrim } from "@/lib/audio/audio-attachments-bus"
 import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { recordTakeAdded, type PieceStretch, type TakeRemoveData } from "@/lib/history/take-steps"
 import { emitCellAudioAttach, emitCellAudioEven, emitCellAudioGain, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
-import { measureLoudnessYielding } from "@/lib/audio/loudness"
+import { loudnessClient } from "@/lib/audio/loudness-client"
+import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 
 /** One line the new version goes on, and how it sits there. */
@@ -108,22 +109,11 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
   const lane = args.targetLang ? { targetLang: args.targetLang } : {}
   const over = args.mode === "over"
   const changes = args.changes ? { ...args.changes, ...(over ? { over: true } : {}) } : over ? { kinds: [], usedOn: args.placements.map((p) => p.cellId), over: true } : null
-  // AQU-2664: the new audio is in hand, so each line's take is measured now,
-  // over the part of it that line plays (on the page, yielding). If it can't
-  // be, it is simply unmeasured: it plays at its own volume until Even out
-  // measures it.
-  const measureKept = async (p: VersionPlacement): Promise<{ loudnessLufs: number; truePeakDb: number; loudnessFromMs: number; loudnessToMs: number | null } | null> => {
-    try {
-      const a = Math.max(0, Math.round(((p.trimStartMs ?? 0) / 1000) * args.rate))
-      const b = p.trimEndMs != null ? Math.min(args.samples.length, Math.round((p.trimEndMs / 1000) * args.rate)) : args.samples.length
-      const r = await measureLoudnessYielding([args.samples.subarray(a, Math.max(a, b))], args.rate)
-      return { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: p.trimStartMs ?? 0, loudnessToMs: p.trimEndMs }
-    } catch {
-      return null
-    }
-  }
   const ids: string[] = []
   let attached = 0
+  // AQU-2664: what each line's new take looks like on the page, for the
+  // reading's overlay once it is measured (after the save).
+  const born: Array<{ p: VersionPlacement; audioId: string; out: AudioAttachmentOut }> = []
   try {
     await withGroup(
       // Its name in Undo, the toast and History: what this Save did.
@@ -155,10 +145,6 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
           if (lvl && (lvl.gainDb != null || lvl.fadeInMs != null || lvl.fadeOutMs != null)) {
             await emitCellAudioGain({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, ...lvl, ...lane, author: args.author })
           }
-          const reading = await measureKept(p)
-          if (reading) {
-            await emitCellAudioMeasure({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, durationMs, loudness: reading, ...lane, author: args.author })
-          }
           if (p.evenTargetLufs != null) {
             await emitCellAudioEven({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, evenTargetLufs: p.evenTargetLufs, ...lane, author: args.author })
           }
@@ -176,29 +162,30 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
                   author: args.author,
                 })
               : null
+          const out: AudioAttachmentOut = {
+            audioId,
+            url,
+            slot: p.slot,
+            mimeType: "audio/wav",
+            voiceId: null,
+            referenceAudioId: p.fromAudioId,
+            durationMs,
+            trimStartMs: p.trimStartMs,
+            trimEndMs: p.trimEndMs,
+            targetOffsetMs: p.targetOffsetMs,
+            recordingsOffsetMs: p.recordingsOffsetMs,
+            ...(p.label ? { label: p.label } : {}),
+            ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}),
+            ...(p.level?.gainDb != null ? { gainDb: p.level.gainDb } : {}),
+            ...(p.level?.fadeInMs != null ? { fadeInMs: p.level.fadeInMs } : {}),
+            ...(p.level?.fadeOutMs != null ? { fadeOutMs: p.level.fadeOutMs } : {}),
+            ...(p.evenTargetLufs != null ? { evenTargetLufs: p.evenTargetLufs } : {}),
+          }
+          born.push({ p, audioId, out })
           injectOptimisticAudioAttachment(
             p.fileId,
             p.cellId,
-            {
-              audioId,
-              url,
-              slot: p.slot,
-              mimeType: "audio/wav",
-              voiceId: null,
-              referenceAudioId: p.fromAudioId,
-              durationMs,
-              trimStartMs: p.trimStartMs,
-              trimEndMs: p.trimEndMs,
-              targetOffsetMs: p.targetOffsetMs,
-              recordingsOffsetMs: p.recordingsOffsetMs,
-              ...(p.label ? { label: p.label } : {}),
-              ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}),
-              ...(p.level?.gainDb != null ? { gainDb: p.level.gainDb } : {}),
-              ...(p.level?.fadeInMs != null ? { fadeInMs: p.level.fadeInMs } : {}),
-              ...(p.level?.fadeOutMs != null ? { fadeOutMs: p.level.fadeOutMs } : {}),
-              ...(reading ?? {}),
-              ...(p.evenTargetLufs != null ? { evenTargetLufs: p.evenTargetLufs } : {}),
-            },
+            out,
             placeP ?? eventId,
           )
           recordTakeAdded(
@@ -245,5 +232,36 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
     throw err
   }
   for (const fileId of new Set(args.placements.map((p) => p.fileId))) notifyAudioAttachmentsChanged(fileId)
+  void measureVersion(args, born, durationMs, lane)
   return { audioIds: ids, url, durationMs }
+}
+
+/**
+ * AQU-2664: measure each line's new take over the part it plays — AFTER the
+ * save, never holding it up, off the page in the loudness worker (else on the
+ * page in yielding chunks) — store it, and show it on the page at once. A
+ * failure leaves the take unmeasured: it plays at its own volume until Even
+ * out measures it (the fallback).
+ */
+async function measureVersion(
+  args: SaveVersionArgs,
+  born: ReadonlyArray<{ p: VersionPlacement; audioId: string; out: AudioAttachmentOut }>,
+  durationMs: number,
+  lane: { targetLang?: string },
+): Promise<void> {
+  for (const { p, audioId, out } of born) {
+    try {
+      const a = Math.max(0, Math.round(((p.trimStartMs ?? 0) / 1000) * args.rate))
+      const b = p.trimEndMs != null ? Math.min(args.samples.length, Math.round((p.trimEndMs / 1000) * args.rate)) : args.samples.length
+      // A copy: the worker takes (transfers) what it measures.
+      const r = await loudnessClient().measure([args.samples.slice(a, Math.max(a, b))], args.rate)
+      const reading = { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: p.trimStartMs ?? 0, loudnessToMs: p.trimEndMs }
+      const ev = emitCellAudioMeasure({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, durationMs, loudness: reading, ...lane, author: args.author })
+      injectOptimisticAudioTrim(p.fileId, p.cellId, { ...out, ...reading }, ev)
+      await ev
+    } catch {
+      // The fallback: unmeasured, it plays at its own volume.
+    }
+  }
+  for (const fileId of new Set(born.map((b) => b.p.fileId))) notifyAudioAttachmentsChanged(fileId)
 }

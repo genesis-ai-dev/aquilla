@@ -54,6 +54,12 @@ export function readingIsStale(att: CodexCellAttachment): boolean {
   return (att.loudnessFromMs ?? 0) !== (att.trimStartMs ?? 0) || (att.loudnessToMs ?? null) !== (att.trimEndMs ?? null)
 }
 
+export interface MeasureOptions {
+  /** No later take of this run shares the recording: the decode can be
+   *  metered in place (no copy) and let go. */
+  last?: boolean
+}
+
 /** What the actions need from the workspace. */
 export interface EvenOutHost {
   /** The take as it reads now (null when gone or deleted). */
@@ -68,7 +74,10 @@ export interface EvenOutHost {
    *  refuses the action up front, before anything is downloaded. */
   allowed?: boolean
   /** Measure a take that has no reading (see makeTakeMeasurer); null = couldn't. */
-  measure(cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal): Promise<LoudnessFields | null>
+  measure(cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal, opts?: MeasureOptions): Promise<LoudnessFields | null>
+  /** The run is over: let go of what measuring held (the decoded recording,
+   *  the recordings that failed this run). */
+  release?(): void
   /** The file the takes are in, for the history step ("open … to undo this"). */
   fileId?: string | null
   fileName?: string | null
@@ -178,19 +187,45 @@ export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[],
   })
   // Measure what has no reading, or a reading of another window, one take at
   // a time (one decode in memory).
-  const toMeasure = live.filter((t) => {
-    const att = host.readTake(t.cellId, t.audioId)
-    return att != null && (att.loudnessLufs == null || readingIsStale(att))
-  })
+  // Takes of one recording go together (a stable sort, by recording), so a
+  // shared recording — cut pieces, an import's sections — is downloaded and
+  // decoded once, however its takes sit among the others.
+  const urlOf = (t: TakeRef) => host.readTake(t.cellId, t.audioId)?.url ?? ""
+  const toMeasure = live
+    .filter((t) => {
+      const att = host.readTake(t.cellId, t.audioId)
+      return att != null && (att.loudnessLufs == null || readingIsStale(att))
+    })
+    .map((t, i) => ({ t, i, url: urlOf(t) }))
+    .sort((a, b) => (a.url < b.url ? -1 : a.url > b.url ? 1 : a.i - b.i))
+    .map((x) => x.t)
+  try {
+    return await evenOutMeasured(host, live, toMeasure, targetLufs, result, opts)
+  } finally {
+    host.release?.()
+  }
+}
+
+async function evenOutMeasured(
+  host: EvenOutHost,
+  live: readonly TakeRef[],
+  toMeasure: readonly TakeRef[],
+  targetLufs: number,
+  result: EvenOutResult,
+  opts: EvenOutOptions,
+): Promise<EvenOutResult> {
   let done = 0
   if (toMeasure.length > 0) opts.onProgress?.(0, toMeasure.length)
   const readings = new Map<string, LoudnessFields>()
-  for (const t of toMeasure) {
+  for (let k = 0; k < toMeasure.length; k++) {
+    const t = toMeasure[k]
     if (opts.signal?.aborted) break
     const att = host.readTake(t.cellId, t.audioId)
     if (att) {
+      const next = toMeasure[k + 1]
+      const last = !next || host.readTake(next.cellId, next.audioId)?.url !== att.url
       try {
-        const r = await host.measure(t.cellId, t.audioId, att, opts.signal)
+        const r = await host.measure(t.cellId, t.audioId, att, opts.signal, { last })
         if (r) readings.set(`${t.cellId}\u0000${t.audioId}`, r)
       } catch {
         // The fallback: an unmeasured take is skipped below.
@@ -364,10 +399,11 @@ export interface TakeMeasurerDeps {
    */
   decodeWindow?(bytes: Uint8Array, startSec: number, endSec: number): Promise<Float32Array | null>
   /** Store the reading (emitCellAudioMeasure + an optimistic overlay). */
-  emit(cellId: string, audioId: string, reading: LoudnessFields, durationMs: number): Promise<void>
+  /** `durationMs`: the take's length when known (its own, else the decode's), null when not. */
+  emit(cellId: string, audioId: string, reading: LoudnessFields, durationMs: number | null): Promise<void>
   /** The meter. Default: off the page in the loudness worker, else on the
    *  page in yielding chunks (loudness-client.ts). It may take the samples. */
-  meter?: (pcm: Float32Array, rate: number) => Promise<LoudnessReading>
+  meter?: (pcm: Float32Array, rate: number, signal?: AbortSignal) => Promise<LoudnessReading>
   pcmBudgetBytes?: number
   timeoutMs?: number
 }
@@ -390,13 +426,18 @@ interface HeldRecording {
  * long for the budget, a long recording that can't be decoded in parts — is
  * a null, never a throw: the take is then skipped and plays at its own volume.
  */
-export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"] {
+export type TakeMeasurer = EvenOutHost["measure"] & { release(): void }
+
+export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
   const budget = deps.pcmBudgetBytes ?? MEASURE_PCM_BUDGET_BYTES
   const timeoutMs = deps.timeoutMs ?? MEASURE_TIMEOUT_MS
-  const meter = deps.meter ?? ((pcm: Float32Array, rate: number) => loudnessClient().measure([pcm], rate))
+  const meter = deps.meter ?? ((pcm: Float32Array, rate: number, signal?: AbortSignal) => loudnessClient().measure([pcm], rate, signal))
   // One recording at a time (one decode in memory).
   let held: HeldRecording | null = null
-  const results = new Map<string, LoudnessFields>()
+  const results = new Map<string, { reading: LoudnessFields; durationMs: number | null }>()
+  // Recordings whose download failed or ran out of time this run: their
+  // other takes are skipped at once instead of downloading again.
+  const failed = new Set<string>()
 
   const windowOf = (att: CodexCellAttachment): { startSec: number; endSec: number | null } => ({
     startSec: Math.max(0, (att.trimStartMs ?? 0) / 1000),
@@ -406,7 +447,13 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
   const recordingFor = async (att: CodexCellAttachment, where: TakeRef, signal: AbortSignal): Promise<HeldRecording | null> => {
     if (held?.url === att.url) return held
     held = null
-    const bytes = await deps.fetchBytes(att, where, signal)
+    let bytes: Uint8Array
+    try {
+      bytes = await deps.fetchBytes(att, where, signal)
+    } catch (e) {
+      failed.add(att.url)
+      throw e
+    }
     if (signal.aborted) return null
     const decodedBytes = att.durationMs != null ? (att.durationMs / 1000) * PCM_BYTES_PER_SEC : bytes.length * WORST_EXPANSION
     const pcm = decodedBytes <= budget ? await deps.decode(bytes) : null
@@ -415,7 +462,7 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
     return held
   }
 
-  const run = async (where: TakeRef, att: CodexCellAttachment, signal: AbortSignal): Promise<{ reading: LoudnessFields; durationMs: number } | null> => {
+  const run = async (where: TakeRef, att: CodexCellAttachment, signal: AbortSignal, last: boolean): Promise<{ reading: LoudnessFields; durationMs: number | null } | null> => {
     const { startSec, endSec } = windowOf(att)
     // A part too long for this device's memory: don't fetch anything.
     const knownEnd = endSec ?? (att.durationMs != null ? att.durationMs / 1000 : null)
@@ -423,22 +470,30 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
     const rec = await recordingFor(att, where, signal)
     if (!rec) return null
     let part: Float32Array | null
-    let durationMs: number
+    let durationMs: number | null
     if (rec.pcm) {
       durationMs = Math.round((rec.pcm.length / TARGET_RATE) * 1000)
       const a = Math.min(rec.pcm.length, Math.round(startSec * TARGET_RATE))
       const b = endSec != null ? Math.min(rec.pcm.length, Math.round(endSec * TARGET_RATE)) : rec.pcm.length
-      // A copy: the meter may take (transfer) it, and the decode stays for
-      // the recording's next section.
-      part = rec.pcm.slice(a, Math.max(a, b))
+      if (last) {
+        // Nothing later needs the decode: meter it in place (the worker may
+        // take it) and let it go — no second copy in memory.
+        part = a === 0 && b === rec.pcm.length ? rec.pcm : rec.pcm.subarray(a, Math.max(a, b))
+        held = null
+      } else {
+        // A copy: the meter may take (transfer) it, and the decode stays for
+        // the recording's next section.
+        part = rec.pcm.slice(a, Math.max(a, b))
+      }
     } else {
       // Too long to decode whole: just this part, if the recording allows it.
       if (knownEnd == null || !deps.decodeWindow) return null
       part = await deps.decodeWindow(rec.bytes, startSec, knownEnd)
-      durationMs = att.durationMs ?? 0
+      durationMs = att.durationMs ?? null
     }
     if (!part || signal.aborted) return null
-    const r = await meter(part, TARGET_RATE)
+    // Cancel and the timeout stop the meter too, not just the download.
+    const r = await meter(part, TARGET_RATE, signal)
     if (signal.aborted) return null
     return {
       reading: { loudnessLufs: r.integratedLufs, truePeakDb: r.truePeakDb, loudnessFromMs: att.trimStartMs ?? 0, loudnessToMs: att.trimEndMs ?? null },
@@ -446,10 +501,12 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
     }
   }
 
-  return async (cellId, audioId, att, signal) => {
+  const measure = async (cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal, mopts?: MeasureOptions): Promise<LoudnessFields | null> => {
+    if (failed.has(att.url)) return null
     const key = `${att.url}\u0000${att.trimStartMs ?? 0}\u0000${att.trimEndMs ?? ""}`
-    let reading = results.get(key) ?? null
-    let durationMs = att.durationMs ?? 0
+    const hit = results.get(key)
+    let reading = hit?.reading ?? null
+    let durationMs: number | null = att.durationMs ?? hit?.durationMs ?? null
     if (!reading) {
       // Its own controller: Cancel and the timeout both stop the download,
       // and nothing is decoded or metered after either.
@@ -461,26 +518,38 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): EvenOutHost["measure"]
       try {
         // Settles on abort too, even if a download ignores its signal.
         const aborted = new Promise<null>((resolve) => ac.signal.addEventListener("abort", () => resolve(null), { once: true }))
-        const m = await Promise.race([run({ cellId, audioId }, att, ac.signal).catch(() => null), aborted])
+        const m = await Promise.race([run({ cellId, audioId }, att, ac.signal, mopts?.last ?? false).catch(() => null), aborted])
         if (!m) {
-          // A failure is not remembered: the next run may have a better network.
-          if (ac.signal.aborted) held = null
+          // Ran out of time (not Cancel): this recording is skipped for the
+          // rest of the run. Nothing outlives the run: the next one may have
+          // a better network.
+          if (ac.signal.aborted) {
+            if (!signal?.aborted && held?.url !== att.url) failed.add(att.url)
+            held = null
+          }
           return null
         }
         reading = m.reading
         if (!durationMs) durationMs = m.durationMs
-        results.set(key, reading)
+        results.set(key, { reading, durationMs: m.durationMs })
       } finally {
         clearTimeout(timer)
         signal?.removeEventListener("abort", cancel)
       }
     }
     try {
-      await deps.emit(cellId, audioId, reading, durationMs)
+      await deps.emit(cellId, audioId, reading, durationMs && durationMs > 0 ? durationMs : null)
     } catch {
       // Not saved (the outbox refused it): it still counts in this session,
       // and the take is measured again next time.
     }
     return reading
   }
+  return Object.assign(measure, {
+    release() {
+      held = null
+      failed.clear()
+      results.clear()
+    },
+  })
 }

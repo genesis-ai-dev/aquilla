@@ -25,6 +25,13 @@ describe("evening out on the wire", () => {
     expect(last().payload).toMatchObject({ loudnessFromMs: 120, loudnessToMs: null })
   })
 
+  it("a measure with no known duration (or 0) leaves the duration out", async () => {
+    await emitCellAudioMeasure({ ...where, durationMs: 0, loudness: { loudnessLufs: -20, truePeakDb: -6 } })
+    expect(last().payload).not.toHaveProperty("durationMs")
+    await emitCellAudioMeasure({ ...where, loudness: { loudnessLufs: -20, truePeakDb: -6 } })
+    expect(last().payload).not.toHaveProperty("durationMs")
+  })
+
   it("a measure without a reading is the duration backfill it always was", async () => {
     await emitCellAudioMeasure({ ...where, durationMs: 900 })
     expect(last().payload).toEqual({ audioId: "a1", durationMs: 900 })

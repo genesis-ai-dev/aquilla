@@ -546,3 +546,197 @@ describe("measuring a take", () => {
     expect(await measure("c1", "a", att)).not.toBeNull()
   })
 })
+
+// Re-check M1: a recording shared by several takes (cut pieces, an import's
+// sections) is downloaded once per run, however its takes are interleaved
+// with others; one whose download failed is not tried again for its other
+// takes in that run.
+describe("a shared recording across interleaved takes", () => {
+  const tone = (seconds: number) => Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
+  function hostWith(takes: Record<string, Record<string, Partial<CodexCellAttachment>>>, fetchBytes: (att: CodexCellAttachment) => Promise<Uint8Array>) {
+    const store: Record<string, Record<string, CodexCellAttachment>> = {}
+    for (const [c, atts] of Object.entries(takes)) {
+      store[c] = {}
+      for (const [id, a] of Object.entries(atts)) store[c][id] = { type: "audio", durationMs: 4000, ...a } as CodexCellAttachment
+    }
+    const readTake = (c: string, id: string) => store[c]?.[id] ?? null
+    const measure = makeTakeMeasurer({
+      fetchBytes: (att) => fetchBytes(att),
+      decode: async () => tone(4),
+      emit: async (c, id, r) => { Object.assign(store[c][id], r) },
+      meter: async (pcm, rate) => (await import("./loudness")).measureLoudness([pcm], rate),
+    })
+    const host: EvenOutHost = { readTake, applyEven: async (c, id, t) => { store[c][id].evenTargetLufs = t }, measure, release: () => measure.release() }
+    return { host, store }
+  }
+  const interleaved = {
+    c1: { u1: { url: "frontier-audio://U.mp3", trimEndMs: 2000 }, v1: { url: "frontier-audio://V1.wav" } },
+    c2: { u2: { url: "frontier-audio://U.mp3", trimStartMs: 2000 }, v2: { url: "frontier-audio://V2.wav" } },
+    c3: { u3: { url: "frontier-audio://U.mp3", trimStartMs: 1000, trimEndMs: 3000 } },
+  }
+  const refs = [
+    { cellId: "c1", audioId: "u1" }, { cellId: "c1", audioId: "v1" },
+    { cellId: "c2", audioId: "u2" }, { cellId: "c2", audioId: "v2" },
+    { cellId: "c3", audioId: "u3" },
+  ]
+
+  it("downloads U once, though its takes are mixed with others", async () => {
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => { fetched.push(att.url); return new Uint8Array([1]) })
+    const r = await evenOutTakes(host, refs)
+    expect(r).toMatchObject({ evened: 5, unmeasured: 0 })
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(1)
+    expect(fetched).toHaveLength(3)
+  })
+
+  it("a recording whose download failed is skipped for its other takes in that run, counted as skipped", async () => {
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => {
+      fetched.push(att.url)
+      if (att.url.endsWith("U.mp3")) throw new Error("network gave up")
+      return new Uint8Array([1])
+    })
+    const r = await evenOutTakes(host, refs)
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(1)
+    expect(r).toMatchObject({ evened: 2, unmeasured: 3, skipped: 3 })
+  })
+
+  it("a recording whose download ran out of time is skipped for its other takes too", async () => {
+    vi.useFakeTimers()
+    try {
+      let fetches = 0
+      const measure = makeTakeMeasurer({
+        fetchBytes: () => { fetches++; return new Promise(() => {}) },
+        decode: async () => tone(4), emit: async () => {}, timeoutMs: 1000,
+      })
+      const att = { url: "frontier-audio://slow.mp3", type: "audio", durationMs: 4000 } as CodexCellAttachment
+      const first = measure("c1", "a", { ...att, trimEndMs: 2000 })
+      await vi.advanceTimersByTimeAsync(1001)
+      expect(await first).toBeNull()
+      expect(await measure("c2", "b", { ...att, trimStartMs: 2000 })).toBeNull()
+      expect(fetches).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a later run tries the failed recording again", async () => {
+    let fail = true
+    const fetched: string[] = []
+    const { host } = hostWith(interleaved, async (att) => {
+      fetched.push(att.url)
+      if (fail && att.url.endsWith("U.mp3")) throw new Error("offline")
+      return new Uint8Array([1])
+    })
+    await evenOutTakes(host, refs)
+    fail = false
+    const r = await evenOutTakes(host, refs)
+    expect(r.unmeasured).toBe(0)
+    expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(2)
+  })
+})
+
+// Re-check S1: no copy of the decode when nothing later needs it, and the
+// decode is let go when the run ends.
+describe("memory while measuring", () => {
+  const tone = (seconds: number) => Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
+  it("the last take of a recording is metered in place; earlier ones get a copy, so the decode stays for them", async () => {
+    const decoded = tone(4)
+    const seen: Float32Array[] = []
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]),
+      decode: async () => decoded,
+      emit: async () => {},
+      meter: async (pcm, rate) => { seen.push(pcm); return (await import("./loudness")).measureLoudness([pcm], rate) },
+    })
+    const att = { url: "frontier-audio://U.wav", type: "audio", durationMs: 4000 } as CodexCellAttachment
+    await measure("c1", "a", { ...att, trimEndMs: 2000 }, undefined, { last: false })
+    await measure("c2", "b", { ...att, trimStartMs: 2000 }, undefined, { last: true })
+    expect(seen[0].buffer).not.toBe(decoded.buffer)
+    expect(seen[1].buffer).toBe(decoded.buffer)
+  })
+
+  it("an untrimmed last take is metered as the decode itself", async () => {
+    const decoded = tone(2)
+    let seen: Float32Array | null = null
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]), decode: async () => decoded, emit: async () => {},
+      meter: async (pcm, rate) => { seen = pcm; return (await import("./loudness")).measureLoudness([pcm], rate) },
+    })
+    await measure("c1", "a", { url: "frontier-audio://W.wav", type: "audio", durationMs: 2000 } as CodexCellAttachment, undefined, { last: true })
+    expect(seen).toBe(decoded)
+  })
+
+  it("Even out tells the measurer which take is a recording's last, and releases it at the end", async () => {
+    const calls: Array<{ id: string; last: boolean | undefined }> = []
+    const release = vi.fn()
+    const store: Record<string, CodexCellAttachment> = {
+      a: { url: "u1", type: "audio" } as CodexCellAttachment,
+      b: { url: "u2", type: "audio" } as CodexCellAttachment,
+      c: { url: "u1", type: "audio", trimStartMs: 10 } as CodexCellAttachment,
+    }
+    const host: EvenOutHost = {
+      readTake: (_c, id) => store[id],
+      applyEven: async () => {},
+      measure: async (_c, id, _att, _s, o) => { calls.push({ id, last: o?.last }); return null },
+      release,
+    }
+    await evenOutTakes(host, ["a", "b", "c"].map((id) => ({ cellId: "c", audioId: id })))
+    expect(calls).toEqual([{ id: "a", last: false }, { id: "c", last: true }, { id: "b", last: true }])
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the timeout reaches the meter", () => {
+  it("the meter is handed a signal that aborts when the take runs out of time", async () => {
+    vi.useFakeTimers()
+    try {
+      let meterSignal: AbortSignal | undefined
+      const measure = makeTakeMeasurer({
+        fetchBytes: async () => new Uint8Array([1]),
+        decode: async () => new Float32Array(48_000),
+        emit: async () => {},
+        timeoutMs: 1000,
+        meter: (_pcm, _rate, signal) => { meterSignal = signal; return new Promise(() => {}) },
+      })
+      const p = measure("c1", "a", { url: "frontier-audio://m.wav", type: "audio", durationMs: 1000 } as CodexCellAttachment)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(meterSignal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await p).toBeNull()
+      expect(meterSignal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// Re-check S5: the measurer never claims a duration it doesn't know.
+describe("durations from a measure", () => {
+  it("a take measured in parts (no whole decode) sends no duration when it has none", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array(200_000), decode: async () => new Float32Array(0),
+      decodeWindow: async () => Float32Array.from({ length: 48_000 }, (_, i) => 0.1 * Math.sin(i / 7)),
+      emit, pcmBudgetBytes: 1_000_000,
+    })
+    const att = { url: "frontier-audio://old.mp3", type: "audio", trimStartMs: 0, trimEndMs: 1000 } as CodexCellAttachment
+    expect(await measure("c1", "a", att)).not.toBeNull()
+    expect(emit).toHaveBeenCalledWith("c1", "a", expect.anything(), null)
+  })
+
+  it("a second take of the same recording and window reuses the decoded length", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]),
+      decode: async () => Float32Array.from({ length: 96_000 }, (_, i) => 0.1 * Math.sin(i / 7)),
+      emit,
+    })
+    const att = { url: "frontier-audio://nolen.wav", type: "audio" } as CodexCellAttachment
+    await measure("c1", "a", att)
+    await measure("c2", "b", att)
+    expect(emit).toHaveBeenNthCalledWith(1, "c1", "a", expect.anything(), 2000)
+    expect(emit).toHaveBeenNthCalledWith(2, "c2", "b", expect.anything(), 2000)
+  })
+})
+

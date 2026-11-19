@@ -1344,31 +1344,59 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(slot.className).not.toMatch(/justify-end/)
     })
 
-    // Review S4: the mic stays centred on its line, where it sat before
-    // Make speech joined it, and the ✨ hangs off to its right. The row
-    // carries a leading margin of one button plus the gap, so the row's
-    // centre (which the slot centres) is the mic's centre. Computed from the
-    // rendered sizes, so a change to either button or the margin fails it.
-    it("keeps the mic centred on the line, the sparkle beside it, on wide and narrow lines", () => {
+    // AQU-2663 spec §3: the PAIR is centred on the line (the slot is
+    // justify-center and the row carries no offset), mic then ✨, 4px apart.
+    // The drawn buttons' boxes are computed from the rendered slot, row and
+    // sizes, so a leading margin or a size change fails it. Covers both
+    // buttons (hover), the ✨ alone (a picked line at rest) and the mic alone
+    // (a line with no words).
+    const drawnBoxes = (id: string) => {
+      const slot = screen.getByTestId(`tl-target-empty-${id}`)
+      const slotW = parseFloat(slot.style.width)
+      const row = screen.getByTestId(`tl-target-empty-${id}-record`).parentElement!
+      const buttons = Array.from(row.querySelectorAll("button")).filter((b) => b.getAttribute("data-folded") !== "true")
+      const m = parseFloat(row.style.marginInlineStart || "0")
+      const widths = buttons.map((b) => parseFloat(b.style.width))
+      const rowW = m + widths.reduce((a, b) => a + b, 0) + 4 * (buttons.length - 1)
+      let x = (slotW - rowW) / 2 + m // justify-center
+      const boxes = buttons.map((b, i) => {
+        const box = { id: b.getAttribute("data-testid")!, left: x, right: x + widths[i] }
+        x = box.right + 4
+        return box
+      })
+      return { slotW, boxes }
+    }
+    const centreOf = (boxes: { left: number; right: number }[]) => (boxes[0].left + boxes[boxes.length - 1].right) / 2
+
+    it("centres the pair on the line, on wide and narrow lines", () => {
       for (const [start, end] of [[30, 36], [30, 30.5]] as const) {
         const { unmount } = render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", start, end)] })} />)
-        const slotW = parseFloat(screen.getByTestId("tl-target-empty-c9").style.width)
-        const row = rec().parentElement!
-        const m = parseFloat(row.style.marginInlineStart || "0")
-        const recW = parseFloat(rec().style.width)
-        const spW = parseFloat(speech().style.width)
-        const gapPx = 4 // gap-1
-        const rowW = m + recW + gapPx + spW
-        const rowLeft = (slotW - rowW) / 2 // justify-center
-        const recBox = { left: rowLeft + m, right: rowLeft + m + recW }
-        const spBox = { left: recBox.right + gapPx, right: recBox.right + gapPx + spW }
-        expect((recBox.left + recBox.right) / 2).toBeCloseTo(slotW / 2)
-        expect(spBox.left).toBeGreaterThan(recBox.right)
+        fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+        const { slotW, boxes } = drawnBoxes("c9")
+        expect(boxes.map((b) => b.id)).toEqual(["tl-target-empty-c9-record", "tl-target-empty-c9-speech"])
+        expect(centreOf(boxes)).toBeCloseTo(slotW / 2)
+        expect(boxes[1].left).toBeGreaterThan(boxes[0].right)
         unmount()
       }
-      // No sparkle on this line: no margin, the mic alone is centred.
+    })
+
+    it("centres the sparkle alone on a picked line at rest, and the pair on hover", () => {
+      render(<TargetAudioLane {...wired({ pickedGhostIds: new Set(["c9"]) })} />)
+      let { slotW, boxes } = drawnBoxes("c9")
+      expect(boxes.map((b) => b.id)).toEqual(["tl-target-empty-c9-speech"])
+      expect(centreOf(boxes)).toBeCloseTo(slotW / 2)
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+      ;({ slotW, boxes } = drawnBoxes("c9"))
+      expect(boxes).toHaveLength(2)
+      expect(centreOf(boxes)).toBeCloseTo(slotW / 2)
+    })
+
+    it("centres the mic alone on a line with no words", () => {
       render(<TargetAudioLane {...wired({ emptyCells: [emptyCell("c9")] })} />)
-      expect(rec().parentElement!.style.marginInlineStart).toBe("")
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+      const { slotW, boxes } = drawnBoxes("c9")
+      expect(boxes.map((b) => b.id)).toEqual(["tl-target-empty-c9-record"])
+      expect(centreOf(boxes)).toBeCloseTo(slotW / 2)
     })
 
     // Review S4: while the pointer is on a line, its slot is lifted over the
@@ -1446,12 +1474,12 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(btn("c10", "speech")).not.toHaveAttribute("data-hot")
       expect(btn("c10", "speech")).toHaveAttribute("aria-pressed", "false")
 
-      // Hovering the picked line brings the mic back beside it, mic centred.
+      // Hovering the picked line brings the mic back beside it, the pair centred.
       fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
       expect(btn("c9", "record")).toHaveAttribute("data-hot", "true")
       expect(folded("c9")).toBe(false)
       expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
-      expect(rowOf("c9").style.marginInlineStart).toBe("32px")
+      expect(rowOf("c9").style.marginInlineStart).toBe("")
       expect(folded("c11")).toBe(true)
       fireEvent.pointerLeave(screen.getByTestId("tl-target-empty-c9"))
       expect(folded("c9")).toBe(true)
@@ -1479,7 +1507,7 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       act(() => speech().focus())
       expect(rec()).not.toHaveAttribute("data-folded")
       expect(rec()).toHaveAttribute("data-hot", "true")
-      expect(row().style.marginInlineStart).toBe("32px")
+      expect(row().style.marginInlineStart).toBe("")
       expect(Number(screen.getByTestId("tl-target-empty-c9").style.zIndex)).toBeGreaterThan(1000)
 
       // Focus moving within the line keeps it open.

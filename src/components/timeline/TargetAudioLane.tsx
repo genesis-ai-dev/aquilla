@@ -2075,8 +2075,6 @@ function TargetAudioChip({
   )
 }
 
-/** AQU-2663: the gap between the mic and the ✨ (`gap-1`). */
-const SLOT_PAIR_GAP_PX = 4
 /** AQU-2663: a hovered empty line's z — over every clip but a dragged one. */
 const SLOT_LIFT_Z = 1999
 
@@ -2442,18 +2440,16 @@ export function TargetAudioLane({
             // showing with the pointer elsewhere — ALONE, centred on the line,
             // so picked neighbours never pile up when zoomed out. The mic is
             // folded (0×0, out of flow, still Tab-reachable) until the pointer
-            // or focus is on the line; then the pair is back, mic centred. Every other line shows its
-            // pair only on hover. (AQU-2663, agreed Nov 19.)
+            // or focus is on the line; then the pair is back, centred. Every
+            // other line shows its pair only on hover. (AQU-2663, agreed Nov 19.)
             const hot = pointerHere || picked || busy
             const showMic = Boolean(onOpenRecording) && (pointerHere || !(picked || busy))
             return (
-              <div
-                className="flex shrink-0 items-center gap-1"
-                // AQU-2663 (review S4): a leading margin the size of the ✨ and
-                // the gap keeps the MIC centred on the line, where it always
-                // sat; the ✨ hangs off to its right. The canvas is forced LTR.
-                style={showMic && offersSpeech ? { marginInlineStart: `${buttonPx + SLOT_PAIR_GAP_PX}px` } : undefined}
-              >
+              // AQU-2663 spec §3: the PAIR is centred on the line (the slot is
+              // justify-center), mic then ✨ with gap-1; the canvas is forced
+              // LTR. A narrow line's overhang stays reachable because the
+              // hovered line is lifted over the clips (above).
+              <div className="flex shrink-0 items-center gap-1">
                 {onOpenRecording && (
                   <TimelineSlotButton
                     testId={`tl-target-empty-${cell.id}-record`}

@@ -1364,6 +1364,36 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(speech()).not.toHaveAttribute("data-hot")
     })
 
+    // AQU-2663 (agreed Nov 19): a picked line, or one being made, keeps its
+    // pair showing with the pointer elsewhere, ✨ pressed or busy. Every other
+    // empty line still shows its pair only on hover.
+    it("keeps the pair showing on a picked or in-progress line, with the pointer away", () => {
+      const props = wired({
+        emptyCells: [worded("c9", 30, 36), worded("c10", 40, 46), worded("c11", 50, 56)],
+        pickedGhostIds: new Set(["c9"]),
+        makingSpeechCellIds: new Set(["c11"]),
+      })
+      render(<TargetAudioLane {...props} />)
+      const btn = (id: string, kind: "record" | "speech") => screen.getByTestId(`tl-target-empty-${id}-${kind}`)
+      for (const kind of ["record", "speech"] as const) {
+        expect(btn("c9", kind)).toHaveAttribute("data-hot", "true")
+        expect(btn("c11", kind)).toHaveAttribute("data-hot", "true")
+        expect(btn("c10", kind)).not.toHaveAttribute("data-hot")
+      }
+      expect(btn("c9", "speech")).toHaveAttribute("aria-pressed", "true")
+      expect(btn("c11", "speech")).toHaveAttribute("data-busy", "true")
+      expect(btn("c10", "speech")).toHaveAttribute("aria-pressed", "false")
+
+      // Hovering another line lights it too, and leaves the picked ones lit.
+      fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c10"))
+      expect(btn("c10", "record")).toHaveAttribute("data-hot", "true")
+      expect(btn("c10", "speech")).toHaveAttribute("data-hot", "true")
+      expect(btn("c9", "speech")).toHaveAttribute("data-hot", "true")
+      fireEvent.pointerLeave(screen.getByTestId("tl-target-empty-c10"))
+      expect(btn("c10", "speech")).not.toHaveAttribute("data-hot")
+      expect(btn("c9", "record")).toHaveAttribute("data-hot", "true")
+    })
+
     it("on a narrow line keeps both buttons, at full size, centred and overhanging", () => {
       // 0.5s at 40px/s = a 20px line, narrower than the pair.
       render(<TargetAudioLane {...wired({ emptyCells: [worded("c9", 30, 30.5)] })} />)

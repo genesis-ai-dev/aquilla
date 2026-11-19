@@ -1317,6 +1317,18 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       }
     })
 
+    // Review N7: in Amharic, the narrow line's button and its Record item use
+    // the record button's own verb (ይቅዱ), not a second word for "record".
+    it("in Amharic, the narrow line's menu says record with the record button's verb", async () => {
+      const { CATALOGS } = await import("@/lib/i18n/messages/all")
+      const am = CATALOGS.am as Record<string, string>
+      const verb = "ይቅዱ"
+      expect(am["workspace.targetAudioLane.recordAudio"]).toContain(verb)
+      expect(am["workspace.targetAudioLane.slotMenuRecord"]).toBe(verb)
+      expect(am["workspace.targetAudioLane.slotMenu"]).toContain(verb)
+      expect(am["workspace.targetAudioLane.slotMenuPicked"]).toContain(verb)
+    })
+
     it("draws no ghost clip", () => {
       render(<TargetAudioLane {...wired()} />)
       expect(screen.queryByTestId("tl-target-ghost-c9")).toBeNull()

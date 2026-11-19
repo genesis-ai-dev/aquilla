@@ -77,6 +77,11 @@ import {
   type RegenerateBriefSummaryCommand,
 } from './commands-regenerate-brief'
 import {
+  PATCH_ORTHOGRAPHY_EXCEPTIONS_REQUIRED_ROLE,
+  validatePatchOrthographyExceptionsCommand,
+  type PatchOrthographyExceptionsCommand,
+} from './commands-orthography-exceptions'
+import {
   isOrgMemberCommand,
   validateOrgMemberCommand,
   type OrgMemberCommand,
@@ -140,6 +145,10 @@ export type {
   RenameProjectCommand,
   UnarchiveProjectCommand,
 } from './commands-project-lifecycle'
+export type {
+  OrthographyExceptionOp,
+  PatchOrthographyExceptionsCommand,
+} from './commands-orthography-exceptions'
 export type { SetBriefCommand } from './commands-set-brief'
 export type { RegenerateBriefSummaryCommand } from './commands-regenerate-brief'
 export type {
@@ -335,6 +344,7 @@ export type Command =
   | UpdateProjectSettingsCommand
   | LinkMediaCommand
   | PatchSettingsCommand
+  | PatchOrthographyExceptionsCommand
   | EmitEventsCommand
   | DraftCellsCommand
   | CellFieldCommand
@@ -925,6 +935,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'PatchOrthographyExceptions') {
+      const cmd = validatePatchOrthographyExceptionsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'SetBrief') {
       const cmd = validateSetBriefCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -1071,6 +1086,14 @@ export function requiredRoleForCommand(
   // commit, and this static value stays the conservative default.
   if (c.kind === 'PatchSettings') {
     return ROLE.MAINTAINER
+  }
+  // PatchOrthographyExceptions (AQU-2642) takes its own receipt-only path and
+  // resolves the acting role LIVE: CONTRIBUTOR proposes (status `pending`),
+  // MAINTAINER approves, and removal is MAINTAINER-only. CONTRIBUTOR is the
+  // honest static value for index filtering — the lowest role the command is
+  // usable from at all.
+  if (c.kind === 'PatchOrthographyExceptions') {
+    return PATCH_ORTHOGRAPHY_EXCEPTIONS_REQUIRED_ROLE
   }
   // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
   // floor (the same one PatchSettings applies to the translationBrief key).

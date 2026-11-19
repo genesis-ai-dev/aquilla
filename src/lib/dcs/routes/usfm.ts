@@ -50,10 +50,11 @@ export const usfmRoute: ResourceRoute = {
           refSegmentCount.set(ref, segIdx + 1)
           // Only append a segment suffix when a ref actually splits — keeps the
           // common one-segment-per-verse seed clean (`repo|TIT 1:1`).
-          const seed = segIdx === 0 ? `${repo}|${ref}` : `${repo}|${ref}#${segIdx}`
+          const unitKey = segIdx === 0 ? ref : `${ref}#${segIdx}`
 
           cells.push({
-            cellId: dcsCellId(seed),
+            cellId: dcsCellId(`${repo}|${unitKey}`),
+            unitKey,
             value: s.original,
             ...(s.originalHtml !== undefined ? { valueHtml: s.originalHtml } : {}),
             type: s.type,

@@ -58,6 +58,26 @@ path that updates a source: `db/shared/file-revision.ts`.
   before its transaction and projects cells with
   `sync-worker/src/events/file-revision-apply.ts::buildCellStmtsFromManifest`;
   an unreadable manifest fails the rebuild rather than emptying the file.
+- **A provider with its own identity brings its keys.** Door43 files were
+  imported with deterministic cell ids (`uuidv5(repo|book|rowId)`) before
+  revisions existed, and adoption can only key a cell by `canonical_ref` plus
+  an ordinal, which shifts when a sibling note is inserted upstream. The
+  request carries `cellId → unitKey` and
+  `db/shared/file-revision.ts::rekeyUnits` applies it to the head before
+  alignment; the stored manifest is not rewritten, the next one carries the
+  provider's keys. Door43 is the first such provider:
+  `src/lib/dcs/revision.ts::dcsRevision` builds the units and the keys,
+  `src/lib/dcs/revision.ts::reviseDcsFiles` posts one revision per changed
+  file the project holds, and the browser no longer reads the project's source
+  cells or writes per-cell source events for an upstream release. An
+  extension's `files.upsert` does the same on a revisioned file
+  (`src/lib/tools/live-data-files.ts::LiveFilesData`).
+- **Repair is a re-parse, not a second write path.** "Re-sync content" posts
+  the same revisions with `realign`, which skips the same-artifact no-op rule
+  so a parser fix can land without a stamp bump; a parse that changes nothing
+  writes no revision. Its scan is the same request with `dryRun`, which
+  writes nothing, adoption included
+  (`sync-worker/src/events/revisions-route.ts::handleRevisionsRequest`).
 - **No dependencies.** The module ships its own SHA-1/UUIDv5
   (`db/shared/file-revision.ts::uuidV5`), pinned against the `uuid` package in
   its test, because the sync-worker has no `uuid` dependency and every runtime
@@ -78,6 +98,12 @@ path that updates a source: `db/shared/file-revision.ts`.
 - Re-import of a revisioned file still travels through `/import/reconcile`
   (unit-key matching on `cells`); moving it onto the revisions route is the
   remaining half of increment 3.
-- Server-side parsing and connectors; the route takes parsed units.
+- Server-side parsing and connectors; the route takes parsed units. Door43
+  parses in the browser and is user-triggered; polling it from a cron waits on
+  this.
+- A Door43 release that ADDS a file the project does not hold is not imported
+  by an update, and a file removed upstream keeps its cells.
+- An extension's revision is attributed to it (verified `tool_origin`), but
+  the Smart Extensions revert does not undo a `file.revision`.
 - Export selecting a walk by stamp remains AQU-2382's work.
 - Cross-file moves are delete + insert.

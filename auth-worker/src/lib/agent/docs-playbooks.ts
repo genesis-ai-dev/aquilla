@@ -52,6 +52,14 @@ and applies before the next step reads the state it produced.
    literalness, key-term strategy, constraints), staged with
    propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
      ops:[{key:'translationBrief', value:{…}}]}]})
+   WHICH KEY ACTUALLY REACHES THE AI: 'translationInstructions' is the text
+   every drafting prompt reads. The brief is the long-form document behind it,
+   and it composes into prompts ONLY while the project has not saved
+   translationInstructions. Once that key is stored, a brief write changes the
+   document and reaches no prompt (the changeset warns 'inert_write').
+   So check which case the project is in BEFORE promising a brief edit will
+   change the AI, and write 'translationInstructions' when the person wants the
+   AI's behaviour to change.
    Gotchas: PatchSettings is sole-command; read the LIVE settings version
    first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
    again); floor MAINTAINER (600). Propose a DRAFT brief from what the
@@ -157,7 +165,9 @@ of the first cycle is to make that visible on ONE passage instead of a book.
 5. Fill the gaps — each of these is a staged changeset the person applies:
    - termbase: term.create events in an EmitEvents changeset (status
      'active' needs the org termbase floor, default 500; docs('terminology'))
-   - brief: PatchSettings op on 'translationBrief' (MAINTAINER 600)
+   - brief: PatchSettings op on 'translationBrief' (MAINTAINER 600) — and if
+     the project has already saved 'translationInstructions', that key is what
+     the prompts read, so write it instead (same command, same floor)
    - exemplars: there is no command for these. Ask the person to hand-translate
      and validate 5-10 cells. That is the highest-value thing they can do, and
      only they can do it.

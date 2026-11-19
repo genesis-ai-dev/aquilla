@@ -155,6 +155,11 @@ export function AddProjectMemberDialog({
         row: {
           defaultRole: ROLE.CONTRIBUTOR,
           grantScope: { kind: "project", projectName, lanes: "all" },
+          // AQU-2576: this dialog's caller already cleared the project's
+          // member-grant floor, which is exactly the bar the server applies to
+          // an email lookup — so an owner handed a reviewer's address can
+          // resolve it here instead of hunting for a username.
+          lookupProjectId: projectId,
           targetLanes,
           onAdd: async (usernames, role, laneAccess) => {
             const outcomes = await handleAddMany(usernames, role, laneAccess)
@@ -165,7 +170,16 @@ export function AddProjectMemberDialog({
           excludedUserIds: [...directGrantUserIds],
           suggestions:
             visibleOrgMembers.length > 0
-              ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
+              // AQU-2609: carry the roster's email into the picker row. It is
+              // the same payload the Members table already shows this viewer —
+              // GET /orgs/:id/members withholds it below rosterViewMinRole — so
+              // the picker identifies people at least as well as the list it
+              // feeds, with no extra request and no wider exposure.
+              ? eligibleOrgMembers.map((m) => ({
+                  id: m.userId,
+                  username: m.username,
+                  secondary: m.email ?? null,
+                }))
               : undefined,
           emptySuggestionsHint: t("org.membersPage.allOrgMembersAdded"),
           onAddStart: () => setAddForbidden(false),

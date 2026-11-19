@@ -1,5 +1,13 @@
 import type { ConceptMatchInput, TermMatchingSettings } from "./model"
 import { resolveMatchOptions } from "./match-options"
+import {
+  AnchorIndex,
+  mayMatch,
+  prefilterForTerms,
+  prefilterMode,
+  verifyRejected,
+  type Prefilter,
+} from "./prefilter"
 
 /**
  * Shared terminology matcher — inflectional wildcard support.
@@ -160,10 +168,21 @@ function precomposedVariants(base: string): readonly string[] {
  * byte as before.
  */
 function foldedChar(ch: string): string {
-  const variants = precomposedVariants(ch)
-  if (variants.length === 0) return escapeRegex(ch)
-  return `[${escapeRegex(ch)}${variants.map((v) => escapeRegex(v)).join("")}]`
+  // Cached per letter (AQU-2654): a glossary is the same few dozen letters
+  // thousands of times over, and each class is dozens of escaped variants.
+  let folded = foldedChars.get(ch)
+  if (folded === undefined) {
+    const variants = precomposedVariants(ch)
+    folded =
+      variants.length === 0
+        ? escapeRegex(ch)
+        : `[${escapeRegex(ch)}${variants.map((v) => escapeRegex(v)).join("")}]`
+    foldedChars.set(ch, folded)
+  }
+  return folded
 }
+
+const foldedChars = new Map<string, string>()
 
 /**
  * Escape a literal segment for the regex. When folding, marks are removed from
@@ -217,7 +236,30 @@ function affixGroup(
   fold: boolean,
   side: "prefix" | "suffix",
 ): string {
-  const list = (affixes ?? []).map((a) => a.trim()).filter((a) => a.length > 0)
+  if (!affixes || affixes.length === 0) return ""
+  // Cached by content (AQU-2654): every alternate of every concept of a
+  // project asks for the same two groups, and callers hand in a freshly
+  // filtered array each time.
+  const key = `${side}\u0001${fold ? 1 : 0}\u0001${maxAffixes ?? ""}\u0001${affixes.join("\u0001")}`
+  let group = affixGroups.get(key)
+  if (group === undefined) {
+    group = buildAffixGroup(affixes, maxAffixes, fold, side)
+    if (affixGroups.size >= MAX_AFFIX_GROUPS) affixGroups.clear()
+    affixGroups.set(key, group)
+  }
+  return group
+}
+
+const MAX_AFFIX_GROUPS = 256
+const affixGroups = new Map<string, string>()
+
+function buildAffixGroup(
+  affixes: string[],
+  maxAffixes: number | undefined,
+  fold: boolean,
+  side: "prefix" | "suffix",
+): string {
+  const list = affixes.map((a) => a.trim()).filter((a) => a.length > 0)
   if (list.length === 0) return ""
   // Dedupe and drop empties AFTER folding, not before: folding collapses
   // differently-pointed spellings of one affix onto the same pattern (ים/יִם),
@@ -269,11 +311,34 @@ export interface ConceptRegexOpts {
  * One regex source for a whole concept: sourceTerm + match.forms as
  * alternates, each with boundaries and affix groups; excludedForms as a
  * leading negative lookahead anchored at the same word start.
+ *
+ * Memoized per concept object, and behind that per content (AQU-2654). Building this source walks every
+ * character of every form through escaping, mark folding and affix expansion.
+ * Callers ask for it once per concept per text they test, and the editor asks
+ * from render, so an uncached build made a 664-term glossary cost seconds per
+ * row render. The entry is checked against the fields it was built from, so a
+ * concept edited in place is rebuilt rather than served stale.
  */
 export function conceptToRegexSource(
   concept: ConceptLike,
   project?: TermMatchingSettings,
   opts: ConceptRegexOpts = {},
+): string | null {
+  const cached = compiledFor(concept, project)
+  const includeExcluded = !!opts.includeExcluded
+  const hit = includeExcluded ? cached.withExcluded : cached.source
+  if (hit !== undefined) return hit
+  const built = buildConceptRegexSource(concept, project, opts)
+  if (includeExcluded) cached.withExcluded = built
+  else cached.source = built
+  if (built !== null) prefilterByPattern.set(built, conceptPrefilter(concept, project))
+  return built
+}
+
+function buildConceptRegexSource(
+  concept: ConceptLike,
+  project: TermMatchingSettings | undefined,
+  opts: ConceptRegexOpts,
 ): string | null {
   const r = resolveMatchOptions(concept, project)
   const termOpts: TermRegexOptions = {
@@ -297,6 +362,223 @@ export function conceptToRegexSource(
   return `(?!(?:${excl})${TRAIL_BOUNDARY})${body}`
 }
 
+interface CompiledConcept {
+  /** `undefined` = not built yet; `null` = the concept has no usable term. */
+  source?: string | null
+  withExcluded?: string | null
+  /** What a text must contain for either source to be able to match it. */
+  prefilter?: Prefilter
+}
+
+interface ConceptCacheEntry {
+  /** The fields the entry was built from — a mismatch means rebuild. */
+  sourceTerm: string
+  match: ConceptLike["match"]
+  compiled: CompiledConcept
+}
+
+const compiledConcepts = new WeakMap<object, Map<string, ConceptCacheEntry>>()
+/**
+ * The same entries by CONTENT. The editor does not hold on to concept objects:
+ * the lane filter copies every concept when its inputs are re-read, and
+ * `compileConceptsToRulesCore` passes a fresh `{ sourceTerm, match }`. Without
+ * this second key each of those would build every pattern again, and — since
+ * the compiled regexes hang off the pattern string — hand back an equal but
+ * different string object, which costs the regex cache a full string compare
+ * per lookup instead of a pointer compare.
+ */
+const compiledByContent = new Map<string, CompiledConcept>()
+const MAX_COMPILED_BY_CONTENT = 20000
+const settingsKeys = new WeakMap<object, string>()
+
+/**
+ * A cache key for the project's matching settings, by content. Callers build
+ * the settings object in render, so its identity changes while its content
+ * does not; keying on identity would miss every time.
+ */
+export function termMatchingKey(project?: TermMatchingSettings): string {
+  if (!project) return ""
+  let key = settingsKeys.get(project)
+  if (key === undefined) {
+    key = JSON.stringify([project.prefixes, project.suffixes, project.maxAffixes ?? null, project.foldMarksDefault ?? null])
+    settingsKeys.set(project, key)
+  }
+  return key
+}
+
+function compiledFor(concept: ConceptLike, project?: TermMatchingSettings): CompiledConcept {
+  let byProject = compiledConcepts.get(concept)
+  if (!byProject) {
+    byProject = new Map()
+    compiledConcepts.set(concept, byProject)
+  }
+  const key = termMatchingKey(project)
+  let entry = byProject.get(key)
+  if (!entry || entry.sourceTerm !== concept.sourceTerm || entry.match !== concept.match) {
+    const contentKey = `${key}\u0001${concept.sourceTerm}\u0001${JSON.stringify(concept.match ?? null)}`
+    let compiled = compiledByContent.get(contentKey)
+    if (!compiled) {
+      compiled = {}
+      if (compiledByContent.size >= MAX_COMPILED_BY_CONTENT) {
+        // Bounded for a long-lived worker isolate that sees many projects.
+        // The two go together: a pattern is registered when it is built, so a
+        // pattern rebuilt after this is registered again.
+        compiledByContent.clear()
+        prefilterByPattern.clear()
+      }
+      compiledByContent.set(contentKey, compiled)
+    }
+    entry = { sourceTerm: concept.sourceTerm, match: concept.match, compiled }
+    byProject.set(key, entry)
+  }
+  return entry.compiled
+}
+
+/**
+ * What a text must contain for the concept to be able to match it — see
+ * ./prefilter for why this is a superset of what the regex matches. Built from
+ * the same alternates `buildConceptRegexSource` compiles: the headword and the
+ * listed forms that are not blank. Affixes, boundaries and exclusions only
+ * surround or narrow a match, so they take no part.
+ */
+export function conceptPrefilter(concept: ConceptLike, project?: TermMatchingSettings): Prefilter {
+  const cached = compiledFor(concept, project)
+  if (!cached.prefilter) {
+    const alternates = [concept.sourceTerm, ...resolveMatchOptions(concept, project).forms].filter(
+      (term) => term.trim().length > 0,
+    )
+    cached.prefilter = prefilterForTerms(alternates)
+  }
+  return cached.prefilter
+}
+
+/** pattern → what a text must contain for it to match, for the rule engine. */
+const prefilterByPattern = new Map<string, Prefilter>()
+
+/**
+ * The prefilter of a pattern this module built for a concept, or `undefined`
+ * for any other string. The rule engine holds terminology as compiled rules —
+ * a pattern, not a concept — and asks by the pattern itself, so the answer can
+ * only ever be the one derived for exactly that regex.
+ */
+export function prefilterForPattern(pattern: string): Prefilter | undefined {
+  return prefilterByPattern.get(pattern)
+}
+
+const compiledPatterns = new Map<string, Map<string, RegExp | null>>()
+let patternsCompiled = 0
+
+/**
+ * One compiled RegExp per (pattern, flags) for the whole app (AQU-2654). The
+ * matcher and the rule engine test the same concept patterns; with a cache
+ * each, every pattern was parsed and — the expensive part — compiled by V8 on
+ * its first exec, once per cache. Keyed by the pattern string first, so a
+ * lookup with the cached string object is a pointer compare rather than a
+ * hash of a multi-kilobyte key. `null` is a pattern that does not compile.
+ *
+ * A `g` regex carries `lastIndex`: callers reset it before use and never hold
+ * the regex across an await.
+ */
+export function compiledPattern(pattern: string, flags: string): RegExp | null {
+  let byFlags = compiledPatterns.get(pattern)
+  if (!byFlags) {
+    byFlags = new Map()
+    compiledPatterns.set(pattern, byFlags)
+  }
+  let re = byFlags.get(flags)
+  if (re === undefined) {
+    try {
+      re = new RegExp(pattern, flags)
+    } catch {
+      re = null
+    }
+    patternsCompiled += 1
+    byFlags.set(flags, re)
+    if (re && prefilterByPattern.has(pattern)) {
+      conceptPatterns += 1
+      compileOnce(re)
+    }
+  }
+  return re
+}
+
+let conceptPatterns = 0
+
+/**
+ * How many CONCEPT patterns have been compiled — the expensive kind (see
+ * `compileOnce`). A caller that must not hold the main thread budgets its
+ * synchronous work on this count instead of on a clock, which makes the
+ * budget the same on every machine (`useHealth`).
+ */
+export function conceptPatternsCompiled(): number {
+  return conceptPatterns
+}
+
+/** Long enough for V8 to compile a regex to native code on its first run. */
+const WARM_UP_SUBJECT = "\u0000".repeat(1024)
+
+/**
+ * Make V8 compile a concept pattern once instead of twice.
+ *
+ * V8 runs a new regex in its bytecode interpreter and recompiles it to native
+ * code on the second execution. For a concept pattern each compilation is
+ * several milliseconds (every folded letter is a class plus `\p{M}*`), and
+ * every pattern that is used at all is used more than once, so it pays both.
+ * A first subject of 1,000 characters or more goes straight to native code —
+ * so the first thing a new concept regex runs on is a kilobyte of NULs. A term
+ * is built of literal letters, so the scan fails at every position at once;
+ * it costs microseconds, matches nothing (or, for a bare `*`, the empty
+ * string), and has no effect on any later match. Measured on the benchmark
+ * glossary's patterns: ~15 ms → ~8 ms per pattern at 1x CPU.
+ *
+ * Only for patterns this module built: a hand-written rule pattern can be
+ * arbitrarily slow on a long subject. On an engine without this tiering it is
+ * one cheap, harmless execution.
+ */
+function compileOnce(re: RegExp): void {
+  re.lastIndex = 0
+  re.test(WARM_UP_SUBJECT)
+  re.lastIndex = 0
+}
+
+/** How many distinct (pattern, flags) have been compiled — for tests that count work. */
+export function compiledPatternCount(): number {
+  return patternsCompiled
+}
+
+/**
+ * The cached compiled regex, always global so the matcher's two questions
+ * ("does it match", "where") and the rule engine share one. It is only handed
+ * to the synchronous loops below, which reset `lastIndex` first; exported
+ * callers of `buildConceptRegex` still get a regex of their own.
+ */
+function sharedConceptRegex(
+  concept: ConceptLike,
+  project: TermMatchingSettings | undefined,
+  opts?: ConceptRegexOpts,
+): RegExp | null {
+  const src = conceptToRegexSource(concept, project, opts)
+  if (src === null) return null
+  const re = compiledPattern(src, concept.caseSensitive ? "gu" : "giu")
+  if (re) re.lastIndex = 0
+  return re
+}
+
+/** True when the prefilter says the concept cannot match `haystack`. */
+function ruledOut(
+  haystack: string,
+  concept: ConceptLike,
+  project: TermMatchingSettings | undefined,
+  opts?: ConceptRegexOpts,
+): boolean {
+  if (mayMatch(conceptPrefilter(concept, project), haystack)) return false
+  if (prefilterMode() === "verify") {
+    const src = conceptToRegexSource(concept, project, opts)
+    if (src !== null) verifyRejected(src, concept.caseSensitive ? "u" : "iu", haystack)
+  }
+  return true
+}
+
 export function buildConceptRegex(
   concept: ConceptLike,
   project?: TermMatchingSettings,
@@ -309,8 +591,63 @@ export function buildConceptRegex(
 
 export function matchesConcept(haystack: string, concept: ConceptLike, project?: TermMatchingSettings): boolean {
   if (!haystack) return false
-  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "u" : "iu")
-  return re !== null && re.test(haystack)
+  if (ruledOut(haystack, concept, project)) return false
+  const re = sharedConceptRegex(concept, project)
+  if (re === null) return false
+  const hit = re.test(haystack)
+  re.lastIndex = 0
+  return hit
+}
+
+interface ConceptIndex {
+  index: AnchorIndex
+  /** Per text: the concepts that may match it, in the array's order. */
+  byText: Map<string, readonly unknown[]>
+}
+
+const conceptIndexes = new WeakMap<readonly object[], Map<string, ConceptIndex>>()
+const MAX_CANDIDATE_TEXTS = 4096
+
+/**
+ * The concepts of `concepts` that may match `haystack`, in the order given:
+ * every concept `matchesConcept` accepts is among them, and for a glossary
+ * that mostly does not occur in the text, little else. One pass over the text
+ * instead of one test per concept — this is what a caller that would loop
+ * over the whole glossary per row, per keystroke or per cell loops over
+ * instead. The verdict is still `matchesConcept` / `findConceptMatches`.
+ *
+ * The index is built once per termbase array (and settings), so the array
+ * must be replaced, not edited in place, when a term changes — the contract
+ * `conceptsForSourceSurface` already relies on. The returned array is shared:
+ * do not mutate it.
+ */
+export function candidateConcepts<T extends ConceptLike>(
+  haystack: string,
+  concepts: readonly T[],
+  project?: TermMatchingSettings,
+): readonly T[] {
+  if (!haystack || concepts.length === 0) return []
+  if (prefilterMode() === "off") return concepts
+  let byProject = conceptIndexes.get(concepts)
+  if (!byProject) {
+    byProject = new Map()
+    conceptIndexes.set(concepts, byProject)
+  }
+  const key = termMatchingKey(project)
+  let entry = byProject.get(key)
+  if (!entry) {
+    const index = new AnchorIndex()
+    concepts.forEach((concept, i) => index.add(i, conceptPrefilter(concept, project)))
+    entry = { index, byText: new Map() }
+    byProject.set(key, entry)
+  }
+  let found = entry.byText.get(haystack) as readonly T[] | undefined
+  if (!found) {
+    found = entry.index.candidates(haystack).map((i) => concepts[i])
+    if (entry.byText.size >= MAX_CANDIDATE_TEXTS) entry.byText.clear()
+    entry.byText.set(haystack, found)
+  }
+  return found
 }
 
 export interface ConceptMatch {
@@ -327,7 +664,8 @@ export function findConceptMatches(
   opts?: ConceptRegexOpts,
 ): ConceptMatch[] {
   if (!haystack) return []
-  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "gu" : "giu", opts)
+  if (ruledOut(haystack, concept, project, opts)) return []
+  const re = sharedConceptRegex(concept, project, opts)
   if (!re) return []
   const out: ConceptMatch[] = []
   let m: RegExpExecArray | null
@@ -338,5 +676,59 @@ export function findConceptMatches(
     }
     out.push({ start: m.index, end: m.index + m[0].length, surface: m[0] })
   }
+  re.lastIndex = 0
+  return out
+}
+
+interface PlainTerm {
+  source: string
+  prefilter: Prefilter
+}
+
+const plainTerms = new Map<string, PlainTerm | null>()
+const MAX_PLAIN_TERMS = 20000
+
+/** A term with no match options (a rendering): its pattern and prefilter, cached by the term. */
+function plainTerm(term: string): PlainTerm | null {
+  let entry = plainTerms.get(term)
+  if (entry === undefined) {
+    const source = termToRegexSource(term)
+    entry = source === null ? null : { source, prefilter: prefilterForTerms([term]) }
+    if (plainTerms.size >= MAX_PLAIN_TERMS) plainTerms.clear()
+    plainTerms.set(term, entry)
+  }
+  return entry
+}
+
+/**
+ * Every non-overlapping, case-insensitive match of a plain term (wildcards and
+ * word boundaries, no match options) — what `buildTermRegex(term, "giu")` and
+ * an exec loop find, without building a regex per call: the pattern is cached
+ * by the term, compiled once, and not run at all on a text the prefilter rules
+ * out. The target column asks this for every approved rendering of every
+ * concept, for every row.
+ */
+export function findPlainTermMatches(text: string, term: string): Array<{ start: number; end: number }> {
+  if (!term || !text) return []
+  const entry = plainTerm(term)
+  if (!entry) return []
+  if (!mayMatch(entry.prefilter, text)) {
+    verifyRejected(entry.source, "iu", text)
+    return []
+  }
+  const re = compiledPattern(entry.source, "giu")
+  if (!re) return []
+  re.lastIndex = 0
+  const out: Array<{ start: number; end: number }> = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    // Zero-width matches (a term that is only `*`) would loop forever.
+    if (m[0].length === 0) {
+      re.lastIndex += 1
+      continue
+    }
+    out.push({ start: m.index, end: m.index + m[0].length })
+  }
+  re.lastIndex = 0
   return out
 }

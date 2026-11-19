@@ -12,8 +12,8 @@
 // it. That is the third bounce (AQU-910): Codex looks correct, Aquilla still
 // shows the pre-fix state, including headings Codex no longer has at all.
 //
-// The DCS delta already solves this shape (src/lib/dcs/delta.ts →
-// `classifyAgainstCurrent`): diff a fresh parse against the projection's CURRENT
+// The generic change detection already solves this shape
+// (src/lib/import/change-detection.ts → `detectChanges`): diff a fresh parse against the projection's CURRENT
 // cells and tombstone whatever the parse no longer produces. This module does
 // the same for the Codex migration.
 //

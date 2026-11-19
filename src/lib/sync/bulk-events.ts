@@ -6,7 +6,7 @@
 // in a single click, for two structural reasons:
 //
 //   1. Enqueueing is one IndexedDB write per event when the caller emits them
-//      one at a time (`src/lib/dcs/delta.ts` applyDelta awaits each emitter).
+//      one at a time.
 //   2. The flusher uploads at most MAX_BATCH (100) events per POST, for the
 //      OLDEST FILE ONLY (`outbox-flush.ts` groupOldestFileFirst), one POST per
 //      account per drain round, with a 5 s base interval between cycles

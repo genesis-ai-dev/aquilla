@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -10,6 +10,7 @@ import {
   attentionRank,
   type PortfolioProject,
 } from "@/lib/frontier/portfolio"
+import { readOrgPortfolioSeed } from "@/lib/frontier/portfolio-seed"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -49,11 +50,24 @@ export function useOrgPortfolio(
   } = useActiveOrg()
   const jwt = session?.jwt ?? null
 
-  const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
+  // Overview and Projects each mount this hook, and a project's own overview
+  // sits between visits to either: start from the org's last answer in this
+  // tab and replace it when the read below lands, rather than from nothing.
+  const [seed] = useState(() => readOrgPortfolioSeed(jwt, orgId))
+  const [projects, setProjects] = useState<PortfolioProjectRow[]>(() =>
+    seed && orgId != null
+      ? seed.projects.map((project) => ({ ...project, orgId, orgName: orgName ?? "Workspace" }))
+      : [],
+  )
   // AQU-1071: distinct active target languages across the org, counted
   // server-side on the same rule billing bills on (see getOrgPortfolioSummary).
-  const [activeLanguageCount, setActiveLanguageCount] = useState(0)
-  const [resolvedScopeKey, setResolvedScopeKey] = useState<string | null>(null)
+  const [activeLanguageCount, setActiveLanguageCount] = useState(seed?.activeLanguageCount ?? 0)
+  const [resolvedScopeKey, setResolvedScopeKey] = useState<string | null>(
+    seed && jwt && orgId != null ? `org:${orgId}` : null,
+  )
+  // The scope the seed was last consulted for. Once per scope: a refresh of
+  // the same org must not repaint an older answer over what is on screen.
+  const seededScopeRef = useRef<string | null>(seed && jwt && orgId != null ? `org:${orgId}` : null)
   const [error, setError] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
 
@@ -78,6 +92,16 @@ export function useOrgPortfolio(
     }
     let cancelled = false
     setError(null)
+    // An org switch keeps this hook mounted: paint the new org's last answer.
+    if (seededScopeRef.current !== portfolioScopeKey) {
+      seededScopeRef.current = portfolioScopeKey
+      const switched = readOrgPortfolioSeed(jwt, orgId)
+      if (switched) {
+        setProjects(switched.projects.map((project) => ({ ...project, orgId, orgName: orgName ?? "Workspace" })))
+        setActiveLanguageCount(switched.activeLanguageCount)
+        setResolvedScopeKey(portfolioScopeKey)
+      }
+    }
     getOrgPortfolioSummary(jwt, orgId)
       .then(({ projects: list, activeLanguageCount: languages }) => {
         if (!cancelled) {

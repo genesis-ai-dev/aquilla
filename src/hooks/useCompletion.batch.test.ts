@@ -56,6 +56,8 @@ import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import {
   getCompletionBatchProgress,
   clearBatchCompletionProgress,
+  dismissBatchCompletionSummary,
+  resumeBatchCompletion,
 } from "@/lib/completion/batch-completion"
 
 const SESSION: FrontierSession = {
@@ -337,5 +339,268 @@ describe("completeBatch — Luna context recipe", () => {
     }
     expect(userPrompt.indexOf("Previous target 6")).toBeLessThan(userPrompt.indexOf("<v1>Live source</v1>"))
     expect(commitMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-2654: "Make batch drafting show progress and completion, and fail loudly
+// if a batch dies." A customer's 362-cell run went silent twice for ~20
+// minutes; nothing on screen distinguished "slow" from "dead". These lock the
+// driver's side of that: every exit is a terminal state that names what is
+// left, the loop is not paced by timers, and it does not need the editor.
+describe("completeBatch — an honest run (AQU-2654)", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+    dismissBatchCompletionSummary()
+  })
+
+  const okResponse = (chunk: MinimalCell[]) => ({
+    ok: true,
+    json: () => Promise.resolve({ choices: [{ message: { content: encodeChunkResponse(chunk) } }] }),
+    body: null,
+  })
+  const chunkFor = (body: string): MinimalCell[] => {
+    const index = body.includes("Source sentence 21") ? 2 : body.includes("Source sentence 11") ? 1 : 0
+    return THIRTY_CELLS.slice(index * 10, index * 10 + 10)
+  }
+  const bodyOf = (init?: RequestInit) => (typeof init?.body === "string" ? init.body : "")
+
+  function renderBatchHook(opts: {
+    commit?: ReturnType<typeof vi.fn>
+    cells?: MinimalCell[] | (() => MinimalCell[])
+    styleInstructionsFor?: () => string[]
+  } = {}) {
+    const commit = opts.commit ?? vi.fn().mockResolvedValue(undefined)
+    const rendered = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commit as never, [],
+        (opts.cells ?? THIRTY_CELLS) as never, undefined, DEFAULT_DRAFT_CONTEXT, "",
+        undefined,
+        opts.styleInstructionsFor as never,
+        undefined,
+        undefined,
+        { id: "project-1", files: [{ id: FILE_A, name: "file-a.docx" }] },
+      ),
+    )
+    return { ...rendered, commit }
+  }
+
+  it("a failed chunk ends in a visible failed state that names the cells left to draft", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const body = bodyOf(init)
+      if (body.includes("Source sentence 11")) {
+        return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve("upstream down") })
+      }
+      return Promise.resolve(okResponse(chunkFor(body)))
+    }))
+    const { result } = renderBatchHook()
+
+    await act(async () => {
+      await result.current.completeBatch(THIRTY_CELLS as never)
+    })
+
+    const progress = getCompletionBatchProgress()
+    expect(progress).toMatchObject({
+      finished: true,
+      outcome: "failed",
+      total: 30,
+      done: 20,
+      failed: 10,
+      scope: { projectId: "project-1", fileId: FILE_A, fileName: "file-a.docx" },
+    })
+    const failedIds = Array.from({ length: 10 }, (_, i) => `cell-${i + 11}`)
+    expect(progress?.failedCells.map((cell) => cell.cellId)).toEqual(failedIds)
+    expect(progress?.failedCells[0].reason).toContain("503")
+    expect(progress?.remainingCellIds).toEqual(failedIds)
+  })
+
+  it("a run that drafted everything ends in a visible done state — it does not just vanish", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(okResponse(chunkFor(bodyOf(init)))),
+    ))
+    const { result } = renderBatchHook()
+
+    await act(async () => {
+      await result.current.completeBatch(THIRTY_CELLS as never)
+    })
+
+    expect(getCompletionBatchProgress()).toMatchObject({
+      finished: true, outcome: "done", total: 30, done: 30, failed: 0, remainingCellIds: [],
+    })
+  })
+
+  it("cells that had streamed in before the request died are failed, not left uncounted", async () => {
+    const cells = THIRTY_CELLS.slice(0, 10)
+    const encoder = new TextEncoder()
+    // Both attempts stream <v1>..<v3> and then the connection drops.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve({
+      ok: true,
+      headers: new Headers(),
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          const content = "<v1>Un</v1><v2>Deux</v2><v3>Trois</v3>"
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n`,
+          ))
+          controller.error(new Error("connection reset"))
+        },
+      }),
+    })))
+    const { result, commit } = renderBatchHook({ cells })
+
+    await act(async () => {
+      await result.current.completeBatch(cells as never)
+    })
+
+    // Nothing from a failed request is saved…
+    expect(commit).not.toHaveBeenCalled()
+    // …and every cell is accounted for: done + failed === total.
+    expect(getCompletionBatchProgress()).toMatchObject({
+      finished: true, outcome: "failed", total: 10, done: 0, failed: 10,
+    })
+    // No cell keeps a spinner or a preview of text that was never saved.
+    expect(result.current.previews.size).toBe(0)
+    for (const cell of cells) expect(result.current.completing.get(cell.id)).toBe("error")
+  })
+
+  it("a chunk that returns too few cells is not counted complete", async () => {
+    const cells = THIRTY_CELLS.slice(0, 10)
+    // The batch reply carries 7 of 10 tags; the per-cell fallback for the
+    // other three returns nothing usable.
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const isBatchCall = bodyOf(init).includes("Source sentence 1\\n") || bodyOf(init).includes("<v1>")
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: isBatchCall ? encodeChunkResponse(cells.slice(0, 7)) : "" } }],
+        }),
+        body: null,
+      })
+    }))
+    const { result, commit } = renderBatchHook({ cells })
+
+    await act(async () => {
+      await result.current.completeBatch(cells as never)
+    })
+
+    expect(commit).toHaveBeenCalledTimes(7)
+    const progress = getCompletionBatchProgress()
+    expect(progress).toMatchObject({ finished: true, outcome: "failed", total: 10, done: 7, failed: 3 })
+    expect(progress?.remainingCellIds).toEqual(["cell-8", "cell-9", "cell-10"])
+  })
+
+  it("the loop itself dying is a failed run with a reason, not an unhandled rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(okResponse(chunkFor(bodyOf(init)))),
+    ))
+    let calls = 0
+    const { result } = renderBatchHook({
+      // Throws while the SECOND chunk's prompt is being built.
+      styleInstructionsFor: () => {
+        calls += 1
+        if (calls > 10) throw new Error("style graph exploded")
+        return []
+      },
+    })
+
+    await act(async () => {
+      await expect(result.current.completeBatch(THIRTY_CELLS as never)).resolves.toBeUndefined()
+    })
+
+    const progress = getCompletionBatchProgress()
+    expect(progress).toMatchObject({
+      finished: true, outcome: "failed", total: 30, done: 10, runError: "style graph exploded",
+    })
+    expect(progress?.remainingCellIds).toHaveLength(20)
+    expect(result.current.completing.size).toBe(0)
+  })
+
+  it("does not wait on a timer between chunks", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(okResponse(chunkFor(bodyOf(init)))),
+    ))
+    const { result, commit } = renderBatchHook()
+
+    // No timer is ever advanced. A sleep, a backoff or a rAF anywhere on the
+    // chunk → chunk path would leave this promise pending — which is what a
+    // background tab (timers throttled to one a minute) does to such a loop.
+    await act(async () => {
+      await result.current.completeBatch(THIRTY_CELLS as never)
+    })
+
+    expect(commit).toHaveBeenCalledTimes(30)
+    expect(getCompletionBatchProgress()).toMatchObject({ finished: true, outcome: "done", done: 30 })
+  })
+
+  it("keeps drafting, and reports the outcome, after the editor that started it unmounts", async () => {
+    let releaseSecondChunk: (() => void) | undefined
+    const secondChunkGate = new Promise<void>((resolve) => { releaseSecondChunk = resolve })
+    const twenty = THIRTY_CELLS.slice(0, 20)
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = bodyOf(init)
+      if (body.includes("Source sentence 11")) await secondChunkGate
+      return okResponse(chunkFor(body))
+    }))
+    const { result, commit, unmount } = renderBatchHook({ cells: twenty })
+
+    let run: Promise<void> | undefined
+    await act(async () => {
+      run = result.current.completeBatch(twenty as never)
+      // Let chunk 1 land; chunk 2's request is now in flight.
+      await vi.waitFor(() => expect(getCompletionBatchProgress()?.done).toBe(10))
+    })
+
+    // The user navigates away: the component that owns the hook is gone.
+    unmount()
+    expect(getCompletionBatchProgress()).toMatchObject({ finished: false, done: 10, total: 20 })
+
+    releaseSecondChunk?.()
+    await run
+
+    expect(commit).toHaveBeenCalledTimes(20)
+    expect(getCompletionBatchProgress()).toMatchObject({
+      finished: true, outcome: "done", done: 20, total: 20,
+    })
+  })
+
+  it("retrying the remainder drafts only cells that still have no translation", async () => {
+    const live: MinimalCell[] = THIRTY_CELLS.slice(0, 20).map((cell) => ({ ...cell }))
+    const requests: string[] = []
+    let failSecondChunk = true
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      const body = bodyOf(init)
+      requests.push(body)
+      if (failSecondChunk && body.includes("Source sentence 11")) {
+        return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("boom") })
+      }
+      // The retry run is ONE chunk holding only cells 11-20.
+      return Promise.resolve(okResponse(THIRTY_CELLS.slice(0, 10)))
+    }))
+    const commit = vi.fn().mockImplementation(async (cell: MinimalCell, text: string) => {
+      const target = live.find((candidate) => candidate.id === cell.id)
+      if (target) target.translated = text
+    })
+    const { result } = renderBatchHook({ commit, cells: () => live })
+
+    await act(async () => {
+      await result.current.completeBatch(live as never)
+    })
+    expect(getCompletionBatchProgress()).toMatchObject({ outcome: "failed", done: 10, failed: 10 })
+
+    failSecondChunk = false
+    requests.length = 0
+    await act(async () => {
+      expect(resumeBatchCompletion()).toBe(true)
+      await vi.waitFor(() => expect(getCompletionBatchProgress()?.outcome).toBe("done"))
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toContain("Source sentence 11")
+    expect(requests[0]).not.toContain("Source sentence 5")
+    expect(getCompletionBatchProgress()).toMatchObject({ total: 10, done: 10, failed: 0 })
+    expect(commit).toHaveBeenCalledTimes(20)
   })
 })

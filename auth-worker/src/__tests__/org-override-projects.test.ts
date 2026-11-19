@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
+import { DEFAULT_POOL_MAX } from "../../../db/shim/postgres"
 
 interface ProjectList { total: number; projects: Array<{ id: string; name: string }> }
 
@@ -269,5 +270,53 @@ describe("AQU-1938: a long list is capped, and the total stays exact", () => {
       total: 55,
       projects: [{ id: "b-55", name: "Book 55" }],
     })
+  })
+})
+
+// 2026-11-16 production outage. This route issued its nine override reads in
+// one Promise.all against a per-request pool of eight (DEFAULT_POOL_MAX). The
+// ninth had no connection of its own, and through Hyperdrive it was left
+// half-sent, holding an origin connection for ten minutes. Every page load
+// leaked one, until no route could get a connection. The test double has no
+// pool, so nothing else here can see that: count the statements in flight.
+describe("the settings read never asks for more connections than the request pool holds", () => {
+  const EXECUTORS = new Set(["all", "first", "run", "raw"])
+
+  function trackedEnv() {
+    let inFlight = 0
+    const seen = { peak: 0, statements: 0 }
+    const wrap = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        get(obj, prop) {
+          const value = Reflect.get(obj, prop, obj) as unknown
+          if (typeof value !== "function") return value
+          return (...args: unknown[]) => {
+            if (!EXECUTORS.has(String(prop))) {
+              const out = Reflect.apply(value, obj, args) as unknown
+              // prepare() / bind() / asAdmin() hand back more of the same surface.
+              return out && typeof out === "object" && !(out instanceof Promise) ? wrap(out) : out
+            }
+            inFlight += 1
+            seen.statements += 1
+            seen.peak = Math.max(seen.peak, inFlight)
+            return (Reflect.apply(value, obj, args) as Promise<unknown>).finally(() => { inFlight -= 1 })
+          }
+        },
+      })
+    const tracked = Object.assign(Object.create(env) as typeof env, { AQUILLA_PG: wrap(env.AQUILLA_PG) })
+    return { tracked, seen }
+  }
+
+  it("GET /orgs/:id/settings stays inside the pool while still reading every override list", async () => {
+    await seed()
+    const { tracked, seen } = trackedEnv()
+    const res = await app.request("/api/v2/orgs/1/settings", { headers: authHeader(await jwtFor("mara")) }, tracked)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SettingsBody
+    // The probe saw the route's reads (nine override lists at least) ...
+    expect(seen.statements).toBeGreaterThanOrEqual(9)
+    // ... and they still answered.
+    expect(body.overrideProjects.validationCount.total).toBe(3)
+    expect(seen.peak).toBeLessThanOrEqual(DEFAULT_POOL_MAX)
   })
 })

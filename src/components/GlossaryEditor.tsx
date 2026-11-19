@@ -18,16 +18,6 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus, Merge } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Field, FieldLabel } from "@/components/ui/field"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
@@ -71,8 +61,10 @@ import {
   renderingsForLane,
   replaceLaneRenderings,
 } from "@/lib/terminology/rendering-lane"
-import { importTermbaseFile } from "@/lib/terminology/import-format"
+import { importTermbaseFile, termsNotAlreadyListed } from "@/lib/terminology/import-format"
+import { GlossaryAddTermDialog } from "@/components/GlossaryAddTermDialog"
 import { GlossaryRow } from "@/components/GlossaryRow"
+import { useProgressiveCount } from "@/hooks/useProgressiveCount"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
@@ -273,6 +265,14 @@ export function GlossaryEditor({
     () => partitionConcepts(visibleConcepts),
     [visibleConcepts],
   )
+  // AQU-2654: a long glossary draws its first screen at once and the rest in a
+  // transition, so opening 664 terms no longer freezes the click. Every row
+  // still ends up in the DOM — find-in-page is how a glossary gets searched.
+  const activeRowCount = useProgressiveCount(active.length)
+  const drawnActive = useMemo(
+    () => (activeRowCount >= active.length ? active : active.slice(0, activeRowCount)),
+    [active, activeRowCount],
+  )
 
   const [showArchived, setShowArchived] = useState(false)
   const [view, setView] = useState<"glossary" | "violations">("glossary")
@@ -280,9 +280,11 @@ export function GlossaryEditor({
   const [suggestRequested, setSuggestRequested] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
-  const [newSource, setNewSource] = useState("")
-  const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // AQU-2487 (review, Nov 9): what the last term-list import did, in words:
+  // how many terms it added and how many the list already had. Cleared by the
+  // next change to the list, so it never describes an older state.
+  const [importNotice, setImportNotice] = useState<string | null>(null)
   const [predictedSuggestions, setPredictedSuggestions] = useState<PredictedEquivalent[] | undefined>(undefined)
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const violations = useTerminologyViolations({
@@ -323,6 +325,7 @@ export function GlossaryEditor({
       const next = updated.terminology ?? []
       conceptsRef.current = next
       setOptimisticConcepts(next)
+      setImportNotice(null)
       pendingWritesRef.current += 1
       try {
         await emitConceptDelta({ projectId, author, prev, next })
@@ -492,14 +495,16 @@ export function GlossaryEditor({
     [project, canManage, persist],
   )
 
-  const handleAddTerm = useCallback(() => {
+  // The form's fields are GlossaryAddTermDialog's own state (AQU-2654): this
+  // runs once per submit, not once per letter. True means the term was taken.
+  const handleAddTerm = useCallback((newSource: string, newRendering: string): boolean => {
     const p = suggestGuard()
-    if (!p) return
+    if (!p) return false
     const source = newSource.trim()
     const rendering = newRendering.trim()
     if (!source || !rendering) {
       setError(t("terminology.editor.errorSourceAndRenderingRequired"))
-      return
+      return false
     }
     const lanes = project?.lanes ?? []
     const activeId = laneIdForLegacyTag(activeLane, lanes)
@@ -516,18 +521,9 @@ export function GlossaryEditor({
     const status = canManage ? "active" : "draft"
     void persist(addConcept(p, { sourceTerm: source, renderings, status }))
     setError(null)
-    setNewSource("")
-    setNewRendering("")
     setAddOpen(false)
-  }, [project, canManage, canSuggest, persist, newSource, newRendering, activeLane])
-
-  function handleAddOpenChange(open: boolean) {
-    setAddOpen(open)
-    if (!open) {
-      setNewSource("")
-      setNewRendering("")
-    }
-  }
+    return true
+  }, [project, canManage, canSuggest, persist, activeLane])
 
   const handleSuggest = useCallback(() => {
     if (!guard()) return
@@ -641,6 +637,7 @@ export function GlossaryEditor({
     (file: File) => {
       const p = guard()
       if (!p) return
+      setImportNotice(null)
       const reader = new FileReader()
       reader.onload = () => {
         try {
@@ -664,7 +661,24 @@ export function GlossaryEditor({
                 ),
               }))
             : imported
-          void persist({ terminology: [...(p.terminology ?? []), ...stamped] })
+          // AQU-2487 (import sweep, Nov 2): a term the list already has,
+          // word for word, is not added a second time.
+          const existing = p.terminology ?? []
+          const fresh = termsNotAlreadyListed(existing, stamped)
+          if (fresh.length === 0) {
+            setError(t("terminology.editor.importNothingNew"))
+            return
+          }
+          // AQU-2487 (review, Nov 9): an updated list adds a few terms and
+          // leaves the rest out; say how many of each once they are saved.
+          const already = stamped.length - fresh.length
+          void persist({ terminology: [...existing, ...fresh] }).then((saved) => {
+            if (!saved) return
+            const added = t("terminology.editor.importAdded", { count: fresh.length })
+            setImportNotice(
+              already > 0 ? `${added} ${t("terminology.editor.importAlreadyListed", { count: already })}` : added,
+            )
+          })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
         }
@@ -838,60 +852,12 @@ export function GlossaryEditor({
         </div>
       )}
 
-      <Dialog open={addOpen} onOpenChange={handleAddOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("terminology.editor.addTerm")}</DialogTitle>
-            {/* AQU-872: say which of the two things this form does before it is
-                submitted. Below the floor it files a suggestion, and a
-                translator who expected the term to start being checked would
-                otherwise read the silent draft row as the feature not working. */}
-            <DialogDescription>
-              {canManage
-                ? t("terminology.editor.addTermDescription")
-                : t("terminology.editor.addTermSuggestionDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <Field>
-              <FieldLabel htmlFor="glossary-new-source">
-                {t("terminology.editor.sourceTermLabel")}
-              </FieldLabel>
-              <Input
-                id="glossary-new-source"
-                value={newSource}
-                placeholder={t("terminology.editor.sourceTermPlaceholder")}
-                onChange={(e) => setNewSource(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-                autoFocus
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="glossary-new-rendering">
-                {t("terminology.editor.renderingLabel")}
-              </FieldLabel>
-              <Input
-                id="glossary-new-rendering"
-                value={newRendering}
-                placeholder={t("terminology.editor.renderingLabel")}
-                onChange={(e) => setNewRendering(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-              />
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => handleAddOpenChange(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={handleAddTerm}
-              disabled={!newSource.trim() || !newRendering.trim()}
-            >
-              {t("terminology.editor.addTerm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GlossaryAddTermDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        canManage={canManage}
+        onAdd={handleAddTerm}
+      />
 
       <TerminologyMergeDialog
         open={mergeOpen}
@@ -902,6 +868,11 @@ export function GlossaryEditor({
 
       {error && (
         <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>
+      )}
+      {importNotice && !error && (
+        <div role="status" data-testid="term-import-notice" className="border-b bg-muted/50 px-4 py-2 text-xs text-muted-foreground">
+          {importNotice}
+        </div>
       )}
 
       {/* AQU-1340: a refresh that failed OVER a termbase we already hold. The
@@ -977,7 +948,7 @@ export function GlossaryEditor({
         ))}
 
         {/* Active rows */}
-        {active.map((c) => (
+        {drawnActive.map((c) => (
           <GlossaryRow
             key={c.id}
             concept={c}

@@ -63,6 +63,7 @@ export const tsvNotesRoute: ResourceRoute = {
         const note = unescapeTsvProse(row.prose["note"] ?? "")
         const cell: DcsCell = {
           cellId: dcsCellId(`${repo}|${book}|${row.rowId}`),
+          unitKey: `${book}|${row.rowId}`,
           value: note,
           type: "text",
           canonicalRef: canonicalRefFromTsv(book, row.reference),

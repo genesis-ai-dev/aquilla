@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ATTENTION_PROJECT_SORT } from "@/lib/org/project-list-sort"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
@@ -101,6 +101,15 @@ export function OrgProjectsPage() {
     rows: [],
   })
   const [directoryTick, setDirectoryTick] = useState(0)
+  // AQU-2654: ONE function for the life of the page. The table's rows are
+  // drawn through callbacks that close over this, so when it was rebuilt on
+  // every render (it closed over `portfolio`, a new object each time) every
+  // keystroke in the search box redrew every visible row, menus and all.
+  const bumpPortfolio = portfolio.bumpRefresh
+  const handleLanesChanged = useCallback(() => {
+    bumpPortfolio()
+    setDirectoryTick((tick) => tick + 1)
+  }, [bumpPortfolio])
 
   const directory = useProjectDirectory({
     jwt,
@@ -285,10 +294,7 @@ export function OrgProjectsPage() {
                 allowSelfAssignment={orgSettings.allowSelfAssignment}
                 assignmentMinRole={orgSettings.assignmentMinRole}
                 viewerUsername={username}
-                onLanesChanged={() => {
-                  portfolio.bumpRefresh()
-                  setDirectoryTick((tick) => tick + 1)
-                }}
+                onLanesChanged={handleLanesChanged}
                 rememberSort
                 initialSort={statusFilter === "attention" ? ATTENTION_PROJECT_SORT : undefined}
                 loading={isPageLoading}

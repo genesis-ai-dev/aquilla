@@ -2,9 +2,9 @@
 //
 // POST /admin/projects/:projectId/rebuild-fts
 //
-// Idempotent backfill of the cells_fts virtual table for a project. Runs a
-// delete-then-insert pass in batches of 1000 rows (cursor-paginated by rowid)
-// so it doesn't time out on large projects.
+// A no-op on Postgres, kept so the operator endpoint stays addressable: the
+// full-text index is the GIN index over the generated `cells.value_tsv`
+// column, which Postgres maintains on every write. See the handler body.
 //
 // Auth: Authorization: Bearer ${ADMIN_SECRET} — the dedicated operator
 // credential shared with the projection-rebuild and every other admin endpoint.
@@ -46,9 +46,9 @@ export async function handleRebuildFtsRequest(
 
   const projectId = decodeURIComponent(match[1])
 
-  // Postgres: cells.value_tsv is a GENERATED column with a GIN index, so the
-  // FTS index is always in sync with the data — there is nothing to rebuild.
-  // Kept as a no-op endpoint for API compatibility (was the SQLite FTS5 backfill).
+  // cells.value_tsv is a GENERATED column with a GIN index, so the full-text
+  // index is always in sync with the data — there is nothing to rebuild.
+  // Kept as a no-op endpoint for API compatibility.
   return Response.json({
     ok: true,
     projectId,

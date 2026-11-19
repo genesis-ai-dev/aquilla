@@ -65,6 +65,21 @@ describe("decidePruneGate", () => {
     expect(decision.kind).toBe("refuse")
     expect(decision.kind === "refuse" && decision.message).toContain("unidentified database")
   })
+
+  // AQU-2658: the gate is shared (the cast fold, the cell-metadata repair), and
+  // an operator refused a write must be told about THEIR write, not this one's.
+  it("names the caller's own write in what it refuses and what it allows", () => {
+    const repair = { ...base, action: "restore cell metadata", productionNote: "Nothing else is written." }
+    const refused = decidePruneGate({ ...repair, apply: true, target: "production" })
+    expect(refused.kind === "refuse" && refused.message).toContain("Refusing to restore cell metadata on Neon production")
+    const unidentified = decidePruneGate({ ...repair, apply: true })
+    expect(unidentified.kind === "refuse" && unidentified.message).toContain("Refusing to restore cell metadata on an unidentified database")
+    const allowed = decidePruneGate({ ...repair, apply: true, production: true, target: "production" })
+    expect(allowed.kind === "proceed" && allowed.note).toBe("⚠ applying to Neon PRODUCTION. Nothing else is written.")
+    // Unnamed, it still speaks for the prune.
+    const prune = decidePruneGate({ ...base, apply: true, target: "production" })
+    expect(prune.kind === "refuse" && prune.message).toContain("Refusing to rewrite TTS settings on Neon production")
+  })
 })
 
 describe("settingsBackupPath", () => {

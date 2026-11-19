@@ -58,6 +58,15 @@ export const terminology = defineNamespace({
     "terminology.editor.errorSourceAndRenderingRequired":
       "A source term and rendering are required before the term can be active.",
     "terminology.editor.errorImportFailed": "Import failed",
+    "terminology.editor.importNothingNew": "Every term in this file is already in the list, so nothing was added.",
+    "terminology.editor.importAdded": plural({
+      one: "{count} term added.",
+      other: "{count} terms added.",
+    }),
+    "terminology.editor.importAlreadyListed": plural({
+      one: "{count} term in the file was already in the list.",
+      other: "{count} terms in the file were already in the list.",
+    }),
     "terminology.editor.findingTerms": "Finding terms…",
     "terminology.editor.suggestTerms": "Suggest terms",
     "terminology.editor.exportCsv": "Export CSV",
@@ -605,6 +614,16 @@ export const terminology = defineNamespace({
       },
       "terminology.sharing.publishAria": {
         description: "Accessible name for the publish-to-org toggle switch.",
+      },
+      "terminology.editor.importAdded": {
+        description:
+          "Status line above the term list after a term-list file was imported: how many terms the import added. A full sentence; terminology.editor.importAlreadyListed may follow it after a space.",
+        placeholders: { count: "Number of terms added; also selects the plural form." },
+      },
+      "terminology.editor.importAlreadyListed": {
+        description:
+          "Second sentence of the status line after a term-list import, shown after terminology.editor.importAdded only when some terms in the file were left out because the list already had them.",
+        placeholders: { count: "Number of terms in the file the list already had; also selects the plural form." },
       },
       "terminology.editor.showArchived": {
         description:

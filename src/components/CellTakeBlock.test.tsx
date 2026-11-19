@@ -58,6 +58,13 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
 }))
 
+// AQU-2492 (review, Nov 9): the Undo steps this block records.
+const steps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/lib/history/history", async (orig) => ({
+  ...(await orig<typeof import("@/lib/history/history")>()),
+  recordStep: (step: Record<string, unknown>) => { steps.push(step) },
+}))
+
 const joinCalls: Array<Record<string, unknown>> = []
 vi.mock("@/lib/audio/join-pieces", () => ({
   joinTakePieces: vi.fn(async (args: Record<string, unknown>) => { joinCalls.push(args); return "audio-c1-9-joined.wav" }),
@@ -119,6 +126,7 @@ beforeEach(() => {
   transcribeCalls.length = 0
   trimCalls.length = 0
   trimEmits.length = 0
+  steps.length = 0
   removeEmits.length = 0
   renameEmits.length = 0
   localStorage.clear()
@@ -287,6 +295,25 @@ describe("trimming in place", () => {
     })
   })
 
+  // AQU-2495 (review, Nov 9): a take's clip may now start before 0:00, but
+  // its sound may not (playback skips it, and the audio exports pull it to
+  // 0:00). The start line comes back only as far as the file's start, as the
+  // timeline's left trim handle does.
+  it("the start line stops where the take's sound would start before the file", () => {
+    const owner = { ...cueOwner(), startTime: 1, endTime: 3 } as CellData
+    const id = owner.selectedAudioId!
+    // Its clip starts 1 s before 0:00 (1 s - 2 s); 1.5 s trimmed off, so it sounds from 0:00.5.
+    owner.attachments![id] = { ...owner.attachments![id], durationMs: 3000, trimStartMs: 1500, targetOffsetMs: -2000 } as never
+    draw({ owner })
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    // From where it is (1.5 s, 200px) back to 0.3 s: it stops at 1 s, 0:00 in the file.
+    fireEvent.pointerDown(line, { clientX: 200, buttons: 1 })
+    fireEvent.pointerMove(line, { clientX: 40, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 40 })
+    expect(trimEmits.at(-1)).toMatchObject({ audioId: id, trimStartMs: 1000 })
+  })
+
   it("saves nothing when a line is clicked but not moved", () => {
     draw()
     sized()
@@ -294,6 +321,41 @@ describe("trimming in place", () => {
     fireEvent.pointerDown(line, { clientX: 4, buttons: 1 })
     fireEvent.pointerUp(line, { clientX: 4 })
     expect(trimEmits).toHaveLength(0)
+  })
+
+  // AQU-2492 (review, Nov 9): the same trim on the timeline is an Undo step;
+  // here it was none, so ⌘Z after it undid something else.
+  it("records the trim as an Undo step, on the cell that holds the take", () => {
+    draw()
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(line, { clientX: 0, buttons: 1 })
+    fireEvent.pointerMove(line, { clientX: 40, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 40 })
+    expect(steps).toEqual([expect.objectContaining({
+      kind: "take.window",
+      labelKey: "editor.history.stepTrim",
+      fileId: "cue-sibling",
+      data: {
+        cellId: "cue-1",
+        audioId: "audio-cue-1-1700000000-take.webm",
+        before: { trimStartMs: undefined, trimEndMs: undefined },
+        after: { trimStartMs: 300, trimEndMs: undefined },
+      },
+    })])
+  })
+
+  it("records the old window as the step's before, so Undo puts it back", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    owner.attachments![id] = { ...owner.attachments![id], trimStartMs: 300, trimEndMs: 2700 } as never
+    draw({ owner })
+    const line = screen.getByRole("slider", { name: /end of the kept audio/i })
+    fireEvent.keyDown(line, { key: "ArrowLeft", shiftKey: true })
+    expect(steps.at(-1)).toMatchObject({
+      kind: "take.window",
+      data: { before: { trimStartMs: 300, trimEndMs: 2700 }, after: { trimStartMs: 300, trimEndMs: 2600 } },
+    })
   })
 
   it("nudges a focused line with the arrow keys", () => {
@@ -716,6 +778,16 @@ describe("Join into one recording", () => {
     fireEvent.click(screen.getByTestId("cell-take-join"))
     await waitFor(() => expect(joinCalls).toHaveLength(1))
     expect(joinCalls[0]).toMatchObject({ cellId: "c1", slot: "recording", label: "Take 3" })
+  })
+
+  // AQU-2492 (review, Nov 9): joining left no Undo step. The join records one,
+  // naming the take in pieces that played before, so Undo plays it again.
+  it("asks for an Undo step that names the take in pieces as what played before", async () => {
+    joinCalls.length = 0
+    draw({ owner, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(joinCalls).toHaveLength(1))
+    expect(joinCalls[0]).toMatchObject({ history: { selectedBefore: "audio-c1-1-a.wav" } })
   })
 })
 

@@ -543,6 +543,40 @@ describe("useOutboxFlusher", () => {
     expect(result.current.pendingCount).toBe(3)
   })
 
+  // AQU-2654. WHY: one acked commit triggers three count refreshes at once
+  // (the outbox notification, the committing handler, the flush cycle). Each
+  // used to supersede the one before and drop its result, so the provider
+  // learned "0 pending" only from the last — a render after the records list
+  // had already said so. Overlapping calls now share a read, and every caller
+  // still gets a count taken after its call.
+  it("overlapping refreshPending calls share one read, plus one more for what changed meanwhile", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    const { result } = renderHook(() =>
+      useOutboxFlusher({ enabled: false, getTokenForFile: TOKEN_FN }),
+    )
+    await act(async () => { await result.current.refreshPending() })
+    mockPendingCount.mockClear()
+    let release!: (count: number) => void
+    mockPendingCount.mockImplementationOnce(() => new Promise<number>((resolve) => { release = resolve }))
+    mockPendingCount.mockResolvedValue(0)
+
+    let totals: number[] = []
+    await act(async () => {
+      const first = result.current.refreshPending()
+      const second = result.current.refreshPending()
+      const third = result.current.refreshPending()
+      // The read in flight saw two pending; the record was acked meanwhile.
+      release(2)
+      totals = await Promise.all([first, second, third])
+    })
+
+    // One shared read and ONE follow-up — not three reads.
+    expect(mockPendingCount).toHaveBeenCalledTimes(2)
+    // Nobody is handed the stale count.
+    expect(totals).toEqual([0, 0, 0])
+    expect(result.current.pendingCount).toBe(0)
+  })
+
   it("clears a provisional stale-source warning after authoritative reconciliation", async () => {
     Object.defineProperty(navigator, "locks", {
       value: undefined,

@@ -231,6 +231,18 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
+/**
+ * AQU-2552 (review r6): this zip gives none of its exporters the hiding. Its
+ * text, subtitle, InDesign and audio files carry a hidden line like any other
+ * line (only the server-built USFM leaves one out). The Word and PowerPoint
+ * exporters read the flag off the cells themselves, so it is taken off here:
+ * they too write a hidden line like any other, rather than half honour it.
+ */
+function withoutHiding(cells: CellData[]): CellData[] {
+  if (!cells.some((cell) => cell.hidden === true)) return cells
+  return cells.map((cell) => (cell.hidden === true ? { ...cell, hidden: undefined } : cell))
+}
+
 export async function buildProjectExport(
   selection: EgressProjectSelection,
   options: EgressOptions,
@@ -411,7 +423,7 @@ export async function buildProjectExport(
           const cells = await getCells()
           const inject =
             plan.format === "docx" ? exportDocxFn : plan.format === "pptx" ? exportPptxFn : exportIdmlFn
-          const result = await inject(raw, cells)
+          const result = await inject(raw, withoutHiding(cells))
           outcome.textEntries.push({ path, data: result.blob })
         } else if (plan.kind === "vtt") {
           outcome.textEntries.push({ path, data: exportVttStructured(await getCells()) })

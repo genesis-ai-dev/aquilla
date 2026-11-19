@@ -319,6 +319,66 @@ describe("deriveCommittedCellStats", () => {
     expect(result.current.byCellId.get("cell-2")?.editCount).toBe(7)
     expect((global.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(calls)
   })
+
+  // AQU-2654. WHY: one edit is a commit plus the validation it casts for
+  // itself, applied by the server in that order. The validation's entry used
+  // to be read back (twice: once per path that noticed it). It is derivable:
+  // the server counts the author against the head the event names.
+  it("applyValidationCellStats adds the validator of an applied validate, in the same pass as the commit, without a fetch", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const calls = (global.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    const validate = (editEventId: string, kind: "cell.validate" | "cell.unvalidate" = "cell.validate") => ({
+      event: {
+        id: `v-${editEventId}`, kind, projectId: "p", fileId: "file-abc", cellId: "cell-1",
+        author: "me", clientTs: 4242, parentId: null, payload: { editEventId },
+      },
+    }) as unknown as Parameters<typeof result.current.applyValidationCellStats>[0]
+    let derived = false
+    // Before React renders the commit's entry — the order the POST response
+    // (and the echo) deliver the two frames in.
+    act(() => {
+      result.current.applyCommittedCellStats("cell-1", [{ ...base, side: "target", eventId: "ev-2", value: "new" }])
+      derived = result.current.applyValidationCellStats(validate("ev-2"))
+    })
+    expect(derived).toBe(true)
+    expect(result.current.byCellId.get("cell-1")).toMatchObject({
+      lastEditEventId: "ev-2", activeValidators: ["me"], validatorDecidedTs: { me: 4242 },
+    })
+    act(() => { derived = result.current.applyValidationCellStats(validate("ev-2", "cell.unvalidate")) })
+    expect(derived).toBe(true)
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual([])
+    expect((global.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(calls)
+  })
+
+  it("applyValidationCellStats refuses a validation whose edit is not the head this client knows", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const record = (cellId: string, editEventId: string, extra: Record<string, unknown> = {}) => ({
+      event: {
+        id: "v-1", kind: "cell.validate", projectId: "p", fileId: "file-abc", cellId,
+        author: "me", clientTs: 1, parentId: null, payload: { editEventId, ...extra },
+      },
+    }) as unknown as Parameters<typeof result.current.applyValidationCellStats>[0]
+    let derived = true
+    // A head a collaborator moved, a cell the read left out, someone else's
+    // approval withdrawn: the caller keeps its read for all three.
+    act(() => { derived = result.current.applyValidationCellStats(record("cell-1", "ev-other")) })
+    expect(derived).toBe(false)
+    act(() => { derived = result.current.applyValidationCellStats(record("cell-unknown", "ev-1")) })
+    expect(derived).toBe(false)
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["alice", "bob"])
+  })
 })
 
 // ── AQU-1506 ────────────────────────────────────────────────────────────────
@@ -558,5 +618,84 @@ describe("useCellsAuditStats — a committed cell landing beside the full read (
     expect(result.current.byCellId.get("cell-2")?.editCount).toBe(7)
     expect(result.current.byCellId.get("cell-9")).toMatchObject({ lastEditEventId: "ev-9", activeValidators: [] })
     expect(result.current.complete).toBe(true)
+  })
+})
+
+// AQU-2654 — "a background refresh must not flip visible state".
+describe("useCellsAuditStats — a revalidation is quiet (AQU-2654)", () => {
+  const respond = (cells: unknown[]) => new Response(JSON.stringify({ cells }), { status: 200 })
+
+  it("shows no loading state and keeps the map when the file's stats did not change", async () => {
+    // A new response, parsed into new objects, per read.
+    global.fetch = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE)) as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    let renders = 0
+    const { result } = renderHook(() => {
+      const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN })
+      renders += 1
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const mapBefore = result.current.byCellId
+    const rendersBefore = renders
+    seenLoading.length = 0
+
+    act(() => result.current.revalidate())
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2))
+    await act(async () => { await new Promise((r) => setTimeout(r, 10)) })
+
+    expect(result.current.byCellId).toBe(mapBefore)
+    expect(seenLoading).not.toContain(true)
+    expect(renders).toBe(rendersBefore)
+  })
+
+  it("replaces only the cells whose stats changed", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE))
+    global.fetch = fetchMock as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    const { result } = renderHook(() => {
+      const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN })
+      seenLoading.push(state.isLoading)
+      return state
+    })
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const first = result.current.byCellId.get("cell-1")
+    const second = result.current.byCellId.get("cell-2")
+    seenLoading.length = 0
+
+    // Someone validated cell-2 while this tab was away.
+    fetchMock.mockImplementation(async () => respond([
+      STATS_RESPONSE[0],
+      { ...STATS_RESPONSE[1], activeValidators: ["carol"] },
+    ]))
+    act(() => result.current.revalidate())
+    await waitFor(() => expect(result.current.byCellId.get("cell-2")?.activeValidators).toEqual(["carol"]))
+
+    expect(result.current.byCellId.get("cell-1")).toBe(first)
+    expect(result.current.byCellId.get("cell-2")).not.toBe(second)
+    expect(seenLoading).not.toContain(true)
+  })
+
+  it("a different lane is a load, not a revalidation", async () => {
+    global.fetch = vi.fn().mockImplementation(async () => respond(STATS_RESPONSE)) as unknown as typeof fetch
+    const seenLoading: boolean[] = []
+    const { result, rerender } = renderHook(
+      ({ lane }: { lane: string }) => {
+        const state = useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN, lane })
+        seenLoading.push(state.isLoading)
+        return state
+      },
+      { initialProps: { lane: "French" } },
+    )
+    await waitFor(() => expect(result.current.byCellId.size).toBe(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    seenLoading.length = 0
+    rerender({ lane: "Spanish" })
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(seenLoading).toContain(true)
   })
 })

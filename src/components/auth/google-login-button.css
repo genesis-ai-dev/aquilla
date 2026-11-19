@@ -31,3 +31,9 @@
   color: #e3e3e3;
   border-color: #8e918f;
 }
+
+/* Keep the user's input mounted so cancelling restores the form as they left it. */
+[data-google-login-pending] ~ *,
+form:has(> [data-google-login-pending]) ~ [data-login-alternative] {
+  display: none;
+}

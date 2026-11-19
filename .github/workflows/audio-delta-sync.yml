@@ -39,7 +39,7 @@ name: Delta sync (audio + users)
 #   SYNC_SECRET_KEY                        trusted ingest/upsert auth (prod sync-worker)
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state,
 #                                          and the _migrate/*.lock run lock every --apply takes)
-#   DISCORD_WEBHOOK_URL                    channel webhook for the run report
+#   DISCORD_AUDIO_SYNC_WEBHOOK_URL         channel webhook for the run report
 # Optional:
 #   R2_ACCOUNT_ID (defaults to the Frontier R&D account baked into the script)
 
@@ -81,8 +81,16 @@ jobs:
       # migration → utils/password → bcryptjs). auth-worker is its own npm
       # package, not a pnpm workspace member, so the root install leaves its
       # node_modules empty and the users step died with ERR_MODULE_NOT_FOUND.
+      #
+      # pnpm, like every other job that installs auth-worker (ci.yml,
+      # dev-deploy.yml) — NOT `npm ci`. auth-worker's vitest 5 sits outside
+      # @cloudflare/vitest-pool-workers' peer range (^4.1), which npm treats as
+      # a hard ERESOLVE and pnpm as a warning. While this step ran `npm ci` it
+      # failed every night, so the users step below was skipped and no Frontier
+      # account reached Aquilla (AQU-1403 tracks the peer conflict itself).
       - name: Install auth-worker deps (imported by migrate-users.ts)
-        run: npm ci --prefix auth-worker
+        run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
 
       # Restore the delta state (HEAD-sha-per-project, for audioFastSha) so
       # unchanged projects are skipped without cloning. Missing object →
@@ -240,7 +248,7 @@ jobs:
       - name: Post to Discord
         if: always()
         env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          WEBHOOK: ${{ secrets.DISCORD_AUDIO_SYNC_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           R_STATUS: ${{ steps.report.outputs.status }}
           R_AAPPLIED: ${{ steps.report.outputs.a_applied }}
@@ -250,7 +258,7 @@ jobs:
           R_UCOUNTS: ${{ steps.report.outputs.u_counts }}
         run: |
           if [ -z "$WEBHOOK" ]; then
-            echo "::warning title=Delta sync report not posted::DISCORD_WEBHOOK_URL secret is not set, so this run reported to nobody. Set it in Settings → Secrets and variables → Actions."
+            echo "::warning title=Delta sync report not posted::DISCORD_AUDIO_SYNC_WEBHOOK_URL secret is not set, so this run reported to nobody. Set it in Settings → Secrets and variables → Actions."
             exit 0
           fi
           msg=$(printf '**Delta sync** — %s\nUsers (%s): %s\nAudio: %s · %s takes copied\naudio errors: %s\n<%s>' \

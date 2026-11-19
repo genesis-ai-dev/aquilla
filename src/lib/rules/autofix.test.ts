@@ -3,6 +3,8 @@ import { applyRegexFix, applyLiteralFix } from "./autofix"
 import { parseBatchResponse, parsePerCellResponse } from "./autofix"
 import { buildRegexProposal, buildPerCellProposal } from "./autofix"
 import { requestBatchFix, requestSurgicalFix } from "./autofix"
+import { buildOrthographyProposal, hasOrthographyFix } from "./autofix"
+import { CANONICAL_APOSTROPHE, type OrthographyProfile } from "../../../db/shared/orthography"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule, CompletionSettings } from "@/lib/parsers/types"
 
@@ -244,6 +246,88 @@ describe("requestSurgicalFix", () => {
   it("returns none on network error", async () => {
     vi.mocked(complete).mockRejectedValueOnce(new Error("net"))
     const prop = await requestSurgicalFix({ rule: sampleRule, cell: cell("c1", "foo"), settings, session: null })
+    expect(prop).toEqual({ kind: "none", reason: "Could not apply fixes" })
+  })
+})
+
+// ── AQU-2642 §1: the old-orthography fix is computed, not asked ───────────
+
+const uzbek = {
+  rules: [["sh", "ş"], ["ch", "ç"], ["oʻ", "ö"], ["gʻ", "ğ"]],
+  apostrophe: CANONICAL_APOSTROPHE,
+  exceptions: [{ word: "Isʼhoq", status: "approved" }],
+} as const satisfies OrthographyProfile
+
+function orthographyRule(orthography: OrthographyProfile | null): TranslationRule {
+  return {
+    id: "builtin:old-orthography", name: "Old orthography", description: "",
+    severity: "major", source: "algorithmic", scope: "project", enabled: true, createdAt: "",
+    check: { type: "builtin", checkId: "old-orthography", orthography },
+  }
+}
+
+describe("buildOrthographyProposal", () => {
+  it("corrects each flagged word from the lane's own rules", () => {
+    const prop = buildOrthographyProposal(orthographyRule(uzbek), [cell("c1", "shahar va chiroq")])
+    expect(prop?.kind).toBe("per-cell")
+    if (prop?.kind !== "per-cell") return
+    expect(prop.previews[0]).toMatchObject({
+      cellId: "c1", before: "shahar va chiroq", after: "şahar va çiroq", source: "orthography",
+    })
+  })
+
+  it("carries find/replace only when every flagged word is the same word", () => {
+    const one = buildOrthographyProposal(orthographyRule(uzbek), [cell("c1", "shahar va shahar")])
+    const two = buildOrthographyProposal(orthographyRule(uzbek), [cell("c2", "shahar va chiroq")])
+    expect(one?.kind === "per-cell" && one.previews[0]).toMatchObject({ find: "shahar", replace: "şahar" })
+    expect(two?.kind === "per-cell" && two.previews[0].find).toBeUndefined()
+  })
+
+  it("leaves an approved exception alone, as the check does", () => {
+    expect(buildOrthographyProposal(orthographyRule(uzbek), [cell("c1", "Ishoqning kitobi")])).toBeNull()
+  })
+
+  it("is null for another check, and for a lane with no profile", () => {
+    expect(buildOrthographyProposal(sampleRule, [cell("c1", "shahar")])).toBeNull()
+    expect(buildOrthographyProposal(orthographyRule(null), [cell("c1", "shahar")])).toBeNull()
+  })
+
+  it("skips cells with nothing flagged rather than previewing a no-op", () => {
+    const prop = buildOrthographyProposal(orthographyRule(uzbek), [cell("c1", "şahar"), cell("c2", "chiroq")])
+    expect(prop?.kind === "per-cell" && prop.previews.map((p) => p.cellId)).toEqual(["c2"])
+  })
+})
+
+describe("hasOrthographyFix", () => {
+  it("is true only for the orthography check with a profile", () => {
+    expect(hasOrthographyFix(orthographyRule(uzbek))).toBe(true)
+    expect(hasOrthographyFix(orthographyRule(null))).toBe(false)
+    expect(hasOrthographyFix(sampleRule)).toBe(false)
+  })
+})
+
+describe("orthography fixes never reach the model", () => {
+  beforeEach(() => vi.mocked(complete).mockReset())
+
+  it("answers requestSurgicalFix without a completion call", async () => {
+    const prop = await requestSurgicalFix({
+      rule: orthographyRule(uzbek), cell: cell("c1", "shahar"), settings, session: null,
+    })
+    expect(vi.mocked(complete)).not.toHaveBeenCalled()
+    expect(prop.kind === "per-cell" && prop.previews[0].after).toBe("şahar")
+  })
+
+  it("answers requestBatchFix with AI unconfigured", async () => {
+    const prop = await requestBatchFix({
+      rule: orthographyRule(uzbek), violatingCells: [cell("c1", "chiroq")], passingCells: [], session: null,
+    })
+    expect(vi.mocked(complete)).not.toHaveBeenCalled()
+    expect(prop.kind === "per-cell" && prop.previews[0].after).toBe("çiroq")
+  })
+
+  it("still reports none for a non-orthography rule with AI unconfigured", async () => {
+    const prop = await requestSurgicalFix({ rule: sampleRule, cell: cell("c1", "foo"), session: null })
+    expect(vi.mocked(complete)).not.toHaveBeenCalled()
     expect(prop).toEqual({ kind: "none", reason: "Could not apply fixes" })
   })
 })

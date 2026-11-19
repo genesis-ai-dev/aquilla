@@ -15,6 +15,7 @@
 import type { AquillaDb } from '../../../db/shim/postgres'
 import { markProjectSyncLinksDirty } from '../../../db/shared/progress-sync-dirty'
 import { verifyTokenForProject } from '../auth'
+import { canReadRequestedLane, visibleLanesForRead } from './lane-read-wall'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
 import { counts, readValidationCount, readValidationCountAudio, BOOK_INDEX } from './progress-read-route'
@@ -89,6 +90,8 @@ export interface PlanResponse {
 export interface PlanRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" or "true" turns the lane read wall on. */
+  LANE_READ_WALL?: string
 }
 
 /** The folder a file's meta names, or null; a blob that will not parse names none. */
@@ -245,6 +248,14 @@ export async function handlePlanRequest(
   const lane = await readLaneTag(db, projectId, url.searchParams.get('lane'))
 
   if (request.method === 'GET') {
+    // AQU-730 read wall: the plan carries `lane`'s per-file progress counts,
+    // and the lane is the caller's choice. A lane the caller cannot read
+    // answers as an empty plan, the way progress answers it.
+    const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+    if (!(await canReadRequestedLane(db, projectId, visibleLanes, lane))) {
+      const hidden: PlanResponse = { projectId, lane, validationCount: 1, revision: 0, units: [] }
+      return Response.json(hidden, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
     const { units, revision, validationCount, validationCountAudio, countStructural, planUpdatedAt, progressUpdatedAt } =
       await readPlan(db, projectId, lane)
     // THREE CLOCKS, because none of them alone moves for every change worth

@@ -135,6 +135,37 @@ describe("POST /api/v2/access-links (mint)", () => {
     expect(member).toBeNull()
   })
 
+  // [Pen test] 2026-11-16: power that leaves no membership row. Each of these
+  // accounts passed the footprint check as "fresh", so any user could mint a
+  // link for it from their own project and redeem a full sign-in as it.
+  it("rejects a platform admin target, who needs no membership row to hold power", async () => {
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    await seedUser(2, "operator")
+    await env.AQUILLA_PG.prepare("INSERT INTO platform_admins (email) VALUES ('operator@example.com')").run()
+
+    const res = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
+    expect(res.status).toBe(403)
+    const links = await env.AQUILLA_PG.prepare("SELECT 1 FROM project_access_links").all()
+    expect(links.results.length).toBe(0)
+  })
+
+  it("rejects a target who owns another project through the creator fallback alone", async () => {
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    await seedProjectWithCreator("proj-theirs", 2, "bob") // no project_members row for bob
+
+    const res = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
+    expect(res.status).toBe(403)
+  })
+
+  it("rejects a target who sits in a team", async () => {
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    await seedUser(2, "teammate")
+    await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id) VALUES (77, 2)").run()
+
+    const res = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
+    expect(res.status).toBe(403)
+  })
+
   it("allows re-minting for a translator already a member of the SAME project", async () => {
     await seedProjectWithCreator("proj-1", 1, "alice")
     await seedUser(2, "translator")
@@ -183,6 +214,20 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('own-proj', 2, 700, 2)",
     ).run()
+    const res = await redeem(token, "4821")
+    expect(res.status).toBe(401)
+  })
+
+  it("kills the link once the bound account becomes a platform admin", async () => {
+    const token = await setup()
+    expect((await redeem(token, "4821")).status).toBe(200)
+    const bound = await env.AQUILLA_PG.prepare(
+      "SELECT u.email FROM project_access_links l JOIN users u ON u.id = l.user_id WHERE l.token = ?",
+    )
+      .bind(token)
+      .first<{ email: string }>()
+    await env.AQUILLA_PG.prepare("INSERT INTO platform_admins (email) VALUES (LOWER(?))").bind(bound!.email).run()
+
     const res = await redeem(token, "4821")
     expect(res.status).toBe(401)
   })

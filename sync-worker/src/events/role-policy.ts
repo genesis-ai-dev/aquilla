@@ -259,18 +259,15 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // lead) sit at; those are normal editing flow, this changes the shared layout.
   'file.track.set': ROLE.MAINTAINER,
 
-  // AQU-2308: setting, renaming or removing a hand-set milestone. The
-  // file.track.set floor and the file.track.set reason: a division relayouts
-  // the navigator for every collaborator who opens the file, so it is shared
-  // layout rather than normal editing flow. Deliberately NOT the contributor
-  // floor file.rename sits at — a rename changes one file's own label, this
-  // changes how everyone's work in it is divided and counted.
-  //
-  // The project setting that would let a project lead do this is its own slice
-  // (AQU-2309); until it lands the floor is fixed here at maintainer, which is
-  // that setting's default.
-  'file.milestone.set': ROLE.MAINTAINER,
-  'file.milestone.remove': ROLE.MAINTAINER,
+  // AQU-2308 / AQU-2309: setting, renaming, resizing or removing a hand-set
+  // milestone. A division relayouts the navigator for every collaborator who
+  // opens the file, so it is shared layout rather than normal editing flow.
+  // PROJECT_LEAD is the lowest rung the project's milestoneFloor can admit.
+  // The tier itself — maintainer unless the project opens it — is applied on
+  // the events route (db/shared/milestone-floor.ts), which is what rejects a
+  // lead's write from a page that has not picked up a raised floor.
+  'file.milestone.set': ROLE.PROJECT_LEAD,
+  'file.milestone.remove': ROLE.PROJECT_LEAD,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

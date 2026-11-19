@@ -545,3 +545,54 @@ describe("a shared recording across interleaved takes", () => {
     expect(fetched.filter((u) => u.endsWith("U.mp3"))).toHaveLength(2)
   })
 })
+
+// Re-check S1: no copy of the decode when nothing later needs it, and the
+// decode is let go when the run ends.
+describe("memory while measuring", () => {
+  const tone = (seconds: number) => Float32Array.from({ length: seconds * TARGET_RATE }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / TARGET_RATE))
+  it("the last take of a recording is metered in place; earlier ones get a copy, so the decode stays for them", async () => {
+    const decoded = tone(4)
+    const seen: Float32Array[] = []
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]),
+      decode: async () => decoded,
+      emit: async () => {},
+      meter: async (pcm, rate) => { seen.push(pcm); return (await import("./loudness")).measureLoudness([pcm], rate) },
+    })
+    const att = { url: "frontier-audio://U.wav", type: "audio", durationMs: 4000 } as CodexCellAttachment
+    await measure("c1", "a", { ...att, trimEndMs: 2000 }, undefined, { last: false })
+    await measure("c2", "b", { ...att, trimStartMs: 2000 }, undefined, { last: true })
+    expect(seen[0].buffer).not.toBe(decoded.buffer)
+    expect(seen[1].buffer).toBe(decoded.buffer)
+  })
+
+  it("an untrimmed last take is metered as the decode itself", async () => {
+    const decoded = tone(2)
+    let seen: Float32Array | null = null
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]), decode: async () => decoded, emit: async () => {},
+      meter: async (pcm, rate) => { seen = pcm; return (await import("./loudness")).measureLoudness([pcm], rate) },
+    })
+    await measure("c1", "a", { url: "frontier-audio://W.wav", type: "audio", durationMs: 2000 } as CodexCellAttachment, undefined, { last: true })
+    expect(seen).toBe(decoded)
+  })
+
+  it("Even out tells the measurer which take is a recording's last, and releases it at the end", async () => {
+    const calls: Array<{ id: string; last: boolean | undefined }> = []
+    const release = vi.fn()
+    const store: Record<string, CodexCellAttachment> = {
+      a: { url: "u1", type: "audio" } as CodexCellAttachment,
+      b: { url: "u2", type: "audio" } as CodexCellAttachment,
+      c: { url: "u1", type: "audio", trimStartMs: 10 } as CodexCellAttachment,
+    }
+    const host: EvenOutHost = {
+      readTake: (_c, id) => store[id],
+      applyEven: async () => {},
+      measure: async (_c, id, _att, _s, o) => { calls.push({ id, last: o?.last }); return null },
+      release,
+    }
+    await evenOutTakes(host, ["a", "b", "c"].map((id) => ({ cellId: "c", audioId: id })))
+    expect(calls).toEqual([{ id: "a", last: false }, { id: "c", last: true }, { id: "b", last: true }])
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+})

@@ -54,6 +54,12 @@ export function readingIsStale(att: CodexCellAttachment): boolean {
   return (att.loudnessFromMs ?? 0) !== (att.trimStartMs ?? 0) || (att.loudnessToMs ?? null) !== (att.trimEndMs ?? null)
 }
 
+export interface MeasureOptions {
+  /** No later take of this run shares the recording: the decode can be
+   *  metered in place (no copy) and let go. */
+  last?: boolean
+}
+
 /** What the actions need from the workspace. */
 export interface EvenOutHost {
   /** The take as it reads now (null when gone or deleted). */
@@ -68,7 +74,7 @@ export interface EvenOutHost {
    *  refuses the action up front, before anything is downloaded. */
   allowed?: boolean
   /** Measure a take that has no reading (see makeTakeMeasurer); null = couldn't. */
-  measure(cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal): Promise<LoudnessFields | null>
+  measure(cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal, opts?: MeasureOptions): Promise<LoudnessFields | null>
   /** The run is over: let go of what measuring held (the decoded recording,
    *  the recordings that failed this run). */
   release?(): void
@@ -203,12 +209,15 @@ async function evenOutMeasured(
   let done = 0
   if (toMeasure.length > 0) opts.onProgress?.(0, toMeasure.length)
   const readings = new Map<string, LoudnessFields>()
-  for (const t of toMeasure) {
+  for (let k = 0; k < toMeasure.length; k++) {
+    const t = toMeasure[k]
     if (opts.signal?.aborted) break
     const att = host.readTake(t.cellId, t.audioId)
     if (att) {
+      const next = toMeasure[k + 1]
+      const last = !next || host.readTake(next.cellId, next.audioId)?.url !== att.url
       try {
-        const r = await host.measure(t.cellId, t.audioId, att, opts.signal)
+        const r = await host.measure(t.cellId, t.audioId, att, opts.signal, { last })
         if (r) readings.set(`${t.cellId}\u0000${t.audioId}`, r)
       } catch {
         // The fallback: an unmeasured take is skipped below.
@@ -374,7 +383,7 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
     return held
   }
 
-  const run = async (where: TakeRef, att: CodexCellAttachment, signal: AbortSignal): Promise<{ reading: LoudnessFields; durationMs: number } | null> => {
+  const run = async (where: TakeRef, att: CodexCellAttachment, signal: AbortSignal, last: boolean): Promise<{ reading: LoudnessFields; durationMs: number } | null> => {
     const { startSec, endSec } = windowOf(att)
     // A part too long for this device's memory: don't fetch anything.
     const knownEnd = endSec ?? (att.durationMs != null ? att.durationMs / 1000 : null)
@@ -387,9 +396,16 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
       durationMs = Math.round((rec.pcm.length / TARGET_RATE) * 1000)
       const a = Math.min(rec.pcm.length, Math.round(startSec * TARGET_RATE))
       const b = endSec != null ? Math.min(rec.pcm.length, Math.round(endSec * TARGET_RATE)) : rec.pcm.length
-      // A copy: the meter may take (transfer) it, and the decode stays for
-      // the recording's next section.
-      part = rec.pcm.slice(a, Math.max(a, b))
+      if (last) {
+        // Nothing later needs the decode: meter it in place (the worker may
+        // take it) and let it go — no second copy in memory.
+        part = a === 0 && b === rec.pcm.length ? rec.pcm : rec.pcm.subarray(a, Math.max(a, b))
+        held = null
+      } else {
+        // A copy: the meter may take (transfer) it, and the decode stays for
+        // the recording's next section.
+        part = rec.pcm.slice(a, Math.max(a, b))
+      }
     } else {
       // Too long to decode whole: just this part, if the recording allows it.
       if (knownEnd == null || !deps.decodeWindow) return null
@@ -405,7 +421,7 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
     }
   }
 
-  const measure = async (cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal): Promise<LoudnessFields | null> => {
+  const measure = async (cellId: string, audioId: string, att: CodexCellAttachment, signal?: AbortSignal, mopts?: MeasureOptions): Promise<LoudnessFields | null> => {
     if (failed.has(att.url)) return null
     const key = `${att.url}\u0000${att.trimStartMs ?? 0}\u0000${att.trimEndMs ?? ""}`
     let reading = results.get(key) ?? null
@@ -421,7 +437,7 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
       try {
         // Settles on abort too, even if a download ignores its signal.
         const aborted = new Promise<null>((resolve) => ac.signal.addEventListener("abort", () => resolve(null), { once: true }))
-        const m = await Promise.race([run({ cellId, audioId }, att, ac.signal).catch(() => null), aborted])
+        const m = await Promise.race([run({ cellId, audioId }, att, ac.signal, mopts?.last ?? false).catch(() => null), aborted])
         if (!m) {
           // Ran out of time (not Cancel): this recording is skipped for the
           // rest of the run. Nothing outlives the run: the next one may have

@@ -5591,12 +5591,13 @@ export function linesPlaybackStopsAt(cells: readonly CellData[], ask: PlaybackAs
 //  - `linesHaveAnythingOfTheirOwnToPlay`: a take or an original, the film
 //    NOT counted. Asked by Play all's own move into the next chapter when a
 //    chapter plays out (lib/timeline/chapter-pick's `nextChapterForPlayAll`,
-//    from ProjectWorkspace's `onQueueRanOut`). On a book each chapter runs on
-//    its own clock from 0:00, so the film behind a chapter nobody has
-//    recorded is the film's opening again, under that chapter's verses:
-//    counting it, Play all ran the whole book through the film's first
-//    minutes. So Play all goes on only into a chapter with something of its
-//    own, and a chapter only the film could play ends it there, as before.
+//    from ProjectWorkspace's `onQueueRanOut`). That move is made only by a
+//    run that does not already hold the later chapters (since the
+//    whole-book timeline, a run of the timeline holds the whole book and
+//    plays them itself, under the film). A run of one chapter started on
+//    its own clock from 0:00, where the film behind a chapter nobody has
+//    recorded would be the film's opening again: so it goes on only into a
+//    chapter with something of its own.
 
 /**
  * A take or an original of the lines' own, the film not counted: what Play

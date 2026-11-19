@@ -16239,7 +16239,6 @@ export function ProjectWorkspace() {
   // plays behind is played, never skipped. Null wherever no film plays behind
   // the lines (`linkedFilmBehindLines`): following the source, an imported
   // film, a film that could not be loaded.
-  const filmChapterOfABook = timelineScopes.length > 0
   const filmBehind = useMemo(
     () => linkedFilmBehindLines({
       kind: filmKind,
@@ -16247,9 +16246,8 @@ export function ProjectWorkspace() {
       followsRecordings: timingMode === "audioFirst",
       filmFailed,
       durationSec: videoDurationForTable,
-      chapterOfABook: filmChapterOfABook,
     }),
-    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, filmChapterOfABook],
+    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable],
   )
   // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
   // the timeline and the bottom strip start the queue with must be the same

@@ -36,9 +36,11 @@ import { nextPlayableChapter, scopeCells, type TimelineChapter } from "./sequenc
  * AQU-2253 (review 2, Nov 9): where Play all goes when a run of one chapter
  * plays out (ProjectWorkspace's `onQueueRanOut`): the next chapter with
  * something of its OWN to play, a take or an original, or null, and Play all
- * ends there. A linked film behind a chapter does not count here: on a book
- * each chapter runs on its own clock from 0:00, so the film behind a chapter
- * nobody has recorded is only the film's opening again. (A chapter picked by
+ * ends there. A linked film behind a chapter does not count here: this move
+ * is made only by a run that does not already hold the later chapters (a run
+ * of the whole-book timeline plays them itself), one on its own clock from
+ * 0:00, where the film behind a chapter nobody has recorded is only the
+ * film's opening again. (A chapter picked by
  * hand counts the film, `planChapterPick`; play-queue's "anything to play"
  * questions say which caller asks which and why.)
  */

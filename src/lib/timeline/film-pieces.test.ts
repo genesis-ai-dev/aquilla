@@ -154,16 +154,14 @@ describe("linkedFilmBehindLines: the film behind the lines, following the record
 
   // AQU-2253 (Sam, Nov 9): these two said "nothing" while Play only ran on
   // past the lines. The film is the lines' source too, so it is behind them
-  // before its length is known, and on one chapter of a book.
+  // before its length is known. (The review of the Nov 19 merge, S1: a book
+  // is no longer a case of its own; its run holds every chapter.)
   it("a length not known yet, or not a length: still behind the lines, its length unknown", () => {
     expect(linkedFilmBehindLines({ ...linked, durationSec: null })).toEqual({ endSec: null, runsOn: true })
     expect(linkedFilmBehindLines({ ...linked, durationSec: 0 })).toEqual({ endSec: null, runsOn: true })
     expect(linkedFilmBehindLines({ ...linked, durationSec: Number.NaN })).toEqual({ endSec: null, runsOn: true })
   })
 
-  it("one chapter of a book on the timeline: behind its lines, but Play does not run on (Play all goes on into the next chapter)", () => {
-    expect(linkedFilmBehindLines({ ...linked, chapterOfABook: true })).toEqual({ endSec: 2700, runsOn: false })
-  })
 
   it("a film whose sound is not what plays is still behind the lines: its picture is running", () => {
     // The uploaded recording picked as the sound: the film is the quiet one…

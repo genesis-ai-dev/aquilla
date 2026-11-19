@@ -106,9 +106,9 @@ export function filmVoicesProgramme(args: {
  *   - a film that could not be loaded, so nothing waits on a dead film;
  *   - a film that is not on screen.
  *
- * One chapter of a book on the timeline: the film is behind its lines, but
- * Play does not run on past them (`runsOn` false): the lines there are a
- * chapter's, and Play all goes on into the next chapter when they end.
+ * A book is no case of its own (the review of the Nov 19 merge, S1): the
+ * timeline is the whole book and a run holds every chapter, so Play runs on
+ * past the book's last line to the film's end, as on any file.
  *
  * The sound pick does not count here, nor whether the film's sound is off. It
  * decides what is HEARD over the lines (`filmVoicesProgramme`) and whether the
@@ -122,14 +122,12 @@ export function linkedFilmBehindLines(args: {
   filmFailed?: boolean
   /** The film's length (lib/timeline/video-duration); null while unknown. */
   durationSec: number | null | undefined
-  /** The timeline shows one chapter of a book. */
-  chapterOfABook?: boolean
 }): { endSec: number | null; runsOn: boolean } | null {
   if (args.kind !== "linked" || !args.paneOnScreen || !args.followsRecordings || args.filmFailed) return null
   const sec = args.durationSec
   return {
     endSec: typeof sec === "number" && Number.isFinite(sec) && sec > 0 ? sec : null,
-    runsOn: !args.chapterOfABook,
+    runsOn: true,
   }
 }
 
@@ -150,7 +148,7 @@ export function linkedFilmBehindLines(args: {
  *
  * AQU-2253 (Sam, Nov 9): on a book, `lines` is every chapter's (the file's
  * lines Play plays), so a chapter Play all or a pick starts is under the film
- * at once; Play does not run on past a chapter (`runsOn` false).
+ * at once, and Play runs on past the book's last line to the film's end.
  */
 export function programmeFilmFor(
   film: { endSec: number | null; runsOn: boolean } | null,

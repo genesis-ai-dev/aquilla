@@ -142,7 +142,9 @@ const refused = [expect.objectContaining({ status: 403 })]
 
 const ARABIC = { ...MALLORY, laneGrants: [{ lane: 'cc33dd44', level: 400 }] }
 const row = async (audioId: string) =>
-  (await h.pg.query(`SELECT selected, deleted, lane_id, piece_of FROM cell_audio WHERE audio_id = $1`, [audioId])).rows[0]
+  (await h.pg.query<{ selected: number; deleted: number; lane_id: string | null; piece_of: string | null }>(
+    `SELECT selected, deleted, lane_id, piece_of FROM cell_audio WHERE audio_id = $1`, [audioId],
+  )).rows[0]
 
 describe('a new piece is in its take\'s language', () => {
   it('RC1: an Arabic-only contributor can\'t add a piece to a Spanish take', async () => {

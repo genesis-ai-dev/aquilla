@@ -8,6 +8,7 @@
  *   pnpm perf:interaction --no-build  # reuse .perf/interaction-dist from the last run
  *   pnpm perf:interaction --only plain --throttle 1
  *   pnpm perf:interaction --suggest-budgets
+ *   pnpm perf:interaction --no-ghost-text   # see the flag's note in measureVariant
  *
  * Two fixtures of the same small project (2 files, 400 cells): `plain`, and
  * `glossary` with 664 active terms that use forms, affixes and mark folding —
@@ -71,6 +72,8 @@ interface Options {
   appBase: string | null
   suggestBudgets: boolean
   enforce: boolean
+  /** False: the editor's ghost-text suggestions are switched off for the run. */
+  ghostText: boolean
   target: PerfTarget
 }
 
@@ -84,6 +87,7 @@ function parseOptions(argv: string[]): Options {
       "app-base": { type: "string" },
       "suggest-budgets": { type: "boolean" },
       "no-budgets": { type: "boolean" },
+      "no-ghost-text": { type: "boolean" },
     },
   })
   const only = values.only?.split(",").map((s) => s.trim()).filter(Boolean)
@@ -99,6 +103,7 @@ function parseOptions(argv: string[]): Options {
     appBase: values["app-base"] ?? null,
     suggestBudgets: !!values["suggest-budgets"],
     enforce: !values["no-budgets"],
+    ghostText: !values["no-ghost-text"],
     target: DEFAULT_TARGET,
   }
 }
@@ -294,6 +299,14 @@ async function measureVariant(
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     await context.addInitScript({ content: INTERACTION_INIT_SCRIPT })
+    // `--no-ghost-text`: a visible ghost suggestion takes Tab (accept) ahead of
+    // cell navigation, and whether one is visible when editTab presses Tab is
+    // a race between the suggestion's 250 ms debounce and the main thread. The
+    // flag takes the race out: the preference is the one View settings writes
+    // (src/lib/store/ghost-text-pref.ts).
+    if (!options.ghostText) {
+      await context.addInitScript({ content: 'try { localStorage.setItem("aq.ghost-text.v3", "off") } catch {}' })
+    }
     const page = await context.newPage()
     const cdp = await context.newCDPSession(page)
     const recorder = createRecorder(page, new URL(appBase).origin)

@@ -102,18 +102,86 @@ function lookUpConcepts(
 ): Concept[] {
   const folded = foldForFragment(surface)
   if (!folded) return []
+  return concepts.filter((concept) => answersFolded(surface, folded, concept, project))
+}
 
-  return concepts.filter((concept) => {
-    if (concept.status !== "active") return false
-    const resolved = resolveMatchOptions(concept, project)
-    // Exclusions win over both grounds below.
-    if (resolved.excludedForms.some((f) => foldForFragment(f) === folded)) return false
-    if (matchesConcept(surface, concept, project)) return true
-    return [concept.sourceTerm, ...resolved.forms].some((headword) => {
-      const foldedHeadword = foldForFragment(headword)
-      return foldedHeadword.length > 0 && foldedHeadword.includes(folded)
-    })
-  })
+/** One concept's answer — the predicate `conceptsForSourceSurface` filters with. */
+function answersFolded(
+  surface: string,
+  folded: string,
+  concept: Concept,
+  project: TermMatchingSettings | undefined,
+): boolean {
+  if (concept.status !== "active") return false
+  const lexical = lexicalFormsOf(concept)
+  // Exclusions win over both grounds below.
+  if (lexical.excluded.includes(folded)) return false
+  if (matchesConcept(surface, concept, project)) return true
+  return lexical.headwords.some((headword) => headword.includes(folded))
+}
+
+/**
+ * Whether ONE concept is among `conceptsForSourceSurface(surface, …)` — the
+ * same predicate, asked of a concept the caller already holds. The source
+ * column knows which concepts matched a highlighted span; asking them is how
+ * it learns the lookup is not empty without testing the glossary (AQU-2654).
+ */
+export function conceptAnswersSourceSurface(
+  surface: string,
+  concept: Concept,
+  project?: TermMatchingSettings,
+): boolean {
+  const folded = foldForFragment(surface)
+  return folded.length > 0 && answersFolded(surface, folded, concept, project)
+}
+
+interface LexicalForms {
+  sourceTerm: string
+  match: Concept["match"]
+  /** `foldForFragment` of each excluded form. */
+  excluded: string[]
+  /** `foldForFragment` of the headword and each listed form, blanks dropped. */
+  headwords: string[]
+}
+
+const lexicalForms = new WeakMap<Concept, LexicalForms>()
+
+/**
+ * The folded strings the lexical grounds compare against. They depend on the
+ * concept alone (the project's settings add affixes and a fold default,
+ * neither of which the fragment test reads), and folding them per lookup was
+ * two normalizations per form per concept per surface.
+ */
+function lexicalFormsOf(concept: Concept): LexicalForms {
+  let entry = lexicalForms.get(concept)
+  if (!entry || entry.sourceTerm !== concept.sourceTerm || entry.match !== concept.match) {
+    const resolved = resolveMatchOptions(concept)
+    entry = {
+      sourceTerm: concept.sourceTerm,
+      match: concept.match,
+      excluded: resolved.excludedForms.map(foldForFragment),
+      headwords: [concept.sourceTerm, ...resolved.forms].map(foldForFragment).filter((h) => h.length > 0),
+    }
+    lexicalForms.set(concept, entry)
+  }
+  return entry
+}
+
+const activeByArray = new WeakMap<readonly Concept[], Concept[]>()
+
+/**
+ * The active concepts of a termbase array, as ONE array per input array. Every
+ * source row filters the same glossary; a filter per row gives each row its
+ * own array, and every cache keyed on the array (the lookup above, the
+ * matcher's candidate index) then starts empty for each row.
+ */
+export function activeConceptsOf(concepts: readonly Concept[]): Concept[] {
+  let active = activeByArray.get(concepts)
+  if (!active) {
+    active = concepts.filter((c) => c.status === "active")
+    activeByArray.set(concepts, active)
+  }
+  return active
 }
 
 /** True when a source-side surface string has at least one lookup target. */

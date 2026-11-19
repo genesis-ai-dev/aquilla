@@ -69,7 +69,7 @@ function now(): number {
 }
 
 /** Hand the thread back, preferring idle time but never waiting for it. */
-function scheduleSlice(run: () => void): () => void {
+export function scheduleSlice(run: () => void): () => void {
   const idle = typeof requestIdleCallback === "function" ? requestIdleCallback : null
   if (idle) {
     // `timeout` keeps a busy page from starving the scan indefinitely.

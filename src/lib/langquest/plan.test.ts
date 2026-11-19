@@ -134,3 +134,18 @@ describe("langquestAudioId", () => {
     expect(langquestAudioId("cell-1234-abcd", "take/0001:x", { hash: "a+b/c=" })).toMatch(/^lq-[A-Za-z0-9-]+$/)
   })
 })
+
+describe("langquestAudioId, for versions made close together", () => {
+  it("two versions a second apart (time-ordered ids share their first characters) get different ids", () => {
+    // uuidv7s minted 1 s apart: the same first 8 hex characters.
+    const first = "019a8f3c-1a2b-7c3d-8e4f-0123456789ab"
+    const second = "019a8f3c-1e13-7c3d-8e4f-0123456789ab"
+    expect(first.replace(/-/g, "").slice(0, 8)).toBe(second.replace(/-/g, "").slice(0, 8))
+    expect(langquestAudioId("cell-1234-abcd", first, { hash: "h1" })).not.toBe(langquestAudioId("cell-1234-abcd", second, { hash: "h1" }))
+  })
+
+  it("is still the same for the same version", () => {
+    const v = "019a8f3c-1a2b-7c3d-8e4f-0123456789ab"
+    expect(langquestAudioId("cell-1234-abcd", v, { hash: "h1" })).toBe(langquestAudioId("cell-1234-abcd", v, { hash: "h1" }))
+  })
+})

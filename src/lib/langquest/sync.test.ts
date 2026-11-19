@@ -173,7 +173,7 @@ describe("syncLangQuest", () => {
 // AQU-981 check 8 (Oct 29): a version LangQuest recorded as several cards is
 // written as one take — the first card the take, the rest its pieces, each
 // card its own recording (url). A LangQuest id ("lq-<first 8 of the cell
-// id>-<first 8 of the version>-<hash>") isn't seeded with the line's cell id; since AQU-2411 the
+// id>-<the version id>-<hash>") isn't seeded with the line's cell id; since AQU-2411 the
 // players take it as the line's own take anyway (own-take.ts), so the
 // timeline, the chapter queue's dub overlay and Free timing find every card.
 describe("a multi-card LangQuest version, as the players read it", () => {

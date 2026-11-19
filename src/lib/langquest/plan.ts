@@ -35,10 +35,12 @@ export const langquestEventId = (projectId: string, ...parts: string[]): string 
  * card (content-addressed by LangQuest's hash). AQU-2682: without the
  * version, a reused card took the id of an earlier take, which a person may
  * have removed; storage keeps such a name as that take's, and attaching it
- * again brought the old take back with its old approvals.
+ * again brought the old take back with its old approvals. The WHOLE version
+ * id: LangQuest's are time-ordered, so two versions made within a minute
+ * share their first characters.
  */
 export const langquestAudioId = (cellId: string, takeId: string, card: Pick<LangQuestAudioCard, "hash">): string =>
-  `lq-${cellId.slice(0, 8)}-${takeId.replace(/[^A-Za-z0-9]/g, "").slice(0, 8)}-${card.hash.replace(/[^A-Za-z0-9]/g, "").slice(0, 40)}`
+  `lq-${cellId.slice(0, 8)}-${takeId.replace(/[^A-Za-z0-9]/g, "")}-${card.hash.replace(/[^A-Za-z0-9]/g, "").slice(0, 40)}`
 
 /** The book a passage files under: its outermost path label, else its reference's book. */
 export function bookOf(p: Pick<LangQuestPassage, "path" | "reference">): string {

@@ -110,6 +110,10 @@ interface PersistQueue {
 const persistQueues = new WeakMap<SyncStatusFeed, PersistQueue>()
 
 function settlePersisted(store: SyncStatusFeed, queue: PersistQueue, status: PersistStatus): void {
+  // LiveStore's unsubscribe interrupts its fiber asynchronously, so a retired
+  // queue's feed can still deliver a status after a new queue took its place.
+  // A retired queue has no waiters left; it must not touch the new one.
+  if (persistQueues.get(store) !== queue) return
   const local = parseSeqNum(String(status.localHead))
   // A rebase renumbered this session's pending events: the old heads may now
   // name another session's events. Wait for the new head instead, which is
@@ -131,7 +135,7 @@ function settlePersisted(store: SyncStatusFeed, queue: PersistQueue, status: Per
 function stopPersistFeed(store: SyncStatusFeed, queue: PersistQueue): void {
   queue.unsubscribe?.()
   queue.unsubscribe = null
-  persistQueues.delete(store)
+  if (persistQueues.get(store) === queue) persistQueues.delete(store)
 }
 
 /**

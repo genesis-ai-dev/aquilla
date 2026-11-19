@@ -196,6 +196,49 @@ describe("watchLeaderPersisted", () => {
     expect(onPersisted).toHaveBeenCalledOnce()
   })
 
+  it("ignores a late status from a retired subscription", () => {
+    // LiveStore's unsubscribe interrupts its fiber asynchronously, so a
+    // status already in flight can still reach a listener after it.
+    let current: FeedStatus = { upstreamHead: "e3.0", localHead: "e3.9", isSynced: false }
+    const listeners = new Set<(status: FeedStatus) => void>()
+    const retired: Array<(status: FeedStatus) => void> = []
+    const store = {
+      syncStatus: () => current,
+      subscribeSyncStatus: (cb: (status: FeedStatus) => void) => {
+        listeners.add(cb)
+        return () => {
+          listeners.delete(cb)
+          retired.push(cb)
+        }
+      },
+    } as unknown as Parameters<typeof watchLeaderPersisted>[0]
+    const advance = (upstreamHead: string) => {
+      current = { ...current, upstreamHead }
+      for (const cb of [...listeners]) cb(current)
+    }
+
+    const first = vi.fn()
+    watchLeaderPersisted(store, "e3.1", first)
+    advance("e3.1")
+    expect(first).toHaveBeenCalledOnce()
+    expect(retired).toHaveLength(1)
+
+    // A new queue starts; then the retired feed delivers one last status.
+    const second = vi.fn()
+    const stopSecond = watchLeaderPersisted(store, "e3.3", second)
+    retired[0](current)
+    // The new queue is still the one on record: a third waiter joins it
+    // instead of opening another subscription, and stopping works.
+    const third = vi.fn()
+    watchLeaderPersisted(store, "e3.4", third)
+    expect(listeners.size).toBe(1)
+    stopSecond()
+    advance("e3.4")
+    expect(second).not.toHaveBeenCalled()
+    expect(third).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
   it("keeps the caller's backup when the store can't report its status", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const broken = {

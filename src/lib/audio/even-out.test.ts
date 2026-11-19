@@ -620,3 +620,33 @@ describe("the timeout reaches the meter", () => {
     }
   })
 })
+
+// Re-check S5: the measurer never claims a duration it doesn't know.
+describe("durations from a measure", () => {
+  it("a take measured in parts (no whole decode) sends no duration when it has none", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array(200_000), decode: async () => new Float32Array(0),
+      decodeWindow: async () => Float32Array.from({ length: 48_000 }, (_, i) => 0.1 * Math.sin(i / 7)),
+      emit, pcmBudgetBytes: 1_000_000,
+    })
+    const att = { url: "frontier-audio://old.mp3", type: "audio", trimStartMs: 0, trimEndMs: 1000 } as CodexCellAttachment
+    expect(await measure("c1", "a", att)).not.toBeNull()
+    expect(emit).toHaveBeenCalledWith("c1", "a", expect.anything(), null)
+  })
+
+  it("a second take of the same recording and window reuses the decoded length", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({
+      fetchBytes: async () => new Uint8Array([1]),
+      decode: async () => Float32Array.from({ length: 96_000 }, (_, i) => 0.1 * Math.sin(i / 7)),
+      emit,
+    })
+    const att = { url: "frontier-audio://nolen.wav", type: "audio" } as CodexCellAttachment
+    await measure("c1", "a", att)
+    await measure("c2", "b", att)
+    expect(emit).toHaveBeenNthCalledWith(1, "c1", "a", expect.anything(), 2000)
+    expect(emit).toHaveBeenNthCalledWith(2, "c2", "b", expect.anything(), 2000)
+  })
+})
+

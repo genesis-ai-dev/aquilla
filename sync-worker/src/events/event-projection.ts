@@ -2824,14 +2824,18 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.measure event ${event.id} is missing fileId or cellId`)
       }
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
-          )
-          .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
-      )
+      // AQU-2664: a reading may come without a known length; a missing or
+      // zero duration stores nothing (fill-only, a 0 would stay for good).
+      if (typeof p.durationMs === 'number' && p.durationMs > 0) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
       // AQU-2664: the loudness and true peak of the take's WINDOW of the
       // recording, both or neither, with the window they measured. The same
       // window again is a no-op (a replay, a second device); another window

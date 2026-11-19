@@ -127,6 +127,18 @@ describe('a take\'s loudness (cell.audio.measure)', () => {
     expect(await stored('take-a')).toMatchObject({ loudness: -12, peak: -1.5 })
   })
 
+  // Re-check S5: a measure never stores a duration of 0 (fill-only, it would
+  // stay for good); a reading without a known duration leaves it out.
+  it('a reading with no duration, or a duration of 0, leaves duration_ms alone', async () => {
+    await project('cell.audio.attach', { audioId: 'take-z', url: 'https://r2.invalid/take-z', slot: 'recording', label: 'Take 1' })
+    await project('cell.audio.measure', { audioId: 'take-z', durationMs: 0, loudnessLufs: -20, truePeakDb: -6 })
+    expect(await stored('take-z')).toMatchObject({ duration: null, loudness: -20 })
+    await project('cell.audio.measure', { audioId: 'take-z', loudnessLufs: -20, truePeakDb: -6, loudnessFromMs: 0, loudnessToMs: 1000 })
+    expect(await stored('take-z')).toMatchObject({ duration: null })
+    await project('cell.audio.measure', { audioId: 'take-z', durationMs: 4_200 })
+    expect(await stored('take-z')).toMatchObject({ duration: 4_200 })
+  })
+
   it('refuses a reading that is not a finite number', () => {
     const stmts: AquillaStatement[] = []
     expect(() => buildEventProjectionStmts(h.db, event('cell.audio.measure', { audioId: 'a', durationMs: 1, loudnessLufs: 'loud', truePeakDb: -3 }), stmts)).toThrow(/malformed/)

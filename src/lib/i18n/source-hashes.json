@@ -4975,7 +4975,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9935,7 +9941,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14882,7 +14894,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19855,7 +19873,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26103,7 +26127,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32353,7 +32383,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38675,7 +38711,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45044,7 +45086,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51328,7 +51376,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59558,7 +59612,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67793,7 +67853,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76437,7 +76503,13 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84726,7 +84798,13 @@
     "nav.fileRow.audioProgressAriaLabel": "a2e22d8d6e3efbc1",
     "nav.fileRow.progressWithAudioAriaLabel": "bd2466d8484d0659",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93390,7 +93468,13 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102047,7 +102131,13 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110740,7 +110830,13 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119419,7 +119515,13 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128090,6 +128192,12 @@
     "editor.cellDetail.next": "cbf247c49ed2b7ad",
     "workspace.typeahead.noAccountWithEmail": "955ac627d958224d",
     "editor.bookHealth.showFewerCells": "1653d6a69ecac277",
-    "editor.bookHealth.showMoreCells": "4fab240f37e65448"
+    "editor.bookHealth.showMoreCells": "4fab240f37e65448",
+    "editor.health.estimatePending": "0c552e9f236d9f66",
+    "editor.health.estimate": "4664b218279bb23d",
+    "editor.health.estimateTrend": "27ba754b63382bf2",
+    "editor.health.evidenceUnavailable": "e9f83334a95527a2",
+    "editor.health.evidence": "98db0c8848d2376c",
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
   }
 }

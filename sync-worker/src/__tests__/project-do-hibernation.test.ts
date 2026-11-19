@@ -23,6 +23,7 @@ function conn(over: Partial<Parameters<typeof toConnectionAttachment>[0]> = {}) 
     numericUserId: 7,
     role: 30,
     tokenExpiresAt: NOW + 60_000,
+    rowsWalled: false,
     lastSeenAt: NOW,
     heartbeatSeen: true,
     ...over,
@@ -52,6 +53,7 @@ describe("connection attachment", () => {
       userId: "ryder",
       numericUserId: 7,
       role: 30,
+      rowsWalled: false,
       tokenExpiresAt: NOW + 60_000,
       lastSeenAt: NOW,
       heartbeatSeen: true,
@@ -221,5 +223,19 @@ describe("pruneDeniedUsers", () => {
     const { entries, changed } = pruneDeniedUsers({ "7": "soon" as unknown as number }, NOW)
     expect(entries).toEqual({})
     expect(changed).toBe(true)
+  })
+})
+
+// AQU-730: the wall flag has to survive an eviction, or a walled socket would
+// wake up receiving every lane's rows again.
+describe("connection attachment — lane read wall", () => {
+  it("round-trips rowsWalled", () => {
+    expect(parseConnectionAttachment(toConnectionAttachment(conn({ rowsWalled: true }), undefined))?.rowsWalled).toBe(true)
+    expect(parseConnectionAttachment(toConnectionAttachment(conn({ rowsWalled: false }), undefined))?.rowsWalled).toBe(false)
+  })
+
+  it("reads an attachment written before the field existed as walled", () => {
+    const { rowsWalled: _dropped, ...older } = toConnectionAttachment(conn(), undefined)
+    expect(parseConnectionAttachment(older)?.rowsWalled).toBe(true)
   })
 })

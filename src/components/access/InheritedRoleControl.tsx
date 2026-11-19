@@ -1,7 +1,7 @@
 import { cloneElement, useId } from "react"
 import type { ReactElement } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { formatScopePath } from "@/lib/access/scope-path"
+import { formatGrantPlace } from "@/lib/access/scope-path"
 import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -31,10 +31,10 @@ export function InheritedRoleControl({
   const t = useT()
   const descId = useId()
   if (origin.kind !== "inherited" || !origin.from?.length) return children
-  const path = formatScopePath(origin.from)
-  const target = origin.from[origin.from.length - 1]
+  const path = formatGrantPlace(origin.from)
+  const target = origin.from.filter((scope) => !scope.hidden).at(-1)
   // Never link into a scope the viewer cannot see (spec §3.9 rule 4).
-  const href = target.hidden ? undefined : hrefFor?.(target)
+  const href = target ? hrefFor?.(target) : undefined
   const hint = t("org.access.inherited.tooltip", { path })
   return (
     <span className="inline-flex items-center gap-2" data-inherited="true">

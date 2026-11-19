@@ -13,7 +13,9 @@
 //     those exports do;
 //   * footnotes become real Word footnotes, from the inline `\f … \f*` notes
 //     the Word, PDF and USFM imports carry (any note kind becomes a footnote);
-//   * a paragraph whose text reads right-to-left is set right-to-left.
+//   * a paragraph whose text reads right-to-left is set right-to-left;
+//   * bold and italic marks (`\bd …\bd*`, `\it …\it*`) are bold and
+//     italic runs (AQU-2680).
 // An untranslated line falls back to its source text, as the other exports do.
 //
 // Valid against the ECMA-376 WordprocessingML schema (document, styles,
@@ -94,6 +96,15 @@ function textRuns(text: string, rPr: string): string {
   return out
 }
 
+/** AQU-2680: a run's properties, in the schema's order (bold, italic, then
+ *  right-to-left). Bold and italic come from the run's inline marks. */
+function runProps(marks: readonly string[], rtl: boolean): string {
+  const bold = marks.includes("bold")
+  const italic = marks.includes("italic")
+  if (!bold && !italic && !rtl) return ""
+  return `<w:rPr>${bold ? "<w:b/><w:bCs/>" : ""}${italic ? "<w:i/><w:iCs/>" : ""}${rtl ? "<w:rtl/>" : ""}</w:rPr>`
+}
+
 interface Built {
   documentXml: string
   footnotesXml: string | null
@@ -115,7 +126,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[]): Built {
       if (i > 0) runs += `<w:r>${rPr}<w:br/></w:r>`
       for (const run of line) {
         if (run.kind === "text") {
-          runs += textRuns(run.text, rPr)
+          runs += textRuns(run.text, runProps(run.marks, rtl))
           continue
         }
         const note = run.text.trim()

@@ -101,6 +101,19 @@ describe("a Word document from the lines", () => {
     expect(files["word/document.xml"]).toContain("Fish &amp; &lt;chips&gt; &quot;quoted&quot;")
   })
 
+  // AQU-2680: bold and italic the translator marked come across as Word's own.
+  it("writes bold and italic marks as bold and italic runs", () => {
+    const doc = docxFromLinesFiles([cell({ original: "A \\bd strong\\bd* and \\it slanted\\it* word.", paragraphStart: true })])["word/document.xml"]
+    expect(doc).toContain('<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t xml:space="preserve">strong</w:t></w:r>')
+    expect(doc).toContain('<w:r><w:rPr><w:i/><w:iCs/></w:rPr><w:t xml:space="preserve">slanted</w:t></w:r>')
+    expect(doc).toContain('<w:r><w:t xml:space="preserve">A </w:t></w:r>')
+  })
+
+  it("puts bold before right-to-left in a run's properties, as the schema orders them", () => {
+    const doc = docxFromLinesFiles([cell({ original: "שלום \\bd עולם\\bd*", paragraphStart: true })])["word/document.xml"]
+    expect(doc).toContain('<w:rPr><w:b/><w:bCs/><w:rtl/></w:rPr><w:t xml:space="preserve">עולם</w:t>')
+  })
+
   it("names the document's language when the export has one", () => {
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "es-419" })["word/styles.xml"]).toContain('<w:lang w:val="es-419"/>')
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "und" })["word/styles.xml"]).not.toContain("w:lang")

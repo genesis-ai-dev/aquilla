@@ -151,6 +151,51 @@ function renderTable(
   )
 }
 
+// An approved concept whose rendering the committed target does not use: the
+// compiled `term:` rule blots the SOURCE term (source-requires-target).
+const APPROVED_PROJECT: ProjectRecord = {
+  id: "proj-1",
+  name: "Test Project",
+  sourceLanguage: "en",
+  targetLanguage: "es",
+  createdAt: "2026-01-01T00:00:00Z",
+  files: [],
+  members: [],
+  terminology: [{
+    id: "concept-1",
+    sourceTerm: "sample",
+    status: "active",
+    createdAt: "2026-01-01T00:00:00Z",
+    renderings: [{ rendering: "muestra", status: "preferred" }],
+  }],
+}
+
+const SOURCE_SPAN_INFRACTIONS = new Map([
+  ["cell-1", [{
+    ruleId: "term:concept-1:approved",
+    cellId: "cell-1",
+    fileId: "file-1",
+    reason: "source-requires-target" as const,
+    spans: [{ side: "source" as const, start: 10, end: 16, matchedText: "sample" }],
+  }]],
+])
+
+const APPROVED_RULE: NonNullable<ComponentProps<typeof EditorTable>["rules"]>[number] = {
+  id: "term:concept-1:approved",
+  name: "Term: sample",
+  description: "Use an approved rendering",
+  severity: "major",
+  source: "user",
+  scope: "project",
+  check: {
+    type: "source-requires-target",
+    sourcePattern: "sample",
+    targetPattern: "muestra",
+  },
+  enabled: true,
+  createdAt: "2026-01-01T00:00:00Z",
+}
+
 afterEach(() => toast.close())
 
 describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
@@ -209,51 +254,15 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     expect(document.querySelector(".decoration-dotted")).toBeNull()
   })
 
-  it("opens only the violation toast when a managed source term is blotted", async () => {
-    const approved: Concept = {
-      id: "concept-1",
-      sourceTerm: "sample",
-      status: "active",
-      createdAt: "2026-01-01T00:00:00Z",
-      renderings: [{ rendering: "muestra", status: "preferred" }],
-    }
-    const project: ProjectRecord = {
-      id: "proj-1",
-      name: "Test Project",
-      sourceLanguage: "en",
-      targetLanguage: "es",
-      createdAt: "2026-01-01T00:00:00Z",
-      files: [],
-      members: [],
-      terminology: [approved],
-    }
-    const infractions = new Map([
-      ["cell-1", [{
-        ruleId: "term:concept-1:approved",
-        cellId: "cell-1",
-        fileId: "file-1",
-        reason: "source-requires-target" as const,
-        spans: [{ side: "source" as const, start: 10, end: 16, matchedText: "sample" }],
-      }]],
-    ])
-    renderTable(project, {
-      infractions,
-      rules: [{
-        id: "term:concept-1:approved",
-        name: "Term: sample",
-        description: "Use an approved rendering",
-        severity: "major",
-        source: "user",
-        scope: "project",
-        check: {
-          type: "source-requires-target",
-          sourcePattern: "sample",
-          targetPattern: "muestra",
-        },
-        enabled: true,
-        createdAt: "2026-01-01T00:00:00Z",
-      }],
-    })
+  // A source term with a finding is two things at once: the lookup trigger
+  // and, inside it, the finding's underline. The underline used to keep the
+  // click to itself, so the mouse reached the rule card and never the lookup —
+  // on exactly the terms whose approved rendering the translator needs to
+  // read. Keyboard users were unaffected (Enter on the trigger), which is why
+  // an RTL click on the trigger alone never saw it: the click has to land on
+  // the text, inside the row, as a pointer does.
+  it("opens the term lookup as well as the violation toast when a blotted source term is clicked", async () => {
+    renderTable(APPROVED_PROJECT, { infractions: SOURCE_SPAN_INFRACTIONS, rules: [APPROVED_RULE] })
 
     const blot = await waitFor(() => {
       const element = document.querySelector<HTMLElement>(
@@ -262,14 +271,53 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
       expect(element).not.toBeNull()
       return element!
     })
+    expect(blot.closest('[data-slot="popover-trigger"]')).not.toBeNull()
     await userEvent.click(blot)
 
+    // The lookup, with the rendering the finding is about…
+    const lookup = await screen.findByRole("tooltip", { name: /terminology lookup/i })
+    expect(lookup).toHaveTextContent("muestra")
+    expect(document.querySelectorAll('[data-slot="popover-content"]')).toHaveLength(1)
+    // …and the finding's own card, once.
     await screen.findByRole("button", { name: /waive/i })
     await waitFor(() => {
       expect(document.querySelectorAll('[data-slot="toast"]')).toHaveLength(1)
     })
-    expect(document.querySelector('[data-slot="popover-content"]')).toBeNull()
-    expect(screen.queryByRole("tooltip", { name: /terminology lookup/i })).toBeNull()
+  })
+
+  it("opens the term lookup when a source term with no finding is clicked in the row", async () => {
+    renderTable(APPROVED_PROJECT)
+
+    const trigger = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-cell-type="source"] .terminology-highlight[data-slot="popover-trigger"]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+    await userEvent.click(trigger)
+
+    const lookup = await screen.findByRole("tooltip", { name: /terminology lookup/i })
+    expect(lookup).toHaveTextContent("muestra")
+    // No finding, so no card.
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+  })
+
+  it("keeps Enter on the trigger opening the lookup alone, finding or not", async () => {
+    renderTable(APPROVED_PROJECT, { infractions: SOURCE_SPAN_INFRACTIONS, rules: [APPROVED_RULE] })
+
+    const trigger = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-cell-type="source"] .terminology-highlight[data-slot="popover-trigger"]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+    trigger.focus()
+    await userEvent.keyboard("{Enter}")
+
+    await screen.findByRole("tooltip", { name: /terminology lookup/i })
+    expect(document.querySelector('[data-slot="toast"]')).toBeNull()
   })
 
   it("shows the target blot violation in a bottom-right toast without opening details", async () => {

@@ -33,12 +33,16 @@ interface HighlightedTextProps {
   /** Called with the rule id and the span element itself, so callers can
    *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
   onRangeClick?: (ruleId: string, anchor: HTMLElement, matchHash?: string) => void
+  /** Set when an ancestor also acts on a click on this text — the source
+   *  column's term-lookup trigger. The click then goes on to that ancestor
+   *  after the finding has taken it, instead of stopping here. */
+  rangeClickBubbles?: boolean
 }
 
 export function HighlightedText({
   text, highlights = [], ranges = [],
   healthSpans = [],
-  showEvidence = false, onRangeClick,
+  showEvidence = false, onRangeClick, rangeClickBubbles = false,
 }: HighlightedTextProps) {
   const highlightMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -70,7 +74,12 @@ export function HighlightedText({
         <HealthSpanWrap key={i} span={group.health}>
           {group.chunks.map((chunk) => {
             if (chunk.ranges.length > 0) {
-              return <RangeStack key={chunk.start} chunk={chunk} onRangeClick={onRangeClick} />
+              return <RangeStack
+                  key={chunk.start}
+                  chunk={chunk}
+                  onRangeClick={onRangeClick}
+                  bubbles={rangeClickBubbles}
+                />
             }
             if (showEvidence && highlights.length > 0) {
               return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
@@ -88,8 +97,12 @@ export function HighlightedText({
  *  severe finding wins a fully shared span while a partially overlapping one
  *  stays clickable on the characters only it covers. */
 function RangeStack({
-  chunk, onRangeClick,
-}: { chunk: DisplayChunk; onRangeClick?: HighlightedTextProps["onRangeClick"] }) {
+  chunk, onRangeClick, bubbles,
+}: {
+  chunk: DisplayChunk
+  onRangeClick?: HighlightedTextProps["onRangeClick"]
+  bubbles: boolean
+}) {
   let node: ReactNode = chunk.text
   for (let depth = 0; depth < chunk.ranges.length; depth++) {
     const range = chunk.ranges[chunk.ranges.length - 1 - depth]
@@ -98,11 +111,21 @@ function RangeStack({
         role={onRangeClick ? "button" : undefined}
         tabIndex={onRangeClick ? 0 : undefined}
         onClick={onRangeClick ? (e) => {
-          // A terminology blot can sit inside the managed-term popover
-          // trigger, and a stacked finding sits inside another blot. Keep
-          // this click owned by the innermost span so one gesture never
-          // opens two popovers (AQU-1006 review regression).
-          e.stopPropagation()
+          // A stacked finding sits inside another blot, and a blot can sit
+          // inside something else that takes clicks (the target read
+          // surface enters edit on one). The innermost span owns the click.
+          // The one exception is the source column's term-lookup trigger:
+          // there the click must also reach the trigger, or a term that
+          // carries a finding could never be looked up with the mouse —
+          // the rule card says a rendering is missing, the lookup is what
+          // says which. The card is a corner toast (AQU-1634), so the two
+          // do not land on top of each other. The outer blots of a stack
+          // still stand down, so one click opens one card.
+          if (bubbles) {
+            if ((e.target as Element).closest("[data-rule-id]") !== e.currentTarget) return
+          } else {
+            e.stopPropagation()
+          }
           onRangeClick(range.ruleId, e.currentTarget, range.matchHash)
         } : undefined}
         className={rangeSpanClass(range, depth)}

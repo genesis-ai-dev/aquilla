@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { render } from "@testing-library/react"
+import { describe, it, expect, vi } from "vitest"
+import { fireEvent, render } from "@testing-library/react"
 import { HighlightedText, type RangeHighlight } from "./HighlightedText"
 
 function r(start: number, end: number, ruleId: string, kind: RangeHighlight["kind"] = "violation-major"): RangeHighlight {
@@ -247,5 +247,43 @@ describe("HighlightedText evidence tokens (Unicode)", () => {
     )
     const highlighted = Array.from(container.querySelectorAll("span[style]"))
     expect(highlighted.map((el) => el.textContent)).toContain("λόγος,")
+  })
+})
+
+describe("HighlightedText range clicks", () => {
+  const TEXT = "In the beginning"
+  const STACK = [r(0, 2, "minor-rule", "violation-minor"), r(0, 2, "major-rule", "violation-major")]
+
+  function renderInside(props: { rangeClickBubbles?: boolean }) {
+    const onRangeClick = vi.fn()
+    const onOuterClick = vi.fn()
+    const { container } = render(
+      <div onClick={onOuterClick}>
+        <HighlightedText text={TEXT} ranges={STACK} onRangeClick={onRangeClick} {...props} />
+      </div>,
+    )
+    const innermost = container.querySelector<HTMLElement>('[data-rule-id="major-rule"]')!
+    return { onRangeClick, onOuterClick, innermost }
+  }
+
+  it("keeps a finding's click from the surface around it", () => {
+    // The target read surface enters edit on a click; a finding must not.
+    const { onRangeClick, onOuterClick, innermost } = renderInside({})
+    fireEvent.click(innermost)
+
+    expect(onRangeClick).toHaveBeenCalledTimes(1)
+    expect(onRangeClick.mock.calls[0][0]).toBe("major-rule")
+    expect(onOuterClick).not.toHaveBeenCalled()
+  })
+
+  it("lets the click on to an ancestor that asks for it, still once per stack", () => {
+    // The source term-lookup trigger: the finding opens its card AND the
+    // trigger opens the lookup. The outer finding of the stack stays quiet.
+    const { onRangeClick, onOuterClick, innermost } = renderInside({ rangeClickBubbles: true })
+    fireEvent.click(innermost)
+
+    expect(onRangeClick).toHaveBeenCalledTimes(1)
+    expect(onRangeClick.mock.calls[0][0]).toBe("major-rule")
+    expect(onOuterClick).toHaveBeenCalledTimes(1)
   })
 })

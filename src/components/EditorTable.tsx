@@ -5368,6 +5368,9 @@ export function SourceWithTermLookup({
             ranges={clipRangesToTextSlice(ranges, start, end)}
             showEvidence={false}
             onRangeClick={onRangeClick}
+            // A finding on this term takes the click for its rule card and
+            // then lets it reach the trigger, so the lookup opens too.
+            rangeClickBubbles
           />
         </span>
       </TermLookupPopover>,

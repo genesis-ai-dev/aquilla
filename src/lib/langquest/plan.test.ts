@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { bookOf, canonicalRefOf, langquestCellId, langquestFileId, planSync } from "./plan"
+import { bookOf, canonicalRefOf, langquestAudioId, langquestCellId, langquestFileId, planSync } from "./plan"
 import type { KnownPassage, LangQuestPassage } from "./types"
 
 const P = "proj-1"
@@ -113,5 +113,24 @@ describe("references", () => {
   it("files a passage with no path under its reference's book", () => {
     expect(bookOf({ path: [], reference: { book: "MRK", chapter: 1, verse: 1, endChapter: null, endVerse: null } })).toBe("MRK")
     expect(bookOf({ path: [], reference: null })).toBe("Passages")
+  })
+})
+
+// AQU-2682 (Nov 19): a card's audio id names its VERSION too. A new LangQuest
+// version that reuses a card would otherwise reuse the id of an earlier take
+// (one a person may have removed, whose recording storage then keeps as that
+// take's), and attaching it would bring the old take back with its old
+// approvals. Still the same id on a rerun of the same version.
+describe("langquestAudioId", () => {
+  it("is the same for the same card of the same version, so a rerun is idempotent", () => {
+    expect(langquestAudioId("cell-1234-abcd", "take-0001-x", { hash: "h1" })).toBe(langquestAudioId("cell-1234-abcd", "take-0001-x", { hash: "h1" }))
+  })
+
+  it("differs for the same card in a new version", () => {
+    expect(langquestAudioId("cell-1234-abcd", "take-0001-x", { hash: "h1" })).not.toBe(langquestAudioId("cell-1234-abcd", "take-0002-y", { hash: "h1" }))
+  })
+
+  it("keeps to the storage name's characters", () => {
+    expect(langquestAudioId("cell-1234-abcd", "take/0001:x", { hash: "a+b/c=" })).toMatch(/^lq-[A-Za-z0-9-]+$/)
   })
 })

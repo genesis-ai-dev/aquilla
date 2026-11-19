@@ -34,6 +34,8 @@
 
 import { v7 as uuidv7 } from "uuid"
 import type { TranslatableString } from "./types"
+import { tsvMarkdownToHtml, unescapeTsvProse } from "../dcs/routes/tsv-common"
+import { BOOK_CODES_BY_NUMBER } from "../paratext-bridge/book-codes"
 
 export interface TranslationNote {
   /** "BOOK CH:V" — e.g. "GEN 1:1" */
@@ -47,6 +49,8 @@ export interface TranslationNote {
   origQuote?: string
   /** Raw `Occurrence` column — which instance of `origQuote` in the verse. */
   occurrence?: string
+  /** The `Tags` column, when the file has one beside its support reference. */
+  tags?: string
   /** The formatted note body (may include Markdown) */
   body: string
 }
@@ -58,6 +62,11 @@ export interface TnParseResult {
   strings: TranslatableString[]
   /** Rows that were skipped because no canonical_ref could be assembled */
   skippedCount: number
+  /** AQU-2487 (browser pass, Nov 12): set when rows that give only
+   *  "chapter:verse" were skipped because the file name doesn't give one book:
+   *  every book code the name holds (perhaps none), the one in unfoldingWord's
+   *  place first. The refusal names the file name instead of the columns. */
+  fileNameBooks?: string[]
 }
 
 /**
@@ -67,11 +76,49 @@ export interface TnParseResult {
  * - UTF-8 BOM at the start
  * - Windows (\r\n) and Unix (\n) line endings
  * - Any column order (reads the header row)
- * - The "Reference" single-column format (splits on ":")
+ * - The "Reference" single-column format ("GEN 1:1", or "1:1" with the book
+ *   taken from `fileName`)
  * - Missing optional columns (note id, support ref)
  * - Empty trailing lines
  */
-export function parseTnTsv(tsvText: string): TnParseResult {
+/** The 66 books unfoldingWord publishes notes for, plus Open Bible Stories. */
+const TN_BOOKS: ReadonlySet<string> = new Set([...BOOK_CODES_BY_NUMBER.slice(0, 66), "OBS"])
+
+/**
+ * AQU-2487 (import sweep, Nov 2): the book a notes file is for, from its name
+ * (`tn_GEN.tsv`, `en_tn_57-TIT.tsv`). Null when the name holds no book, so
+ * "my_new_notes.tsv" is not book "NEW".
+ *
+ * AQU-2487 (review, Nov 9): read only where unfoldingWord puts the book: the
+ * word right after "tn" (`tn_GEN.tsv`, `tn_GEN_en.tsv`, `en_tn_57-TIT.tsv`),
+ * or "NN-BOOK" at the start (`57-tit.tsv`). The Door43 reader's "last word
+ * that looks like a book" filed `tn_GEN_rev.tsv` under Revelation and
+ * `notes_job.tsv` under Job. A name that holds a second, different book, or
+ * holds its book anywhere else, is not guessed at: null, and the rows are
+ * refused as having no book.
+ *
+ * `books` is every book code the name holds, anywhere in it, the one in
+ * unfoldingWord's place first, so a refusal can say what the name holds.
+ */
+function bookFromTnFileName(fileName: string | undefined): { book: string | null; books: string[] } {
+  if (!fileName) return { book: null, books: [] }
+  const base = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.tsv$/i, "")
+  const words = base.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  const asBook = (word: string | undefined): string | null => {
+    const code = word?.toUpperCase()
+    return code && TN_BOOKS.has(code) ? code : null
+  }
+  const isNumber = (word: string | undefined): boolean => word != null && /^\d+$/.test(word)
+  const tn = words.findIndex((w) => w.toLowerCase() === "tn")
+  let at = tn + 1
+  if (isNumber(words[at])) at++
+  // Without "tn", only the numbered form at the very start.
+  const book = tn !== -1 || isNumber(words[0]) ? asBook(words[at]) : null
+  const books = [...new Set([book, ...words.map(asBook)].filter((b): b is string => b != null))]
+  return { book: book && books.length === 1 ? book : null, books }
+}
+
+export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
   // Strip BOM
   if (tsvText.charCodeAt(0) === 0xfeff) tsvText = tsvText.slice(1)
 
@@ -100,14 +147,23 @@ export function parseTnTsv(tsvText: string): TnParseResult {
   const iReference = col(["reference", "ref"])
   const iId = col(["id"])
   const iSupportRef = col(["supportreference", "support_reference", "supportref", "tags"])
+  // AQU-2487 (review, Nov 9): today's unfoldingWord files have Tags AND
+  // SupportReference. Tags was only a second name for the support reference,
+  // so with both present it fell into the note ("keyterm<tab>This is…"). It is
+  // its own reference column, carried under the key the Door43 import uses.
+  const iTags = col(["tags"])
+  const ownTags = iTags !== -1 && iTags !== iSupportRef
   const iQuote = col(["origquote", "orig_quote", "quote"])
   const iOccurrence = col(["occurrence", "occurrences"])
 
   const threeCol = iBook !== -1 && iChapter !== -1 && iVerse !== -1
+  const { book: fileBook, books: fileNameBooks } = bookFromTnFileName(fileName)
 
   const notes: TranslationNote[] = []
   const strings: TranslatableString[] = []
   let skippedCount = 0
+  // Rows that give only "chapter:verse" and found no one book in the name.
+  let wantedFileBook = 0
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]
@@ -128,8 +184,13 @@ export function parseTnTsv(tsvText: string): TnParseResult {
       // Reference column may be "ch:v" or "book ch:v"
       const raw = (cols[iReference] ?? "").trim()
       if (raw.includes(":")) {
-        // If it already has a space before the colon-containing part, treat as full ref
-        canonicalRef = raw.includes(" ") ? raw : null
+        // If it already has a space before the colon-containing part, treat as full ref.
+        // AQU-2487 (import sweep, Nov 2): a bare "1:1" is what unfoldingWord
+        // publishes now, with the book only in the file name. Every such row
+        // used to be skipped, so the whole file was refused here while the
+        // same file imported through Door43.
+        canonicalRef = raw.includes(" ") ? raw : fileBook ? `${fileBook} ${raw}` : null
+        if (!canonicalRef) wantedFileBook++
       }
     }
 
@@ -143,6 +204,7 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     const origQuote = iQuote !== -1 ? (cols[iQuote] ?? "").trim() || undefined : undefined
     const occurrence =
       iOccurrence !== -1 ? (cols[iOccurrence] ?? "").trim() || undefined : undefined
+    const tags = ownTags ? (cols[iTags] ?? "").trim() || undefined : undefined
 
     // Build body from remaining columns (everything not already consumed as metadata).
     // Collect indices of known metadata columns so we can skip them for the body.
@@ -158,17 +220,24 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     if (iSupportRef !== -1) metaCols.add(iSupportRef)
     if (iQuote !== -1) metaCols.add(iQuote)
     if (iOccurrence !== -1) metaCols.add(iOccurrence)
+    if (ownTags) metaCols.add(iTags)
 
     const bodyParts = cols
       .map((c, idx) => (metaCols.has(idx) ? null : c.trim()))
       .filter((c): c is string => c !== null && c.length > 0)
-    const body = bodyParts.join("\t")
+    // AQU-2487 (review, Nov 9): a TSV cell can't hold a line break, so the file
+    // writes one as the two characters "\n". The Door43 import unfolds them
+    // and renders the note's markdown; this reads the note with the same code,
+    // so an introduction is headings and paragraphs here too, not one run of
+    // text with "\n" in it.
+    const body = unescapeTsvProse(bodyParts.join("\t"))
 
     const note: TranslationNote = { canonicalRef, body }
     if (noteId) note.noteId = noteId
     if (supportRef) note.supportRef = supportRef
     if (origQuote) note.origQuote = origQuote
     if (occurrence) note.occurrence = occurrence
+    if (tags) note.tags = tags
 
     notes.push(note)
 
@@ -177,6 +246,7 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     // are written, so a row without a quote produces no metadata at all rather
     // than a bucket of nulls.
     const cellMetadata: Record<string, string> = {}
+    if (tags) cellMetadata.tags = tags
     if (origQuote) cellMetadata.quote = origQuote
     if (occurrence) cellMetadata.occurrence = occurrence
     if (supportRef) cellMetadata.supportReference = supportRef
@@ -188,6 +258,7 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     strings.push({
       id: uuidv7(),
       original: body,
+      ...(body ? { originalHtml: tsvMarkdownToHtml(body) } : {}),
       translated: "",
       context: canonicalRef,
       group: canonicalRef,
@@ -202,5 +273,10 @@ export function parseTnTsv(tsvText: string): TnParseResult {
     throw new Error("TN TSV: no note rows found after parsing")
   }
 
-  return { notes, strings, skippedCount }
+  return {
+    notes,
+    strings,
+    skippedCount,
+    ...(wantedFileBook > 0 ? { fileNameBooks } : {}),
+  }
 }

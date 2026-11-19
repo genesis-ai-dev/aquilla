@@ -1,10 +1,18 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect, vi } from "vitest"
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { bumpOrgActivity } from "../services/org-permissions"
 import { sendScheduledRetentionReport } from "../lib/retention-cron"
 import type { Env } from "../types"
+import { setPoolGuardEnabled } from "../../../db/shared/test-pool-guard"
+
+// AQU-2613 / AQU-2629: the retention report loads two windows at once and each
+// window issues five statements, so this route holds ten against a pool of
+// eight. AQU-2629 narrows it; until then the pool guard is off here and on
+// everywhere else.
+beforeAll(() => setPoolGuardEnabled(false))
+afterAll(() => setPoolGuardEnabled(true))
 
 // ADMIN_EMAILS is pinned to "root@example.com" (pg-test-env), so "root" is the
 // platform admin and must be EXCLUDED from the retention figures.

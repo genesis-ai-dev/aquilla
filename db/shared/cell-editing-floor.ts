@@ -9,7 +9,8 @@
 // three flows that emit the same event kinds through the user's own outbox.
 // See sync-worker/src/events/authorize.ts for the full reasoning and for the
 // one rule that DID stay at the perimeter: removing an imported cell needs
-// maintainer.
+// maintainer, unless this tier admits the caller (AQU-2632, via
+// sync-worker/src/events/cell-removal-authority.ts).
 //
 // The CLIENT keeps its own copy in src/lib/sync/project-settings.ts, because
 // it cannot import server code. That copy and this one are now the whole of
@@ -60,9 +61,6 @@ export function cellEditingFloorFromSettings(settings: unknown): number | null {
   if (typeof tier !== "string") return null
   return FLOOR_BY_TIER[tier] ?? null
 }
-
-/** Removing an IMPORTED cell needs this on top of the tier, always. */
-export const IMPORTED_CELL_REMOVAL_ROLE = MAINTAINER
 
 /** The event kinds the tier governs. Reorder is here because every add and
  *  remove batches one in as chain bookkeeping, and a gate that refused the

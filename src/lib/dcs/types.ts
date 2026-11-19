@@ -66,7 +66,13 @@ export interface DcsManifest {
 /** A translatable unit with a STABLE, content-addressed id (see cell-id.ts).
  *  The unit of import, delta comparison, and downstream lineage. */
 export interface DcsCell {
+  /** The pre-revision cell id, `dcsCellId(repo|unitKey)`. A file imported
+   *  before Door43 moved onto file revisions holds its cells under these ids;
+   *  the revisions route is told `cellId → unitKey` so it pairs them by key. */
   cellId: string // deterministic uuidv5 (NEVER a fresh uuidv7)
+  /** Identity within the file across upstream releases: a reference
+   *  ("TIT 1:1", "OBS 1:2") or a book + row id ("TIT|abc1"). Never positional. */
+  unitKey: string
   value: string // translatable text (plain)
   valueHtml?: string
   type: string // CellType, e.g. "verse" | "text" | "heading"

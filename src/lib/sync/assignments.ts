@@ -15,6 +15,7 @@ import { laneTagForAssignment } from "./assignment-lane"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
+import { createSameTurnCoalescer } from "@/lib/request-coalescer"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 
 /**
@@ -153,8 +154,18 @@ export async function getWorkload(jwt: string, orgId: number): Promise<OrgWorklo
   return ((await res.json()) as { assignments: OrgWorkloadAssignment[] }).assignments
 }
 
+// AQU-2654: the editor asks for the caller's assignments twice on open (the
+// workspace's own read and the assignments panel's, mounted in one commit).
+// Callers in the same synchronous turn share the request; any later read
+// (after an assignment changed) is a request of its own.
+const myAssignmentReads = createSameTurnCoalescer<MyAssignment[]>()
+
 /** Assignee inbox: the caller's open assignments in one project (any member). */
-export async function getMyAssignments(jwt: string, projectId: string): Promise<MyAssignment[]> {
+export function getMyAssignments(jwt: string, projectId: string): Promise<MyAssignment[]> {
+  return myAssignmentReads.run(`${jwt}\n${projectId}`, () => fetchMyAssignments(jwt, projectId))
+}
+
+async function fetchMyAssignments(jwt: string, projectId: string): Promise<MyAssignment[]> {
   const res = await fetchWithTimeout(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/mine`,
     { headers: { Authorization: `Bearer ${jwt}` } },

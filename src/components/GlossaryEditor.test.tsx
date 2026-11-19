@@ -126,6 +126,22 @@ vi.mock("@/components/TranslatedEditor", () => ({
   TranslatedEditor: () => <div data-testid="inline-cell-editor" />,
 }))
 
+// AQU-2654: counts how often the editor hands a term row to React, to hold
+// that typing in a dialog over the list does not redraw the list. The real row
+// renders underneath.
+const glossaryRowRendered = vi.hoisted(() => vi.fn())
+vi.mock("@/components/GlossaryRow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/GlossaryRow")>()
+  const { createElement } = await import("react")
+  return {
+    ...actual,
+    GlossaryRow: (props: import("@/components/GlossaryRow").GlossaryRowProps) => {
+      glossaryRowRendered()
+      return createElement(actual.GlossaryRow, props)
+    },
+  }
+})
+
 import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
@@ -623,6 +639,43 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     expect(emitTermApprove).not.toHaveBeenCalled()
   })
 
+  it("typing in the Add term form does not redraw the term list behind it (AQU-2654)", async () => {
+    renderAs({
+      ...hydrated(500, "project_lead"),
+      terminology: [concept({}), concept({ id: "c2", sourceTerm: "mercy" }), concept({ id: "c3", sourceTerm: "truth" })],
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    const dialog = screen.getByRole("dialog")
+    const source = within(dialog).getByPlaceholderText(/new source term/i)
+    const rendering = within(dialog).getByPlaceholderText(/^rendering$/i)
+
+    glossaryRowRendered.mockClear()
+    for (const value of ["c", "co", "cov", "cove", "coven", "covena", "covenan", "covenant"]) {
+      fireEvent.change(source, { target: { value } })
+    }
+    fireEvent.change(rendering, { target: { value: "alianza" } })
+    expect(glossaryRowRendered).not.toHaveBeenCalled()
+
+    // The form still works: what was typed is what gets added.
+    fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", sourceTerm: "covenant", status: "active" }),
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("the Add term form opens empty again after a cancel (AQU-2654)", () => {
+    renderAs(hydrated(500, "project_lead"))
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    fireEvent.change(within(screen.getByRole("dialog")).getByPlaceholderText(/new source term/i), {
+      target: { value: "half-typed" },
+    })
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    expect(within(screen.getByRole("dialog")).getByPlaceholderText(/new source term/i)).toHaveValue("")
+  })
+
   it("enables the termbase controls for a project lead", () => {
     renderAs(hydrated(500, "project_lead"))
 
@@ -657,6 +710,16 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     for (const control of TERMBASE_CONTROLS) {
       expect(screen.getByRole("button", { name: control })).toBeEnabled()
     }
+  })
+
+  it("a long glossary ends up with every term in the document (AQU-2654)", async () => {
+    // Drawn in two steps (first screen, then the rest) so opening it does not
+    // freeze — but all of it must land: the list is searched with find-in-page.
+    const many = Array.from({ length: 200 }, (_, i) => concept({ id: `c${i}`, sourceTerm: `term-${i}` }))
+    renderAs({ ...hydrated(500, "project_lead"), terminology: many })
+    await waitFor(() => expect(screen.getAllByTestId("glossary-row")).toHaveLength(200))
+    expect(screen.getByRole("button", { name: "term-0" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "term-199" })).toBeInTheDocument()
   })
 
   it("names the org's configured floor in the lock line, not the default", async () => {
@@ -745,6 +808,82 @@ describe("GlossaryEditor — term-base file import (AQU-684)", () => {
 
     expect(await screen.findByText("Import failed")).toBeInTheDocument()
     expect(emitTermCreate).not.toHaveBeenCalled()
+  })
+
+  // AQU-2487 (import sweep, Nov 2): the import appended every term in the
+  // file, so picking the same word list again doubled every term.
+  it("adds nothing when the same file is imported again, and says so", async () => {
+    const { container } = renderEditor()
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(1))
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    expect(await screen.findByText(/Every term in this file is already in the list/)).toBeInTheDocument()
+    expect(emitTermCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it("adds only the terms an updated file brings that the list doesn't have yet", async () => {
+    const { container } = renderEditor()
+    const created = (call: number) => {
+      const term = emitTermCreate.mock.calls[call][0] as { sourceTerm: string; renderings: { rendering: string }[] }
+      return [term.sourceTerm, term.renderings.map((r) => r.rendering)]
+    }
+    const entry = (gloss: string, word: string) =>
+      `<entry><lexical-unit><form lang="pmy"><text>${word}</text></form></lexical-unit>
+        <sense><gloss lang="en"><text>${gloss}</text></gloss></sense></entry>`
+
+    pickFile(container, "Lexicon.lift", FLEX_EXPORT)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(1))
+
+    // "light" is unchanged and "water" is new: only "water" is added.
+    pickFile(container, "Lexicon.lift", `<lift version="0.13">${entry("light", "trang")}${entry("water", "wai")}</lift>`)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(2))
+    expect(created(1)).toEqual(["water", ["wai"]])
+
+    // "light" with another word is a change someone has to look at, so it
+    // still comes in as its own term, as before.
+    pickFile(container, "Lexicon.lift", `<lift version="0.13">${entry("light", "cahaya")}${entry("water", "wai")}</lift>`)
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalledTimes(3))
+    expect(created(2)).toEqual(["light", ["cahaya"]])
+  })
+
+  // AQU-2487 (review, Nov 9): an updated word list left most of its terms
+  // out and added a few, and no line said how many of each.
+  it("says how many terms an import added and how many were already in the list", async () => {
+    const { container } = renderEditor()
+    const entry = (gloss: string, word: string) =>
+      `<entry><lexical-unit><form lang="pmy"><text>${word}</text></form></lexical-unit>
+        <sense><gloss lang="en"><text>${gloss}</text></gloss></sense></entry>`
+    const lift = (...entries: string[]) => `<lift version="0.13">${entries.join("")}</lift>`
+    const light = entry("light", "trang")
+    const water = entry("water", "wai")
+    const fire = entry("fire", "api")
+    const earth = entry("earth", "tanah")
+
+    // A first import: nothing was there before, so only the added count.
+    pickFile(container, "Lexicon.lift", lift(light))
+    const notice = await screen.findByTestId("term-import-notice")
+    expect(notice).toHaveTextContent(/^1 term added\.$/)
+
+    pickFile(container, "Lexicon.lift", lift(light, water, fire))
+    await waitFor(() =>
+      expect(screen.getByTestId("term-import-notice")).toHaveTextContent(
+        "2 terms added. 1 term in the file was already in the list.",
+      ),
+    )
+
+    pickFile(container, "Lexicon.lift", lift(light, water, fire, earth))
+    await waitFor(() =>
+      expect(screen.getByTestId("term-import-notice")).toHaveTextContent(
+        "1 term added. 3 terms in the file were already in the list.",
+      ),
+    )
+
+    // Nothing new: the line that says so replaces the counts.
+    pickFile(container, "Lexicon.lift", lift(light, water))
+    expect(await screen.findByText(/Every term in this file is already in the list/)).toBeInTheDocument()
+    expect(screen.queryByTestId("term-import-notice")).toBeNull()
   })
 
   // AQU-1693: a shared termbase keeps its Bible entity links, so nobody has

@@ -113,7 +113,37 @@ export type OptimisticShadow = ShadowCore &
     /** The slot is left with nothing selected (2026-09-28). The takes stay;
      *  only the slot's selection empties. */
     | { kind: "deselect"; slot: AudioSlot }
+    /** AQU-2654: the WORDS on a take changed (speech recognition answered, a
+     *  transcript was corrected, cleaned up or cleared). A patch over the
+     *  clip the read already holds: it adds no clip and chooses none, the way
+     *  the `wordsOnly` re-attach it stands for does. */
+    | { kind: "words"; audioId: string; words: AudioWordsPatch }
   )
+
+/**
+ * What a words-only re-attach changes on a take. A field left out is a field
+ * the write leaves alone (the server keeps `asr_text` through an attach with no
+ * `asr`); `timings` and `transcriptAi` are always written by such an attach, so
+ * every caller states them.
+ */
+export interface AudioWordsPatch {
+  /** The transcript's word timings, as sent. `[]` clears the transcript. */
+  timings: readonly AudioWordTiming[]
+  /** What ASR heard. `""` is a clear. */
+  asrText?: string
+  asrModel?: string
+  /** The AI-cleanup mark; `null` when this write removes it. */
+  transcriptAi: { model: string; at: number; changes: number } | null
+}
+
+/** A word timing as the read hands it back (`CellAudioEntry.audioTimings`). */
+export interface AudioWordTiming {
+  word: string
+  start: number
+  end: number
+  t0: number
+  t1: number
+}
 
 /** How long an overlay outlives its event's departure from the outbox. */
 export const SETTLED_GRACE_MS = 12_000
@@ -250,20 +280,25 @@ function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
  *     keeps its claim and its own values.
  * A claiming inject keeps the original supersede-outright semantics: it
  * represents a NEW user intent, which really should win.
+ *
+ * AQU-2492 (review, Nov 9), finding 1: `opts.revive` is a non-claiming paint
+ * of a clip THIS write brings back — the Redo of a cut names the piece its
+ * Undo removed. It is a user intent like a claiming one: it supersedes the
+ * pending delete of that clip and any older paint of it, and claims nothing.
  */
 export function injectOptimisticAudioAttachment(
   fileId: string,
   cellId: string,
   incoming: AudioAttachmentOut,
   eventId?: string | Promise<string>,
-  opts?: { claimSelection?: boolean },
+  opts?: { claimSelection?: boolean; revive?: boolean },
 ): void {
   const claimSelection = opts?.claimSelection ?? true
   const attachment = withoutViewFlags(incoming)
   const byCell = cellMap(fileId)
   const list = byCell.get(cellId) ?? []
 
-  if (!claimSelection) {
+  if (!claimSelection && !opts?.revive) {
     // The user's delete outranks a metadata write — drop this paint entirely.
     if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
     const live = list.find(
@@ -480,6 +515,44 @@ export function injectOptimisticAudioDeselect(
   broadcast(fileId, cellId, shadow)
 }
 
+/**
+ * AQU-2654: optimistically put a take's new words on screen — what the
+ * words-only `cell.audio.attach` just queued will make true. Readers patch the
+ * one cell they already hold, so a transcript save does not wait on the flush
+ * and a re-read of the whole file to be seen.
+ *
+ * It claims no selection and paints no "saving" badge on the take: the take
+ * itself is saved, only words about it are in flight. A newer write to the
+ * same take supersedes an older one but keeps what the older one stated and
+ * the newer one leaves alone (a cleanup queued behind the transcription it
+ * cleans up must not un-hear the take while both are still queued).
+ */
+export function injectOptimisticAudioWords(
+  fileId: string,
+  cellId: string,
+  audioId: string,
+  words: AudioWordsPatch,
+  eventId?: string | Promise<string>,
+): void {
+  const byCell = cellMap(fileId)
+  const list = byCell.get(cellId) ?? []
+  // A take this device is deleting gets no words painted back onto it.
+  if (list.some((s) => s.kind === "remove" && s.audioId === audioId)) return
+  const older = list.find((s) => s.kind === "words" && s.audioId === audioId)
+  const shadow: OptimisticShadow = {
+    key: nextShadowKey++,
+    eventId: null,
+    phase: "binding",
+    graceStartedAt: Date.now(),
+    kind: "words",
+    audioId,
+    words: older?.kind === "words" ? { ...older.words, ...words } : words,
+  }
+  byCell.set(cellId, [...list.filter((s) => s !== older), shadow])
+  attachEventBinding(fileId, shadow, eventId)
+  broadcast(fileId, cellId, shadow)
+}
+
 /** The live overlay map for a file (cellId → shadows). Readers may prune it. */
 export function getOptimisticShadows(fileId: string): Map<string, OptimisticShadow[]> {
   return shadowsByFile.get(fileId) ?? new Map()
@@ -658,6 +731,9 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       const url = payload.url
       const slot = payload.slot
       if (typeof audioId !== "string" || typeof url !== "string") continue
+      // AQU-2426 (review, Nov 9): a words-only re-attach adds no clip and
+      // chooses none, so it has nothing to show while it is queued.
+      if (payload.wordsOnly === true) continue
       // ANY non-empty slot. (AQU-646 stage 3)
       //
       // This used to accept only the two well-known names, which meant a
@@ -697,6 +773,12 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       // only matters for which selection the remove shadow clears, and the
       // read-side prune keys removes by audioId — recording covers both.
       injectOptimisticAudioRemove(fileId, cellId, audioId, "recording", record.id)
+    } else if (event.kind === "cell.audio.uncut") {
+      // AQU-2492: an undo of a cut removes the piece the cut made, as the
+      // remove it replaces did (pending only, for the same reason).
+      const pieceAudioId = payload.pieceAudioId
+      if (typeof pieceAudioId !== "string" || record.status !== "pending") continue
+      injectOptimisticAudioRemove(fileId, cellId, pieceAudioId, "recording", record.id)
     } else if (event.kind === "cell.audio.select" && payload.audioId === null) {
       // A queued "nothing selected" (2026-09-28) — pending only, like removes:
       // a stuck one asserts nothing the server holds.

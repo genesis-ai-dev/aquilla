@@ -36,6 +36,14 @@ vi.mock("@/lib/completion/batch-completion", () => ({
   isBatchCompletionCancelled: vi.fn(() => false),
   getBatchCompletionSignal: vi.fn(() => new AbortController().signal),
   cancelBatchCompletion: vi.fn(),
+  // AQU-2654 additions to the store surface the hook now calls.
+  finishBatchCompletion: vi.fn(),
+  recordBatchCompletionDone: vi.fn(),
+  recordBatchCompletionFailed: vi.fn(),
+  noteBatchCompletionActivity: vi.fn(),
+  registerBatchCompletionResumer: vi.fn(() => () => {}),
+  getCurrentBatchRunId: vi.fn(() => "run-1"),
+  getCompletionBatchProgress: vi.fn(() => null),
 }))
 vi.mock("@/lib/completion/compress-examples", () => ({
   compressExampleSource: (src: string) => src,

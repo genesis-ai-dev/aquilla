@@ -9,7 +9,7 @@
 // asserting.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest"
 import app from "../index"
 import {
   _test,
@@ -33,6 +33,16 @@ import { getSceneBrief, proposeSceneBrief } from "../../../db/shared/scene-brief
 import { makeLlmCall, runOneTick } from "../lib/contextual/tick"
 import type { LlmCall } from "../lib/contextual/types"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
+import { setPoolGuardEnabled } from "../../../db/shared/test-pool-guard"
+
+// AQU-2613: the pool guard (db/shared/test-pool-guard.ts) fails a request that
+// holds more statements at once than its Postgres pool. This suite starts one
+// run driver per file, and in production each driver opens a pool of its own
+// (routes/contextual.ts selfTickLoop → makePostgres on PG_CONNECTION_STRING).
+// Only here do they all share the harness handle, so their statements would be
+// counted as one request's fan-out. Off for this suite, on everywhere else.
+beforeAll(() => setPoolGuardEnabled(false))
+afterAll(() => setPoolGuardEnabled(true))
 
 const PROJECT = "proj-ctx-routes"
 const FILE = "file-mrk"

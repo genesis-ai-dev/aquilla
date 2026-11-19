@@ -75,6 +75,21 @@ export function planCellAudio(cell: CodexCell, oidIndex: Map<string, string>): C
   }
 }
 
+/**
+ * The files a batch of events touches, each once: the scope a caller hands
+ * `POST /migrate/finalize` after ingesting them.
+ *
+ * Every migration ingest defers the file counters, and `/migrate/ingest` never
+ * writes a progress row, so an audio pass that ingests and stops leaves its
+ * takes attached and playable while the book reads "0% recorded" in the sidebar
+ * and on the dashboard. Each audio pass therefore finalizes what it touched.
+ * An empty result means "nothing to finalize" — the route reads an empty list
+ * as the whole project, so callers must not pass one on.
+ */
+export function touchedFileIds(events: IngestEvent[]): string[] {
+  return [...new Set(events.flatMap((event) => (event.fileId ? [event.fileId] : [])))]
+}
+
 /** Build the events for one cell after its takes have been copied: an attach per
  *  copied take (clientTs = createdAt so TakesStrip's created_ts order reproduces
  *  "Take 1..N"), then a single select to pin the active take — omitted when the

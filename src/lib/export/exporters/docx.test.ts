@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest"
 import JSZip from "jszip"
 import { exportDocx } from "./docx"
 import type { CellData } from "@/hooks/useCells"
+import { scopeRoundTripCells } from "../validation-scope"
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -705,5 +706,23 @@ describe("exportDocx — content removed in the app", () => {
     const withEmpty = await documentXml((await exportDocx(bytes, cells, { removedCells: [] })).blob)
     const without = await documentXml((await exportDocx(bytes, cells)).blob)
     expect(withEmpty).toBe(without)
+  })
+})
+
+// AQU-2545: a "validated only" export leaves a line nobody validated in the
+// client's own words, even when it carries its translation with formatting
+// (every line a person typed does).
+describe("exportDocx — validated only (AQU-2545)", () => {
+  it("writes the validated line and leaves an unvalidated line with a formatted translation out", async () => {
+    const bytes = await makeDocx(para("First line.") + para("Second line."))
+    const validated: CellData = {
+      ...withDocxLocator(makeCellWithHtml("c1", "First line.", "Première ligne.", "<p>Première <strong>ligne</strong>.</p>", "g1"), 1),
+      status: "validated",
+    }
+    const draft = withDocxLocator(makeCellWithHtml("c2", "Second line.", "Brouillon.", "<p><em>Brouillon</em>.</p>", "g2"), 2)
+    const xml = await documentXml((await exportDocx(bytes, scopeRoundTripCells([validated, draft], "validated-only"))).blob)
+    expect(xml).toContain("Première")
+    expect(xml).not.toContain("Brouillon")
+    expect(xml).toContain("Second line.")
   })
 })

@@ -1,21 +1,21 @@
 // DcsUpstreamPanel smoke test (Slice C).
 //
 // Focuses on the component's own contract, mocking the heavy modules its
-// callbacks orchestrate (the delta engine, the cells reader, the settings +
-// session hooks). Two assertions carry the design intent:
+// callbacks orchestrate (the Door43 revision loop, the files reader, the
+// settings + session hooks). Two assertions carry the design intent:
 //   1. "Check for updates" resolves a newer release and renders
 //      "vOLD → vNEW, N files changed".
-//   2. "Import changes" runs applyDelta with REAL source emitters — i.e. the
-//      emitters passed to applyDelta build genuine source.cell.create /
-//      .commit / .delete envelopes, those go out through the BULK commit path
-//      (AQU-1860, not one outbox row per cell), and the advanced cursor is
-//      persisted via patch().
+//   2. "Import changes" revises only the files changed between the two refs
+//      that this project holds, and persists the advanced cursor via patch()
+//      only when every revision landed. What a revision does to cells is the
+//      route's contract (sync-worker revisions-route.test.ts) and the loop's
+//      (src/lib/dcs/revision.test.ts).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { DcsUpstreamPanel } from "./DcsUpstreamPanel"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
-import type { DeltaResult, DeltaEmitters, RepairDeltaResult } from "@/lib/dcs/delta"
+import type { ReviseDcsArgs, ReviseDcsResult } from "@/lib/dcs/revision"
 
 // ── Session + settings hooks ────────────────────────────────────────────────
 
@@ -55,104 +55,32 @@ vi.mock("@/lib/sync/cqrs-bridge", () => ({
 // ── Reads ───────────────────────────────────────────────────────────────────
 
 vi.mock("@/lib/sync/cells-read", () => ({
-  fetchProjectFiles: vi.fn().mockResolvedValue([{ fileId: "file-tit", name: "TIT" }]),
-  fetchAllFileCells: vi.fn().mockResolvedValue([
-    { cellId: "TIT-1-1", value: "old verse 1", eventId: "src-head-1" },
+  fetchProjectFiles: vi.fn().mockResolvedValue([
+    { fileId: "file-tit", name: "TIT" },
+    { fileId: "file-trashed", name: "PHM", deletedAt: 5 },
   ]),
 }))
 
-// ── Bulk commit (AQU-1860) ─────────────────────────────────────────────────
-//
-// applyDelta's emitters no longer write one outbox row per cell; they build
-// real envelopes with `buildRawEvent` (left unmocked — it is pure) and the
-// whole delta is handed to `bulkPostEvents` in one call. Capturing that call is
-// what proves the wiring, so the per-kind assertions below read the envelopes.
+// ── The revision loop — canned counts; the args are what the panel owns. ────
 
-type BulkOutcome = {
-  posted: number
-  rejected: Array<{ id: string; status: number; reason: string }>
-  stale: Array<{ id: string; fileId: string | null; cellId: string | null }>
-}
-
-const mockBulkPostEvents = vi.fn(
-  async (_arg: { events: PostedEvent[] }): Promise<BulkOutcome> => ({
-    posted: 0,
-    rejected: [],
-    stale: [],
-  }),
-)
-vi.mock("@/lib/sync/bulk-events", () => ({
-  bulkPostEvents: (arg: unknown) => mockBulkPostEvents(arg as { events: PostedEvent[] }),
-}))
-
-type PostedEvent = {
-  kind: string
-  cellId?: string
-  fileId?: string
-  parentId: string | null
-  payload: Record<string, unknown>
-}
-
-/** The envelopes handed to the single bulkPostEvents call, by kind. */
-function postedEvents(): PostedEvent[] {
-  expect(mockBulkPostEvents).toHaveBeenCalledTimes(1)
-  return mockBulkPostEvents.mock.calls[0][0].events
-}
-
-function postedOfKind(kind: string): PostedEvent[] {
-  return postedEvents().filter((event) => event.kind === kind)
-}
-
-// ── Delta engine — computeDelta returns a canned result; applyDelta is a spy
-//    that ACTUALLY invokes the passed emitters so we prove the wiring. ────────
-
-const cannedDelta: DeltaResult = {
-  creates: [
-    {
-      cell: { cellId: "TIT-1-3", value: "new verse 3", type: "verse", contentHash: "aaaa1111" },
-      fileId: "file-57-TIT",
-    },
-  ],
-  commits: [
-    {
-      cell: { cellId: "TIT-1-1", value: "new verse 1", type: "verse", contentHash: "bbbb2222" },
-      parentEventId: "src-head-1",
-    },
-  ],
-  deletes: ["TIT-1-9"],
-}
-
-// AQU-1896: a repair result also carries what the scan reached. A scan that
-// produced ops necessarily read something, so the canned repair is a scan that
-// resolved and read the one held file.
-const cannedRepairDelta: RepairDeltaResult = {
-  ...cannedDelta,
+const cannedRevise: ReviseDcsResult = {
+  created: 1,
+  updated: 1,
+  removed: 1,
+  revisedFiles: 1,
+  // AQU-1896: a run that changed something necessarily read something.
   scan: { heldFiles: 1, resolvedFiles: 1, fetchedFiles: 1 },
 }
+const unchanged = (scan: ReviseDcsResult["scan"]): ReviseDcsResult => ({ created: 0, updated: 0, removed: 0, revisedFiles: 0, scan })
 
-const mockComputeDelta = vi.fn().mockResolvedValue(cannedDelta)
-const mockComputeRepairDelta = vi.fn().mockResolvedValue(cannedRepairDelta)
-const mockApplyDelta = vi.fn(
-  async (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) => {
-    for (const { cell, fileId } of delta.creates) {
-      await emitters.create({ cellId: cell.cellId, eventId: `ev-${cell.cellId}`, cell, fileId })
-    }
-    for (const { cell, parentEventId } of delta.commits) {
-      await emitters.commit({ cellId: cell.cellId, eventId: `ev-${cell.cellId}`, parentEventId, cell })
-    }
-    for (const cellId of delta.deletes) {
-      await emitters.delete({ cellId })
-    }
-    void ctx
-  },
-)
-vi.mock("@/lib/dcs/delta", async (i) => ({
-  ...(await i<typeof import("@/lib/dcs/delta")>()),
-  computeDelta: (arg: unknown) => mockComputeDelta(arg),
-  computeRepairDelta: (arg: unknown) => mockComputeRepairDelta(arg),
-  applyDelta: (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) =>
-    mockApplyDelta(delta, emitters, ctx),
+const mockRevise = vi.fn(async (_args: ReviseDcsArgs): Promise<ReviseDcsResult> => cannedRevise)
+vi.mock("@/lib/dcs/revision", async (i) => ({
+  ...(await i<typeof import("@/lib/dcs/revision")>()),
+  reviseDcsFiles: (args: ReviseDcsArgs) => mockRevise(args),
 }))
+
+/** The calls that would have written (a scan is a dry run). */
+const writes = () => mockRevise.mock.calls.filter(([args]) => !args.dryRun)
 
 // ── DcsClient — inject via prop so no network. ──────────────────────────────
 
@@ -198,10 +126,7 @@ describe("DcsUpstreamPanel", () => {
       updatedBy: null,
       settings: settingsBag,
     }))
-    mockBulkPostEvents.mockClear().mockResolvedValue({ posted: 0, rejected: [], stale: [] })
-    mockComputeDelta.mockClear().mockResolvedValue(cannedDelta)
-    mockComputeRepairDelta.mockClear().mockResolvedValue(cannedRepairDelta)
-    mockApplyDelta.mockClear()
+    mockRevise.mockClear().mockResolvedValue(cannedRevise)
   })
 
   it("renders nothing when the project has no dcsUpstream cursor", () => {
@@ -244,7 +169,7 @@ describe("DcsUpstreamPanel", () => {
     expect(screen.queryByText(/files changed/i)).not.toBeInTheDocument()
   })
 
-  it("Import changes runs applyDelta with real emitters and persists the advanced cursor", async () => {
+  it("Import changes revises the changed files this project holds and persists the advanced cursor", async () => {
     const client = makeClient(V89, ["57-TIT.usfm"])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
 
@@ -255,46 +180,17 @@ describe("DcsUpstreamPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /import changes/i }))
 
-    await waitFor(() => {
-      expect(mockApplyDelta).toHaveBeenCalledTimes(1)
-    })
-
-    // applyDelta was handed REAL emitters — invoking them built genuine source
-    // envelopes (commit chained on the head, delete, create), and the whole
-    // delta went out in ONE bulk commit rather than one outbox row per cell
-    // (AQU-1860).
-    const commits = postedOfKind("source.cell.commit")
-    expect(commits).toHaveLength(1)
-    expect(commits[0]).toMatchObject({
-      cellId: "TIT-1-1",
-      parentId: "src-head-1",
-      payload: { value: "new verse 1" },
-    })
-    const deletes = postedOfKind("source.cell.delete")
-    expect(deletes).toHaveLength(1)
-    expect(deletes[0]).toMatchObject({ cellId: "TIT-1-9" })
-    const creates = postedOfKind("source.cell.create")
-    expect(creates).toHaveLength(1)
-    // fileId MUST be the parsed file's id, not the cell id — a create is absent
-    // from currentCells, so the old `fileIdByCellId.get() ?? cell.cellId` fallback
-    // orphaned new cells into a phantom file. Guard that regression here.
-    expect(creates[0]).toMatchObject({
-      kind: "source.cell.create",
-      cellId: "TIT-1-3",
-      fileId: "file-57-TIT",
-    })
-    expect(creates[0].fileId).not.toBe("TIT-1-3")
-    // A genesis kind must carry a null parent; the commit's parent is the head.
-    expect(creates[0].parentId).toBeNull()
-
-    // applyDelta's ctx uses the destination projectId + the new release's
-    // fullName + sha — projectId scopes the deterministic event ids so the same
-    // resource delta'd into two projects never collides on the events PK (DEFECT 4).
-    expect(mockApplyDelta.mock.calls[0][2]).toEqual({
-      projectId: "adapter-1",
-      repo: "unfoldingWord/en_ult",
-      sha: "new-sha",
-    })
+    await waitFor(() => expect(mockRevise).toHaveBeenCalledTimes(1))
+    const args = mockRevise.mock.calls[0][0]
+    // The NEW release is what gets read, narrowed to what changed since the pin.
+    expect(args.entry).toMatchObject({ ref: "v89", commitSha: "new-sha" })
+    expect(args.paths).toEqual(["57-TIT.usfm"])
+    expect(args.projectId).toBe("adapter-1")
+    // A file in Trash is not held: an update must not write into it.
+    expect([...args.heldFileIds]).toEqual(["file-tit"])
+    // An update is a real write, and not a same-artifact re-parse.
+    expect(args.dryRun).toBeUndefined()
+    expect(args.repair).toBeUndefined()
 
     // The advanced cursor was persisted under the dcsUpstream key.
     await waitFor(() => {
@@ -310,17 +206,11 @@ describe("DcsUpstreamPanel", () => {
     })
   })
 
-  it("does NOT advance the cursor when the server refused part of the delta", async () => {
-    // AQU-1860: the bulk path has no outbox behind it, so a partial commit is
-    // the panel's to report. Advancing the pin here would be the damaging
-    // outcome: the next "Check for updates" would compare against a release
-    // this project never fully received, and the missing cells would never be
-    // offered again.
-    mockBulkPostEvents.mockResolvedValue({
-      posted: 3,
-      rejected: [],
-      stale: [{ id: "ev-TIT-1-1", fileId: "file-tit", cellId: "TIT-1-1" }],
-    })
+  it("does NOT advance the cursor when a revision fails part-way", async () => {
+    // Advancing the pin here would be the damaging outcome: the next "Check
+    // for updates" would compare against a release this project never fully
+    // received, and the files that did not land would never be offered again.
+    mockRevise.mockRejectedValue(new Error("Revision upload failed (HTTP 500)"))
     const client = makeClient(V89, ["57-TIT.usfm"])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
 
@@ -330,17 +220,16 @@ describe("DcsUpstreamPanel", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /import changes/i }))
 
-    await waitFor(() => expect(mockBulkPostEvents).toHaveBeenCalledTimes(1))
     await waitFor(() => {
-      expect(screen.getByText(/could not be applied/i)).toBeInTheDocument()
+      expect(screen.getByText(/HTTP 500/i)).toBeInTheDocument()
     })
     expect(mockPatch).not.toHaveBeenCalled()
     expect(screen.queryByText(/1 created, 1 updated, 1 removed/i)).not.toBeInTheDocument()
   })
 
   it("Re-sync content SCANS first: shows counts and emits NOTHING until confirmed", async () => {
-    // One-click tombstoning was the adversarial-review blocker: computeRepairDelta
-    // deletes hide translations, so the scan must be side-effect free and the
+    // One-click tombstoning was the adversarial-review blocker: a repair's
+    // removals hide translations, so the scan must be side-effect free and the
     // apply gated behind an explicit confirm.
     const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
     const client = makeClient(V89, [], pinnedEntry)
@@ -348,13 +237,17 @@ describe("DcsUpstreamPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
 
-    await waitFor(() => expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1))
-    // Repair reads the PINNED entry, never the latest release.
-    expect(mockComputeRepairDelta.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(mockRevise).toHaveBeenCalledTimes(1))
+    // Repair reads the PINNED entry, never the latest release, re-reads every
+    // held member (no changed-files narrowing), and the scan is a dry run.
+    expect(mockRevise.mock.calls[0][0]).toMatchObject({
       entry: expect.objectContaining({ ref: "v88", commitSha: "old-sha" }),
+      repair: true,
+      dryRun: true,
     })
+    expect(mockRevise.mock.calls[0][0].paths).toBeUndefined()
 
-    // Counts surface (1 commit to repair, 1 create, 1 delete in the canned delta)…
+    // Counts surface (1 to repair, 1 new, 1 to remove in the canned result)…
     await waitFor(() => {
       expect(screen.getByText(/1 to repair,\s*1 new,\s*1 to remove/i)).toBeInTheDocument()
     })
@@ -362,22 +255,21 @@ describe("DcsUpstreamPanel", () => {
     expect(
       screen.getAllByText(/will be removed — translations attached to (them|removed cells) will be hidden/i).length,
     ).toBeGreaterThan(0)
-    // …and NOTHING has been emitted or applied yet.
-    expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    // …and NOTHING has been written yet.
+    expect(writes()).toHaveLength(0)
 
     // Cancelling the confirm dialog also applies nothing.
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
-    expect(mockApplyDelta).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
   })
 
-  it("Re-sync confirm applies the SCANNED delta via the SAME apply path, without advancing the cursor", async () => {
+  it("Re-sync confirm writes the scanned repair against the same pin, without advancing the cursor", async () => {
     const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
     const client = makeClient(V89, [], pinnedEntry)
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
 
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
-    await waitFor(() => expect(mockComputeRepairDelta).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockRevise).toHaveBeenCalledTimes(1))
 
     // Confirm dialog: checkbox-gated destructive confirm (same idiom as detach).
     const confirmButton = await screen.findByRole("button", { name: /^apply re-sync$/i })
@@ -386,33 +278,17 @@ describe("DcsUpstreamPanel", () => {
     expect(confirmButton).toBeEnabled()
     fireEvent.click(confirmButton)
 
-    // Applied through the SAME applyDelta path with the REAL emitters wired.
-    await waitFor(() => expect(mockApplyDelta).toHaveBeenCalledTimes(1))
-    // The apply step re-read the settings cursor before emitting.
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    // The apply step re-read the settings cursor before writing.
     expect(mockRefresh).toHaveBeenCalled()
-    const repairCommits = postedOfKind("source.cell.commit")
-    expect(repairCommits).toHaveLength(1)
-    expect(repairCommits[0]).toMatchObject({
-      cellId: "TIT-1-1",
-      parentId: "src-head-1",
-      payload: { value: "new verse 1" },
-    })
-    expect(postedOfKind("source.cell.delete")).toHaveLength(1)
-    const repairCreates = postedOfKind("source.cell.create")
-    expect(repairCreates).toHaveLength(1)
-    expect(repairCreates[0]).toMatchObject({
-      kind: "source.cell.create",
-      fileId: "file-57-TIT",
+    // Same pinned entry as the scan, and `repair` is what lets the route align
+    // an artifact the head already names — without it every file is a no-op.
+    expect(writes()[0][0]).toMatchObject({
+      entry: expect.objectContaining({ ref: "v88", commitSha: "old-sha" }),
+      repair: true,
     })
 
-    // The revision token is NOT the bare pinned sha — the original import
-    // already minted event ids there; a bare-sha repair would be silently
-    // dropped by the server's idempotent event PK.
-    const ctx = mockApplyDelta.mock.calls[0][2] as { projectId: string; repo: string; sha: string }
-    expect(ctx.repo).toBe("unfoldingWord/en_ult")
-    expect(ctx.sha).toMatch(/^old-sha#repair-/)
-
-    // Summary: 1 create + 1 commit + 1 delete = 3 repaired cells.
+    // Summary: 1 new + 1 repaired + 1 removed = 3 repaired cells.
     await waitFor(() => {
       expect(screen.getByText(/repaired 3 cells/i)).toBeInTheDocument()
     })
@@ -420,22 +296,17 @@ describe("DcsUpstreamPanel", () => {
     expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("Re-sync content reports 'already matches' when the repair delta is empty AND the scan read something", async () => {
+  it("Re-sync content reports 'already matches' when the repair changes nothing AND the scan read something", async () => {
     // AQU-1896: the reassuring copy is earned by a scan that actually re-read
     // the project's files. Zero ops alone no longer buys it.
-    mockComputeRepairDelta.mockResolvedValue({
-      creates: [],
-      commits: [],
-      deletes: [],
-      scan: { heldFiles: 2, resolvedFiles: 2, fetchedFiles: 2 },
-    })
+    mockRevise.mockResolvedValue(unchanged({ heldFiles: 2, resolvedFiles: 2, fetchedFiles: 2 }))
     const client = makeClient(V89, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
     await waitFor(() => {
       expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
     })
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
   })
 
   it("Re-sync content that resolved NONE of the project's files says so instead of claiming a match (AQU-1896)", async () => {
@@ -443,12 +314,7 @@ describe("DcsUpstreamPanel", () => {
     // from any upstream path, so no book was fetched — and the panel reported
     // that everything matched. The op counts are identical to the healthy
     // case; only the scan distinguishes them.
-    mockComputeRepairDelta.mockResolvedValue({
-      creates: [],
-      commits: [],
-      deletes: [],
-      scan: { heldFiles: 3, resolvedFiles: 0, fetchedFiles: 0 },
-    })
+    mockRevise.mockResolvedValue(unchanged({ heldFiles: 3, resolvedFiles: 0, fetchedFiles: 0 }))
     const client = makeClient(V89, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
@@ -460,18 +326,13 @@ describe("DcsUpstreamPanel", () => {
     expect(screen.getByText(/none of this project's 3 source files/i)).toBeInTheDocument()
     // And it must NOT claim a match.
     expect(screen.queryByText(/everything already matches/i)).not.toBeInTheDocument()
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
   })
 
   it("Re-sync content whose resolved paths are no longer served names that cause, not a match (AQU-1896)", async () => {
     // The legitimate variant: the pinned tree still lists the held paths but
     // the ref no longer serves them, so again nothing was compared.
-    mockComputeRepairDelta.mockResolvedValue({
-      creates: [],
-      commits: [],
-      deletes: [],
-      scan: { heldFiles: 2, resolvedFiles: 2, fetchedFiles: 0 },
-    })
+    mockRevise.mockResolvedValue(unchanged({ heldFiles: 2, resolvedFiles: 2, fetchedFiles: 0 }))
     const client = makeClient(V89, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
@@ -486,12 +347,7 @@ describe("DcsUpstreamPanel", () => {
   it("a DCS project holding no source cells at all still reads as in sync, not as an alarm (AQU-1896)", async () => {
     // Nothing held means nothing to check and no false claim about files the
     // scan failed to reach — the reassuring copy stays correct here.
-    mockComputeRepairDelta.mockResolvedValue({
-      creates: [],
-      commits: [],
-      deletes: [],
-      scan: { heldFiles: 0, resolvedFiles: 0, fetchedFiles: 0 },
-    })
+    mockRevise.mockResolvedValue(unchanged({ heldFiles: 0, resolvedFiles: 0, fetchedFiles: 0 }))
     const client = makeClient(V89, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
@@ -504,7 +360,7 @@ describe("DcsUpstreamPanel", () => {
   it("Re-sync apply ABORTS without events when the cursor vanished between confirm and apply (detach race)", async () => {
     // Another tab detaches the project while the confirm dialog is open. The
     // apply step re-reads the settings cursor via refresh() and must abort —
-    // applying the stale delta would write into a detached project.
+    // applying would write into a detached project.
     const pinnedEntry = { ...V89, ref: "v88", commitSha: "old-sha" }
     const client = makeClient(V89, [], pinnedEntry)
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
@@ -524,8 +380,7 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
     })
-    expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
   })
 
   it("Re-sync apply ABORTS when the cursor's commitSha changed between confirm and apply (import race)", async () => {
@@ -548,8 +403,7 @@ describe("DcsUpstreamPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/upstream link changed .* nothing was applied/i)).toBeInTheDocument()
     })
-    expect(mockApplyDelta).not.toHaveBeenCalled()
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
   })
 
   it("hides Re-sync content below maintainer (600)", () => {
@@ -599,7 +453,7 @@ describe("DcsUpstreamPanel", () => {
     expect(mockPatch.mock.calls[0][0]).toEqual({ dcsUpstream: null })
 
     // No source events were emitted — detach only rewrites settings.
-    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
 
     // The settings hook now serves the nulled bag → no-cursor state (nothing).
     rerender(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)

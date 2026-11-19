@@ -94,8 +94,9 @@ impl BundleStore {
         self.current_version().as_deref() == Some(version) || self.staged_version().as_deref() == Some(version)
     }
 
-    /// Moves an extracted, verified tree into place and points `staged` at it. `extracted_root`
-    /// must be on the same filesystem (it is: it lives under `staging/`), so the rename is atomic.
+    /// Moves an extracted, verified tree into place and points `staged` at it, replacing any
+    /// bundle already staged. `extracted_root` must be on the same filesystem (it is: it lives
+    /// under `staging/`), so the rename is atomic.
     pub fn stage(&self, info: &BundleInfo, extracted_root: &Path) -> Result<(), String> {
         fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
         let target = self.version_dir(&info.version);
@@ -105,7 +106,21 @@ impl BundleStore {
         fs::rename(extracted_root, &target).map_err(|e| format!("stage {}: {e}", info.version))?;
         let meta = serde_json::to_vec(info).map_err(|e| e.to_string())?;
         fs::write(target.join(BUNDLE_META), meta).map_err(|e| e.to_string())?;
-        self.write_pointer(STAGED, &info.version)
+        let superseded = self.staged_version();
+        self.write_pointer(STAGED, &info.version)?;
+        // A bundle that was waiting and never ran is dead weight once a newer one replaces it;
+        // an app left open for days would otherwise keep one per release until the next launch.
+        if let Some(old) = superseded.filter(|old| *old != info.version && !self.is_live(old)) {
+            if let Err(err) = fs::remove_dir_all(self.version_dir(&old)) {
+                log::warn!("[hot_bundle] could not remove superseded bundle {old}: {err}");
+            }
+        }
+        Ok(())
+    }
+
+    /// `current` or `previous`: being served, or the rollback target.
+    fn is_live(&self, version: &str) -> bool {
+        [CURRENT, PREVIOUS].iter().any(|p| self.read_pointer(p).as_deref() == Some(version))
     }
 
     /// Run once per launch, before the window exists. Rolls back a bundle that never booted,
@@ -271,6 +286,45 @@ mod tests {
         // A clean relaunch changes nothing.
         assert_eq!(s.launch().unwrap(), LaunchOutcome::default());
         assert_eq!(s.current_dir(), Some(s.version_dir("2026.11.05.01")));
+    }
+
+    /// The user restarts once and lands on the newest release, not on each one in between.
+    #[test]
+    fn a_newer_bundle_replaces_the_one_waiting_so_one_restart_reaches_the_latest() {
+        let (_d, s) = store();
+        stage(&s, "v1");
+        s.launch().unwrap();
+        s.booted().unwrap();
+
+        stage(&s, "v2");
+        stage(&s, "v3");
+        assert_eq!(s.staged_version().as_deref(), Some("v3"));
+        assert!(!s.version_dir("v2").exists(), "the superseded bundle is removed at once");
+
+        assert_eq!(s.launch().unwrap().applied.as_deref(), Some("v3"));
+        assert_eq!(s.current_version().as_deref(), Some("v3"));
+        assert_eq!(s.staged_version(), None, "nothing is left to prompt for");
+        // Rollback still targets what was actually running, not the skipped release.
+        assert_eq!(s.read_pointer(PREVIOUS).as_deref(), Some("v1"));
+    }
+
+    /// Production can be rolled back to a release this device still runs or keeps as its
+    /// fallback; replacing the waiting bundle must not delete either.
+    #[test]
+    fn replacing_the_waiting_bundle_never_removes_the_running_or_fallback_one() {
+        let (_d, s) = store();
+        stage(&s, "v1");
+        s.launch().unwrap();
+        s.booted().unwrap();
+        stage(&s, "v2");
+        s.launch().unwrap();
+        s.booted().unwrap();
+
+        // `staged` points at the fallback (v1), then a newer bundle arrives.
+        s.write_pointer(STAGED, "v1").unwrap();
+        stage(&s, "v3");
+        assert!(s.version_dir("v1").exists(), "previous survives");
+        assert!(s.version_dir("v2").exists(), "current survives");
     }
 
     #[test]

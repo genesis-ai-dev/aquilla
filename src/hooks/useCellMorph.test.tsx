@@ -36,6 +36,19 @@ describe("useCellMorph", () => {
     expect(result.current.words).toEqual([])
   })
 
+  it("does not re-render its row just to stay empty while disabled (AQU-2654)", async () => {
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useCellMorph({ ...base, enabled: false })
+    })
+    const mounted = result.current.words
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.words).toBe(mounted)
+    expect(renders).toBe(1)
+  })
+
   it("reads exactly the open cell once enabled", async () => {
     const { result } = renderHook(() => useCellMorph({ ...base, enabled: true }))
     await act(async () => { await Promise.resolve() })

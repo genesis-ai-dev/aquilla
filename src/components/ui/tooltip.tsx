@@ -6,6 +6,7 @@ import type { ReactElement, ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent } from "@/components/ui/popover"
+import { TOOLTIP_POPOVER_CLASS, TOOLTIP_POPUP_CLASS } from "@/components/ui/tooltip-popup"
 
 type TooltipSide = "top" | "bottom" | "left" | "right"
 type TooltipAlign = NonNullable<TooltipPrimitive.Positioner.Props["align"]>
@@ -57,7 +58,8 @@ function TooltipContent({
           data-slot="tooltip-content"
           role="tooltip"
           className={cn(
-            "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md has-data-[slot=kbd]:pe-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-[0.97] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.97] data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-[0.97]",
+            "z-50 inline-flex origin-(--transform-origin) has-data-[slot=kbd]:pe-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-[0.97] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-[0.97] data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-[0.97]",
+            TOOLTIP_POPUP_CLASS,
             className
           )}
           {...props}
@@ -220,7 +222,7 @@ function DisabledReason({
         align={align}
         sideOffset={6}
         data-slot="disabled-reason-note"
-        className={cn("w-auto max-w-xs rounded-md border border-border px-3 py-1.5 text-xs ring-0", className)}
+        className={cn(TOOLTIP_POPOVER_CLASS, className)}
       >
         {content}
       </PopoverContent>

@@ -25,6 +25,9 @@ const DEFAULT_MANIFEST_URL: &str = "https://desktop-bundles.aquilla.app/producti
 /// Long enough for the window to paint first; the check is never on the startup path.
 const STARTUP_CHECK_DELAY: Duration = Duration::from_secs(5);
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const SHELL_FEATURES_FILE: &str = "shell-features.json";
+
 const EVENT_STAGED: &str = "bundle://staged";
 const EVENT_SHELL_OUTDATED: &str = "bundle://shell-outdated";
 const EVENT_ROLLED_BACK: &str = "bundle://rolled-back";
@@ -101,6 +104,32 @@ pub fn prepare(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Whether the bundle `prepare` chose declares `feature` in its `shell-features.json`, the
+/// list each SPA build writes of the window behaviour it handles (vite.config.ts). Lets the
+/// shell turn on something the web side must cooperate with only when the code being served
+/// knows about it: a downloaded bundle can be older than this shell. The embedded assets and
+/// the `tauri dev` server are built from this shell's own commit, so they always qualify.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn serves_feature(app: &tauri::App, feature: &str) -> bool {
+    let root = app.state::<HotBundleState>().serve_root.read().ok().and_then(|r| r.clone());
+    let Some(dir) = root else { return true };
+    let declared = declares_feature(&dir, feature);
+    if !declared {
+        log::info!("[hot_bundle] {} does not declare {feature}; leaving it off", dir.display());
+    }
+    declared
+}
+
+/// A missing or unreadable list declares nothing: every bundle published before the list
+/// existed predates every feature gated on it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn declares_feature(bundle_dir: &std::path::Path, feature: &str) -> bool {
+    std::fs::read(bundle_dir.join(SHELL_FEATURES_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Vec<String>>(&raw).ok())
+        .is_some_and(|features| features.iter().any(|f| f == feature))
+}
+
 /// In `tauri dev` with no downloaded bundle, keep Vite's HMR server; everywhere else the SPA
 /// lives on `app://localhost` so storage stays on one origin across updates.
 pub fn window_url(app: &tauri::App) -> Result<WebviewUrl, String> {
@@ -156,7 +185,8 @@ async fn run_check_logged(app: &AppHandle) {
 }
 
 /// `None` when nothing new is available (or this shell must not apply it); otherwise the bundle
-/// now staged for the next launch. Repeat calls return the already-staged bundle.
+/// now staged for the next launch. Every call asks the server again, so a bundle staged earlier
+/// is replaced by a newer one rather than applied first.
 #[tauri::command]
 pub async fn check_bundle_update(app: AppHandle) -> Result<Option<StagedBundle>, String> {
     run_check(&app).await
@@ -199,9 +229,27 @@ async fn run_check(app: &AppHandle) -> Result<Option<StagedBundle>, String> {
     let state = app.state::<HotBundleState>();
     let _checking = state.checking.lock().await;
     let store = state.store()?;
-    if let Some(info) = store.staged_version().and_then(|v| store.info(&v)) {
-        return Ok(Some(info.into()));
+    // A bundle already waiting does not end the check: releases are hourly, so by the time the
+    // user restarts it may be several behind, and applying it would only prompt them again.
+    let waiting = store.staged_version().and_then(|v| store.info(&v));
+    match stage_latest(app, store).await {
+        Ok(Some(info)) => {
+            let _ = app.emit(EVENT_STAGED, StagedBundle::from(info.clone()));
+            Ok(Some(info.into()))
+        }
+        Ok(None) => Ok(waiting.map(Into::into)),
+        // Offline or a failed download: the bundle already waiting is still good.
+        Err(err) if waiting.is_some() => {
+            log::warn!("[hot_bundle] could not look for a newer bundle, keeping the staged one: {err}");
+            Ok(waiting.map(Into::into))
+        }
+        Err(err) => Err(err),
     }
+}
+
+/// Stages the manifest's bundle when it is news to this shell, replacing any bundle already
+/// waiting. `None` when there is nothing newer to stage.
+async fn stage_latest(app: &AppHandle, store: &BundleStore) -> Result<Option<BundleInfo>, String> {
     let Some(public_key) = public_key() else {
         static WARNED: std::sync::Once = std::sync::Once::new();
         WARNED.call_once(|| {
@@ -232,9 +280,7 @@ async fn run_check(app: &AppHandle) -> Result<Option<StagedBundle>, String> {
         return Ok(None);
     }
 
-    let info = download_and_stage(store, &manifest).await?;
-    let _ = app.emit(EVENT_STAGED, StagedBundle::from(info.clone()));
-    Ok(Some(info.into()))
+    download_and_stage(store, &manifest).await.map(Some)
 }
 
 async fn download_and_stage(store: &BundleStore, manifest: &manifest::Manifest) -> Result<BundleInfo, String> {
@@ -301,4 +347,24 @@ fn embedded_version(app: &AppHandle) -> String {
 
 fn embedded_sha() -> &'static str {
     option_env!("AQUILLA_BUNDLE_SHA").unwrap_or("unknown")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_bundle_that_lists_a_feature_gets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"), "bundles from before the list");
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), "not json").unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"));
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), r#"["something-else"]"#).unwrap();
+        assert!(!declares_feature(dir.path(), "mac-titlebar-overlay"));
+
+        std::fs::write(dir.path().join(SHELL_FEATURES_FILE), r#"["mac-titlebar-overlay"]"#).unwrap();
+        assert!(declares_feature(dir.path(), "mac-titlebar-overlay"));
+    }
 }

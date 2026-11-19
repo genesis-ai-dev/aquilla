@@ -14,7 +14,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
+import { preloadWorkspace, useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -48,6 +48,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
+import { readPortfolioRowSeed } from "@/lib/frontier/portfolio-seed"
 import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -415,7 +416,9 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
-  const [audio, setAudio] = useState<PortfolioProject | null>(null)
+  // The portfolio row the list this page was opened from was already showing.
+  // `loadRow` below still reads the org's portfolio and replaces it.
+  const [audio, setAudio] = useState<PortfolioProject | null>(() => readPortfolioRowSeed(jwt, id))
   const [files, setFiles] = useState<FileSummary[]>([])
   // fileId → display name for the autopilot panel, which knows runs by file id
   // only (its rollup comes from the run table, not the file list).
@@ -1209,6 +1212,7 @@ export function ProjectOverview() {
       const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
       let cellId: string | null = null
       if (wanted) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
@@ -1252,6 +1256,7 @@ export function ProjectOverview() {
       if (!id) return
       let cellId: string | null = null
       if (unit.sectionKey && getPlanToken) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,

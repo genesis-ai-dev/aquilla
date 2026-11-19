@@ -407,4 +407,28 @@ describe("useFocusLock", () => {
     expect(ws.sent.length).toBe(before)
     expect(result.current[0].isHeld).toBe(false)
   })
+
+  // AQU-2654. WHY: the hook lives in the workspace component. As React state,
+  // the claimant's own lease re-rendered the whole workspace on every blur
+  // (release) and again on every focus (claim), and once more when the server
+  // confirmed the claim — for a value no surface draws.
+  it("claiming, releasing and the server's own-claim confirmation do not re-render the host", () => {
+    const ws = makeFakeReconciler()
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders++
+      return useFocusLock({ reconciler: ws, cellId: "cell-1", currentUserId: "alice", leaseMs: 30_000 })
+    })
+    const mounted = renders
+    act(() => { result.current[0].claim() })
+    act(() => { result.current[1]({ t: "lock.claimed", cellId: "cell-1", by: { userId: "alice", ts: 1 } }) })
+    expect(result.current[0].isHeld).toBe(true)
+    act(() => { result.current[0].release() })
+    expect(result.current[0].isHeld).toBe(false)
+    expect(renders).toBe(mounted)
+    // What IS drawn — someone else holding the cell — still renders.
+    act(() => { result.current[1]({ t: "lock.claimed", cellId: "cell-1", by: { userId: "bob", ts: 2 } }) })
+    expect(renders).toBe(mounted + 1)
+    expect(result.current[0].heldBy).toEqual({ userId: "bob", ts: 2 })
+  })
 })

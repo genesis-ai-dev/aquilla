@@ -12,6 +12,7 @@ import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCache
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
 import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { releaseSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
+import { clearOptimisticShadows, getOptimisticShadows, subscribeAudioAttachments } from "./audio-attachments-bus"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
 import type { CellData } from "@/hooks/useCells"
@@ -117,6 +118,78 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     const status = getTranscribeStatus(FULL_ID)
     expect(status.kind).toBe("error")
     expect(status.kind === "error" && status.message).toMatch(/boom/)
+  })
+})
+
+// ── AQU-2491 (review, Nov 9): a transcript landing never chooses a take ────
+//
+// The word timings come back as a re-attach of the take that was chosen when
+// the run STARTED. By the time they land the person may have recorded a newer
+// take, or deleted this one; an ordinary re-attach made this take the chosen,
+// live one again. The write says `wordsOnly`, which the server reads as "add
+// the words, choose nothing" (audio-late-transcript-projection.test.ts).
+describe("transcribeCell — the timings write chooses nothing (AQU-2491)", () => {
+  it("a take's timings ride a words-only re-attach", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1", slot: "track-9", targetLang: "fr" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: FULL_ID, slot: "track-9", targetLang: "fr", wordsOnly: true,
+    }))
+  })
+
+  it("so does an imported line's transcript", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour"]))
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
+      transcription: "bonjour", wordsOnly: true,
+    }))
+  })
+})
+
+// AQU-2654: the words a run just stored used to be seen only after the outbox
+// was flushed and the whole file's audio read back. The write itself now
+// tells the file's audio read what changed on the take.
+describe("transcribeCell — the take's words are shown from the write itself (AQU-2654)", () => {
+  beforeEach(() => { clearOptimisticShadows("file-1") })
+
+  it("hands what was heard and its timings to the file's audio read, bound to the queued event", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(vi.fn(async () => ({
+      text: "hola mundo", model: "omni-fast",
+      chunks: [{ text: "hola", start: 0, end: 1 }, { text: "mundo", start: 1, end: 2 }],
+    })))
+    const reads = vi.fn()
+    const stop = subscribeAudioAttachments("file-1", reads)
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1" })
+    stop()
+
+    const sent = emitCellAudioAttach.mock.calls[0][0] as { timings: unknown }
+    expect(getOptimisticShadows("file-1").get("cell-1")).toMatchObject([{
+      kind: "words", audioId: FULL_ID, eventId: "evt-1", phase: "queued",
+      words: { timings: sent.timings, asrText: "hola mundo", asrModel: "omni-fast", transcriptAi: null },
+    }])
+    // Nothing asked for the whole file to be read again.
+    expect(reads).not.toHaveBeenCalled()
+  })
+
+  it("shows nothing when the words could not be queued", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+    emitCellAudioAttach.mockRejectedValueOnce(new Error("outbox closed"))
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1" })
+    warn.mockRestore()
+
+    expect(getOptimisticShadows("file-1").get("cell-1")).toBeUndefined()
   })
 })
 

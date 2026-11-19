@@ -54,10 +54,13 @@ const MD_PX = 768
  * MIN_TEXT_COLUMN_PX; otherwise stacked under the source text. Phones always
  * stack: their grid has no room for a third track.
  */
-export function bibleColumnsLayout(width: number, gutterPx: number, count: number): BibleColumnsLayout {
+export function bibleColumnsLayout(width: number, gutterPx: number, count: number, extraTracks = 0): BibleColumnsLayout {
   if (count === 0) return "none"
   if (count > MAX_BIBLE_COLUMNS || width < MD_PX) return "stacked"
-  const tracks = count + 2
+  // `extraTracks`: the Back-translation column, when it is open as a column.
+  // It is decided first and keeps its track; the Bibles stack if they no
+  // longer fit beside it.
+  const tracks = count + 2 + extraTracks
   // ps-2.5 + pe-4 on the row, gap-x-2 between tracks.
   const usable = width - gutterPx - 26 - 8 * (tracks)
   return usable / tracks >= MIN_TEXT_COLUMN_PX ? "columns" : "stacked"
@@ -111,8 +114,10 @@ export function useEditorBibleColumns(args: {
   visibleRows: readonly RowScripture[]
   widthRef: RefObject<HTMLElement | null>
   gutterPx: number
+  /** Text tracks other than Source, Target and the Bibles (the Back-translation column). */
+  extraTracks?: number
 }): BibleColumnsValue | null {
-  const { config, enabled, visibleRows, widthRef, gutterPx } = args
+  const { config, enabled, visibleRows, widthRef, gutterPx, extraTracks = 0 } = args
   const pins = usePinnedVersions(config?.projectId, config?.projectDefaults)
   const active = enabled && !!config
   const pinned = active ? pins.pinned : []
@@ -146,7 +151,7 @@ export function useEditorBibleColumns(args: {
     const columns = pinned.map((versionId) => ({ versionId, label: label(versionId), meta: catalogue.byId.get(versionId) }))
     return {
       columns,
-      layout: bibleColumnsLayout(width, gutterPx, columns.length),
+      layout: bibleColumnsLayout(width, gutterPx, columns.length, extraTracks),
       cellFor: (versionId: string, row: RowScripture) =>
         resolveBibleCell({
           versionId,
@@ -165,7 +170,7 @@ export function useEditorBibleColumns(args: {
       catalogue,
       config,
     }
-  }, [active, config, pinned, pins, catalogue, chapterData, forget, width, gutterPx])
+  }, [active, config, pinned, pins, catalogue, chapterData, forget, width, gutterPx, extraTracks])
 }
 
 export function BibleColumnsProvider({ value, children }: { value: BibleColumnsValue | null; children: ReactNode }) {

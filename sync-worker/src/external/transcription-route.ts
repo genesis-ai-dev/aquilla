@@ -6,7 +6,10 @@ import { fetchIdentity } from './identity-bridge'
 //       language?, exampleCellIds? }
 //     → { text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }
 //   POST /api/v1/external/projects/:projectId/transcriptions/status
-//     { model: "omni-zs" | "omni-ctc", warm? } → { state, estGpuSecPerAudioSec? }
+//     { model: "omni-zs" | "omni-ctc" | "omni-fast", warm? } → { state, estGpuSecPerAudioSec? }
+//
+// model "omni-fast" is the fast first pass: Omnilingual CTC 300M, CPU, no GPU
+// queue; less accurate than zero-shot. "auto" never picks it.
 //
 // Either transcribe a cell's selected recorded take (fileId + cellId + laneId)
 // or raw canonical WAV (16 kHz mono PCM16). The result is OUTPUT ONLY: nothing
@@ -79,7 +82,7 @@ function upstreamError(status: number, error: string, retryAfter: string | null)
   }
   if (error === 'audio_format_unsupported_for_model') {
     return errorResponse('validation_failed',
-      'this take is webm, which Whisper/Qwen3-ASR cannot read; pass model "omni-ctc" or "omni-zs", or upload WAV as audio', { reason: error })
+      'this take is webm, which Whisper/Qwen3-ASR cannot read; pass model "omni-ctc", "omni-zs" or "omni-fast", or upload WAV as audio', { reason: error })
   }
   // 402 is the one allowance refusal since AQU-2062 (spec §5.3); the 429 codes
   // are the legacy caps and rate limiting.
@@ -155,8 +158,8 @@ export async function handleExternalTranscriptionRequest(
 
   if (match[2]) {
     const model = body.model ?? 'omni-zs'
-    if (model !== 'omni-zs' && model !== 'omni-ctc') {
-      return errorResponse('validation_failed', 'model must be "omni-zs" or "omni-ctc" (Whisper and Qwen need no warm-up)')
+    if (model !== 'omni-zs' && model !== 'omni-ctc' && model !== 'omni-fast') {
+      return errorResponse('validation_failed', 'model must be "omni-zs", "omni-ctc" or "omni-fast" (Whisper and Qwen need no warm-up)')
     }
     const res = await callAuthWorker(env, '/api/v1/audio/internal/transcriptions/status', {
       projectId, userId, model, action: body.warm === true ? 'warm' : 'status',

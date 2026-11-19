@@ -41,7 +41,7 @@ describe("OfflineStoreProvider", () => {
   it("boots the offline store and exposes it once ready inside Tauri", async () => {
     withTauriGlobal()
     // Pre-warm the memoized store with an in-memory adapter (the real adapter needs
-    // OPFS/SharedWorker, unavailable in happy-dom) so the provider's effect resolves it.
+    // OPFS and a leader worker, unavailable in happy-dom) so the provider's effect resolves it.
     await getOfflineStore(() => makeInMemoryAdapter())
 
     render(
@@ -60,7 +60,7 @@ describe("OfflineStoreProvider", () => {
   it("surfaces a boot error instead of throwing", async () => {
     withTauriGlobal()
     // No pre-warm here: the provider calls getOfflineStore() with the real
-    // default adapter, which needs OPFS/SharedWorker/Vite worker-suffix
+    // default adapter, which needs OPFS, a leader worker and Vite worker-suffix
     // imports that happy-dom can't provide — it rejects, and that rejection
     // should land in `error`, not as an unhandled promise / thrown render.
     render(

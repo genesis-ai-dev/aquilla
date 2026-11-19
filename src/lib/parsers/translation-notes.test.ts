@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from "vitest"
 import { parseTnTsv } from "./translation-notes"
+import { tsvNotesRoute } from "@/lib/dcs/routes/tsv-notes"
+import type { DcsCatalogEntry, DcsManifest } from "@/lib/dcs/types"
 import {
   readNoteReferenceMetadata,
   supportReferenceLabel,
@@ -196,5 +198,125 @@ describe("parseTnTsv — original-language quote (AQU-527)", () => {
     // Occurrence 1 singles nothing out, so the panel shows no marker.
     expect(read.occurrence).toBeNull()
     expect(supportReferenceLabel(read.supportReference!)).toBe("creation")
+  })
+})
+
+// AQU-2487 (import sweep, Nov 2): the format unfoldingWord publishes today.
+// Its Reference column is "1:1"; the book is only in the file name.
+describe("parseTnTsv — current unfoldingWord format (book in the file name)", () => {
+  const CURRENT = `Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote
+front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
+1:1\tabc1\t\trc://*/ta/man/translate/figs-merism\tהַשָּׁמַ֖יִם\t1\tThis is a merism.
+1:2\tabc2\t\t\t\t1\tNote for verse 2.`
+
+  it("takes the book from the file name", () => {
+    const { notes, strings, skippedCount } = parseTnTsv(CURRENT, "tn_GEN.tsv")
+    expect(skippedCount).toBe(0)
+    expect(notes.map((n) => n.canonicalRef)).toEqual(["GEN front:intro", "GEN 1:1", "GEN 1:2"])
+    expect(strings[1].globalReferences).toEqual(["GEN 1:1"])
+    expect(strings[1].section).toBe("GEN 1")
+    expect(notes[1].origQuote).toBe("הַשָּׁמַ֖יִם")
+  })
+
+  it("reads the book from the other names these files are given", () => {
+    for (const name of ["en_tn_57-TIT.tsv", "57-tit.tsv", "tn_tit.TSV"]) {
+      expect(parseTnTsv(CURRENT, name).notes[1].canonicalRef).toBe("TIT 1:1")
+    }
+  })
+
+  it("a reference that names its book keeps it, whatever the file is called", () => {
+    const { notes } = parseTnTsv("Reference\tID\tNote\nMAT 5:3\tx\tBlessed.", "tn_GEN.tsv")
+    expect(notes[0].canonicalRef).toBe("MAT 5:3")
+  })
+
+  it("still skips the rows when the file name names no book", () => {
+    expect(parseTnTsv(CURRENT, "my_new_notes.tsv")).toMatchObject({ notes: [], skippedCount: 3 })
+    expect(parseTnTsv(CURRENT)).toMatchObject({ notes: [], skippedCount: 3 })
+  })
+
+  // AQU-2487 (review, Nov 9): the book is read only where unfoldingWord puts
+  // it (right after "tn", or as "NN-BOOK" at the start). "tn_GEN_rev.tsv" was
+  // filed under Revelation and "notes_job.tsv" under Job, with nothing said.
+  it("reads the book right after tn, whatever follows it", () => {
+    for (const name of ["tn_GEN_en.tsv", "tn_GEN_v86.tsv", "hi_tn_GEN.tsv", "en_tn_01-GEN.tsv", "tn_GEN (1).tsv", "tn_GEN - Copy.tsv", "TN_gen.TSV"]) {
+      expect(parseTnTsv(CURRENT, name).notes[1]?.canonicalRef, name).toBe("GEN 1:1")
+    }
+    expect(parseTnTsv(CURRENT, "tn_1JN.tsv").notes[1].canonicalRef).toBe("1JN 1:1")
+    expect(parseTnTsv(CURRENT, "tn_OBS.tsv").notes[1].canonicalRef).toBe("OBS 1:1")
+  })
+
+  it("does not guess when the name holds two books, or the book is somewhere else", () => {
+    for (const name of ["tn_GEN_rev.tsv", "rev_tn_GEN.tsv", "titus-notes-rev.tsv", "notes_job.tsv", "GEN_tn.tsv", "57-TIT_act.tsv"]) {
+      expect(parseTnTsv(CURRENT, name), name).toMatchObject({ notes: [], skippedCount: 3 })
+    }
+  })
+
+  // AQU-2487 (browser pass, Nov 12, and its review): whenever rows were
+  // skipped because they needed the book from the name and it didn't give
+  // one, the parser says which book codes the name holds (perhaps none), the
+  // one in unfoldingWord's place first, so the refusal can name the name.
+  it("says which books the name holds whenever the rows needed one from it", () => {
+    expect(parseTnTsv(CURRENT, "tn_GEN_rev.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "rev_tn_GEN.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "57-TIT_act.tsv").fileNameBooks).toEqual(["TIT", "ACT"])
+    expect(parseTnTsv(CURRENT, "GEN_REV.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "notes_job.tsv").fileNameBooks).toEqual(["JOB"])
+    expect(parseTnTsv(CURRENT, "GEN_tn.tsv").fileNameBooks).toEqual(["GEN"])
+    expect(parseTnTsv(CURRENT, "Titus notes.tsv").fileNameBooks).toEqual([])
+    expect(parseTnTsv(CURRENT, "my_new_notes.tsv").fileNameBooks).toEqual([])
+    expect(parseTnTsv(CURRENT).fileNameBooks).toEqual([])
+    // The name gave the rows their book.
+    for (const name of ["tn_GEN.tsv", "tn_GEN_GEN.tsv"]) {
+      expect(parseTnTsv(CURRENT, name).fileNameBooks, name).toBeUndefined()
+    }
+    // Rows that name their own book, or have no reference, never needed it.
+    const own = parseTnTsv("Reference\tID\tNote\nMAT 5:3\tx\tBlessed.", "tn_GEN_rev.tsv")
+    expect(own.notes[0].canonicalRef).toBe("MAT 5:3")
+    expect(own.fileNameBooks).toBeUndefined()
+    expect(parseTnTsv("Reference\tID\tNote\n\tx\tA note.", "tn_GEN_rev.tsv").fileNameBooks).toBeUndefined()
+  })
+})
+
+// AQU-2487 (review, Nov 9): the tile left the file's "\n" marks in the note as
+// text and glued the Tags column onto it; the same file through Door43 came in
+// with real line breaks and the Note text alone.
+describe("parseTnTsv — reads the note the way the Door43 import does", () => {
+  const FILE = [
+    "Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote",
+    "front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis\\n\\n## Part 1\\n\\nGenesis begins.",
+    "1:1\tabc1\tkeyterm\trc://*/ta/man/translate/figs-merism\tהַשָּׁמַ֖יִם\t1\tThis is a **merism**.",
+  ].join("\n")
+
+  it("turns the file's \\n marks into line breaks and shows the note's formatting", () => {
+    const { notes, strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(notes[0].body).toBe("# Introduction to Genesis\n\n## Part 1\n\nGenesis begins.")
+    expect(strings[0].original).toBe(notes[0].body)
+    expect(strings[0].originalHtml).toBe("<h1>Introduction to Genesis</h1><h2>Part 1</h2><p>Genesis begins.</p>")
+    expect(strings[1].originalHtml).toBe("<p>This is a <b>merism</b>.</p>")
+  })
+
+  it("keeps Tags out of the note, beside its other reference columns", () => {
+    const { notes, strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(notes[1].body).toBe("This is a **merism**.")
+    expect(notes[1].supportRef).toBe("rc://*/ta/man/translate/figs-merism")
+    expect(strings[1].metadata).toEqual({
+      tags: "keyterm",
+      supportReference: "rc://*/ta/man/translate/figs-merism",
+      quote: "הַשָּׁמַ֖יִם",
+      occurrence: "1",
+    })
+  })
+
+  it("gives the same note text, formatting and reference columns as Door43 for the same file", () => {
+    const door43 = tsvNotesRoute.parse({
+      entry: { fullName: "unfoldingWord/en_tn" } as DcsCatalogEntry,
+      manifest: {} as DcsManifest,
+      projectId: "p1",
+      files: new Map([["tn_GEN.tsv", FILE]]),
+    })[0].cells
+    const { strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(strings.map((s) => ({ value: s.original, valueHtml: s.originalHtml, canonicalRef: s.context, metadata: s.metadata }))).toEqual(
+      door43.map((c) => ({ value: c.value, valueHtml: c.valueHtml, canonicalRef: c.canonicalRef, metadata: c.metadata })),
+    )
   })
 })

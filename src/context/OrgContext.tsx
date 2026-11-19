@@ -7,6 +7,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
+import { rememberListedProjects } from "@/lib/sync/project-record-seed"
 import {
   ALL_ORGS_PARAM,
   ORG_STORAGE_KEY,
@@ -359,6 +360,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   // honor the accompanying loading flag perfectly.
   const visibleOrgs = orgsReady ? orgs : []
   const visibleAccessibleProjects = projectsReady ? accessibleProjects : []
+  // Every project list in the app is drawn from this directory, so it is what
+  // a page opened from one of them can paint before its own read answers
+  // (see project-record-seed.ts). Masked the same way: never the last account's.
+  useEffect(() => {
+    rememberListedProjects(projectsReady ? accessibleProjects : [])
+  }, [projectsReady, accessibleProjects])
   const visibleGuestOrgs = orgsReady && projectsReady ? guestOrgs : []
   const resolvedMemberOrg = visibleOrgs.find((org) => org.id === activeOrgId) ?? null
   // A confirmed membership is safe as soon as the org directory resolves.

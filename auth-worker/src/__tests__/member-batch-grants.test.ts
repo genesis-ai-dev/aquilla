@@ -420,3 +420,180 @@ describe("POST /api/v2/orgs/:id/groups/:gid/members — batch (AQU-736)", () => 
     expect(tooMany.status).toBe(400)
   })
 })
+
+// Only an address the account has proven it controls resolves ([Pen test]
+// 2026-11-17), so the by-email cases start from verified accounts — which is
+// what a reviewer who clicked their welcome link, or signed up with Google, is.
+async function seedOrgWithVerifiedEmails() {
+  await seedOrgWithMembers()
+  await env.AQUILLA_PG.prepare("UPDATE users SET email_verified_at = CURRENT_TIMESTAMP").run()
+}
+
+// AQU-2576: the grant itself resolves an EMAIL as well as a username. The
+// caller has already cleared this project's `role >= project_lead` floor —
+// the same bar the scoped lookup route applies — so no new audience gains the
+// email oracle, and every cap below still runs on the RESOLVED account.
+describe("POST /api/v2/projects/:id/members — by email (AQU-2576)", () => {
+  it("grants by email address, at the requested role", async () => {
+    await seedOrgWithVerifiedEmails()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "bob@example.com", role: 400 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { userId: number; username: string }
+    // The response names the account, not the address that found it.
+    expect(body.username).toBe("bob")
+    expect(body.userId).toBe(2)
+    expect(await projectRole(2)).toBe(400)
+  })
+
+  it("matches the address case-insensitively", async () => {
+    await seedOrgWithVerifiedEmails()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "BOB@Example.COM", role: 300 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await projectRole(2)).toBe(300)
+  })
+
+  it("mixes emails and usernames in one batch", async () => {
+    await seedOrgWithVerifiedEmails()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({
+          members: [
+            { username: "bob@example.com", role: 400 },
+            { username: "carol", role: 300 },
+          ],
+        }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as BatchResult
+    expect(body.results.every((r) => r.ok)).toBe(true)
+    expect(await projectRole(2)).toBe(400)
+    expect(await projectRole(3)).toBe(300)
+  })
+
+  it("says no account uses the address, rather than 'user not found'", async () => {
+    await seedOrgWithVerifiedEmails()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "nobody@proton.me", role: 400 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(404)
+    // The distinction matters: a username typo is a typo, but an address with
+    // no account usually means the person has no Aquilla account at all, and
+    // the invite link is the path that reaches them.
+    expect(((await res.json()) as { error: string }).error).toMatch(/email address/i)
+  })
+
+  it("keeps the role cap on an email-resolved target", async () => {
+    await seedOrgWithVerifiedEmails()
+    // dave is project_lead (500) and grants above his own level are refused —
+    // resolving the target by email must not route around that.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1', 4, 500, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("dave")),
+        body: JSON.stringify({ username: "bob@example.com", role: 700 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    expect(await projectRole(2)).toBe(null)
+  })
+
+  it("keeps the self-grant guard on an email-resolved target", async () => {
+    await seedOrgWithVerifiedEmails()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "alice@example.com", role: 700 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(400)
+  })
+
+  // [Pen test] Authorization & access control (2026-11-17). Registration takes
+  // any address and returns a working session without proving it, so someone
+  // who learns which reviewer is about to be onboarded can register that
+  // address first. Matching on the string alone made THEIR account the one
+  // "add reviewer@org" resolved to — admitted at the lead's chosen role with
+  // no invite and no step of their own. The invite paths already refuse this
+  // (AQU-1579); direct add has to as well.
+  it("does not admit an account that merely CLAIMS the address", async () => {
+    await seedOrgWithMembers() // every email unverified
+    await seedUser(66, "squatter")
+    await env.AQUILLA_PG.prepare("UPDATE users SET email = 'reviewer@partner.org' WHERE id = 66").run()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "reviewer@partner.org", role: 400 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(404)
+    expect(await projectRole(66)).toBeNull()
+    // The same account is still addable by the handle only its owner gives out.
+    const byHandle = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "squatter", role: 400 }),
+      },
+      env,
+    )
+    expect(byHandle.status).toBe(200)
+  })
+
+  it("admits the same address once its account has verified it", async () => {
+    await seedOrgWithMembers()
+    await seedUser(66, "reviewer")
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email = 'reviewer@partner.org', email_verified_at = CURRENT_TIMESTAMP WHERE id = 66",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "reviewer@partner.org", role: 400 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await projectRole(66)).toBe(400)
+  })
+})

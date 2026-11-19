@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { basicSchema } from "./test-schema"
-import { findTermMatches, buildTerminologyChipDecorationSet } from "./terminology-chip-plugin"
+import { findTermMatches, buildTerminologyChipDecorationSet, findApprovedRenderingMatches } from "./terminology-chip-plugin"
+import { buildTermRegex } from "@/lib/terminology/match"
 import type { Concept } from "@/lib/terminology/types"
 
 function makeConcept(sourceTerm: string, status: Concept["status"] = "active"): Concept {
@@ -123,5 +124,52 @@ describe("buildTerminologyChipDecorationSet", () => {
     ])
     // "God" → 1 match; "love" → 2 matches.
     expect(set.find()).toHaveLength(3)
+  })
+})
+
+describe("findApprovedRenderingMatches (AQU-2654)", () => {
+  // What the read-mode target column computed before: every approved rendering
+  // of every active concept, run over the text one regex at a time.
+  function reference(text: string, concepts: Concept[]) {
+    const out: Array<{ start: number; end: number; term: string }> = []
+    for (const concept of concepts) {
+      if (concept.status !== "active") continue
+      for (const rendering of concept.renderings) {
+        if (rendering.status !== "preferred" && rendering.status !== "admitted") continue
+        const re = buildTermRegex(rendering.rendering, "giu")
+        if (!re || !text) continue
+        let m: RegExpExecArray | null
+        while ((m = re.exec(text)) !== null) {
+          if (m[0].length === 0) {
+            re.lastIndex += 1
+            continue
+          }
+          out.push({ start: m.index, end: m.index + m[0].length, term: concept.sourceTerm })
+        }
+      }
+    }
+    return out
+  }
+
+  const concepts: Concept[] = [
+    { ...makeConcept("grace"), renderings: [{ rendering: "gracia", status: "preferred" }, { rendering: "merced", status: "admitted" }, { rendering: "favor", status: "forbidden" }] },
+    { ...makeConcept("word"), renderings: [{ rendering: "λόγος", status: "preferred" }, { rendering: "palabr*", status: "admitted" }, { rendering: "  ", status: "preferred" }] },
+    { ...makeConcept("draft"), status: "draft", renderings: [{ rendering: "borrador", status: "preferred" }] },
+    { ...makeConcept("any"), renderings: [{ rendering: "*", status: "admitted" }] },
+    ...Array.from({ length: 40 }, (_, i) => ({ ...makeConcept(`filler${i}`), renderings: [{ rendering: `relleno${i}`, status: "preferred" as const }] })),
+  ]
+
+  it.each([
+    "por gracia, Gracia y merced; favor",
+    "Ὁ ΛΌΓΟΣ y las palabras de un borrador",
+    "relleno7 relleno39 relleno400",
+    "nada que ver",
+    "",
+  ])("finds what the per-rendering loop found, in the same order: %j", (text) => {
+    expect(findApprovedRenderingMatches(text, concepts)).toEqual(reference(text, concepts))
+  })
+
+  it("the reference is not empty for the texts that carry renderings", () => {
+    expect(reference("por gracia, Gracia y merced; favor", concepts.slice(0, 3)).map((m) => m.term)).toEqual(["grace", "grace", "grace"])
   })
 })

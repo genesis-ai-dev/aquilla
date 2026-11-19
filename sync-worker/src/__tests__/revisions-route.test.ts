@@ -595,3 +595,129 @@ describe('POST /files/:f/revisions', () => {
     expect(await res!.text()).toMatch(/no readable manifest/)
   })
 })
+
+// Door43 and extension files had deterministic cell ids before revisions
+// existed. Adoption can only key their cells by canonical_ref + ordinal, which
+// is wrong for several notes on one verse: an upstream insert would shift the
+// ordinals and move translations onto the wrong notes. `cellKeys` is what
+// keeps each note its own cell.
+describe('provider keys (Door43, extensions)', () => {
+  const note = (rowId: string, text: string, i: number) => ({
+    unitKey: `TIT|${rowId}`,
+    positional: false,
+    text,
+    canonicalRef: 'TIT 1:1',
+    sequenceIndex: i,
+  })
+
+  async function setupNotes() {
+    const s = await setup()
+    const post = await handleBulkImportRequest(
+      new Request('https://x/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.token}` },
+        body: JSON.stringify({
+          projectId: PROJECT,
+          fileId: FILE,
+          cells: [
+            { id: 'ev-a', cellId: 'note-a', anchorCellId: null, value: 'Note A', canonicalRef: 'TIT 1:1' },
+            { id: 'ev-b', cellId: 'note-b', anchorCellId: 'note-a', value: 'Note B', canonicalRef: 'TIT 1:1' },
+          ],
+          complete: true,
+          clientTs: 1,
+        }),
+      }),
+      s.env as unknown as Parameters<typeof handleBulkImportRequest>[1],
+    )
+    expect(post?.status).toBe(200)
+    return s
+  }
+  const cellKeys = { 'note-a': 'TIT|a', 'note-b': 'TIT|b' }
+
+  it('a note inserted between two notes on one verse leaves both on their own cells', async () => {
+    const { post, sourceCells } = await setupNotes()
+    const res = await post({
+      artifactSha256: SHA_B,
+      stamp: 'builtin:dcs-tsv-notes@1',
+      origin: 'dcs',
+      cellKeys,
+      returnCellIds: true,
+      units: [note('a', 'Note A', 0), note('new', 'A new note', 1), note('b', 'Note B', 2)],
+    })
+    expect(res?.status).toBe(200)
+    const out = (await res!.json()) as { counts: Record<string, number>; cellIds: Record<string, string>; adopted: boolean }
+    expect(out.adopted).toBe(true)
+    expect(out.counts).toMatchObject({ equal: 2, inserted: 1, changed: 0, deleted: 0 })
+    expect(out.cellIds['TIT|a']).toBe('note-a')
+    expect(out.cellIds['TIT|b']).toBe('note-b')
+    const live = (await sourceCells()).filter((c) => c.tombstoned_at == null)
+    expect(live.find((c) => c.cell_id === 'note-b')?.value).toBe('Note B')
+    // Unchanged notes keep their event, so targets pinned to them stay fresh.
+    expect(live.find((c) => c.cell_id === 'note-b')?.event_id).toBe('ev-b')
+  })
+
+  it('without the keys the same insert lands on the second note (the bug the keys prevent)', async () => {
+    const { post, sourceCells } = await setupNotes()
+    const byOrdinal = (i: number, text: string) => ({
+      unitKey: i === 0 ? 'TIT 1:1' : `TIT 1:1#${i + 1}`,
+      positional: false,
+      text,
+      canonicalRef: 'TIT 1:1',
+      sequenceIndex: i,
+    })
+    await post({
+      artifactSha256: SHA_B,
+      stamp: 'builtin:dcs-tsv-notes@1',
+      units: [byOrdinal(0, 'Note A'), byOrdinal(1, 'A new note'), byOrdinal(2, 'Note B')],
+    })
+    const live = (await sourceCells()).filter((c) => c.tombstoned_at == null)
+    expect(live.find((c) => c.cell_id === 'note-b')?.value).toBe('A new note')
+  })
+
+  it('a dry run reports the counts and writes nothing, adoption included', async () => {
+    const { post, rows, bucket } = await setupNotes()
+    const before = (await rows<{ id: string }>('events')).length
+    const res = await post({
+      artifactSha256: SHA_B,
+      stamp: 'builtin:dcs-tsv-notes@1',
+      cellKeys,
+      dryRun: true,
+      units: [note('a', 'Note A, reworded entirely', 0)],
+    })
+    const out = (await res!.json()) as { dryRun: boolean; counts: Record<string, number> }
+    expect(out.dryRun).toBe(true)
+    expect(out.counts).toMatchObject({ changed: 1, deleted: 1 })
+    expect((await rows<{ id: string }>('events')).length).toBe(before)
+    expect((await rows<{ file_id: string }>('file_revisions')).length).toBe(0)
+    expect(bucket._allKeys()).toEqual([])
+  })
+
+  it('realign re-parses the artifact the head names; a parse that changes nothing writes no revision', async () => {
+    const { post, rows } = await setupNotes()
+    const body = { artifactSha256: SHA_B, stamp: 'builtin:dcs-tsv-notes@1', cellKeys, units: [note('a', 'Note A', 0), note('b', 'Note B', 1)] }
+    await post(body)
+    const headN = async () => (await rows<{ head_revision_n: number }>('files'))[0].head_revision_n
+    const n = await headN()
+    // Same artifact, same stamp: refused as a no-op without realign.
+    const refused = (await (await post({ ...body, units: [note('a', 'Note A fixed by a parser change', 0), note('b', 'Note B', 1)] }))!.json()) as { noop: boolean }
+    expect(refused.noop).toBe(true)
+    const unchanged = (await (await post({ ...body, realign: true }))!.json()) as { noop: boolean }
+    expect(unchanged.noop).toBe(true)
+    expect(await headN()).toBe(n)
+    const repaired = (await (await post({ ...body, realign: true, units: [note('a', 'Note A fixed by a parser change', 0), note('b', 'Note B', 1)] }))!.json()) as { noop: boolean; counts: Record<string, number> }
+    expect(repaired.noop).toBe(false)
+    expect(repaired.counts).toMatchObject({ changed: 1, equal: 1 })
+    expect(await headN()).toBe(n + 1)
+  })
+
+  it('refuses a revision that names an extension it cannot verify', async () => {
+    const { post } = await setupNotes()
+    const res = await post({
+      artifactSha256: SHA_B,
+      stamp: 'extension:x@1',
+      units: [note('a', 'Note A', 0)],
+      toolOrigin: { toolId: 'x', version: 1, codeHash: 'h', session: 'not-a-session' },
+    })
+    expect(res?.status).toBe(403)
+  })
+})

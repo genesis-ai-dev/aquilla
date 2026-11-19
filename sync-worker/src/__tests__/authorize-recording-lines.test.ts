@@ -79,7 +79,14 @@ describe("undoing lines made from a recording, below Maintainer", () => {
 
   it("still refuses the same delete when it names no creating event — imported lines stay Maintainer's", async () => {
     const result = await authorize(await lead(), del({}), SECRET, makeDb({}))
-    expect(result).toMatchObject({ ok: false, status: 403, reason: "removing an imported cell requires maintainer" })
+    // This project sets no cell-editing tier, so AQU-2632's exception does not
+    // apply. Match the clause rather than the whole sentence, as
+    // authorize-cell-editing.test.ts does, so rewording the hint cannot break it.
+    expect(result).toMatchObject({
+      ok: false,
+      status: 403,
+      reason: expect.stringMatching(/imported cell requires maintainer/),
+    })
   })
 
   it("refuses once someone else has written to the line since it was made", async () => {

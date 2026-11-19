@@ -137,6 +137,15 @@ describe("a Word document from the lines", () => {
     expect(docxFromLinesFiles([cell({ original: "Hi.", metadata: { pageSize: { width: "x", height: 5 } } })])["word/document.xml"]).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
   })
 
+  // AQU-2680 review finding 8: a page under about 2.5 inches left no room
+  // inside fixed 1-inch margins.
+  it("keeps 1-inch margins, and narrows them on a page too small for them", () => {
+    const doc = (pageSize?: { width: number; height: number }) => docxFromLinesFiles([cell({ original: "Hi.", ...(pageSize ? { metadata: { pageSize } } : {}) })])["word/document.xml"]
+    expect(doc()).toContain('<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>')
+    expect(doc({ width: 612, height: 792 })).toContain('<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708"')
+    expect(doc({ width: 144, height: 216 })).toContain('<w:pgMar w:top="360" w:right="360" w:bottom="360" w:left="360" w:header="180" w:footer="180" w:gutter="0"/>')
+  })
+
   it("names the document's language when the export has one", () => {
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "es-419" })["word/styles.xml"]).toContain('<w:lang w:val="es-419"/>')
     expect(docxFromLinesFiles([cell({ original: "Hola." })], { lang: "und" })["word/styles.xml"]).not.toContain("w:lang")

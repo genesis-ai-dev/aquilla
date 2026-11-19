@@ -236,6 +236,16 @@ function pageSizeXml(size: { width: number; height: number } | null): string {
   return `<w:pgSz w:w="${w}" w:h="${h}"${w > h ? ` w:orient="landscape"` : ""}/>`
 }
 
+/** AQU-2680 review finding 8: 1-inch margins, or an eighth of the page's
+ *  shorter side on a page too small for them (a 2-inch card gets a quarter
+ *  inch), so the text always has room. */
+function pageMarginsXml(size: { width: number; height: number } | null): string {
+  const shorter = size ? Math.round(Math.min(size.width, size.height) * 20) : 11906
+  const m = Math.min(1440, Math.round(shorter / 8))
+  const hf = Math.min(708, Math.round(m / 2))
+  return `<w:pgMar w:top="${m}" w:right="${m}" w:bottom="${m}" w:left="${m}" w:header="${hf}" w:footer="${hf}" w:gutter="0"/>`
+}
+
 /** The document and footnote parts for these paragraphs. */
 export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: { width: number; height: number } | null = null): Built {
   const footnotes: string[] = []
@@ -302,8 +312,7 @@ export function buildDocxParts(paragraphs: readonly LinesParagraph[], pageSize: 
     })
     body.push(`<w:p>${pPr}${runs}</w:p>`)
   }
-  const sectPr = `<w:sectPr>${pageSizeXml(pageSize)}` +
-    `<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>`
+  const sectPr = `<w:sectPr>${pageSizeXml(pageSize)}${pageMarginsXml(pageSize)}</w:sectPr>`
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
     `<w:document xmlns:w="${W_NS}" xmlns:r="${R_NS}"><w:body>${body.join("")}${sectPr}</w:body></w:document>`
   const footnotesXml = footnotes.length === 0 ? null : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +

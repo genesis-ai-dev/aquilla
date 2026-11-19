@@ -48,7 +48,9 @@ export function TimelineSlotButton({
   /** AQU-2663: a toggle's state (Make speech's "this line is picked"). Absent:
    *  not a toggle, no `aria-pressed`. */
   pressed?: boolean
-  /** AQU-2663: its work is running — disabled, and the caller swaps the glyph. */
+  /** AQU-2663: its work is running. `aria-disabled` and the click is ignored,
+   *  NOT native `disabled`: AppTooltip turns a disabled child into its "why is
+   *  this unavailable" note. The caller swaps the glyph and the label. */
   busy?: boolean
   /** Handed the click, for callers that read Shift/Ctrl/⌘. */
   onClick(e: MouseEvent<HTMLButtonElement>): void
@@ -63,10 +65,11 @@ export function TimelineSlotButton({
         data-hot={hot ? "true" : undefined}
         data-busy={busy ? "true" : undefined}
         aria-pressed={pressed}
-        disabled={busy}
+        aria-disabled={busy ? true : undefined}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
+          if (busy) return
           onClick(e)
         }}
         style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
@@ -75,7 +78,7 @@ export function TimelineSlotButton({
           // The button arrives with the pointer, not before. No fade: the
           // slot is already under the pointer, so a transition only lags it.
           hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
-          "hover:text-foreground disabled:cursor-progress",
+          "hover:text-foreground aria-disabled:cursor-progress",
           // AQU-2663: a toggle's ON state (a line picked for Make speech) is
           // seen, not only announced. Inert on buttons that pass no `pressed`.
           "aria-pressed:text-primary aria-pressed:ring-primary/50",

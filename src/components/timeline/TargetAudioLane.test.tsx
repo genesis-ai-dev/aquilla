@@ -1452,8 +1452,20 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(speech().className).toMatch(/(^| )aria-pressed:ring-primary\/50( |$)/)
       expect(rec()).not.toHaveAttribute("aria-pressed")
       rerender(<TargetAudioLane {...props} makingSpeechCellIds={new Set(["c9"])} />)
-      expect(speech()).toBeDisabled()
+      // Review S3: busy is aria-disabled, NOT natively disabled — a disabled
+      // child makes AppTooltip open its "why unavailable" note, with the pick
+      // sentence in it. The label says what is happening, the spinner shows
+      // it, and a click does nothing.
+      expect(speech()).not.toBeDisabled()
+      expect(speech()).toHaveAttribute("aria-disabled", "true")
       expect(speech()).toHaveAttribute("data-busy", "true")
+      expect(speech()).toHaveAttribute("aria-label", "Making this line's speech…")
+      expect(speech().querySelector('[data-slot="spinner"]')).not.toBeNull()
+      props.onPickGhost.mockClear()
+      props.onSelect.mockClear()
+      fireEvent.click(speech())
+      expect(props.onPickGhost).not.toHaveBeenCalled()
+      expect(props.onSelect).not.toHaveBeenCalled()
     })
 
     it("follows the record button's permission: neither is drawn when the lane is read-only", () => {

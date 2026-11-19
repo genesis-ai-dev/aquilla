@@ -2436,7 +2436,7 @@ export function TargetAudioLane({
                   // generates nothing; Shift, Ctrl or ⌘ adds or removes it.
                   <TimelineSlotButton
                     testId={`tl-target-empty-${cell.id}-speech`}
-                    label={t("audio.makeSpeech.ghost")}
+                    label={busy ? t("audio.makeSpeech.makingLine") : t("audio.makeSpeech.ghost")}
                     hot={hot}
                     sizePx={buttonPx}
                     pressed={picked}

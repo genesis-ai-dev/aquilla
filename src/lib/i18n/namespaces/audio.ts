@@ -734,6 +734,7 @@ export const audio = defineNamespace({
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
     "audio.makeSpeech.title": "Make speech",
     "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
+    "audio.makeSpeech.makingLine": "Making this line's speech…",
     "audio.makeSpeech.ghostHint": "Or hover an empty line on the timeline and click the sparkle beside the record button.",
     "audio.makeSpeech.pickedCount": plural({
       one: "{count} line picked",
@@ -3296,6 +3297,9 @@ export const audio = defineNamespace({
       },
       "audio.addVoice.consentNote": {
         description: "Note at the bottom of the Add a voice panel.",
+      },
+      "audio.makeSpeech.makingLine": {
+        description: "Tooltip and accessible label of the sparkle button beside the record button on an empty line of the timeline, while that line's speech is being made. It shows a spinner and cannot be clicked until it is done.",
       },
       "audio.makeSpeech.ghost": {
         description: "Tooltip and accessible label of the grey sparkle-icon button beside the record button on an empty line of the timeline. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",

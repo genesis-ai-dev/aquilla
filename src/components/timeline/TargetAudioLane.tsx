@@ -2614,7 +2614,7 @@ export function TargetAudioLane({
                     aria-hidden
                     className={cn(
                       "pointer-events-none absolute inset-y-1 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary",
-                      busy && "animate-pulse",
+                      busy && "motion-safe:animate-pulse",
                     )}
                   />
                 )}

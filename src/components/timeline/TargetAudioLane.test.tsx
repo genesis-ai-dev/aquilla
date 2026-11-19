@@ -1846,7 +1846,11 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
 
         it("a busy line at rest shows the mark as busy; on hover, the spinner", () => {
           render(<TargetAudioLane {...wired({ emptyCells: [tiny()], makingSpeechCellIds: new Set(["c9"]) })} />)
-          expect(screen.getByTestId("tl-target-empty-c9-mark")).toHaveAttribute("data-busy", "true")
+          const mark = screen.getByTestId("tl-target-empty-c9-mark")
+          expect(mark).toHaveAttribute("data-busy", "true")
+          // Pulses only where motion is welcome.
+          expect(mark.className.split(" ")).toContain("motion-safe:animate-pulse")
+          expect(mark.className.split(" ")).not.toContain("animate-pulse")
           fireEvent.pointerEnter(slot())
           expect(one()).toHaveAttribute("data-busy", "true")
         })

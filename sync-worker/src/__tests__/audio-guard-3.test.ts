@@ -337,3 +337,77 @@ describe('the cost of a big batch is bounded', () => {
     expect(cost).toEqual({ laneLists: 0, takeLanes: 0 })
   })
 })
+
+// ---- The shared source clip. Arabic is the '' lane (cc33dd44), Spanish 'es'.
+const SPANISH = { ...RITA, laneGrants: [{ lane: ES, level: 400 }] }
+const LEAD_AR = { ...RAVI, laneGrants: [{ lane: 'cc33dd44', level: 500 }] }
+const full = async (audioId: string) =>
+  (await h.pg.query<{ selected: number; role: string; url: string; created_by: string; validator_count: number }>(`SELECT selected, role, url, created_by, validator_count FROM cell_audio WHERE audio_id = $1`, [audioId])).rows[0]
+
+/** Rita's approved Spanish take, chosen; optionally the owner's source clip on the line too. */
+async function ritaChosenEs(opts: { source?: boolean } = {}) {
+  await approvedTake({ lane: 'es' })
+  if (opts.source) {
+    expect(await send(OWNER, [ev('cell.audio.attach', F, 'c1', 'owner', { audioId: 'src.webm', url: 'frontier-audio://src.webm', slot: 'recording', role: 'source' })])).toEqual([])
+  }
+  expect(await send(SPANISH, [ev('cell.audio.select', F, 'c1', 'rita', { audioId: 'take-rita.webm', slot: 'recording', targetLang: 'es' })], { wall: true })).toEqual([])
+  expect((await row('take-rita.webm')).selected).toBe(1)
+}
+const reattachSource = (who: Who, extra: Record<string, unknown>) =>
+  ev('cell.audio.attach', F, 'c1', who.username, { audioId: 'src.webm', url: 'frontier-audio://src.webm', slot: 'recording', ...extra })
+
+describe('re-attaching the source clip chooses it in the language named', () => {
+  it('is refused from someone without that language, and Rita stays chosen', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { targetLang: 'es' })], { wall: true })).toEqual(refused)
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+  it('is allowed from someone who works in that language', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(SPANISH, [reattachSource(SPANISH, { targetLang: 'es' })], { wall: true })).toEqual([])
+  })
+  it('a words-only re-attach chooses nothing, so it is not checked in the language named', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { targetLang: 'es', wordsOnly: true })], { wall: true })).toEqual([])
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+})
+
+describe('replacing the source clip\'s recording needs Maintainer', () => {
+  it('a contributor\'s re-attach with her own url is refused', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { url: 'frontier-audio://mal.webm' })], { wall: true })).toEqual(refused)
+    expect(await full('src.webm')).toMatchObject({ url: 'frontier-audio://src.webm', created_by: 'owner' })
+  })
+  it('so is a words-only one', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(ARABIC, [reattachSource(ARABIC, { url: 'frontier-audio://mal.webm', wordsOnly: true })], { wall: true })).toEqual(refused)
+    expect((await full('src.webm')).url).toBe('frontier-audio://src.webm')
+  })
+  it('a Project Lead with every language is refused too; a Maintainer may', async () => {
+    await ritaChosenEs({ source: true })
+    expect(await send(RAVI, [reattachSource(RAVI, { url: 'frontier-audio://lead.webm', role: 'source' })])).toEqual(refused)
+    expect(await send(MAX, [reattachSource(MAX, { url: 'frontier-audio://max.webm', role: 'source' })])).toEqual([])
+    expect((await full('src.webm')).url).toBe('frontier-audio://max.webm')
+  })
+})
+
+describe('only someone with every language may declare source audio', () => {
+  it('a new source clip from a Project Lead limited to Arabic is refused, and Rita stays chosen', async () => {
+    await ritaChosenEs()
+    expect(await send(LEAD_AR, [ev('cell.audio.attach', F, 'c1', 'ravi', { audioId: 'lead-src.webm', url: 'frontier-audio://lead-src.webm', slot: 'recording', role: 'source' })], { wall: true })).toEqual(refused)
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+  it('he cannot turn Rita\'s Spanish take into source audio', async () => {
+    await ritaChosenEs()
+    const before = await full('take-rita.webm')
+    expect(await send(LEAD_AR, [ev('cell.audio.attach', F, 'c1', 'ravi', { audioId: 'take-rita.webm', url: 'frontier-audio://lead.webm', slot: 'recording', role: 'source' })], { wall: true })).toEqual(refused)
+    expect(await full('take-rita.webm')).toEqual(before)
+  })
+  it('wall off, a Project Lead token scoped to Arabic is refused the same', async () => {
+    await ritaChosenEs()
+    const scoped = { ...RAVI, scopes: [{ kind: 'lane', value: 'cc33dd44' }] }
+    expect(await send(scoped, [ev('cell.audio.attach', F, 'c1', 'ravi', { audioId: 'take-rita.webm', url: 'frontier-audio://lead.webm', slot: 'recording', role: 'source' })])).toEqual(refused)
+    expect(await full('take-rita.webm')).toMatchObject({ role: 'dub', url: 'frontier-audio://take-rita.webm', created_by: 'rita' })
+  })
+})

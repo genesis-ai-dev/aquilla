@@ -832,6 +832,26 @@ export async function authorize<K extends EventKind>(
     return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
   }
 
+  // AQU-2682: the shared source clip's recording is what every language
+  // hears, so replacing it (a re-attach with another url) needs the level
+  // that imports source audio: Maintainer. A re-attach that keeps the url
+  // (words only, or choosing it) is held to the rules above and below.
+  if (db != null && raw.kind === 'cell.audio.attach' && raw.cellId && tokenClaims.role < ROLE.MAINTAINER) {
+    const ap = raw.payload as { audioId?: unknown; url?: unknown } | null
+    if (typeof ap?.audioId === 'string' && ap.audioId) {
+      const existing = await db
+        .prepare(
+          `SELECT url FROM cell_audio
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ? AND role = 'source'`,
+        )
+        .bind(raw.projectId, raw.fileId, raw.cellId, ap.audioId)
+        .first<{ url: string | null }>()
+      if (existing && existing.url !== (typeof ap.url === 'string' ? ap.url : null)) {
+        return { ok: false, status: 403, reason: "replacing the source audio's recording requires maintainer" }
+      }
+    }
+  }
+
   // AQU-2682: a take is never named as a `.peaks` sidecar. The audio route
   // lets a sidecar be rewritten (it is drawn, never heard), so a take named
   // like one would escape the write-once rule for recordings.
@@ -1014,8 +1034,13 @@ export async function authorize<K extends EventKind>(
     const laneLimited = wallOn
       ? tokenClaims.role < ROLE.MAINTAINER && tokenClaims.src !== 'platform'
       : (tokenClaims.scopes ?? []).some((sc) => sc.kind === 'lane')
-    const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown } | null
-    if (laneLimited && !(raw.kind === 'cell.audio.attach' && ap?.role === 'source')) {
+    const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown; wordsOnly?: unknown } | null
+    // Source audio acts in every language at once, so only someone not
+    // limited to particular languages may declare it.
+    if (laneLimited && raw.kind === 'cell.audio.attach' && ap?.role === 'source') {
+      return { ok: false, status: 403, reason: 'marking a clip as source audio requires access to every language' }
+    }
+    if (laneLimited) {
       const takeLane = (audioId: string) =>
         db
           .prepare(
@@ -1030,9 +1055,10 @@ export async function authorize<K extends EventKind>(
       const eventLane = laneOfAudioEvent(raw.payload)
       // Every language the event acts in:
       //   - an existing take: its own language. The shared source clip has
-      //     none of its own; choosing it un-chooses the dubs of the language
-      //     the event names, so a choice of it is checked there, and other
-      //     edits of it are no language's.
+      //     none of its own; choosing it (a select, or an attach that is not
+      //     words-only) un-chooses the dubs of the language the event names,
+      //     so a choice of it is checked there, and other edits of it are no
+      //     language's.
       //   - a NEW take or piece: the language its attach names, always (being
       //     chosen there un-chooses that language's take), and, for a piece,
       //     the language of the take it is a piece of too (the projection
@@ -1040,7 +1066,7 @@ export async function authorize<K extends EventKind>(
       const lanes = new Set<string>()
       if (take) {
         if (take.role !== 'source') lanes.add(take.tag)
-        else if (raw.kind === 'cell.audio.select') lanes.add(eventLane)
+        else if (raw.kind === 'cell.audio.select' || (raw.kind === 'cell.audio.attach' && ap?.wordsOnly !== true)) lanes.add(eventLane)
       } else {
         lanes.add(eventLane)
         if (raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {

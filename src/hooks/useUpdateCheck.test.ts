@@ -6,7 +6,7 @@ import { __startUpdatePollingForTests } from "./useUpdateCheck"
 describe("useUpdateCheck — the poll pauses in a hidden tab", () => {
   let stop: () => void
   let hidden = false
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ sha: "same" })))
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ sha: "same" })))
   const versionChecks = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/version.json")).length
 
   beforeEach(() => {

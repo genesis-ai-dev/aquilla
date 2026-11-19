@@ -6,11 +6,18 @@ import { act, renderHook } from "@testing-library/react"
 vi.unmock("@/hooks/useAccountAnalytics")
 
 const account = vi.hoisted(() => {
+  interface AccountState { generation: number; username: string | null }
+  interface FakeAccount {
+    state: AccountState
+    eligible: boolean
+    publish(update: Partial<AccountState>, eligible?: boolean): void
+    listeners: Set<() => void>
+  }
   const listeners = new Set<() => void>()
-  const self = {
-    state: { generation: 0, username: null as string | null },
+  const self: FakeAccount = {
+    state: { generation: 0, username: null },
     eligible: false,
-    publish(update: Partial<{ generation: number; username: string | null }>, eligible = self.eligible) {
+    publish(update, eligible = self.eligible) {
       self.state = { ...self.state, ...update }
       self.eligible = eligible
       for (const listener of listeners) listener()

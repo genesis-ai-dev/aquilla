@@ -13,6 +13,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
+import { readBytesWithLimit } from "../../../shared/http-body-limit"
 import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
@@ -327,17 +328,21 @@ export async function handleUpload(
   // get them rendered as HTML for any viewer who opens the original. Derive it instead
   // from the extension we already validated above.
   const contentType = kbContentTypeForExtension(fileName)
-  const bytes = new Uint8Array(await c.req.arrayBuffer())
-  if (bytes.byteLength === 0) {
-    const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
-    return c.json(body, status)
-  }
-  if (bytes.byteLength > MAX_KB_ORIGINAL_BYTES) {
+  // AQU-2594: read through the cap (AQU-1858's reader), not whole and then
+  // measured: a chunked body could otherwise hold the platform's 100 MB+
+  // request limit in a 128 MB isolate.
+  const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_ORIGINAL_BYTES)
+  if (!upload.ok) {
     const { body, status } = errorJson(
       "validation_failed",
       `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`,
       400,
     )
+    return c.json(body, status)
+  }
+  const bytes = upload.bytes
+  if (bytes.byteLength === 0) {
+    const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
     return c.json(body, status)
   }
 

@@ -8,6 +8,7 @@ import { zipSync, strToU8 } from "fflate"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
+import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -441,6 +442,31 @@ describe("knowledge routes — validation", () => {
     stubIndexingFetch()
     const res = await uploadDoc(PROJECT, jwt, undefined, "a.md", new FakeBucket())
     expect(res.status).toBe(400)
+  })
+
+  it("a body over the 25 MB cap with no Content-Length → 400, read no further than the cap", async () => {
+    // AQU-2594: the upload read the whole body before checking its size, so a
+    // chunked body could hold up to the platform's request limit (100 MB+) in
+    // an isolate of 128 MB.
+    const jwt = await setup()
+    stubIndexingFetch()
+    const chunk = new Uint8Array(1024 * 1024)
+    const chunks = 60
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === chunks) return controller.close()
+        pulled++
+        controller.enqueue(chunk.slice())
+      },
+    })
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge`,
+      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.pdf" }, body, duplex: "half" } as RequestInit,
+      testEnvWith(new FakeBucket()),
+    )
+    expect(res.status).toBe(400)
+    expect(pulled * chunk.length).toBeLessThan(MAX_KB_ORIGINAL_BYTES + 4 * chunk.length)
   })
 
   it(".docx body over 2 MB → 400", async () => {

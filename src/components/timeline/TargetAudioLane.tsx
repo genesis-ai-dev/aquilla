@@ -2075,6 +2075,16 @@ function TargetAudioChip({
   )
 }
 
+/** AQU-2663: whether focus on `el` is keyboard focus (`:focus-visible`).
+ *  An engine without the selector throws; treat its focus as keyboard. */
+function isFocusVisible(el: Element): boolean {
+  try {
+    return el.matches(":focus-visible")
+  } catch {
+    return true
+  }
+}
+
 /** AQU-2663: a hovered empty line's z — over every clip but a dragged one. */
 const SLOT_LIFT_Z = 1999
 
@@ -2239,7 +2249,7 @@ export function TargetAudioLane({
   // add-and-record slot and an empty-section slot can never both be lit. Keys
   // are prefixed because a span start and a cell id share no namespace.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
-  // AQU-2663: keyboard focus counts as hover for an empty line's pair — the
+  // AQU-2663: KEYBOARD focus counts as hover for an empty line's pair — the
   // line whose buttons hold focus unfolds its mic and is lifted, like the
   // line under the pointer.
   const [focusSlotKey, setFocusSlotKey] = useState<string | null>(null)
@@ -2414,7 +2424,13 @@ export function TargetAudioLane({
           }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
-          onFocus={() => setFocusSlotKey(`empty-${cell.id}`)}
+          onFocus={(e) => {
+            // KEYBOARD focus only: a mouse click leaves focus on the clicked
+            // button, and that must not keep the pair lit once the pointer
+            // leaves. The browser's own :focus-visible tells the two apart.
+            if (!isFocusVisible(e.target)) return
+            setFocusSlotKey(`empty-${cell.id}`)
+          }}
           onBlur={(e) => {
             // Focus moving between this line's own buttons keeps it open.
             if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return

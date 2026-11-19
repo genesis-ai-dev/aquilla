@@ -1527,6 +1527,44 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       expect(rec()).not.toHaveAttribute("data-folded")
     })
 
+    // Only KEYBOARD focus counts as hover. A mouse click leaves focus on the
+    // clicked button, and the browser says that focus is not :focus-visible;
+    // happy-dom treats every focus as visible, so the mouse case stubs the
+    // platform answer the way Chrome gives it after a click.
+    it("after a mouse click on the sparkle, the pair hides when the pointer leaves", async () => {
+      const user = userEvent.setup()
+      render(<TargetAudioLane {...wired()} />)
+      const slot = screen.getByTestId("tl-target-empty-c9")
+      const realMatches = Element.prototype.matches
+      const spy = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, sel: string) {
+        return sel === ":focus-visible" ? false : realMatches.call(this, sel)
+      })
+      try {
+        fireEvent.pointerEnter(slot)
+        await user.click(speech())
+        expect(document.activeElement).toBe(speech())
+        fireEvent.pointerLeave(slot)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(rec()).not.toHaveAttribute("data-hot")
+      expect(speech()).not.toHaveAttribute("data-hot")
+      expect(slot.style.zIndex).toBe("")
+    })
+
+    it("after Tab onto the line, the pair shows and the line is lifted", async () => {
+      const user = userEvent.setup()
+      render(<TargetAudioLane {...wired()} />)
+      await user.tab()
+      expect(document.activeElement).toBe(rec())
+      expect(rec()).toHaveAttribute("data-hot", "true")
+      expect(speech()).toHaveAttribute("data-hot", "true")
+      expect(Number(screen.getByTestId("tl-target-empty-c9").style.zIndex)).toBeGreaterThan(1000)
+      await user.tab()
+      expect(document.activeElement).toBe(speech())
+      expect(rec()).toHaveAttribute("data-hot", "true")
+    })
+
     // The zoomed-out case that overlapped (shot 3d): 25px lines 40px apart,
     // three picked. At rest each shows one 28px ✨ centred on its line, and no
     // two of them touch. Boxes computed from the rendered slot, row and button.

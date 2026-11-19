@@ -156,11 +156,50 @@ describe('a new piece is in its take\'s language', () => {
     expect(await row('mal-piece.webm')).toBeUndefined()
   })
 
-  it('someone working in Spanish still can', async () => {
+  it('someone working in Spanish still can (the app names the language on every attach)', async () => {
     await approvedTake({ lane: 'es' })
     const spanish = { ...RITA, laneGrants: [{ lane: ES, level: 400 }] }
     expect(await send(spanish, [ev('cell.audio.attach', F, 'c1', 'rita', {
-      audioId: 'rita-piece.webm', url: 'frontier-audio://rita-piece.webm', slot: 'recording', pieceOf: 'take-rita.webm',
+      audioId: 'rita-piece.webm', url: 'frontier-audio://rita-piece.webm', slot: 'recording', pieceOf: 'take-rita.webm', targetLang: 'es',
+    })], { wall: true })).toEqual([])
+  })
+
+  // A new take or piece acts in the language its attach names (choosing it
+  // there un-chooses that language's take), so that language is checked too,
+  // whatever take it is a piece of.
+  async function ritaChosenInSpanish() {
+    await approvedTake({ lane: 'es' })
+    const spanish = { ...RITA, laneGrants: [{ lane: ES, level: 400 }] }
+    expect(await send(spanish, [ev('cell.audio.select', F, 'c1', 'rita', { audioId: 'take-rita.webm', slot: 'recording', targetLang: 'es' })], { wall: true })).toEqual([])
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  }
+
+  it('FC1: a piece of their own Arabic take, tagged Spanish, is refused, and Rita\'s take stays chosen', async () => {
+    await ritaChosenInSpanish()
+    expect(await send(ARABIC, [ev('cell.audio.attach', F, 'c1', 'mallory', { audioId: 'mal.webm', url: 'frontier-audio://mal.webm', slot: 'recording' })], { wall: true })).toEqual([])
+    expect(await send(ARABIC, [ev('cell.audio.attach', F, 'c1', 'mallory', {
+      audioId: 'mal-p.webm', url: 'frontier-audio://mal.webm', slot: 'recording', pieceOf: 'mal.webm', targetLang: 'es',
+    })], { wall: true })).toEqual(refused)
+    expect((await row('take-rita.webm')).selected).toBe(1)
+    expect(await row('mal-p.webm')).toBeUndefined()
+  })
+
+  it('FC2: a piece of the shared source clip, tagged Spanish, is refused, and Rita\'s take stays chosen', async () => {
+    await ritaChosenInSpanish()
+    expect(await send(OWNER, [ev('cell.audio.attach', F, 'c1', 'owner', { audioId: 'src.webm', url: 'frontier-audio://src.webm', slot: 'recording', role: 'source' })])).toEqual([])
+    const spanish = { ...RITA, laneGrants: [{ lane: ES, level: 400 }] }
+    expect(await send(spanish, [ev('cell.audio.select', F, 'c1', 'rita', { audioId: 'take-rita.webm', slot: 'recording', targetLang: 'es' })], { wall: true })).toEqual([])
+    expect(await send(ARABIC, [ev('cell.audio.attach', F, 'c1', 'mallory', {
+      audioId: 'mal-sp.webm', url: 'frontier-audio://src.webm', slot: 'recording', pieceOf: 'src.webm', targetLang: 'es',
+    })], { wall: true })).toEqual(refused)
+    expect((await row('take-rita.webm')).selected).toBe(1)
+  })
+
+  it('a piece of their own Arabic take, in Arabic, still works', async () => {
+    await approvedTake()
+    expect(await send(ARABIC, [ev('cell.audio.attach', F, 'c1', 'mallory', { audioId: 'mal.webm', url: 'frontier-audio://mal.webm', slot: 'recording' })], { wall: true })).toEqual([])
+    expect(await send(ARABIC, [ev('cell.audio.attach', F, 'c1', 'mallory', {
+      audioId: 'mal-p.webm', url: 'frontier-audio://mal.webm', slot: 'recording', pieceOf: 'mal.webm',
     })], { wall: true })).toEqual([])
   })
 })
@@ -202,6 +241,36 @@ describe('a voice\'s WAV belongs to the voice itself', () => {
     expect((await audio(RITA, 'PUT', 'gen-two.wav', { body: 'W' })).status).toBe(403)
     expect((await audio(MALLORY, 'PUT', 'gen-two.wav', { body: 'W' })).status).toBe(403)
     expect((await audio(MAX, 'PUT', 'gen-two.wav', { body: 'W' })).status).toBe(200)
+  })
+})
+
+describe('long urls', () => {
+  it('FC13: an attach with a 4 KB url (a long signed link) still lands', async () => {
+    await approvedTake()
+    const { randomBytes } = await import('node:crypto')
+    const big = 'https://media.example.org/x?sig=' + randomBytes(3000).toString('base64url')
+    expect(await send(OWNER, [ev('cell.audio.attach', F, 'c7', 'owner', { audioId: 'long.webm', url: big, slot: 'recording' })])).toEqual([])
+    expect(await row('long.webm')).toBeDefined()
+  })
+})
+
+describe('the "has a take named this" lookup uses its indexes', () => {
+  it('by id and by the stored recording\'s url (the partial index matches)', async () => {
+    await approvedTake()
+    await h.pg.exec('SET enable_seqscan = off')
+    try {
+      const plan = (await h.pg.query<{ 'QUERY PLAN': string }>(
+        `EXPLAIN SELECT 1 AS hit FROM cell_audio WHERE project_id = $1 AND file_id = $2 AND audio_id = $3
+         UNION ALL
+         SELECT 1 FROM cell_audio WHERE project_id = $1 AND file_id = $2 AND url = $4
+           AND url LIKE 'frontier-audio://%'
+         LIMIT 1`, [P, F, 'take-rita.webm', 'frontier-audio://take-rita.webm'],
+      )).rows.map((r) => r['QUERY PLAN']).join('\n')
+      expect(plan).toMatch(/idx_cell_audio_name/)
+      expect(plan).toMatch(/idx_cell_audio_stored_url/)
+    } finally {
+      await h.pg.exec('SET enable_seqscan = on')
+    }
   })
 })
 

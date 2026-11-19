@@ -1026,19 +1026,29 @@ export async function authorize<K extends EventKind>(
           .bind(raw.projectId, raw.fileId, raw.cellId, audioId)
           .first<{ tag: string; role: string }>()
       const audioId = typeof ap?.audioId === 'string' ? ap.audioId : null
-      let take = audioId && raw.cellId ? await takeLane(audioId) : null
-      // A new piece is born in its take's language (the projection gives it
-      // its root's lane), so that is the language it is checked in.
-      if (!take && raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {
-        take = await takeLane(ap.pieceOf)
+      const take = audioId && raw.cellId ? await takeLane(audioId) : null
+      const eventLane = laneOfAudioEvent(raw.payload)
+      // Every language the event acts in:
+      //   - an existing take: its own language. The shared source clip has
+      //     none of its own; choosing it un-chooses the dubs of the language
+      //     the event names, so a choice of it is checked there, and other
+      //     edits of it are no language's.
+      //   - a NEW take or piece: the language its attach names, always (being
+      //     chosen there un-chooses that language's take), and, for a piece,
+      //     the language of the take it is a piece of too (the projection
+      //     gives it its root's lane). A piece of the source clip adds none.
+      const lanes = new Set<string>()
+      if (take) {
+        if (take.role !== 'source') lanes.add(take.tag)
+        else if (raw.kind === 'cell.audio.select') lanes.add(eventLane)
+      } else {
+        lanes.add(eventLane)
+        if (raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {
+          const root = await takeLane(ap.pieceOf)
+          if (root && root.role !== 'source') lanes.add(root.tag)
+        }
       }
-      // The shared source clip has no language of its own. Choosing it
-      // un-chooses the dubs of the language the event names, so that is the
-      // language a choice of it is checked in; other edits of it are not
-      // a language's.
-      const sourceClip = take?.role === 'source'
-      if (!sourceClip || raw.kind === 'cell.audio.select') {
-        const laneTag = take && !sourceClip ? take.tag : laneOfAudioEvent(raw.payload)
+      for (const laneTag of lanes) {
         const laneRefused = await laneRefusal(
           db, tokenClaims, raw.projectId, laneTag, laneReadWall, requiredRole,
           () => targetLanesFor(db, raw.projectId, settings),

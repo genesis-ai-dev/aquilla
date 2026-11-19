@@ -7,7 +7,7 @@ import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup
 const KEY = `aquilla:google-login:${AUTH_BASE}`
 export const GOOGLE_ATTEMPT_LIFETIME_MS = 10 * 60_000
 export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; desktopChallenge?: string; desktopReturned?: boolean; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
-export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
+export interface GooglePending { continuation: string; step: "signup" | "link" | "legacy"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
 export async function googleRequest<T>(path: string, body?: object, jwt?: string): Promise<T> {
   let response: Response
@@ -75,7 +75,7 @@ export function readGoogleAttempt(): GoogleAttempt | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(KEY) ?? "null") as GoogleAttempt | null
     if (!value || !/^[a-f0-9]{64}$/.test(value.verifier) || !Number.isFinite(value.expires) || value.expires <= Date.now()) { clearGoogleAttempt(); return null }
-    if (value.pending && (!/^[a-f0-9]{64}$/.test(value.pending.continuation) || !["signup","link"].includes(value.pending.step) || typeof value.pending.email !== "string")) { clearGoogleAttempt(); return null }
+    if (value.pending && (!/^[a-f0-9]{64}$/.test(value.pending.continuation) || !["signup","link","legacy"].includes(value.pending.step) || typeof value.pending.email !== "string")) { clearGoogleAttempt(); return null }
     if (value.connectCode && !/^[a-f0-9]{64}$/.test(value.connectCode)) { clearGoogleAttempt(); return null }
     const choice = value.choice?.version === ANALYTICS_DISCLOSURE_VERSION && typeof value.choice.allowed === "boolean" && typeof value.choice.revision === "string" ? value.choice : null
     return { ...value, choice, next: safeLoginNext(value.next) }

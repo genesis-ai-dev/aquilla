@@ -408,21 +408,33 @@ export const AUTO_EVEN_CHANGED_TAKES = true
 
 /**
  * Of the takes THIS TAB just made or changed (review M1: never every take
- * that merely looks un-evened), the ones auto-even evens: on a track (slot)
- * where some other take is evened out, a take with no target; or a take with
- * a target whose reading is of another window (cut or trimmed since). A new
- * Station version or Remove-noise take that inherited its target is left
- * alone: it is measured when it is made. None when `enabled` is off.
+ * that merely looks un-evened), the ones auto-even evens. The rule needs no
+ * new state (re-check, Sam):
+ * - a NEW take (`kind: "new"`: recorded, attached, a version, Remove noise)
+ *   with no target, on a track (slot) where some take is evened out;
+ * - a CUT or TRIMMED take (`kind: "changed"`) only if it already HAD a
+ *   target and its reading is now of another window. A cleared take has no
+ *   target, so a later trim or cut leaves it cleared.
+ * A new take that inherited its target (a version) is measured when it is
+ * made, so it is left alone. None when `enabled` is off.
  */
-export function autoEvenCandidates(cells: readonly CellData[], refs: readonly TakeRef[], enabled: boolean): TakeRef[] {
+export function autoEvenCandidates(
+  cells: readonly CellData[],
+  refs: ReadonlyArray<TakeRef & { kind: "new" | "changed" }>,
+  enabled: boolean,
+): TakeRef[] {
   if (!enabled || refs.length === 0) return []
   const evenedSlots = new Set<string>()
   for (const [, a] of liveTakes(cells, undefined)) if (a.evenTargetLufs != null) evenedSlots.add(a.slot ?? "recording")
-  const wanted = new Set(refs.map((r) => `${r.cellId}\u0000${r.audioId}`))
+  const kindOf = new Map(refs.map((r) => [`${r.cellId}\u0000${r.audioId}`, r.kind] as const))
   const out: TakeRef[] = []
   for (const [ref, a] of liveTakes(cells, undefined)) {
-    if (!wanted.has(`${ref.cellId}\u0000${ref.audioId}`)) continue
-    if (a.evenTargetLufs != null ? readingIsStale(a) : evenedSlots.has(a.slot ?? "recording")) out.push(ref)
+    const kind = kindOf.get(`${ref.cellId}\u0000${ref.audioId}`)
+    if (!kind) continue
+    const wanted = kind === "new"
+      ? a.evenTargetLufs == null && evenedSlots.has(a.slot ?? "recording")
+      : a.evenTargetLufs != null && readingIsStale(a)
+    if (wanted) out.push(ref)
   }
   return out
 }

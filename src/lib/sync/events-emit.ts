@@ -739,6 +739,9 @@ export interface CellAudioAttachInput {
    * slot in one lane at most, not all of them.
    */
   wordsOnly?: boolean
+  /** Re-check S2: don't tell auto-even about this take (bulk upload: its
+   *  finish offers "Even out the track to match" instead). */
+  skipAutoEven?: boolean
   /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -851,8 +854,11 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
     }, analytics)
   }
   // Review M1: this tab made or attached the take (a recording, an upload,
-  // a Station version, Remove noise…); auto-even may even it.
-  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }])
+  // a Station version, Remove noise…); auto-even may even it. Re-check M1a:
+  // not a words-only attach (transcribe, Transcribe all, a transcript save
+  // or clear), which changes no audio; nor an attach that asks to stay quiet
+  // (bulk upload, whose finish says how to even the track instead).
+  if (!input.wordsOnly && !input.skipAutoEven) noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }], "new")
   return eventId
 }
 
@@ -930,7 +936,7 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
     clientTs: input.clientTs,
   })
   // Review M1: this tab trimmed the take; auto-even may measure it again.
-  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }])
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }], "changed")
   return eventId
 }
 
@@ -1083,7 +1089,7 @@ export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string
     clientTs: input.clientTs,
   })
   // Review M1: this tab cut the take; auto-even may even its pieces.
-  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }, { cellId: input.cellId, audioId: input.newAudioId }])
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }, { cellId: input.cellId, audioId: input.newAudioId }], "changed")
   return eventId
 }
 

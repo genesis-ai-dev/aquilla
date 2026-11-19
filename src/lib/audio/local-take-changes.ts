@@ -10,14 +10,25 @@ export interface LocalTakeRef {
   audioId: string
 }
 
-const listeners = new Set<(refs: readonly LocalTakeRef[]) => void>()
+/**
+ * Re-check (Sam): what the action did to the take, which is what decides
+ * whether auto-even touches it — with no new state.
+ * - "new": new audio (a recording, an attach, a version, Remove noise). It is
+ *   evened when its track is evened.
+ * - "changed": a cut or a trim. Only a take that already HAD a target is
+ *   evened again; a cleared take has none, so it stays cleared.
+ * A words-only attach (transcribe, a transcript save) is neither: no note.
+ */
+export type LocalTakeChange = "new" | "changed"
 
-export function noteLocalTakeChange(refs: readonly LocalTakeRef[]): void {
+const listeners = new Set<(refs: readonly LocalTakeRef[], kind: LocalTakeChange) => void>()
+
+export function noteLocalTakeChange(refs: readonly LocalTakeRef[], kind: LocalTakeChange): void {
   if (refs.length === 0) return
-  for (const l of listeners) l(refs)
+  for (const l of listeners) l(refs, kind)
 }
 
-export function onLocalTakeChange(fn: (refs: readonly LocalTakeRef[]) => void): () => void {
+export function onLocalTakeChange(fn: (refs: readonly LocalTakeRef[], kind: LocalTakeChange) => void): () => void {
   listeners.add(fn)
   return () => { listeners.delete(fn) }
 }

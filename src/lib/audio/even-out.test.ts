@@ -389,25 +389,36 @@ describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)
     } },
   ] as unknown as CellData[]
 
-  const all = ["a", "b", "c", "d"].map((audioId) => ({ cellId: "c1", audioId }))
+  const ref = (audioId: string, kind: "new" | "changed") => ({ cellId: "c1", audioId, kind })
 
   it("is ON (settled Nov 19): an evened track stays even", () => {
     expect(AUTO_EVEN_CHANGED_TAKES).toBe(true)
   })
 
   it("OFF would leave every take alone", () => {
-    expect(autoEvenCandidates(cells, all, false)).toEqual([])
+    expect(autoEvenCandidates(cells, [ref("b", "new"), ref("c", "changed")], false)).toEqual([])
   })
 
-  it("ON: of the takes this tab just made or changed, the new and the changed ones on an evened track", () => {
-    expect(autoEvenCandidates(cells, all, true)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
+  it("a new take on an evened track is evened; one on a track nobody evened is not", () => {
+    expect(autoEvenCandidates(cells, [ref("b", "new"), ref("d", "new")], true)).toEqual([{ cellId: "c1", audioId: "b" }])
   })
 
-  // Review M1: never from what the takes look like — only the takes an action
-  // names. A take nobody named (a cleared one, an undone one, a colleague's)
-  // is left alone.
+  it("a cut or trimmed take is evened again only if it already had a target", () => {
+    expect(autoEvenCandidates(cells, [ref("c", "changed")], true)).toEqual([{ cellId: "c1", audioId: "c" }])
+    // b has no target (new, or cleared): a trim leaves it as it is.
+    expect(autoEvenCandidates(cells, [ref("b", "changed")], true)).toEqual([])
+  })
+
+  // Re-check (Sam): a Clear sticks through a later trim or cut.
+  it("leaves a cleared take cleared when it is trimmed or cut", () => {
+    const cleared = [{ id: "c1", attachments: {
+      a: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 },
+      x: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: null, loudnessFromMs: 0, trimStartMs: 200 },
+    } }] as unknown as CellData[]
+    expect(autoEvenCandidates(cleared, [ref("x", "changed")], true)).toEqual([])
+  })
+
   it("looks only at the takes it is given", () => {
-    expect(autoEvenCandidates(cells, [{ cellId: "c1", audioId: "c" }], true)).toEqual([{ cellId: "c1", audioId: "c" }])
     expect(autoEvenCandidates(cells, [], true)).toEqual([])
   })
 
@@ -416,7 +427,7 @@ describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)
       a: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 },
       v2: { url: "u2", type: "audio", slot: "recording", evenTargetLufs: -16 },
     } }] as unknown as CellData[]
-    expect(autoEvenCandidates(born, [{ cellId: "c1", audioId: "v2" }], true)).toEqual([])
+    expect(autoEvenCandidates(born, [{ cellId: "c1", audioId: "v2", kind: "new" }], true)).toEqual([])
   })
 })
 

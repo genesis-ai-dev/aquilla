@@ -15242,7 +15242,7 @@ export function ProjectWorkspace() {
       allowed: () => autoEvenRole.current != null && canPerform("cell.audio.even", autoEvenRole.current),
       run: (takes) => handleEvenOutRef.current(takes, { markAsRun: true }),
     })
-    const off = onLocalTakeChange((refs) => q.note(refs))
+    const off = onLocalTakeChange((refs, kind) => q.note(refs, kind))
     return () => {
       off()
       q.dispose()

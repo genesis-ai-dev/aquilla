@@ -1,7 +1,8 @@
 // Review M1, S1, S2 (question 89 ON: an evened track stays even). Auto-even
 // starts ONLY from this tab's own actions on a take (local-take-changes.ts):
 // a new recording or attachment, a cut, a trim, a Station version, Remove
-// noise. It is handed those takes, waits a moment so one action is one run,
+// noise — never a words-only attach or a bulk upload. A new take is evened
+// when its track is; a cut or trim re-evens only a take that had a target. It is handed those takes, waits a moment so one action is one run,
 // and evens the ones `autoEvenCandidates` picks. So a Clear, an Undo, a
 // colleague's change, another device or opening a file never starts it.
 //
@@ -28,12 +29,13 @@ export interface AutoEvenDeps {
 }
 
 export interface AutoEvenQueue {
-  note(refs: readonly TakeRef[]): void
+  /** `kind`: "new" audio, or a cut / trim ("changed") — see autoEvenCandidates. */
+  note(refs: readonly TakeRef[], kind: "new" | "changed"): void
   dispose(): void
 }
 
 export function createAutoEvenQueue(deps: AutoEvenDeps): AutoEvenQueue {
-  const pending = new Map<string, TakeRef>()
+  const pending = new Map<string, TakeRef & { kind: "new" | "changed" }>()
   const tried = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
@@ -59,9 +61,13 @@ export function createAutoEvenQueue(deps: AutoEvenDeps): AutoEvenQueue {
   }
 
   return {
-    note(refs) {
+    note(refs, kind) {
       if (disposed || !deps.enabled || refs.length === 0) return
-      for (const r of refs) pending.set(refKey(r), r)
+      // A take made and then trimmed before the run is still a new take.
+      for (const r of refs) {
+        const k = refKey(r)
+        pending.set(k, { cellId: r.cellId, audioId: r.audioId, kind: pending.get(k)?.kind === "new" ? "new" : kind })
+      }
       if (timer == null) timer = setTimeout(flush, deps.delayMs ?? 400)
     },
     dispose() {

@@ -25,7 +25,7 @@ describe("auto-even", () => {
   it("evens a take this tab just recorded on an evened track", async () => {
     vi.useFakeTimers()
     const { q, run } = setup(() => cellsWith({ b: { url: "u2", type: "audio", slot: "recording" } }))
-    q.note([{ cellId: "c1", audioId: "b" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(10)
     expect(run).toHaveBeenCalledWith([{ cellId: "c1", audioId: "b" }])
   })
@@ -35,7 +35,7 @@ describe("auto-even", () => {
     const { q, run } = setup(() => cellsWith({ cleared: { url: "u3", type: "audio", slot: "recording", loudnessLufs: -22, truePeakDb: -6, evenTargetLufs: null } }))
     await vi.advanceTimersByTimeAsync(100)
     expect(run).not.toHaveBeenCalled()
-    q.note([])
+    q.note([], "new")
     await vi.advanceTimersByTimeAsync(100)
     expect(run).not.toHaveBeenCalled()
   })
@@ -43,8 +43,8 @@ describe("auto-even", () => {
   it("gathers the takes of one action into one run", async () => {
     vi.useFakeTimers()
     const { q, run } = setup(() => cellsWith({ b: { url: "u2", type: "audio", slot: "recording" }, c: { url: "u4", type: "audio", slot: "recording" } }))
-    q.note([{ cellId: "c1", audioId: "b" }])
-    q.note([{ cellId: "c1", audioId: "c" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
+    q.note([{ cellId: "c1", audioId: "c" }], "new")
     await vi.advanceTimersByTimeAsync(10)
     expect(run).toHaveBeenCalledOnce()
     expect(run.mock.calls[0][0]).toHaveLength(2)
@@ -54,9 +54,9 @@ describe("auto-even", () => {
     vi.useFakeTimers()
     const b = { url: "u2", type: "audio", slot: "recording" }
     const { q, run } = setup(() => cellsWith({ b }), { run: vi.fn(async () => ({ ...ok(0), unmeasured: 1, skipped: 1 })) })
-    q.note([{ cellId: "c1", audioId: "b" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(10)
-    q.note([{ cellId: "c1", audioId: "b" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(10)
     expect(run).toHaveBeenCalledOnce()
   })
@@ -65,10 +65,11 @@ describe("auto-even", () => {
     vi.useFakeTimers()
     let b: Record<string, unknown> = { url: "u2", type: "audio", slot: "recording" }
     const { q, run } = setup(() => cellsWith({ b }), { run: vi.fn(async () => ({ ...ok(0), unmeasured: 1, skipped: 1 })) })
-    q.note([{ cellId: "c1", audioId: "b" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(10)
     b = { ...b, trimStartMs: 400 }
-    q.note([{ cellId: "c1", audioId: "b" }])
+    // Re-recorded or re-attached over a new window: a new try.
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(10)
     expect(run).toHaveBeenCalledTimes(2)
   })
@@ -77,18 +78,29 @@ describe("auto-even", () => {
     vi.useFakeTimers()
     const cells = () => cellsWith({ b: { url: "u2", type: "audio", slot: "recording" } })
     const a = setup(cells, { allowed: () => false })
-    a.q.note([{ cellId: "c1", audioId: "b" }])
+    a.q.note([{ cellId: "c1", audioId: "b" }], "new")
     const b = setup(cells, { enabled: false })
-    b.q.note([{ cellId: "c1", audioId: "b" }])
+    b.q.note([{ cellId: "c1", audioId: "b" }], "new")
     await vi.advanceTimersByTimeAsync(50)
     expect(a.run).not.toHaveBeenCalled()
     expect(b.run).not.toHaveBeenCalled()
   })
 
+  it("re-evens a trimmed take that had a target, and leaves a trimmed cleared take alone", async () => {
+    vi.useFakeTimers()
+    const { q, run } = setup(() => cellsWith({
+      had: { url: "u5", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16, loudnessFromMs: 0, trimStartMs: 300 },
+      cleared: { url: "u6", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: null, loudnessFromMs: 0, trimStartMs: 300 },
+    }))
+    q.note([{ cellId: "c1", audioId: "had" }, { cellId: "c1", audioId: "cleared" }], "changed")
+    await vi.advanceTimersByTimeAsync(10)
+    expect(run).toHaveBeenCalledWith([{ cellId: "c1", audioId: "had" }])
+  })
+
   it("stops when disposed", async () => {
     vi.useFakeTimers()
     const { q, run } = setup(() => cellsWith({ b: { url: "u2", type: "audio", slot: "recording" } }))
-    q.note([{ cellId: "c1", audioId: "b" }])
+    q.note([{ cellId: "c1", audioId: "b" }], "new")
     q.dispose()
     await vi.advanceTimersByTimeAsync(50)
     expect(run).not.toHaveBeenCalled()
@@ -98,10 +110,10 @@ describe("auto-even", () => {
 describe("this tab's own take changes", () => {
   it("reach every listener until it unsubscribes", () => {
     const seen: unknown[] = []
-    const off = onLocalTakeChange((refs) => seen.push(refs))
-    noteLocalTakeChange([{ cellId: "c1", audioId: "b" }])
+    const off = onLocalTakeChange((refs, kind) => seen.push([refs, kind]))
+    noteLocalTakeChange([{ cellId: "c1", audioId: "b" }], "new")
     off()
-    noteLocalTakeChange([{ cellId: "c1", audioId: "x" }])
-    expect(seen).toEqual([[{ cellId: "c1", audioId: "b" }]])
+    noteLocalTakeChange([{ cellId: "c1", audioId: "x" }], "changed")
+    expect(seen).toEqual([[[{ cellId: "c1", audioId: "b" }], "new"]])
   })
 })

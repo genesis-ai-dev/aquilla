@@ -222,6 +222,16 @@ describe("classifyKey", () => {
     })
   })
 
+  // AQU-2671: no row names an AI voice's full-quality WAV; it is matched by
+  // base id to the live take beside it, whatever that take's extension.
+  it("maps a .wav onto its base id, and leaves other audio keys alone", () => {
+    expect(classifyKey("projects/p1/files/f1/audio/a.wav")?.ref).toBe("f1/a#lossless-sibling")
+    expect(classifyKey("projects/p1/files/f1/audio/a.WAV")?.ref).toBe("f1/a#lossless-sibling")
+    expect(classifyKey("projects/p1/files/f1/audio/a.wav.peaks")?.ref).toBe("f1/a#lossless-sibling")
+    expect(classifyKey("projects/p1/files/f1/audio/a.opus")?.ref).toBe("f1/a.opus")
+    expect(classifyKey("projects/p1/voices/ref.wav")?.ref).toBe("ref.wav")
+  })
+
   // The allowlist is the sweep's primary safety property: a namespace it has
   // not been taught about must be invisible to it, not fair game.
   it.each([
@@ -328,6 +338,109 @@ describe("sweepOrphanedR2Objects", () => {
     const bucket = makeStubBucket([{ key: "projects/p1/files/f1/audio/take-orig.webm" }])
     await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
     expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(false)
+  })
+
+  // AQU-2671: an AI voice made in the browser uploads its compressed take plus
+  // the original WAV under the same base id (src/lib/audio/lossless-sibling.ts),
+  // and no cell_audio row names the WAV — on purpose. Unmapped, every sibling
+  // read as orphaned and was deleted the night after it was made.
+  it("keeps a live AI voice's full-quality WAV beside its webm", async () => {
+    await seed("cell_audio", [take()])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-live.webm" },
+      { key: "projects/p1/files/f1/audio/take-live.wav", size: 57344 },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.wav")).toBe(true)
+  })
+
+  it("keeps the WAV beside an opus or mp3 take, matching case-insensitively", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "take-o.opus", url: "frontier-audio://take-o.opus" }),
+      take({ audio_id: "take-m.MP3", url: "frontier-audio://take-m.MP3", event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-o.wav" },
+      { key: "projects/p1/files/f1/audio/take-m.WAV" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-o.wav")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/take-m.WAV")).toBe(true)
+  })
+
+  it("collects a deleted take's WAV with it", async () => {
+    await seed("cell_audio", [
+      take(),
+      take({ audio_id: "take-superseded.webm", url: "frontier-audio://take-superseded.webm", deleted: 1, event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-superseded.webm" },
+      { key: "projects/p1/files/f1/audio/take-superseded.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-superseded.webm")).toBe(false)
+    expect(bucket._has("projects/p1/files/f1/audio/take-superseded.wav")).toBe(false)
+  })
+
+  it("keeps a WAV whose only live take sits in another file and plays it from here", async () => {
+    // The take's own row is in f2, but its url plays f1's object, so f1's WAV
+    // sibling is still the full-quality copy of what that take plays.
+    await seed("cell_audio", [
+      take({ file_id: "f2", audio_id: "take-moved.webm", url: "/audio/p1/f1/take-live.webm" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-live.webm" },
+      { key: "projects/p1/files/f1/audio/take-live.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.webm")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/take-live.wav")).toBe(true)
+  })
+
+  it("collects a WAV no live take shares a base with", async () => {
+    await seed("cell_audio", [take()])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-live.webm" },
+      { key: "projects/p1/files/f1/audio/stranger.wav" },
+      // Same base, other file: only the take's own file is its sibling's home.
+      { key: "projects/p1/files/f2/audio/take-live.wav" },
+      // A prefix of the take's base is not the take's base.
+      { key: "projects/p1/files/f1/audio/take.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/stranger.wav")).toBe(false)
+    expect(bucket._has("projects/p1/files/f2/audio/take-live.wav")).toBe(false)
+    expect(bucket._has("projects/p1/files/f1/audio/take.wav")).toBe(false)
+  })
+
+  it("still keeps a live take that is itself a WAV, and collects a dead one", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "rec-live.wav", url: "frontier-audio://rec-live.wav" }),
+      take({ audio_id: "rec-dead.wav", url: "frontier-audio://rec-dead.wav", deleted: 1, event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/rec-live.wav" },
+      { key: "projects/p1/files/f1/audio/rec-live.wav.peaks", size: 328 },
+      { key: "projects/p1/files/f1/audio/rec-dead.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/rec-live.wav")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/rec-live.wav.peaks")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/rec-dead.wav")).toBe(false)
+  })
+
+  it("keeps the WAV the cut pieces of a deleted first piece still play", async () => {
+    await seed("cell_audio", [
+      take({ audio_id: "take-orig.webm", url: "frontier-audio://take-orig.webm", deleted: 1 }),
+      take({ audio_id: "take-orig-p2.webm", url: "frontier-audio://take-orig.webm", piece_of: "take-orig.webm", event_id: "e2" }),
+    ])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/files/f1/audio/take-orig.webm" },
+      { key: "projects/p1/files/f1/audio/take-orig.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/take-orig.wav")).toBe(true)
   })
 
   it("keeps a quick-clone clip a voice in the project library still points at", async () => {

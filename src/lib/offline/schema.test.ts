@@ -1,7 +1,7 @@
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import { beforeEach, describe, expect, it } from "vitest"
-import { cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, tables } from "./schema"
+import { CELL_COLUMNS, cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, tables } from "./schema"
 
 let store: Store<typeof schema>
 let storeId = 0
@@ -92,6 +92,36 @@ describe("cells", () => {
     const rows = store.query(tables.cells.select().where({ projectId: "proj1", fileId: "file1" }))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ value: "In the beginning...", validated: true })
+  })
+
+  it("writes every cells column through the raw upsert, and a batch updates in place", () => {
+    // The cell materializers bypass the query builder (memory), so their
+    // column list must track the table's.
+    expect([...CELL_COLUMNS].sort()).toEqual(Object.keys(tables.cells.sqliteDef.columns).sort())
+
+    const full = {
+      ...cellArgs,
+      side: "target" as const,
+      targetLang: "nl",
+      laneId: "lane-nl",
+      sourceEventId: "src-evt",
+      validated: true,
+      aiDrafted: true,
+      sequenceIndex: 7,
+      hidden: true,
+    }
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "file1", rows: [full] }))
+    const id = cellRowId("proj1", "file1", "GEN 1:1", "target", "lane-nl")
+    expect(store.query(tables.cells.select().where({ id }).first())).toEqual({ id, ...full, laneKey: "lane-nl" })
+
+    // A row sent without `hidden` (pre-AQU-1422 payload) lands it false, as the builder did.
+    const { hidden: _h, ...withoutHidden } = full
+    store.commit(events.cellsSynced({ projectId: "proj1", fileId: "file1", rows: [{ ...withoutHidden, value: "new" }] }))
+    expect(store.query(tables.cells.select().where({ id }).first())).toMatchObject({ value: "new", hidden: false })
+    expect(store.query(tables.cells.select())).toHaveLength(1)
+
+    store.commit(events.cellsRemoved({ projectId: "proj1", fileId: "file1", cells: [{ cellId: "GEN 1:1", side: "target", laneKey: "lane-nl" }] }))
+    expect(store.query(tables.cells.select())).toHaveLength(0)
   })
 
   it("removes a cell by its logical key", () => {

@@ -456,6 +456,90 @@ const events = {
 
 export { events }
 
+// Cell rows are written as raw SQL, not through the query builder. A builder
+// statement costs ~140 µs and ~23 KB of garbage per row (schema encode plus
+// SQL compile), and every event is materialized at least twice — in the page
+// and in the leader. Downloading a 31k-row Bible file this way pushed the
+// page past +2 GB, enough for macOS to start killing WebKit processes. This
+// is the same statement the builder produced: a column it isn't given takes
+// `excluded.<col>`, i.e. its default.
+export const CELL_COLUMNS = [
+  "id",
+  "projectId",
+  "fileId",
+  "cellId",
+  "side",
+  "targetLang",
+  "laneId",
+  "value",
+  "valueHtml",
+  "eventId",
+  "sourceEventId",
+  "validated",
+  "aiDrafted",
+  "sequenceIndex",
+  "canonicalRef",
+  "hidden",
+  "laneKey",
+] as const
+const quoted = (column: string) => `"${column}"`
+const UPSERT_CELL_SQL =
+  `INSERT INTO 'cells' (${CELL_COLUMNS.map(quoted).join(", ")}) VALUES (${CELL_COLUMNS.map(() => "?").join(", ")}) ` +
+  `ON CONFLICT ("id") DO UPDATE SET ${CELL_COLUMNS.filter((c) => c !== "id")
+    .map((c) => `${quoted(c)} = excluded.${quoted(c)}`)
+    .join(", ")}`
+const DELETE_CELL_SQL = `DELETE FROM 'cells' WHERE "id" = ?`
+const CELL_WRITE_TABLES: ReadonlySet<string> = new Set(["cells"])
+
+type CellUpsert = {
+  projectId: string
+  fileId: string
+  cellId: string
+  side: "source" | "target"
+  targetLang: string
+  laneId: string | null
+  laneKey: string
+  value: string | null
+  valueHtml: string | null
+  eventId: string | null
+  sourceEventId: string | null
+  validated: boolean
+  aiDrafted: boolean
+  sequenceIndex: number
+  canonicalRef: string | null
+  hidden?: boolean
+}
+
+const upsertCell = (row: CellUpsert) => ({
+  sql: UPSERT_CELL_SQL,
+  bindValues: [
+    cellRowId(row.projectId, row.fileId, row.cellId, row.side, row.laneKey),
+    row.projectId,
+    row.fileId,
+    row.cellId,
+    row.side,
+    row.targetLang,
+    row.laneId,
+    row.value,
+    row.valueHtml,
+    row.eventId,
+    row.sourceEventId,
+    row.validated ? 1 : 0,
+    row.aiDrafted ? 1 : 0,
+    row.sequenceIndex,
+    row.canonicalRef,
+    row.hidden === true ? 1 : 0,
+    row.laneKey,
+  ],
+  writeTables: CELL_WRITE_TABLES,
+})
+
+const deleteCell = (projectId: string, fileId: string, cellId: string, side: "source" | "target", laneKey: string) => ({
+  sql: DELETE_CELL_SQL,
+  bindValues: [cellRowId(projectId, fileId, cellId, side, laneKey)],
+  writeTables: CELL_WRITE_TABLES,
+})
+
 const queueRow = (row: typeof QueuedEvent.Type) =>
   tables.eventQueue.insert({ ...row, status: "pending" }).onConflict("id", "ignore")
 
@@ -482,44 +566,21 @@ const materializers = State.SQLite.materializers(events, {
     }),
   "v1.FileRemoved": ({ id }) => tables.files.delete().where({ id }),
 
-  "v2.CellSynced": (args) => {
-    const laneKey = localLaneKey(args.laneId, args.targetLang)
-    const row = { ...args, laneKey }
-    const id = cellRowId(args.projectId, args.fileId, args.cellId, args.side, laneKey)
-    return tables.cells.insert({ id, ...row }).onConflict("id", "update", row)
-  },
-  "v2.CellRemoved": ({ projectId, fileId, cellId, side, laneKey }) =>
-    tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, laneKey) }),
+  "v2.CellSynced": (args) => upsertCell({ ...args, laneKey: localLaneKey(args.laneId, args.targetLang) }),
+  "v2.CellRemoved": ({ projectId, fileId, cellId, side, laneKey }) => deleteCell(projectId, fileId, cellId, side, laneKey),
   "v2.CellsSynced": ({ projectId, fileId, rows }) =>
-    rows.map((row) => {
-      const laneKey = localLaneKey(row.laneId, row.targetLang)
-      const args = { projectId, fileId, ...row, laneKey }
-      const id = cellRowId(projectId, fileId, row.cellId, row.side, laneKey)
-      return tables.cells.insert({ id, ...args }).onConflict("id", "update", args)
-    }),
+    rows.map((row) => upsertCell({ projectId, fileId, ...row, laneKey: localLaneKey(row.laneId, row.targetLang) })),
   "v2.CellsRemoved": ({ projectId, fileId, cells }) =>
-    cells.map(({ cellId, side, laneKey }) =>
-      tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, laneKey) }),
-    ),
+    cells.map(({ cellId, side, laneKey }) => deleteCell(projectId, fileId, cellId, side, laneKey)),
 
   // AQU-1614: pre-lane eventlog entries replay onto the former default lane.
-  "v1.CellSynced": (args) => {
-    const row = { ...args, laneKey: DEFAULT_LANE_KEY, targetLang: "", laneId: null }
-    const id = cellRowId(args.projectId, args.fileId, args.cellId, args.side, DEFAULT_LANE_KEY)
-    return tables.cells.insert({ id, ...row }).onConflict("id", "update", row)
-  },
+  "v1.CellSynced": (args) => upsertCell({ ...args, laneKey: DEFAULT_LANE_KEY, targetLang: "", laneId: null }),
   "v1.CellRemoved": ({ projectId, fileId, cellId, side }) =>
-    tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, DEFAULT_LANE_KEY) }),
+    deleteCell(projectId, fileId, cellId, side, DEFAULT_LANE_KEY),
   "v1.CellsSynced": ({ projectId, fileId, rows }) =>
-    rows.map((row) => {
-      const args = { projectId, fileId, ...row, laneKey: DEFAULT_LANE_KEY, targetLang: "", laneId: null }
-      const id = cellRowId(projectId, fileId, row.cellId, row.side, DEFAULT_LANE_KEY)
-      return tables.cells.insert({ id, ...args }).onConflict("id", "update", args)
-    }),
+    rows.map((row) => upsertCell({ projectId, fileId, ...row, laneKey: DEFAULT_LANE_KEY, targetLang: "", laneId: null })),
   "v1.CellsRemoved": ({ projectId, fileId, cells }) =>
-    cells.map(({ cellId, side }) =>
-      tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, DEFAULT_LANE_KEY) }),
-    ),
+    cells.map(({ cellId, side }) => deleteCell(projectId, fileId, cellId, side, DEFAULT_LANE_KEY)),
 
   // An id already queued is left as it is: a plain insert would fail the
   // materializer, which shuts the whole store down.

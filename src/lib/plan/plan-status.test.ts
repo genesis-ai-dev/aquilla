@@ -29,6 +29,7 @@ import {
   textFileIds,
   AUDIO_JUDGED_ON_RECORDED,
   planPct,
+  planDoneCheck,
 } from "./plan-status"
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
@@ -1160,5 +1161,24 @@ describe("planUnitShowsWayToWork", () => {
 
   it("is false for a unit marked done with nothing left", () => {
     expect(planUnitShowsWayToWork(shortBy(1000, 0, { doneAt: DONE }), NOW)).toBe(false)
+  })
+})
+
+describe("planDoneCheck — what Mark done pauses on", () => {
+  // Each row: the five counts, which mediums the file owes, and the answer.
+  // The partner's Leviticus (2026-11-19) is the first: an audio-only book with
+  // every take recorded and validated paused on its text, 0 of 856.
+  it.each([
+    { name: "audio-only, finished", u: counts(856, 0, 0, 856, 856), hasAudio: true, hasText: false, short: false, pct: 100 },
+    { name: "audio-only, takes left to validate", u: counts(856, 0, 0, 856, 800), hasAudio: true, hasText: false, short: true, pct: 93 },
+    { name: "text-only, finished", u: counts(100, 100, 100), hasAudio: false, hasText: true, short: false, pct: 100 },
+    { name: "text-only, a few cells short of a big book", u: counts(1200, 1200, 1194), hasAudio: false, hasText: true, short: true, pct: 99 },
+    { name: "both, text finished and takes not", u: counts(100, 100, 100, 100, 40), hasAudio: true, hasText: true, short: true, pct: 40 },
+    { name: "both, takes finished and text not", u: counts(100, 100, 31, 100, 100), hasAudio: true, hasText: true, short: true, pct: 31 },
+    { name: "both, finished", u: counts(100, 100, 100, 100, 100), hasAudio: true, hasText: true, short: false, pct: 100 },
+    { name: "audio against a cue sheet", u: counts(646, 0, 0, 548, 548, { audioTotalCount: 548 }), hasAudio: true, hasText: false, short: false, pct: 100 },
+    { name: "an empty unit", u: counts(0, 0, 0), hasAudio: false, hasText: true, short: true, pct: 0 },
+  ])("$name", ({ u, hasAudio, hasText, short, pct }) => {
+    expect(planDoneCheck(u, hasAudio, hasText)).toEqual({ short, validatedPct: pct })
   })
 })

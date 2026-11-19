@@ -13039,7 +13039,7 @@ export function ProjectWorkspace() {
   // updates when it changes.
   const [evenOutTakeCount, setEvenOutTakeCount] = useState(0)
   const handleClearOneTakeRef = useRef<(cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => Promise<ClearResult | null>>(async () => null)
-  const openEvenOutRef = useRef<(trackIds: readonly string[]) => void>(() => {})
+  const openEvenOutRef = useRef<(trackIds: readonly string[], from?: string) => void>(() => {})
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
@@ -15178,8 +15178,8 @@ export function ProjectWorkspace() {
     () => (evenOutReq ? evenOutScopes(evenOutCells, timelineTracks, evenOutReq) : null),
     [evenOutReq, evenOutCells, timelineTracks],
   )
-  const openEvenOut = useCallback((trackIds: readonly string[]) => {
-    setEvenOutReq({ trackIds: [...trackIds], selection: [...evenOutSelection.current] })
+  const openEvenOut = useCallback((trackIds: readonly string[], from?: string) => {
+    setEvenOutReq({ trackIds: [...trackIds], selection: [...evenOutSelection.current], ...(from ? { from } : {}) })
   }, [])
   openEvenOutRef.current = openEvenOut
   const timelineEvenOut = useMemo(

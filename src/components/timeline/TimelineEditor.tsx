@@ -712,7 +712,8 @@ export interface TimelineEditorProps {
    */
   evenOut?: {
     states: ReadonlyMap<string, EvenState>
-    open(trackIds: readonly string[]): void
+    /** `from`: the track whose ⋯ or ≈ opened it (evidence 71F). */
+    open(trackIds: readonly string[], from?: string): void
     /** The tracks selected here, so the file menu's window can offer them. */
     selectionChanged?(trackIds: readonly string[]): void
   }
@@ -1575,7 +1576,7 @@ export function TimelineEditor({
   function openEvenOutFrom(trackId: string) {
     if (!evenOut) return
     const chosen = selectedTrackIdSet.has(trackId) ? menuTargets(trackId).filter((tr) => evenOutTrackIds.has(tr.id)).map((tr) => tr.id) : []
-    evenOut.open(chosen.length >= 2 ? chosen : [trackId])
+    evenOut.open(chosen.length >= 2 ? chosen : [trackId], trackId)
   }
   /** AQU-2252: "Sets line lengths" — only while the file follows its
    *  recordings, where a track's takes are what set a line's length. */
@@ -1891,7 +1892,7 @@ export function TimelineEditor({
       onPromote: onPromoteTrackToRows,
       ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
       folders: folderTracks,
-      ...(evenOut ? { evenOut: { trackIds: evenOutTrackIds, open: evenOut.open } } : {}),
+      ...(evenOut ? { evenOut: { trackIds: evenOutTrackIds, open: (ids: readonly string[]) => evenOut.open(ids, track.id) } } : {}),
       editing: trackEditing
         ? {
             onLeaveFolder: (trackIds) => {

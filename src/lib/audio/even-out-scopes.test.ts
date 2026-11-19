@@ -57,6 +57,15 @@ describe("the window's scopes", () => {
     expect(three.scopes.map((x) => x.pick)).toEqual(["file", "sel"])
   })
 
+  // Evidence 71F: opened from one track's ⋯ (or ≈) while three are selected,
+  // the window also offers that track.
+  it("from a track in a selection of three: file, that track, and the selection", () => {
+    const s = evenOutScopes(CELLS, TRACKS, { trackIds: ["target-audio", "simon", "narr"], selection: ["target-audio", "simon", "narr"], from: "simon" })
+    expect(s.scopes.map((x) => x.pick)).toEqual(["file", "track", "sel"])
+    expect(s.scopes[1].names).toEqual(["Simon"])
+    expect(s.start).toBe("sel")
+  })
+
   it("from the file menu with three selected: file, the first selected track, and the selection", () => {
     const s = evenOutScopes(CELLS, TRACKS, { trackIds: [], selection: ["target-audio", "simon", "narr"] })
     expect(s.scopes.map((x) => x.pick)).toEqual(["file", "track", "sel"])

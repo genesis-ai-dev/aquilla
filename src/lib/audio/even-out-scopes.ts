@@ -26,6 +26,9 @@ export interface EvenOutScope {
 export interface EvenOutRequest {
   trackIds: readonly string[]
   selection: readonly string[]
+  /** Evidence 71F: the track whose ⋯ or ≈ opened it, when it was opened on a
+   *  selection; offered on its own too. */
+  from?: string
 }
 
 const mixKinds = new Set(["target-audio", "audio"])
@@ -60,7 +63,11 @@ export function evenOutScopes(
   const selected = pickIn(req.selection)
   // One track: the one it was opened on, else (from the file menu) the first
   // selected one.
-  const one = opened.length === 1 ? opened[0] : req.trackIds.length === 0 ? (selected[0] ?? null) : null
+  const one = opened.length === 1
+    ? opened[0]
+    : req.trackIds.length === 0
+      ? (selected[0] ?? null)
+      : (req.from ? (byId.get(req.from) ?? null) : null)
   if (one) scopes.push(scopeOf("track", cells, [byId.get(one.id)!]))
   // The selection: only while two or more tracks holding takes are selected
   // (opened on several tracks, those are the selection).

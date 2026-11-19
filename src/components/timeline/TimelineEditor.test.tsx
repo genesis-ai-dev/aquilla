@@ -1171,7 +1171,7 @@ describe("TimelineEditor", () => {
       const ev = screen.getByTestId("tl-even-target-audio")
       expect(ev).toHaveAttribute("data-even", "part")
       fireEvent.click(ev)
-      expect(open).toHaveBeenCalledExactlyOnceWith(["target-audio"])
+      expect(open).toHaveBeenCalledExactlyOnceWith(["target-audio"], "target-audio")
     })
 
     it("has no ≈ without the clearance, or on a track with no takes", () => {

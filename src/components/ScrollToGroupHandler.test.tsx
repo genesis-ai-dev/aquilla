@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { act, render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRef, useEffect, type ReactNode } from "react"
 import { EditorTable, type EditorTableHandle } from "./EditorTable"
@@ -323,7 +323,10 @@ describe("ScrollToGroupHandler — section requests (AQU-1244)", () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
-    expect(cellRow("cell-1pe-ch3-a")).toBeTruthy()
+    // The workspace learns of a whole-file change a couple of frames after the
+    // store does (AQU-2654, `WHOLE_FILE_NOTIFY_MS`), so wait for the page
+    // rather than for a tick: a fixed wait made this depend on machine load.
+    await waitFor(() => expect(cellRow("cell-1pe-ch3-a")).toBeTruthy())
     expect(cellRow("cell-1pe-ch3-b")).toBeTruthy()
     // Chapter 1 is the file's FIRST milestone — the page it wrongly landed on.
     expect(cellRow("cell-1pe-ch1-a")).toBeNull()
@@ -380,7 +383,7 @@ describe("ScrollToGroupHandler — section requests (AQU-1244)", () => {
 
     // The request survived all three phases and landed on the REQUESTED
     // milestone of the new file, not on its first.
-    expect(cellRow("cell-other-ch3-a")).toBeTruthy()
+    await waitFor(() => expect(cellRow("cell-other-ch3-a")).toBeTruthy())
     expect(cellRow("cell-other-ch3-b")).toBeTruthy()
     expect(cellRow("cell-other-ch1-a")).toBeNull()
   })

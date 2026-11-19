@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTimelineOriginPx } from "./timeline-origin"
 import type { ReactNode } from "react"
-import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, EqualApproximately, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, TriangleAlert, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -75,6 +75,7 @@ import type { ClipPreviewHandle } from "@/lib/audio/clip-preview"
 import { useTargetChipPeaks } from "./useTargetChipPeaks"
 import { chipWaveformWindow } from "@/lib/timeline/chip-waveform"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
+import { takeGain, waveLevelScale } from "@/lib/audio/take-gain"
 import type { PeaksTarget } from "@/lib/audio/peaks-loader"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
@@ -510,6 +511,12 @@ function TargetAudioChip({
   // This chip's own take: its length, its trims and its placement. The geometry
   // and the drag both read it, so it is resolved once here.
   const chipAtt = cell.attachments?.[chip.item.audioId]
+  // AQU-2664 (board 72): an evened take wears ≈ on its name bar, or the amber
+  // mark when it couldn't go all the way; its waveform is drawn at the level
+  // it plays.
+  const chipGain = takeGain(chipAtt)
+  const evenMark = chipGain.evened && chipGain.measured ? (chipGain.held ? "held" : "evened") : null
+  const waveScale = waveLevelScale(chipAtt)
   // AQU-1767: the first (or only) piece keeps the chip's historical test id;
   // later pieces add "-p2", "-p3"… so every piece is addressable.
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
@@ -1502,6 +1509,7 @@ function TargetAudioChip({
         // variant of each. No colour logic here at all.
         <TargetChipWaveform
           peaks={waveform.peaks}
+          level={waveScale}
           x0={waveform.x0}
           x1={waveform.x1}
           chipH={chipH}
@@ -1625,6 +1633,29 @@ function TargetAudioChip({
                 onDoubleClick={renameFromBar}
               >
                 {barName}
+              </span>
+            )}
+            {/* AQU-2664 (board 72): after the name, in the bar's own ink. */}
+            {evenMark === "evened" && (
+              <span
+                data-testid={`tl-target-${testKey}-evened`}
+                role="img"
+                aria-label={t("editor.evenOut.clipEvened")}
+                title={t("editor.evenOut.clipEvened")}
+                className="flex flex-none"
+              >
+                <EqualApproximately className={barH >= 14 ? "h-2.5 w-2.5" : "h-[9px] w-[9px]"} strokeWidth={2.6} aria-hidden />
+              </span>
+            )}
+            {evenMark === "held" && (
+              <span
+                data-testid={`tl-target-${testKey}-even-held`}
+                role="img"
+                aria-label={t("editor.evenOut.clipHeld")}
+                title={t("editor.evenOut.clipHeld")}
+                className="flex flex-none text-amber-900 dark:text-amber-300"
+              >
+                <TriangleAlert className={barH >= 14 ? "h-2.5 w-2.5" : "h-[9px] w-[9px]"} strokeWidth={2.4} aria-hidden />
               </span>
             )}
             {/* SUB-48: an unmeasurable clip says so instead of quietly

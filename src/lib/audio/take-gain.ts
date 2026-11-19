@@ -129,3 +129,20 @@ export function takeGain(att: TakeGainFields | null | undefined): TakeGain {
 export function takeGainDb(att: TakeGainFields | null | undefined): number {
   return takeGain(att).gainDb
 }
+
+/** The lowest a measured take's waveform is drawn (board 72's floor), so a
+ *  very quiet take still shows its shape. */
+const WAVE_FLOOR = 0.12
+
+/**
+ * AQU-2664 (board 72): how tall a clip's waveform is drawn, 0.12…1 of the
+ * clip — "at the level it plays": the recording's true peak after evening out
+ * and its own volume (the peaks are normalised so the loudest bin is 1, which
+ * is that peak). A take with no reading draws full height, as before.
+ */
+export function waveLevelScale(att: TakeGainFields | null | undefined): number {
+  const peak = num(att?.truePeakDb)
+  if (peak == null || num(att?.loudnessLufs) == null) return 1
+  const scale = Math.pow(10, (peak + takeGainDb(att)) / 20)
+  return Math.max(WAVE_FLOOR, Math.min(1, scale))
+}

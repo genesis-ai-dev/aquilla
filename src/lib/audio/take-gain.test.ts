@@ -5,7 +5,7 @@
 // The correction depends on the recording and the target ALONE, so a user's
 // volume reads relative to the evened level: 0 dB means "as evened".
 import { describe, expect, it } from "vitest"
-import { DEFAULT_EVEN_TARGET_LUFS, MAX_EVEN_CUT_DB, MAX_EVEN_RAISE_DB, PEAK_CEILING_DBTP, takeGain, takeGainDb } from "./take-gain"
+import { DEFAULT_EVEN_TARGET_LUFS, MAX_EVEN_CUT_DB, MAX_EVEN_RAISE_DB, PEAK_CEILING_DBTP, takeGain, takeGainDb, waveLevelScale } from "./take-gain"
 import { SILENT_LUFS } from "./loudness"
 
 describe("a take's gain", () => {
@@ -100,5 +100,28 @@ describe("a take's gain", () => {
 
   it("reads stored nulls as absent", () => {
     expect(takeGainDb({ gainDb: null, loudnessLufs: null, truePeakDb: null, evenTargetLufs: null })).toBe(0)
+  })
+})
+
+// AQU-2664 (board 72): a clip's waveform is drawn at the level it plays — its
+// recording's peak after evening out and its own volume.
+describe("the height a clip's waveform is drawn at", () => {
+  it("is full for a take with no reading, as today", () => {
+    expect(waveLevelScale({})).toBe(1)
+    expect(waveLevelScale({ loudnessLufs: -20 })).toBe(1)
+  })
+
+  it("follows the peak as it plays: quiet small, evened taller", () => {
+    const quiet = { loudnessLufs: -27, truePeakDb: -12 }
+    expect(waveLevelScale(quiet)).toBeCloseTo(Math.pow(10, -12 / 20), 6)
+    // Evened: +11 dB, so it peaks at −1 dBTP.
+    expect(waveLevelScale({ ...quiet, evenTargetLufs: -16 })).toBeCloseTo(Math.pow(10, -1 / 20), 6)
+    // Its own volume on top.
+    expect(waveLevelScale({ ...quiet, evenTargetLufs: -16, gainDb: -6 })).toBeCloseTo(Math.pow(10, -7 / 20), 6)
+  })
+
+  it("never draws below 0.12 or above full", () => {
+    expect(waveLevelScale({ loudnessLufs: -60, truePeakDb: -50 })).toBe(0.12)
+    expect(waveLevelScale({ loudnessLufs: -10, truePeakDb: 0, gainDb: 6 })).toBe(1)
   })
 })

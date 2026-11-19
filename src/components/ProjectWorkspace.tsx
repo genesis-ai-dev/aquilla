@@ -13020,6 +13020,7 @@ export function ProjectWorkspace() {
   // AQU-2664: the Even out window's takes and opener, set further down (the
   // cells that carry the takes are worked out there).
   const evenOutCellsRef = useRef<CellData[]>([])
+  const handleClearOneTakeRef = useRef<(cellId: string, audioId: string, names: { take: string; line: string; volume: string }) => Promise<ClearResult | null>>(async () => null)
   const openEvenOutRef = useRef<(trackIds: readonly string[]) => void>(() => {})
   const actionCtx = useMemo(() => ({
     project: project!,
@@ -14329,6 +14330,9 @@ export function ProjectWorkspace() {
       setLevel: handleGainTarget,
       evenOut: handleEvenOut,
       clearEvenOut: handleClearEvenOut,
+      // AQU-2664 (board 73D): the Station's Clear, with its toast. Through a
+      // ref: the toast helper is set up further down.
+      clearEvenOutTake: (cellId, audioId, names) => handleClearOneTakeRef.current(cellId, audioId, names),
       removeNoise: async (cellId, audioId) => {
         const cur = readTake(cellId, audioId)
         if (!cur || !frontierSession) return null
@@ -15205,7 +15209,6 @@ export function ProjectWorkspace() {
     if (r && r.cleared > 0) evenOutToast(t("editor.evenOut.clearedTake", names), r.stepId)
     return r
   }, [handleClearEvenOut, evenOutToast, t])
-  const handleClearOneTakeRef = useRef(handleClearOneTake)
   handleClearOneTakeRef.current = handleClearOneTake
 
   // QUESTION 89 — the ONE switch (lib/audio/even-out.ts AUTO_EVEN_CHANGED_TAKES),

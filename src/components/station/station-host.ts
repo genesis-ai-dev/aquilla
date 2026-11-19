@@ -43,6 +43,9 @@ export interface StationHost {
   evenOut?(takes: readonly TakeRef[], opts?: EvenOutOptions): Promise<EvenOutResult | null>
   /** AQU-2664: take evening out off these takes, as one Undo step. */
   clearEvenOut?(takes: readonly TakeRef[]): Promise<ClearResult | null>
+  /** AQU-2664 (board 73D): the Station's Clear on the take open here, with its
+   *  toast ("Take 2 on 694 is no longer evened. Your volume (−2 dB) is kept."). */
+  clearEvenOutTake?(cellId: string, audioId: string, names: { take: string; line: string; volume: string }): Promise<ClearResult | null>
   /** Item 2 / slice 9: clean the take's noise into a new version (the Remove
    *  noise action, keeping its track, kept part and places); its new id. */
   removeNoise(cellId: string, audioId: string): Promise<string | null>

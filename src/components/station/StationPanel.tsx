@@ -40,6 +40,7 @@ import {
   useStationTarget,
   type StationTarget,
 } from "@/lib/station/target"
+import { StationEvenLine } from "./StationEvenLine"
 import type { StationHost, StationTake } from "./station-host"
 import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice, type SaveHow } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
@@ -534,6 +535,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             hint={editable ? t("editor.station.hint", { mod: modKey() }) : t("editor.station.hintListen")}
             onMessage={setMessage}
           />
+          {/* AQU-2664 (board 72): one line under the transport. */}
+          <StationEvenLine host={host} take={take} target={target} ownDb={ed.level.gainDb} editable={editable && !recording} />
           <StationHistory
             host={host}
             take={take}
@@ -730,6 +733,8 @@ function StationControlsHelp() {
     [t("editor.station.helpTrimTerm"), t("editor.station.helpTrim")],
     [t("editor.station.helpEditTerm"), t("editor.station.helpEdit")],
     [t("editor.station.helpVolumeTerm"), t("editor.station.helpVolume")],
+    // AQU-2664 (board 72F): evening out comes before your volume.
+    [t("editor.station.helpEvenTerm"), t("editor.station.helpEven")],
     [t("editor.station.helpFadesTerm"), t("editor.station.helpFades")],
     [t("editor.station.helpSaveTerm"), t("editor.station.helpSave")],
     [t("editor.station.helpKeysTerm"), t("editor.station.helpKeys", { mod: modKey() })],

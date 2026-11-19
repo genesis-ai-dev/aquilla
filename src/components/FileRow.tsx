@@ -43,6 +43,8 @@ export interface FileRowProps {
   /** Opens the Export dialog for this file. */
   onExport?: () => void
   onDownloadOriginal?: () => void
+  /** AQU-2476: Download original stays, disabled, when the export floor refuses it. */
+  downloadOriginalDisabledReason?: string
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
   /**
@@ -75,7 +77,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
+    onMove, onExport, onDownloadOriginal, downloadOriginalDisabledReason, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
     onApplySuggestion, unassigned = false, reorder,
   } = props
   const t = useT()
@@ -145,6 +147,7 @@ export function FileRow(props: FileRowProps) {
       onMove={onMove}
       onExport={onExport}
       onDownloadOriginal={onDownloadOriginal}
+      downloadOriginalDisabledReason={downloadOriginalDisabledReason}
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onReimport={onReimport}

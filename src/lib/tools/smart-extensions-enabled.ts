@@ -7,17 +7,22 @@
  */
 
 import { useEffect, useState } from "react"
-import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { readProjectSettingsShared } from "@/lib/sync/project-settings-shared-read"
 import { smartExtensionsEnabledIn } from "../../../shared/tools/smart-extensions-flag"
 
 const EVENT = "aquilla:smart-extensions-changed"
 const cache = new Map<string, Promise<boolean>>()
+// Projects whose switch was flipped since their last read: the re-read follows
+// a write, so it must not be answered by a settings read from before it.
+const flipped = new Set<string>()
 
 export function readSmartExtensionsEnabled(jwt: string, projectId: string): Promise<boolean> {
   let p = cache.get(projectId)
   if (!p) {
-    p = fetchProjectSettings(jwt, projectId)
-      .then((s) => smartExtensionsEnabledIn(s?.settings ?? null))
+    // AQU-2654: the same GET the page's useProjectSettings instances send, so
+    // it rides on theirs instead of being one more.
+    p = readProjectSettingsShared(jwt, projectId, flipped.delete(projectId) ? "afterWrite" : "mount")
+      .then((out) => smartExtensionsEnabledIn(out.ok ? (out.value?.settings ?? null) : null))
       .catch(() => false)
     cache.set(projectId, p)
   }
@@ -25,7 +30,10 @@ export function readSmartExtensionsEnabled(jwt: string, projectId: string): Prom
 }
 
 export function notifySmartExtensionsChanged(projectId: string | undefined): void {
-  if (projectId) cache.delete(projectId)
+  if (projectId) {
+    cache.delete(projectId)
+    flipped.add(projectId)
+  }
   window.dispatchEvent(new CustomEvent(EVENT, { detail: projectId ?? null }))
 }
 

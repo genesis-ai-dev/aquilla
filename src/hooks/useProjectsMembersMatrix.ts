@@ -48,6 +48,81 @@ export interface UseProjectsMembersMatrix {
   refresh: () => Promise<void>;
 }
 
+interface FetchedMatrix {
+  jwt: string;
+  orgId: number | null;
+  membersByProject: Map<string, ProjectMember[]>;
+}
+
+/**
+ * Join the batched members-by-project response with the project columns and
+ * the org roster into the sparse matrix. Pure, so it runs in a memo.
+ */
+export function buildMembersMatrix(
+  projects: CloudProjectSummary[],
+  orgMembers: ReadonlyArray<{ userId: number; username: string }>,
+  membersByProject: ReadonlyMap<string, ProjectMember[]>,
+): MembersMatrix {
+  // Build the sparse cell map and the deduped member list in one pass.
+  const cells = new Map<number, Map<string, MatrixCell>>();
+  const memberByUserId = new Map<number, MatrixMember>();
+  const ownerCountByProject = new Map<string, number>();
+
+  for (const project of projects) {
+    const members = membersByProject.get(project.id) ?? [];
+    let ownerCount = 0;
+    for (const m of members) {
+      // Track the user as a row.
+      if (!memberByUserId.has(m.userId)) {
+        memberByUserId.set(m.userId, {
+          userId: m.userId,
+          username: m.username,
+          isOrgInherited: m.role.source === "org",
+        });
+      } else {
+        // If we've seen this user via override or creator on any project,
+        // they're not purely org-inherited.
+        if (m.role.source !== "org") {
+          const existing = memberByUserId.get(m.userId)!;
+          if (existing.isOrgInherited) {
+            memberByUserId.set(m.userId, { ...existing, isOrgInherited: false });
+          }
+        }
+      }
+
+      // Cell.
+      if (!cells.has(m.userId)) cells.set(m.userId, new Map());
+      cells.get(m.userId)!.set(project.id, { role: m.role, secondarySources: m.secondarySources ?? [] });
+
+      if (m.role.level >= 700) ownerCount++;
+    }
+    ownerCountByProject.set(project.id, ownerCount);
+  }
+
+  // Union org members in as rows. Anyone in the org but not yet
+  // observed via a project's effective-members list is still on the
+  // operator's payroll — they should appear in the matrix with empty
+  // cells, distinct from "this person isn't in your org at all."
+  // isOrgInherited stays true because their access on any project
+  // would come from the org tier (or be absent if the project's
+  // org_id is null).
+  for (const om of orgMembers) {
+    if (!memberByUserId.has(om.userId)) {
+      memberByUserId.set(om.userId, {
+        userId: om.userId,
+        username: om.username,
+        isOrgInherited: true,
+      });
+    }
+  }
+
+  const members = [...memberByUserId.values()].sort((a, b) =>
+    a.username.localeCompare(b.username)
+  );
+
+  return { projects, members, cells, ownerCountByProject };
+}
+
 /**
  * Pulls effective members for every accessible project in the org via ONE
  * batched request (AQU-218 — fetchOrgMembersMatrix), then aggregates into a
@@ -82,14 +157,21 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   // it no longer gets a column here.
   const { projects, error: projectsError } = useAccessibleProjects(orgId);
   const { members: orgMembers } = useOrgMembers(orgId);
-  const [matrix, setMatrix] = useState<MembersMatrix | null>(null);
+  // AQU-2654: what the server said, kept apart from the two lists it is
+  // joined with. The org id, the project list and the org roster each resolve
+  // on their own, and when the fetch depended on all three the batched matrix
+  // (the heaviest read on the page) was sent once per arrival — three times to
+  // open the view. Now it is sent once per (session, org); the lists are
+  // joined in a memo, and a list that names something the response has never
+  // heard of asks again.
+  const [fetched, setFetched] = useState<FetchedMatrix | null>(null);
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
+  const requestRef = useRef(0);
 
-  // Stable identity keys so the callback/effect only re-fires when the actual
-  // set of IDs changes, not on every render (both arrays are new references
-  // every render cycle since they come from useState in their respective hooks).
+  // Stable identity keys so the join only re-runs when the actual set of IDs
+  // changes, not when a hook hands back an equal list in a new array.
   const projectsKey = useMemo(
     () => projects.map((p) => p.id).join(","),
     [projects],
@@ -99,16 +181,6 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     [orgMembers],
   );
 
-  // Keep refs to the latest values so the callback can read them without
-  // them being listed as deps (which would create a new function on every
-  // array mutation — defeating the key-based stability above).
-  const projectsRef = useRef(projects);
-  projectsRef.current = projects;
-  const orgMembersRef = useRef(orgMembers);
-  orgMembersRef.current = orgMembers;
-  const orgIdRef = useRef(orgId);
-  orgIdRef.current = orgId;
-
   // Reset aliveRef on each effect run — see useOrg for the StrictMode
   // rationale (cleanup-only would permanently flip it false in dev).
   useEffect(() => {
@@ -117,18 +189,15 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   }, []);
 
   const refresh = useCallback(async () => {
+    const request = ++requestRef.current;
+    const current = () => aliveRef.current && requestRef.current === request;
     if (!jwt) {
-      if (aliveRef.current) {
-        setMatrix(null);
+      if (current()) {
+        setFetched(null);
         setError(null);
       }
       return;
     }
-    // Read latest values via refs — safe because refresh is always called from
-    // an effect that was scheduled after these refs were updated.
-    const projects = projectsRef.current;
-    const orgMembers = orgMembersRef.current;
-    const orgId = orgIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -141,83 +210,50 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
       const membersByProject = orgId
         ? await fetchOrgMembersMatrix(jwt, orgId)
         : new Map<string, ProjectMember[]>();
-
-      // Build the sparse cell map and the deduped member list in one pass.
-      const cells = new Map<number, Map<string, MatrixCell>>();
-      const memberByUserId = new Map<number, MatrixMember>();
-      const ownerCountByProject = new Map<string, number>();
-
-      for (const project of projects) {
-        const members = membersByProject.get(project.id) ?? [];
-        let ownerCount = 0;
-        for (const m of members) {
-          // Track the user as a row.
-          if (!memberByUserId.has(m.userId)) {
-            memberByUserId.set(m.userId, {
-              userId: m.userId,
-              username: m.username,
-              isOrgInherited: m.role.source === "org",
-            });
-          } else {
-            // If we've seen this user via override or creator on any project,
-            // they're not purely org-inherited.
-            if (m.role.source !== "org") {
-              const existing = memberByUserId.get(m.userId)!;
-              if (existing.isOrgInherited) {
-                memberByUserId.set(m.userId, { ...existing, isOrgInherited: false });
-              }
-            }
-          }
-
-          // Cell.
-          if (!cells.has(m.userId)) cells.set(m.userId, new Map());
-          cells.get(m.userId)!.set(project.id, { role: m.role, secondarySources: m.secondarySources ?? [] });
-
-          if (m.role.level >= 700) ownerCount++;
-        }
-        ownerCountByProject.set(project.id, ownerCount);
-      }
-
-      // Union org members in as rows. Anyone in the org but not yet
-      // observed via a project's effective-members list is still on the
-      // operator's payroll — they should appear in the matrix with empty
-      // cells, distinct from "this person isn't in your org at all."
-      // isOrgInherited stays true because their access on any project
-      // would come from the org tier (or be absent if the project's
-      // org_id is null).
-      for (const om of orgMembers) {
-        if (!memberByUserId.has(om.userId)) {
-          memberByUserId.set(om.userId, {
-            userId: om.userId,
-            username: om.username,
-            isOrgInherited: true,
-          });
-        }
-      }
-
-      const sortedMembers = [...memberByUserId.values()].sort((a, b) =>
-        a.username.localeCompare(b.username)
-      );
-
-      if (aliveRef.current) {
-        setMatrix({
-          projects,
-          members: sortedMembers,
-          cells,
-          ownerCountByProject,
-        });
-      }
+      if (current()) setFetched({ jwt, orgId, membersByProject });
     } catch (e) {
-      if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
+      if (current()) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (current()) setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, orgId, projectsKey, orgMembersKey]);
+  }, [jwt, orgId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A project or an org member the response does not mention arrived after it
+  // (created or invited elsewhere): the snapshot is older than the lists, so
+  // read it again. The lists landing after the first response name nothing
+  // new, which is the common case and costs no request.
+  const staleKey = useMemo(() => {
+    if (!fetched || fetched.jwt !== jwt || fetched.orgId !== orgId || orgId == null) return null;
+    const known = new Set<number>();
+    for (const members of fetched.membersByProject.values()) {
+      for (const m of members) known.add(m.userId);
+    }
+    const unknownProject = projects.some((p) => !fetched.membersByProject.has(p.id));
+    const unknownMember = orgMembers.some((m) => !known.has(m.userId));
+    return unknownProject || unknownMember ? `${projectsKey}|${orgMembersKey}` : null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetched, jwt, orgId, projectsKey, orgMembersKey]);
+  const refetchedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (staleKey == null || refetchedForRef.current === staleKey) return;
+    refetchedForRef.current = staleKey;
+    void refresh();
+  }, [staleKey, refresh]);
+
+  const matrix = useMemo(
+    () =>
+      fetched && fetched.jwt === jwt && fetched.orgId === orgId
+        ? buildMembersMatrix(projects, orgMembers, fetched.membersByProject)
+        : null,
+    // Keyed on the id sets, not the arrays, so rows keep their identity (and
+    // the memoized matrix rows their props) across equal re-reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetched, jwt, orgId, projectsKey, orgMembersKey],
+  );
 
   // The matrix refresh can legitimately succeed with zero projects. Do not
   // let that success erase a project-directory failure that produced the

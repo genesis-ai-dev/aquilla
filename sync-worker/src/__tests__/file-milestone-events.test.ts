@@ -4,8 +4,9 @@
 //
 // What matters here, and why each case exists:
 //
-//   * the MAINTAINER floor, because a division relayouts the navigator for
-//     every collaborator who opens the file;
+//   * the static PROJECT_LEAD floor — the lowest rung the project's
+//     milestoneFloor can admit. The tier (maintainer unless opened) is
+//     enforced on the events route; see milestone-floor-enforcement.test.ts;
 //   * blank-name refusal, because the acceptance criteria require the server
 //     to refuse one and not only the dialog;
 //   * that a refusal is RETURNED rather than thrown, because a throw would
@@ -106,24 +107,27 @@ function expectRejected(
   expect(outcome.reason).toMatch(message)
 }
 
-describe('file.milestone.* — role floor', () => {
+describe('file.milestone.* — static role floor', () => {
+  // The static floor is the lowest rung the setting can admit. A project
+  // that never opens milestoneFloor still refuses a lead, but that refusal
+  // is the events route's, not authorize()'s.
   it.each([
     ['an owner (700)', 700, true],
     ['a maintainer (600)', 600, true],
-    ['a project lead (500)', 500, false],
+    ['a project lead (500)', 500, true],
     ['a contributor (400)', 400, false],
     ['a viewer (100)', 100, false],
-  ])('%s may set a milestone: %o', async (_label, role, allowed) => {
+  ])('%s passes the static floor for setting a milestone: %o', async (_label, role, allowed) => {
     const result = await authorizeRaw('file.milestone.set', VALID_SET, role)
     expect(result.ok).toBe(allowed)
     if (!result.ok) expect(result.status).toBe(403)
   })
 
-  it('holds the same floor for removing one', async () => {
+  it('holds the same static floor for removing one', async () => {
     const lead = await authorizeRaw('file.milestone.remove', { milestoneId: 'ms-1' }, 500)
-    expect(lead.ok).toBe(false)
-    const maintainer = await authorizeRaw('file.milestone.remove', { milestoneId: 'ms-1' }, 600)
-    expect(maintainer.ok).toBe(true)
+    expect(lead.ok).toBe(true)
+    const contributor = await authorizeRaw('file.milestone.remove', { milestoneId: 'ms-1' }, 400)
+    expect(contributor.ok).toBe(false)
   })
 })
 

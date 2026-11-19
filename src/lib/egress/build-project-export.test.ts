@@ -617,3 +617,73 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
     ])
   })
 })
+
+// AQU-2552 (review r6): the zip hands none of its exporters the hiding, so its
+// text files carry a hidden line like any other; the Word and PowerPoint files
+// in it do the same, rather than half honour it.
+describe("buildProjectExport — hidden lines in Word and PowerPoint files", () => {
+  const WORD_XML = "word/document.xml"
+  const SLIDE_XML = "ppt/slides/slide1.xml"
+  const lines = (memberPath: string, blockPath: string, hidden: number[]) =>
+    ["Un.", "Deux.", "Trois."].map((translated, k) => cell({
+      id: `l${k}`,
+      original: ["One.", "Two.", "Three."][k],
+      translated,
+      translatedHtml: `<p>${translated}</p>`,
+      group: "g1",
+      ...(hidden.includes(k) ? { hidden: true } : {}),
+      metadata: { aquillaImport: { sourceLocator: { kind: "package-block", memberPath, blockPath, segment: k + 1 }, physicalOrder: k + 1 } },
+    }))
+  const zipOf = async (path: string, xml: string) => {
+    const { default: JSZip } = await import("jszip")
+    const zip = new JSZip()
+    zip.file(path, xml)
+    return zip.generateAsync({ type: "arraybuffer" })
+  }
+  const textOf = async (data: unknown, path: string) => {
+    const { default: JSZip } = await import("jszip")
+    const zip = await JSZip.loadAsync(await (data as Blob).arrayBuffer())
+    return [...(await zip.file(path)!.async("string")).matchAll(/<(?:w|a):t(?:\s[^>]*)?>([^<]*)</g)].map((m) => m[1]).join("|")
+  }
+
+  it.each([
+    ["one hidden line", [1]],
+    ["every line hidden", [0, 1, 2]],
+  ])("Word writes every line's translation with %s, as the zip's text file does", async (_name, hidden) => {
+    const docx = await zipOf(
+      WORD_XML,
+      '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>One. Two. Three.</w:t></w:r></w:p></w:body></w:document>',
+    )
+    const cells = lines(WORD_XML, "w:p[1]", hidden)
+    const deps = makeDeps({
+      loadCellFiles: async ({ projectFiles }) => projectFiles.map((f) => ({ fileId: f.id, fileName: f.name, cells })),
+      fetchSidecar: async () => docx,
+      exportDocxFn: undefined,
+    })
+    const { entries } = await buildProjectExport(sel([{ id: "f1", name: "Doc.docx", type: "docx" }]), opts(), deps)
+    expect(await textOf(entries[0].data, WORD_XML)).toBe("Un. Deux. Trois.")
+    const text = await buildProjectExport(sel([{ id: "f1", name: "Doc.docx", type: "docx" }]), opts({ textMode: "convert" }), deps)
+    expect(await (text.entries[0].data as Blob).text()).toContain("Deux.")
+  })
+
+  it.each([
+    ["one hidden line", [1]],
+    ["every line hidden", [0, 1, 2]],
+  ])("PowerPoint writes every line's translation with %s", async (_name, hidden) => {
+    const pptx = await zipOf(
+      SLIDE_XML,
+      '<?xml version="1.0"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:bodyPr/><a:p><a:r><a:t>One. Two. Three.</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>',
+    )
+    const cells = lines(SLIDE_XML, "p:sp[1]/p:txBody/a:p[1]", hidden)
+    const { entries } = await buildProjectExport(
+      sel([{ id: "f1", name: "Deck.pptx", type: "pptx" }]),
+      opts(),
+      makeDeps({
+        loadCellFiles: async ({ projectFiles }) => projectFiles.map((f) => ({ fileId: f.id, fileName: f.name, cells })),
+        fetchSidecar: async () => pptx,
+        exportPptxFn: undefined,
+      }),
+    )
+    expect(await textOf(entries[0].data, SLIDE_XML)).toBe("Un. Deux. Trois.")
+  })
+})

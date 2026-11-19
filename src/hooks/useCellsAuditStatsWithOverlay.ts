@@ -55,8 +55,9 @@ export function useCellsAuditStatsWithOverlay(
   revalidate: () => void
   revalidateCellStats: (cellId: string) => void
   applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
+  applyValidationCellStats: (record: Pick<OutboxRecord, "event">) => boolean
 } {
-  const { byCellId: base, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats } = useCellsAuditStats(opts)
+  const { byCellId: base, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats, applyValidationCellStats } = useCellsAuditStats(opts)
 
   // `includeFailed` so a record that was QUARANTINED can be told apart from
   // one that FLUSHED: only the latter earns a shadow. Quarantined records are
@@ -112,5 +113,5 @@ export function useCellsAuditStatsWithOverlay(
   }
   const byCellId = out as Map<string, CellAuditStats>
 
-  return { byCellId, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  return { byCellId, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats, applyValidationCellStats }
 }

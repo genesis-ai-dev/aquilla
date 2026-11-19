@@ -17,7 +17,7 @@ import { playingInSlot, recordSlotChoice } from "@/lib/history/take-steps"
 import { nextTakeLabel } from "./TakesStrip"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { LineDelivery, ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 
@@ -40,6 +40,8 @@ export interface RegenerateVoiceArgs {
   /** AQU-2212: say them in THIS voice — a pick that acts before the cast
    *  settings catch up. Absent: the cast voice, as above. */
   voiceId?: string
+  /** AQU-2577: how to deliver this take (speed, tags), over the line's stored delivery. */
+  lineDelivery?: LineDelivery
   surface: TelemetrySurface
 }
 
@@ -79,6 +81,7 @@ async function regenerate(args: RegenerateVoiceArgs): Promise<boolean> {
     text: args.text,
     voiceCellId: args.voiceCellId ?? undefined,
     ...(args.voiceId ? { voiceId: args.voiceId } : {}),
+    ...(args.lineDelivery ? { lineDelivery: args.lineDelivery } : {}),
     // The voice lands on the track asked for, not always on the default row's
     // generated-voice slot.
     slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,

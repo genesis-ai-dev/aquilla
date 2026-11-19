@@ -28,6 +28,7 @@ import {
   type IdSet,
 } from "./lib/seed-tables"
 import { assertSeedTargetAllowed } from "./lib/seed-target-guard"
+import { MAINTENANCE_SESSION_OPTIONS } from "./maintenance-session"
 import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -159,7 +160,13 @@ async function main() {
     assignment: ids("assignments", "assignment_id"),
   }
 
-  const c = new Client({ connectionString: url, ssl: host.endsWith(".neon.tech") ? { rejectUnauthorized: true } : false })
+  const c = new Client({
+    connectionString: url,
+    ssl: host.endsWith(".neon.tech") ? { rejectUnauthorized: true } : false,
+    // The whole load is one transaction of bulk inserts; a role-level timeout
+    // default set for the workers must not cancel it part-way.
+    options: MAINTENANCE_SESSION_OPTIONS,
+  })
   await c.connect()
   try {
     console.log(`Loading ${meta.projectIds.length} projects into ${host} …`)

@@ -17,6 +17,10 @@ compatibility_date = "2025-05-01"
 #   DISCORD_WEBHOOK_URL   required — the channel webhook URL
 #   HEARTBEAT_URL         optional — external dead-man's-switch URL
 #   MONITOR_ADMIN_TOKEN   optional — enables POST /test-alert
+#   SYNC_ADMIN_TOKEN      required when STUCK_SESSIONS_URL is set (AQU-2611) —
+#                         sync-worker's ADMIN_SECRET for that environment. Set
+#                         the secret BEFORE deploying the var, or every run
+#                         fails until it exists.
 # =============================================================================
 
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -75,6 +79,12 @@ RECOVERY_THRESHOLD = "2"
 REMINDER_MINUTES = "60"
 DISCORD_MENTION_ROLE_IDS = "1564768432677847051,1564768540450361497"
 DISCORD_MENTION_USER_IDS = ""
+# AQU-2611 — alert when origin sessions sit `active` in `ClientRead`. Not an
+# uptime target: it reads a count, not an up/down state. Needs the
+# SYNC_ADMIN_TOKEN secret (sync-worker's ADMIN_SECRET for this environment).
+STUCK_SESSIONS_URL = "https://api.aquilla.app/sync/admin/db/stuck-sessions"
+STUCK_SESSIONS_THRESHOLD = "5"
+STUCK_SESSIONS_REPEAT_MINUTES = "10"
 
 [[env.production.durable_objects.bindings]]
 name = "MONITOR_STATE"
@@ -113,6 +123,9 @@ RECOVERY_THRESHOLD = "2"
 REMINDER_MINUTES = "120"
 DISCORD_MENTION_ROLE_IDS = ""
 DISCORD_MENTION_USER_IDS = ""
+STUCK_SESSIONS_URL = "https://api.dev.aquilla.app/sync/admin/db/stuck-sessions"
+STUCK_SESSIONS_THRESHOLD = "5"
+STUCK_SESSIONS_REPEAT_MINUTES = "10"
 
 [[env.development.durable_objects.bindings]]
 name = "MONITOR_STATE"

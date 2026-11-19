@@ -127,9 +127,9 @@ describe("delta sync — Discord report", () => {
 
   it("annotates the run when the webhook secret is missing, instead of quietly skipping", () => {
     expect(discord.run).toMatch(
-      /if \[ -z "\$WEBHOOK" \][\s\S]*::warning title=Delta sync report not posted::[\s\S]*DISCORD_WEBHOOK_URL/,
+      /if \[ -z "\$WEBHOOK" \][\s\S]*::warning title=Delta sync report not posted::[\s\S]*DISCORD_AUDIO_SYNC_WEBHOOK_URL/,
     )
-    expect(discord.run).not.toMatch(/no DISCORD_WEBHOOK_URL secret — skipping/)
+    expect(discord.run).not.toMatch(/secret — skipping/)
   })
 
   it("annotates rather than silently swallowing a failed webhook call", () => {

@@ -173,6 +173,17 @@ describe("role-policy (client mirror)", () => {
     expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
   })
 
+  it("lets a project lead pass the static milestone floor, but not a contributor (AQU-2309)", () => {
+    // Project lead is the lowest rung milestoneFloor can admit. The tier
+    // itself (maintainer unless opened) is canSetMilestones, not this table.
+    for (const kind of ["file.milestone.set", "file.milestone.remove"]) {
+      expect(requiredRoleFor(kind)).toBe(ROLE.PROJECT_LEAD)
+      expect(canPerform(kind, ROLE.CONTRIBUTOR)).toBe(false)
+      expect(canPerform(kind, ROLE.PROJECT_LEAD)).toBe(true)
+      expect(canPerform(kind, ROLE.MAINTAINER)).toBe(true)
+    }
+  })
+
   it("lets a project lead label a cell, but not a contributor (AQU-2408)", () => {
     // A label is metadata on the line, not a character: it sits a rung below
     // cast.assign. Project lead is the static floor — the lowest rung the

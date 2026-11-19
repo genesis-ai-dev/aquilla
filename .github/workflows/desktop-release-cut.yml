@@ -1,0 +1,181 @@
+name: desktop-release-cut
+
+# Cuts a desktop shell release when the shell changed. A fix in src-tauri/
+# reaches users only in a new shell (hourly web updates carry no Rust), and
+# before this workflow a release happened when someone remembered to bump four
+# files and push a tag. docs/DESKTOP-RELEASES.md has the whole line.
+#
+# scripts/desktop-release-cut.ts decides (scripts/lib/desktop-release.ts::planCut);
+# this workflow only acts on its JSON:
+# - `tag`: dev carries a version with no `v*` tag. Tag dev's head. The tag
+#   push starts tauri-release.yml, which builds, verifies and promotes.
+# - `bump`: the shell changed since the last tag. Open a pull request that
+#   moves the version, wait for its checks, merge it, then tag.
+# - `none`: nothing to do.
+#
+# Triggers:
+# - Nightly, so a day's shell merges ship as one release, not one each.
+# - A push to dev that changes the version file, so a bump merged by hand is
+#   tagged at once.
+# - "Run workflow": cut now, or show the plan without acting.
+#
+# The scheduled and push runs do nothing until the repository variable
+# DESKTOP_AUTO_RELEASE is `true` (the same kind of switch as HOURLY_RELEASE).
+
+on:
+  schedule:
+    - cron: '20 7 * * *'
+  push:
+    branches: [dev]
+    paths: ['src-tauri/tauri.conf.json']
+  workflow_dispatch:
+    inputs:
+      plan_only:
+        description: Show the plan without tagging or opening a pull request
+        required: false
+        type: boolean
+        default: false
+
+# Two runs at once would plan the same version. Queue the second; it then
+# finds the tag or the open pull request and stops.
+concurrency:
+  group: desktop-release-cut
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    if: github.event_name == 'workflow_dispatch' || vars.DESKTOP_AUTO_RELEASE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # The tag push must start tauri-release.yml and the pull request must
+      # run CI; GitHub starts neither for anything GITHUB_TOKEN pushes.
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+      PLAN_ONLY: ${{ inputs.plan_only }}
+    steps:
+      - name: Require the release bot token
+        env:
+          HAS_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::RELEASE_BOT_TOKEN is not set. A tag pushed with GITHUB_TOKEN starts no release build, so this workflow would tag and nothing would ship."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: |
+          git fetch origin --tags
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
+
+      - name: Plan
+        id: plan
+        run: |
+          # A bump is in flight when its branch exists in THIS repository. Only
+          # people with write access can create one, and the merge step deletes
+          # it. Counting open pull requests by head name instead would let a
+          # fork's pull request named desktop-release/x hold every release back.
+          open="$(git ls-remote --heads origin 'refs/heads/desktop-release/*' | wc -l | tr -d ' ')"
+          BUMP_PR_OPEN="$([ "$open" -gt 0 ] && echo true || echo false)" pnpm exec tsx scripts/desktop-release-cut.ts plan > "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json"
+          {
+            echo "action=$(jq -r .action "$RUNNER_TEMP/plan.json")"
+            echo "from=$(jq -r '.from // empty' "$RUNNER_TEMP/plan.json")"
+            echo "to=$(jq -r '.to // empty' "$RUNNER_TEMP/plan.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Desktop release plan" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '"`\(.action)`: \(.reason)"' "$RUNNER_TEMP/plan.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open the version bump
+        id: bump
+        if: steps.plan.outputs.action == 'bump' && env.PLAN_ONLY != 'true'
+        env:
+          FROM: ${{ steps.plan.outputs.from }}
+          TO: ${{ steps.plan.outputs.to }}
+        run: |
+          branch="desktop-release/v$TO"
+          git checkout -b "$branch"
+          pnpm exec tsx scripts/desktop-release-cut.ts bump "$FROM" "$TO"
+          git commit -am "chore(desktop): bump the app version to $TO"
+          git push origin "$branch"
+          {
+            echo "## Summary"
+            echo "Opened by \`desktop-release-cut.yml\`: the desktop shell changed since v$FROM, and a shell change reaches users only in a new shell release."
+            echo
+            echo "Shell files changed since v$FROM:"
+            jq -r '.changed[] | "- `\(.)`"' "$RUNNER_TEMP/plan.json"
+            echo
+            echo "## Changes"
+            echo "- \`$FROM\` to \`$TO\` in the four version files. Nothing else."
+            echo
+            echo "## Test Checklist"
+            echo "- [x] \`scripts/app-version.test.ts\` (CI): the version copies agree"
+            echo
+            echo "Once this merges, the same workflow tags \`v$TO\`; \`tauri-release.yml\` then builds, verifies and promotes it (docs/DESKTOP-RELEASES.md)."
+            echo
+            echo "## Approval"
+            echo "- [ ] Dev Approved"
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base dev --head "$branch" --title "Desktop $TO: release the shell changes since v$FROM" --body-file "$RUNNER_TEMP/body.md"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      # AGENTS.md says Actions does not click merge, because auto-merge cannot
+      # read `on hold` or a stacked parent. Neither can apply to this pull
+      # request: the workflow made it a minute ago, on dev, and the step below
+      # refuses to merge unless it changes the four version files and nothing
+      # else. Its checks are the same ones every pull request must pass.
+      - name: Merge the version bump once its checks pass
+        if: steps.bump.outputs.branch != ''
+        env:
+          BRANCH: ${{ steps.bump.outputs.branch }}
+        run: |
+          # Checks register a few seconds after the pull request opens.
+          sleep 60
+          gh pr checks "$BRANCH" --watch --interval 60
+          files="$(gh pr view "$BRANCH" --json files -q '[.files[].path] | sort | join(" ")')"
+          expected="package.json src-tauri/Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json"
+          if [ "$files" != "$expected" ]; then
+            echo "::error::The bump pull request changes '$files', not the four version files. Not merging."
+            exit 1
+          fi
+          gh pr merge "$BRANCH" --merge --delete-branch
+          git checkout dev
+          git pull --ff-only origin dev
+          pnpm exec tsx scripts/desktop-release-cut.ts plan > "$RUNNER_TEMP/plan.json"
+          cat "$RUNNER_TEMP/plan.json"
+
+      - name: Tag
+        if: env.PLAN_ONLY != 'true'
+        run: |
+          if [ "$(jq -r .action "$RUNNER_TEMP/plan.json")" != "tag" ]; then
+            echo "Nothing to tag."
+            exit 0
+          fi
+          version="$(jq -r .version "$RUNNER_TEMP/plan.json")"
+          git tag -a "v$version" -m "Aquilla desktop v$version"
+          git push origin "v$version"
+          echo "Tagged v$version at $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a failed cut
+        if: failure()
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/release-discord-notify.sh "Desktop release cut failed; shell changes on dev are not being released. $RUN_URL"

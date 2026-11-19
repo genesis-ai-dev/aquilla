@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, cleanup, act } from "@testing-library/react"
+import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement, Fragment, forwardRef, useImperativeHandle, type ComponentProps, type ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -312,3 +312,75 @@ describe("EditorTable — incremental per-cell memos (AQU-1146)", () => {
     expect(lineNumberFor("cell-4")).toBe("4")
   })
 })
+
+describe("EditorTable — a row's props are stable (AQU-2654)", () => {
+  function threeRows() {
+    return makeStore([
+      ...makeCellRows("cell-1", 0),
+      ...makeCellRows("cell-2", 1),
+      ...makeCellRows("cell-3", 2),
+    ])
+  }
+
+  it("does not re-render other rows when the table is handed rebuilt maps and callbacks that say the same thing", async () => {
+    const store = threeRows()
+    // What the workspace does on every commit: new closures over the new
+    // corpus, and maps rebuilt from it with the entries they already had.
+    const churn = () => ({
+      repetitionCounts: new Map([["cell-2", 2]]),
+      infractions: new Map(),
+      backtranslating: new Set<string>(),
+      backtranslationErrors: new Map<string, string>(),
+      cellOpenCommentCount: new Map<string, number>(),
+      onBacktranslate: () => {},
+      getStatisticalBt: () => ({ text: "", corrected: false }),
+      getAlignmentModel: () => null,
+      onClaimCell: () => {},
+      onSetUpAffixes: () => {},
+    })
+    const { rerenderWithProps } = renderTable(store, churn())
+    await screen.findByText("target 0")
+    window.__perfResetRowRenders?.()
+
+    rerenderWithProps(churn())
+    rerenderWithProps(churn())
+
+    const renders = window.__perfRowRenders
+    expect(renders?.get("cell-1") ?? 0).toBe(0)
+    expect(renders?.get("cell-2") ?? 0).toBe(0)
+    expect(renders?.get("cell-3") ?? 0).toBe(0)
+  })
+
+  it("re-renders only the row whose own slice of a map changed", async () => {
+    const store = threeRows()
+    const { rerenderWithProps } = renderTable(store, { repetitionCounts: new Map(), cellOpenCommentCount: new Map() })
+    await screen.findByText("target 0")
+    window.__perfResetRowRenders?.()
+
+    rerenderWithProps({ repetitionCounts: new Map([["cell-2", 2]]), cellOpenCommentCount: new Map([["cell-3", 1]]) })
+
+    const renders = window.__perfRowRenders
+    expect(renders?.get("cell-1") ?? 0).toBe(0)
+    expect(renders?.get("cell-2") ?? 0).toBeGreaterThan(0)
+    expect(renders?.get("cell-3") ?? 0).toBeGreaterThan(0)
+  })
+
+  it("does not re-render an unrelated row when another row becomes the active editor", async () => {
+    const store = threeRows()
+    renderTable(store)
+    await screen.findByText("target 0")
+    window.__perfResetRowRenders?.()
+
+    const row = document.querySelector('[data-cell-id="cell-2"]') as HTMLElement
+    const readSurface = row.querySelector("[data-target-read-view]") as HTMLElement
+    expect(readSurface).not.toBeNull()
+    act(() => { fireEvent.click(readSurface) })
+    await waitFor(() => expect(row.querySelector(".ProseMirror")).not.toBeNull())
+
+    const renders = window.__perfRowRenders
+    expect(renders?.get("cell-2") ?? 0).toBeGreaterThan(0)
+    expect(renders?.get("cell-1") ?? 0).toBe(0)
+    expect(renders?.get("cell-3") ?? 0).toBe(0)
+  })
+})
+

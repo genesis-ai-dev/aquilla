@@ -3,11 +3,12 @@ import { useSyncExternalStore } from "react"
 /**
  * Which hosted model runs (transcription-models spec §6). "auto" lets the
  * server pick by language (Qwen3-ASR for Chinese varieties, Whisper, then
- * Omnilingual CTC) and never picks zero-shot; the rest pin one model.
+ * Omnilingual CTC) and never picks zero-shot or fast; the rest pin one model.
+ * "omni-fast" is Omnilingual CTC 300M on CPU: the quickest answer, and rougher.
  */
-export type TranscriptionModel = "auto" | "whisper" | "qwen3-asr" | "omni-ctc" | "omni-zs"
+export type TranscriptionModel = "auto" | "whisper" | "qwen3-asr" | "omni-ctc" | "omni-zs" | "omni-fast"
 export const TRANSCRIPTION_MODELS: readonly TranscriptionModel[] =
-  ["auto", "whisper", "qwen3-asr", "omni-ctc", "omni-zs"]
+  ["auto", "whisper", "qwen3-asr", "omni-ctc", "omni-zs", "omni-fast"]
 const isModel = (value: string | null): value is TranscriptionModel =>
   (TRANSCRIPTION_MODELS as readonly (string | null)[]).includes(value)
 const prefix = "aq.transcription-model.v1."

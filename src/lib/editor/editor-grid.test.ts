@@ -15,4 +15,17 @@ describe("editor grid template", () => {
     })
     expect(editorGridStyle(true, 1)).toEqual({ "--editor-grid-cols": "132px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)" })
   })
+
+  it("moves the action rail in by the back-translation track when that column is open", () => {
+    // Source, Target, Back-translation: one track is (100% - 16px - two 8px
+    // gaps) / 3; the rail ends flush with Target (16px padding + 8px gap).
+    expect(editorGridStyle(false, 1, true)).toEqual({
+      "--editor-grid-cols": "84px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)",
+      "--editor-rail-end": "calc((100% - 32px) / 3 + 24px)",
+    })
+    // Two Bible columns as well: five text tracks.
+    expect(editorGridStyle(false, 3, true)?.["--editor-rail-end" as never]).toBe("calc((100% - 48px) / 5 + 24px)")
+    // Bible columns alone leave the rail at the row's end.
+    expect(editorGridStyle(false, 2)).not.toHaveProperty("--editor-rail-end")
+  })
 })

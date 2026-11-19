@@ -385,6 +385,65 @@ describe('ProjectSetup — one plan, one approval', () => {
     expect(res.status).toBe(428)
     expect(denied.error?.code).toBe('confirmation_required')
   })
+
+  // AQU-2425: the inert-brief question is asked of the state the plan LEAVES
+  // BEHIND, not the state it found — a setup that saves the Instructions text
+  // in the same breath strands its own brief step.
+  it('warns that its own brief step reaches no AI when the same plan saves the Instructions text', async () => {
+    const env = makeEnv(tdb.db, bucket, { briefBackend: true })
+    stubBriefBackend()
+    const caller = await memberToken(700)
+
+    const stranded = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        settings: { translationInstructions: 'Formal register. Keep verse numbers.' },
+        brief: { parameters: { audience: 'Rural youth, 15–25' } },
+      }),
+    )
+    const warned = (stranded.body.summary.warnings as { code: string; message: string }[]).filter(
+      (w) => w.code === 'inert_write',
+    )
+    expect(warned).toHaveLength(1)
+    expect(warned[0].message).toContain('translationInstructions')
+
+    // The same plan without the Instructions op leaves the brief live, so it
+    // must not warn.
+    const live = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        brief: { parameters: { audience: 'Rural youth, 15–25' } },
+      }),
+    )
+    expect(
+      (live.body.summary.warnings as { code: string }[]).filter((w) => w.code === 'inert_write'),
+    ).toHaveLength(0)
+
+    // A brief step that is already satisfied writes nothing, so there is no
+    // inert write to report — it reports only that it was superseded.
+    await tdb.pg.query(`UPDATE project_settings SET settings = $2 WHERE project_id = $1`, [
+      PROJECT,
+      JSON.stringify({
+        translationInstructions: 'Formal register. Keep verse numbers.',
+        [BRIEF_SETTINGS_KEY]: { version: 1, parameters: { audience: 'Rural youth, 15–25' } },
+      }),
+    ])
+    const satisfied = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        brief: { parameters: { audience: 'Rural youth, 15–25' } },
+      }),
+    )
+    const codes = (satisfied.body.summary.warnings as { code: string }[]).map((w) => w.code)
+    expect(codes).toContain('superseded_step')
+    expect(codes).not.toContain('inert_write')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

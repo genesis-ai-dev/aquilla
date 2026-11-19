@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { useProject } from "./useProject"
 import { getProject } from "@/lib/store/project-index"
-import { clearResolvedProjectSeeds, readResolvedProjectSeed } from "@/lib/sync/project-record-seed"
+import { clearResolvedProjectSeeds, readResolvedProjectSeed, rememberListedProjects } from "@/lib/sync/project-record-seed"
 import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 
 const API = "https://api.frontier.example"
@@ -132,6 +132,85 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
     // The authoritative fetch still runs and its answer wins.
     await waitFor(() => expect(second.result.current.project?.name).toBe("Renamed on server"))
     expect(calls).toBe(2)
+  })
+
+  // A project clicked in a list has never been resolved in this tab, but the
+  // list was drawn from the account's directory: its name, role, PM and files
+  // are known. The page paints from that instead of a loader. It is marked
+  // provisional because the directory is as old as the session — the workspace
+  // must not redirect away from a file it does not list yet — and the
+  // project's own read then replaces it.
+  it("paints a never-opened project from the directory, provisionally, until its own read lands", async () => {
+    rememberListedProjects([
+      {
+        id: "p-listed",
+        name: "Listed name",
+        gitlabProjectId: null,
+        orgId: 7,
+        role: { level: 500, name: "translator", source: "org" },
+        pm: { id: 3, username: "sam" },
+        files: [{ id: "f-old", name: "Old file.usfm", type: "usfm", cellCount: 4 }],
+      } as never,
+    ])
+    let release!: (response: Response) => void
+    global.fetch = vi.fn<typeof fetch>(() => new Promise<Response>((resolve) => { release = resolve })) as unknown as typeof fetch
+
+    const { result } = renderHook(() => useProject("p-listed", { includeSettings: false }))
+    expect(result.current.status).toBe("ready")
+    expect(result.current.provisional).toBe(true)
+    expect(result.current.project?.name).toBe("Listed name")
+    expect(result.current.project?.orgId).toBe(7)
+    expect(result.current.project?.files.map((f) => f.id)).toEqual(["f-old"])
+    expect(result.current.roleLevel).toBe(500)
+    expect(result.current.pm).toEqual({ id: 3, username: "sam" })
+
+    await waitFor(() => expect(release).toBeTypeOf("function"))
+    await act(async () => {
+      release(new Response(
+        JSON.stringify({
+          id: "p-listed",
+          name: "Listed name",
+          gitlabProjectId: null,
+          role: { level: 600, name: "maintainer", source: "override" },
+          files: [
+            { id: "f-old", name: "Old file.usfm", type: "usfm", cellCount: 4 },
+            { id: "f-new", name: "Added since.usfm", type: "usfm", cellCount: 9 },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ))
+    })
+    await waitFor(() => expect(result.current.provisional).toBe(false))
+    expect(result.current.project?.files.map((f) => f.id)).toEqual(["f-old", "f-new"])
+    expect(result.current.roleLevel).toBe(600)
+  })
+
+  it("lets go of a directory record the server now refuses", async () => {
+    rememberListedProjects([
+      { id: "p-revoked", name: "Was shared", gitlabProjectId: null, role: { level: 300, name: "viewer", source: "org" }, files: [] } as never,
+    ])
+    global.fetch = vi.fn<typeof fetch>(async () => new Response("", { status: 403 })) as unknown as typeof fetch
+    const { result } = renderHook(() => useProject("p-revoked", { includeSettings: false }))
+    expect(result.current.project?.name).toBe("Was shared")
+    await waitFor(() => expect(result.current.status).toBe("forbidden"))
+    expect(result.current.project).toBeNull()
+    expect(result.current.provisional).toBe(false)
+  })
+
+  it("prefers a previous resolve over the directory, and is not provisional", async () => {
+    global.fetch = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: "p-both", name: "Resolved name", gitlabProjectId: null, role: { level: 700, name: "owner", source: "creator" }, files: [] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as unknown as typeof fetch
+    const first = renderHook(() => useProject("p-both", { includeSettings: false }))
+    await waitFor(() => expect(first.result.current.status).toBe("ready"))
+    first.unmount()
+    rememberListedProjects([
+      { id: "p-both", name: "Directory name", gitlabProjectId: null, role: { level: 700, name: "owner", source: "creator" }, files: [] } as never,
+    ])
+    const second = renderHook(() => useProject("p-both", { includeSettings: false }))
+    expect(second.result.current.project?.name).toBe("Resolved name")
+    expect(second.result.current.provisional).toBe(false)
   })
 
   it("takes the cold path when no resolve of this project has happened in the tab", () => {

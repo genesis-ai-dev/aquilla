@@ -9,6 +9,7 @@ mod llm_proxy;
 mod paratext;
 mod repo_root;
 mod shutdown_guard;
+mod titlebar;
 
 use llm_proxy::LlmConfig;
 use tauri::utils::config::BackgroundThrottlingPolicy;
@@ -17,6 +18,8 @@ use tauri::{Manager, WebviewWindowBuilder};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
+        .manage(auth::GoogleCallback::default())
         // Managed before `setup` so the `app://` handler can find it on the first request.
         .manage(hot_bundle::HotBundleState::default())
         .register_uri_scheme_protocol(hot_bundle::SCHEME, hot_bundle::serve_request)
@@ -60,7 +63,7 @@ pub fn run() {
             // Decide which bundle the `app://` scheme serves before any window asks for it.
             hot_bundle::prepare(app)?;
             // Label stays "main" so capabilities/default.json keeps applying.
-            WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
+            let main_window = WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
                 .title("Aquilla")
                 // Desktop-first default: fits a 13" laptop (1440x900 logical) with
                 // room to spare, and sits above the SPA's tablet breakpoint.
@@ -73,8 +76,28 @@ pub fn run() {
                 // stop flushing until the user brings the window back. Throttle
                 // keeps it running at the hidden-page timer clamp. macOS 14+ only;
                 // ignored elsewhere.
-                .background_throttling(BackgroundThrottlingPolicy::Throttle)
-                .build()?;
+                .background_throttling(BackgroundThrottlingPolicy::Throttle);
+            // macOS: drop the native title strip and let the SPA's top row be the
+            // title bar, traffic lights floating over it. y=28 centres them on
+            // AppShell's 52px header band; the SPA keeps that corner clear and
+            // marks the drag regions (src/hooks/useMacTitlebarOverlay.ts).
+            // Note `y` is not the buttons' top edge: tao sizes the title-bar
+            // container to button height + y and the buttons keep their own
+            // offset in it. Measured on macOS 26: y=28 puts their centre at
+            // 26px, the header band's midline; y=20 left them ~8px high.
+            // Only when the bundle being served declares it handles all that: a
+            // downloaded bundle can predate this shell (titlebar::OVERLAY_FEATURE).
+            #[cfg(target_os = "macos")]
+            let main_window = if hot_bundle::serves_feature(app, titlebar::OVERLAY_FEATURE) {
+                main_window
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(16.0, 28.0))
+                    .initialization_script(titlebar::OVERLAY_FLAG_SCRIPT)
+            } else {
+                main_window
+            };
+            main_window.build()?;
             hot_bundle::start(app.handle());
 
             connectivity::start_connectivity_loop(app.handle().clone());
@@ -111,8 +134,13 @@ pub fn run() {
                     keychain::get_token,
                     keychain::set_token,
                     keychain::clear_token,
+                    titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
+                    auth::cancel_auth_browser,
+                    auth::take_google_callback,
+                    auth::google_login_supported,
+                    auth::google_private_session_supported,
                     auth::simulate_deep_link_callback,
                     connectivity::get_connectivity,
                     connectivity::set_connectivity_probe_url,
@@ -152,8 +180,13 @@ pub fn run() {
                     keychain::get_token,
                     keychain::set_token,
                     keychain::clear_token,
+                    titlebar::titlebar_double_click,
                     keychain::get_refresh_token,
                     auth::open_auth_browser,
+                    auth::cancel_auth_browser,
+                    auth::take_google_callback,
+                    auth::google_login_supported,
+                    auth::google_private_session_supported,
                     connectivity::get_connectivity,
                     connectivity::set_connectivity_probe_url,
                     llm_proxy::set_llm_config,

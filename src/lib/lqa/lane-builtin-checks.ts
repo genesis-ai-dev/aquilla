@@ -21,6 +21,7 @@ import type {
 import { laneLanguage, laneLanguageCode } from "@/lib/lanes/lane-display"
 import { readLanguageProfile } from "../../../db/shared/language-profile"
 import { resolveNumberFormat, type ResolvedNumberFormat } from "../../../db/shared/number-format"
+import { hasOrthography, type OrthographyProfile } from "../../../db/shared/orthography"
 import { resolvePunctuation, type ResolvedPunctuation } from "../../../db/shared/punctuation-conventions"
 
 type LaneRow = NonNullable<ProjectRecord["lanes"]>[number]
@@ -109,6 +110,27 @@ export function laneNumberFormat(
     language: laneLanguageForChecks(project, lane),
     profile: readLanguageProfile(project?.languageProfile).numberFormat ?? null,
   })
+}
+
+/**
+ * The orthography in force in `lane` (AQU-2628): the project's Language
+ * profile slot, or null — which leaves the old-orthography check silent and
+ * every converter call site a no-op.
+ *
+ * There is no table to fall back to and never will be: an alphabet reform is
+ * a decision a project records, not a fact about a language tag. A lane whose
+ * project has not filled the slot therefore behaves exactly as it did before
+ * this feature existed.
+ *
+ * The Language profile is a PROJECT-level record, so a filled slot applies in
+ * every lane, exactly as it does for punctuation and number format.
+ */
+export function laneOrthography(
+  project: Pick<ProjectRecord, "languageProfile"> | null | undefined,
+  _lane?: string,
+): OrthographyProfile | null {
+  const profile = readLanguageProfile(project?.languageProfile).orthography
+  return hasOrthography(profile) ? profile : null
 }
 
 /**

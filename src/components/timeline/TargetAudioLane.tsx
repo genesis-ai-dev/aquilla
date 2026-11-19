@@ -219,6 +219,18 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /**
+   * AQU-2577: a line with no speech is drawn as a GHOST clip where its speech
+   * will land. A click picks that line for Make speech (nothing is generated
+   * by the click); with Shift, Ctrl or ⌘ held it is added to, or taken out of,
+   * the lines already picked. Absent: the empty space keeps only its hover
+   * record button.
+   */
+  onPickGhost?(cellId: string, opts: { additive: boolean }): void
+  /** The ghosts picked for Make speech: drawn selected. */
+  pickedGhostIds?: ReadonlySet<string>
+  /** The lines whose speech is being made right now: their ghost shows a spinner. */
+  makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-2432 (Sam, Nov 9): draw the marker for a line of `emptyCells` whose
    *  room was closed too narrow to draw (lib/timeline/line-markers). On by
    *  default; off on a track made a layer, whose takes are not laid end to
@@ -317,15 +329,16 @@ export interface TakeMenuActions {
   regenerate?(cellId: string): void
   /**
    * AQU-2026: re-voice this line's own take into its cast voice. Nothing is
-   * synthesized from text — the words and timing are kept.
+   * synthesized from text — the words and timing are kept. AQU-2499: names
+   * the take right-clicked, so an added track's take is the one re-voiced.
    */
-  changeVoice?(cellId: string): void
+  changeVoice?(cellId: string, audioId: string): void
   /**
-   * AQU-2026: what Change voice can do on this line, or `null` to leave the
+   * AQU-2026: what Change voice can do on this take, or `null` to leave the
    * item out of the menu entirely (a line whose only sound is the film's own
    * programme audio has nothing of its own to convert).
    */
-  changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  changeVoiceState?(cellId: string, audioId: string): ChangeVoiceMenuState | null
   /**
    * AQU-1758 / AQU-2291: "Train a voice from this recording" — New voice on
    * the Train voice tab, THIS take already added as its first recording.
@@ -362,6 +375,8 @@ export interface ChangeVoiceMenuState {
   voiceName: string
   /** Why Change voice can't run; null when it can. */
   blocker: ChangeVoiceMenuBlocker | null
+  /** AQU-2499 (review, Nov 9): on "shared", how many lines hold the recording. */
+  sharedLines?: number
 }
 
 function TargetAudioChip({
@@ -1892,11 +1907,12 @@ function TargetAudioChip({
   // itself.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
-  // AQU-2026: the per-line Change voice. The state is read off the line, not
-  // this chip: it converts the take the Audio tab's voice card would, which on
-  // a cut take is the whole take whichever piece was right-clicked.
+  // AQU-2026: the per-line Change voice. On a cut take it converts the whole
+  // take whichever piece was right-clicked. AQU-2499 (review, Nov 9): it names
+  // this chip's take, so on an added track it is that track's take, not the
+  // main track's.
   const changeVoice = takeMenu?.changeVoice && takeMenu.changeVoiceState
-    ? takeMenu.changeVoiceState(cell.id)
+    ? takeMenu.changeVoiceState(cell.id, audioId)
     : null
   // The item's reason: a voice with no trained model, a take already in this
   // voice, or a conversion already running on this line (no extra words).
@@ -1908,7 +1924,9 @@ function TargetAudioChip({
     ? t("editor.voice.changeVoiceCantRevoice", { name: changeVoice?.voiceName ?? "" })
     : changeVoiceBlocked === "up-to-date"
       ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice?.voiceName ?? "" })
-      : null
+      : changeVoiceBlocked === "shared" // AQU-2499 (review, Nov 9)
+        ? t("editor.voice.changeVoiceShared", { count: changeVoice?.sharedLines ?? 2 })
+        : null
   const canSplit = Boolean(onCutTarget) && editable
   return (
     <>
@@ -1997,7 +2015,7 @@ function TargetAudioChip({
           <ContextMenuItem
             data-testid="tl-take-menu-change-voice"
             disabled={changeVoiceBlocked != null}
-            onClick={() => { if (changeVoiceBlocked == null) takeMenu.changeVoice?.(cell.id) }}
+            onClick={() => { if (changeVoiceBlocked == null) takeMenu.changeVoice?.(cell.id, audioId) }}
           >
             <AudioLines className="h-3.5 w-3.5" />
             {changeVoiceReason ?? t("editor.voice.changeVoice")}
@@ -2084,6 +2102,9 @@ export function TargetAudioLane({
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
+  onPickGhost,
+  pickedGhostIds,
+  makingSpeechCellIds,
   lineMarkers: showLineMarkers = true,
   emptySpans,
   onAddLineAndRecord,
@@ -2240,7 +2261,7 @@ export function TargetAudioLane({
   })
   const markedCellIds = new Set(lineMarkers.map((m) => m.cell.id))
   const emptySlots =
-    editable && onOpenRecording
+    editable && (onOpenRecording || onPickGhost)
       ? (emptyCells ?? []).flatMap((cell) => {
           // A hidden line is not recorded onto from the timeline.
           if (isHiddenCell(cell)) return []
@@ -2374,10 +2395,42 @@ export function TargetAudioLane({
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
-          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
+          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center ${onPickGhost ? "justify-end pe-1" : "justify-center"}`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >
-          {(() => {
+          {/* AQU-2577: the ghost of the clip this line has not got yet. It fills
+              the slot under the record button; a click picks the line. */}
+          {onPickGhost && (cell.translated?.trim() || cell.original?.trim()) && (() => {
+            const busy = makingSpeechCellIds?.has(cell.id) === true
+            const picked = pickedGhostIds?.has(cell.id) === true
+            return (
+              <button
+                type="button"
+                data-testid={`tl-target-ghost-${cell.id}`}
+                data-busy={busy ? "true" : undefined}
+                aria-pressed={picked}
+                title={t("audio.makeSpeech.ghost")}
+                aria-label={t("audio.makeSpeech.ghost")}
+                disabled={busy}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const additive = e.shiftKey || e.metaKey || e.ctrlKey
+                  if (!additive) onSelect(cell.id)
+                  onPickGhost(cell.id, { additive })
+                }}
+                className={`absolute inset-0 flex items-center justify-center gap-1.5 overflow-hidden rounded-md border border-dashed px-2 text-[11px] transition-colors disabled:cursor-progress ${
+                  picked
+                    ? "border-solid border-primary bg-primary/10 text-foreground ring-2 ring-primary/30"
+                    : "border-muted-foreground/40 bg-muted/30 text-muted-foreground hover:border-primary/60 hover:bg-primary/5 hover:text-foreground"
+                }`}
+              >
+                {busy ? <Spinner className="size-3 shrink-0" /> : <Sparkles className="size-3 shrink-0" aria-hidden />}
+                {widthPx >= 110 && <span className="truncate">{t("audio.makeSpeech.title")}</span>}
+              </button>
+            )
+          })()}
+          {onOpenRecording && (() => {
             const buttonPx = slotButtonPx(chipH)
             const iconPx = slotIconPx(buttonPx)
             return (

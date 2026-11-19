@@ -208,6 +208,21 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     if (ctx) return contextualMockResponse(ctx[1], userText)
   }
 
+  // Back-translation (BACKTRANSLATION_SYSTEM_PROMPT): read the last "Text:"
+  // line back. Deterministic and visibly a mock, so a live reading on the
+  // local stack changes when the translation does — without pretending to be
+  // a real back-translation.
+  const backtranslationPrompt = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.startsWith("You are a backtranslation assistant."),
+  )
+  if (backtranslationPrompt) {
+    const texts = [...userText.matchAll(/^Text: (.*)$/gm)]
+    const target = texts[texts.length - 1]?.[1]?.trim() ?? ""
+    return respond(`[mock reading] ${target}`)
+  }
+
   const importerSystemPrompt = messages.some((message) =>
     message.role === "system"
       && typeof message.content === "string"

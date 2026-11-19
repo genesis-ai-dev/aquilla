@@ -51,23 +51,41 @@ covers (`*` at the end matches a prefix). `scripts/audit-tickets.ts` reads those
 lines to mark audit tickets `HITL` and to quote the rule in the ticket. Add the
 line when you add a hold.
 
-### postgres: exactly 3.4.9, no major bump
+### postgres: exactly 4.0.0, and only with `max_pipeline: 1`
 
 <!-- holds: postgres -->
 
 Applies to the root, `auth-worker` and `sync-worker` manifests.
 
-> postgres.js 4 is a rewrite that pipelines a query on a busy connection
-> instead of queueing it. Through Hyperdrive that left the unprepared
-> queries db/shim/postgres.ts sends half-sent: Postgres sat in ClientRead
-> holding a pooled connection until Hyperdrive dropped the client ten
-> minutes later, and production ran out of pool slots (2026-11-13, release
-> 2026.11.12.02). The driver is pinned to exactly 3.4.9 in all three
-> manifests; db/shim/postgres.ts resolves it from THIS (root) one. Remove
-> all three entries together, once 4.x has been proven through Hyperdrive.
+postgres.js 4 is a rewrite. At its defaults it writes a statement to a busy
+connection where 3.x queued it, and through Hyperdrive that left an unprepared
+statement half-sent: Postgres sat in `ClientRead` holding an origin connection
+until Hyperdrive dropped the client ten minutes later. Production ran out of
+connections twice (2026-11-13 and 2026-11-16). The driver was pinned to 3.4.9
+in between.
 
-The pin lives in all three `package.json` files. Change them together or not
-at all.
+4.0.0 is back on these terms, all of which live in `db/shim/postgres.ts`:
+
+- `db/shim/postgres.ts::MAX_PIPELINE` is 1, so the driver never doubles
+  statements up on a pool connection. Measured on the development Hyperdrive:
+  4.0.0 at its default wedged 3 runs of 3, 4.0.0 at 1 wedged 0 of 105, and
+  3.4.9 wedged 0 of 105.
+- `db/shim/postgres.ts::fromPostgresJs` orders unprepared statements inside a
+  transaction, which `max_pipeline` does not reach.
+- `db/shim/postgres.ts::capInFlight` keeps a handle inside its pool.
+
+The record is `docs/decisions/0011-in-flight-statement-cap.md`.
+
+The version is exact in all three `package.json` files. Change them together
+or not at all; `db/shim/postgres.ts` resolves the driver from the root one.
+Any other version, 4.x patch releases included, is a new driver as far as
+Hyperdrive is concerned: repeat the measurement above on a deployed
+environment before it merges, and do not raise `MAX_PIPELINE` without doing
+the same.
+
+A deploy bundles whatever is installed, not what the lockfile says. The second
+outage was a release whose manifests pinned 3.4.9 and whose bundle contained
+4.0.0. Install from the lockfile before deploying by hand.
 
 ### @tanstack/react-table: stay on v8
 

@@ -67,8 +67,8 @@ export function Signup() {
   if (sessionLoadError && !session) return <SessionHydrationError retry={retrySessionLoad} />
   if (session && !isJwtExpired(session.jwt)) return <Navigate to={next} replace />
 
-  return <main className="flex min-h-svh flex-col bg-background p-4 sm:p-6">
-    <div className="flex flex-1 items-center justify-center py-8"><div className="w-full max-w-md">
+  return <main className="flex h-svh flex-col bg-background p-4 sm:p-6">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-8"><div className="m-auto w-full max-w-md shrink-0">
     <div className="mb-8 flex justify-center gap-2" aria-label={t("onboarding.wizard.stepProgress", { step, total: 3 })}>
       {[1, 2, 3].map(n => <span key={n} className={`size-2 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`} />)}
     </div>
@@ -86,11 +86,11 @@ export function Signup() {
       }} />}
       {mode === "login" && <FrontierLoginForm initialUsername={identifier} onSuccess={complete} onForgotPassword={() => setMode("forgot")} />}
       {mode === "forgot" && <FrontierForgotPasswordForm returnTo={next} onBack={() => setMode("login")} />}
-      {mode === "signup" && <p className="text-center text-sm text-muted-foreground">
+      {mode === "signup" && <p data-login-alternative className="text-center text-sm text-muted-foreground">
         {t("auth.join.alreadyHaveAccount")}{" "}<Link className="font-medium text-foreground hover:underline" to={loginPath({ next })}>{t("common.logIn")}</Link>
       </p>}
-      {mode === "signup" && <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="w-full"><ChevronLeft className="h-4 w-4 rtl:rotate-180" />{t("common.back")}</Button>}
+      {mode === "signup" && <Button data-login-alternative variant="ghost" size="sm" onClick={() => setStep(2)} className="w-full"><ChevronLeft className="h-4 w-4 rtl:rotate-180" />{t("common.back")}</Button>}
     </div></div>}
-    </div></div><footer className="w-full"><VersionBadge inline /></footer>
+    </div></div><footer className="shrink-0 w-full"><VersionBadge inline /></footer>
   </main>
 }

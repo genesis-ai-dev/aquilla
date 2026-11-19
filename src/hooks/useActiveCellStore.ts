@@ -496,6 +496,11 @@ export class CellStore {
   // enter the paired view (`targetById`/`order`). Always empty for N=1.
   private otherLaneTargetRows: CellRow[] = []
   private pendingOverlay = new Map<string, PendingOverlay>()
+  // AQU-2654: see `batch()`.
+  private batchDepth = 0
+  private batchedCellIds: Set<string> | null = null
+  private batchedList = false
+  private batchedAll = false
   private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
@@ -859,6 +864,36 @@ export class CellStore {
     this.listVersion++
     this.fileVersion++
     this.emit(clearedIds)
+  }
+
+  /**
+   * AQU-2654: apply several mutations as ONE announcement. Every mutator
+   * still updates rows, versions and derived indexes as it runs — reads
+   * inside the batch see each step — but listeners are told once, when the
+   * outermost batch ends, with the union of the cells that changed. Landing
+   * one applied frame is three mutations (confirm the shadow, mark the cell
+   * fresh, replace its rows); announced one by one that was three passes over
+   * every subscriber for a single event.
+   */
+  batch<T>(run: () => T): T {
+    this.batchDepth++
+    try {
+      return run()
+    } finally {
+      if (--this.batchDepth === 0) this.flushBatch()
+    }
+  }
+
+  private flushBatch(): void {
+    const cells = this.batchedCellIds
+    const list = this.batchedList
+    const all = this.batchedAll
+    this.batchedCellIds = null
+    this.batchedList = false
+    this.batchedAll = false
+    if (cells) this.emitCells(cells)
+    if (list) this.emitList()
+    if (all) this.emitAll()
   }
 
   subscribeList = (listener: () => void): (() => void) => {
@@ -3123,19 +3158,38 @@ export class CellStore {
   }
 
   private emit(changedIds: Iterable<string>): void {
-    for (const id of changedIds) {
-      const listeners = this.cellListeners.get(id)
-      if (listeners) for (const listener of Array.from(listeners)) listener()
+    if (this.batchDepth > 0) {
+      const batched = (this.batchedCellIds ??= new Set<string>())
+      for (const id of changedIds) batched.add(id)
+      this.batchedList = true
+      this.batchedAll = true
+      return
     }
+    this.emitCells(changedIds)
     this.emitList()
     this.emitAll()
   }
 
+  private emitCells(changedIds: Iterable<string>): void {
+    for (const id of changedIds) {
+      const listeners = this.cellListeners.get(id)
+      if (listeners) for (const listener of Array.from(listeners)) listener()
+    }
+  }
+
   private emitList(): void {
+    if (this.batchDepth > 0) {
+      this.batchedList = true
+      return
+    }
     for (const listener of Array.from(this.listListeners)) listener()
   }
 
   private emitAll(): void {
+    if (this.batchDepth > 0) {
+      this.batchedAll = true
+      return
+    }
     for (const listener of Array.from(this.allListeners)) listener()
   }
 }
@@ -3191,6 +3245,18 @@ export interface UseActiveCellStoreResult {
   isError: boolean
 }
 
+// The lane grants of the last sync token minted in this tab, per user and
+// project. A file's cached rows are keyed by those grants, so knowing them
+// ahead of the next token lets that file paint while its token is minted.
+// It only ever picks WHICH snapshot to try first: the token that arrives is
+// still the one that decides whether the rows stay (see doFetch).
+const lastGrantsVersionByProject = new Map<string, string>()
+
+/** Test-only. */
+export function clearLastGrantsVersions(): void {
+  lastGrantsVersionByProject.clear()
+}
+
 export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCellStoreResult {
   const {
     projectId,
@@ -3230,6 +3296,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
   const grantsVersionRef = useRef("")
+  // Rows painted from the cache before their sync token arrived, kept only
+  // while that token is still outstanding (see doFetch).
+  const paintedAheadRef = useRef<{ pid: string; fid: string; grantsVersion: string } | null>(null)
+  const usernameRef = useRef(username)
+  usernameRef.current = username
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // I3: queue, don't drop. A second event.applied for a cell while its GET is
   // in flight marks it dirty; the in-flight fetch re-runs once when it lands.
@@ -3283,6 +3354,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       fetchRetryTimerRef.current = null
     }
     if (!isEnabled || !pid || !fid) {
+      paintedAheadRef.current = null
       store.reset(pid, fid)
       setLoadProgress(null)
       setIsLoading(false)
@@ -3346,12 +3418,40 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       return
     }
 
-    let token: string | null = null
-    try {
-      token = tokenFetcher ? await tokenFetcher(fid) : null
-    } catch {
-      token = null
+    // The token is asked for first and awaited second: the cached file can
+    // paint while the mint is in flight. The cache is keyed by the token's
+    // lane grants, which are not known until it arrives, so the paint uses the
+    // grants this user's last token for this project carried (in this tab) and
+    // is thrown away below if the new token's differ.
+    const tokenPromise: Promise<string | null> = (tokenFetcher ? tokenFetcher(fid) : Promise.resolve(null)).catch(() => null)
+    const grantsKey = `${usernameRef.current}\u0000${pid}`
+    let paintedAhead: string | null = null
+    if (!soft) {
+      const held = paintedAheadRef.current
+      if (held && held.pid === pid && held.fid === fid && store.getCellCount() > 0) {
+        // A retry after a failed mint: the rows are already up, and may carry
+        // an edit made since. Leave them be.
+        paintedAhead = held.grantsVersion
+      } else {
+        paintedAheadRef.current = null
+        const expected = lastGrantsVersionByProject.get(grantsKey)
+        if (expected !== undefined) {
+          store.reset(pid, fid)
+          const cached = await readCellsCache(pid, fid, expected)
+          if (generationRef.current !== gen) return
+          if (cached && cached.rows.length > 0) {
+            store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+            store.setProjectEpoch(cached.projectEpoch ?? null)
+            setIsLoading(false)
+            setIsRefreshing(true)
+            paintedAhead = expected
+            paintedAheadRef.current = { pid, fid, grantsVersion: expected }
+          }
+        }
+      }
     }
+
+    const token = await tokenPromise
     if (generationRef.current !== gen) return
     if (!token) {
       const attempt = ++tokenAttemptsRef.current
@@ -3372,10 +3472,15 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     tokenAttemptsRef.current = 0
     grantsVersionRef.current = grantsVersionFromSyncToken(token)
+    lastGrantsVersionByProject.set(grantsKey, grantsVersionRef.current)
+    paintedAheadRef.current = null
 
     let usedCache = false
 
-    if (!soft) {
+    if (!soft && paintedAhead === grantsVersionRef.current) {
+      // The rows painted ahead of the token are the ones this token unlocks.
+      usedCache = true
+    } else if (!soft) {
       store.reset(pid, fid)
       const cached = await readCellsCache(pid, fid, grantsVersionRef.current)
       if (generationRef.current !== gen) return
@@ -3750,9 +3855,11 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
             continue
           }
           exhaustedByDiscard = false
-          store.clearConfirmedShadows(rows, startSeq)
-          store.markCellFresh(cellId)
-          store.replaceRowsForCell(cellId, rows)
+          store.batch(() => {
+            store.clearConfirmedShadows(rows, startSeq)
+            store.markCellFresh(cellId)
+            store.replaceRowsForCell(cellId, rows)
+          })
           refreshCellsCacheFromStore()
           return
         }
@@ -3863,8 +3970,50 @@ export function useCellView(store: CellStore, cellId: string): CellViewModel | n
   return useMemo(() => readAtVersion(version, () => store.getCellView(cellId)), [cellId, store, version])
 }
 
+/**
+ * How long a whole-file subscriber waits before it is told the store changed.
+ * See `useCellStoreVersion`.
+ */
+export const WHOLE_FILE_NOTIFY_MS = 32
+
+/**
+ * `store.subscribeAll`, told at most once per `WHOLE_FILE_NOTIFY_MS`.
+ * Exported for the test that pins the property.
+ */
+export function subscribeAllCoalesced(store: Pick<CellStore, "subscribeAll">, listener: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const unsubscribe = store.subscribeAll(() => {
+    if (timer !== null) return
+    timer = setTimeout(() => {
+      timer = null
+      listener()
+    }, WHOLE_FILE_NOTIFY_MS)
+  })
+  return () => {
+    unsubscribe()
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
+/**
+ * The store's whole-file version, for components that derive something from
+ * EVERY cell (the workspace, the table shell).
+ *
+ * AQU-2654: such a component re-renders its whole tree, so it is told about a
+ * burst of store changes once, a couple of frames later, instead of once per
+ * mutation. One commit mutates the store five or six times (the optimistic
+ * edit, the pending overlay per outbox change, the applied rows, the audit
+ * diff), usually next to a React state update for the same event; each
+ * synchronous notification was its own full render, and a second one when the
+ * state update rendered. Waiting lets the state update's render read the new
+ * version (the snapshot is always live — only the wake-up is late), so the
+ * two become one. Rows are NOT affected: they subscribe per cell
+ * (`useCellView`) and to the list (`useCellIds`), both told synchronously, so
+ * an edit still shows in its row at once.
+ */
 export function useCellStoreVersion(store: CellStore): number {
-  return useSyncExternalStore(store.subscribeAll, store.getAllVersion, () => 0)
+  const subscribe = useCallback((listener: () => void) => subscribeAllCoalesced(store, listener), [store])
+  return useSyncExternalStore(subscribe, store.getAllVersion, () => 0)
 }
 
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
@@ -3930,10 +4079,13 @@ function sameStampRecord(
 function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
   if (a === b) return true
   if (!a || !b) return false
+  // AQU-2654: `editCount`, `contentHash` and `lastEditAt` are deliberately
+  // not compared. No view is built from them (buildCellData reads the
+  // validators, their stamps and the waivers), and they are exactly the
+  // fields on which the entry derived from an applied commit differs from the
+  // optimistic overlay it replaces — which bumped the cell, and re-rendered
+  // the workspace, to draw the same thing again.
   return (
-    a.editCount === b.editCount &&
-    a.contentHash === b.contentHash &&
-    a.lastEditAt === b.lastEditAt &&
     a.lastEditEventId === b.lastEditEventId &&
     sameStringArray(a.activeValidators, b.activeValidators) &&
     // AQU-2296: a re-validation on the SAME head moves one person's

@@ -152,6 +152,12 @@ export function buildLibraryLintResolver(source: LibraryLintSource): LibraryLint
   // to grow with a whole book (each miss then costs one resolve, which is the
   // uncached cost anyway).
   const byCoordinate = new Map<string, TranslationRule[]>()
+  // AQU-2654: the composed array, by the two arrays it is made of. The concat
+  // is still transient in what it costs to keep (the entry dies with the
+  // project's rule array), but cells that share a coordinate now share ONE
+  // array, and the rule engine plans its walk per array — a fresh concat per
+  // cell made it re-plan a glossary's worth of rules for every cell.
+  const composed = new WeakMap<TranslationRule[], WeakMap<TranslationRule[], TranslationRule[]>>()
 
   const rulesForCell = (
     cell: LintCell,
@@ -176,7 +182,18 @@ export function buildLibraryLintResolver(source: LibraryLintSource): LibraryLint
       byCoordinate.set(key, applicable)
     }
     // Nothing applies → the caller keeps its own array, by reference.
-    return applicable.length === 0 ? projectEnabledRules : [...projectEnabledRules, ...applicable]
+    if (applicable.length === 0) return projectEnabledRules
+    let byApplicable = composed.get(projectEnabledRules)
+    if (!byApplicable) {
+      byApplicable = new WeakMap()
+      composed.set(projectEnabledRules, byApplicable)
+    }
+    let rules = byApplicable.get(applicable)
+    if (!rules) {
+      rules = [...projectEnabledRules, ...applicable]
+      byApplicable.set(applicable, rules)
+    }
+    return rules
   }
 
   return { rulesForCell, signature: lintSignature(compiled, rows) }

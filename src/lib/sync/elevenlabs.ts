@@ -123,6 +123,56 @@ export async function listElevenLabsVoices(
   return { voices: Array.isArray(json.voices) ? json.voices : [], nextPageToken: json.nextPageToken ?? null }
 }
 
+/** A voice in ElevenLabs' public voice library, not yet in the account (AQU-2577). */
+export interface ElevenLabsLibraryVoiceRow {
+  id: string
+  /** The sharing user's public id: adding the voice needs it. */
+  ownerId: string
+  name: string
+  labels: Record<string, string>
+  previewUrl: string | null
+  description: string | null
+  /** Already saved to this account. */
+  added: boolean
+}
+
+export interface ElevenLabsLibraryPage {
+  voices: ElevenLabsLibraryVoiceRow[]
+  nextPage: number | null
+}
+
+/** GET /api/v1/elevenlabs/library — search ElevenLabs' public voice library. */
+export async function searchElevenLabsLibrary(
+  scope: ElevenLabsScope & { search?: string; language?: string; gender?: string; age?: string; page?: number },
+  getSyncToken: SyncTokenForFile,
+): Promise<ElevenLabsLibraryPage> {
+  const params = new URLSearchParams({ projectId: scope.projectId })
+  if (scope.search?.trim()) params.set("search", scope.search.trim())
+  if (scope.language) params.set("language", scope.language)
+  if (scope.gender) params.set("gender", scope.gender)
+  if (scope.age) params.set("age", scope.age)
+  if (scope.page) params.set("page", String(scope.page))
+  const res = await send(`${base()}/library?${params}`, { headers: await authHeaders(scope, getSyncToken) }, READ_TIMEOUT_MS)
+  const json = (await res.json()) as Partial<ElevenLabsLibraryPage>
+  return { voices: Array.isArray(json.voices) ? json.voices : [], nextPage: json.nextPage ?? null }
+}
+
+/**
+ * POST /api/v1/elevenlabs/library/add — save a library voice to the user's own
+ * ElevenLabs account. Returns the voice's id in that account.
+ */
+export async function addElevenLabsLibraryVoice(
+  scope: ElevenLabsScope & { ownerId: string; voiceId: string; name: string },
+  getSyncToken: SyncTokenForFile,
+): Promise<string> {
+  const res = await send(`${base()}/library/add`, {
+    method: "POST",
+    headers: { ...(await authHeaders(scope, getSyncToken)), "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId: scope.projectId, ownerId: scope.ownerId, voiceId: scope.voiceId, name: scope.name }),
+  }, READ_TIMEOUT_MS)
+  return ((await res.json()) as { voiceId: string }).voiceId
+}
+
 /** GET /api/v1/elevenlabs/models — the curated TTS models this account has. */
 export async function listElevenLabsModels(scope: ElevenLabsScope, getSyncToken: SyncTokenForFile): Promise<string[]> {
   const params = new URLSearchParams({ projectId: scope.projectId })

@@ -64,9 +64,33 @@ export const recorderCountdownBeepPref = definePersonPref(
   onByDefault("recorder.countdownBeep", "aq.recording-countdown-beep.v1", "off"),
 )
 
-/** Recorder ⚙ → Move on after saving a recording. */
+/**
+ * Recorder ⚙ → Move on after saving a recording. OFF by default (AQU-2620,
+ * Matthew, 2026-11-16): moving on suits a fast pass down a file, and gets in
+ * the way of working one line — record, listen back, record again.
+ *
+ * Both keys are versioned because the default had to change for people who
+ * already have a stored value, not only for new accounts. AQU-2264's first
+ * sync wrote every recorder preference into each person's record, including
+ * ones they had never touched, so virtually every active person's record says
+ * `recorder.moveOnAfterSaving: true` — and a stored value always beats a
+ * default. A stored "on" somebody chose cannot be told apart from one written
+ * for them, so the decision is to treat every one of them as the old default.
+ *
+ * Reading `…moveOnAfterSaving.v2` instead does that in one move, exactly once:
+ *   - the record has no `.v2` key, so the device key decides;
+ *   - the device key is `…auto-advance.v2`, which nothing has ever written, so
+ *     it reads off — for the person who had it on, the person who had turned
+ *     it off, and the brand-new account alike;
+ *   - the first device to sync offers that `false` as `setIfAbsent`, so every
+ *     later device adopts it rather than switching it back on;
+ *   - once anyone switches it on, `.v2` is in the record and wins everywhere.
+ *     The reset cannot happen a second time.
+ * The superseded `recorder.moveOnAfterSaving` / `aq.recording-auto-advance.v1`
+ * keys are simply left where they are; nothing reads them any more.
+ */
 export const recorderMoveOnAfterSavingPref = definePersonPref(
-  onByDefault("recorder.moveOnAfterSaving", "aq.recording-auto-advance.v1", "off"),
+  offByDefault("recorder.moveOnAfterSaving.v2", "aq.recording-auto-advance.v2"),
 )
 
 /** Recorder ⚙ → Keep the takes drawer open. */

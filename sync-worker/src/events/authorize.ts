@@ -14,7 +14,7 @@ import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { resolveImportFloor } from './import-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
-import { laneOfEvent } from './event-projection'
+import { laneOfAudioEvent, laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
@@ -32,7 +32,7 @@ import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-aut
 import { toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { findRestorableRemoval } from './removed-cell-archive'
-import { namesSidecar } from '../audio-write-guard'
+import { fileScopeRefusal, laneRefusal, namesSidecar } from '../audio-write-guard'
 
 /** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
 const EXTENSION_GATED_KINDS = new Set<string>([
@@ -111,6 +111,22 @@ function isTermKind(kind: string): boolean {
  * file-level lifecycle) is NEVER scope-gated: source rows are shared across
  * lanes, and the other surfaces aren't lane-addressable.
  */
+/** AQU-2685: the audio event kinds held to file and language limits. */
+const AUDIO_SCOPE_KINDS = new Set<string>([
+  'cell.audio.attach',
+  'cell.audio.select',
+  'cell.audio.remove',
+  'cell.audio.rename',
+  'cell.audio.trim',
+  'cell.audio.gain',
+  'cell.audio.place',
+  'cell.audio.cut',
+  'cell.audio.uncut',
+  'cell.audio.measure',
+  'cell.audio.validate',
+  'cell.audio.unvalidate',
+])
+
 const SCOPE_GATED_KINDS = new Set<string>([
   'target.cell.create',
   'target.cell.commit',
@@ -980,6 +996,37 @@ export async function authorize<K extends EventKind>(
             AND role = 'timeline-content' AND deleted_at IS NULL`,
       ).bind(contentFileId, raw.projectId, raw.fileId).first<{ id: string }>()
       if (!content) return { ok: false, status: 403, reason: 'track content does not belong to this timeline' }
+    }
+  }
+
+  // AQU-2685: audio events are held to the same file and language limits as
+  // text. The file: the caller's file scopes, a cue file counting as part of
+  // the file it belongs to (so a scoped performer still records heard
+  // lines). The language: an existing take's own (many re-attaches and trims
+  // name none, AQU-1978), else the one the event names; the shared source
+  // clip has none. Same lane rules as text: the wall's grants when it is on
+  // (Maintainer+ and platform pass), else the token's lane scopes.
+  if (db != null && AUDIO_SCOPE_KINDS.has(raw.kind) && raw.fileId) {
+    const fileRefusal = await fileScopeRefusal(db, tokenClaims, raw.projectId, raw.fileId)
+    if (fileRefusal) return { ok: false, status: 403, reason: fileRefusal }
+    const ap = raw.payload as { audioId?: unknown; role?: unknown } | null
+    if (!(raw.kind === 'cell.audio.attach' && ap?.role === 'source')) {
+      const audioId = typeof ap?.audioId === 'string' ? ap.audioId : null
+      const stored = audioId && raw.cellId
+        ? await db
+            .prepare(
+              `SELECT COALESCE(l.legacy_tag, '') AS tag, a.role FROM cell_audio a
+                 LEFT JOIN lanes l ON l.id = a.lane_id
+                WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?`,
+            )
+            .bind(raw.projectId, raw.fileId, raw.cellId, audioId)
+            .first<{ tag: string; role: string }>()
+        : null
+      if (stored?.role !== 'source') {
+        const laneTag = stored ? stored.tag : laneOfAudioEvent(raw.payload)
+        const laneRefused = await laneRefusal(db, tokenClaims, raw.projectId, laneTag, laneReadWall, requiredRole)
+        if (laneRefused) return { ok: false, status: 403, reason: laneRefused }
+      }
     }
   }
 

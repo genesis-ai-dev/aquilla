@@ -195,8 +195,6 @@ export function verifyRejected(pattern: string, flags: string, text: string): vo
 const verifiers = new Map<string, RegExp>()
 
 const MAX_INDEXED_TEXTS = 4096
-/** Trie edges are keyed `node * EDGE_RADIX + UTF-16 unit` in one flat map. */
-const EDGE_RADIX = 0x10000
 
 /**
  * Many prefilters, answered together: which of them may match a text, in one
@@ -204,19 +202,23 @@ const EDGE_RADIX = 0x10000
  * by the caller (an index into its own list), and `candidates` returns those
  * numbers in ascending order, so the caller's order is preserved.
  *
- * The anchors are held in a trie. From each position of the folded text the
- * trie is walked for as long as the text agrees with some anchor, and every
- * anchor that ends on the way is one that occurs in the text — exactly the
- * anchors `mayMatch` finds one `includes` at a time. The walk usually stops
- * within a letter or two, so the cost follows the length of the text and the
- * anchors actually present, not the size of the glossary, and does not degrade
- * when many anchors share a prefix.
+ * Anchors are filed under their first two UTF-16 units, then by length, then
+ * by the anchor itself. At each position of the folded text the two units
+ * found there select a bucket — for most positions there is none, and that is
+ * the whole cost — and each length in the bucket is one substring lookup. An
+ * anchor is found wherever it occurs, which is what `mayMatch` computes one
+ * `includes` at a time; the cost follows the text and the anchors that share
+ * its letter pairs, not the size of the glossary, and a thousand anchors with
+ * a common prefix are still one lookup per distinct length. Building it is a
+ * few map writes per anchor (a trie was measured at ~90 ms for the benchmark
+ * glossary's three indexes; this is a few).
  */
 export class AnchorIndex {
   private readonly always: number[] = []
-  private readonly edges = new Map<number, number>()
-  private readonly endings = new Map<number, number[]>()
-  private nodes = 1
+  /** One-unit anchors, by that unit. */
+  private readonly single = new Map<string, number[]>()
+  /** Longer anchors: first two units → length → anchor → entries. */
+  private readonly buckets = new Map<string, Map<number, Map<string, number[]>>>()
   private readonly entries: number[] = []
   private readonly byText = new Map<string, readonly number[]>()
   private sorted: number[] | null = null
@@ -224,26 +226,32 @@ export class AnchorIndex {
   add(entry: number, prefilter: Prefilter): void {
     this.entries.push(entry)
     this.sorted = null
-    this.byText.clear()
+    if (this.byText.size > 0) this.byText.clear()
     if (prefilter.always) {
       this.always.push(entry)
       return
     }
     for (const anchor of prefilter.anchors) {
-      let node = 0
-      for (let i = 0; i < anchor.length; i += 1) {
-        const edge = node * EDGE_RADIX + anchor.charCodeAt(i)
-        let next = this.edges.get(edge)
-        if (next === undefined) {
-          next = this.nodes
-          this.nodes += 1
-          this.edges.set(edge, next)
+      let byAnchor: Map<string, number[]>
+      if (anchor.length === 1) {
+        byAnchor = this.single
+      } else {
+        const key = anchor.slice(0, 2)
+        let byLength = this.buckets.get(key)
+        if (!byLength) {
+          byLength = new Map()
+          this.buckets.set(key, byLength)
         }
-        node = next
+        let found = byLength.get(anchor.length)
+        if (!found) {
+          found = new Map()
+          byLength.set(anchor.length, found)
+        }
+        byAnchor = found
       }
-      const ending = this.endings.get(node)
-      if (ending) ending.push(entry)
-      else this.endings.set(node, [entry])
+      const list = byAnchor.get(anchor)
+      if (list) list.push(entry)
+      else byAnchor.set(anchor, [entry])
     }
   }
 
@@ -266,18 +274,26 @@ export class AnchorIndex {
 
   private scan(folded: string): readonly number[] {
     const hits = new Set<number>(this.always)
-    if (this.endings.size > 0) {
+    const singles = this.single.size > 0
+    const longer = this.buckets.size > 0
+    if (singles || longer) {
       for (let at = 0; at < folded.length; at += 1) {
-        let node = 0
-        for (let i = at; i < folded.length; i += 1) {
-          const next = this.edges.get(node * EDGE_RADIX + folded.charCodeAt(i))
-          if (next === undefined) break
-          node = next
-          const ending = this.endings.get(node)
-          if (ending) for (const entry of ending) hits.add(entry)
+        if (singles) {
+          const list = this.single.get(folded[at])
+          if (list) for (const entry of list) hits.add(entry)
+        }
+        if (!longer || at + 2 > folded.length) continue
+        const byLength = this.buckets.get(folded.slice(at, at + 2))
+        if (!byLength) continue
+        for (const [length, byAnchor] of byLength) {
+          if (at + length > folded.length) continue
+          const list = byAnchor.get(length === 2 ? folded.slice(at, at + 2) : folded.slice(at, at + length))
+          if (list) for (const entry of list) hits.add(entry)
         }
       }
     }
-    return [...hits].sort((a, b) => a - b)
+    return hits.size === 0 ? NO_ENTRIES : [...hits].sort((a, b) => a - b)
   }
 }
+
+const NO_ENTRIES: readonly number[] = []

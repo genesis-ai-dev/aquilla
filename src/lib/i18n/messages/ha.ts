@@ -5453,7 +5453,6 @@ export const ha: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Ku zaɓi fayil a sama don ƙara shi zuwa wannan haɗin, ko ku cire zaɓin ɗaya don daina bin sa.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Ku ƙara fayiloli",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Ana ƙara fayiloli…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Fayiloli ba su gama zuwa ba, don haka har yanzu ba a ƙara su zuwa haɗin ba. Ku sake gwadawa don kammala kawo su.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "an daina bi",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Ku yi bita canje-canje",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Ku tabbatar da waɗannan canje-canje ga haɗin",

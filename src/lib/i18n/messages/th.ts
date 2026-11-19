@@ -4559,7 +4559,6 @@ export const th: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "ติ๊กไฟล์ด้านบนเพื่อเพิ่มในลิงก์นี้ หรือเลิกติ๊กเพื่อเลิกติดตาม",
   "projectSettings.sourceLink.chooseFilesAddButton": "เพิ่มไฟล์",
   "projectSettings.sourceLink.chooseFilesAddingButton": "กำลังเพิ่มไฟล์…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "ไฟล์ส่งมาไม่ครบ จึงยังไม่ได้เพิ่มในลิงก์ ลองอีกครั้งเพื่อนำเข้าให้เสร็จ",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "เลิกติดตามแล้ว",
   "projectSettings.sourceLink.chooseFilesReviewButton": "ตรวจสอบการเปลี่ยนแปลง",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "ยืนยันการเปลี่ยนแปลงลิงก์นี้",

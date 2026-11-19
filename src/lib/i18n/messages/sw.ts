@@ -5449,7 +5449,6 @@ export const sw: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "Chagua faili hapo juu ili kuiongeza kwenye kiungo hiki, au ondoa uteuzi wa moja ili kuacha kuifuata.",
   "projectSettings.sourceLink.chooseFilesAddButton": "Ongeza faili",
   "projectSettings.sourceLink.chooseFilesAddingButton": "Inaongeza faili…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "Faili hazijamaliza kufika, hivyo bado hazijaongezwa kwenye kiungo. Jaribu tena ili kumaliza kuzileta.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "imeacha kufuata",
   "projectSettings.sourceLink.chooseFilesReviewButton": "Kagua mabadiliko",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "Thibitisha mabadiliko haya ya kiungo",

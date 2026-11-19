@@ -5455,7 +5455,6 @@ export const am: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "ወደዚህ አገናኝ ለመጨመር ከላይ ፋይል ምልክት ያድርጉ፣ ወይም መከተል ለማቆም አንዱን ምልክት ያንሱ።",
   "projectSettings.sourceLink.chooseFilesAddButton": "ፋይሎች ይጨምሩ",
   "projectSettings.sourceLink.chooseFilesAddingButton": "ፋይሎች በመጨመር ላይ…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "ፋይሎቹ መድረስ አልጨረሱም፣ ስለዚህ እስካሁን ወደ አገናኙ አልተጨመሩም። ማምጣት ለመጨረስ እንደገና ይሞክሩ።",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "መከተል ቆሟል",
   "projectSettings.sourceLink.chooseFilesReviewButton": "ለውጦችን ይገምግሙ",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "እነዚህን የአገናኝ ለውጦች ያረጋግጡ",

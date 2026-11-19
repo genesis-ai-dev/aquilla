@@ -5461,7 +5461,6 @@ export const bn: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "এই লিংকে যোগ করতে উপরে একটি ফাইল টিক দিন, অথবা অনুসরণ বন্ধ করতে একটির টিক তুলুন।",
   "projectSettings.sourceLink.chooseFilesAddButton": "ফাইল যোগ করুন",
   "projectSettings.sourceLink.chooseFilesAddingButton": "ফাইল যোগ হচ্ছে…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "ফাইল আসা শেষ হয়নি, তাই এখনো লিংকে যোগ হয়নি। আনা শেষ করতে আবার চেষ্টা করুন।",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "অনুসরণ বন্ধ",
   "projectSettings.sourceLink.chooseFilesReviewButton": "পরিবর্তন পর্যালোচনা করুন",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "লিংকের এই পরিবর্তন নিশ্চিত করুন",

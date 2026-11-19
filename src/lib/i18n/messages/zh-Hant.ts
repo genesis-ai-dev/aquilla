@@ -4575,7 +4575,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "在上方勾選檔案即可加入此連結，或取消勾選以停止跟隨。",
   "projectSettings.sourceLink.chooseFilesAddButton": "加入檔案",
   "projectSettings.sourceLink.chooseFilesAddingButton": "正在加入檔案…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "檔案尚未全部完成帶入，因此還沒有加入連結。請再試一次以完成帶入。",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "已停止跟隨",
   "projectSettings.sourceLink.chooseFilesReviewButton": "檢視變更",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "確認對連結的這些變更",

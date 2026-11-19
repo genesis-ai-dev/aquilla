@@ -5446,7 +5446,6 @@ export const pa: Catalog = {
   "projectSettings.sourceLink.chooseFilesNoneChecked": "ਇਸ ਲਿੰਕ ਵਿੱਚ ਜੋੜਨ ਲਈ ਉੱਪਰ ਇੱਕ ਫ਼ਾਈਲ ਟਿੱਕ ਕਰੋ, ਜਾਂ ਪਿੱਛਾ ਰੋਕਣ ਲਈ ਇੱਕ ਦੀ ਟਿੱਕ ਹਟਾਓ.",
   "projectSettings.sourceLink.chooseFilesAddButton": "ਫ਼ਾਈਲਾਂ ਜੋੜੋ",
   "projectSettings.sourceLink.chooseFilesAddingButton": "ਫ਼ਾਈਲਾਂ ਜੋੜੀਆਂ ਜਾ ਰਹੀਆਂ ਹਨ…",
-  "projectSettings.sourceLink.chooseFilesIncomplete": "ਫ਼ਾਈਲਾਂ ਪੂਰੀਆਂ ਨਹੀਂ ਆਈਆਂ, ਇਸ ਲਈ ਉਹ ਹਾਲੇ ਲਿੰਕ ਵਿੱਚ ਨਹੀਂ ਜੁੜੀਆਂ. ਉਨ੍ਹਾਂ ਨੂੰ ਲਿਆਉਣਾ ਪੂਰਾ ਕਰਨ ਲਈ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
   "projectSettings.sourceLink.chooseFilesStoppedBadge": "ਪਿੱਛਾ ਰੁਕਿਆ",
   "projectSettings.sourceLink.chooseFilesReviewButton": "ਬਦਲਾਅ ਵੇਖੋ",
   "projectSettings.sourceLink.chooseFilesConfirmTitle": "ਲਿੰਕ ਦੇ ਇਹ ਬਦਲਾਅ ਪੁਸ਼ਟੀ ਕਰੋ",

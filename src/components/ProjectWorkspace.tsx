@@ -7,7 +7,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
@@ -202,7 +202,7 @@ import {
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
-import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { ParallelPassagesPanel as ParallelPassagesPanelImpl, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
@@ -345,7 +345,7 @@ import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow } from "@/lib/c
 import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
+import { SplitAtQuotesDialog as SplitAtQuotesDialogImpl } from "@/components/SplitAtQuotesDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
@@ -481,24 +481,24 @@ import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeE
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { ExpandableFileList } from "./ExpandableFileList"
+import { ExpandableFileList as ExpandableFileListImpl } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
-import { FileDetailsModal } from "./FileDetailsModal"
-import { RenameDialog } from "./RenameDialog"
-import { FileSegmentationDialog } from "./FileSegmentationDialog"
-import { AnalysisReportDialog } from "./analysis/AnalysisReportDialog"
+import { FileDetailsModal as FileDetailsModalImpl } from "./FileDetailsModal"
+import { RenameDialog as RenameDialogImpl } from "./RenameDialog"
+import { FileSegmentationDialog as FileSegmentationDialogImpl } from "./FileSegmentationDialog"
+import { AnalysisReportDialog as AnalysisReportDialogImpl } from "./analysis/AnalysisReportDialog"
 import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
-import { ConfirmActionDialog } from "./ConfirmActionDialog"
-import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
-import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
-import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
+import { ConfirmActionDialog as ConfirmActionDialogImpl } from "./ConfirmActionDialog"
+import { LinkVideoTimingDialog as LinkVideoTimingDialogImpl } from "./timeline/LinkVideoTimingDialog"
+import { LinkVideoUrlDialog as LinkVideoUrlDialogImpl } from "./timeline/LinkVideoUrlDialog"
+import { ImportAudioVttDialog as ImportAudioVttDialogImpl } from "./timeline/ImportAudioVttDialog"
 import { captionTrackDestinations } from "@/lib/import/caption-destinations"
 import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
 import type { MediaTextSource } from "@/lib/import/media-cues"
-import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
+import { ImportSubtitlesDialog as ImportSubtitlesDialogImpl } from "./timeline/ImportSubtitlesDialog"
 // Media redesign, layout: the panels' constraints, sizes, folds and full
 // screen all come from `useMediaDock`; the gate for the film stays here.
 import { shouldShowVideoPane } from "./timeline/video-pane-layout"
@@ -591,7 +591,7 @@ import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
-import { AiSetupDialog } from "./AiSetupDialog"
+import { AiSetupDialog as AiSetupDialogImpl } from "./AiSetupDialog"
 import {
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
@@ -639,7 +639,7 @@ import { createLiveBtQueue, needsLiveBacktranslation, type LiveBtQueue } from "@
 import type { EditorBacktranslationConfig } from "@/components/backtranslation/BacktranslationColumn"
 import { readDraftingSettings } from "../../db/shared/drafting-settings"
 // FRO-192: assignment work-pickup UI
-import { AssignModal } from "./AssignModal"
+import { AssignModal as AssignModalImpl } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
@@ -650,6 +650,10 @@ import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
+import { useStableCallback } from "@/hooks/useStableCallback"
+import { memoWhileClosed } from "@/components/memoWhileClosed"
+import { useStableValue, mapsEqual } from "@/hooks/useStableValue"
+import { ChapterNavTrailingContext, CHAPTER_NAV_TRAILING_OUTLET } from "@/components/ChapterNavTrailingSlot"
 import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import {
   batchValidateChunkSize,
@@ -737,7 +741,7 @@ const SetupChecklistDrawer = lazy(() =>
   import("./onboarding/SetupChecklistDrawer").then((m) => ({ default: m.SetupChecklistDrawer })),
 )
 const ImportCharactersDialog = lazy(() =>
-  import("./timeline/ImportCharactersDialog").then((m) => ({ default: m.ImportCharactersDialog })),
+  import("./timeline/ImportCharactersDialog").then((m) => ({ default: memoWhileClosed(m.ImportCharactersDialog) })),
 )
 const ImportTimelineTextDialog = lazy(() =>
   import("./import/ImportTimelineTextDialog").then((m) => ({ default: m.ImportTimelineTextDialog })),
@@ -905,6 +909,34 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
     /* storage unavailable — tab open-state stays in-memory only */
   }
 }
+
+// AQU-2654 (decision 0013, "closed is unmounted"): the dialogs the workspace
+// renders with `open={false}` for the whole session. Each stays mounted — its
+// exit animation and any state it keeps between opens are untouched — but is
+// not re-rendered while it stays closed. Every one here was checked to do
+// nothing while closed; see `memoWhileClosed` for the rule and for the four
+// that are deliberately left as they were.
+const AiSetupDialog = memoWhileClosed(AiSetupDialogImpl)
+const AssignModal = memoWhileClosed(AssignModalImpl)
+const ParallelPassagesPanel = memoWhileClosed(ParallelPassagesPanelImpl)
+const FileSegmentationDialog = memoWhileClosed(FileSegmentationDialogImpl)
+const AnalysisReportDialog = memoWhileClosed(AnalysisReportDialogImpl)
+const FileDetailsModal = memoWhileClosed(FileDetailsModalImpl)
+const RenameDialog = memoWhileClosed(RenameDialogImpl)
+const ConfirmActionDialog = memoWhileClosed(ConfirmActionDialogImpl)
+const SplitAtQuotesDialog = memoWhileClosed(SplitAtQuotesDialogImpl, (props) => props.pieces !== null)
+const LinkVideoUrlDialog = memoWhileClosed(LinkVideoUrlDialogImpl)
+const ImportAudioVttDialog = memoWhileClosed(ImportAudioVttDialogImpl)
+const ImportSubtitlesDialog = memoWhileClosed(ImportSubtitlesDialogImpl)
+const LinkVideoTimingDialog = memoWhileClosed(LinkVideoTimingDialogImpl)
+
+// The sidebar's file list: ~100 components, re-rendered by every workspace
+// render until its props were made stable (see the `handleFileList*` handlers).
+const ExpandableFileList = memo(ExpandableFileListImpl)
+
+type CellAssignmentMap = ReadonlyMap<string, { username: string; scopeLabel: string }>
+const assignmentMapsEqual = (a: CellAssignmentMap, b: CellAssignmentMap): boolean =>
+  mapsEqual(a, b, (x, y) => x.username === y.username && x.scopeLabel === y.scopeLabel)
 
 export function ProjectWorkspace() {
   const analytics = useAccountAnalytics()
@@ -8667,7 +8699,7 @@ export function ProjectWorkspace() {
   // Build a cellId → {username, scopeLabel} map for the EditorTable gutter.
   // Strategy: match each cell against the active assignments using fileId and
   // globalReferences prefix (chapter LIKE 'BOOK CH:%').
-  const assignmentsByCellId = useMemo((): ReadonlyMap<string, { username: string; scopeLabel: string }> => {
+  const assignmentsByCellIdNow = useMemo((): ReadonlyMap<string, { username: string; scopeLabel: string }> => {
     const map = new Map<string, { username: string; scopeLabel: string }>()
     if (myAssignments.length === 0 || !activeFileId) return map
     for (const a of myAssignments) {
@@ -8705,6 +8737,9 @@ export function ProjectWorkspace() {
     }
     return map
   }, [myAssignments, cellSummaries, activeFileId, project?.id, currentUsername])
+  // AQU-2654: rebuilt whenever the cell summaries are (every commit), nearly
+  // always to the same answer. The memoized table takes it as a prop.
+  const assignmentsByCellId = useStableValue(assignmentsByCellIdNow, assignmentMapsEqual)
 
   const backtranslating = backtranslatingState
   const backtranslationErrors = backtranslationErrorsState
@@ -17454,13 +17489,17 @@ export function ProjectWorkspace() {
   // chrome. `readAtVersion` because the React Compiler otherwise memoizes away
   // a version-only dependency and the badge would freeze at the first render's
   // counts (see the compiler note in CLAUDE.md).
-  const repetitionCounts = useMemo(
+  const repetitionCountsNow = useMemo(
     () =>
       autoPropagateRepetitions
         ? readAtVersion(cellStoreVersion, () => buildRepetitionCounts(cellStore.getAllCellViews()))
         : undefined,
     [autoPropagateRepetitions, cellStore, cellStoreVersion],
   )
+  // AQU-2654: rebuilt on every store emit, and nearly always to the same
+  // counts. The table is memoized on this prop, so keep the map's identity
+  // until a count really changes.
+  const repetitionCounts = useStableValue(repetitionCountsNow, mapsEqual)
 
   const isRepetitionWritable = useCallback(
     (cell: { id: string; fileId: string }) =>
@@ -18162,6 +18201,80 @@ export function ProjectWorkspace() {
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
 
+  // AQU-2654 (decision 0013, "a row's props are stable"): the editor table is
+  // memoized, so the handlers it is given must not be new closures per
+  // workspace render. These four were inline arrows in the JSX below; each
+  // runs only from a click, so an identity-stable wrapper around the newest
+  // closure changes nothing but the identity.
+  const handleEditTargetLanguage = useStableCallback(() => {
+    // AQU-583: the TARGET tag is the discoverable entry point to change
+    // the target language (the lane dropdown's "Change target language…",
+    // the single-lane pill, and the "Set target language" prompt all land
+    // here), where the field is edited (server enforces the role floor).
+    // AQU-2031: it opens the General PANE with the Languages card in
+    // view, not a `?q=target language` search — the search pre-fill
+    // always showed the search box and mixed in Project Info, which has
+    // no target-language field, so the person landed on what looked like
+    // a search they never ran.
+    if (!projectId) return
+    navigate(projectLanguageSettingsPath(projectId, "languages"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  })
+  // AQU-1601: "Add lane…" opens Languages too, scrolled to its "Add a
+  // target lane" field (AQU-2031). EditorTable withholds the item from
+  // anyone below maintainer.
+  const handleAddLane = useStableCallback(() => {
+    if (!projectId) return
+    navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  })
+  // AQU-1271: the add-to-terminology popover offers this when the
+  // project has no prefix/suffix inventory for its matcher yet.
+  const handleSetUpAffixes = useStableCallback(() =>
+    navigate(`/project/${projectId}/settings?q=terminology`, {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    }),
+  )
+  const handlePlaceChange = useStableCallback((cellId: string) => rememberCell(cellId, "top"))
+  // The sidebar file list is memoized for the same reason; these seven were
+  // its inline arrows, each run only from a click or a finished drag.
+  const handleFileListMove = useStableCallback((fileId: string) => {
+    setMoveTargetId(fileId)
+    setMoveCorpus(project?.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+  })
+  const handleFileListExport = useStableCallback((fileId: string) => {
+    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
+    openExportFlow()
+  })
+  const handleFileListAssignWork = useStableCallback((fileId: string) => {
+    setAssignTargetFileId(fileId)
+    setAssignModalOpen(true)
+  })
+  const handleFileListReimport = useStableCallback((fileId: string) => {
+    const file = project?.files.find((entry) => entry.id === fileId)
+    if (!file) return
+    setReimportTarget({
+      fileId,
+      name: file.name,
+      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
+      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
+    })
+    setImportOpen(true)
+  })
+  const handleFileListUploadRecordings = useStableCallback((fileId: string) => {
+    const file = project?.files.find((entry) => entry.id === fileId)
+    if (!file) return
+    setReimportTarget(null)
+    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
+    setImportOpen(true)
+  })
+  const handleFileListReorder = useStableCallback((writes: Parameters<typeof handleReorderFiles>[0]) => { void handleReorderFiles(writes) })
+  const handleFileListMoveToGroup = useStableCallback((move: Parameters<typeof handleMoveFileToGroup>[0]) => { void handleMoveFileToGroup(move) })
+  // (Hooks: these sit above the early returns below. What they call is
+  // declared further down, which is fine — each runs from a later click.)
+
   // AQU-1325: while the project record loads, paint the real chrome (rail,
   // account switcher, breadcrumb) around a main-area skeleton. None of the
   // chrome depends on the record, so blanking it behind a whole-page template
@@ -18717,38 +18830,13 @@ export function ProjectWorkspace() {
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
                   onRename={handleRename}
-                  onMove={(fileId) => {
-                    setMoveTargetId(fileId)
-                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-                  }}
-                  onExport={(fileId) => {
-                    if (fileId !== activeFileId) workspaceTabs.openFile(fileId)
-                    openExportFlow()
-                  }}
-                  onAssignWork={canAssignWork ? (fileId) => {
-                    setAssignTargetFileId(fileId)
-                    setAssignModalOpen(true)
-                  } : undefined}
+                  onMove={handleFileListMove}
+                  onExport={handleFileListExport}
+                  onAssignWork={canAssignWork ? handleFileListAssignWork : undefined}
                   onSegmentation={setSegmentationFileId}
-                  onReimport={canImportSource ? (fileId) => {
-                    const file = project.files.find((entry) => entry.id === fileId)
-                    if (!file) return
-                    setReimportTarget({
-                      fileId,
-                      name: file.name,
-                      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
-                      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
-                    })
-                    setImportOpen(true)
-                  } : undefined}
-                  onUploadRecordings={canUploadRecordings ? (fileId) => {
-                    const file = project.files.find((entry) => entry.id === fileId)
-                    if (!file) return
-                    setReimportTarget(null)
-                    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
-                    setImportOpen(true)
-                  } : undefined}
-                  onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
+                  onReimport={canImportSource ? handleFileListReimport : undefined}
+                  onUploadRecordings={canUploadRecordings ? handleFileListUploadRecordings : undefined}
+                  onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? setPendingDeleteId : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
@@ -18758,8 +18846,8 @@ export function ProjectWorkspace() {
                   // `file.reorder`. Below it the affordances are absent rather
                   // than present-and-403ing.
                   canReorderFiles={canPerform("file.reorder", project?.syncRole?.level ?? null)}
-                  onReorderFiles={(writes) => { void handleReorderFiles(writes) }}
-                  onMoveFileToGroup={(move) => { void handleMoveFileToGroup(move) }}
+                  onReorderFiles={handleFileListReorder}
+                  onMoveFileToGroup={handleFileListMoveToGroup}
                 />
                 <SidebarProjectSection items={projectNavItems}>
                   {/* FRO-192: member's per-project assignment pickup — a sidebar button that opens a popover. */}
@@ -19836,6 +19924,7 @@ export function ProjectWorkspace() {
                 // bottom strip is playing is marked.
                 enabled={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered)}
               />
+              <ChapterNavTrailingContext.Provider value={fileChapterToolbar}>
               <EditorTable
             ref={bindEditorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -19874,28 +19963,14 @@ export function ProjectWorkspace() {
             // always showed the search box and mixed in Project Info, which has
             // no target-language field, so the person landed on what looked like
             // a search they never ran.
-            onEditTargetLanguage={() => {
-              if (!projectId) return
-              navigate(projectLanguageSettingsPath(projectId, "languages"), {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }}
+            onEditTargetLanguage={handleEditTargetLanguage}
             // AQU-1601: "Add lane…" opens Languages too, scrolled to its "Add a
             // target lane" field (AQU-2031). EditorTable withholds the item from
             // anyone below maintainer.
-            onAddLane={() => {
-              if (!projectId) return
-              navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }}
+            onAddLane={handleAddLane}
             // AQU-1271: the add-to-terminology popover offers this when the
             // project has no prefix/suffix inventory for its matcher yet.
-            onSetUpAffixes={() =>
-              navigate(`/project/${projectId}/settings?q=terminology`, {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
-            }
+            onSetUpAffixes={handleSetUpAffixes}
             isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             exampleOriginFor={exampleOriginFor}
@@ -19969,7 +20044,7 @@ export function ProjectWorkspace() {
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
             onNavigateToCell={handleNavigatorCell}
-            onPlaceChange={(cellId) => rememberCell(cellId, "top")}
+            onPlaceChange={handlePlaceChange}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}
@@ -19988,13 +20063,17 @@ export function ProjectWorkspace() {
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
-            chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            // AQU-2654: the toolbar element is new on every workspace render,
+            // so it reaches the table through context and the prop is one
+            // constant outlet — see ChapterNavTrailingSlot.
+            chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
             // AQU-1758: a book's timeline shows the chapter the table is on.
             onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
+              </ChapterNavTrailingContext.Provider>
               </>
               )}
               </div>

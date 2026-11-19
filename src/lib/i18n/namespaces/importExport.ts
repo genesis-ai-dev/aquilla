@@ -761,6 +761,8 @@ export const importExport = defineNamespace({
     "importExport.htmlPage.backToText": "Back to text",
     // AQU-2680: the PDF export opened the print window; the person saves the PDF there.
     "importExport.status.pdfChooseSaveAsPdf": "The print window is open. Choose \"Save as PDF\" there to save the file.",
+    // AQU-2680 re-check finding 3: beside the print message, for a browser that cannot print but doesn't say so.
+    "importExport.dialog.pdfOrDownloadWord": "Or download the Word file",
     // AQU-2680: printing is not available here (another app's built-in browser), so the PDF export saved the Word file.
     "importExport.status.pdfFellBackToWord": "The PDF couldn't be made right now, so this is the Word file; open it in Word or Pages and save it as PDF.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",

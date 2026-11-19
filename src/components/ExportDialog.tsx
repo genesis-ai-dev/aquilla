@@ -1257,6 +1257,11 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
   const [repairingCopy, setRepairingCopy] = useState(false)
+  // AQU-2680 re-check finding 3: what the PDF export printed, so the Word
+  // file of the same lines is one click away beside the print message. Some
+  // apps' built-in browsers (Gmail, Slack, X, LinkedIn, Telegram on iPhone)
+  // have no print and don't say so; this is their way out.
+  const [pdfWordFallback, setPdfWordFallback] = useState<{ cells: CellData[]; name: string } | null>(null)
   // Translations the failed InDesign export found outside the file's style
   // runs. Non-zero offers the placement beside the error.
   const [idmlUnplacedCount, setIdmlUnplacedCount] = useState(0)
@@ -1596,6 +1601,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
+    setPdfWordFallback(null)
     setIdmlUnplacedCount(0)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     let idmlTelemetryStartedAt: number | null = null
@@ -2292,6 +2298,7 @@ export function ExportDialog({
             setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
             if (result.kind === "print") {
               setStatus({ kind: "ok", msg: t("importExport.status.pdfChooseSaveAsPdf") })
+              setPdfWordFallback({ cells: filteredCells, name: `${baseName}.docx` })
             } else {
               downloadBlob(result.blob, `${baseName}.docx`)
               setStatus({ kind: "ok", msg: result.notice })
@@ -2421,6 +2428,7 @@ export function ExportDialog({
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
       setIdmlRecovery(null)
+      setPdfWordFallback(null)
       setIdmlUnplacedCount(0)
     }
     onOpenChange(next)
@@ -3563,6 +3571,22 @@ export function ExportDialog({
                     disabled={!onRepairIdmlCopy || repairingCopy}
                   >
                     {t("importExport.dialog.repairByReimporting")}
+                  </Button>
+                </span>
+              )}
+              {status.kind === "ok" && pdfWordFallback && (
+                <span className="pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void (async () => {
+                        const { exportDocxFromLines } = await import("@/lib/export/exporters/docx-from-lines")
+                        downloadBlob(await exportDocxFromLines(pdfWordFallback.cells, { lang: targetLanguage }), pdfWordFallback.name)
+                      })()
+                    }}
+                  >
+                    {t("importExport.dialog.pdfOrDownloadWord")}
                   </Button>
                 </span>
               )}

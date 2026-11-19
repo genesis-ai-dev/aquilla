@@ -25,7 +25,10 @@ export interface PrintOptions {
   loadTimeoutMs?: number
 }
 
-/** Built-in browsers of other apps, where `print()` is a silent no-op. */
+/** Built-in browsers of other apps, where `print()` is a silent no-op.
+ *  AQU-2680 re-check finding 3: others (Gmail, Slack, X, LinkedIn, Telegram
+ *  on iPhone) don't name themselves; the dialog offers the Word file beside
+ *  the print message for them. */
 const IN_APP_BROWSER = /\b(FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|Snapchat)\b|; wv\)/i
 
 const LOAD_TIMEOUT_MS = 10_000

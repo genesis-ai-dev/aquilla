@@ -75,6 +75,22 @@ describe("ExportDialog: PDF from the print window (AQU-2680)", () => {
     expect(mockDownload).not.toHaveBeenCalled()
   })
 
+  // AQU-2680 re-check finding 3: Gmail, Slack, X, LinkedIn and Telegram on
+  // iPhone have no print and don't say so; the Word file is always one click
+  // away beside the print message, so nobody is stuck.
+  it("offers the Word file beside the print message", async () => {
+    mockPrint.mockResolvedValue(true)
+    render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)
+    fireEvent.click(radio(/^PDF \(\.pdf\)/)!)
+    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    const word = await screen.findByRole("button", { name: "Or download the Word file" })
+    expect(mockDownload).not.toHaveBeenCalled()
+    fireEvent.click(word)
+    await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
+    expect(mockDownload.mock.calls[0][1]).toBe("notes.docx")
+    expect((mockDownload.mock.calls[0][0] as Blob).type).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+  })
+
   it("saves the Word file with the sentence on saving it as PDF where this browser cannot print", async () => {
     mockPrint.mockResolvedValue(false)
     render(<ExportDialog {...props("pdf", "notes.pdf", true)} />)

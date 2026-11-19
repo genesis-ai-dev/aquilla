@@ -112,6 +112,18 @@ describe("the Even out window", () => {
     await waitFor(() => expect(p.onRan).toHaveBeenCalledWith(expect.objectContaining({ evened: 40 }), FILE))
   })
 
+  it("says so when it waits for another Even out still running (review M2)", async () => {
+    let finish: (r: EvenOutResult) => void = () => {}
+    const run = vi.fn((_t: readonly TakeRef[], opts: { onWaiting?: () => void }) => {
+      opts.onWaiting?.()
+      return new Promise<EvenOutResult>((resolve) => { finish = resolve })
+    })
+    setup({ run })
+    fireEvent.click(screen.getByRole("button", { name: "Even out 212 takes" }))
+    expect(screen.getByText("Another Even out is still running. This one starts when it ends.")).toBeInTheDocument()
+    await act(async () => finish(result({ evened: 212 })))
+  })
+
   it("never blocks the editor: no dimmer, and the page stays clickable", () => {
     setup()
     expect(document.querySelector("[data-slot=dialog-overlay]")).toBeNull()

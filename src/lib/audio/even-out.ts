@@ -78,6 +78,13 @@ export interface EvenOutHost {
   /** The run is over: let go of what measuring held (the decoded recording,
    *  the recordings that failed this run). */
   release?(): void
+  /** Review M2: a FRESH measurer for each run (its own held decode, results
+   *  and failures), let go when the run ends. When given, `measure` and
+   *  `release` are not used. Two runs never share one: one run's decode,
+   *  handed to the worker, would be gone under the other. */
+  newMeasurer?(): TakeMeasurer
+  /** Review M2: one Even out (or Clear) at a time; a second waits its turn. */
+  queue?: EvenOutQueue
   /** The file the takes are in, for the history step ("open … to undo this"). */
   fileId?: string | null
   fileName?: string | null
@@ -93,6 +100,9 @@ export interface EvenOutOptions {
   /** A run over a file or tracks (the window, or the q89 switch): its steps
    *  are ⌘Z's to take back, not the Station's own Undo (board 73C). */
   markAsRun?: boolean
+  /** Called at once when another Even out is still running and this one
+   *  waits for it (the window says so). */
+  onWaiting?: () => void
 }
 
 export interface EvenOutResult {
@@ -176,7 +186,44 @@ async function applyAsOneStep(host: EvenOutHost, labelKey: string, parts: TakeEv
 }
 
 /** Even out `takes` to the target, measuring any that have no reading yet. */
+/** Review M2: runs Even out (and Clear) one at a time, in the order asked. */
+export interface EvenOutQueue {
+  run<T>(fn: () => Promise<T>, onWaiting?: () => void): Promise<T>
+  busy(): boolean
+}
+
+export function createEvenOutQueue(): EvenOutQueue {
+  let tail: Promise<unknown> = Promise.resolve()
+  let running = 0
+  return {
+    run<T>(fn: () => Promise<T>, onWaiting?: () => void): Promise<T> {
+      if (running > 0) onWaiting?.()
+      running++
+      const go = async () => {
+        try {
+          return await fn()
+        } finally {
+          running--
+        }
+      }
+      // Idle: start now. Busy: after the run before it, however it ended.
+      const next = running === 1 ? go() : tail.then(go, go)
+      tail = next.catch(() => {})
+      return next
+    },
+    busy: () => running > 0,
+  }
+}
+
 export async function evenOutTakes(host: EvenOutHost, takes: readonly TakeRef[], opts: EvenOutOptions = {}): Promise<EvenOutResult> {
+  if (host.queue) return host.queue.run(() => evenOutTakesNow(host, takes, opts), opts.onWaiting)
+  return evenOutTakesNow(host, takes, opts)
+}
+
+async function evenOutTakesNow(hostIn: EvenOutHost, takes: readonly TakeRef[], opts: EvenOutOptions): Promise<EvenOutResult> {
+  // This run's own measurer, when the host makes them (review M2).
+  const own = hostIn.newMeasurer?.()
+  const host: EvenOutHost = own ? { ...hostIn, measure: own, release: () => own.release() } : hostIn
   const targetLufs = opts.targetLufs ?? DEFAULT_EVEN_TARGET_LUFS
   const result: EvenOutResult = { targetLufs, evened: 0, skipped: 0, unmeasured: 0, silent: 0, gone: 0, held: [], failed: 0 }
   if (host.allowed === false) return { ...result, notAllowed: true }
@@ -268,6 +315,11 @@ async function evenOutMeasured(
 
 /** Take evening out off `takes`: each plays at its own volume again. */
 export async function clearEvenOut(host: EvenOutHost, takes: readonly TakeRef[]): Promise<ClearResult> {
+  if (host.queue) return host.queue.run(() => clearEvenOutNow(host, takes))
+  return clearEvenOutNow(host, takes)
+}
+
+async function clearEvenOutNow(host: EvenOutHost, takes: readonly TakeRef[]): Promise<ClearResult> {
   if (host.allowed === false) return { cleared: 0, gone: 0, failed: 0, notAllowed: true }
   let gone = 0
   const parts: TakeEvenData[] = []
@@ -489,7 +541,9 @@ export function makeTakeMeasurer(deps: TakeMeasurerDeps): TakeMeasurer {
       part = await deps.decodeWindow(rec.bytes, startSec, knownEnd)
       durationMs = att.durationMs ?? null
     }
-    if (!part || signal.aborted) return null
+    // No samples (a detached or empty decode) is not silence: store nothing
+    // rather than a −70 LUFS reading (review M2).
+    if (!part || part.length === 0 || signal.aborted) return null
     // Cancel and the timeout stop the meter too, not just the download.
     const r = await meter(part, TARGET_RATE, signal)
     if (signal.aborted) return null

@@ -31,7 +31,7 @@ export interface EvenOutDialogProps {
   scopes: readonly EvenOutScope[]
   start: EvenOutPick
   targetLufs?: number
-  run(takes: readonly TakeRef[], opts: Pick<EvenOutOptions, "signal" | "onProgress">): Promise<EvenOutResult | null>
+  run(takes: readonly TakeRef[], opts: Pick<EvenOutOptions, "signal" | "onProgress" | "onWaiting">): Promise<EvenOutResult | null>
   clear(takes: readonly TakeRef[]): Promise<ClearResult | null>
   /** The run ended (done or cancelled): the workspace shows its toast. */
   onRan(result: EvenOutResult, scope: EvenOutScope): void
@@ -83,7 +83,12 @@ export function EvenOutDialog({ open, onOpenChange, scopes, start, targetLufs = 
       signal: ac.signal,
       // Takes that already have a reading count as done: they are not
       // measured again (board 71G).
-      onProgress: (done, toMeasure) => setRunning({ done: n - toMeasure + done, total: n }),
+      onProgress: (done, toMeasure) => {
+        setNote(null)
+        setRunning({ done: n - toMeasure + done, total: n })
+      },
+      // Review M2: one Even out at a time; this one waits its turn.
+      onWaiting: () => setNote(t("editor.evenOut.waiting")),
     }).catch(() => null)
     abort.current = null
     setRunning(null)

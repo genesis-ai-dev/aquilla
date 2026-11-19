@@ -1294,6 +1294,7 @@ export const editor = defineNamespace({
       other: "{count} takes couldn’t be measured on this device and were skipped. They play at their own volume.",
     }),
     "editor.evenOut.notAllowed": "You can’t even out takes in this project.",
+    "editor.evenOut.waiting": "Another Even out is still running. This one starts when it ends.",
     "editor.evenOut.failed": "Couldn’t even out the takes. Try again.",
     "editor.evenOut.doneToast": plural({
       one: "{count} take evened out to {lufs} LUFS.",
@@ -8456,6 +8457,7 @@ export const editor = defineNamespace({
       "editor.evenOut.run": { description: "The main button of the 'Even out loudness' window.", maxLength: 32, placeholders: { count: "How many takes it will even out." } },
       "editor.evenOut.measuring": { description: "Progress text while the 'Even out loudness' window measures each take's loudness.", placeholders: { done: "How many takes are measured so far.", count: "How many takes it will measure." } },
       "editor.evenOut.skipped": { description: "Shown in the 'Even out loudness' window after a run, when some takes could not be measured on this device (too long, a slow network, too little memory).", placeholders: { count: "How many takes were skipped." } },
+      "editor.evenOut.waiting": { description: "Shown in the 'Even out loudness' window when another Even out (or a background one) is still running; this one starts after it." },
       "editor.evenOut.notAllowed": { description: "Shown when the person's role does not allow evening out takes." },
       "editor.evenOut.failed": { description: "Error toast when evening out takes failed." },
       "editor.evenOut.doneToast": { description: "Toast after evening out: how many takes now play at the loudness. Followed by an Undo button.", placeholders: { count: "How many takes were evened out.", lufs: "The loudness, like −16." } },

@@ -285,7 +285,7 @@ import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
+import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, createEvenOutQueue, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
 import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
 import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
 import { clearedToastText, ranToastText } from "@/lib/audio/even-out-toasts"
@@ -4613,13 +4613,17 @@ export function ProjectWorkspace() {
   // and reaches it through the Station host (`evenOut`, `clearEvenOut`).
   // Takes with no reading are measured once here; one that can't be is
   // skipped and plays at its own volume (the fallback).
+  /** Review M2: one Even out (or Clear) at a time, whoever starts it. */
+  const evenOutQueue = useRef(createEvenOutQueue())
   const evenOutHost = useMemo<EvenOutHost | null>(() => {
     if (!project?.id) return null
     const projectId = project.id
     const getSyncToken = audioSyncTokenFetcherForSession(frontierSession ?? null)
     const touched = new Set<string>()
     const written: string[] = []
-    const measure = makeTakeMeasurer({
+    // Review M2: each run builds its own measurer (its own held decode and
+    // failures); runs go one at a time through `evenOutQueue`.
+    const newMeasurer = () => makeTakeMeasurer({
       fetchBytes: async (att, where, signal) => {
         const ref = parseFrontierAudioUrl(att.url)
         const fileId = resolveTakeCellRef.current(where.cellId)?.fileId
@@ -4661,10 +4665,10 @@ export function ProjectWorkspace() {
       allowed: canPerform("cell.audio.even", project.syncRole?.level ?? null),
       fileId: activeFileId,
       fileName: activeFileNameRef.current,
-      measure,
-      // The run is over: the decoded recording goes, and failed recordings are
-      // tried again next run.
-      release: () => measure.release(),
+      newMeasurer,
+      // Unused while `newMeasurer` is given; the contract still names one.
+      measure: async () => null,
+      queue: evenOutQueue.current,
     }
   }, [project, frontierSession, readTake, applyTakeEven, activeFileId, activeLane, currentUsername, getTokenForProjectFile])
   const handleEvenOut = useCallback(

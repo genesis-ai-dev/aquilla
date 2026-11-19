@@ -3,7 +3,7 @@
 // measuring behind them, with its fallback: a take that can't be measured
 // plays at its own volume and is skipped, and the action says how many.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, evenOutTakes, evenStateOf, evenedTakesIn, makeTakeMeasurer, takesToEvenOut, type EvenOutHost } from "./even-out"
+import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, createEvenOutQueue, clearEvenOut, evenOutTakes, evenStateOf, evenedTakesIn, makeTakeMeasurer, takesToEvenOut, type EvenOutHost } from "./even-out"
 import { takeStepHandlers, type TakeStepContext } from "@/lib/history/take-steps"
 import { historyReady, historyView, redoLast, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
@@ -400,6 +400,61 @@ describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)
 
   it("ON: the new and the changed takes on an evened track, and nothing else", () => {
     expect(autoEvenCandidates(cells, true)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
+  })
+})
+
+// Review M2: two runs never share a measurer, and only one runs at a time.
+describe("one Even out at a time, each with its own measurer (review M2)", () => {
+  it("gives every run a fresh measurer and lets go of it when the run ends", async () => {
+    const w = workspace({ c1: { a: {} }, c2: { b: {} } })
+    w.readings.a = { loudnessLufs: -20, truePeakDb: -6 }
+    w.readings.b = { loudnessLufs: -22, truePeakDb: -6 }
+    const made: Array<{ release: ReturnType<typeof vi.fn> }> = []
+    const host: EvenOutHost = {
+      ...w.host,
+      newMeasurer: () => {
+        const m = Object.assign(w.host.measure.bind(null) as EvenOutHost["measure"], { release: vi.fn() })
+        made.push(m)
+        return m
+      },
+    }
+    await evenOutTakes(host, [{ cellId: "c1", audioId: "a" }])
+    await evenOutTakes(host, [{ cellId: "c2", audioId: "b" }])
+    expect(made).toHaveLength(2)
+    expect(made[0].release).toHaveBeenCalledOnce()
+    expect(made[1].release).toHaveBeenCalledOnce()
+  })
+
+  it("runs a second Even out after the first, telling it that it waits", async () => {
+    const q = createEvenOutQueue()
+    const order: string[] = []
+    let finishFirst: () => void = () => {}
+    const first = q.run(() => new Promise<string>((resolve) => { order.push("first starts"); finishFirst = () => { order.push("first ends"); resolve("a") } }))
+    const onWaiting = vi.fn()
+    const second = q.run(async () => { order.push("second starts"); return "b" }, onWaiting)
+    expect(q.busy()).toBe(true)
+    expect(onWaiting).toHaveBeenCalledOnce()
+    await Promise.resolve()
+    expect(order).toEqual(["first starts"])
+    finishFirst()
+    expect(await first).toBe("a")
+    expect(await second).toBe("b")
+    expect(order).toEqual(["first starts", "first ends", "second starts"])
+    expect(q.busy()).toBe(false)
+  })
+
+  it("keeps going after a run that fails", async () => {
+    const q = createEvenOutQueue()
+    await expect(q.run(async () => { throw new Error("x") })).rejects.toThrow("x")
+    expect(await q.run(async () => 1)).toBe(1)
+  })
+
+  it("never stores a reading of no samples as silence", async () => {
+    const emit = vi.fn(async () => {})
+    const measure = makeTakeMeasurer({ fetchBytes: async () => new Uint8Array([1]), decode: async () => new Float32Array(0), emit })
+    const r = await measure("c1", "t", { url: "frontier-audio://t.wav", type: "audio", durationMs: 1000 } as CodexCellAttachment)
+    expect(r).toBeNull()
+    expect(emit).not.toHaveBeenCalled()
   })
 })
 

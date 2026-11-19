@@ -934,4 +934,30 @@ describe("useOrgSettings — re-reads when the tab comes back", () => {
     expect(fetches()).toBe(first + 1)
     now.mockRestore()
   })
+
+  // AQU-2654: a return that finds the row unchanged is not a change.
+  it("keeps what it holds when the row read on return says the same thing", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000_000)
+    // A new, equal object per read, as the network gives.
+    vi.mocked(restClient.fetchOrgSettings).mockImplementation(async () => makeResponse())
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useOrgSettings(1, 600)
+    })
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const fetches = () => vi.mocked(restClient.fetchOrgSettings).mock.calls.length
+    const first = fetches()
+    const settingsBefore = result.current.settings
+    const rendersBefore = renders
+
+    now.mockReturnValue(2_020_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(fetches()).toBe(first + 1))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.settings).toBe(settingsBefore)
+    expect(renders).toBe(rendersBefore)
+    now.mockRestore()
+  })
 })

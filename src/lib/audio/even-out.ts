@@ -398,7 +398,8 @@ export function evenedTakesIn(cells: readonly CellData[], opts: { slots?: readon
  * trimmed takes on an evened track are evened out quietly in the background,
  * measured the same way (worker or yielding page meter), one undo step per
  * batch; each shows ≈ and can be cleared in the Station. Read in one place —
- * ProjectWorkspace hands it to `autoEvenCandidates`.
+ * ProjectWorkspace hands it to the auto-even queue (auto-even-queue.ts), which
+ * starts only from this tab's own actions on a take (review M1).
  *
  * Fallback: a take that can't be measured plays at its own volume, as any
  * unmeasured take does.
@@ -406,19 +407,22 @@ export function evenedTakesIn(cells: readonly CellData[], opts: { slots?: readon
 export const AUTO_EVEN_CHANGED_TAKES = true
 
 /**
- * The takes the switch would even out on their own: on a track (slot) where
- * at least one take is evened out, every take with no target, or a target and
- * a reading of another window (cut or trimmed since). None when `enabled` is
- * off.
+ * Of the takes THIS TAB just made or changed (review M1: never every take
+ * that merely looks un-evened), the ones auto-even evens: on a track (slot)
+ * where some other take is evened out, a take with no target; or a take with
+ * a target whose reading is of another window (cut or trimmed since). A new
+ * Station version or Remove-noise take that inherited its target is left
+ * alone: it is measured when it is made. None when `enabled` is off.
  */
-export function autoEvenCandidates(cells: readonly CellData[], enabled: boolean): TakeRef[] {
-  if (!enabled) return []
+export function autoEvenCandidates(cells: readonly CellData[], refs: readonly TakeRef[], enabled: boolean): TakeRef[] {
+  if (!enabled || refs.length === 0) return []
   const evenedSlots = new Set<string>()
   for (const [, a] of liveTakes(cells, undefined)) if (a.evenTargetLufs != null) evenedSlots.add(a.slot ?? "recording")
-  if (evenedSlots.size === 0) return []
+  const wanted = new Set(refs.map((r) => `${r.cellId}\u0000${r.audioId}`))
   const out: TakeRef[] = []
-  for (const [ref, a] of liveTakes(cells, [...evenedSlots])) {
-    if (a.evenTargetLufs == null || readingIsStale(a)) out.push(ref)
+  for (const [ref, a] of liveTakes(cells, undefined)) {
+    if (!wanted.has(`${ref.cellId}\u0000${ref.audioId}`)) continue
+    if (a.evenTargetLufs != null ? readingIsStale(a) : evenedSlots.has(a.slot ?? "recording")) out.push(ref)
   }
   return out
 }

@@ -285,9 +285,11 @@ import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { AUTO_EVEN_CHANGED_TAKES, autoEvenCandidates, clearEvenOut, createEvenOutQueue, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
+import { AUTO_EVEN_CHANGED_TAKES, clearEvenOut, createEvenOutQueue, evenOutTakes, makeTakeMeasurer, takesToEvenOut, type ClearResult, type EvenOutHost, type EvenOutOptions, type EvenOutResult, type TakeRef } from "@/lib/audio/even-out"
 import { evenOutScopes, evenOutTrackStates, type EvenOutRequest, type EvenOutScope } from "@/lib/audio/even-out-scopes"
 import { EvenOutDialog } from "@/components/timeline/EvenOutDialog"
+import { createAutoEvenQueue } from "@/lib/audio/auto-even-queue"
+import { onLocalTakeChange } from "@/lib/audio/local-take-changes"
 import { clearedToastText, ranToastText } from "@/lib/audio/even-out-toasts"
 import { flushEvenOutWrites } from "@/lib/audio/even-out-flush"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
@@ -15221,22 +15223,30 @@ export function ProjectWorkspace() {
   }, [handleClearEvenOut, evenOutToast, t])
   handleClearOneTakeRef.current = handleClearOneTake
 
-  // QUESTION 89 (settled Nov 19: ON) — the ONE switch (lib/audio/even-out.ts
-  // AUTO_EVEN_CHANGED_TAKES), read here and nowhere else: a new, cut or
-  // trimmed take on an evened track is evened out quietly, one batch at a
-  // time, with no toast and no window.
-  const autoEvenBusy = useRef(false)
-  const autoEvenKey = useMemo(
-    () => autoEvenCandidates(evenOutCells, AUTO_EVEN_CHANGED_TAKES).map((r) => `${r.cellId}\u0000${r.audioId}`).join("|"),
-    [evenOutCells],
-  )
+  // QUESTION 89 (ON) — the ONE switch (lib/audio/even-out.ts
+  // AUTO_EVEN_CHANGED_TAKES), read here and nowhere else. Review M1: auto-even
+  // starts only from THIS TAB's own actions on a take (record, attach, cut,
+  // trim, a Station version, Remove noise — local-take-changes.ts), never from
+  // what the takes look like, so a Clear, an Undo or a colleague's change
+  // sticks, and opening a file downloads nothing. It needs a KNOWN role of
+  // Contributor or up (review S2), and goes through the one Even out queue.
+  const autoEvenRole = useRef<number | null>(null)
+  autoEvenRole.current = project?.syncRole?.level ?? null
+  const handleEvenOutRef = useRef(handleEvenOut)
+  handleEvenOutRef.current = handleEvenOut
   useEffect(() => {
-    if (!autoEvenKey || autoEvenBusy.current || !canEvenOut) return
-    const takes = autoEvenCandidates(evenOutCellsRef.current, AUTO_EVEN_CHANGED_TAKES)
-    if (takes.length === 0) return
-    autoEvenBusy.current = true
-    void handleEvenOut(takes, { markAsRun: true }).finally(() => { autoEvenBusy.current = false })
-  }, [autoEvenKey, canEvenOut, handleEvenOut])
+    const q = createAutoEvenQueue({
+      enabled: AUTO_EVEN_CHANGED_TAKES,
+      cells: () => evenOutCellsRef.current,
+      allowed: () => autoEvenRole.current != null && canPerform("cell.audio.even", autoEvenRole.current),
+      run: (takes) => handleEvenOutRef.current(takes, { markAsRun: true }),
+    })
+    const off = onLocalTakeChange((refs) => q.note(refs))
+    return () => {
+      off()
+      q.dispose()
+    }
+  }, [])
   useEffect(() => {
     if (!pendingNewTracks || pendingNewTracks.fileId !== activeFileId) return
     const known = new Set(serverTimelineTracks.map((tr) => tr.id))

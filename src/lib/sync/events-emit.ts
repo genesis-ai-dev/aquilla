@@ -17,6 +17,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents, type EnqueueBatchOptions } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
+import { noteLocalTakeChange } from "@/lib/audio/local-take-changes"
 import { canAttachSourceAudio, canImportSourceFiles, canPerform, importDenialFloor, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
@@ -849,6 +850,9 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...playedDuration(input),
     }, analytics)
   }
+  // Review M1: this tab made or attached the take (a recording, an upload,
+  // a Station version, Remove noise…); auto-even may even it.
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }])
   return eventId
 }
 
@@ -925,6 +929,8 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
     },
     clientTs: input.clientTs,
   })
+  // Review M1: this tab trimmed the take; auto-even may measure it again.
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }])
   return eventId
 }
 
@@ -1076,6 +1082,8 @@ export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string
     },
     clientTs: input.clientTs,
   })
+  // Review M1: this tab cut the take; auto-even may even its pieces.
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }, { cellId: input.cellId, audioId: input.newAudioId }])
   return eventId
 }
 

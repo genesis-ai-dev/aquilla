@@ -389,17 +389,34 @@ describe("question 89: new, cut or trimmed takes on an evened track (ONE switch)
     } },
   ] as unknown as CellData[]
 
+  const all = ["a", "b", "c", "d"].map((audioId) => ({ cellId: "c1", audioId }))
+
   it("is ON (settled Nov 19): an evened track stays even", () => {
     expect(AUTO_EVEN_CHANGED_TAKES).toBe(true)
-    expect(autoEvenCandidates(cells, AUTO_EVEN_CHANGED_TAKES)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
   })
 
   it("OFF would leave every take alone", () => {
-    expect(autoEvenCandidates(cells, false)).toEqual([])
+    expect(autoEvenCandidates(cells, all, false)).toEqual([])
   })
 
-  it("ON: the new and the changed takes on an evened track, and nothing else", () => {
-    expect(autoEvenCandidates(cells, true)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
+  it("ON: of the takes this tab just made or changed, the new and the changed ones on an evened track", () => {
+    expect(autoEvenCandidates(cells, all, true)).toEqual([{ cellId: "c1", audioId: "b" }, { cellId: "c1", audioId: "c" }])
+  })
+
+  // Review M1: never from what the takes look like — only the takes an action
+  // names. A take nobody named (a cleared one, an undone one, a colleague's)
+  // is left alone.
+  it("looks only at the takes it is given", () => {
+    expect(autoEvenCandidates(cells, [{ cellId: "c1", audioId: "c" }], true)).toEqual([{ cellId: "c1", audioId: "c" }])
+    expect(autoEvenCandidates(cells, [], true)).toEqual([])
+  })
+
+  it("leaves a new version that inherited its target alone: it is measured when it is made", () => {
+    const born = [{ id: "c1", attachments: {
+      a: { url: "u", type: "audio", slot: "recording", loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 },
+      v2: { url: "u2", type: "audio", slot: "recording", evenTargetLufs: -16 },
+    } }] as unknown as CellData[]
+    expect(autoEvenCandidates(born, [{ cellId: "c1", audioId: "v2" }], true)).toEqual([])
   })
 })
 

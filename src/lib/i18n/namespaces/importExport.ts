@@ -756,6 +756,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.episodeConfirmStart": "Start export",
     "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
     "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
+    // AQU-2680: the notes list at the end of the HTML page export and the PDF's print page.
+    "importExport.htmlPage.notes": "Notes",
+    "importExport.htmlPage.backToText": "Back to text",
     // AQU-2680: the PDF export opened the print window; the person saves the PDF there.
     "importExport.status.pdfChooseSaveAsPdf": "The print window is open. Choose \"Save as PDF\" there to save the file.",
     // AQU-2680: printing is not available here (another app's built-in browser), so the PDF export saved the Word file.

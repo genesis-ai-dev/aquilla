@@ -84,6 +84,13 @@ describe("OfflineLeaderWatchdog", () => {
     expect(restart).toHaveBeenCalledTimes(1)
   })
 
+  it("offers a restart when the boot fails any other way", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    offlineStore = { store: null, loading: false, error: new Error("Encountered empty or corrupted database") }
+    renderWatchdog()
+    expect(await screen.findByText(/couldn't be opened/)).toBeInTheDocument()
+  })
+
   it("leaves a newer build's data to its own notice", async () => {
     offlineStore = { store: null, loading: false, error: new NewerOfflineDataError(9, 8) }
     renderWatchdog()

@@ -7,7 +7,7 @@ import { Effect } from "@livestore/utils/effect"
 import { installLeaderLogForwarder } from "./leader-log-bridge"
 import { installRebuildProgressForwarder } from "./boot-progress"
 import { installReplaySkip } from "./replay-skip"
-import { holdLeaderLock, leaderLockName } from "./leader-lock"
+import { holdLeaderLock, LeaderLockStolenError, leaderLockName } from "./leader-lock"
 import { warnLeader } from "./leader-warnings"
 import { waitForOpfsFilesFree } from "./opfs-handles"
 import { makeLocalSyncBackend } from "./local-sync-backend"
@@ -26,10 +26,13 @@ installReplaySkip()
 const lockName = leaderLockName(STORE_ID)
 void holdLeaderLock(
   lockName,
-  async () => {
+  async (signal) => {
     await waitForOpfsFilesFree(STORE_ID, {
       onBusy: (file) => warnLeader("warn", `waiting for another leader to close ${file}`),
     })
+    // A newer leader may have stolen the lock while this one waited on the
+    // files; booting now would put two leaders on the same OPFS pool.
+    signal.throwIfAborted()
     await Effect.runPromise(makeWorkerEffect({ schema, sync: { backend: makeLocalSyncBackend } }))
   },
   {
@@ -37,10 +40,10 @@ void holdLeaderLock(
     onSteal: (ms) => warnLeader("warn", `took '${lockName}' after waiting ${ms} ms — its holder never let go`),
   },
 ).catch((error: unknown) => {
-  // AbortError once granted means a newer leader took the lock from this one
-  // (see STEAL_LOCK_MS in leader-lock.ts): expected, not a crash. It still
-  // stops below, which closes the files for the new leader.
-  if (error instanceof DOMException && error.name === "AbortError") {
+  // A newer leader took the lock from this one (see STEAL_LOCK_MS in
+  // leader-lock.ts): expected, not a crash. It still stops below, which
+  // closes the files for the new leader. Any other AbortError is a real failure.
+  if (error instanceof LeaderLockStolenError) {
     warnLeader("warn", `a newer leader took '${lockName}' — stopping this one`)
   } else {
     warnLeader("error", "leader worker stopped", error)

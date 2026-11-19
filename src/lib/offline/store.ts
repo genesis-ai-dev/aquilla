@@ -83,7 +83,9 @@ let storePromise: Promise<Store<typeof schema>> | undefined
 // LiveStore 0.4.0 that never fails createStorePromise: shutdown closes the
 // store's lifetime scope while the boot runs in another one, so the boot
 // waited forever (seen on device, 2026-11-18). So the boot watches the
-// leader's `error` event itself. Set only while a boot is in flight.
+// leader's `error` event itself. Set only while createStorePromise is in
+// flight: once the store is open, a leader error mustn't reject a store that's
+// already out there (head-check and checkpoints are still to run).
 let failBoot: ((error: OfflineLeaderBootError) => void) | undefined
 
 /**
@@ -91,10 +93,13 @@ let failBoot: ((error: OfflineLeaderBootError) => void) | undefined
  * Every such error is fatal to the leader: the runner closes on it. After the
  * store is out, a dead leader is the stall watchdog's to report instead.
  */
-export function failBootOnLeaderError(worker: EventTarget): void {
+export function failBootOnLeaderError(worker: EventTarget & { terminate?: () => void }): void {
   worker.addEventListener("error", (event) => {
+    if (!failBoot) return
     const reason = event instanceof ErrorEvent && event.message ? event.message : "unknown error"
-    failBoot?.(new OfflineLeaderBootError(`[offline] the leader stopped before the store opened: ${reason}`))
+    failBoot(new OfflineLeaderBootError(`[offline] the leader stopped before the store opened: ${reason}`))
+    // Its runner has closed; nothing will talk to it again.
+    worker.terminate?.()
   })
 }
 
@@ -122,14 +127,7 @@ export function getOfflineStore(
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
-  if (storePromise === undefined) {
-    const leaderFailed = new Promise<never>((_, reject) => {
-      failBoot = reject
-    })
-    storePromise = Promise.race([bootOfflineStore(createAdapter, generationMarker), leaderFailed]).finally(() => {
-      failBoot = undefined
-    })
-  }
+  storePromise ??= bootOfflineStore(createAdapter, generationMarker)
   return storePromise
 }
 
@@ -141,7 +139,7 @@ function bootOfflineStore(
   // Claim before boot: a newer build that crashes mid-boot may already have written.
   return claimOfflineGeneration(generationMarker)
     .then(() => createAdapter())
-    .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
+    .then(openStore)
     .then(async (store) => {
       // A stale client session must not take writes; hold the store back
       // while the page reloads (see head-check.ts).
@@ -154,6 +152,29 @@ function bootOfflineStore(
       startLocalCheckpoints(store)
       if (import.meta.env.DEV) console.info(`[offline] store ready in ${Math.round(performance.now() - bootStartedAt)} ms`)
       return store
+    })
+}
+
+/**
+ * createStorePromise, failed by a leader that stops before the store opens
+ * (see failBoot). On that failure the abandoned boot's scope is closed through
+ * its signal, so its in-memory SQLite and channels don't sit pending forever.
+ */
+function openStore(adapter: Adapter): Promise<Store<typeof schema>> {
+  const abandon = new AbortController()
+  const leaderFailed = new Promise<never>((_, reject) => {
+    failBoot = reject
+  })
+  return Promise.race([
+    createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates, signal: abandon.signal }),
+    leaderFailed,
+  ])
+    .catch((error: unknown) => {
+      abandon.abort()
+      throw error
+    })
+    .finally(() => {
+      failBoot = undefined
     })
 }
 

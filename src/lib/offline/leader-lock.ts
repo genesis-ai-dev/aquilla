@@ -41,9 +41,11 @@ const SLOW_LOCK_MS = 5_000
  * What the steal recovers from is a holder that has the lock but not the
  * files: a frozen v0.2.4 page in the bfcache (it held the lock in the page,
  * and the bfcache guard terminated its worker), or a leader still waiting
- * here itself. A live leader the lock is taken from stops on its own (its
- * lock request rejects with AbortError and livestore.worker.ts rethrows it,
- * which closes the runner), which frees its files.
+ * here itself. A live leader the lock is taken from stops on its own
+ * (holdLeaderLock rejects with LeaderLockStolenError and aborts the leader's
+ * signal, so one still waiting on the files never boots, and
+ * livestore.worker.ts rethrows it, which closes a runner that did), which
+ * frees its files.
  *
  * A *frozen* leader that still has the files open is beyond reach: it runs
  * nothing, so nothing here can make it close them. The OPFS wait then times
@@ -56,6 +58,15 @@ const SLOW_LOCK_MS = 5_000
  * adding one.
  */
 const STEAL_LOCK_MS = 30_000
+
+/**
+ * Thrown by holdLeaderLock when another leader stole the lock while this one
+ * held it. Its own type so the worker can tell a steal from the leader's own
+ * AbortError (an OPFS call aborted inside `leader`, say).
+ */
+export class LeaderLockStolenError extends Error {
+  override name = "LeaderLockStolenError"
+}
 
 export interface HoldLeaderLockOptions {
   locks?: LockManager | undefined
@@ -73,10 +84,16 @@ export interface HoldLeaderLockOptions {
  * A wait that drags on is reported, and one that drags on past
  * `stealAfterMs` takes the lock (`steal`) rather than waiting forever on a
  * holder that's never coming back.
+ *
+ * If a newer leader steals the lock from this one, this rejects with
+ * LeaderLockStolenError and aborts the `signal` handed to `leader`. The
+ * browser doesn't stop `leader` itself, so it must check `signal` before it
+ * touches the OPFS files: a leader still waiting on them when the lock is
+ * taken would otherwise go on to boot beside the new one.
  */
 export async function holdLeaderLock(
   name: string,
-  leader: () => Promise<void>,
+  leader: (signal: AbortSignal) => Promise<void>,
   {
     locks = globalThis.navigator?.locks,
     slowAfterMs = SLOW_LOCK_MS,
@@ -87,22 +104,36 @@ export async function holdLeaderLock(
 ): Promise<void> {
   if (!locks) throw new Error("The offline store needs the Web Locks API (navigator.locks)")
   let granted = false
+  // Set once `leader` settles: a request that rejects before then was stolen.
+  let leaderSettled = false
+  const lost = new AbortController()
   const run = () => {
     granted = true
     clearTimeout(slow)
     clearTimeout(steal)
-    return leader()
+    return leader(lost.signal).finally(() => {
+      leaderSettled = true
+    })
+  }
+  const holdOrReportSteal = async (request: Promise<void>) => {
+    try {
+      await request
+    } catch (error) {
+      if (!granted || leaderSettled) throw error
+      lost.abort()
+      throw new LeaderLockStolenError(`a newer leader took '${name}'`, { cause: error })
+    }
   }
   const giveUp = new AbortController()
   const slow = setTimeout(() => onSlow(slowAfterMs), slowAfterMs)
   const steal = setTimeout(() => giveUp.abort(), stealAfterMs)
   try {
-    await locks.request(name, { signal: giveUp.signal }, run)
+    await holdOrReportSteal(locks.request(name, { signal: giveUp.signal }, run))
   } catch (error) {
     // Only a wait we gave up on is retried; the leader's own errors pass through.
     if (granted || !giveUp.signal.aborted) throw error
     onSteal(stealAfterMs)
-    await locks.request(name, { steal: true }, run)
+    await holdOrReportSteal(locks.request(name, { steal: true }, run))
   } finally {
     clearTimeout(slow)
     clearTimeout(steal)

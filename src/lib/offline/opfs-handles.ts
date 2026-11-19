@@ -80,6 +80,23 @@ async function findStoreDir(root: () => Promise<OpfsDir>, name: string): Promise
   return null
 }
 
+/**
+ * One pass over the pool: the first busy file, or null when all are free.
+ * The old leader (or a generation wipe) can remove or recreate the directory
+ * while it's being listed, which throws from the listing itself rather than
+ * from opening a file; that's a pool still changing, so it's retried like a
+ * busy file instead of failing the boot.
+ */
+async function probe(root: () => Promise<OpfsDir>, dirName: string): Promise<string | null> {
+  try {
+    const dir = await findStoreDir(root, dirName)
+    return dir === null ? null : await findBusyFile(dir)
+  } catch (error) {
+    if (isBusy(error) || isGone(error)) return `${dirName} (changing)`
+    throw error
+  }
+}
+
 const defaultRoot = async (): Promise<OpfsDir> =>
   (await navigator.storage.getDirectory()) as unknown as OpfsDir
 
@@ -104,8 +121,7 @@ export async function waitForOpfsFilesFree(
   let delay = retryMs
   let reported = false
   for (;;) {
-    const dir = await findStoreDir(root, dirName)
-    const busy = dir === null ? null : await findBusyFile(dir)
+    const busy = await probe(root, dirName)
     if (busy === null) return
     if (!reported) {
       reported = true

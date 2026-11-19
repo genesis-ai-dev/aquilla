@@ -131,4 +131,23 @@ describe("waitForOpfsFilesFree", () => {
       name: "NotAllowedError",
     })
   })
+
+  it("retries when the pool directory is removed while it's being listed", async () => {
+    let listings = 0
+    const a = file("a")
+    const vanishing: OpfsDir = {
+      kind: "directory",
+      name: "livestore-s@6",
+      values: async function* () {
+        listings++
+        if (listings === 1) throw new DOMException("gone", "NotFoundError")
+        yield a
+      },
+    }
+    const onBusy = vi.fn()
+    await waitForOpfsFilesFree("s", { root: async () => dir("", [vanishing]), onBusy, sleep: noSleep })
+    expect(listings).toBe(2)
+    expect(a.opened).toBe(1)
+    expect(onBusy).toHaveBeenCalledWith("livestore-s@6 (changing)")
+  })
 })

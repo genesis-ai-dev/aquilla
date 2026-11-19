@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { holdLeaderLock, leaderLockName } from "./leader-lock"
+import { holdLeaderLock, LeaderLockStolenError, leaderLockName } from "./leader-lock"
 import { STORE_ID } from "./store-id"
 
 const quiet = { onSlow: () => {}, onSteal: () => {} }
@@ -163,7 +163,9 @@ describe("holdLeaderLock", () => {
       await vi.advanceTimersByTimeAsync(1)
       expect(onSteal).toHaveBeenCalledWith(5000)
       expect(leader.run).toHaveBeenCalledOnce()
-      expect(await stuckSettled).toMatchObject({ name: "AbortError" })
+      expect(await stuckSettled).toBeInstanceOf(LeaderLockStolenError)
+      // The browser doesn't stop the old leader; its signal tells it to stand down.
+      expect((stuck.run.mock.calls[0] as unknown as [AbortSignal])[0].aborted).toBe(true)
 
       leader.stop()
       await done
@@ -180,9 +182,11 @@ describe("holdLeaderLock", () => {
       const onSteal = vi.fn()
       const done = holdLeaderLock("l", leader.run, { locks, ...quiet, stealAfterMs: 1000, onSteal })
       await vi.advanceTimersByTimeAsync(5000)
+      // The leader's own AbortError isn't mistaken for a steal.
       const error = new DOMException("leader gave up", "AbortError")
       leader.crash(error)
       await expect(done).rejects.toBe(error)
+      expect((leader.run.mock.calls[0] as unknown as [AbortSignal])[0].aborted).toBe(false)
       expect(onSteal).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()

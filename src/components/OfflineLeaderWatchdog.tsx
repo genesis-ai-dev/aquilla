@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useEffectEvent } from "react"
 import { toast } from "@/components/ui/toast"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -6,7 +6,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { LeaderLogEntry } from "@/lib/offline/leader-log-bridge"
 import { setLeaderStalled, watchLeaderLiveness } from "@/lib/offline/leader-watchdog"
 import { getOfflineBootProgress } from "@/lib/offline/boot-progress"
-import { OfflineLeaderBootError } from "@/lib/offline/leader-boot-error"
+import { NewerOfflineDataError } from "@/lib/offline/generation-guard"
 
 const LEADER_STALLED_TOAST_ID = "offline-leader-stalled"
 const BOOT_FAILED_TOAST_ID = "offline-boot-failed"
@@ -87,13 +87,16 @@ export function OfflineLeaderWatchdog({
 }: Props): null {
   const { store, loading, error } = useOfflineStore()
   const t = useT()
-  const leaderFailed = error instanceof OfflineLeaderBootError
+  // Any boot that failed: a leader that stopped before the store opened
+  // (OfflineLeaderBootError), a corrupted database, a crash in LiveStore's own
+  // boot. All end it (loading goes false, so the slow-boot check below stands
+  // down) and only a restart gets a fresh leader. A newer build's data is
+  // NewerOfflineDataNotice's to explain.
+  const bootFailed = error !== null && !(error instanceof NewerOfflineDataError)
 
-  // A leader that stopped before the store opened ends the boot (loading goes
-  // false, so the slow-boot check below stands down); only a restart gets a
-  // fresh one. A newer build's data is NewerOfflineDataNotice's to explain.
-  useEffect(() => {
-    if (!leaderFailed) return
+  // Read through an effect event so a new `t` (a locale change) doesn't
+  // re-add a toast the user already dismissed, or log the failure again.
+  const showBootFailed = useEffectEvent(() => {
     const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
     console.error("[offline] LiveStore store failed to open", { error, leaderLogs: leaderLogs?.slice(-LOG_TAIL) })
     toast.add({
@@ -106,8 +109,13 @@ export function OfflineLeaderWatchdog({
         onClick: restart,
       },
     })
+  })
+
+  useEffect(() => {
+    if (!bootFailed) return
+    showBootFailed()
     return () => toast.close(BOOT_FAILED_TOAST_ID)
-  }, [leaderFailed, error, restart, t])
+  }, [bootFailed])
 
   useEffect(() => {
     if (!loading) return

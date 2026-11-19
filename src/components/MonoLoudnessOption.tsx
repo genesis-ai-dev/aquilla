@@ -8,7 +8,12 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MonoLoudness } from "@/lib/export/mono-loudness"
 
-export function MonoLoudnessOption({ value, onChange }: { value: MonoLoudness; onChange(next: MonoLoudness): void }) {
+export function MonoLoudnessOption({ value, onChange, heldCount = 0 }: {
+  value: MonoLoudness
+  onChange(next: MonoLoudness): void
+  /** Re-check S4: evened takes the meter reading holds back (shown with the meter choice). */
+  heldCount?: number
+}) {
   const t = useT()
   const [open, toggle] = useInfoOpen()
   const labelId = "export-mono-loudness-label"
@@ -36,6 +41,11 @@ export function MonoLoudnessOption({ value, onChange }: { value: MonoLoudness; o
           </label>
         ))}
       </RadioGroup>
+      {value === "meter" && heldCount > 0 ? (
+        <span data-testid="export-mono-loudness-held" className="text-amber-700 dark:text-amber-400">
+          {t("importExport.dialog.monoLoudnessHeld", { count: heldCount })}
+        </span>
+      ) : null}
     </div>
   )
 }

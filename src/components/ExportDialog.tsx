@@ -80,7 +80,7 @@ import {
 } from "@/lib/export/audio-validation-scope"
 import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { trackVolumeOverrides, withTrackVolumes } from "@/lib/audio/track-volume"
-import { withMonoLoudness } from "@/lib/export/mono-loudness"
+import { monoMeterHeldCount, withMonoLoudness } from "@/lib/export/mono-loudness"
 import { MonoLoudnessOption } from "@/components/MonoLoudnessOption"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
@@ -1448,6 +1448,12 @@ export function ExportDialog({
       monoLoudness,
     ),
     [audioSourceCells, contentMode, audioValidationRequirement, timelineTracks, monoLoudness],
+  )
+
+  // Re-check S4: evened takes the meter reading would hold back.
+  const monoHeldCount = useMemo(
+    () => (monoLoudness === "meter" ? monoMeterHeldCount(audioExportCells) : 0),
+    [monoLoudness, audioExportCells],
   )
 
   const episodeEstimate = useMemo(
@@ -2858,7 +2864,7 @@ export function ExportDialog({
                 ))}
               </RadioGroup>
               {audioMode === "audio-by-line" && renderLineFormatOption()}
-              <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} />
+              <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} heldCount={monoHeldCount} />
               {audioMode === "audio-episode" && renderEpisodeEstimate()}
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
@@ -3338,7 +3344,7 @@ export function ExportDialog({
           && effectiveScope === "file" && renderLineFormatOption()}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line" || format === "audio-chapter")
           // i18n-exempt "file" is an ExportScope tag, not copy
-          && effectiveScope === "file" && <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} />}
+          && effectiveScope === "file" && <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} heldCount={monoHeldCount} />}
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy

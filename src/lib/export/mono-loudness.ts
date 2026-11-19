@@ -16,6 +16,7 @@
 // `channels` defaults to 1; a stereo export would pass 2 and be left alone.
 
 import type { CellData } from "@/hooks/useCells"
+import { evenOutCorrection } from "@/lib/audio/take-gain"
 
 export type MonoLoudness = "heard" | "meter"
 
@@ -34,4 +35,18 @@ export function withMonoLoudness(cells: CellData[], mode: MonoLoudness, opts: { 
     }
     return changed ? ({ ...cell, attachments: next } as CellData) : cell
   })
+}
+
+/** Re-check S4: how many evened takes the meter reading holds back (the
+ *  −1 dBTP ceiling or the +12 dB cap), so the dialog can say so. Same rule
+ *  as the export, read once per take. */
+export function monoMeterHeldCount(cells: readonly CellData[]): number {
+  let n = 0
+  for (const cell of cells) {
+    for (const att of Object.values(cell.attachments ?? {})) {
+      if (!att || att.isDeleted || att.role === "source" || att.evenTargetLufs == null) continue
+      if (evenOutCorrection({ ...att, monoLoudness: "meter" }).held) n++
+    }
+  }
+  return n
 }

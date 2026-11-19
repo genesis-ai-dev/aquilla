@@ -18,6 +18,17 @@ describe("Mono loudness", () => {
     expect(onChange).toHaveBeenCalledWith("meter")
   })
 
+  it("says in amber how many takes can't reach the meter level, only with the meter choice", () => {
+    const { rerender } = render(<MonoLoudnessOption value="meter" heldCount={3} onChange={() => {}} />)
+    const line = screen.getByTestId("export-mono-loudness-held")
+    expect(line).toHaveTextContent("3 takes can’t go all the way up to the meter reading; they’d distort or raise too much hiss.")
+    expect(line.className).toContain("text-amber-700")
+    rerender(<MonoLoudnessOption value="heard" heldCount={3} onChange={() => {}} />)
+    expect(screen.queryByTestId("export-mono-loudness-held")).toBeNull()
+    rerender(<MonoLoudnessOption value="meter" heldCount={0} onChange={() => {}} />)
+    expect(screen.queryByTestId("export-mono-loudness-held")).toBeNull()
+  })
+
   it("keeps the explanation behind a click (i), not a hover", () => {
     render(<MonoLoudnessOption value="heard" onChange={() => {}} />)
     const info = screen.getByRole("button", { name: "About mono loudness" })
@@ -27,6 +38,6 @@ describe("Mono loudness", () => {
     expect(text).toHaveAttribute("data-open", "false")
     fireEvent.click(info)
     expect(text).toHaveAttribute("data-open", "true")
-    expect(text).toHaveTextContent("A mono file plays on both speakers, so it sounds about 3 dB louder than one channel measures. Pick the meter reading if a delivery checks mono files on a loudness meter.")
+    expect(text).toHaveTextContent("A mono file plays on both speakers, so it sounds about 3 dB louder than one channel measures. Pick the meter reading if a delivery checks mono files on a loudness meter. Every export is mono today, and only evened-out takes change.")
   })
 })

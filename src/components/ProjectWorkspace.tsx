@@ -35,6 +35,8 @@ import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
+import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
+import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -933,7 +935,14 @@ export function ProjectWorkspace() {
   const pendingCellScrollTryRef = useRef<PendingScrollAttempt | null>(null)
   /** Mirrors currentUsername (computed much further down). */
   const currentUsernameRef = useRef<string>("local")
-  const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
+  const {
+    orgs,
+    activeOrg,
+    activeOrgId,
+    isAllOrgs,
+    refresh: refreshOrgs,
+    refreshAccessibleProjects,
+  } = useActiveOrg()
   const goToProjects = useCallback(() => {
     navigate(
       isAllOrgs
@@ -2029,18 +2038,31 @@ export function ProjectWorkspace() {
   // path quarantined it, unlike a flush callback. Dismissal is a persistent
   // acknowledgment stamped on the record (SUB-8), so refusals banner once.
   const forbiddenRecords = useForbiddenOutboxRecords(Boolean(project?.id))
+  // AQU-2455: a lost-access refusal is the blocking screen below, not the
+  // repeating rose bar. Scope, role, and validation refusals still banner.
   const forbiddenEntries = useMemo<ForbiddenEntry[]>(
     () =>
-      forbiddenRecords.map((r) => ({
-        id: r.id,
-        status: r.lastError?.status ?? 403,
-        reason: r.lastError?.reason ?? "forbidden",
-        kind: r.event.kind,
-        fileId: r.event.fileId ?? null,
-        cellId: r.event.cellId ?? null,
-      })),
-    [forbiddenRecords],
+      forbiddenRecords
+        .filter((r) => r.event.projectId !== projectId || !isLostProjectAccess(r.lastError?.reason))
+        .map((r) => ({
+          id: r.id,
+          status: r.lastError?.status ?? 403,
+          reason: r.lastError?.reason ?? "forbidden",
+          kind: r.event.kind,
+          fileId: r.event.fileId ?? null,
+          cellId: r.event.cellId ?? null,
+        })),
+    [forbiddenRecords, projectId],
   )
+  const projectSettled = status === "ready" && !projectProvisional && Boolean(project)
+  const [removedProjectId, setRemovedProjectId] = useState<string | null>(null)
+  const leaveRevokedProject = useRevokedOpenProject({
+    projectId: projectId ?? null,
+    settled: projectSettled,
+    status,
+    ejected: removedProjectId != null && removedProjectId === projectId,
+    records: forbiddenRecords,
+  })
   const showForbiddenBanner = forbiddenEntries.length > 0
   // SUB-8: Dismiss = persistent acknowledgment (stamped on the IDB record, so
   // the banner stays gone across reloads). The hook's subscription re-derives
@@ -10192,13 +10214,13 @@ export function ProjectWorkspace() {
                 return next
               }).then(() => refresh())
             } else if (msg.t === "member.removed") {
-              // FRO-346: this user's membership was revoked; the DO closes
-              // the socket right after this frame. Re-fetch the project —
-              // the server now 403s, which flips useProject to "forbidden",
-              // unmounts the editor (project → null tears this reconciler
-              // down via the effect cleanup) and shows the clean
-              // "you no longer have access" state.
+              // FRO-346 / AQU-2455: this user's membership was revoked; the DO
+              // closes the socket right after this frame. The frame is
+              // best-effort (a team removal may never send it). When it does
+              // arrive, leave the editor for the same refusal screen the first
+              // refused save uses. Re-fetch so a later visit is a 403.
               if (msg.project !== pid || msg.userId !== currentUsername) return
+              setRemovedProjectId(pid)
               refresh()
             }
           },
@@ -18161,6 +18183,28 @@ export function ProjectWorkspace() {
     if (!importAction.isAvailable(actionCtx)) return
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
+
+  // AQU-2455: the project was open and then refused (a save, a member.removed
+  // frame, or the follow-up 403). One blocking screen — the AQU-2452 sentence —
+  // and the way out is the org project list, which refetches. The editor does
+  // not stay open. This sits above the loading skeleton so a refresh started
+  // by the removal does not cover the message.
+  if (leaveRevokedProject && projectId) {
+    return (
+      <ProjectNoAccess
+        onBack={() => {
+          leaveRevokedOpenProject({
+            jwt: frontierSession?.jwt ?? null,
+            projectId,
+            activeOrgId,
+            isAllOrgs,
+            refreshAccessibleProjects,
+            navigate,
+          })
+        }}
+      />
+    )
+  }
 
   // AQU-1325: while the project record loads, paint the real chrome (rail,
   // account switcher, breadcrumb) around a main-area skeleton. None of the

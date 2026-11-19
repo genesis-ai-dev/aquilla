@@ -62,7 +62,7 @@ export function emptySlotFit({
   // The empty space around the line, up to the nearest DRAWN clip each side.
   // A clip drawn into the line (a tiny take at its painted minimum) keeps that
   // part: the box is only what is free, down to nothing.
-  let freeL = -Infinity
+  let freeL = 0 // the timeline starts at 0:00
   let freeR = Infinity
   // A clip belongs to the side its middle is on, so one drawn part-way into
   // the line still leaves the other side free.

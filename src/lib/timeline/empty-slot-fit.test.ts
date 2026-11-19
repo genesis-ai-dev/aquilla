@@ -37,6 +37,11 @@ describe("emptySlotFit", () => {
     expect(fit).toEqual({ kind: "reveal", sizePx: SLOT_BUTTON_MIN_PX, boxLeftPx: -3, boxWidthPx: SLOT_BUTTON_MIN_PX, clipped: false })
   })
 
+  it("the first line at 0:00 is not revealed before the timeline starts", () => {
+    const fit = emptySlotFit({ lineLeftPx: 0, lineWidthPx: 10, buttonPx: b, actions: 2, neighbours: [] })
+    expect(fit).toMatchObject({ kind: "reveal", boxLeftPx: 0, boxWidthPx: SLOT_BUTTON_MIN_PX, clipped: false })
+  })
+
   it("never covers a neighbour: shifts into the empty side", () => {
     // Line at 1000..1010; a clip ends exactly at 1000, empty to the right.
     const fit = at(10, 2, [{ startPx: 900, endPx: 1000 }])

@@ -6179,6 +6179,7 @@ export const id: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Bertumpang tindih dengan sulih suara sebelumnya",
   "workspace.targetAudioLane.recordAudio": "Rekam audio untuk baris ini",
   "workspace.targetAudioLane.slotMenu": "Rekam atau buat ucapan untuk baris ini",
+  "workspace.targetAudioLane.slotMenuPicked": "Rekam atau buat ucapan untuk baris ini (dipilih)",
   "workspace.targetAudioLane.slotMenuRecord": "Rekam",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Buat ucapan",
   "workspace.targetAudioLane.playClip": "Putar klip ini",

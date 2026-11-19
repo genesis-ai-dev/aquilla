@@ -7295,6 +7295,7 @@ export const hi: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "पिछले डब पर चढ़ता है",
   "workspace.targetAudioLane.recordAudio": "इस पंक्ति के लिए ऑडियो रिकॉर्ड करें",
   "workspace.targetAudioLane.slotMenu": "इस पंक्ति के लिए रिकॉर्ड करें या बोली बनाएँ",
+  "workspace.targetAudioLane.slotMenuPicked": "इस पंक्ति के लिए रिकॉर्ड करें या बोली बनाएँ (चुनी गई)",
   "workspace.targetAudioLane.slotMenuRecord": "रिकॉर्ड करें",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "बोली बनाएँ",
   "workspace.targetAudioLane.playClip": "यह क्लिप चलाएँ",

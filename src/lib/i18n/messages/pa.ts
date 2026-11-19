@@ -7573,6 +7573,7 @@ export const pa: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "ਪਿਛਲੀ ਡਬ ਉੱਤੇ ਚੜ੍ਹਦਾ ਹੈ",
   "workspace.targetAudioLane.recordAudio": "ਇਸ ਕਤਾਰ ਲਈ ਆਡੀਓ ਰਿਕਾਰਡ ਕਰੋ",
   "workspace.targetAudioLane.slotMenu": "ਇਸ ਕਤਾਰ ਲਈ ਰਿਕਾਰਡ ਕਰੋ ਜਾਂ ਬੋਲੀ ਬਣਾਓ",
+  "workspace.targetAudioLane.slotMenuPicked": "ਇਸ ਕਤਾਰ ਲਈ ਰਿਕਾਰਡ ਕਰੋ ਜਾਂ ਬੋਲੀ ਬਣਾਓ (ਚੁਣੀ ਗਈ)",
   "workspace.targetAudioLane.slotMenuRecord": "ਰਿਕਾਰਡ ਕਰੋ",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "ਬੋਲੀ ਬਣਾਓ",
   "workspace.targetAudioLane.playClip": "ਇਹ ਕਲਿੱਪ ਚਲਾਓ",

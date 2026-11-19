@@ -7264,6 +7264,7 @@ export const pt: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Sobrepõe a dublagem anterior",
   "workspace.targetAudioLane.recordAudio": "Gravar áudio para esta fala",
   "workspace.targetAudioLane.slotMenu": "Gravar ou gerar a voz desta fala",
+  "workspace.targetAudioLane.slotMenuPicked": "Gravar ou gerar a voz desta fala (escolhida)",
   "workspace.targetAudioLane.slotMenuRecord": "Gravar",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Gerar voz",
   "workspace.targetAudioLane.playClip": "Reproduzir este clipe",

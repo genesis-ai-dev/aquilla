@@ -1738,6 +1738,8 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
         expect(one()).toHaveAttribute("data-picked", "true")
         expect(one().className).toMatch(/\btext-primary\b/)
         expect(glyph(one())).toMatch(/sparkles/)
+        // Review S4: a screen reader hears the pick too, not only the colour.
+        expect(one().getAttribute("aria-label")).toBe("Record or make speech for this line (picked)")
         rerender(<TargetAudioLane {...wired({ emptyCells: [narrow()], makingSpeechCellIds: new Set(["c9"]) })} />)
         expect(one()).toHaveAttribute("data-hot", "true")
         expect(one()).toHaveAttribute("data-busy", "true")
@@ -1842,6 +1844,7 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
           expect(screen.queryByTestId("tl-target-empty-c9-mark")).toBeNull()
           expect(one()).toHaveAttribute("data-picked", "true")
           expect(glyph(one())).toMatch(/sparkles/)
+          expect(one().getAttribute("aria-label")).toBe("Record or make speech for this line (picked)")
         })
 
         it("a busy line at rest shows the mark as busy; on hover, the spinner", () => {

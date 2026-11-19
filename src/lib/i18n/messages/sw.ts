@@ -7575,6 +7575,7 @@ export const sw: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Inapishana na toleo lililotangulia",
   "workspace.targetAudioLane.recordAudio": "Rekodi sauti ya mstari huu",
   "workspace.targetAudioLane.slotMenu": "Rekodi au tengeneza usemi wa mstari huu",
+  "workspace.targetAudioLane.slotMenuPicked": "Rekodi au tengeneza usemi wa mstari huu (umechaguliwa)",
   "workspace.targetAudioLane.slotMenuRecord": "Rekodi",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Tengeneza usemi",
   "workspace.targetAudioLane.playClip": "Cheza kipande hiki",

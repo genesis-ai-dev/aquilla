@@ -6226,6 +6226,7 @@ export const ru: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Накладывается на предыдущий дубляж",
   "workspace.targetAudioLane.recordAudio": "Записать аудио для этой строки",
   "workspace.targetAudioLane.slotMenu": "Записать или создать речь для этой строки",
+  "workspace.targetAudioLane.slotMenuPicked": "Записать или создать речь для этой строки (выбрана)",
   "workspace.targetAudioLane.slotMenuRecord": "Записать",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Создать речь",
   "workspace.targetAudioLane.playClip": "Воспроизвести этот фрагмент",

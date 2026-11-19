@@ -6109,6 +6109,7 @@ export const zh_Hans: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "与上一段配音重叠",
   "workspace.targetAudioLane.recordAudio": "为这一行录制音频",
   "workspace.targetAudioLane.slotMenu": "为这一行录制或生成语音",
+  "workspace.targetAudioLane.slotMenuPicked": "为这一行录制或生成语音（已选）",
   "workspace.targetAudioLane.slotMenuRecord": "录制",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "生成语音",
   "workspace.targetAudioLane.playClip": "播放此片段",

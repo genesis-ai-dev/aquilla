@@ -2541,7 +2541,14 @@ export function TargetAudioLane({
             const button = offersRecord && offersSpeech ? (
               <TimelineSlotButton
                 testId={`tl-target-${key}-menu`}
-                label={busy ? t("audio.makeSpeech.makingLine") : t("workspace.targetAudioLane.slotMenu")}
+                // The pick is said, not only coloured (it is not a toggle).
+                label={
+                  busy
+                    ? t("audio.makeSpeech.makingLine")
+                    : picked
+                      ? t("workspace.targetAudioLane.slotMenuPicked")
+                      : t("workspace.targetAudioLane.slotMenu")
+                }
                 hot={hot}
                 sizePx={buttonPx}
                 folded={reveal && !pointerHere}

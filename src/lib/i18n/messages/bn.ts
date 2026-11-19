@@ -7594,6 +7594,7 @@ export const bn: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "আগের ডাবের সাথে ওভারল্যাপ",
   "workspace.targetAudioLane.recordAudio": "এই লাইনের জন্য অডিও রেকর্ড করুন",
   "workspace.targetAudioLane.slotMenu": "এই লাইনের জন্য রেকর্ড করুন বা কথা তৈরি করুন",
+  "workspace.targetAudioLane.slotMenuPicked": "এই লাইনের জন্য রেকর্ড করুন বা কথা তৈরি করুন (বাছাই করা)",
   "workspace.targetAudioLane.slotMenuRecord": "রেকর্ড",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "কথা তৈরি করুন",
   "workspace.targetAudioLane.playClip": "এই ক্লিপ চালান",

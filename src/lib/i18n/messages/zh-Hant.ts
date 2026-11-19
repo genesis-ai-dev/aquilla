@@ -6111,6 +6111,7 @@ export const zh_Hant: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "與上一段配音重疊",
   "workspace.targetAudioLane.recordAudio": "為這一行錄製音訊",
   "workspace.targetAudioLane.slotMenu": "為這一行錄製或生成語音",
+  "workspace.targetAudioLane.slotMenuPicked": "為這一行錄製或生成語音（已選）",
   "workspace.targetAudioLane.slotMenuRecord": "錄製",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "生成語音",
   "workspace.targetAudioLane.playClip": "播放這個片段",

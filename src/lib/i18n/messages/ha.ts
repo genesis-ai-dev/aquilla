@@ -7578,6 +7578,7 @@ export const ha: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Yana mamaye maimaitawar da ta gabata",
   "workspace.targetAudioLane.recordAudio": "Ku naɗa sauti ga wannan layi",
   "workspace.targetAudioLane.slotMenu": "Ku naɗa ko ku samar da magana ga wannan layi",
+  "workspace.targetAudioLane.slotMenuPicked": "Ku naɗa ko ku samar da magana ga wannan layi (an zaɓa)",
   "workspace.targetAudioLane.slotMenuRecord": "Ku naɗa",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Samar da magana",
   "workspace.targetAudioLane.playClip": "Ku kunna wannan yanki",

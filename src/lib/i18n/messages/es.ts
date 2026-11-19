@@ -7259,6 +7259,7 @@ export const es: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Se superpone al doblaje anterior",
   "workspace.targetAudioLane.recordAudio": "Grabar audio para esta línea",
   "workspace.targetAudioLane.slotMenu": "Grabar o crear el habla de esta línea",
+  "workspace.targetAudioLane.slotMenuPicked": "Grabar o crear el habla de esta línea (elegida)",
   "workspace.targetAudioLane.slotMenuRecord": "Grabar",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Crear habla",
   "workspace.targetAudioLane.playClip": "Reproducir este clip",

@@ -7566,6 +7566,7 @@ export const ur: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "پچھلے ڈب پر چڑھتا ہے",
   "workspace.targetAudioLane.recordAudio": "اس سطر کے لیے آڈیو ریکارڈ کریں",
   "workspace.targetAudioLane.slotMenu": "اس سطر کے لیے ریکارڈ کریں یا گفتار بنائیں",
+  "workspace.targetAudioLane.slotMenuPicked": "اس سطر کے لیے ریکارڈ کریں یا گفتار بنائیں (منتخب)",
   "workspace.targetAudioLane.slotMenuRecord": "ریکارڈ",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "گفتار بنائیں",
   "workspace.targetAudioLane.playClip": "یہ کلپ چلائیں",

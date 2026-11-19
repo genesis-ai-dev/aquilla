@@ -6066,6 +6066,7 @@ export const ms: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Tumpang tindih dengan dub sebelumnya",
   "workspace.targetAudioLane.recordAudio": "Rakam audio untuk baris ini",
   "workspace.targetAudioLane.slotMenu": "Rakam atau jana pertuturan untuk baris ini",
+  "workspace.targetAudioLane.slotMenuPicked": "Rakam atau jana pertuturan untuk baris ini (dipilih)",
   "workspace.targetAudioLane.slotMenuRecord": "Rakam",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Jana pertuturan",
   "workspace.targetAudioLane.playClip": "Mainkan klip ini",

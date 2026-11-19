@@ -6138,6 +6138,7 @@ export const fr: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "Chevauche le doublage précédent",
   "workspace.targetAudioLane.recordAudio": "Enregistrer l'audio pour cette ligne",
   "workspace.targetAudioLane.slotMenu": "Enregistrer ou générer la parole de cette ligne",
+  "workspace.targetAudioLane.slotMenuPicked": "Enregistrer ou générer la parole de cette ligne (choisie)",
   "workspace.targetAudioLane.slotMenuRecord": "Enregistrer",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "Générer la parole",
   "workspace.targetAudioLane.playClip": "Lire ce clip",

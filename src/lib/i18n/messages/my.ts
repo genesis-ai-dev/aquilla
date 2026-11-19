@@ -6087,6 +6087,7 @@ export const my: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "အရင်သုံးအသံထုံးချ နှင့် ထုံးကျော်သည်",
   "workspace.targetAudioLane.recordAudio": "ဤလုံးအတွက် အသံသွင်း",
   "workspace.targetAudioLane.slotMenu": "ဤလုံးအတွက် အသံသွင်းရန် သို့မဟုတ် စကားသံ ဖန်တီးရန်",
+  "workspace.targetAudioLane.slotMenuPicked": "ဤလုံးအတွက် အသံသွင်းရန် သို့မဟုတ် စကားသံ ဖန်တီးရန် (ရွေးထားသည်)",
   "workspace.targetAudioLane.slotMenuRecord": "အသံသွင်းရန်",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "စကားသံ ဖန်တီးရန်",
   "workspace.targetAudioLane.playClip": "ဤကလစ် ဖွင့်ရန်",

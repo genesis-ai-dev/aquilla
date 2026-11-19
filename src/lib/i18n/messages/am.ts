@@ -7578,6 +7578,7 @@ export const am: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "ከቀድሞው ድምጽ ይደራረባል",
   "workspace.targetAudioLane.recordAudio": "ለዚህ መስመር ድምጽ ይቅዱ",
   "workspace.targetAudioLane.slotMenu": "ለዚህ መስመር ይቅዱ ወይም ንግግር ይፍጠሩ",
+  "workspace.targetAudioLane.slotMenuPicked": "ለዚህ መስመር ይቅዱ ወይም ንግግር ይፍጠሩ (ተመርጧል)",
   "workspace.targetAudioLane.slotMenuRecord": "ይቅረጹ",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "ንግግር ይፍጠሩ",
   "workspace.targetAudioLane.playClip": "ይህን ክሊፕ ያጫውቱ",

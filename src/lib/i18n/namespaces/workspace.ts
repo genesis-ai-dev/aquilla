@@ -523,6 +523,7 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     "workspace.targetAudioLane.slotMenu": "Record or make speech for this line",
+    "workspace.targetAudioLane.slotMenuPicked": "Record or make speech for this line (picked)",
     "workspace.targetAudioLane.slotMenuRecord": "Record",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "Make speech",
     // AQU-646 stage 5: the other corner of the same chip.
@@ -2273,6 +2274,13 @@ export const workspace = defineNamespace({
           "line of the target-audio timeline track when the line is too narrow for " +
           "the record button and the make-speech button side by side. Clicking it " +
           "opens a two-item menu: record this line, or make its speech with a voice.",
+      },
+      "workspace.targetAudioLane.slotMenuPicked": {
+        description:
+          "The same button's tooltip and accessible name while its line is picked " +
+          "for the Make speech panel (it then shows a coloured sparkle). The words in " +
+          "brackets tell a screen-reader user the line is picked; keep the first part " +
+          "the same as the button's usual name.",
       },
       "workspace.targetAudioLane.slotMenuRecord": {
         description:

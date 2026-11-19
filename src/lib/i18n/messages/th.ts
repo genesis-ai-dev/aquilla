@@ -6093,6 +6093,7 @@ export const th: Catalog = {
   "workspace.targetAudioLane.overlapsPrevious": "ซ้อนทับกับเสียงดับก่อนหน้า",
   "workspace.targetAudioLane.recordAudio": "บันทึกเสียงสำหรับบรรทัดนี้",
   "workspace.targetAudioLane.slotMenu": "บันทึกเสียงหรือสร้างเสียงพูดสำหรับบรรทัดนี้",
+  "workspace.targetAudioLane.slotMenuPicked": "บันทึกเสียงหรือสร้างเสียงพูดสำหรับบรรทัดนี้ (เลือกแล้ว)",
   "workspace.targetAudioLane.slotMenuRecord": "บันทึกเสียง",
   "workspace.targetAudioLane.slotMenuMakeSpeech": "สร้างเสียงพูด",
   "workspace.targetAudioLane.playClip": "เล่นคลิปนี้",

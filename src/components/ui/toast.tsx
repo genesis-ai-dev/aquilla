@@ -167,6 +167,7 @@ function ToastItem({
   }, [updateKey, toastItem.id])
 
   const body = bodyFromToast(toastItem.data)
+  const hasTitle = toastItem.title != null && toastItem.title !== ""
 
   return (
     <Toast toast={toastItem}>
@@ -181,7 +182,11 @@ function ToastItem({
           >
             <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
             {body ? (
-              <ToastTitle className="min-w-0" />
+              hasTitle ? (
+                <ToastTitle className="min-w-0" />
+              ) : (
+                <div className="min-w-0">{body}</div>
+              )
             ) : (
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <ToastTitle />
@@ -189,7 +194,7 @@ function ToastItem({
               </div>
             )}
             <ToastClose className="-mt-1" />
-            {body ? <div className="col-span-2 col-start-2 min-w-0">{body}</div> : null}
+            {body && hasTitle ? <div className="col-span-2 col-start-2 min-w-0">{body}</div> : null}
           </div>
           {hasActions && (
             <div

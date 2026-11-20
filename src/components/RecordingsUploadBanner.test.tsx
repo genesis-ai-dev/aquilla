@@ -12,6 +12,16 @@ vi.mock("@/lib/audio/bulk-upload/engine", () => ({
 }))
 
 import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
+import { Toaster } from "@/components/ui/toast"
+
+function renderBanner() {
+  return render(
+    <>
+      <Toaster />
+      <RecordingsUploadBanner />
+    </>,
+  )
+}
 
 const finished = (extra: Partial<BulkUploadState>): BulkUploadState => ({
   total: 3, done: 3, failed: [], notStarted: 0, cancelled: false, waitingForConnection: false,
@@ -23,7 +33,7 @@ const finished = (extra: Partial<BulkUploadState>): BulkUploadState => ({
 describe("RecordingsUploadBanner: lines given several takes", () => {
   it("names the line and how many takes it got", () => {
     state = finished({ takes: [{ target: "Genesis 1:1", count: 2 }] })
-    render(<RecordingsUploadBanner />)
+    renderBanner()
     expect(screen.getByTestId("recordings-banner-text").textContent).toBe("3 recordings uploaded. 2 takes on Genesis 1:1.")
   })
 
@@ -32,7 +42,7 @@ describe("RecordingsUploadBanner: lines given several takes", () => {
       total: 10, done: 10,
       takes: ["1:1", "1:2", "1:3", "1:4", "1:5"].map((v) => ({ target: `Genesis ${v}`, count: 2 })),
     })
-    render(<RecordingsUploadBanner />)
+    renderBanner()
     expect(screen.getByTestId("recordings-banner-text").textContent).toBe(
       "10 recordings uploaded. 2 takes on Genesis 1:1, 2 takes on Genesis 1:2, 2 takes on Genesis 1:3, and 2 more lines.",
     )
@@ -40,7 +50,7 @@ describe("RecordingsUploadBanner: lines given several takes", () => {
 
   it("says nothing more when every line got one take", () => {
     state = finished({})
-    render(<RecordingsUploadBanner />)
+    renderBanner()
     expect(screen.getByTestId("recordings-banner-text").textContent).toBe("3 recordings uploaded.")
   })
 })
@@ -52,13 +62,13 @@ describe("RecordingsUploadBanner: counts files, not failures", () => {
 
   it("a failed verse in three parts counts three files in the summary", () => {
     state = finished({ total: 10, done: 7, failed: [failure(3)] })
-    render(<RecordingsUploadBanner />)
+    renderBanner()
     expect(screen.getByTestId("recordings-banner-text").textContent).toContain("3 of 10")
   })
 
   it("the bar reaches its end when every file has landed or failed", () => {
     state = { ...finished({ total: 10, done: 7, failed: [failure(3)] }), finished: false }
-    render(<RecordingsUploadBanner />)
+    renderBanner()
     expect(screen.getByTestId("recordings-banner-count").textContent).toBe("10/10")
   })
 })

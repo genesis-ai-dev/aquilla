@@ -28,16 +28,34 @@ function renderModal() {
 }
 
 describe("BatchBooksModal", () => {
+  it("checks and clears every book from the checkbox beside Books", async () => {
+    const user = userEvent.setup()
+    renderModal()
+    const all = screen.getByRole("checkbox", { name: "Books" })
+    expect(all).toHaveAttribute("aria-checked", "mixed")
+    await user.click(screen.getByText("Books"))
+    expect(screen.getByRole("checkbox", { name: "Genesis" })).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Exodus" })).toBeChecked()
+    expect(all).toBeChecked()
+    await user.click(screen.getByText("Books"))
+    expect(screen.getByRole("checkbox", { name: "Genesis" })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Exodus" })).not.toBeChecked()
+  })
+
   it("starts with the open book checked and confirms the books the reader adds", async () => {
     const user = userEvent.setup()
     const { onConfirm } = renderModal()
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
     expect(screen.getByRole("checkbox", { name: "Genesis" })).toBeChecked()
     expect(screen.getByRole("checkbox", { name: "Exodus" })).not.toBeChecked()
-    await user.click(screen.getByRole("checkbox", { name: "Exodus" }))
+    await user.click(screen.getByText("Exodus"))
+    expect(screen.getByRole("checkbox", { name: "Exodus" })).toBeChecked()
+    await user.click(screen.getByText("Cells ready for your check"))
+    expect(screen.getByRole("checkbox", { name: "Cells ready for your check" })).not.toBeChecked()
     await user.click(screen.getByRole("button", { name: "Validate books" }))
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       fileIds: ["gen", "exo"],
-      includeReadyCells: true,
+      includeReadyCells: false,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
     }))

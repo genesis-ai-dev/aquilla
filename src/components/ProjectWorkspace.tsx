@@ -13172,16 +13172,14 @@ export function ProjectWorkspace() {
       const chunks = chunksOf(summary.validatable, batchValidateChunk)
       const total = summary.validatable.length
       void (async () => {
-        // A run of more than one chunk takes long enough to need saying so.
-        // `timeout: 0` keeps it up until this run replaces it with its own
-        // closing message; a single-chunk run keeps the old silence-then-toast.
-        const progressToastId = chunks.length > 1
-          ? toast.add({
+        // A run of more than one chunk takes long enough to need saying so,
+        // and a single chunk still says it is working. `timeout: 0` keeps the
+        // toast up until this run replaces it with its own closing message.
+        const progressToastId = toast.add({
             type: "loading",
             title: t("editor.batchValidate.progress", { done: 0, total }),
             timeout: 0,
           })
-          : null
         const closeProgress = () => { if (progressToastId != null) toast.close(progressToastId) }
         try {
           // AQU-1486: ask what the run's repetitions get BEFORE anything is
@@ -13317,46 +13315,71 @@ export function ProjectWorkspace() {
       if (targets.length === 0) return
       const projectId = project.id
       void (async () => {
-        // AQU-1767 phase 2: the whole run is ONE history step.
-        await withGroup(
-          {
-            labelKey: "editor.history.stepValidateAudioMany",
-            labelParams: { count: targets.length },
-            fileId: activeFileId,
-            fileName: activeFileNameRef.current,
-          },
-          async () => {
-            for (const target of targets) {
-              await emitCellAudioValidate({
-                projectId,
-                fileId: target.fileId,
-                cellId: target.cellId,
-                audioId: target.audioId,
-                ...(activeLane ? { targetLang: activeLane } : {}),
-                author: currentUsername,
-                surface: "batch", // AQU-1572
-              })
-              recordStep({
-                kind: "vote.audio",
-                data: { cellId: target.cellId, audioId: target.audioId, voted: true },
-                labelKey: "editor.history.stepValidateAudio",
-                fileId: activeFileId,
-              })
-            }
-          },
-          { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
-        )
-        await refreshOutboxPending()
-        // EVERY file the run touched, not just the open one. On a file with an
-        // audio-cue sibling the takes live on the heard lines, so poking only
-        // `activeFileId` left the file that actually changed stale — the same
-        // shape runTranscribeAll already guards against. The flush lives in
-        // the shared commit so every audio-validation path orders it the same
-        // way (AQU-490, 2026-09-22).
-        await commitAudioValidation(
-          targets.map((target) => target.fileId),
-          { getTokenForFile: getTokenForProjectFile },
-        )
+        const total = targets.length
+        const progressToastId = toast.add({
+          type: "loading",
+          title: t("editor.batchValidate.audioProgress", { done: 0, total }),
+          timeout: 0,
+        })
+        try {
+          // AQU-1767 phase 2: the whole run is ONE history step.
+          await withGroup(
+            {
+              labelKey: "editor.history.stepValidateAudioMany",
+              labelParams: { count: targets.length },
+              fileId: activeFileId,
+              fileName: activeFileNameRef.current,
+            },
+            async () => {
+              let done = 0
+              for (const target of targets) {
+                await emitCellAudioValidate({
+                  projectId,
+                  fileId: target.fileId,
+                  cellId: target.cellId,
+                  audioId: target.audioId,
+                  ...(activeLane ? { targetLang: activeLane } : {}),
+                  author: currentUsername,
+                  surface: "batch", // AQU-1572
+                })
+                recordStep({
+                  kind: "vote.audio",
+                  data: { cellId: target.cellId, audioId: target.audioId, voted: true },
+                  labelKey: "editor.history.stepValidateAudio",
+                  fileId: activeFileId,
+                })
+                done += 1
+                toast.update(progressToastId, {
+                  type: "loading",
+                  title: t("editor.batchValidate.audioProgress", { done, total }),
+                })
+              }
+            },
+            { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
+          )
+          await refreshOutboxPending()
+          // EVERY file the run touched, not just the open one. On a file with an
+          // audio-cue sibling the takes live on the heard lines, so poking only
+          // `activeFileId` left the file that actually changed stale — the same
+          // shape runTranscribeAll already guards against. The flush lives in
+          // the shared commit so every audio-validation path orders it the same
+          // way (AQU-490, 2026-09-22).
+          await commitAudioValidation(
+            targets.map((target) => target.fileId),
+            { getTokenForFile: getTokenForProjectFile },
+          )
+          toast.update(progressToastId, {
+            type: "success",
+            title: t("editor.batchValidate.audioDone", { count: total }),
+            timeout: 5000,
+          })
+        } catch {
+          toast.update(progressToastId, {
+            type: "error",
+            title: t("editor.batchValidate.failedTitle"),
+            timeout: 8000,
+          })
+        }
       })()
     },
     runTranscribeAll: () => {
@@ -13374,11 +13397,9 @@ export function ProjectWorkspace() {
       const cells =
         audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void (async () => {
-        // Same lazy toast as the mp3 auto-transcribe: created on the first
-        // progress call, so a run with nothing to transcribe never leaves a
-        // spinner hanging. The banner still tracks per-cell state; the toast
-        // is the count that survives scrolling away from the table.
-        let toastId: string | null = null
+        // The batch's own toast (AudioBulkProgressBanner) is the live count and
+        // the cancel control, in the bottom-right stack. This one is only the
+        // closing line, and only when the run reported work.
         let lastDone = 0
         let lastTotal = 0
         const plural = (n: number) => (n === 1 ? "" : "s")
@@ -13396,14 +13417,6 @@ export function ProjectWorkspace() {
           onProgress: (done, total) => {
             lastDone = done
             lastTotal = total
-            // The zeroth call lands BEFORE the Whisper model is fetched — on a
-            // cold run that is most of the wait, so say what is happening
-            // rather than counting from nothing.
-            const title = done === 0
-              ? `Transcribing ${total} recording${plural(total)}…`
-              : `Transcribing — ${done} of ${total} done…`
-            if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
-            else toast.update(toastId, { type: "loading", title })
           },
         })
         // AQU-783: the batch enqueues one cell.audio.attach per cell but never
@@ -13418,12 +13431,13 @@ export function ProjectWorkspace() {
         // left them invisible until a reload. Same rule as
         // `handleTranscribeSections`.
         for (const id of new Set(cells.map((c) => c.fileId))) notifyAudioAttachmentsChanged(id)
-        // Only if something was actually reported — see the lazy toast above.
-        // A short count means the banner's Cancel was pressed mid-run.
-        if (toastId !== null) {
-          toast.update(toastId, lastDone < lastTotal
-            ? { type: "info", title: `Transcription stopped — ${lastDone} of ${lastTotal} done.` }
-            : { type: "success", title: `Transcribed ${lastTotal} recording${plural(lastTotal)}.` })
+        if (lastTotal > 0) {
+          toast.add({
+            type: lastDone < lastTotal ? "info" : "success",
+            title: lastDone < lastTotal
+              ? `Transcription stopped — ${lastDone} of ${lastTotal} done.`
+              : `Transcribed ${lastTotal} recording${plural(lastTotal)}.`,
+          })
         }
       })()
     },

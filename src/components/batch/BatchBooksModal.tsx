@@ -5,16 +5,20 @@
  * Each checked book is taken whole; a chapter belongs to the open book's own
  * dialog.
  */
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { BatchBook } from "@/lib/review/batch-books"
+
+/** Measured book row (checkbox + name). A larger estimate makes LegendList build extra rows. */
+const BOOK_ROW_PX = 20
+const BOOK_LIST_MAX_PX = 256
 
 export type BatchBooksRequest = "validate" | "draft"
 
@@ -73,14 +77,27 @@ export function BatchBooksModal({
 
   const allChecked = books.length > 0 && books.every((book) => checked.has(book.id))
 
-  const toggle = (id: string, on: boolean) => {
+  const toggle = useCallback((id: string, on: boolean) => {
     setChecked((prev) => {
       const next = new Set(prev)
       if (on) next.add(id)
       else next.delete(id)
       return next
     })
-  }
+  }, [])
+
+  // LegendList re-renders a mounted row only when `extraData` changes, so the
+  // checked set travels there. The row callback stays stable across a toggle.
+  const renderBook = useCallback(
+    ({ item, extraData }: LegendListRenderItemProps<BatchBook>) => (
+      <BookCheckRow
+        book={item}
+        checked={(extraData as Set<string>).has(item.id)}
+        onToggle={toggle}
+      />
+    ),
+    [toggle],
+  )
 
   const title = request === "validate"
     ? t("editor.batchBooks.validateTitle")
@@ -93,34 +110,44 @@ export function BatchBooksModal({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{t("editor.batchBooks.description")}</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-between gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={books.length === 0}
-            onClick={() => setChecked(allChecked ? new Set() : new Set(books.map((book) => book.id)))}
+        <FieldSet>
+          <FieldLegend variant="label" className="flex items-center gap-1.5">
+            <Checkbox
+              id="batch-books-all"
+              checked={allChecked}
+              indeterminate={checked.size > 0 && !allChecked}
+              disabled={books.length === 0}
+              onCheckedChange={(value) => {
+                setChecked(value === true ? new Set(books.map((book) => book.id)) : new Set())
+              }}
+            />
+            <FieldLabel
+              htmlFor="batch-books-all"
+              onClick={(event) => {
+                event.preventDefault()
+                if (books.length === 0) return
+                setChecked(allChecked ? new Set() : new Set(books.map((book) => book.id)))
+              }}
+            >
+              {t("editor.batchBooks.section")}
+            </FieldLabel>
+          </FieldLegend>
+          <div
+            className="overflow-hidden"
+            style={{ height: Math.min(BOOK_LIST_MAX_PX, Math.max(BOOK_ROW_PX, books.length * BOOK_ROW_PX)) }}
           >
-            {allChecked ? t("editor.batchBooks.clear") : t("editor.batchBooks.selectAll")}
-          </Button>
-        </div>
-        <ScrollArea className="max-h-64">
-          <FieldSet>
-            <FieldLegend variant="label">{t("editor.batchBooks.section")}</FieldLegend>
-            {books.map((book) => (
-              <Field key={book.id} orientation="horizontal">
-                <Checkbox
-                  id={`batch-book-${book.id}`}
-                  checked={checked.has(book.id)}
-                  onCheckedChange={(value) => toggle(book.id, value === true)}
-                />
-                <FieldContent>
-                  <FieldLabel htmlFor={`batch-book-${book.id}`}>{book.name}</FieldLabel>
-                </FieldContent>
-              </Field>
-            ))}
-          </FieldSet>
-        </ScrollArea>
+            <LegendList
+              data={books}
+              extraData={checked}
+              renderItem={renderBook}
+              keyExtractor={(book) => book.id}
+              estimatedItemSize={BOOK_ROW_PX}
+              recycleItems={false}
+              style={{ height: "100%" }}
+              contentContainerStyle={{ width: "100%" }}
+            />
+          </div>
+        </FieldSet>
         {request === "validate" ? (
           <FieldSet>
             <FieldLegend variant="label">{t("editor.batchFile.legend")}</FieldLegend>
@@ -193,6 +220,37 @@ export function BatchBooksModal({
   )
 }
 
+function BookCheckRow({
+  book, checked, onToggle,
+}: {
+  book: BatchBook
+  checked: boolean
+  onToggle: (id: string, on: boolean) => void
+}) {
+  const id = `batch-book-${book.id}`
+  return (
+    <Field orientation="horizontal">
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(value) => onToggle(book.id, value === true)}
+      />
+      <FieldContent>
+        <FieldLabel
+          htmlFor={id}
+          className="w-full"
+          onClick={(event) => {
+            event.preventDefault()
+            onToggle(book.id, !checked)
+          }}
+        >
+          {book.name}
+        </FieldLabel>
+      </FieldContent>
+    </Field>
+  )
+}
+
 function OptionRow({
   id, checked, disabled, onCheckedChange, label, help,
 }: {
@@ -212,7 +270,17 @@ function OptionRow({
         onCheckedChange={(value) => onCheckedChange(value === true)}
       />
       <FieldContent>
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <FieldLabel
+          htmlFor={id}
+          className="w-full"
+          onClick={(event) => {
+            event.preventDefault()
+            if (disabled) return
+            onCheckedChange(!checked)
+          }}
+        >
+          {label}
+        </FieldLabel>
         <FieldDescription>{help}</FieldDescription>
       </FieldContent>
     </Field>

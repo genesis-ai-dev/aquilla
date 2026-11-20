@@ -948,8 +948,6 @@ export const editor = defineNamespace({
     "editor.batchBooks.draftTitle": "Draft books",
     "editor.batchBooks.description":
       "Each book you check is included in full. To limit one book to a chapter, open that book and use its file menu.",
-    "editor.batchBooks.selectAll": "Select all",
-    "editor.batchBooks.clear": "Clear",
     "editor.batchBooks.ready": "Cells ready for your check",
     "editor.batchBooks.aiDrafts": "AI drafts nobody has checked",
     "editor.batchBooks.flagged": "Cells with open check flags",
@@ -996,6 +994,11 @@ export const editor = defineNamespace({
     // AQU-2507: one action validates the whole file, so the run says where it
     // has got to rather than stopping at a chunk boundary.
     "editor.batchValidate.progress": "Validating… {done} of {total} cells signed off.",
+    "editor.batchValidate.audioProgress": "Validating… {done} of {total} recordings signed off.",
+    "editor.batchValidate.audioDone": plural({
+      one: "{count} recording signed off.",
+      other: "{count} recordings signed off.",
+    }),
     "editor.batchValidate.nothingEligibleTitle": "Nothing was validated",
     "editor.batchValidate.nothingEligibleNoReason":
       "None of these cells is eligible for bulk validation.",
@@ -7703,7 +7706,8 @@ export const editor = defineNamespace({
         maxLength: 24,
       },
       "editor.batchBooks.section": {
-        description: "Legend over the list of books in the header batch dialog.",
+        description:
+          "Label beside the checkbox that checks or clears every book in the header batch dialog.",
         maxLength: 16,
       },
       "editor.batchBooks.validateTitle": {
@@ -7718,14 +7722,6 @@ export const editor = defineNamespace({
         description:
           "Explains that each checked book is taken in full, and that a chapter "
           + "is chosen from the open book's file menu instead.",
-      },
-      "editor.batchBooks.selectAll": {
-        description: "Button that checks every book. Becomes Clear when all are checked.",
-        maxLength: 20,
-      },
-      "editor.batchBooks.clear": {
-        description: "Button that unchecks every book.",
-        maxLength: 16,
       },
       "editor.batchBooks.ready": {
         description: "Checkbox for committed text the reader has not signed off. No count: the books are not loaded yet.",
@@ -7845,6 +7841,23 @@ export const editor = defineNamespace({
           total: "How many cells the run will sign off in all.",
         },
         maxLength: 80,
+      },
+      "editor.batchValidate.audioProgress": {
+        description:
+          "Toast shown WHILE a file-wide recording validation runs. Same rule as "
+          + "the text progress toast: it reports progress and does not ask for another click.",
+        placeholders: {
+          done: "How many recordings have been signed off so far.",
+          total: "How many recordings the run will sign off in all.",
+        },
+        maxLength: 90,
+      },
+      "editor.batchValidate.audioDone": {
+        description: "Toast when a file-wide recording validation finishes and every take was signed off.",
+        placeholders: {
+          count: "How many recordings were signed off. Selects the plural form.",
+        },
+        maxLength: 60,
       },
       "editor.batchValidate.nothingEligibleTitle": {
         description:

@@ -4,6 +4,7 @@ import { BookOpen, ChevronRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bridgeStore } from "@/lib/paratext-bridge/store"
+import { copyApp } from "@/lib/paratext-bridge/copies"
 import type { BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
 
 export const paratextProjectPath = (project: Pick<BridgeProject, "path">) =>
@@ -24,9 +25,18 @@ export function useLinkedProjects(projects: readonly BridgeProject[]): Set<strin
   return ids
 }
 
-/** One Paratext project on this computer, as a row that opens its page. */
-export function ParatextProjectRow({ project: p, linked, testId = "paratext-project" }: { project: BridgeProject; linked: boolean; testId?: string }) {
+/** One Paratext project on this computer, as a row that opens its page.
+ *  `others` are the other folders holding the same project (copies.ts);
+ *  `copyLinked` says one of them is the copy Aquilla writes to. */
+export function ParatextProjectRow({ project: p, linked, others = [], copyLinked = false, testId = "paratext-project" }: {
+  project: BridgeProject
+  linked: boolean
+  others?: readonly BridgeProject[]
+  copyLinked?: boolean
+  testId?: string
+}) {
   const t = useT()
+  const apps = [...new Set(others.map((o) => t(`paratextBridge.copies.app.${copyApp(o.path)}`)))]
   return (
     <li data-testid={testId}>
       <Link to={paratextProjectPath(p)} className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50">
@@ -41,10 +51,19 @@ export function ParatextProjectRow({ project: p, linked, testId = "paratext-proj
             {p.settings.language ? ` · ${p.settings.language}` : ""}
             {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
           </div>
+          {apps.length > 0 ? (
+            <div className="truncate text-xs text-muted-foreground" data-testid="paratext-project-copies">
+              {t("paratextBridge.copies.alsoIn", { apps: apps.join(", ") })}
+            </div>
+          ) : null}
         </div>
-        <Badge variant={linked ? "default" : "outline"}>
-          {linked ? t("paratextBridge.project.inAquilla") : t("paratextBridge.project.notInAquilla")}
-        </Badge>
+        {linked ? (
+          <Badge variant="default">{t("paratextBridge.project.inAquilla")}</Badge>
+        ) : copyLinked ? (
+          <Badge variant="secondary">{t("paratextBridge.copies.otherCopy")}</Badge>
+        ) : (
+          <Badge variant="outline">{t("paratextBridge.project.notInAquilla")}</Badge>
+        )}
         <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </Link>
     </li>

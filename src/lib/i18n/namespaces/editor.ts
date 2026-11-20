@@ -2464,6 +2464,7 @@ export const editor = defineNamespace({
     // and the hover corner. `editor.source.editText` and the row's insert /
     // remove / reason strings are reused verbatim as its entries.
     "editor.cellMenu.trigger": "Cell actions",
+    "editor.cellMenu.copySource": "Copy source text",
     "editor.cellMenu.editTimestamps": "Edit timestamps",
     "editor.cellMenu.timingLocked": "Timing is locked for this project.",
     // AQU-2204: the source's times aren't shown while a file follows its recordings.
@@ -9664,9 +9665,17 @@ export const editor = defineNamespace({
       "editor.cellMenu.trigger": {
         description:
           "Screen-reader name of the three-dot button at the top-right of a source " +
-          "cell. It opens the one menu holding every action on that cell: edit its " +
-          "source text, edit its timestamps, insert a cell above or below, remove it.",
+          "cell. It opens the one menu holding every action on that cell: copy its " +
+          "source text, edit its source text, edit its timestamps, insert a cell " +
+          "above or below, remove it.",
         maxLength: 20,
+      },
+      "editor.cellMenu.copySource": {
+        description:
+          "Right-click entry on a source cell. Copies that cell's source text to " +
+          "the clipboard. Shown to anyone who can see the cell, including someone " +
+          "who cannot edit it. Imperative.",
+        maxLength: 24,
       },
       "editor.cellMenu.editTimestamps": {
         description:

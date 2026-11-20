@@ -25,6 +25,7 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
+  Copy,
   MoreHorizontal,
   Bold,
   VolumeX,
@@ -195,6 +196,7 @@ import {
   useIsSelected,
 } from "@/lib/audio/selection"
 import { dragSelectionIndex, idsForDrag } from "@/lib/editor/selection-drag-index"
+import { claimsCellSelectAll } from "@/lib/editor/select-all-key"
 import { idsForSelectAll } from "@/lib/editor/select-all-ids"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
@@ -368,7 +370,9 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
-import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
+import { toast } from "@/components/ui/toast"
+import { cellTextForDisplay, displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
+import { formatSelectionCopy, writeFormattedSelection } from "@/lib/editor/selection-copy"
 import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
@@ -2901,35 +2905,31 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
 
-  // Select All inside the table marks every cell in the file. A cell editor
-  // is contenteditable, and the browser would otherwise highlight that cell's
-  // text. A real text field still selects its own text.
+  // In the open text pane, Command-A or Control-A checks the cells, unless
+  // the key is going to a text field. A cell editor still selects its text.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "a" || event.altKey || event.shiftKey) return
-      if (!(event.metaKey || event.ctrlKey)) return
       const root = tableRootRef.current
-      if (!root) return
-      const target = event.target
-      const inside = (node: Node | null | undefined) => Boolean(node && root.contains(node))
-      const selectionAnchor = document.getSelection()?.anchorNode ?? null
-      if (!inside(target instanceof Node ? target : null) && !inside(selectionAnchor)) return
-      const field = target instanceof HTMLElement
-        ? target.closest("input, textarea, select")
-        : null
-      if (field) return
-      const ids = idsForSelectAll({
-        fileIds: fileCellIdsRef.current,
-        filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
-      })
-      if (ids.length === 0) return
+      if (!root || !claimsCellSelectAll(root, event)) return
       event.preventDefault()
-      event.stopPropagation()
-      document.getSelection()?.removeAllRanges()
-      setSelection(ids, ids[0] ?? null)
+      event.stopImmediatePropagation()
+      const wipe = () => root.ownerDocument.getSelection()?.removeAllRanges()
+      wipe()
+      if (event.type === "keydown") {
+        const ids = idsForSelectAll({
+          fileIds: fileCellIdsRef.current,
+          filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
+        })
+        if (ids.length > 0) setSelection(ids, ids[0] ?? null)
+      }
+      window.requestAnimationFrame(wipe)
     }
     window.addEventListener("keydown", onKey, true)
-    return () => window.removeEventListener("keydown", onKey, true)
+    window.addEventListener("keyup", onKey, true)
+    return () => {
+      window.removeEventListener("keydown", onKey, true)
+      window.removeEventListener("keyup", onKey, true)
+    }
   }, [voiceFilterActive])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
@@ -4355,14 +4355,13 @@ function CellMenuAnchorSlot() {
  * an ordinary text file simply has no timings, and a permanently dead entry on
  * every text project is furniture rather than an explanation.
  *
- * Nothing to offer at all (the tier does not admit you, or the source is
- * mirrored from upstream): the cell renders as given, with the browser's own
- * menu. Those never change while you are in the file, so a permanently empty
- * menu would be furniture.
+ * Copy source text is always there. Someone who can change nothing else
+ * still gets that one entry, because the cell text itself cannot be highlighted.
  */
 function CellSourceMenu({
   children,
   cellId,
+  sourceText,
   /** Insert after this row. */
   onInsertBelow,
   belowDisabledReason,
@@ -4405,6 +4404,8 @@ function CellSourceMenu({
   /** The source column. It becomes the menu's trigger. */
   children: React.ReactElement
   cellId: string
+  /** This cell's source text, already unwrapped for display. */
+  sourceText: string
   onInsertBelow?: () => void
   belowDisabledReason?: string | null
   onInsertAbove?: () => void
@@ -4438,9 +4439,23 @@ function CellSourceMenu({
   // source-edit permission rather than on the add/remove tier, so it is its own
   // flag rather than another term in `structural`.
   const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
-  const offered = structural || parkable || Boolean(onSetMilestone)
+  const copyText = sourceText.trim()
+  const hasMore = structural || parkable || Boolean(onSetMilestone)
     || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
-  if (!offered) return children
+  const onCopySource = () => {
+    if (!copyText) return
+    const payload = formatSelectionCopy([{
+      number: null,
+      chapter: null,
+      chapterLabel: null,
+      text: copyText,
+    }])
+    void writeFormattedSelection(payload).then(() => {
+      toast.add({ type: "success", title: t("editor.selection.copiedSource") })
+    }, () => {
+      toast.add({ type: "error", title: t("editor.selection.copyFailed") })
+    })
+  }
 
   /**
    * Open the context menu from the button, at the button.
@@ -4525,13 +4540,18 @@ function CellSourceMenu({
     <CellMenuAnchorContext.Provider value={anchor}>
       <ContextMenu onOpenChange={(open) => setMenuOpen(open)}>
         <ContextMenuTrigger
-          // The trigger's own class is `select-none`. Source text has to stay
-          // selectable (add-to-termbase / Ask AI), so this wins the merge.
-          className="select-text"
           data-testid={`cell-menu-${cellId}`}
           render={children}
         />
         <ContextMenuContent className="min-w-[13rem]">
+          <RowInsertItem
+            testId="cell-menu-copy-source"
+            icon={<Copy className="mr-2 h-3.5 w-3.5 shrink-0" />}
+            label={t("editor.cellMenu.copySource")}
+            reason={copyText ? null : t("editor.selection.copyEmpty")}
+            onSelect={copyText ? onCopySource : undefined}
+          />
+          {hasMore && <ContextMenuSeparator />}
           {(onToggleSourceEdit || sourceEditDisabledReason) && (
             <RowInsertItem
               testId="cell-menu-edit-source"
@@ -9309,6 +9329,7 @@ function EditorRow({
             item. */}
         <CellSourceMenu
           cellId={cell.id}
+          sourceText={cellTextForDisplay(effectiveSourceText(cell))}
           sourceEditing={sourceEditing}
           onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
           // The DCS pin used to show a padlock where the pencil sat, so the
@@ -9338,14 +9359,14 @@ function EditorRow({
           ref={sourceColRef}
           className={cn(
             // The showcase node IS the text surface so it fills the whole
-            // source column. select-text: global chrome disables selection;
-            // source must stay selectable for add-to-termbase / Ask AI.
+            // source column. Text is not highlighted here; Copy source text
+            // in the right-click menu is how that text leaves the cell.
             // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
             // TRACK, but a grid item keeps `min-width: auto` and would still
             // overflow its area on an unbreakable token; min-w-0 lets it
             // shrink and break-words (inherited by the text below) breaks the
             // token instead of blowing the column out.
-            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 select-text transition-[colors,opacity] md:col-auto",
+            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 transition-[colors,opacity] md:col-auto",
             // Match the target well — same muted fill + ring (not a darker
             // primary-tinted edit chrome).
             "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",

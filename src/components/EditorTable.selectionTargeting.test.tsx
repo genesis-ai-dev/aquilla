@@ -243,6 +243,26 @@ describe("EditorTable — selection targeting (AQU-348)", () => {
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
   })
 
+  it("Command-A checks the cells when the caret is in a cell editor", () => {
+    const cells = ["1", "2", "3", "4", "5"].map(makeCell)
+    renderTable(cells)
+
+    const editor = document.createElement("div")
+    editor.contentEditable = "true"
+    screen.getByLabelText("GEN 1:1 cell").appendChild(editor)
+    editor.focus()
+    const event = new KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    editor.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(new Set(getSelectedIds())).toEqual(new Set(["1", "2", "3", "4", "5"]))
+  })
+
   it("keeps the select control out of the source column, in its own leading track", () => {
     renderTable([makeCell("1")])
 

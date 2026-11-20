@@ -2901,9 +2901,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
 
-  // Select All inside the table marks every cell in the file. The list
-  // recycles rows that leave the window and often shows one chapter, so a
-  // browser text selection cannot hold the file.
+  // Select All inside the table marks every cell in the file. A cell editor
+  // is contenteditable, and the browser would otherwise highlight that cell's
+  // text. A real text field still selects its own text.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "a" || event.altKey || event.shiftKey) return
@@ -2914,15 +2914,18 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       const inside = (node: Node | null | undefined) => Boolean(node && root.contains(node))
       const selectionAnchor = document.getSelection()?.anchorNode ?? null
       if (!inside(target instanceof Node ? target : null) && !inside(selectionAnchor)) return
-      const editable = target instanceof HTMLElement
-        && (target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable='true']")))
-      if (editable) return
+      const field = target instanceof HTMLElement
+        ? target.closest("input, textarea, select")
+        : null
+      if (field) return
       const ids = idsForSelectAll({
         fileIds: fileCellIdsRef.current,
         filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
       })
       if (ids.length === 0) return
       event.preventDefault()
+      event.stopPropagation()
+      document.getSelection()?.removeAllRanges()
       setSelection(ids, ids[0] ?? null)
     }
     window.addEventListener("keydown", onKey, true)

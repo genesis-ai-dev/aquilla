@@ -8,10 +8,16 @@
 import { describe, expect, it } from "vitest"
 import {
   listDamagedCellMetadata,
+  markProjectionRepaired,
+  repairProjectCellMetadata,
   restoreDamagedCellMetadata,
 } from "../../../db/shared/cell-metadata-repair"
+import { handleCellsReadRequest } from "../events/cells-read-route"
 import { envelopeObject } from "../events/link-envelope"
+import { makeTestToken } from "./helpers/auth"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+
+const SECRET = "cell-metadata-repair-secret"
 
 const RUSSIAN = "proj-repair-russian"
 const OROMO = "proj-repair-oromo"
@@ -207,6 +213,144 @@ describe("putting them back", () => {
       // The translation, and everything about the source but its metadata.
       expect((await t.pg.query(`SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'target'`, [RUSSIAN, JOS])).rows).toEqual(targetBefore.rows)
       expect((await t.pg.query(`SELECT value, value_html, event_id, last_editor, last_edit_at FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'source'`, [RUSSIAN, JOS])).rows).toEqual(sourceBefore.rows)
+    } finally {
+      await t.close()
+    }
+  })
+})
+
+// A browser keeps each file's cells in IndexedDB with the file's event-log
+// watermark, and on reopen asks only for what changed since. Putting a row
+// back mints no event. Production's first repair (2026-11-20) restored 51
+// cells and the export went on failing on every one of them, in a browser
+// that had the file cached: the rows were right and nothing said so.
+describe("a browser that cached the damaged cells", () => {
+  const LAST_EVENT_SEQ = 7
+
+  /** One damaged cell, and the mirror event that is the file's newest. */
+  async function seedDamagedFile(t: TestDb): Promise<void> {
+    await seedProjects(t)
+    await seedSource(t, RUSSIAN, JOS, "cell-1", damagedBy(1, 1))
+    await t.pg.query(
+      `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+       VALUES ('e-mirror-1', 1, $1, $2, 'cell-1', 'source.cell.mirror', 'link-sync', '{}', 1000, 1000, NULL, $3)`,
+      [RUSSIAN, JOS, LAST_EVENT_SEQ],
+    )
+  }
+
+  async function read(t: TestDb, query: string) {
+    const token = await makeTestToken(SECRET, { projectId: RUSSIAN, fileId: JOS })
+    const res = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${RUSSIAN}/files/${JOS}/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
+    ))!
+    expect(res.status).toBe(200)
+    return (await res.json()) as {
+      delta?: boolean
+      resync?: boolean
+      changedCellIds?: string[]
+      maxServerSeq: number
+      cells?: Array<{ cellId: string; metadata: unknown }>
+    }
+  }
+
+  async function marker(t: TestDb, projectId: string): Promise<number | null> {
+    const res = await t.pg.query<{ rebuilt_seq: number | null }>(
+      `SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = $1`,
+      [projectId],
+    )
+    return res.rows[0]?.rebuilt_seq ?? null
+  }
+
+  it("is told to read the file again, and reads the repaired cell", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedDamagedFile(t)
+      // Warm and caught up: nothing newer than what it holds.
+      expect(await read(t, `since=${LAST_EVENT_SEQ}`)).toMatchObject({ delta: true, changedCellIds: [] })
+
+      const repaired = await repairProjectCellMetadata(t.db, RUSSIAN, [JOS])
+
+      expect(repaired).toMatchObject({ restored: 1, restoredByFile: { [JOS]: 1 } })
+      expect(repaired.resyncMarker).toBeGreaterThan(LAST_EVENT_SEQ)
+      // The same cursor is now answered with a resync, not an empty delta.
+      const after = await read(t, `since=${LAST_EVENT_SEQ}`)
+      expect(after.resync).toBe(true)
+      expect(after.delta).toBeUndefined()
+      // The full read it falls back to carries the envelope, locator and all...
+      const full = await read(t, "side=source")
+      expect(full.cells).toHaveLength(1)
+      expect(full.cells![0]!.metadata).toEqual(envelope(1))
+      // ...and a cursor past the marker, so the next delta is an ordinary one.
+      expect(await read(t, `since=${full.maxServerSeq}`)).toMatchObject({ delta: true, changedCellIds: [] })
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("goes on showing them when the rows are put back and nothing says so, until --resync does", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedDamagedFile(t)
+
+      // What the first production repair did: the rows, and only the rows.
+      expect(await restoreDamagedCellMetadata(t.db, RUSSIAN, JOS)).toBe(1)
+      expect(await listDamagedCellMetadata(t.db)).toEqual([])
+      expect(await read(t, `since=${LAST_EVENT_SEQ}`)).toMatchObject({ delta: true, changedCellIds: [] })
+
+      // Nothing left to put back, so a plain apply has no reason to move the marker...
+      expect(await repairProjectCellMetadata(t.db, RUSSIAN, [JOS])).toEqual({
+        restoredByFile: { [JOS]: 0 }, restored: 0, resyncMarker: null,
+      })
+      expect(await marker(t, RUSSIAN)).toBeNull()
+      expect((await read(t, `since=${LAST_EVENT_SEQ}`)).delta).toBe(true)
+
+      // ...and --resync does it for the project named, with no file to repair.
+      const resynced = await repairProjectCellMetadata(t.db, RUSSIAN, [], { resync: true })
+      expect(resynced).toMatchObject({ restored: 0, restoredByFile: {} })
+      expect(resynced.resyncMarker).toBeGreaterThan(LAST_EVENT_SEQ)
+      expect((await read(t, `since=${LAST_EVENT_SEQ}`)).resync).toBe(true)
+      // Only that project: its neighbour's clients are not sent round again.
+      expect(await marker(t, OROMO)).toBeNull()
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("moves the marker above every cursor a client could hold, every time", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedDamagedFile(t)
+
+      const first = await markProjectionRepaired(t.db, RUSSIAN)
+      const second = await markProjectionRepaired(t.db, RUSSIAN)
+
+      expect(first).toBe(LAST_EVENT_SEQ + 1)
+      expect(second).toBe(first + 1)
+      expect(await marker(t, RUSSIAN)).toBe(second)
+      // A project with no events yet still gets a marker a cursor of 0 trips.
+      expect(await markProjectionRepaired(t.db, OROMO)).toBe(1)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("leaves the cells and the marker as they were when the repair cannot finish", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedDamagedFile(t)
+      const before = await stored(t, RUSSIAN, JOS)
+      // The marker statement fails: the counter row cannot take the next seq.
+      await t.pg.query(`ALTER TABLE project_seq_counters ADD CONSTRAINT no_marker_for_this_test CHECK (rebuilt_seq = 0)`)
+
+      await expect(repairProjectCellMetadata(t.db, RUSSIAN, [JOS])).rejects.toThrow()
+
+      // Rows and marker go together or not at all: a repair that restored the
+      // cells and then failed to announce it is the bug this exists to prevent.
+      expect(await stored(t, RUSSIAN, JOS)).toEqual(before)
+      expect(await marker(t, RUSSIAN)).toBeNull()
     } finally {
       await t.close()
     }

@@ -1,10 +1,9 @@
 import type { Locator } from "@playwright/test"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import path from "node:path"
 import { Client } from "pg"
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
+import { capturedEmailTexts } from "../../helpers/captured-email"
 import {
   addOrgMember,
   createOrg,
@@ -81,12 +80,9 @@ test("org invitation survives password recovery in a fresh browser session", asy
   // Miniflare captures outbound mail locally. Consume the actual handler's
   // email (including its reset token and returnTo), without sending real mail
   // or replacing auth responses. The unique invitation identifies this mail.
-  const mailRoot = path.resolve("auth-worker/.wrangler/tmp/email")
   let resetUrl: URL | undefined
-  await expect.poll(() => {
-    const files = existsSync(mailRoot) ? readdirSync(mailRoot, { recursive: true, encoding: "utf8" }) : []
-    for (const file of files.filter(f => f.includes("email-text/") && f.endsWith(".txt"))) {
-      const text = readFileSync(path.join(mailRoot, file), "utf8")
+  await expect.poll(async () => {
+    for (const text of await capturedEmailTexts()) {
       const link = text.match(/https?:\/\/\S+\/reset-password\?\S+/)?.[0]
       if (!link) continue
       const url = new URL(link)

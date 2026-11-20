@@ -75,6 +75,74 @@ function identifiers(value: string): string[] {
   return value.split(",").map((item) => item.trim().replace(/^"|"$/g, "").toLowerCase()).filter(Boolean)
 }
 
+/** A column definition that Postgres will report as `is_nullable = 'NO'`. */
+const NOT_NULLABLE = /\b(?:NOT\s+NULL|PRIMARY\s+KEY)\b/i
+
+/** Index of the `;` that ends the statement running through `from`, outside quotes. */
+function statementEnd(sql: string, from: number): number {
+  let quote: "'" | '"' | null = null
+  for (let index = from; index < sql.length; index++) {
+    const char = sql[index]
+    if (quote) {
+      if (char === quote && sql[index + 1] === quote) index++
+      else if (char === quote) quote = null
+      continue
+    }
+    if (char === "'" || char === '"') quote = char
+    else if (char === ";") return index
+  }
+  return sql.length
+}
+
+export interface AddedColumn {
+  table: string
+  name: string
+  /** `<name> <type and constraints>` as written — what `ADD COLUMN` takes. */
+  def: string
+}
+
+/**
+ * Columns schema.sql declares with `ALTER TABLE … ADD COLUMN` instead of in the
+ * table's CREATE TABLE block (org_billing.tier, users.email_changed_at). That
+ * is a legitimate way to write them, and they are as much part of the schema
+ * as any other column.
+ *
+ * Both readers of schema.sql take them from this one function — the drift
+ * check below and the local reconciler's parser
+ * (scripts/dev-stack-schema-parser.ts) — so neither can miss a column the
+ * other sees. Before AQU-2689 both read CREATE TABLE blocks only: `pnpm dev`
+ * never added these columns to a long-lived local database, and
+ * `pnpm neon:status` reported "schema is current" with them missing.
+ */
+export function addedColumns(schemaSql: string): AddedColumn[] {
+  const schema = stripSqlComments(schemaSql)
+  const added: AddedColumn[] = []
+  const alterPattern = /\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?("?[A-Za-z_][A-Za-z0-9_]*"?)\s+/gi
+  let alter: RegExpExecArray | null
+  while ((alter = alterPattern.exec(schema)) !== null) {
+    const table = alter[1].replaceAll('"', "").toLowerCase()
+    const end = statementEnd(schema, alterPattern.lastIndex)
+    // One ALTER TABLE may carry several comma-separated actions.
+    for (const action of splitTopLevel(schema.slice(alterPattern.lastIndex, end))) {
+      const add = action.match(
+        /^ADD\s+(COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?("?[A-Za-z_][A-Za-z0-9_]*"?)\s+([\s\S]+)$/i,
+      )
+      if (!add) continue
+      // Postgres lets COLUMN be left out, so after a bare ADD the next word
+      // decides: `ADD CONSTRAINT …`, `ADD PRIMARY KEY …` and the like are
+      // table constraints, not columns.
+      if (!add[1] && /^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)$/i.test(add[2])) continue
+      added.push({
+        table,
+        name: add[2].replaceAll('"', "").toLowerCase(),
+        def: `${add[2]} ${add[3].replace(/\s*\n\s*/g, " ").trim()}`,
+      })
+    }
+    alterPattern.lastIndex = end
+  }
+  return added
+}
+
 export function expectedSchemaContract(schemaSql: string, migrationSql: string[]): SchemaContract {
   const schema = stripSqlComments(schemaSql)
   const tables = new Map<string, Map<string, ExpectedColumn>>()
@@ -96,7 +164,7 @@ export function expectedSchemaContract(schemaSql: string, migrationSql: string[]
       const column = part.match(/^("?[A-Za-z_][A-Za-z0-9_]*"?)\s+([\s\S]+)$/)
       if (!column) continue
       const name = column[1].replaceAll('"', "").toLowerCase()
-      columns.set(name, { nullable: !/\b(?:NOT\s+NULL|PRIMARY\s+KEY)\b/i.test(column[2]) })
+      columns.set(name, { nullable: !NOT_NULLABLE.test(column[2]) })
     }
     for (const column of primaryKeyColumns) {
       const expected = columns.get(column)
@@ -104,6 +172,13 @@ export function expectedSchemaContract(schemaSql: string, migrationSql: string[]
     }
     tables.set(table, columns)
     tablePattern.lastIndex = close + 1
+  }
+
+  // A table this parse never saw a CREATE TABLE for still gets an entry, so a
+  // column added to it is checked rather than dropped on the floor.
+  for (const { table, name, def } of addedColumns(schemaSql)) {
+    if (!tables.has(table)) tables.set(table, new Map())
+    tables.get(table)!.set(name, { nullable: !NOT_NULLABLE.test(def) })
   }
 
   for (const match of schema.matchAll(/\bCONSTRAINT\s+("?[A-Za-z_][A-Za-z0-9_]*"?)/gi)) {

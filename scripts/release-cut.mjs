@@ -43,6 +43,19 @@ export function dependencyHint(pr, paths, candidates) {
 
 const conflictReason = (paths, needs) => `pick conflict in ${paths.join(", ")}${needs === undefined ? "" : `; needs #${needs}`}`
 const emptyReason = (needs) => `empty pick: already in base, or needs ${needs === undefined ? "a held PR" : `#${needs}`}`
+const RECORDED_REASON = "already in base; recorded with the next cut that picks something"
+
+// An empty pick the plan can prove production already carries: the plan
+// lists the PR's files and every candidate's, and no PR still off the
+// branch touches any of them. "Needs a held PR" is then impossible (a change
+// that only exists relative to a held PR shares a file with it), so the base
+// has the change, put there by a hand-built release that picked without -x
+// or carried the same fix as its own commit (2026.11.16.02 did both).
+export function provablyInBase(pr, candidates) {
+  if (!pr.files?.length) return false
+  if (!candidates.every((candidate) => Array.isArray(candidate.files))) return false
+  return dependencyHint(pr, pr.files, candidates) === undefined
+}
 
 // How a failed `git cherry-pick` left the repo. A pick git stopped on is
 // still in progress (CHERRY_PICK_HEAD exists): with unmerged paths it is a
@@ -74,12 +87,16 @@ function stoppedPick(run) {
 //   the change was built on ("needs #N"): approving that PR is the fix.
 // - empty: git stopped with nothing to commit. Either the base already
 //   carries the change, or the change only exists relative to a held PR
-//   (a revert of one, say) and vanishes against the base. The pick is
-//   skipped, never committed empty: an empty commit with -x provenance
-//   would mark the PR released while production lacks its change. It is
-//   reported on every cut until the held PR ships or a person records it
-//   by hand, which is the point: nobody reads it as a conflict, and nobody
-//   loses it.
+//   (a revert of one, say) and vanishes against the base.
+//   When the plan proves the first (provablyInBase), the pick is committed
+//   empty: its -x provenance is the record the planner reads, so the PR
+//   stops appearing on every cut. Four PRs sat on every cut from 2026-11-16
+//   as "empty pick" waiting for a person to record them by hand, and
+//   nothing said how. Such a PR is `recorded`, not `picked`: it adds
+//   nothing to the release, and a branch of nothing but records is not cut.
+//   Otherwise the pick is skipped, never committed empty: provenance on a
+//   change production lacks would mark the PR released. It is reported on
+//   every cut until the held PR it needs ships.
 //
 // `held` is the plan's held list, with files: the candidates for "needs",
 // together with the PRs this cut has already left unpicked.
@@ -92,6 +109,7 @@ export function buildReleaseBranch({ branch, base, prs, held = [], cwd }) {
   run(["checkout", "-q", "-B", branch, base])
   const picked = []
   const unpicked = []
+  const recorded = []
   for (const pr of prs) {
     const parents = run(["rev-list", "--parents", "-n", "1", pr.sha]).split(" ").length - 1
     const args = ["cherry-pick", "-x", ...(parents > 1 ? ["-m", "1"] : []), pr.sha]
@@ -117,6 +135,11 @@ export function buildReleaseBranch({ branch, base, prs, held = [], cwd }) {
         run(["cherry-pick", "--abort"])
         const needs = dependencyHint(pr, stopped.paths, candidates)
         unpicked.push({ ...pr, kind: "conflict", paths: stopped.paths, ...(needs === undefined ? {} : { needs }), why: conflictReason(stopped.paths, needs) })
+      } else if (provablyInBase(pr, candidates)) {
+        // Finishes the stopped pick as an empty commit; the message git
+        // prepared already ends with the -x provenance line.
+        run(["commit", "--allow-empty", "--no-edit"])
+        recorded.push({ ...pr, kind: "recorded", why: RECORDED_REASON })
       } else {
         run(["cherry-pick", "--skip"])
         const needs = dependencyHint(pr, pr.files ?? [], candidates)
@@ -124,7 +147,7 @@ export function buildReleaseBranch({ branch, base, prs, held = [], cwd }) {
       }
     }
   }
-  return { sha: run(["rev-parse", "HEAD"]), picked, unpicked }
+  return { sha: run(["rev-parse", "HEAD"]), picked, unpicked, recorded }
 }
 
 // RELEASE-CUT.md "Release notes template". titles maps PR number to title; a
@@ -138,10 +161,14 @@ export function releaseNotes(plan, titles = {}) {
     const walk = pr.walk === "none" ? "none (docs only)" : pr.walk
     lines.push(`| #${pr.number} | ${title(pr.number)} | ${walk} | ${pr.areas.length ? pr.areas.join(", ") : "—"} |`)
   }
+  const recorded = plan.recorded ?? []
+  if (recorded.length) {
+    lines.push("", `**Recorded, no change:** ${recorded.map((pr) => `#${pr.number}`).join(", ")}. Production already carried these; the empty pick is the record.`)
+  }
   const held = plan.held ?? []
   if (held.length) {
     lines.push("", `**Held, not in this release:** ${held.map((pr) => `#${pr.number} (${pr.why})`).join(", ")}.`)
-    lines.push("A held PR joins the next cut once it carries the `release:approved` label.")
+    lines.push("A held PR joins the next cut once its gate is green or it carries the `release:approved` label.")
   }
   return lines.join("\n")
 }
@@ -221,10 +248,13 @@ async function main() {
   const built = buildReleaseBranch({ branch: plan.branch, base: plan.base, prs: plan.prs, held: plan.held ?? [] })
   const held = [...(plan.held ?? []), ...built.unpicked]
   if (!built.picked.length) {
-    summary(`${cutSummary(plan, built)}\n\n${releaseNotes({ ...plan, prs: [], held }, titles)}`)
+    // Nothing to release: the records stay local and are made again by the
+    // next cut that has a pick to carry them.
+    const waiting = [...held, ...built.recorded]
+    summary(`${cutSummary(plan, { ...built, unpicked: [...built.unpicked, ...built.recorded] })}\n\n${releaseNotes({ ...plan, prs: [], held: waiting }, titles)}`)
     return
   }
-  const effective = { ...plan, sha: built.sha, prs: built.picked, held }
+  const effective = { ...plan, sha: built.sha, prs: built.picked, held, recorded: built.recorded }
   const notes = releaseNotes(effective, titles)
 
   execFileSync("git", ["push", "origin", `${built.sha}:refs/heads/${plan.branch}`], { stdio: "inherit" })

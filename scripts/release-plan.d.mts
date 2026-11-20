@@ -36,8 +36,19 @@ export interface UnreleasedPr extends FileClassification {
   files?: string[]
 }
 
-/** Off the automatic line: an ungated holding area or an unproven walk, unless a person approved it. */
-export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates">): boolean
+/** How a walk verdict is read: `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
+export type WalkPolicy = "fail-only" | "strict"
+export const WALK_POLICIES: WalkPolicy[]
+export const DEFAULT_WALK_POLICY: WalkPolicy
+
+/** The policy named by WALK_POLICY in `env`, or the default. */
+export function walkPolicy(env?: Record<string, string | undefined>): WalkPolicy
+
+/** Whether this walk verdict keeps a PR off the line under `policy`. */
+export function walkHolds(walk: string, policy?: WalkPolicy): boolean
+
+/** Off the automatic line: an ungated holding area or a walk that holds under `policy`, unless a person approved it. */
+export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates">, policy?: WalkPolicy): boolean
 
 /** Why a held PR is held, for the notes: "touches <areas>" or "walk <verdict>". */
 export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates">): string
@@ -109,8 +120,10 @@ export interface ReleasePlan {
   areas?: string[]
   /** Ready PRs, oldest first: the ones the cut picks. */
   prs: Omit<UnreleasedPr, "pathHolds" | "behindFloor">[]
-  /** PRs skipped by this cut, with why; they wait for `release:approved`. */
+  /** PRs off the line, with why, on every plan (cut or not); they wait for a gate or `release:approved`. */
   held: HeldPr[]
+  /** The walk policy the plan was made under. */
+  walkPolicy?: WalkPolicy
 }
 
 export function planRelease(input: {
@@ -122,4 +135,5 @@ export function planRelease(input: {
   usedSuffixesToday?: string[]
   /** See ReleasePlan.base. */
   base?: string
+  policy?: WalkPolicy
 }): ReleasePlan

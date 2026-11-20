@@ -11,6 +11,25 @@ const POLL_MS = 60_000
 let available = false
 const listeners = new Set<() => void>()
 let timer: ReturnType<typeof setInterval> | null = null
+// AQU-2654: the poll only feeds an indicator, so a hidden tab does not need
+// it. A tick that falls while the tab is hidden is skipped and remembered, and
+// the check runs once when the tab is shown again: no later than it would have
+// been seen anyway, since nobody was looking.
+let skippedWhileHidden = false
+
+function tick() {
+  if (typeof document !== "undefined" && document.hidden) {
+    skippedWhileHidden = true
+    return
+  }
+  void check()
+}
+
+function onVisibilityChange() {
+  if (document.hidden || !skippedWhileHidden) return
+  skippedWhileHidden = false
+  void check()
+}
 
 async function check() {
   try {
@@ -28,17 +47,32 @@ async function check() {
 
 function subscribe(listener: () => void) {
   listeners.add(listener)
-  if (!timer && !import.meta.env.DEV) timer = setInterval(() => void check(), POLL_MS)
+  if (!timer && !import.meta.env.DEV) startPolling()
   return () => {
     listeners.delete(listener)
-    if (!listeners.size && timer) {
-      clearInterval(timer)
-      timer = null
-    }
+    if (!listeners.size && timer) stopPolling()
   }
 }
 
-/** True once a build newer than this one is deployed. Polls /version.json every minute. */
+function startPolling() {
+  timer = setInterval(tick, POLL_MS)
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityChange)
+}
+
+function stopPolling() {
+  if (timer) clearInterval(timer)
+  timer = null
+  skippedWhileHidden = false
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange)
+}
+
+/** Test seam: run the poller as a production build would. */
+export function __startUpdatePollingForTests(): () => void {
+  startPolling()
+  return stopPolling
+}
+
+/** True once a build newer than this one is deployed. Polls /version.json every minute while the tab is visible. */
 export function useUpdateCheck(): boolean {
   return useSyncExternalStore(subscribe, () => available, () => false)
 }

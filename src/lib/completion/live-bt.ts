@@ -52,33 +52,47 @@ export function needsLiveBacktranslation(args: {
   return record.polished !== false
 }
 
+/** Why a cell is in the queue: a save in live mode, or someone asked for it. */
+export type BtQueueReason = "live" | "request"
+
+export interface BtQueueState {
+  /** Cells that will be read back: debouncing after a save, or waiting for a slot. */
+  waiting: string[]
+  /** Cells being read back right now. */
+  running: string[]
+}
+
 export interface LiveBtQueue {
   /** A save of `cellId` was confirmed; read it back once things settle. */
   notify(cellId: string, committedEventId?: string): void
-  /** Drop everything waiting (file switch, setting turned off, unmount). */
+  /** Someone asked for this cell's reading (the column's "Back-translate" actions): no debounce. */
+  request(cellId: string): void
+  /** Drop everything waiting (file switch, Stop, unmount). Readings in flight finish. */
   cancelAll(): void
 }
 
 export interface LiveBtQueueOptions {
   /** Read one cell back. Errors are the runner's to report. */
-  run: (cellId: string, committedEventId: string | undefined) => Promise<void>
+  run: (cellId: string, committedEventId: string | undefined, reason: BtQueueReason) => Promise<void>
   /** Quiet period after the last save of a cell before it is read back. */
   delayMs?: number
   /** How many readings may be in flight at once. */
   concurrency?: number
+  /** Called whenever what is waiting or running changes, so the column can show it. */
+  onChange?: (state: BtQueueState) => void
 }
 
 export const LIVE_BT_DELAY_MS = 1200
 export const LIVE_BT_CONCURRENCY = 2
 
 /**
- * Debounced, bounded queue of live readings.
+ * Debounced, bounded queue of back-translation readings.
  *
- * Each cell waits `delayMs` after its last save, so a burst of saves to one
- * cell is read once. At most `concurrency` readings run together, so drafting
- * a whole chapter queues its readings behind the drafts instead of firing
- * them all at once. A cell saved again while its reading is in flight is read
- * once more afterwards, with the newest commit id.
+ * A live save waits `delayMs` after the cell's last save, so a burst of saves
+ * to one cell is read once; a requested reading skips the wait. At most
+ * `concurrency` readings run together, so a whole chapter queues instead of
+ * firing at once. A cell saved or requested again while its reading is in
+ * flight is read once more afterwards, with the newest commit id.
  */
 export function createLiveBtQueue(options: LiveBtQueueOptions): LiveBtQueue {
   const delayMs = options.delayMs ?? LIVE_BT_DELAY_MS
@@ -86,10 +100,18 @@ export function createLiveBtQueue(options: LiveBtQueueOptions): LiveBtQueue {
 
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   const latestEventId = new Map<string, string | undefined>()
+  const reasons = new Map<string, BtQueueReason>()
   const waiting: string[] = []
   const running = new Set<string>()
   const again = new Set<string>()
   let generation = 0
+
+  const emit = () => {
+    options.onChange?.({
+      waiting: [...new Set([...timers.keys(), ...waiting, ...again])],
+      running: [...running],
+    })
+  }
 
   const pump = () => {
     while (running.size < concurrency && waiting.length > 0) {
@@ -102,14 +124,17 @@ export function createLiveBtQueue(options: LiveBtQueueOptions): LiveBtQueue {
     const gen = generation
     running.add(cellId)
     const eventId = latestEventId.get(cellId)
+    const reason = reasons.get(cellId) ?? "live"
     latestEventId.delete(cellId)
-    void options.run(cellId, eventId)
+    reasons.delete(cellId)
+    void options.run(cellId, eventId, reason)
       .catch(() => {})
       .finally(() => {
-        running.delete(cellId)
         if (gen !== generation) return
+        running.delete(cellId)
         if (again.delete(cellId)) enqueue(cellId)
         pump()
+        emit()
       })
   }
 
@@ -127,23 +152,38 @@ export function createLiveBtQueue(options: LiveBtQueueOptions): LiveBtQueue {
       // Only the newest save's id: an older one would pin the reading to a
       // commit it no longer describes.
       latestEventId.set(cellId, committedEventId)
+      if (!reasons.has(cellId)) reasons.set(cellId, "live")
       const prev = timers.get(cellId)
       if (prev) clearTimeout(prev)
       timers.set(cellId, setTimeout(() => {
         timers.delete(cellId)
         enqueue(cellId)
+        emit()
       }, delayMs))
+      emit()
+    },
+    request(cellId) {
+      reasons.set(cellId, "request")
+      const pending = timers.get(cellId)
+      if (pending) {
+        clearTimeout(pending)
+        timers.delete(cellId)
+      }
+      enqueue(cellId)
+      emit()
     },
     cancelAll() {
       generation++
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
       latestEventId.clear()
+      reasons.clear()
       waiting.length = 0
       again.clear()
       // In-flight readings finish; their results are still checked against
       // the live text before they are kept.
       running.clear()
+      emit()
     },
   }
 }

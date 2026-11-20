@@ -425,6 +425,15 @@ function carryOver<K extends keyof OrgSettingsResponse>(
 
 const REFETCH_ON_RETURN_MS = 10_000
 
+function sameOrgSettingsResponse(a: OrgSettingsResponse, b: OrgSettingsResponse): boolean {
+  if (a === b) return true
+  try {
+    return JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -435,7 +444,15 @@ export function useOrgSettings(
   const t = useT()
 
   const [server, setServer] = useState<OrgSettingsResponse | null>(null)
-  const [hasFetched, setHasFetched] = useState(false)
+  const [hasFetched, setHasFetchedState] = useState(false)
+  // Set only when it differs: setting what React already holds can still cost
+  // a render of the host component, and every re-read sets it.
+  const hasFetchedRef = useRef(false)
+  const setHasFetched = useCallback((next: boolean) => {
+    if (hasFetchedRef.current === next) return
+    hasFetchedRef.current = next
+    setHasFetchedState(next)
+  }, [])
 
   const serverRef = useRef<OrgSettingsResponse | null>(null)
   const writeServer = useCallback((next: OrgSettingsResponse | null) => {
@@ -449,6 +466,10 @@ export function useOrgSettings(
       for (const key of OVERRIDE_COUNT_KEYS) carryOver(filled, prev, key)
       next = filled
     }
+    // AQU-2654: the row is re-read on every return to the tab. An answer that
+    // says what this hook already holds is not a change: keep the object, so
+    // nothing that reads the org's settings renders for it.
+    if (next && prev && sameOrgSettingsResponse(prev, next)) return
     serverRef.current = next
     setServer(next)
   }, [])
@@ -464,7 +485,7 @@ export function useOrgSettings(
     if (current && current.version >= next.version) return
     writeServer(next)
     setHasFetched(true)
-  }, [writeServer])
+  }, [writeServer, setHasFetched])
 
   useEffect(() => {
     if (!orgId) return
@@ -488,7 +509,7 @@ export function useOrgSettings(
     writeServer(got)
     setHasFetched(true)
     return got
-  }, [orgId, jwt, writeServer])
+  }, [orgId, jwt, writeServer, setHasFetched])
 
   /**
    * AQU-1083: put every project back on the org's structural-cell default.
@@ -545,7 +566,7 @@ export function useOrgSettings(
     aliveRef.current = true
     void refresh().then(() => { if (!alive) return }).catch(() => {})
     return () => { alive = false }
-  }, [orgId, refresh, writeServer])
+  }, [orgId, refresh, writeServer, setHasFetched])
 
   // Re-read when the tab comes back into view. The sibling sync above only
   // reaches instances in THIS tab, so a setting changed in another tab — or

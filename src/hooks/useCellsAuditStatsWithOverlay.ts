@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useCellsAuditStats, type CellAuditStats } from "./useCellsAuditStats"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { usePendingOutboxRecords } from "./usePendingOutboxRecords"
+import { recordsEqual, usePendingOutboxRecords } from "./usePendingOutboxRecords"
 import type { OutboxRecord } from "@/lib/sync/outbox"
 import {
   applyOutboxOverlay,
@@ -15,7 +15,21 @@ interface UseCellsAuditStatsWithOverlayOptions {
   fileId: string | null
   getTokenForFile: (fileId: string) => Promise<string | null>
   lane?: string
+  /**
+   * The outbox as the caller already holds it: ALL statuses, every file
+   * (`useOutbox().inspectorRecords`). When given, this hook filters it to the
+   * file and does not read the outbox itself, so an outbox change reaches the
+   * caller in the same render as the rest of that snapshot, not one later.
+   */
+  outboxRecords?: readonly OutboxRecord[]
 }
+
+interface ScopedRecords {
+  from: readonly OutboxRecord[] | null
+  fileId: string | null
+  records: OutboxRecord[]
+}
+const NO_SCOPED: ScopedRecords = { from: null, fileId: null, records: [] }
 
 const EMPTY_SHADOWS: FlushShadowState = new Map()
 const EMPTY_IDS: ReadonlySet<string> = new Set()
@@ -55,17 +69,29 @@ export function useCellsAuditStatsWithOverlay(
   revalidate: () => void
   revalidateCellStats: (cellId: string) => void
   applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
+  applyValidationCellStats: (record: Pick<OutboxRecord, "event">) => boolean
 } {
-  const { byCellId: base, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats } = useCellsAuditStats(opts)
+  const { byCellId: base, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats, applyValidationCellStats } = useCellsAuditStats(opts)
 
   // `includeFailed` so a record that was QUARANTINED can be told apart from
   // one that FLUSHED: only the latter earns a shadow. Quarantined records are
   // split out below and never reach the overlay (AQU-274).
-  const records = usePendingOutboxRecords({
-    enabled: !!opts.fileId,
+  const shared = opts.outboxRecords
+  const ownRecords = usePendingOutboxRecords({
+    enabled: !!opts.fileId && !shared,
     fileId: opts.fileId,
     includeFailed: true,
   })
+  // The file's slice of the shared list, kept by identity while its content
+  // is unchanged (another file's event must not recompute this file's overlay).
+  const [scoped, setScoped] = useState<ScopedRecords>(NO_SCOPED)
+  let sharedRecords = scoped.records
+  if (shared && (scoped.from !== shared || scoped.fileId !== opts.fileId)) {
+    const next = opts.fileId ? shared.filter((r) => r.event.fileId === opts.fileId) : []
+    sharedRecords = recordsEqual(scoped.records, next) ? scoped.records : next
+    setScoped({ from: shared, fileId: opts.fileId, records: sharedRecords })
+  }
+  const records = shared ? sharedRecords : ownRecords
   const { pending, failedCellIds } = useMemo(() => {
     const pending = records.filter((r) => (r.status ?? "pending") !== "failed")
     const failedCellIds = new Set<string>()
@@ -112,5 +138,5 @@ export function useCellsAuditStatsWithOverlay(
   }
   const byCellId = out as Map<string, CellAuditStats>
 
-  return { byCellId, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
+  return { byCellId, complete, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats, applyValidationCellStats }
 }

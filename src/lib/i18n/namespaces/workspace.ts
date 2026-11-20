@@ -45,6 +45,8 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store's leader stopped before it opened (src/lib/offline/store.ts).
+    "workspace.offline.bootFailedToast": "Your offline projects couldn't be opened. Restart the app to try again.",
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
     "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
     "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
@@ -520,6 +522,10 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    "workspace.targetAudioLane.slotMenu": "Record or make speech for this line",
+    "workspace.targetAudioLane.slotMenuPicked": "Record or make speech for this line (picked)",
+    "workspace.targetAudioLane.slotMenuRecord": "Record",
+    "workspace.targetAudioLane.slotMenuMakeSpeech": "Make speech",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.takeValidated": "This take is validated",
@@ -639,6 +645,15 @@ export const workspace = defineNamespace({
           "stuck. Paired with a 'Restart app' action " +
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
+      },
+      "workspace.offline.bootFailedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when the " +
+          "on-device storage for offline projects failed to open (for example, " +
+          "the files were still in use). Paired with a 'Restart app' action " +
+          "(workspace.offline.leaderStalledRestart); a restart usually fixes it. " +
+          "Two short sentences with periods. Plain language — no 'worker', " +
+          "'store' or 'sync' jargon.",
       },
       "workspace.offline.preparingToast": {
         description:
@@ -2252,6 +2267,33 @@ export const workspace = defineNamespace({
           "Tooltip/accessible name for the small record-button affordance on " +
           "the target-audio timeline lane — both the corner mic button on an " +
           "existing chip and the button that fills an empty (undubbed) slot.",
+      },
+      "workspace.targetAudioLane.slotMenu": {
+        description:
+          "Tooltip and accessible name of the one small button shown on an empty " +
+          "line of the target-audio timeline track when the line is too narrow for " +
+          "the record button and the make-speech button side by side. Clicking it " +
+          "opens a two-item menu: record this line, or make its speech with a voice.",
+      },
+      "workspace.targetAudioLane.slotMenuPicked": {
+        description:
+          "The same button's tooltip and accessible name while its line is picked " +
+          "for the Make speech panel (it then shows a coloured sparkle). The words in " +
+          "brackets tell a screen-reader user the line is picked; keep the first part " +
+          "the same as the button's usual name.",
+      },
+      "workspace.targetAudioLane.slotMenuRecord": {
+        description:
+          "Menu item in that small menu on a narrow empty timeline line: opens the " +
+          "recorder for this line. A verb (record audio), not a noun.",
+        maxLength: 20,
+      },
+      "workspace.targetAudioLane.slotMenuMakeSpeech": {
+        description:
+          "Menu item in that small menu on a narrow empty timeline line: picks this " +
+          "line for the Make speech panel, which generates the line's spoken audio " +
+          "from its text with a synthetic voice. Same wording as the panel's title.",
+        maxLength: 24,
       },
       "workspace.targetAudioLane.runsPastSectionTooltip": {
         description:

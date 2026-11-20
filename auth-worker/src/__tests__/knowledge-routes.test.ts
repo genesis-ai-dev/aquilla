@@ -8,6 +8,7 @@ import { zipSync, strToU8 } from "fflate"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
+import { MAX_KB_ORIGINAL_BYTES, MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -163,6 +164,7 @@ describe("knowledge routes — project upload floor", () => {
     expect(res.status).toBe(201)
     const out = (await res.json()) as { doc: { id: string; indexStatus: string; r2Key: string } }
     expect(out.doc.indexStatus).toBe("pending")
+    expect(out).not.toHaveProperty("textTruncated")
 
     const row = await env.AQUILLA_PG.prepare("SELECT id, r2_key FROM knowledge_docs WHERE id = ?")
       .bind(out.doc.id)
@@ -170,6 +172,20 @@ describe("knowledge routes — project upload floor", () => {
     expect(row).not.toBeNull()
     expect(row!.r2_key).toBe(out.doc.r2Key)
     expect(bucket.store.has(out.doc.r2Key)).toBe(true)
+  })
+
+  it("says so when only the first part of a document's text was kept (AQU-2594)", async () => {
+    await seedUser(1, "owner")
+    await seedUser(2, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 2, ROLE.PROJECT_LEAD)
+    const jwt = await jwtFor("lead")
+    stubIndexingFetch()
+
+    const long = new TextEncoder().encode("a".repeat(MAX_KB_TEXT_CHARS + 1))
+    const res = await uploadDoc(PROJECT, jwt, long, "long.md", new FakeBucket(), { OPENROUTER_API_KEY: "k" })
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as { textTruncated?: boolean }).textTruncated).toBe(true)
   })
 
   it("ignores a spoofed Content-Type header; stored/served type derives from the extension", async () => {
@@ -441,6 +457,31 @@ describe("knowledge routes — validation", () => {
     stubIndexingFetch()
     const res = await uploadDoc(PROJECT, jwt, undefined, "a.md", new FakeBucket())
     expect(res.status).toBe(400)
+  })
+
+  it("a body over the 25 MB cap with no Content-Length → 400, read no further than the cap", async () => {
+    // AQU-2594: the upload read the whole body before checking its size, so a
+    // chunked body could hold up to the platform's request limit (100 MB+) in
+    // an isolate of 128 MB.
+    const jwt = await setup()
+    stubIndexingFetch()
+    const chunk = new Uint8Array(1024 * 1024)
+    const chunks = 60
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === chunks) return controller.close()
+        pulled++
+        controller.enqueue(chunk.slice())
+      },
+    })
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge`,
+      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.pdf" }, body, duplex: "half" } as RequestInit,
+      testEnvWith(new FakeBucket()),
+    )
+    expect(res.status).toBe(400)
+    expect(pulled * chunk.length).toBeLessThan(MAX_KB_ORIGINAL_BYTES + 4 * chunk.length)
   })
 
   it(".docx body over 2 MB → 400", async () => {

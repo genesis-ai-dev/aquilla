@@ -15,6 +15,7 @@ import {
   userRateLimitIdentifier,
 } from "../../../db/shared/rate-limit"
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { withoutPoolGuard } from "../../../db/shared/test-pool-guard"
 
 const USER = userRateLimitIdentifier(42)
 
@@ -62,14 +63,19 @@ describe("enforceRateLimit", () => {
   // count and all passed: 50 parallel requests against a limit of 10 let 50
   // through. One atomic upsert hands each caller a distinct ordinal.
   it("lets at most `limit` through when 50 calls run in parallel", async () => {
-    const decisions = await Promise.all(
-      Array.from({ length: 50 }, () =>
-        enforceRateLimit(env.AQUILLA_PG, {
-          kind: "test_burst",
-          identifier: USER,
-          limit: 10,
-          failMode: "closed",
-        }),
+    // AQU-2613: fifty SEPARATE requests, each of which has its own pool in
+    // production. The pool guard counts one request's statements, and here
+    // they all run on the one harness handle — so it is off for this burst.
+    const decisions = await withoutPoolGuard(() =>
+      Promise.all(
+        Array.from({ length: 50 }, () =>
+          enforceRateLimit(env.AQUILLA_PG, {
+            kind: "test_burst",
+            identifier: USER,
+            limit: 10,
+            failMode: "closed",
+          }),
+        ),
       ),
     )
     expect(decisions.filter((d) => d.allowed)).toHaveLength(10)

@@ -26,6 +26,7 @@ import {
   requeueTransientlyFailedOutboxEvents,
   stampOutboxError,
   subscribeToOutbox,
+  holdOutboxNotifications,
   setActiveOutboxOwner,
   claimLegacyOutboxEvents,
   outboxRecordCountAllOwners,
@@ -1296,4 +1297,71 @@ describe("Tauri offline routing", () => {
     expect((await peekPendingOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["cm1", "tc-held"])
   })
 
+})
+
+describe("cqrs outbox — notification hold (AQU-2654)", () => {
+  const sample: CqrsRawEvent<"target.cell.commit"> = {
+    id: "e1",
+    schemaVersion: CQRS_SCHEMA_VERSION,
+    kind: "target.cell.commit",
+    projectId: "p",
+    fileId: "f",
+    cellId: "c",
+    author: "a",
+    payload: { value: "x", valueHtml: "<p>x</p>" },
+    clientTs: 1,
+  }
+
+  beforeEach(async () => {
+    localStorage.clear()
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve, reject) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onblocked = () => resolve()
+      d.onsuccess = () => resolve()
+      d.onerror = () => reject(d.error)
+    })
+  })
+
+  // AQU-2654. WHY: an edit that validates itself queues two events a few
+  // milliseconds apart, and every subscriber re-read the outbox and re-rendered
+  // for the state in between.
+  it("holdOutboxNotifications: events queued while held are announced once, on release", async () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeToOutbox(listener)
+    try {
+      const release = holdOutboxNotifications()
+      await enqueueOutboxEvent(sample)
+      await enqueueOutboxEvent({ ...sample, id: "e2" })
+      // Held: nobody was told — but both are durably queued already.
+      expect(listener).not.toHaveBeenCalled()
+      expect((await peekPendingOutboxBatch(10)).map((r) => r.id)).toEqual(["e1", "e2"])
+      release()
+      expect(listener).toHaveBeenCalledTimes(1)
+      // Idempotent, and nothing is announced when nothing changed while held.
+      release()
+      holdOutboxNotifications()()
+      expect(listener).toHaveBeenCalledTimes(1)
+      await enqueueOutboxEvent({ ...sample, id: "e3" })
+      expect(listener).toHaveBeenCalledTimes(2)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it("holdOutboxNotifications: a hold nobody releases gives way on its own", () => {
+    vi.useFakeTimers()
+    const listener = vi.fn()
+    const unsubscribe = subscribeToOutbox(listener)
+    try {
+      holdOutboxNotifications()
+      setActiveOutboxOwner("someone-else") // notifies synchronously
+      expect(listener).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(2_000)
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+      unsubscribe()
+    }
+  })
 })

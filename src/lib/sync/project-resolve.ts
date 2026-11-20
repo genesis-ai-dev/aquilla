@@ -14,6 +14,17 @@
 import { jwtSubject } from "@/lib/frontier/session-refresh"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { resolveCloudProjectResult, type ResolveProjectResult } from "./cloud-projects"
+import { createSameTurnCoalescer } from "@/lib/request-coalescer"
+
+// AQU-2654: a project page mounts `useProject` more than once (the workspace
+// and the tools mount under it), and each resolved the same project on mount:
+// GET /api/v2/projects/:id twice per open, and up to four times. Mount reads
+// (`shareWithSiblings`) of instances that mount in the same commit share the
+// request. Every other read gets its own: `useProject` re-resolves to refresh
+// and to recover (reconnect, a changed record, a manual retry), and such a
+// read must never wait on, or be answered by, an older request that may be
+// hanging.
+const projectMountReads = createSameTurnCoalescer<ResolveProjectResult>()
 import type { ProjectSettingsResponse } from "./project-settings"
 
 export type ProjectReadResult = ResolveProjectResult & {
@@ -27,8 +38,14 @@ export type ProjectReadResult = ResolveProjectResult & {
   offlineCopyPending?: boolean
 }
 
-export async function resolveProjectForRead(projectId: string, jwt: string): Promise<ProjectReadResult> {
-  const result = await resolveCloudProjectResult(projectId, jwt)
+export async function resolveProjectForRead(
+  projectId: string,
+  jwt: string,
+  options?: { shareWithSiblings?: boolean },
+): Promise<ProjectReadResult> {
+  const result = options?.shareWithSiblings
+    ? await projectMountReads.run(`${jwt}\n${projectId}`, () => resolveCloudProjectResult(projectId, jwt))
+    : await resolveCloudProjectResult(projectId, jwt)
   const owner = jwtSubject(jwt)
   if (!isTauriRuntime() || !owner) return result
 

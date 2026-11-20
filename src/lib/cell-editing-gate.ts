@@ -15,15 +15,18 @@
 // keeps the setting readable — a project admin is never asked about timings.
 //
 // SINCE 2026-09-09 THIS MODULE IS THE TIER'S ENFORCEMENT, not a preview of the
-// server's. The sync perimeter stopped checking `cellEditingFloor` because
-// doing so silently refused audio-cue re-import, DCS upstream import and
-// diarization — three flows that emit the same event kinds through the user's
-// own outbox. The tier stops accidents, not attackers, so it lives where the
-// buttons are drawn. The one rule the server still applies is the removal
-// clause below, which protects the client's file rather than the UI.
+// server's. The sync perimeter stopped checking `cellEditingFloor` for inserts
+// because doing so silently refused audio-cue re-import, DCS upstream import
+// and diarization — three flows that emit the same event kinds through the
+// user's own outbox. The tier stops accidents, not attackers, so it lives where
+// the buttons are drawn.
+//
+// REMOVING AN IMPORTED LINE FOLLOWS THE TIER TOO (AQU-2632). It used to need
+// Maintainer whatever the tier said, which made "Project lead" in the setting
+// a promise that was false for every line of an imported Scripture file. The
+// server's one remaining removal rule now reads the same tier
+// (sync-worker/src/events/cell-removal-authority.ts) — keep the two in step.
 
-import { ROLE } from "@/lib/frontier/roles"
-import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy } from "@/lib/parsers/types"
 
 export interface CellEditingSubject {
@@ -49,40 +52,6 @@ export function canEditCells(s: CellEditingSubject): boolean {
   if (s.sourceIsMirrored) return false
   if (!s.staticFloorPasses) return false
   return (s.roleLevel ?? 0) >= s.floor
-}
-
-/**
- * ...and the second gate, on removal only. An IMPORTED cell is the client's own
- * work, so taking one back needs MAINTAINER whatever tier is configured; below
- * that rank a person only ever removes a line somebody added by hand here.
- *
- * This one DOES mirror a live server clause — the only cell-structure rule
- * authorize.ts still enforces per event. Keep the two in step.
- */
-export function canRemoveImportedCells(s: CellEditingSubject): boolean {
-  return canEditCells(s) && (s.roleLevel ?? 0) >= ROLE.MAINTAINER
-}
-
-/**
- * ...and the OTHER half of that clause: which rows count as imported.
- *
- * One signal, the `aquillaOrigin` marker the create event writes — the same
- * question the server's `isUserInsertedCell` asks, so the two can never
- * disagree about whose content a row is.
- *
- * AQU-1068 review: the two surfaces each carried their own version of this and
- * both added "...and it is still EMPTY", which turned a line you added into
- * imported content the moment you typed or recorded into it. Matthew hit it by
- * recording audio on a new cell and finding he could no longer remove it,
- * while the server would have accepted that delete. The emptiness test answers
- * a different question — whether the removal needs a confirmation dialog — and
- * still does, in `buildCellRemovalInventory`.
- *
- * It lives here so there is exactly one definition for the table and the
- * timeline to share.
- */
-export function isImportedRow(cell: { metadata?: Record<string, unknown> | null }): boolean {
-  return !isUserAddedLine(cell)
 }
 
 export interface CellEditingFile {
@@ -151,8 +120,6 @@ export type RowActionReason =
   | "idml"
   /** A timed file with no silence wide enough on that side. */
   | "noRoom"
-  /** An imported line, and this person is not a maintainer. */
-  | "maintainerOnly"
 
 export interface RowActionInput {
   placement: CellPlacement
@@ -164,10 +131,6 @@ export interface RowActionInput {
    *  Ignored when placement is "anywhere", where there is always room. */
   gapAbove: boolean
   gapBelow: boolean
-  /** False for a line somebody added here and left empty — the take-back case. */
-  isImported: boolean
-  /** Whether this viewer may remove an imported line (maintainer and up). */
-  canRemoveImported: boolean
 }
 
 export interface RowActionAvailability {
@@ -196,8 +159,8 @@ export function rowActionAvailability(input: RowActionInput): RowActionAvailabil
   // room between two rows.
   const above = input.placement === "gaps" && !input.gapAbove ? "noRoom" : null
   const below = input.placement === "gaps" && !input.gapBelow ? "noRoom" : null
-  // Taking back a line somebody added here is always allowed at this point;
-  // removing one the client imported is maintainer work, whatever the tier.
-  const remove = input.isImported && !input.canRemoveImported ? "maintainerOnly" : null
-  return { above, below, remove }
+  // Who may remove is the tier's question and was answered before the control
+  // was drawn (AQU-2632: imported lines follow it too), so by here a row can
+  // be removed unless it is audio or a packaged layout, handled above.
+  return { above, below, remove: null }
 }

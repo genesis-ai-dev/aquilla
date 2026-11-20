@@ -5,7 +5,7 @@
 import { ROLE } from "@/lib/frontier/roles"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier, MilestoneFloor } from "@/lib/sync/project-settings"
 
 /**
  * AQU-1068: the cell-editing tiers, in the order they are offered.
@@ -66,6 +66,20 @@ export function cellEditingTierLabel(
  */
 export const CELL_LABEL_FLOOR_OPTIONS: readonly {
   value: CellLabelTier
+  level: number
+  labelKey: MessageKey
+}[] = [
+  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
+  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
+]
+
+/**
+ * AQU-2309: who may set, rename, resize and remove a milestone. The same two
+ * rungs as the cell-label control, spelled with the same role names, the
+ * default (maintainer) first.
+ */
+export const MILESTONE_FLOOR_OPTIONS: readonly {
+  value: MilestoneFloor
   level: number
   labelKey: MessageKey
 }[] = [

@@ -8,6 +8,7 @@ import { requiredRoleFor, ROLE, roleLabel } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
+import { effectiveCellEditingFloorLevel } from './cell-removal-authority'
 import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
@@ -285,6 +286,20 @@ export function isAuthorizedEvent<K extends EventKind = EventKind>(
 }
 
 const targetLanesByCache = new WeakMap<RequestCache, Map<string, Promise<LaneIdentity[]>>>()
+
+/**
+ * AQU-2632: does the project's effective cell-editing tier admit this role to
+ * remove an imported cell? False for "No one", unset, or an unreadable setting.
+ */
+async function tierAdmitsRemoval(
+  db: AquillaDb,
+  projectId: string,
+  role: number,
+  cache: RequestCache | undefined,
+): Promise<boolean> {
+  const floor = await effectiveCellEditingFloorLevel(db, projectId, cache)
+  return floor != null && role >= floor
+}
 
 /**
  * The project's target lanes, memoized on the request cache. A flush batch
@@ -800,11 +815,12 @@ export async function authorize<K extends EventKind>(
     return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
   }
 
-  // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule
-  // about cell structure that this perimeter still enforces.
+  // AQU-1068: removing an IMPORTED cell needs MAINTAINER, unless the project's
+  // own cell-editing tier admits the caller (AQU-2632, below). This is the one
+  // rule about cell structure that this perimeter still enforces.
   //
-  // THE PROJECT'S `cellEditingFloor` TIER IS DELIBERATELY NOT CHECKED HERE, and
-  // its absence is a decision rather than an oversight (Sam, 2026-09-09). The
+  // THE TIER DOES NOT GATE INSERTS OR USER-ADDED DELETES HERE, and its absence
+  // is a decision rather than an oversight (Sam, 2026-09-09). The
   // tier is a PRODUCT rule, enforced where the buttons are drawn — the row's
   // menu, the timeline's add and remove, the gap inserts, and the agent's
   // proposal staging in auth-worker all read it from the same shared module. It
@@ -821,9 +837,13 @@ export async function authorize<K extends EventKind>(
   //
   // What actually protects the client's work is the rule below. An IMPORTED
   // cell is content from their own file, so taking one back needs MAINTAINER
-  // whatever the tier says; below that rank a person only ever removes a line
-  // somebody added by hand here. `isUserInsertedCell` fails closed, so a cell
-  // row that cannot be read keeps the requirement rather than waiving it.
+  // unless the project has deliberately opened removal to a lower rank through
+  // its "who can add and remove cells" setting (AQU-2632: Biblica ETT set it to
+  // Project lead and their leads were still refused, because this clause
+  // ignored the setting). Below the tier a person only ever removes a line
+  // somebody added by hand here. `isUserInsertedCell` fails closed, and so does
+  // the tier read, so a row or setting that cannot be read keeps the
+  // maintainer requirement rather than waiving it.
   //
   // Contrast the timing lock (timing-authority.ts) and `allowTrackEditing`
   // just below, which stay server-enforced and should. Those answer "may this
@@ -863,11 +883,15 @@ export async function authorize<K extends EventKind>(
         createEventId: undoOf,
         author: tokenUsername,
       }))
-    if (!userInserted && !ownRecordingLine) {
+    const admittedByTier =
+      !userInserted &&
+      !ownRecordingLine &&
+      (await tierAdmitsRemoval(db, raw.projectId, tokenClaims.role, settings))
+    if (!userInserted && !ownRecordingLine && !admittedByTier) {
       return {
         ok: false,
         status: 403,
-        reason: 'removing an imported cell requires maintainer',
+        reason: 'removing an imported cell requires maintainer, or a project setting that allows your role to remove cells',
       }
     }
   }

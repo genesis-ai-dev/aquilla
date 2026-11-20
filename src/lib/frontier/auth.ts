@@ -333,6 +333,46 @@ export async function verifyEmail(token: string): Promise<void> {
 }
 
 /**
+ * Ask the server to mail the signed-in account a fresh verification link
+ * (AQU-2636). The address is never passed: the server sends only to the one
+ * already stored on the account.
+ *
+ * Server contract: POST /api/v2/auth/me/resend-verification (Bearer)
+ *   200 → { sent: true, email } · 409 → already_verified
+ *   429 → rate_limited · 503 → email_delivery_unavailable
+ *
+ * Resolves with the address the link went to, so the confirmation names it
+ * from the server's answer rather than from stale client state. Rejects with
+ * the server's error code as the message, which the caller maps to a string.
+ */
+export async function resendVerificationEmail(jwt: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE}/api/v2/auth/me/resend-verification`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch {
+    throw new FrontierAuthError("unavailable", 0);
+  }
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  const body = (data ?? {}) as { sent?: boolean; email?: string; error?: string };
+  if (!res.ok || !body.sent) {
+    throw new FrontierAuthError(
+      typeof body.error === "string" ? body.error : "unavailable",
+      res.status,
+    );
+  }
+  return typeof body.email === "string" ? body.email : "";
+}
+
+/**
  * Perform the actual password reset.
  * Server contract: POST /api/v2/auth/password-reset/reset { token, username, new_password }
  *   200 → { message: "Password reset successful" }
@@ -343,13 +383,16 @@ export async function resetPassword(
   token: string,
   username: string,
   newPassword: string,
+  factorCode?: string,
+  recovery?: boolean,
 ): Promise<void> {
   const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, username, new_password: newPassword }),
+    body: JSON.stringify({ token, username, new_password: newPassword, factor_code: factorCode, recovery }),
   });
   if (!res.ok) {
+    if(res.status===403) throw new FrontierAuthError(t("auth.security.resetVerification"),403);
     // AQU-820: the server's { error: "Invalid token" | "Token expired" } (400)
     // vs "Failed to reset password" (500) is dropped in favour of our own
     // translated messages — a 400 here means the token lapsed between the

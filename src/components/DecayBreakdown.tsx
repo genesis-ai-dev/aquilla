@@ -3,13 +3,18 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+const HAS_LETTER = /\p{L}/u
+
 interface DecayBreakdownProps {
   /** Scope health 0-100 (1 - mean(decay)). */
   health: number
   /** The card's title, e.g. "Project health". */
   scopeLabel: string
   /** Read current per-cell health only while the breakdown is open. */
-  getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
+  getHealthByCell: () => Array<{ cellId: string; health: number }>
+  /** AQU-2278: what to call the lines shown, in the order given. Asked only
+   *  for the few drags on screen, never for the whole file. */
+  nameCells: (cellIds: readonly string[]) => string[]
   /** Decay warn threshold (0-1). Cells above it "need attention". */
   warnThreshold?: number
   /** Number of cells whose pinned source has advanced (AD-9). Optional row. */
@@ -30,6 +35,7 @@ export function DecayBreakdown({
   health,
   scopeLabel,
   getHealthByCell,
+  nameCells,
   warnThreshold = DECAY_DEFAULTS.decayWarnThreshold,
   staleSourceCount,
   onJumpToCell,
@@ -46,14 +52,16 @@ export function DecayBreakdown({
     const healthByCell = getHealthByCell()
     const total = healthByCell.length
     const attention = healthByCell.filter((c) => c.health < attentionHealthCutoff)
-    const drags = [...attention]
+    const shown = [...attention]
       .sort((a, b) => a.health - b.health)
       .slice(0, 8)
+    const names = shown.length > 0 ? nameCells(shown.map((c) => c.cellId)) : []
+    const drags = shown.map((c, i) => ({ ...c, label: names[i] ?? "" }))
     return {
       needsAttentionPct: total > 0 ? Math.round((attention.length / total) * 100) : 0,
       drags,
     }
-  }, [open, getHealthByCell, attentionHealthCutoff])
+  }, [open, getHealthByCell, nameCells, attentionHealthCutoff])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -99,7 +107,10 @@ export function DecayBreakdown({
                     onClick={() => onJumpToCell?.(c.cellId)}
                     disabled={!onJumpToCell}
                   >
-                    <span className="truncate">{c.label}</span>
+                    {/* A name takes its own direction (a Hebrew label in an
+                        English UI); one with no letters, a cue's timing, reads
+                        left to right as the editor's timing line does. */}
+                    <span className="truncate" dir={HAS_LETTER.test(c.label) ? "auto" : "ltr"}>{c.label}</span>
                     <span className="flex-shrink-0 tabular-nums text-muted-foreground">{c.health}%</span>
                   </button>
                 </li>

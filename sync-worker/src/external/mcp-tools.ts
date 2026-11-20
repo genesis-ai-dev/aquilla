@@ -526,7 +526,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'audio { data: <base64>, format: "wav" } (16 kHz mono PCM16; long audio is cut into windows ' +
       'for you). model: "auto" (default — Whisper for its 99 languages, Qwen3-ASR for Chinese ' +
       'varieties, Omnilingual CTC for 1,600+ others), or force "whisper" | "qwen3-asr" | "omni-ctc" | ' +
-      '"omni-zs". "omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
+      '"omni-zs" | "omni-fast". "omni-fast" is the fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot; "auto" never picks it. ' +
+      '"omni-zs" (Omnilingual zero-shot) learns the language from up to 10 of this lane\'s ' +
       'own recorded + transcribed cells (picked automatically by source-text overlap, or name them ' +
       'in exampleCellIds) — use it for a language no model has seen. It cold-starts: call ' +
       'transcription_status { model: "omni-zs", warm: true } first and poll until state is "ready"; ' +
@@ -536,7 +537,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
-      'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
+      'only go to omni-ctc / omni-zs / omni-fast, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -551,7 +552,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           required: ['data', 'format'],
           additionalProperties: false,
         },
-        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs'], description: 'Default "auto".' },
+        model: { type: 'string', enum: ['auto', 'whisper', 'qwen3-asr', 'omni-ctc', 'omni-zs', 'omni-fast'], description: 'Default "auto". "omni-fast": fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.' },
         language: { type: 'string', description: 'BCP-47 tag, e.g. "luo" or "tpi-Latn". Defaults to the lane\'s language.' },
         exampleCellIds: {
           type: 'array', items: { type: 'string' },
@@ -576,7 +577,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       type: 'object',
       properties: {
         ...projectIdProp,
-        model: { type: 'string', enum: ['omni-zs', 'omni-ctc'], description: 'Default "omni-zs".' },
+        model: { type: 'string', enum: ['omni-zs', 'omni-ctc', 'omni-fast'], description: 'Default "omni-zs". "omni-fast" starts in seconds and needs no warm-up.' },
         warm: { type: 'boolean', description: 'Start the model if it is cold. Default false.' },
       },
       required: ['projectId'],
@@ -964,6 +965,52 @@ const TOOL_SPECS: McpToolSpec[] = [
       type: 'object',
       properties: { ...projectIdProp },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_org_members',
+    description:
+      'Read the ORGANIZATION membership roster (AQU-2662) — who holds an org role, at what ' +
+      'level, and who sits in the org\'s owner seat. One entry per person: userId, username, ' +
+      'role (the canonical level: 100 viewer \u00b7 200 commenter \u00b7 300 reviewer \u00b7 ' +
+      '400 contributor \u00b7 500 project_lead \u00b7 600 maintainer \u00b7 700 owner), ' +
+      'roleName, roleSource, direct and orgOwner. Highest role first. Requires org OWNER ' +
+      '(700) \u2014 the same floor as changing org membership; below it you get ' +
+      'permission_denied, not an empty list, and a project-scoped credential gets ' +
+      'scope_denied (org governance is out of its reach entirely).\n\n' +
+      'READ THIS BEFORE STAGING AN ORG MEMBERSHIP CHANGE. Three fields decide what is ' +
+      'legal:\n' +
+      '1. `direct` \u2014 true when the person holds an `org_members` row. SetOrgRole and ' +
+      'RemoveOrgMember act on that row and are refused without one; AddOrgMember is refused ' +
+      'when there is one.\n' +
+      '2. `role` \u2014 the level the gate judges: you can never grant above your own, and ' +
+      'never target yourself.\n' +
+      '3. `orgOwner` \u2014 true for the holder of the organization\'s owner seat. That seat ' +
+      'cannot be demoted or removed through this API at all, nor can the last remaining ' +
+      'owner. roleSource is `member` (an org_members row) or `owner` (the seat held without ' +
+      'one).\n\n' +
+      'THIS IS THE READ THAT MAKES "confine an org maintainer to N projects" plannable: an ' +
+      'org-level role reaches EVERY project in the org, so somebody who shows up here at ' +
+      'maintainer is on all of them. The fix is RemoveOrgMember once, then InviteMember on ' +
+      'each of the N projects they should keep \u2014 and list_members on a project will show ' +
+      'them as roleSource `org`, direct: false until you do.\n\n' +
+      'The response is { data, total, truncated, nextCursor: null }. This read does not page: ' +
+      'at most 500 rows come back, highest role first, and `truncated: true` with a larger ' +
+      '`total` means the org has more members than that \u2014 the rows you get are the top of ' +
+      'the ladder. No email addresses are returned; the membership commands name people by ' +
+      'username, exactly as this tool reports them. Errors: permission_denied (403), ' +
+      'scope_denied (403), validation_failed (400), not_found (404), rate_limited (429). ' +
+      'This tool performs no membership writes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgId: {
+          type: 'string',
+          description: 'The organization id, as list_orgs reports it.',
+        },
+      },
+      required: ['orgId'],
       additionalProperties: false,
     },
   },
@@ -1753,6 +1800,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   read_term_consistency: 'read',
   list_terms: 'read',
   list_members: 'read',
+  list_org_members: 'read',
   prepare_translations: 'stage',
   upload_artifact: 'upload',
   preview_import: 'read',

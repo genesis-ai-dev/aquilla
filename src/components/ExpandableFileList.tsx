@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import type { ChangeSignal } from "@/hooks/useStableCallback"
 import { fileDisplayName } from "@/lib/file-display-name"
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core"
 import { Search as SearchIcon, X, ChevronDown, Pencil, RotateCcw } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
-import { FileRow } from "./FileRow"
+import { FileRowSlot } from "./FileRowSlot"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import {
   hasPlacedFiles,
@@ -172,14 +173,21 @@ interface Props {
    */
   deferSectionProgress?: boolean
   /**
-   * AQU-253 (a fix): whether org policy allows export. When false, the
-   * per-file export menu items are hidden so dashboard affordances match
-   * the workspace. Defaults to true (no gate) for callers that haven't
-   * wired up org settings.
+   * AQU-2476: why Download original is refused. When set, a file that has
+   * an original keeps the row and shows this reason behind its (i); nothing
+   * is downloaded. Omit it when the caller may download — the row then
+   * works as before. A file with no original never shows the row.
    */
-  canExportByOrgPolicy?: boolean
+  downloadOriginalDisabledReason?: string
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
+  /**
+   * AQU-2654: bumps when the active file's chapter health may have changed.
+   * With it the caller can hand `getActiveChapterHealth` over as one stable
+   * function, and a store emit re-renders the expanded file's chapter grid
+   * instead of this whole list. Absent ⇒ the getter's identity is the signal.
+   */
+  activeChapterHealthSignal?: ChangeSignal
   /**
    * AQU-2118: the target lane every per-file `/progress` read here names —
    * the lane the editor's switcher shows, so an expanded file's chapters and
@@ -231,8 +239,8 @@ export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
   assignedFileIds,
-  onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  hasActiveChapters, getActiveChapterHealth,
+  onApplySuggestion, onRenameCorpus, downloadOriginalDisabledReason,
+  hasActiveChapters, getActiveChapterHealth, activeChapterHealthSignal,
   deferSectionProgress,
   lane = "",
   filterFocus,
@@ -634,7 +642,7 @@ export function ExpandableFileList({
                             onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                             onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                           >
-                          <FileRow
+                          <FileRowSlot
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}
@@ -660,12 +668,17 @@ export function ExpandableFileList({
                             onUploadRecordings={onUploadRecordings ? () => onUploadRecordings(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
-                              canExportByOrgPolicy && originalSourceIds.has(file.id)
+                              !downloadOriginalDisabledReason && originalSourceIds.has(file.id)
                                 ? () => { void downloadImportedOriginal({
                                     projectId,
                                     file,
                                     getToken: getTokenForFile,
                                   }) }
+                                : undefined
+                            }
+                            downloadOriginalDisabledReason={
+                              downloadOriginalDisabledReason && originalSourceIds.has(file.id)
+                                ? downloadOriginalDisabledReason
                                 : undefined
                             }
                             onApplySuggestion={
@@ -687,6 +700,7 @@ export function ExpandableFileList({
                               delivers={delivers}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
+                              chaptersSignal={file.id === activeFileId ? activeChapterHealthSignal : undefined}
                               deferFetch={deferSectionProgress}
                               lane={lane}
                               onSectionClick={(label) => {

@@ -41,6 +41,7 @@ const SETTINGS = {
   validationNamedUsers: ['ana'],
   allowSelfValidation: true,
   harmonize_min_role: 'maintainer',
+  milestoneFloor: 'maintainer',
   // Not projected: the keys that make the blob multi-MB in the first place.
   rules: Array.from({ length: 50 }, (_, i) => ({ id: `r${i}`, text: 'x'.repeat(200) })),
 }
@@ -148,6 +149,7 @@ describe('writePathSettingsFromRow', () => {
       validationNamedUsers: ['ana'],
       allowSelfValidation: true,
       harmonize_min_role: 'maintainer',
+      milestoneFloor: 'maintainer',
     })
   })
 })
@@ -191,6 +193,7 @@ describe('a database without migration 0171', () => {
       validationNamedUsers: ['ana'],
       allowSelfValidation: true,
       harmonize_min_role: 'maintainer',
+      milestoneFloor: 'maintainer',
     })
   })
 

@@ -33,6 +33,61 @@ const INVITE_COUNT_PLACEHOLDER =
 
 export const auth = defineNamespace({
   keys: {
+    "auth.security.protectionEnabled": "Authenticator protection is on. Changes to your login methods require a verification code.",
+    "auth.security.manageProtection": "Manage protection",
+    "auth.security.saveRecoveryCodes": "Save your recovery codes",
+    "auth.methods.previewDisabled": "Google login is disabled in CI previews. Use your Aquilla password here.",
+    "auth.security.linkFromSettings": "Log in with your Aquilla password, then connect Google in Login methods after verifying with your authenticator.",
+    "auth.security.turnOffWarning": "Turning off protection removes the extra verification for your login settings. Enter a new code to confirm.",
+    "auth.security.wrongPassword": "That password is incorrect. Try your current Aquilla password.",
+    "auth.security.resetVerification": "Enter a valid authenticator or recovery code to reset this password. If you have tried several times, wait five minutes.",
+    "auth.security.verify": "Verify",
+    "auth.security.notNow": "Not now",
+    "auth.security.enableProtection": "Set up an authenticator app",
+    "auth.security.authenticatorCode": "Authenticator code",
+    "auth.security.unableToLoadSecuritySettingsTryAgain": "Unable to load security settings. Try again.",
+    "auth.security.tooManyAttemptsWaitFiveMinutesAndTry": "Too many attempts. Wait five minutes and try again.",
+    "auth.security.verificationFailedOrExpiredCheckYourPasswordOr": "Verification failed or expired. Check your password or code and try again.",
+    "auth.security.protectYourLoginSettings": "Protect your login settings",
+    "auth.security.useAnAuthenticatorAppToApproveChangesTo": "Use an authenticator app to approve changes to your email and login methods. This extra check is not required for everyday login.",
+    "auth.security.reloadSecuritySettings": "Reload security settings",
+    "auth.security.verifyWithYourAuthenticatorAppToManageYour": "Verify with your authenticator app to manage your login methods.",
+    "auth.security.recoveryCode": "Recovery code",
+    "auth.security.useAnAuthenticatorCode": "Use an authenticator code",
+    "auth.security.useARecoveryCode": "Use a recovery code",
+    "auth.security.confirmAuthenticator": "Confirm authenticator",
+    "auth.security.turnOffProtection": "Turn off protection",
+    "auth.security.replaceRecoveryCodes": "Replace recovery codes",
+    "auth.security.currentAquillaPassword": "Current Aquilla password",
+    "auth.security.setUpWithYourPassword": "Set up with your password",
+    "auth.security.verifyWithGoogleInstead": "Verify with Google instead",
+    "auth.security.continueAfterGoogleVerification": "Continue after Google verification",
+    "auth.security.authenticatorSetupIsUnavailableInThisEnvironment": "Authenticator setup is unavailable in this environment.",
+    "auth.security.scanThisQRCodeInYourAuthenticatorApp": "Scan this QR code in your authenticator app, or copy the setup key. Then enter its six-digit code.",
+    "auth.security.authenticatorSetupQRCode": "Authenticator setup QR code",
+    "auth.security.copySetupKey": "Copy setup key",
+    "auth.security.saveTheseRecoveryCodesSomewhereSeparateFromYour": "Save these recovery codes somewhere separate from your authenticator. Each unlocks your login settings once; they cannot log you in. Replacing codes makes the previous codes unusable.",
+    "auth.security.copyRecoveryCodes": "Copy recovery codes",
+    "auth.security.iSavedMyRecoveryCodes": "I saved my recovery codes",
+    "auth.security.done": "Done",
+    "auth.security.verifyYourLoginSettingsAgainBeforeContinuing": "Verify your login settings again before continuing.",
+    "auth.security.verifyYourCurrentPasswordOrGoogleAccountThen": "Verify your current password or Google account, then try again.",
+    "auth.security.manageYourPassword": "Manage your password",
+    "auth.security.addABackupPassword": "Add a backup password",
+    "auth.security.setAnAquillaPasswordSoYouCanStill": "Set an Aquilla password so you can still log in if you lose access to Google. Google will stay connected.",
+    "auth.security.currentPassword": "Current password",
+    "auth.security.verifyWithGoogle": "Verify with Google",
+    "auth.security.newAquillaPassword": "New Aquilla password",
+    "auth.security.changePassword": "Change password",
+    "auth.security.setAPassword": "Set a password",
+    "auth.security.removingYourPasswordMeansYoullNeedGoogleTo": "Removing your password means you’ll need Google to log in. Other sessions will be signed out. Email password resets will no longer restore password access.",
+    "auth.security.iWantToRemoveMyAquillaPassword": "I want to remove my Aquilla password",
+    "auth.security.removePassword": "Remove password",
+    "auth.security.googleVerificationFailedReturnToLoginMethodsAnd": "Google verification failed. Return to login methods and try again.",
+    "auth.security.verifyingYourGoogleAccount": "Verifying your Google account…",
+    "auth.security.backToLoginMethods": "Back to login methods",
+    "auth.security.verifyWithYourAuthenticatorAppOrARecovery": "Verify with your authenticator app or a recovery code.",
+
     "auth.emailChange.accountChanged": "Your account changed during verification. Start again.",
     "auth.emailChange.admin_verification_required": "Verify your admin session under Admin → Platform → My admin security, then try again.",
     "auth.emailChange.administrator_coordination_required": "This account uses a configured administrator address. Contact the Aquilla team before changing it.",
@@ -78,7 +133,7 @@ export const auth = defineNamespace({
     "auth.methods.disconnect": "Disconnect Google",
     "auth.resetPassword.networkRetry": "We could not reach Aquilla. Check your connection and try again.",
     "auth.methods.disconnectNote": "Enter your Aquilla password to disconnect Google. You will use your Aquilla password to log in afterwards. Existing Aquilla sessions stay signed in. This does not remove permissions in your Google account.",
-    "auth.methods.lastMethod": "Google is your only login method. Set an Aquilla password through the email reset link before disconnecting Google.",
+    "auth.methods.lastMethod": "Google is your only login method. Set an Aquilla password before disconnecting Google.",
     "auth.methods.resetPassword": "Reset Aquilla password",
     "auth.methods.setPassword": "Set an Aquilla password",
     "auth.methods.refresh": "Refresh login methods",
@@ -94,6 +149,12 @@ export const auth = defineNamespace({
     "auth.google.privacy": "Google is contacted only when you continue. Analytics sharing is a separate choice.",
     "auth.google.startFailed": "We couldn’t open Google login. Try again. If this keeps happening, contact the Aquilla team.",
     "auth.google.desktopUnsupported": "Google login isn’t available in the desktop app yet. Use Aquilla in your web browser to log in with Google.",
+    "auth.google.privateSession": "Use a private Google sign-in session",
+    "auth.google.desktopWaitingTitle": "Signing in with Google",
+    "auth.google.desktopClosed": "The Google sign-in window was closed.",
+    "auth.google.desktopExpired": "This Google sign-in request has expired.",
+    "auth.google.desktopWaitingHint": "Finish signing in with Google to continue in Aquilla.",
+    "auth.google.cancelAndSwitch": "Cancel and use another method",
     "auth.google.desktopWaiting": "Finish signing in with Google in your browser, then return to Aquilla. You can cancel and try again if the request expires.",
     "auth.google.browserOpenFailed": "We couldn’t open your browser. Try Google login again.",
     "auth.google.startOrigin": "Google login isn’t available from this app or address. Open Aquilla in your web browser and try again.",
@@ -106,6 +167,8 @@ export const auth = defineNamespace({
     "auth.google.chooseUsername": "Create an Aquilla Account",
     "auth.google.linkTitle": "Connect Google to your account",
     "auth.google.usernameNote": "Choose your permanent Aquilla username. Your Google account will be used to log in.",
+    "auth.google.legacyNote": "Enter your Codex password to bring your existing username and project access to Aquilla and connect Google.",
+    "auth.google.codexPassword": "Codex password",
     "auth.google.linkNote": "An Aquilla account already uses this email. Enter your existing Aquilla password to connect Google.",
     "auth.google.passwordLabel": "Aquilla password",
     "auth.google.linkSubmit": "Connect Google and log in",
@@ -246,6 +309,15 @@ export const auth = defineNamespace({
       "Sign out and sign in with the invited address, or ask the project owner to add " +
       "your account \u201C{username}\u201D directly.",
     "auth.join.wrongEmailSignOut": "Sign out and use the invited address",
+    "auth.join.emailUnverified": "Verify your email address to accept this invite.",
+    "auth.join.emailUnverifiedInvited":
+      "This invite was sent to {email}, and this account hasn\u2019t confirmed that " +
+      "address yet.",
+    "auth.join.emailUnverifiedBody":
+      "This invite was sent to an email address this account hasn\u2019t confirmed yet.",
+    "auth.join.emailUnverifiedNext":
+      "Send yourself a verification link, open it, then come back to this invite and " +
+      "accept.",
     "auth.join.noLongerValidFresh":
       "This invite link is no longer valid. Ask the project owner for a fresh link.",
     "auth.join.loadingDetails": "Loading invitation details…",
@@ -285,6 +357,19 @@ export const auth = defineNamespace({
     "auth.verifyEmail.confirmedBody": "Thanks — your email address is confirmed.",
     "auth.verifyEmail.goToApp": "Go to Aquilla",
     "auth.verifyEmail.couldntVerify": "Couldn't verify",
+    "auth.verifyEmail.statusVerified": "Email verified",
+    "auth.verifyEmail.statusUnverified": "Email not verified",
+    "auth.verifyEmail.unverifiedWhy":
+      "Verify this address so teammates can add you to a project by email.",
+    "auth.verifyEmail.sendLink": "Send verification link",
+    "auth.verifyEmail.sending": "Sending…",
+    "auth.verifyEmail.linkSent": "Verification link sent to {email}. Open it to confirm this address.",
+    "auth.verifyEmail.already_verified": "This address is already verified.",
+    "auth.verifyEmail.rate_limited":
+      "Too many verification emails were sent. Try again later.",
+    "auth.verifyEmail.email_delivery_unavailable":
+      "We could not send the verification email. Try again later.",
+    "auth.verifyEmail.sendFailed": "We could not send the verification email. Try again.",
     "auth.verifyEmail.stillUsable":
       "You can still use Aquilla — verification isn't required to sign in.",
 
@@ -309,6 +394,62 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.security.protectionEnabled": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.security.manageProtection": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.security.saveRecoveryCodes": { description: "Login settings security status, dialog title, or environment availability explanation." },
+      "auth.methods.previewDisabled": { description: "Login settings security status, dialog title, or environment availability explanation." },
+
+      "auth.security.linkFromSettings": { description: "Google linking for an existing account with extra settings verification enabled." },
+      "auth.security.turnOffWarning": { description: "Warning before removing the optional authenticator protection from account settings." },
+      "auth.security.wrongPassword": { description: "Incorrect current password during an authenticated login-method change." },
+      "auth.security.resetVerification": { description: "Password recovery requires the enabled account security factor." },
+      "auth.security.verify": { description: "Confirm the authenticator or recovery code." },
+      "auth.security.notNow": { description: "Dismiss the optional backup-password offer." },
+      "auth.security.enableProtection": { description: "Start optional authenticator protection for login settings." },
+      "auth.security.authenticatorCode": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.unableToLoadSecuritySettingsTryAgain": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.tooManyAttemptsWaitFiveMinutesAndTry": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verificationFailedOrExpiredCheckYourPasswordOr": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.protectYourLoginSettings": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.useAnAuthenticatorAppToApproveChangesTo": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.reloadSecuritySettings": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyWithYourAuthenticatorAppToManageYour": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.recoveryCode": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.useAnAuthenticatorCode": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.useARecoveryCode": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.confirmAuthenticator": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.turnOffProtection": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.replaceRecoveryCodes": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.currentAquillaPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.setUpWithYourPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyWithGoogleInstead": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.continueAfterGoogleVerification": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.authenticatorSetupIsUnavailableInThisEnvironment": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.scanThisQRCodeInYourAuthenticatorApp": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.authenticatorSetupQRCode": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.copySetupKey": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.saveTheseRecoveryCodesSomewhereSeparateFromYour": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.copyRecoveryCodes": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.iSavedMyRecoveryCodes": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.done": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyYourLoginSettingsAgainBeforeContinuing": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyYourCurrentPasswordOrGoogleAccountThen": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.manageYourPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.addABackupPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.setAnAquillaPasswordSoYouCanStill": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.currentPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyWithGoogle": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.newAquillaPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.changePassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.setAPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.removingYourPasswordMeansYoullNeedGoogleTo": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.iWantToRemoveMyAquillaPassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.removePassword": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.googleVerificationFailedReturnToLoginMethodsAnd": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyingYourGoogleAccount": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.backToLoginMethods": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+      "auth.security.verifyWithYourAuthenticatorAppOrARecovery": { description: "Account login-method security settings and recovery. Aquilla and Google are product names." },
+
       "auth.emailChange.accountChanged": { description: "Email change proof was invalidated by a concurrent account update." },
       "auth.emailChange.admin_verification_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
       "auth.emailChange.administrator_coordination_required": { description: "Verified account email change in login-method settings. Aquilla and Google are product names." },
@@ -369,6 +510,12 @@ export const auth = defineNamespace({
       "auth.google.privacy": { description: "Google OAuth privacy text. First-party login UI; no automatic provider contact." },
       "auth.google.startFailed": { description: "Google OAuth startFailed text. First-party login UI; no automatic provider contact." },
       "auth.google.desktopUnsupported": { description: "Desktop cannot complete the web OAuth callback; web login does not sign the desktop app in." },
+      "auth.google.privateSession": { description: "Optional private browser session for Google login on compatible desktop builds." },
+      "auth.google.desktopWaitingTitle": { description: "Status while desktop Google authentication is pending." },
+      "auth.google.desktopClosed": { description: "The user dismissed the desktop Google sign-in window." },
+      "auth.google.desktopExpired": { description: "The desktop Google login attempt expired." },
+      "auth.google.desktopWaitingHint": { description: "Instructions while waiting for Google authentication." },
+      "auth.google.cancelAndSwitch": { description: "Cancel the pending Google login and show other login methods." },
       "auth.google.desktopWaiting": { description: "Desktop waiting for system-browser Google sign-in; cancellation invalidates the local attempt." },
       "auth.google.browserOpenFailed": { description: "Native system browser failed to open for Google login." },
       "auth.google.startOrigin": { description: "OAuth start request rejected because the app origin is not allowed. Do not blame storage or network." },
@@ -381,6 +528,8 @@ export const auth = defineNamespace({
       "auth.google.chooseUsername": { description: "Google OAuth chooseUsername text. First-party login UI; no automatic provider contact." },
       "auth.google.linkTitle": { description: "Google OAuth linkTitle text. First-party login UI; no automatic provider contact." },
       "auth.google.usernameNote": { description: "Google OAuth usernameNote text. First-party login UI; no automatic provider contact." },
+      "auth.google.legacyNote": { description: "Explains the legacy Codex migration before linking Google." },
+      "auth.google.codexPassword": { description: "Password for an existing Codex account." },
       "auth.google.linkNote": { description: "Google OAuth linkNote text. First-party login UI; no automatic provider contact." },
       "auth.google.passwordLabel": { description: "Password of the existing Aquilla account, requested to link Google login. Aquilla is the product name; do not translate it." },
       "auth.google.linkSubmit": { description: "Google OAuth linkSubmit text. First-party login UI; no automatic provider contact." },
@@ -914,6 +1063,35 @@ export const auth = defineNamespace({
           "Button on the email-mismatch rejection that signs the person out " +
           "so they can sign back in with the address the invite was sent to.",
       },
+      "auth.join.emailUnverified": {
+        description:
+          "Heading on the join page when accepting was refused because the signed-in " +
+          "account has never confirmed the email address the invite was sent to. The " +
+          "account is the right one \u2014 this is not the wrong-address rejection " +
+          "(auth.join.wrongEmail).",
+      },
+      "auth.join.emailUnverifiedInvited": {
+        description:
+          "Detail under auth.join.emailUnverified. {email} is the signed-in account's " +
+          "own address, masked (\u201Cn\u2026a@proton.me\u201D) and rendered inline " +
+          "\u2014 never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The signed-in account's own email address, masked. It is also the address " +
+            "the invite was sent to, which is why the invite matched this account at all.",
+        },
+      },
+      "auth.join.emailUnverifiedBody": {
+        description:
+          "Stands in for auth.join.emailUnverifiedInvited when the session carries no " +
+          "email address to name.",
+      },
+      "auth.join.emailUnverifiedNext": {
+        description:
+          "One line under auth.join.emailUnverified saying what to do: use the send " +
+          "button below it, open the emailed link, then return here and accept. Makes " +
+          "clear that verifying alone does not join the project.",
+      },
       "auth.join.noLongerValidFresh": {
         description:
           "Error shown when accepting an invite fails for a definitive server reason " +
@@ -1070,6 +1248,59 @@ export const auth = defineNamespace({
       },
       "auth.verifyEmail.couldntVerify": {
         description: "Error heading shown when the verification link could not be processed.",
+      },
+      "auth.verifyEmail.statusVerified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has been confirmed. Read-only — there is no action next to it.",
+      },
+      "auth.verifyEmail.statusUnverified": {
+        description:
+          "Status line beside the account email in account settings, when the address " +
+          "has not been confirmed yet.",
+      },
+      "auth.verifyEmail.unverifiedWhy": {
+        description:
+          "One line under auth.verifyEmail.statusUnverified saying why confirming the " +
+          "address matters: an unconfirmed address cannot be found by a project owner " +
+          "adding members by email.",
+      },
+      "auth.verifyEmail.sendLink": {
+        description:
+          "Button in account settings that emails a fresh verification link to the " +
+          "account's own address.",
+      },
+      "auth.verifyEmail.sending": {
+        description: "Label on auth.verifyEmail.sendLink while the request is in flight.",
+      },
+      "auth.verifyEmail.linkSent": {
+        description:
+          "Confirmation after the link was emailed. {email} is the account's own email " +
+          "address, rendered inline — never translate, transliterate or reformat it.",
+        placeholders: {
+          email:
+            "The account's own email address, the only address the link is ever sent to.",
+        },
+      },
+      "auth.verifyEmail.already_verified": {
+        description:
+          "Shown instead of a confirmation when the address turned out to be verified " +
+          "already (for example it was confirmed in another tab).",
+      },
+      "auth.verifyEmail.rate_limited": {
+        description:
+          "Shown when the send button has been used too many times in a short period, " +
+          "so no further email was sent.",
+      },
+      "auth.verifyEmail.email_delivery_unavailable": {
+        description:
+          "Shown when Aquilla could not hand the verification email to its mail " +
+          "provider, so nothing was sent.",
+      },
+      "auth.verifyEmail.sendFailed": {
+        description:
+          "Generic failure for the send-verification-link button when no more specific " +
+          "reason is known (e.g. the network dropped).",
       },
       "auth.verifyEmail.stillUsable": {
         description:

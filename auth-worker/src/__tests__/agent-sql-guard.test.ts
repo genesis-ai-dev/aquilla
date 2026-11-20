@@ -736,3 +736,42 @@ describe("guardSql — pen-test 2026-11-18 double-quoted identifier desync", () 
     if (r.ok) expect(r.sql).toContain(`'%"hi"%'`)
   })
 })
+
+// Pen test 2026-11-19. `FROM (a CROSS JOIN b)` is a parenthesised join, not a
+// derived table. The scanner skipped the whole paren as a sub-select, so `a`
+// followed no FROM or JOIN and was never read: not allow-listed, not scoped.
+// Each rejected statement here returned ok:true before the fix, with the
+// first table left raw in the emitted SQL.
+describe("guardSql — pen-test 2026-11-19 parenthesised join hides its first table", () => {
+  it("rejects a non-readable table opening a parenthesised join", () => {
+    for (const table of ["project_invites", "org_settings", "platform_admins", "personal_access_tokens"]) {
+      const r = guard(`SELECT i.* FROM (${table} i CROSS JOIN files f) WHERE f.project_id = :project`)
+      expect(r.ok, table).toBe(false)
+    }
+  })
+
+  it("rejects a readable table there too, since it would go unscoped", () => {
+    const r = guard("SELECT c.value FROM (cells c CROSS JOIN files f) WHERE f.project_id = :project")
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/parenthesised joins/)
+  })
+
+  it("rejects it after JOIN, behind LATERAL and behind extra parentheses", () => {
+    expect(guard("SELECT 1 FROM files f JOIN (project_invites i CROSS JOIN files g) ON true WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM files f, LATERAL (project_invites i CROSS JOIN files g) WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM ((project_invites i CROSS JOIN files f)) WHERE f.project_id = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM ( project_invites ) WHERE :project = :project").ok).toBe(false)
+  })
+
+  it("rejects the TABLE shorthand, which names a relation with no FROM", () => {
+    expect(guard("SELECT * FROM (TABLE project_invites) t WHERE :project = :project").ok).toBe(false)
+    expect(guard("WITH t AS (TABLE project_invites) SELECT * FROM t WHERE :project = :project").ok).toBe(false)
+    expect(guard("SELECT 1 FROM files WHERE project_id = :project AND EXISTS (TABLE project_invites)").ok).toBe(false)
+  })
+
+  it("still accepts derived tables, nested ones and VALUES lists", () => {
+    expect(guard("SELECT t.cell_id FROM (SELECT cell_id FROM cells WHERE project_id = :project) t").ok).toBe(true)
+    expect(guard("SELECT t.cell_id FROM ((SELECT cell_id FROM cells WHERE project_id = :project)) t").ok).toBe(true)
+    expect(guard("SELECT v.n FROM (VALUES (1), (2)) AS v(n), files f WHERE f.project_id = :project").ok).toBe(true)
+  })
+})

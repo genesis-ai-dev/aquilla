@@ -41,6 +41,47 @@ function writeFailed(outcome: unknown): boolean {
 
 const EMPTY_RULES: TranslationRule[] = []
 
+/** Flat fields compared by value; an array field element by element. */
+function sameFields(a: object | undefined, b: object | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  for (const key of keys) {
+    const x = left[key]
+    const y = right[key]
+    if (x === y) continue
+    if (!Array.isArray(x) || !Array.isArray(y) || x.length !== y.length) return false
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false
+  }
+  return true
+}
+
+/**
+ * Whether two compilations of the terminology produced the same rules.
+ * `createdAt` is left out: `compileConceptsToRules` stamps the time of the
+ * compilation on every rule, and nothing reads it off a derived term rule.
+ * Exported for the test.
+ */
+export function sameTerminologyRules(a: readonly TranslationRule[], b: readonly TranslationRule[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x === y) continue
+    if (
+      x.id !== y.id || x.name !== y.name || x.description !== y.description ||
+      x.severity !== y.severity || x.source !== y.source || x.scope !== y.scope ||
+      x.lane !== y.lane || x.enabled !== y.enabled ||
+      !sameFields(x.check, y.check) || !sameFields(x.term, y.term)
+    ) return false
+  }
+  return true
+}
+
 /** Rule-setting writes this close together go to the server as one PATCH. */
 const WRITE_BATCH_MS = 250
 
@@ -269,14 +310,26 @@ export function useRules(
     }
   }, [lane, subscribedConcepts, terminology, project?.lanes])
 
+  // AQU-2654: the inputs below get a new identity whenever the project or its
+  // settings are read again (a new `termMatching` object, new lane rows, and
+  // from those a fresh copy of every concept), with the same content. Handing
+  // back the array already compiled keeps `rules` — and everything memoized
+  // on it: the health pass's rule signature, the rule map every row is given —
+  // from restarting for a re-read that changed nothing.
+  const compiledTermsRef = useRef<TranslationRule[] | null>(null)
   const terminologyRules = useMemo(
-    () =>
-      compileConceptsToRules(
+    () => {
+      const compiled = compileConceptsToRules(
         laneConcepts
           ? [...laneConcepts.subscribed, ...(laneConcepts.local ?? [])]
           : [...(subscribedConcepts ?? []), ...(terminology ?? [])],
         project?.termMatching,
-      ),
+      )
+      const previous = compiledTermsRef.current
+      if (previous && sameTerminologyRules(previous, compiled)) return previous
+      compiledTermsRef.current = compiled
+      return compiled
+    },
     [laneConcepts, subscribedConcepts, terminology, project?.termMatching],
   )
 

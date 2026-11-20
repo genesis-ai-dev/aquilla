@@ -120,15 +120,60 @@ export interface UseCommentsApi {
   refusals: CommentRefusal[]
 }
 
+/** Same rows, field for field (CommentRecord is flat)? */
+function sameComments(a: CommentRecord[], b: CommentRecord[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i] as unknown as Record<string, unknown>
+    const right = b[i] as unknown as Record<string, unknown>
+    if (left === right) continue
+    const keys = Object.keys(left)
+    if (keys.length !== Object.keys(right).length) return false
+    for (const key of keys) if (!Object.is(left[key], right[key])) return false
+  }
+  return true
+}
+
+function sameCounts(a: CommentCounts | null, b: CommentCounts | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const analytics = useAccountAnalytics()
   const { projectId, getToken, author, scope, tokenReady, priorityFileId } = opts
 
   const [comments, setComments] = useState<CommentRecord[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [isLoadingRest, setIsLoadingRest] = useState(false)
-  const [isError, setIsError] = useState(false)
+  const [isLoading, setIsLoadingState] = useState(false)
+  const [isLoadingRest, setIsLoadingRestState] = useState(false)
+  const [isError, setIsErrorState] = useState(false)
   const [counts, setCounts] = useState<CommentCounts | null>(null)
+  // The three flags are set only when they differ from what was last asked
+  // for: setting what React already holds can still cost a render of the host
+  // (the workspace), and a refresh sets each of them at least twice.
+  const flagsRef = useRef({ isLoading: false, isLoadingRest: false, isError: false })
+  const setIsLoading = useCallback((next: boolean) => {
+    if (flagsRef.current.isLoading === next) return
+    flagsRef.current.isLoading = next
+    setIsLoadingState(next)
+  }, [])
+  const setIsLoadingRest = useCallback((next: boolean) => {
+    if (flagsRef.current.isLoadingRest === next) return
+    flagsRef.current.isLoadingRest = next
+    setIsLoadingRestState(next)
+  }, [])
+  const setIsError = useCallback((next: boolean) => {
+    if (flagsRef.current.isError === next) return
+    flagsRef.current.isError = next
+    setIsErrorState(next)
+  }, [])
+  // AQU-2654: which (project, scope) has a complete answer on screen. A
+  // refresh behind one is a revalidation (the focus wave, a comment frame):
+  // the list stays as it is until the new answer is whole, and is replaced
+  // only if that answer differs.
+  const loadedKeyRef = useRef<string | null>(null)
 
   // Keep latest props in refs so callbacks don't close over stale values.
   const projectRef = useRef(projectId)
@@ -193,7 +238,11 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     // comparison reserved for a future multi-concurrent-fetch scenario.)
     void mutationSeqRef.current // snapshot for future guard use
 
-    setIsLoading(true)
+    const sc = scopeRef.current
+    const narrow = Boolean(sc?.fileId || sc?.cellId)
+    const loadKey = `${pid}\u0000${sc?.fileId ?? ''}\u0000${sc?.cellId ?? ''}`
+    const revalidating = loadedKeyRef.current === loadKey
+    if (!revalidating) setIsLoading(true)
     setIsError(false)
     try {
       // Use any file as the token scope — project-level reads only verify projectId.
@@ -202,14 +251,17 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         setIsLoading(false)
         return
       }
-      const sc = scopeRef.current
-      const narrow = Boolean(sc?.fileId || sc?.cellId)
+      const publishWhole = (rows: CommentRecord[]) => {
+        const next = mergeWithOptimistic(sortByCreation(rows))
+        setComments((prev) => (sameComments(prev, next) ? prev : next))
+        loadedKeyRef.current = loadKey
+      }
 
       // Badge counts ride alongside; a failure here must not blank the list.
       const countsPromise = narrow
         ? null
         : fetchCommentCounts(pid, token).then(
-            (c) => { if (isCurrent()) setCounts(c) },
+            (c) => { if (isCurrent()) setCounts((prev) => (sameCounts(prev, c) ? prev : c)) },
             (err: unknown) => { console.warn('[useComments] counts fetch failed:', err) },
           )
 
@@ -219,7 +271,19 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
           cellId: sc?.cellId,
         })
         if (!isCurrent()) return
-        setComments(mergeWithOptimistic(sortByCreation(rows)))
+        publishWhole(rows)
+        return
+      }
+
+      if (revalidating) {
+        // One read, not two: the open file's threads are already on screen, so
+        // there is nothing for a priority read to paint early. Pages are not
+        // published as they arrive either. A partial list would replace the
+        // whole one and take threads away until the last page landed.
+        const rows = await fetchCommentsForProject(pid, token, {})
+        if (!isCurrent()) return
+        publishWhole(rows)
+        await countsPromise
         return
       }
 
@@ -241,6 +305,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       const rest = await fetchCommentsForProject(pid, token, {}, publish)
       if (!isCurrent()) return
       publish(rest)
+      loadedKeyRef.current = loadKey
       await countsPromise
     } catch (err) {
       if (!isCurrent()) return
@@ -252,7 +317,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         setIsLoadingRest(false)
       }
     }
-  }, [])
+  }, [setIsLoading, setIsLoadingRest, setIsError])
 
   // Load on mount, when projectId changes, and — crucially — once the auth
   // token becomes available (AQU-640). On a cold load / direct navigation the
@@ -270,7 +335,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       return
     }
     refresh().catch(() => {/* refresh sets isError */})
-  }, [projectId, tokenReady, refresh])
+  }, [projectId, tokenReady, refresh, setIsLoading])
 
   // AQU-817: refetch when the tab regains focus — the drift mitigation every
   // other read hook already has (useCells, useCellValidators, useCellHistory,

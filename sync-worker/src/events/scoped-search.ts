@@ -1,6 +1,6 @@
 // Scoped search helpers — Step 5 of the v3 search permission model.
 //
-// This module is the SINGLE choke-point for all FTS5 cell-search queries.
+// This module is the SINGLE choke-point for all full-text cell-search queries.
 // Every search surface MUST route through `queryScopedSearch`,
 // `queryScopedPattern`, or `queryScopedExact` — each accepts a
 // `VerifiedProjectId` rather than a raw
@@ -63,7 +63,7 @@ export interface SearchResultOut {
   fileId: string
   side: "source" | "target"
   value: string
-  /** FTS5 snippet with `<mark>...</mark>` highlights around matched terms. */
+  /** ts_headline snippet with `<mark>...</mark>` highlights around matched terms. */
   snippet: string
   rank: number
   /**
@@ -191,21 +191,25 @@ interface ExactRowRaw extends SearchRowRaw {
 // ---------------------------------------------------------------------------
 
 /**
- * Sanitize a free-text query for FTS5 MATCH. FTS5's parser blows up on
- * unbalanced parens, bare colons, double quotes mid-token, and the reserved
- * keywords AND/OR/NOT/NEAR. We strip those out and wrap the survivors in
- * double quotes to force phrase matching, which is the closest UX to
- * "what the translator typed".
+ * Reduce a free-text query to the tokens a search can actually match on.
+ * Drops query-syntax punctuation and the reserved keywords AND/OR/NOT/NEAR,
+ * then quotes each survivor so the result reads as a token sequence rather
+ * than an operator expression.
  *
- * Returns null when the resulting query is empty (e.g. the user typed only
- * punctuation). Callers should treat null as "no results".
+ * Returns null when nothing survives (e.g. the user typed only punctuation).
+ * Callers should treat null as "no results".
+ *
+ * On Postgres the RETURN VALUE is a gate, not a query: `queryScopedSearch`
+ * uses it only to decide whether to run at all, and binds the raw text to
+ * `plainto_tsquery`, which does its own parsing. The quoted form is still
+ * asserted by the test suite, so it is part of this function's contract.
  */
 export function sanitizeFtsQuery(raw: string): string | null {
-  // Drop FTS5 syntax punctuation: quotes, parens, colons, asterisks, pluses,
+  // Drop query-syntax punctuation: quotes, parens, colons, asterisks, pluses,
   // minuses. Keep letters, digits, whitespace, and dashes-internal-to-words
   // (we collapse runs of non-word into a single space below).
   const cleaned = raw.replace(/["()*:+-]/g, " ")
-  // Split into bare tokens; reject the FTS reserved keywords case-insensitively
+  // Split into bare tokens; reject the reserved keywords case-insensitively
   // by lowercasing the comparison.
   const RESERVED = new Set(["and", "or", "not", "near"])
   const tokens = cleaned
@@ -213,17 +217,18 @@ export function sanitizeFtsQuery(raw: string): string | null {
     .filter((t) => t.length > 0)
     .filter((t) => !RESERVED.has(t.toLowerCase()))
   if (tokens.length === 0) return null
-  // Wrap each token in double quotes — FTS5 treats `"foo"` as a single-token
+  // Wrap each token in double quotes — `"foo"` reads as a single-token
   // phrase, sidestepping any remaining parse ambiguity.
   return tokens.map((t) => `"${t}"`).join(" ")
 }
 
 /**
- * Sanitize a phrase for FTS5 adjacent-phrase (ordered) matching. Like
+ * Sanitize a phrase for adjacent-phrase (ordered) matching. Like
  * `sanitizeFtsQuery` in cleanup, but wraps the whole token sequence in a
- * single pair of double quotes so FTS5 treats them as a contiguous phrase —
- * `"token1 token2 token3"` matches cells where those tokens appear in that
- * exact order with no gaps.
+ * single pair of double quotes so it reads as one contiguous phrase —
+ * `"token1 token2 token3"` means those tokens in that exact order with no
+ * gaps. As above, `queryScopedExact` uses the result only as a gate and binds
+ * the raw text to `phraseto_tsquery`.
  *
  * Differs from `sanitizeFtsQuery` (which emits `"t1" "t2"` — all tokens
  * present, any order) — this is the right choice when the caller wants
@@ -240,7 +245,7 @@ export function sanitizeFtsExactPhrase(raw: string): string | null {
     .filter((t) => t.length > 0)
     .filter((t) => !RESERVED.has(t.toLowerCase()))
   if (tokens.length === 0) return null
-  // Single quoted phrase — FTS5 matches the exact token sequence in order.
+  // Single quoted phrase — the exact token sequence, in order.
   return '"' + tokens.join(" ") + '"'
 }
 
@@ -297,11 +302,11 @@ function pairedSubselect(laneIds: SearchLaneWall): { sql: string; binds: unknown
 }
 
 /**
- * Run an FTS5 ranked search over `cells_fts` for the given project. The
- * project scope (`AND cells.project_id = ?`) is hardcoded — the caller
- * cannot bypass it.
+ * Run a ranked full-text search over `cells.value_tsv` for the given
+ * project. The project scope (`AND cells.project_id = ?`) is hardcoded — the
+ * caller cannot bypass it.
  *
- * Throws on FTS5 syntax errors so the route layer can decide 400 vs 500.
+ * Throws on tsquery syntax errors so the route layer can decide 400 vs 500.
  * Returns [] when the sanitizer reduces `q` to nothing.
  */
 export async function queryScopedSearch(
@@ -317,16 +322,12 @@ export async function queryScopedSearch(
   const paired = pairedSubselect(opts.laneIds)
   const cellWall = wallFor("cells", opts.laneIds)
 
-  // FTS5 JOIN: cells_fts.rowid lines up with cells.rowid via the virtual
-  // table's external-content binding (migration 0003).
-  //   snippet(table, col, start, end, ellipsis, max_tokens)
-  //     col=0 → the only column we indexed ("value")
-  //     start/end → <mark>/</mark> highlight tags
-  //     ellipsis → "..." for truncated tails
-  //     max_tokens → 16, plenty for "saw the match in context" UX
-  // Postgres FTS over the generated cells.value_tsv. plainto_tsquery ANDs all
-  // terms (implicit-AND, matching the FTS5 sanitizer intent); ts_headline gives
-  // the <mark> snippet; ts_rank is relevance (higher = better → ORDER BY DESC).
+  // Postgres FTS over the generated cells.value_tsv column and its GIN index.
+  //   plainto_tsquery → ANDs every term, matching the sanitizer's intent that
+  //     all of what the translator typed must be present.
+  //   ts_headline → the <mark>…</mark> snippet; MaxWords=16 is plenty for
+  //     "saw the match in context" UX, MaxFragments=1 keeps it to one line.
+  //   ts_rank → relevance, HIGHER is better, hence ORDER BY rank DESC.
   const parts: string[] = [
     "SELECT",
     "  cells.cell_id AS cell_id,",
@@ -515,15 +516,15 @@ interface PatternRowRaw extends LocationRowRaw {
 // ---------------------------------------------------------------------------
 
 /**
- * Run an FTS5 exact-phrase search over `cells_fts` for the given project,
- * and LEFT JOIN back to `cells` to fetch the opposite-side cell value at
+ * Run an exact-phrase full-text search over `cells.value_tsv` for the given
+ * project, and LEFT JOIN back to `cells` to fetch the opposite-side value at
  * the same (file_id, cell_id). Useful for the parallel-passages UI that
  * shows a source match next to its translation (or vice-versa).
  *
  * The project scope (`AND cells.project_id = ?`) is hardcoded — the caller
  * cannot bypass it.
  *
- * Throws on FTS5 syntax errors. Returns [] when `exactText` sanitizes away.
+ * Throws on tsquery syntax errors. Returns [] when `exactText` sanitizes away.
  */
 export async function queryScopedExact(
   db: AquillaDb,
@@ -542,7 +543,7 @@ export async function queryScopedExact(
   // logical address. CASE flips source↔target so one query covers both
   // directions. `paired.value` is null when no paired row exists.
   // Postgres FTS: phraseto_tsquery requires the terms adjacent + in order
-  // (matching the FTS5 exact-phrase intent).
+  // (matching the exact-phrase sanitizer's intent).
   const parts: string[] = [
     "SELECT",
     "  cells.cell_id AS cell_id,",
@@ -611,13 +612,13 @@ export interface ValidatedNeighbor {
   value: string
   /** The neighbor's validated TARGET value — what the scorer compares against. */
   targetValue: string
-  /** FTS5 bm25 rank (more negative = better). */
+  /** ts_rank relevance over `cells.value_tsv` (HIGHER = better). */
   rank: number
 }
 
 /**
  * Retrieve up to `topK` validated cells whose SOURCE lexically overlaps
- * `queryText` (the asking cell's source), ranked by FTS5 bm25, returning each
+ * `queryText` (the asking cell's source), ranked by ts_rank, returning each
  * neighbor's validated TARGET.
  *
  * This is the one-hop example set for health-as-confidence, framed as a
@@ -626,9 +627,9 @@ export interface ValidatedNeighbor {
  * source (the stable key for "what would I translate this from"); the caller
  * scores the asking cell's TARGET against these neighbors' TARGETS — so a
  * familiar source with a wrong translation scores low. Excludes `excludeCellId`
- * so a cell never endorses itself. SQL stays here (the project-scoped FTS
- * choke-point); scoring is the caller's pure function. Returns [] when the
- * query sanitizes away.
+ * so a cell never endorses itself. SQL stays here (the project-scoped
+ * full-text choke-point); scoring is the caller's pure function. Returns []
+ * when the query sanitizes away.
  */
 /**
  * Any-term OR tsquery (`t1 | t2 | …`) from the same Unicode tokenization the

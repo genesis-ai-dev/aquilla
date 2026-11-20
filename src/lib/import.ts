@@ -77,11 +77,9 @@ import {
   isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
-import {
-  fetchTranslationText,
-  parseEBibleCorpus,
-  type EBibleTranslation,
-} from "./parsers/ebible"
+// The eBible parser bundles the full 31k-line vref list (~420 KB); it loads
+// only when an eBible import runs, not with every module that imports this one.
+import type { EBibleTranslation } from "./parsers/ebible"
 import {
   fetchHelloaoComplete,
   parseHelloaoComplete,
@@ -279,6 +277,7 @@ export async function prepareEBibleTargetImport(
 ): Promise<EBibleMatchResult> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  const { fetchTranslationText, parseEBibleCorpus } = await import("./parsers/ebible")
   const corpusText = await fetchTranslationText(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),
@@ -965,6 +964,7 @@ export async function importEBible(
 ): Promise<FileReference[]> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  const { fetchTranslationText, parseEBibleCorpus } = await import("./parsers/ebible")
   const corpusText = await fetchTranslationText(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),

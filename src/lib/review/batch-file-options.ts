@@ -41,6 +41,8 @@ export function canIncludeUntouchedAiDrafts(roleLevel: number | null | undefined
 
 export interface DraftChoiceCell {
   translated: string
+  /** Canonical ref, so a chapter choice can narrow the file. */
+  group?: string | null
   hidden?: boolean
   aiDrafted?: boolean
   activeValidators?: readonly string[] | null
@@ -69,6 +71,11 @@ export interface DraftRunChoices {
   /** "next" keeps the project's completion package size. "all" does not. */
   scope: "next" | "all"
   batchSize: number
+  /**
+   * A chapter label ("GEN 1") narrows the file. Absent or `WHOLE_BOOK` keeps
+   * every cell. The file modal sets it; older callers omit it.
+   */
+  chapter?: string
 }
 
 export interface ValidateRunChoices {
@@ -80,6 +87,8 @@ export interface ValidateRunChoices {
    * telemetry so "we accepted the flagged lines too" is on the record.
    */
   includeFlaggedCells: boolean
+  /** See `DraftRunChoices.chapter`. */
+  chapter?: string
 }
 
 function alreadyReviewed(cell: DraftChoiceCell): boolean {

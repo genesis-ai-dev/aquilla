@@ -63,6 +63,8 @@ export interface BatchValidateCandidate {
   activeValidators?: string[]
   /** AQU-1571: who wrote the current text in the active lane. */
   lastEditor?: string | null
+  /** Canonical ref ("GEN 1:1"). The chapter filter reads it; eligibility does not. */
+  group?: string | null
 }
 
 /**
@@ -556,6 +558,8 @@ export function batchValidateConfirmDescription(
   t: Translate,
   joinList: JoinList,
   chunkSize?: number | null,
+  /** A chapter run finishes that chapter. The file run finishes the file. */
+  scope: "file" | "chapter" = "file",
 ): string {
   // The dead-end outcomes borrow the toast's wording rather than mint a second
   // phrasing for "your role cannot do this" in the nav namespace.
@@ -588,14 +592,22 @@ export function batchValidateConfirmDescription(
   if (summary.outcome === "nothing-eligible") {
     // No chunk note here: how a run would be written is not why it will do
     // nothing, and saying so would read as the reason.
-    return t("nav.workspaceActions.batchValidate.nothingToValidate") + skippedClause
+    const lead = scope === "chapter"
+      ? t("nav.workspaceActions.batchValidate.nothingInChapter")
+      : t("nav.workspaceActions.batchValidate.nothingToValidate")
+    return lead + skippedClause
   }
 
   // AQU-2507: only on a run that will take more than one chunk. On a 40-cell
   // file the sentence would raise a question the reader did not have.
   const chunk = batchValidateChunkSize(chunkSize)
   const chunkNote = summary.validatable.length > chunk
-    ? t("nav.workspaceActions.batchValidate.runsToCompletion", { cap: chunk })
+    ? t(
+      scope === "chapter"
+        ? "nav.workspaceActions.batchValidate.runsToChapter"
+        : "nav.workspaceActions.batchValidate.runsToCompletion",
+      { cap: chunk },
+    )
     : ""
   return (
     t("nav.workspaceActions.batchValidate.willValidate", { count: summary.validatable.length })

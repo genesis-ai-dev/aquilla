@@ -155,6 +155,8 @@ export const nav = defineNamespace({
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
+    "nav.workspaceActions.batchValidate.nothingInChapter":
+      "Nothing in this chapter can be batch-validated right now.",
     // AQU-2507: the trailing clause the confirmation body actually uses now.
     // One action validates the whole file; this says how it gets there, so a
     // reviewer accepting a 2,870-cell pretranslated book is not left wondering
@@ -166,6 +168,17 @@ export const nav = defineNamespace({
           "is done — one click is enough.",
         other:
           " It saves in batches of {cap} cells and keeps going until the file " +
+          "is done — one click is enough.",
+      },
+      "cap",
+    ),
+    "nav.workspaceActions.batchValidate.runsToChapter": plural(
+      {
+        one:
+          " It saves in batches of {cap} cell and keeps going until this chapter " +
+          "is done — one click is enough.",
+        other:
+          " It saves in batches of {cap} cells and keeps going until this chapter " +
           "is done — one click is enough.",
       },
       "cap",
@@ -909,6 +922,12 @@ export const nav = defineNamespace({
         },
         maxLength: 500,
       },
+      "nav.workspaceActions.batchValidate.nothingInChapter": {
+        description:
+          "Stands in for willValidate when a chapter-scoped run would validate " +
+          "nothing. Neutral, not an error. Ends with a period and no trailing space.",
+        maxLength: 160,
+      },
       "nav.workspaceActions.batchValidate.nothingToValidate": {
         description:
           "Stands in for willValidate when the run would validate nothing at all, " +
@@ -927,6 +946,16 @@ export const nav = defineNamespace({
           cap: "How many cells the run saves per batch. Selects the plural form.",
         },
         maxLength: 140,
+      },
+      "nav.workspaceActions.batchValidate.runsToChapter": {
+        description:
+          "Same clause as runsToCompletion, for a run limited to one chapter of " +
+          "the open book. Leading space is intentional. Do not tell the reader to " +
+          "click again.",
+        placeholders: {
+          cap: "How many cells the run saves per batch. Selects the plural form.",
+        },
+        maxLength: 160,
       },
       "nav.workspaceActions.batchValidate.capNote": {
         description:

@@ -926,6 +926,8 @@ export const editor = defineNamespace({
       one: "{count} hidden cell stays parked.",
       other: "{count} hidden cells stay parked.",
     }),
+    "editor.batchFile.chapterLabel": "Chapter",
+    "editor.batchFile.wholeBook": "Whole book",
     "editor.batchFile.scopeLegend": "How many",
     "editor.batchFile.scopeNext": plural({
       one: "Next {count}",
@@ -941,6 +943,30 @@ export const editor = defineNamespace({
     }),
     "editor.batchFile.nothingToDraft": "Nothing in this file can be drafted with these choices.",
     "editor.batchFile.confirmDraft": "Draft",
+    "editor.batchBooks.section": "Books",
+    "editor.batchBooks.validateTitle": "Validate books",
+    "editor.batchBooks.draftTitle": "Draft books",
+    "editor.batchBooks.description":
+      "Each book you check is included in full. To limit one book to a chapter, open that book and use its file menu.",
+    "editor.batchBooks.selectAll": "Select all",
+    "editor.batchBooks.clear": "Clear",
+    "editor.batchBooks.ready": "Cells ready for your check",
+    "editor.batchBooks.aiDrafts": "AI drafts nobody has checked",
+    "editor.batchBooks.flagged": "Cells with open check flags",
+    "editor.batchBooks.flaggedHelp":
+      "Flags are known for the book you have open. Other books are signed off without that check. Turn this on to sign flagged cells off anyway.",
+    "editor.batchBooks.empty": "Empty cells",
+    "editor.batchBooks.refresh": "Untouched AI drafts to refresh",
+    "editor.batchBooks.confirmValidate": "Validate books",
+    "editor.batchBooks.confirmDraft": "Draft books",
+    "editor.batchBooks.menuValidate": "Validate books…",
+    "editor.batchBooks.menuDraft": "Draft books…",
+    "editor.batchBooks.reading": "Reading {name}…",
+    "editor.batchBooks.loadFailed": "Could not read {name}. Nothing was changed.",
+    "editor.batchBooks.historyName": plural({
+      one: "{count} book",
+      other: "{count} books",
+    }),
     "editor.batchValidate.skip.alreadyMine": plural({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
@@ -7667,6 +7693,93 @@ export const editor = defineNamespace({
           + "'Validate'. A verb, not the autopilot pipeline's 'Draft' stage caption "
           + "(autopilot.graph.node.draft), which is a noun.",
         maxLength: 16,
+      },
+      "editor.batchFile.chapterLabel": {
+        description: "Accessible name of the chapter dropdown in the open-book batch dialog.",
+        maxLength: 24,
+      },
+      "editor.batchFile.wholeBook": {
+        description: "Chapter dropdown option that keeps every chapter of the open book.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.section": {
+        description: "Legend over the list of books in the header batch dialog.",
+        maxLength: 16,
+      },
+      "editor.batchBooks.validateTitle": {
+        description: "Title of the header dialog that validates whole books.",
+        maxLength: 32,
+      },
+      "editor.batchBooks.draftTitle": {
+        description: "Title of the header dialog that drafts whole books.",
+        maxLength: 32,
+      },
+      "editor.batchBooks.description": {
+        description:
+          "Explains that each checked book is taken in full, and that a chapter "
+          + "is chosen from the open book's file menu instead.",
+      },
+      "editor.batchBooks.selectAll": {
+        description: "Button that checks every book. Becomes Clear when all are checked.",
+        maxLength: 20,
+      },
+      "editor.batchBooks.clear": {
+        description: "Button that unchecks every book.",
+        maxLength: 16,
+      },
+      "editor.batchBooks.ready": {
+        description: "Checkbox for committed text the reader has not signed off. No count: the books are not loaded yet.",
+      },
+      "editor.batchBooks.aiDrafts": {
+        description: "Checkbox for untouched AI drafts. Off unless a reviewer turns it on.",
+      },
+      "editor.batchBooks.flagged": {
+        description: "Checkbox for cells with open check flags. Off by default.",
+      },
+      "editor.batchBooks.flaggedHelp": {
+        description:
+          "Says check flags are known only for the open book, and that turning "
+          + "the box on signs flagged cells off anyway.",
+      },
+      "editor.batchBooks.empty": {
+        description: "Checkbox for cells with source text and no translation.",
+      },
+      "editor.batchBooks.refresh": {
+        description: "Checkbox for replacing untouched AI drafts. Off by default.",
+      },
+      "editor.batchBooks.confirmValidate": {
+        description: "Confirm button that starts validation of the checked books.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.confirmDraft": {
+        description: "Confirm button that starts drafting the checked books.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.menuValidate": {
+        description: "Header menu item that opens the validate-books dialog.",
+        maxLength: 28,
+      },
+      "editor.batchBooks.menuDraft": {
+        description: "Header menu item that opens the draft-books dialog.",
+        maxLength: 28,
+      },
+      "editor.batchBooks.reading": {
+        description: "Loading toast while a book's cells are fetched.",
+        placeholders: {
+          name: "The book being read.",
+        },
+      },
+      "editor.batchBooks.loadFailed": {
+        description: "Error toast when a book could not be read. Nothing was validated or drafted.",
+        placeholders: {
+          name: "The book that could not be read.",
+        },
+      },
+      "editor.batchBooks.historyName": {
+        description: "History step name when a batch covers more than one book.",
+        placeholders: {
+          count: "How many books the run covers. Selects the plural form.",
+        },
       },
       "editor.batchValidate.skip.alreadyMine": {
         description:

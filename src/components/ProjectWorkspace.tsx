@@ -434,7 +434,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, CheckSquare, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -673,6 +673,12 @@ import {
   type ValidateRunChoices,
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
+import { BatchBooksModal, type BatchBooksChoices, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
+import { listBatchBooks } from "@/lib/review/batch-books"
+import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
+import { listChapterLabels } from "@/lib/export/chapter-scope"
+import { loadBookCells } from "@/lib/review/load-book-cells"
+import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
@@ -12886,8 +12892,11 @@ export function ProjectWorkspace() {
    */
   const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => {
     const flagged = flaggedCellIds()
+    const inFile = project?.id && activeFileId
+      ? cellSummaries.filter((c) => c.fileId === activeFileId)
+      : []
     return summarizeBatchValidate(
-      project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+      applyChapterScope(inFile, choices?.chapter),
       // AQU-1571: the project's text rules, pinned by a unit test of the builder.
       // AQU-983: the file modal passes which groups this run includes. A call
       // with no choices keeps the selection-toolbar defaults (include both).
@@ -13076,7 +13085,12 @@ export function ProjectWorkspace() {
     includeUntouchedAiDrafts: false,
     // AQU-2507: a check flag is overruled only on purpose.
     includeFlaggedCells: false,
+    chapter: WHOLE_BOOK,
   })
+  /** AQU-2673: a header run across books hands the loop a summary it already
+   *  built from files the cell store does not hold. Null on the open-file path. */
+  const batchValidateOverrideRef = useRef<BatchValidateSummary | null>(null)
+  const batchBooksHistoryRef = useRef<{ fileId: string | null; fileName: string | null } | null>(null)
   const draftChoicesRef = useRef<DraftRunChoices>({
     includeEmpty: true,
     refreshAiDrafts: false,
@@ -13091,7 +13105,10 @@ export function ProjectWorkspace() {
     // hidden cell never enters the list (`classifyBatchDraft`).
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -13101,7 +13118,10 @@ export function ProjectWorkspace() {
     },
     runCompleteAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const cells = applyChapterScope(
+        getActiveCells().filter((cell) => cell.fileId === activeFileId),
+        draftChoicesRef.current.chapter,
+      )
       const chosen = selectBatchDraft(classifyBatchDraft(cells), {
         ...draftChoicesRef.current,
         batchSize: completionBatchSizeFor(project),
@@ -13140,7 +13160,10 @@ export function ProjectWorkspace() {
       // chunk this loop writes and flushes at a time — the event pipeline keeps
       // the protection it was given in AQU-586 — and the loop runs over every
       // chunk, reporting progress, before the one closing message.
-      const summary = batchValidateSummary(batchValidateChoicesRef.current)
+      const summary = batchValidateOverrideRef.current ?? batchValidateSummary(batchValidateChoicesRef.current)
+      const history = batchBooksHistoryRef.current
+      batchValidateOverrideRef.current = null
+      batchBooksHistoryRef.current = null
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -13175,8 +13198,8 @@ export function ProjectWorkspace() {
             {
               labelKey: "editor.history.stepValidateMany",
               labelParams: { count: total },
-              fileId: activeFileId,
-              fileName: activeFileNameRef.current,
+              fileId: history?.fileId ?? activeFileId,
+              fileName: history?.fileName ?? activeFileNameRef.current,
             },
             async () => {
               let done = 0
@@ -13486,6 +13509,136 @@ export function ProjectWorkspace() {
     return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
   }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
   const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
+  const [booksRun, setBooksRun] = useState<BatchBooksRequest | null>(null)
+  // The chapter the table is showing, including the text view. The timeline's
+  // own pick stays on chosenScopeKey so a scroll here does not move playback.
+  const [viewChapterKey, setViewChapterKey] = useState<string | null>(null)
+  useEffect(() => { setViewChapterKey(null) }, [activeFileId])
+  const openFileChapters = useMemo(
+    () => listChapterLabels(activeFileId ? cellSummaries.filter((cell) => cell.fileId === activeFileId) : []),
+    [cellSummaries, activeFileId],
+  )
+  const batchBooks = useMemo(() => listBatchBooks(project?.files ?? []), [project?.files])
+  const runAcrossBooks = useCallback((choices: BatchBooksChoices) => {
+    if (!project) return
+    setBooksRun(null)
+    const names = new Map(batchBooks.map((book) => [book.id, book.name]))
+    const readingId = toast.add({
+      type: "loading",
+      title: t("editor.batchBooks.reading", { name: names.get(choices.fileIds[0] ?? "") ?? "" }),
+      timeout: 0,
+    })
+    void (async () => {
+      try {
+        const byFile = new Map<string, Awaited<ReturnType<typeof loadBookCells>>>()
+        for (const fileId of choices.fileIds) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: names.get(fileId) ?? "" }),
+          })
+          let cells
+          if (fileId === activeFileId) {
+            cells = getActiveCells().filter((cell) => cell.fileId === fileId)
+          } else {
+            const mint = await getTokenForProjectFile(project.id, fileId)
+            if (!mint.token) throw new Error(names.get(fileId) ?? fileId)
+            cells = await loadBookCells({
+              projectId: project.id,
+              fileId,
+              jwt: mint.token,
+              lane: activeLane,
+              username: currentUsername,
+              requiredValidations: validationCount,
+            })
+          }
+          byFile.set(fileId, cells)
+        }
+        toast.close(readingId)
+        if (booksRun === "draft") {
+          for (const cells of byFile.values()) {
+            const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+              includeEmpty: choices.includeEmpty,
+              refreshAiDrafts: choices.refreshAiDrafts,
+              scope: "all",
+              batchSize: completionBatchSizeFor(project),
+              chapter: WHOLE_BOOK,
+            })
+            if (chosen.length > 0) await completeBatch(chosen)
+          }
+          return
+        }
+        const summary = summarizeBatchValidate(
+          [...byFile.values()].flat().map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId: choices.fileIds[0] ?? activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            hasOpenFlags: (cellId: string) => flaggedCellIds().has(cellId),
+            includeReadyCells: choices.includeReadyCells,
+            includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+            includeFlaggedCells: choices.includeFlaggedCells,
+          },
+        )
+        batchValidateChoicesRef.current = {
+          includeReadyCells: choices.includeReadyCells,
+          includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+          includeFlaggedCells: choices.includeFlaggedCells,
+          chapter: WHOLE_BOOK,
+        }
+        batchValidateOverrideRef.current = summary
+        const firstId = choices.fileIds[0] ?? null
+        batchBooksHistoryRef.current = choices.fileIds.length > 1
+          ? { fileId: firstId, fileName: t("editor.batchBooks.historyName", { count: choices.fileIds.length }) }
+          : { fileId: firstId, fileName: names.get(firstId ?? "") ?? null }
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        toast.close(readingId)
+        const name = err instanceof Error ? err.message : ""
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name: name || (names.get(choices.fileIds[0] ?? "") ?? "") }),
+        })
+      }
+    })()
+  }, [project, batchBooks, booksRun, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, actionCtx, actionArgs, t])
+  const booksMenuItems = useMemo((): OverflowMenuItem[] => {
+    if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
+    const level = project.syncRole?.level ?? null
+    const items: OverflowMenuItem[] = [
+      { id: "books-section", type: "label", label: t("editor.batchBooks.section") },
+    ]
+    if (canPerform("cell.validate", level)) {
+      items.push({
+        id: "validate-books",
+        label: t("editor.batchBooks.menuValidate"),
+        icon: CheckSquare,
+        onClick: () => setBooksRun("validate"),
+      })
+    }
+    if (canPerform("target.cell.commit", level)) {
+      items.push({
+        id: "draft-books",
+        label: t("editor.batchBooks.menuDraft"),
+        icon: Sparkles,
+        onClick: () => setBooksRun("draft"),
+      })
+    }
+    return items.length > 1 ? items : []
+  }, [project, batchBooks.length, activeLaneDelivers, t])
   /**
    * AQU-2507: the open-check-flag predicate the batch modal renders its
    * "Also validate N cells with open check flags" box from — the SAME question
@@ -15521,8 +15674,9 @@ export function ProjectWorkspace() {
   // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
-    setChosenScopeKey(key)
-  }, [])
+    setViewChapterKey(key)
+    if (sequenceTimeline) setChosenScopeKey(key)
+  }, [sequenceTimeline])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line, on the whole book's clock.
   // Picking one while playback is paused ends that playback, as before
@@ -19144,6 +19298,7 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
+            extraMenuItems={booksMenuItems}
             onImport={project ? handleHeaderImport : undefined}
             importDisabledReason={importDenialReason}
             onSettings={project ? openProjectSettings : undefined}
@@ -20234,7 +20389,7 @@ export function ProjectWorkspace() {
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
             // AQU-1758: a book's timeline shows the chapter the table is on.
-            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            onActiveChapterChange={handleTableChapterChange}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               </ChapterNavTrailingContext.Provider>
@@ -21130,6 +21285,11 @@ export function ProjectWorkspace() {
           request={batchFileModal}
           batchSize={completionBatchSizeFor(project)}
           chunkSize={batchValidateChunk}
+          bookName={activeFile
+            ? (activeFile.bookCode ? (getBookName(activeFile.bookCode) ?? activeFile.name) : activeFile.name)
+            : undefined}
+          chapters={openFileChapters}
+          initialChapter={initialChapterScope(openFileChapters, viewChapterKey)}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           validateCandidates={activeFileId
             ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
@@ -21161,6 +21321,17 @@ export function ProjectWorkspace() {
             workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
           }}
+        />
+      )}
+      {booksRun && project && (
+        <BatchBooksModal
+          open
+          onOpenChange={(open) => { if (!open) setBooksRun(null) }}
+          request={booksRun}
+          books={batchBooks}
+          initialFileId={activeFileId}
+          canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
+          onConfirm={runAcrossBooks}
         />
       )}
       {pendingActionConfirm?.requiresConfirmation && (

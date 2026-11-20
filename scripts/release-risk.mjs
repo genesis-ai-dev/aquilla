@@ -149,8 +149,8 @@ export function classifyFiles(files) {
 //            permission-matrix/golden.json). The job also fails when either
 //            golden changes in the PR, so an intentional permission change
 //            still goes to a person.
-//   offline-sync → offline-gate (risk-label.yml): the real outbox and both of
-//            its drains run a table of scripted faults against a fake server;
+//   offline-sync → offline-gate (risk-label.yml): the real outbox, its HTTP
+//            drain and the reconciler run scripted faults against a fake server;
 //            every enqueued event must end accepted, still queued, or held by
 //            a documented rule, and the per-scenario outcome must equal
 //            src/lib/sync/offline-gate/golden.json.

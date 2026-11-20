@@ -81,7 +81,7 @@ file can be in several areas.
   (client parent selection: a wrong `parentId` is a lost edit by CAS).
 - `src/lib/import.ts`; `db/postgres/schema.sql` (also `migration`).
 
-**offline-sync** (holding) — the client's write buffer and its two drains.
+**offline-sync** (holding) — the client's write buffer, its drain and the reconciler.
 - `src/lib/sync/outbox.ts`, `outbox-flush.ts` (HTTP drain; 403 quarantine;
   removal only on accepted or permanent 4xx), `outbox-recovery.ts`,
   `outbox-sanitize.ts`, `outbox-types.ts`, `ws-reconciler.ts`,
@@ -263,12 +263,16 @@ today:
   a PR that changes either flips the golden and goes to a person.
 
 - **`offline-sync` → `offline-gate`** (`risk-label.yml`, only for PRs
-  touching the offline-sync area). The real outbox and both of its drains
-  (the HTTP flush and the WebSocket reconciler) run a table of scripted
-  faults against a fake server that records what it accepted: offline then
-  online, 5xx then success, a response lost mid-batch, an expired token, a
-  403, a permanent 4xx, a socket dropped mid-send, a second flusher, a
-  reload mid-flush. The harness, not the scenario, checks the invariant:
+  touching the offline-sync area). The real outbox, its HTTP drain
+  (`flushOutboxBatch` under `useOutboxFlusher`), the recovery journal and
+  the WebSocket reconciler run 35 scripted faults against a fake server
+  that records what it accepted: offline then online, 5xx then success, a
+  response lost mid-batch, an expired token, a 403, a permanent 4xx, a
+  second tab, a reload mid-flush, a socket dropped mid-send. The shipped
+  client drains over HTTP only: nothing under `src/` sends the
+  `outbox.event` frame the worker accepts, so the four socket rows prove
+  the reconciler's half (a truthful `send()`, reconnect, parsed
+  `event.applied` and `event.stale`) under a sender the harness supplies. The harness, not the scenario, checks the invariant:
   every enqueued event ends accepted by the server, still in the outbox, or
   held or removed by a documented rule, and never in none of them. The
   per-scenario outcome is `src/lib/sync/offline-gate/golden.json`; the job
@@ -456,8 +460,19 @@ broken gate, not a week of risky changes.
   but is not a required check; requiring it is the step that makes "a PR
   merges on a PASS walk" true again, and should wait until the routine
   has walked a week of PRs.
-- **Offline gate: what it cannot drive.** Listed in
-  `src/lib/sync/offline-gate/README.md`.
+- **Offline gate: two losses it pins, and what it cannot drive.** The
+  golden records two events that end in no bucket, each marked as a known
+  loss so the gate fails if either changes. (1) `flushOutboxBatch` deletes
+  a non-comment event that has no `fileId` without posting it or telling a
+  listener; no current emitter omits `fileId`, and
+  `outbox-flush.test.ts` pins the delete as a programmer-error path, but
+  it is the shape of forbidden outcome #4 and a quarantine would keep the
+  event readable. (2) The recovery journal covers `target.cell.commit`
+  only, so a lone validate enqueued in the instant before a page is torn
+  down is gone. Both are decisions for a person, not fixed here. Not
+  driven: multi-account drain, Tauri offline routing, storage quota, real
+  page teardown and cross-tab locks
+  (`src/lib/sync/offline-gate/README.md`).
 - **`export` as a holding area.** Not on the meeting's list, on the
   draft's. Default here: noted, not holding. Decide.
 - **`RELEASE_BOT_TOKEN`** (done 2026-10-31: a fine-grained PAT, contents +

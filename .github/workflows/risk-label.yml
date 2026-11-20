@@ -162,7 +162,7 @@ jobs:
 
   # The offline-sync gate (docs/RELEASE-RISK-GATES.md "Gates"). Runs only for
   # a PR that touches the offline-sync area, on the PR's own head: the real
-  # outbox and both of its drains go through a table of scripted faults
+  # outbox, its HTTP drain and the reconciler go through a table of scripted faults
   # against a fake server, and every enqueued event must end accepted, still
   # queued, or held by a documented rule. The per-scenario outcome must equal
   # the committed golden. Green here lifts the `offline-sync` hold

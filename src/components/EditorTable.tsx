@@ -194,7 +194,7 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
-import { dragSelectionIndex } from "@/lib/editor/selection-drag-index"
+import { dragSelectionIndex, idsForDrag } from "@/lib/editor/selection-drag-index"
 import { idsForSelectAll } from "@/lib/editor/select-all-ids"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
@@ -1747,6 +1747,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     startY: number
     didDrag: boolean
     clickAction: "clear-single" | null
+    /** Ids already stored when Command/Ctrl started this drag. Null replaces. */
+    keepIds: ReadonlySet<string> | null
   } | null>(null)
   const selectionDragAbortRef = useRef<AbortController | null>(null)
   const selectionAutoScrollFrameRef = useRef<number | null>(null)
@@ -2478,16 +2480,20 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusGridRowByIndex])
 
-  const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
+  const selectRangeByIndexes = useCallback((
+    anchorIndex: number,
+    focusIndex: number,
+    keepIds: ReadonlySet<string> | null = null,
+  ) => {
     const list = displayCellIdsRef.current
-    if (list.length === 0) return
+    const ids = idsForDrag({
+      listIds: list,
+      anchorIndex,
+      focusIndex,
+      keep: keepIds,
+    })
+    if (ids.length === 0) return
     const anchor = clampIndex(anchorIndex, list.length)
-    const focus = clampIndex(focusIndex, list.length)
-    if (anchor < 0 || focus < 0) return
-
-    const start = Math.min(anchor, focus)
-    const end = Math.max(anchor, focus)
-    const ids = list.slice(start, end + 1)
     setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])
 
@@ -2541,26 +2547,17 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
-    if (!drag) return
-    const scrollEl = parentRef.current ?? listRootRef.current
-    const rect = scrollEl?.getBoundingClientRect()
-    const count = displayCellIdsRef.current.length
-    // The edge of the scrollport selects through rows LegendList has not
-    // mounted. The pointer has no element to hit there, and the selection is
-    // a list of ids, so those rows do not need to be rendered first.
-    const nextIndex = rect
-      ? dragSelectionIndex({
-          clientY,
-          viewTop: rect.top,
-          viewBottom: rect.bottom,
-          edgeZone: SELECTION_EDGE_SCROLL_ZONE_PX,
-          rowIndex: getIndexAtClientY(clientY),
-          count,
-        })
-      : getIndexAtClientY(clientY)
+    if (!drag || !drag.didDrag) return
+    // The stored ids are the selection. This writes the range up to the row
+    // under the pointer. Auto-scroll brings the next row there; crossing the
+    // window does not replace the set with every cell.
+    const nextIndex = dragSelectionIndex({
+      rowIndex: getIndexAtClientY(clientY),
+      count: displayCellIdsRef.current.length,
+    })
     if (nextIndex < 0 || nextIndex === drag.lastIndex) return
     drag.lastIndex = nextIndex
-    selectRangeByIndexes(drag.anchorIndex, nextIndex)
+    selectRangeByIndexes(drag.anchorIndex, nextIndex, drag.keepIds)
   }, [getIndexAtClientY, selectRangeByIndexes])
 
   const scrollSelectionNearEdge = useCallback((clientY: number) => {
@@ -2663,8 +2660,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     // row could have shifted since it was set, so the silently-computed
     // range would land 1-2 rows off, or not start on the clicked cell at
     // all. A plain click must always mean "select exactly this cell."
-    const shouldRange = !isAdditive && anchorIndex >= 0 && e.shiftKey
+    // Command/Ctrl keeps the ids already stored and adds this drag to them.
+    const shouldRange = anchorIndex >= 0 && e.shiftKey
     const startIndex = shouldRange ? anchorIndex : rowIndex
+    const keepIds = isAdditive ? new Set(selectedIds) : null
 
     selectionDragRef.current = {
       pointerId: e.pointerId,
@@ -2673,7 +2672,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       startX: e.clientX,
       startY: e.clientY,
       didDrag: false,
-      clickAction: isAlreadySelected && selectedIds.size === 1 ? "clear-single" : null,
+      clickAction: !isAdditive && isAlreadySelected && selectedIds.size === 1 ? "clear-single" : null,
+      keepIds,
     }
     selectionPointerYRef.current = e.clientY
 
@@ -2702,10 +2702,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       // the drag if the browser refuses capture for any reason.
     }
 
-    if (isAdditive) {
+    if (isAdditive && !shouldRange) {
       toggleSelected(cellId)
     } else if (shouldRange) {
-      selectRangeByIndexes(anchorIndex, rowIndex)
+      selectRangeByIndexes(anchorIndex, rowIndex, keepIds)
     } else if (isAlreadySelected && selectedIds.size === 1) {
       // Defer clearing until pointerup. If the user drags from the selected
       // anchor, the move handler should extend the range instead.

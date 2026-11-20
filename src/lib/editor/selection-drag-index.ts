@@ -1,22 +1,37 @@
-/** Which row a checkbox drag should include.
+/** Row a checkbox drag is on.
  *
- * The list only mounts rows inside its draw window, so a pointer can never
- * land on a row that has not been rendered. Inside that window the row under
- * the pointer is the target. In the top or bottom edge of the scrollport the
- * drag runs through the start or the end of the list, mounted or not. */
+ * The list only mounts a window of rows. The drag follows the row under the
+ * pointer and the scroll that brings the next row under it. It does not jump
+ * to the first or last cell when the pointer crosses the edge of the window. */
 export function dragSelectionIndex(input: {
-  clientY: number
-  viewTop: number
-  viewBottom: number
-  edgeZone: number
-  /** Index of the mounted row under the pointer. Negative when there is none. */
   rowIndex: number
   count: number
 }): number {
   if (input.count <= 0) return -1
-  const zone = Math.max(0, input.edgeZone)
-  if (input.clientY >= input.viewBottom - zone) return input.count - 1
-  if (input.clientY <= input.viewTop + zone) return 0
-  if (input.rowIndex >= 0 && input.rowIndex < input.count) return input.rowIndex
-  return -1
+  if (!Number.isInteger(input.rowIndex) || input.rowIndex < 0 || input.rowIndex >= input.count) return -1
+  return input.rowIndex
+}
+
+/** Ids this drag writes into the stored selection.
+ *
+ * A plain drag replaces the selection with the range. Command-drag passes the
+ * ids already stored in `keep` and adds the range, so rows the list is not
+ * drawing stay selected. */
+export function idsForDrag(input: {
+  listIds: readonly string[]
+  anchorIndex: number
+  focusIndex: number
+  keep: ReadonlySet<string> | null
+}): string[] {
+  const count = input.listIds.length
+  if (count === 0) return []
+  const anchor = Math.max(0, Math.min(count - 1, input.anchorIndex))
+  const focus = Math.max(0, Math.min(count - 1, input.focusIndex))
+  const start = Math.min(anchor, focus)
+  const end = Math.max(anchor, focus)
+  const range = input.listIds.slice(start, end + 1)
+  if (!input.keep) return range
+  const next = new Set(input.keep)
+  for (const id of range) next.add(id)
+  return [...next]
 }

@@ -386,7 +386,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -20516,6 +20516,16 @@ export function ProjectWorkspace() {
                   setAttachmentsDrawerOpen(false)
                   setCommentsCellId(cellId)
                 }}
+                // Comment from the finding itself, without leaving the check.
+                // Same gate as the comments drawer's composer: a viewer below
+                // the org's create floor gets the drawer, which says why.
+                onAddComment={
+                  (project?.syncRole?.level != null
+                    ? canMutateComment("comment.create", project.syncRole.level, true, commentFloorsFrom(project))
+                    : perms.canEditComments)
+                    ? addThread
+                    : undefined
+                }
               />
             )}
             {drawerRuleId && (

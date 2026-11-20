@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { fillWalks, isTrustedWalkAuthor, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment, walkOf, walkTrustedLogins } from "./release-plan-walk.mjs"
+import { fillWalks, isTrustedWalkAuthor, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment, walkFromComments, walkOf, walkTrustedLogins } from "./release-plan-walk.mjs"
+import { walkStatus } from "./release-walk-status.mjs"
 
 const HEAD_SHA = "a".repeat(40)
 const OTHER_SHA = "b".repeat(40)
@@ -440,5 +441,26 @@ describe("fillWalks", () => {
     expect(filled[0].walk).toBe("unknown")
     expect(filled[1].walk).toBe("PASS")
     expect(call).toBeGreaterThan(1)
+  })
+})
+
+// The `qa-walk` status a PR shows before it merges is the planner's own
+// reading of the same comments (release-walk-status.mjs).
+describe("the qa-walk status", () => {
+  const member = (body: string) => ({ body, author_association: "MEMBER", user: { login: "walker" } })
+  const HEAD = "0ba1c726c9283a53347af4fe6a8e91eab9cbbdb0"
+  const walkAt = (comments: ReturnType<typeof member>[]) => walkFromComments(comments, { number: 2070, headSha: HEAD })
+
+  it.each([
+    ["no walk comment", [], "unknown", "pending"],
+    ["a walk of an older head", [member("## QA walk — #2070 @ 1111111\n\n**PASS**")], "unknown", "pending"],
+    ["a PASS at test level only (PR 2070, as posted)", [member("## QA walk — #2070 @ 0ba1c726\n\n**PASS (test-level)** · claim walks 4/4")], "partial", "pending"],
+    ["a PASS in a browser", [member("<!-- aquilla-qa-walk 0ba1c726 -->\n## QA walk — #2070 @ 0ba1c726\n\n**PASS**")], "PASS", "success"],
+    ["a FAIL", [member("## QA walk — #2070 @ 0ba1c726\n\n**FAIL**")], "fail", "failure"],
+    ["NOT CHECKED: no UI claim", [member("## QA walk — #2070 @ 0ba1c726\n\n**NOT CHECKED**")], "none", "success"],
+    ["a stranger's PASS", [{ ...member("## QA walk — #2070 @ 0ba1c726\n\n**PASS**"), author_association: "NONE" }], "unknown", "pending"],
+  ])("%s", (_name, comments, walk, state) => {
+    expect(walkAt(comments)).toBe(walk)
+    expect(walkStatus(walkAt(comments)).state).toBe(state)
   })
 })

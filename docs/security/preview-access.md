@@ -32,6 +32,11 @@ cuts that suite off without any error on the access side.
 | Suite | Accounts | Signs in to | If an account is unlisted |
 | --- | --- | --- | --- |
 | Adversarial Jev (`smart-tests/adversarial`) | The three usernames in the `ADVERSARIAL_USER_1..3` repository secrets (`adv-bot-1`, `adv-bot-2`, `adv-bot-3`) | dev (nightly) and each PR's preview (`pr` job) | Global setup stops at sign-in and the run reads **HARNESS UNAVAILABLE**: the `pr` check is red on every PR and the nightly files nothing (AQU-2562) |
+| QA walk (`e2e/journeys/PR-BOT.md`, the scheduled routine in `docs/routines/WALK-PRS.md`) | `qa-bot` and `qa-bot-2` (QA Bot Workspace), and `qa-admin` (`qa-admin@local.test`) for the admin stories | each PR's preview, and dev for the re-walk after a merge | The walker is refused at sign-in. It used to fall back to running tests and post `PASS (test level only)`, which the release planner does not read as a walk: from 2026-11-12, when this gate reached previews, to 2026-11-19 no PR got a browser walk, and 36 of the 47 merged PRs then waiting for production were held for it. The routine now stops and reports the refusal instead |
+
+`qa-admin` is a preview platform admin through the preview-only `ADMIN_EMAILS`
+bootstrap, and that does not admit it (first section): it needs its own entry
+on the list like any other fixture.
 
 The list is keyed by email and the secrets hold usernames. Read an account's
 email from the development `users` table by its username, then add it on

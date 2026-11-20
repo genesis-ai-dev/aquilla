@@ -194,6 +194,7 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
+import { dragSelectionIndex } from "@/lib/editor/selection-drag-index"
 import { idsForSelectAll } from "@/lib/editor/select-all-ids"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
@@ -1737,6 +1738,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     splitByMilestone,
   ])
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
+  const fileCellIdsRef = useRef<readonly string[]>(fileCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
     anchorIndex: number
@@ -1753,6 +1755,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
   displayCellIdsRef.current = displayCellIds
+  fileCellIdsRef.current = fileCellIds
 
   // 2026-08-07 (wire c): follow-driver plumbing. The driver itself mounts
   // only while the timeline is stacked above (media-sync active).
@@ -2539,7 +2542,22 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
     if (!drag) return
-    const nextIndex = getIndexAtClientY(clientY)
+    const scrollEl = parentRef.current ?? listRootRef.current
+    const rect = scrollEl?.getBoundingClientRect()
+    const count = displayCellIdsRef.current.length
+    // The edge of the scrollport selects through rows LegendList has not
+    // mounted. The pointer has no element to hit there, and the selection is
+    // a list of ids, so those rows do not need to be rendered first.
+    const nextIndex = rect
+      ? dragSelectionIndex({
+          clientY,
+          viewTop: rect.top,
+          viewBottom: rect.bottom,
+          edgeZone: SELECTION_EDGE_SCROLL_ZONE_PX,
+          rowIndex: getIndexAtClientY(clientY),
+          count,
+        })
+      : getIndexAtClientY(clientY)
     if (nextIndex < 0 || nextIndex === drag.lastIndex) return
     drag.lastIndex = nextIndex
     selectRangeByIndexes(drag.anchorIndex, nextIndex)
@@ -2883,9 +2901,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
 
-  // Select All inside the table marks the chapter's cells. The list recycles
-  // rows that leave the window, so a browser text selection cannot hold a
-  // chapter: it dies on scroll and never includes a row that is not mounted.
+  // Select All inside the table marks every cell in the file. The list
+  // recycles rows that leave the window and often shows one chapter, so a
+  // browser text selection cannot hold the file.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "a" || event.altKey || event.shiftKey) return
@@ -2900,9 +2918,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
         && (target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable='true']")))
       if (editable) return
       const ids = idsForSelectAll({
-        displayedIds: displayCellIdsRef.current,
-        filtered: voiceFilterActive,
-        chapterIds: cellIdsForMilestonePage(milestoneNavigation, currentMilestoneKey),
+        fileIds: fileCellIdsRef.current,
+        filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
       })
       if (ids.length === 0) return
       event.preventDefault()
@@ -2910,7 +2927,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [currentMilestoneKey, milestoneNavigation, voiceFilterActive])
+  }, [voiceFilterActive])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
     const target = event.target

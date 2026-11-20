@@ -38,7 +38,7 @@ export function setSelection(ids: Iterable<string>, anchor?: string | null): voi
   notify()
 }
 
-/** Add or remove a cell from the selection. Cap enforced. */
+/** Add or remove a cell from the selection. */
 export function toggleSelected(cellId: string): void {
   const next = new Set(selected)
   let nextAnchor = anchorId

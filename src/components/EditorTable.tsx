@@ -187,7 +187,6 @@ import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import {
-  MAX_SELECTED,
   clearSelection,
   getSelectedIds,
   getSelectionAnchorId,
@@ -195,6 +194,7 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
+import { idsForSelectAll } from "@/lib/editor/select-all-ids"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
@@ -2482,12 +2482,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     const focus = clampIndex(focusIndex, list.length)
     if (anchor < 0 || focus < 0) return
 
-    const start = focus >= anchor
-      ? anchor
-      : Math.max(focus, anchor - MAX_SELECTED + 1)
-    const end = focus >= anchor
-      ? Math.min(focus, anchor + MAX_SELECTED - 1)
-      : anchor
+    const start = Math.min(anchor, focus)
+    const end = Math.max(anchor, focus)
     const ids = list.slice(start, end + 1)
     setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])
@@ -2886,6 +2882,35 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }
     if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
+
+  // Select All inside the table marks the chapter's cells. The list recycles
+  // rows that leave the window, so a browser text selection cannot hold a
+  // chapter: it dies on scroll and never includes a row that is not mounted.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "a" || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey)) return
+      const root = tableRootRef.current
+      if (!root) return
+      const target = event.target
+      const inside = (node: Node | null | undefined) => Boolean(node && root.contains(node))
+      const selectionAnchor = document.getSelection()?.anchorNode ?? null
+      if (!inside(target instanceof Node ? target : null) && !inside(selectionAnchor)) return
+      const editable = target instanceof HTMLElement
+        && (target.isContentEditable || Boolean(target.closest("input, textarea, select, [contenteditable='true']")))
+      if (editable) return
+      const ids = idsForSelectAll({
+        displayedIds: displayCellIdsRef.current,
+        filtered: voiceFilterActive,
+        chapterIds: cellIdsForMilestonePage(milestoneNavigation, currentMilestoneKey),
+      })
+      if (ids.length === 0) return
+      event.preventDefault()
+      setSelection(ids, ids[0] ?? null)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [currentMilestoneKey, milestoneNavigation, voiceFilterActive])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
     const target = event.target

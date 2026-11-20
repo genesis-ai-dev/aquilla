@@ -850,6 +850,12 @@ export const editor = defineNamespace({
       "You need project lead role to run a harmonization sweep",
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
+    "editor.selection.copySource": "Copy source",
+    "editor.selection.copyTarget": "Copy target",
+    "editor.selection.copiedSource": "Source copied",
+    "editor.selection.copiedTarget": "Target copied",
+    "editor.selection.copyEmpty": "Nothing to copy",
+    "editor.selection.copyFailed": "Couldn't copy to the clipboard",
     "editor.selection.validatedToast": plural({
       one: "Validated {count} cell",
       other: "Validated {count} cells",
@@ -7485,6 +7491,40 @@ export const editor = defineNamespace({
       "editor.selection.clear": {
         description:
           "Screen-reader name of that same X. It only deselects; nothing is deleted.",
+      },
+      "editor.selection.copySource": {
+        description:
+          "Button on the selection toolbar. Copies the source text of every selected "
+          + "line, in the order the table shows them, one line per paragraph, with "
+          + "the line number from the # column. For pasting a whole chapter into a "
+          + "document. Pairs with editor.selection.copyTarget. 'Source' is "
+          + "editor.column.source.",
+        maxLength: 24,
+      },
+      "editor.selection.copyTarget": {
+        description:
+          "Button on the selection toolbar. Copies the target text of every selected "
+          + "line, in the order the table shows them, one line per paragraph, with "
+          + "the line number from the # column. Pairs with editor.selection.copySource. "
+          + "'Target' is editor.column.target.",
+        maxLength: 24,
+      },
+      "editor.selection.copiedSource": {
+        description:
+          "Success toast after Copy source wrote the selected source lines to the clipboard.",
+      },
+      "editor.selection.copiedTarget": {
+        description:
+          "Success toast after Copy target wrote the selected target lines to the clipboard.",
+      },
+      "editor.selection.copyEmpty": {
+        description:
+          "Shown when Copy source or Copy target is unavailable because none of the "
+          + "selected lines has text on that side.",
+      },
+      "editor.selection.copyFailed": {
+        description:
+          "Error toast when the browser refused the clipboard write. The selection is unchanged.",
       },
       "editor.selection.validatedToast": {
         description:

@@ -106,7 +106,8 @@ file can be in several areas.
 `.github/workflows/**`, and the deploy/release scripts (`cloudflare-*`,
 `verify-*`, `resolve-deployment-target`, `tag-release`, `tag-metadata`,
 `record-github-deployment`, `assert-workers-build-env`, `ci-build`,
-`release-*`).
+`release-*`, and the desktop line's `desktop-release*` and `desktop-bundle*`,
+including `scripts/lib/desktop-release.ts` and `scripts/lib/desktop-bundle.ts`).
 
 **export** (noted): `src/lib/export/**`, `packages/idml-roundtrip/**`,
 `src/lib/parsers/usfm-lossless/**`, the sync-worker export routes.

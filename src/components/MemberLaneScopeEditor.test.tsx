@@ -200,8 +200,8 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     expect(grants).toHaveTextContent("Spanish")
     expect(screen.queryByText("no access")).toBeNull()
     expect(screen.queryByRole("alert")).toBeNull()
-    // Grants really do cover every lane, so the old wording is still true.
-    expect(screen.getByText("Unscoped — full access")).toBeInTheDocument()
+    // AQU-2355: no "Unscoped" line — it described "every lane, forever".
+    expect(screen.queryByText(/unscoped/i)).toBeNull()
   })
 
   it("gap: marks the walled-off lane, warns, and offers the one-click regrant", async () => {
@@ -214,9 +214,7 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     await openEditor()
     expect(screen.getByTestId("member-lane-grants")).toHaveTextContent("Spanish")
     expect(screen.getByText("no access")).toBeInTheDocument()
-    expect(screen.getByRole("alert")).toHaveTextContent("has no grant for every language lane")
-    // The lie this issue is about is gone.
-    expect(screen.queryByText("Unscoped — full access")).toBeNull()
+    expect(screen.getByRole("alert")).toHaveTextContent("has no grant on some language lanes")
   })
 
   it("the regrant saves an empty lane-scope set and refreshes the list in place", async () => {
@@ -265,7 +263,6 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     expect(screen.getByTestId("member-lane-grants-by-role")).toBeInTheDocument()
     expect(screen.queryByTestId("member-lane-grants")).toBeNull()
     expect(screen.queryByText("no access")).toBeNull()
-    expect(screen.queryByText("Unscoped — full access")).toBeNull()
   })
 
   it("says nothing about grants where the wall is off, or where the server did not report them", async () => {
@@ -278,6 +275,5 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     await openEditor()
     expect(screen.queryByTestId("member-lane-grants")).toBeNull()
     expect(screen.queryByRole("alert")).toBeNull()
-    expect(screen.getByText("Unscoped — full access")).toBeInTheDocument()
   })
 })

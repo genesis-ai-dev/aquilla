@@ -3028,7 +3028,6 @@ export const id: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "tingkat organisasi · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "Ubah cakupan jalur {username} pada proyek ini",
   "org.memberLaneScopeEditor.scopesHeading": "Cakupan {username}",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "Tanpa cakupan — akses penuh",
   "org.memberLaneScopeEditor.languagesLegend": "Bahasa yang dapat mereka kerjakan",
   "org.memberLaneScopeEditor.mainLanguageFallback": "Bahasa utama",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (bukan bahasa di proyek ini)",

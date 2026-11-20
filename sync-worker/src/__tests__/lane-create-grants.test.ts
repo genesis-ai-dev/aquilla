@@ -1,5 +1,9 @@
-// AQU-1781: a target lane created on the write path is granted to the members
-// who already read every lane.
+// AQU-1781 / AQU-2355: a target lane created on the write path.
+//
+// AQU-2355 (AQU-2351 rule 2): a lane created later reaches nobody below
+// Maintainer. The one implicit grant left is a lane-less project's FIRST
+// target lane, which goes to the members it already has (AQU-1781's vacuous
+// case: nobody can hold a lane that does not exist yet).
 //
 // The lane read wall gives a member below Maintainer only the lanes they hold a
 // `project_member_lane_roles` row for. The two writers here create a lane
@@ -18,7 +22,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { handleCellEvent } from '../events/handlers/cell-events'
 import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
-import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
+import { firstTargetLaneStmts } from '../../../db/shared/lane-grants'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const PROJECT = 'proj-lane-grant'
@@ -31,7 +35,7 @@ afterAll(async () => {
 
 /**
  * A bare project (source lane only) plus the members the wall applies to:
- *   2 = contributor (400), unscoped — gains every new lane
+ *   2 = contributor (400), unscoped — gains the project's first lane only
  *   3 = contributor (400), scoped to a lane elsewhere — gains none
  *   4 = maintainer (600) — above the wall
  */
@@ -111,13 +115,22 @@ beforeEach(async () => {
   await seedBareProject()
 })
 
-describe('AQU-1781 the blank bridge is granted to the members who can read every lane', () => {
+describe('the blank bridge (a first lane) is granted to the unscoped members', () => {
   it('grants an unscoped member below Maintainer, and nobody else', async () => {
     await defaultCommit('tc-1')
     const bridge = await targetLaneIdForTag('')
     expect(await grantedLanes(2)).toEqual([bridge])
     expect(await grantedLanes(3)).toEqual([])
     expect(await grantedLanes(4)).toEqual([])
+  })
+
+  it('a later default commit does not hand the one lane back to a member removed from it (AQU-2557)', async () => {
+    await defaultCommit('tc-1')
+    expect(await grantedLanes(2)).toHaveLength(1)
+    // A lead removes member 2 from the project's only lane (AQU-2351 rule 4).
+    await t.pg.query(`DELETE FROM project_member_lane_roles WHERE project_id = $1 AND user_id = 2`, [PROJECT])
+    await defaultCommit('tc-2', 'tc-1')
+    expect(await grantedLanes(2)).toEqual([])
   })
 
   it('a second default commit adds no duplicate grant row', async () => {
@@ -128,18 +141,21 @@ describe('AQU-1781 the blank bridge is granted to the members who can read every
   })
 })
 
-describe('AQU-1781 ensure-lane-for-tag grants the lane it ensures', () => {
-  it('grants the folded lane to an unscoped member, and re-running adds no rows', async () => {
-    const run = () =>
+describe('AQU-2355 ensure-lane-for-tag grants only a first lane', () => {
+  it('grants the first lane to an unscoped member, a later one to nobody, and re-running adds no rows', async () => {
+    const run = (tag: string) =>
       t.db.batch([
-        ensureTargetLaneStmt(t.db, PROJECT, 'Tshangla'),
-        grantNewLaneStmt(t.db, PROJECT, { legacyTag: 'Tshangla' }, null),
+        ensureTargetLaneStmt(t.db, PROJECT, tag),
+        ...firstTargetLaneStmts(t.db, PROJECT, { legacyTag: tag }, null),
       ])
-    await run()
+    await run('Tshangla')
     const lane = await targetLaneIdForTag('Tshangla')
     expect(await grantedLanes(2)).toEqual([lane])
-    await run()
+    await run('Tshangla')
     expect(await grantedLanes(2)).toEqual([lane])
     expect(await grantedLanes(3)).toEqual([])
+    await run('Dzongkha')
+    await targetLaneIdForTag('Dzongkha')
+    expect(await grantedLanes(2)).toEqual([lane])
   })
 })

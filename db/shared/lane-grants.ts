@@ -1,44 +1,27 @@
-// AQU-1781 — creating a target lane has to grant it to the people who already
-// read every lane.
+// AQU-2355 — a lane grant grants only the lanes it lists.
 //
 // Under the lane read wall a member below Maintainer reads only the lanes they
-// hold a `project_member_lane_roles` row for. Two paths wrote those rows:
-// accepting an invite (every lane that existed at that moment) and a lead
-// saving a member's scopes. Lane creation wrote none, so every lane added after
-// a member joined was invisible to them while the member inspector still called
-// them "Unscoped — full access".
+// hold a `project_member_lane_roles` row for. AQU-1781 made lane creation grant
+// each new lane to every member below Maintainer who already held every other
+// lane: "every lane, forever", an implicit grant nobody chose. AQU-2351 rule 2
+// retired it. A lane created later reaches project and org Maintainers and
+// Owners (the wall waves them through) and the people or teams the creator
+// picks in the same step (POST /lanes `grants`), and nobody else.
 //
-// The rule here is the one `planLaneGrants` already encodes, expressed as SQL so
-// it can ride in the same batch as the lane insert:
-//   * a member who reads every lane the project already had reads every lane as
-//     a standing fact, so the new lane is granted at their project role level
-//   * a member limited to some of the lanes keeps only those — a lane created
-//     later is not one of them, so no row
-//   * Maintainer (600) and above are above the wall, and below Viewer (100) has
-//     no read at all: neither gets a row
-//
-// "Reads every lane" is read off the grant rows, not off `project_member_scopes`:
-// per 0091 the leveled grant model REPLACED that table's kind='lane' rows, so a
-// member staffed onto one lane can hold a single grant and no scope row at all
-// (that is what the AQU-730 backfill and the member inspector produce). Asking
-// only "has no lane scope" would hand such a member every lane added afterwards,
-// silently widening access a lead had deliberately narrowed. So the test is: do
-// they already hold a grant for every OTHER target lane of this project? The
-// legacy scope rows are still consulted as well, so a member narrowed only on
-// the old table is excluded too.
-//
-// A project with no other target lane satisfies that vacuously, which is the
-// bare-project case: nobody can hold a grant for a lane that does not exist, and
-// the bridge the first translation creates must be readable by the members who
-// are already there.
+// One implicit grant is left, the vacuous case of the old rule: a project's
+// FIRST target lane. Nobody can hold a grant for a lane that does not exist, so
+// the members a lane-less project already has — a project created inside a
+// team, a bare project whose first translation creates the `''` bridge, a Codex
+// project attached to its team before the content sweep — would otherwise read
+// source text only. The first lane goes to the same members AQU-1781 gave it
+// to, and every team attached to the project is linked to it, so the team's
+// attachment lists the lane it now covers.
 //
 // Keyed by the lane's id OR its legacy tag, because the tag-keyed writers
 // (`ensureProjectLaneStmts`, `ensureTargetLaneStmt`, `ensureBlankTargetBridgeStmt`)
-// upsert and may not own the row the batch ends up with. Either way the join
-// grants exactly the one lane named and nothing else, so an archived lane
-// elsewhere in the project is never picked up as a side effect. The insert is
-// `ON CONFLICT DO NOTHING`, so a lane created twice (or a creation path that
-// no-ops) writes no duplicate rows.
+// upsert and may not own the row the batch ends up with. Each statement reads
+// the lane back out of `lanes`, so a creation that rolled back or no-opped
+// grants nothing, and is `ON CONFLICT DO NOTHING`, so a re-run writes nothing.
 //
 // Lives in db/shared so auth-worker and sync-worker apply the SAME write.
 
@@ -59,25 +42,40 @@ function laneKeyColumn(ref: NewLaneRef): { column: string; value: string } {
 }
 
 /**
- * Grant one newly created target lane to every member below Maintainer who
- * already reads every other lane of the project. Safe to splice into the batch
- * that creates the lane — it reads the lane back out of `lanes`, so a creation
- * that rolled back or no-opped grants nothing.
+ * When the lane just created is the project's only target lane, grant it to
+ * every member below Maintainer with no kind='lane' scope row, and link every
+ * attached team to it. On a project that already had a target lane (archived
+ * included) both statements select nothing. Safe to splice into the batch that
+ * creates the lane.
  *
- * AQU-1800: "every member" is {@link projectWallMembersSql} — the team path as
- * well as `project_members`. A project a team reaches and nobody joined
- * directly used to grant its new lanes to nobody at all, which is what a
- * freshly migrated Codex project looks like: attached to its GitLab team, its
- * lanes created afterwards by the content sweep.
+ * Only a lane created IN THIS TRANSACTION (`lanes.created_at = now()`, which
+ * Postgres fixes at the transaction's start). The tag-keyed writers splice this
+ * into every write that names the lane — every default-lane translation, every
+ * import — not only the one that creates it; without the check, a later write
+ * would hand the project's one lane back to a member a lead had removed from it
+ * (the AQU-2557 leak). A caller that created the lane in an earlier statement
+ * of its own, outside the batch, passes `{ createdByCaller: true }`.
+ *
+ * "Every member" is {@link projectWallMembersSql} — the team path as well as
+ * `project_members` (AQU-1800).
  */
-export function grantNewLaneStmt(
+export function firstTargetLaneStmts(
   db: AquillaDb,
   projectId: string,
   ref: NewLaneRef,
   grantedBy: number | null,
-): AquillaStatement {
+  opts: { createdByCaller?: boolean } = {},
+): AquillaStatement[] {
   const key = laneKeyColumn(ref)
-  return db
+  const fresh = opts.createdByCaller ? "" : "AND l.created_at = now()"
+  const onlyLane = `NOT EXISTS (
+            SELECT 1 FROM lanes other
+             WHERE other.project_id = ?
+               AND other.role = 'target'
+               AND other.id <> l.id
+          )
+          ${fresh}`
+  const members = db
     .prepare(
       `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
        SELECT ?, m.user_id, l.id, m.role_level, ?
@@ -94,18 +92,7 @@ export function grantNewLaneStmt(
                AND s.user_id = m.user_id
                AND s.kind = 'lane'
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM lanes other
-             WHERE other.project_id = ?
-               AND other.role = 'target'
-               AND other.id <> l.id
-               AND NOT EXISTS (
-                 SELECT 1 FROM project_member_lane_roles g
-                  WHERE g.project_id = ?
-                    AND g.user_id = m.user_id
-                    AND g.lane = other.id
-               )
-          )
+          AND ${onlyLane}
           AND (EXISTS (SELECT 1 FROM project_members pm
                         WHERE pm.project_id = l.project_id
                           AND pm.user_id = m.user_id)
@@ -113,32 +100,125 @@ export function grantNewLaneStmt(
        ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )
     // AQU-2563: the last condition keeps out a member whose only path here is
-    // a team a lead limited to other lanes (see `attachmentCoversLaneSql`).
-    // It reads the project through `l`, so it adds no placeholder.
-    // Nine placeholders, in textual order: the row's project id, grantedBy,
+    // a team whose attachment does not list this lane. The team statement
+    // below links every attached team to a first lane and runs FIRST, so a
+    // team member does get it; the condition reads the project through `l`,
+    // so it adds no placeholder.
+    // Eight placeholders, in textual order: the row's project id, grantedBy,
     // the two the member source takes, the lane join's project id, the lane
-    // key, and the three sub-selects' project ids.
-    .bind(
-      projectId,
-      grantedBy,
-      projectId,
-      projectId,
-      projectId,
-      key.value,
-      projectId,
-      projectId,
-      projectId,
+    // key, the scope sub-select's and the only-lane sub-select's project ids.
+    .bind(projectId, grantedBy, projectId, projectId, projectId, key.value, projectId, projectId)
+  const teams = db
+    .prepare(
+      `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+       SELECT gpg.group_id, gpg.project_id, l.id
+         FROM group_project_grants gpg
+         JOIN lanes l
+           ON l.project_id = gpg.project_id
+          AND l.role = 'target'
+          AND l.${key.column} = ?
+        WHERE gpg.project_id = ?
+          AND ${onlyLane}
+       ON CONFLICT DO NOTHING`,
     )
+    .bind(key.value, projectId, projectId)
+  // Teams first: the member statement's AQU-2563 check reads the link.
+  return [teams, members]
 }
 
-/** {@link grantNewLaneStmt} for a caller that writes outside a batch. */
-export async function grantNewLane(
+/**
+ * {@link firstTargetLaneStmts} for a caller that has just created the lane
+ * itself, in an earlier statement (POST /lanes).
+ */
+export async function grantFirstTargetLane(
   db: AquillaDb,
   projectId: string,
   ref: NewLaneRef,
   grantedBy: number | null,
 ): Promise<void> {
-  await grantNewLaneStmt(db, projectId, ref, grantedBy).run()
+  for (const stmt of firstTargetLaneStmts(db, projectId, ref, grantedBy, { createdByCaller: true })) await stmt.run()
+}
+
+/** Which attached teams {@link linkTeamsToLaneStmts} links. */
+export type TeamLinkFilter =
+  /** Teams the Codex migration made (`groups.legacy_uuid` set). */
+  | { codex: true; groupIds?: undefined }
+  /** Exactly these teams, when they are attached to the project. */
+  | { groupIds: readonly number[]; codex?: undefined }
+
+/**
+ * AQU-2355 — link attached teams to one lane, and give their members the lane.
+ *
+ * A team attachment lists its lanes (`group_project_lanes`); a lane created
+ * later is not one of them. The Codex import is the writer that used to rely
+ * on "every lane, forever" (`lanes_explicit = false`) — it attaches each project
+ * to its GitLab team, then the content sweep creates the lanes — so it now
+ * names the team for each lane it creates.
+ *
+ * Members get the same rows `grantTeamLaneAccessStmt` writes, at the team's
+ * level for them, except a direct member who already holds a kind='lane'
+ * scope: a lead narrowed them on purpose (AQU-1818), and a team link must not
+ * widen that. A team-only member with scope rows gets the lane's scope row
+ * too, so the stored scopes keep matching their team's lanes.
+ */
+export function linkTeamsToLaneStmts(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  filter: TeamLinkFilter,
+  grantedBy: number | null,
+): AquillaStatement[] {
+  const groupFilter = filter.codex
+    ? `EXISTS (SELECT 1 FROM groups g WHERE g.id = gpg.group_id AND g.legacy_uuid IS NOT NULL)`
+    : `gpg.group_id IN (SELECT x.v::BIGINT FROM jsonb_array_elements_text(?::jsonb) AS x(v))`
+  const groupParam = filter.codex ? [] : [JSON.stringify(filter.groupIds.map(String))]
+  const link = db
+    .prepare(
+      `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+       SELECT gpg.group_id, gpg.project_id, l.id
+         FROM group_project_grants gpg
+         JOIN lanes l ON l.project_id = gpg.project_id AND l.role = 'target' AND l.id = ?
+        WHERE gpg.project_id = ?
+          AND ${groupFilter}
+       ON CONFLICT DO NOTHING`,
+    )
+    .bind(laneId, projectId, ...groupParam)
+  const level = `GREATEST(gpg.role_level, COALESCE(gm.role_level, 0))`
+  const members = `FROM group_project_grants gpg
+         JOIN group_project_lanes gpl
+           ON gpl.group_id = gpg.group_id AND gpl.project_id = gpg.project_id AND gpl.lane_id = ?
+         JOIN group_members gm ON gm.group_id = gpg.group_id
+        WHERE gpg.project_id = ?
+          AND ${groupFilter}
+          AND ${level} >= ${GRANT_MIN_ROLE}
+          AND ${level} < ${GRANT_BELOW_ROLE}`
+  const directScoped = `EXISTS (SELECT 1 FROM project_members pm
+                             WHERE pm.project_id = gpg.project_id AND pm.user_id = gm.user_id)
+                AND EXISTS (SELECT 1 FROM project_member_scopes s
+                             WHERE s.project_id = gpg.project_id AND s.user_id = gm.user_id AND s.kind = 'lane')`
+  const grants = db
+    .prepare(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+       SELECT gpg.project_id, gm.user_id, gpl.lane_id, MAX(${level}), ?
+         ${members}
+          AND NOT (${directScoped})
+        GROUP BY gpg.project_id, gm.user_id, gpl.lane_id
+       ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
+    )
+    .bind(grantedBy, laneId, projectId, ...groupParam)
+  const scopes = db
+    .prepare(
+      `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
+       SELECT DISTINCT gpg.project_id, gm.user_id, 'lane', gpl.lane_id, ?, (EXTRACT(EPOCH FROM now()) * 1000)::bigint
+         ${members}
+          AND NOT EXISTS (SELECT 1 FROM project_members pm
+                           WHERE pm.project_id = gpg.project_id AND pm.user_id = gm.user_id)
+          AND EXISTS (SELECT 1 FROM project_member_scopes s
+                       WHERE s.project_id = gpg.project_id AND s.user_id = gm.user_id AND s.kind = 'lane')
+       ON CONFLICT DO NOTHING`,
+    )
+    .bind(grantedBy == null ? "0" : String(grantedBy), laneId, projectId, ...groupParam)
+  return [link, grants, scopes]
 }
 
 // ---------------------------------------------------------------------------
@@ -150,8 +230,8 @@ export async function grantNewLane(
 //
 //   - invite accept / staffing / direct add  → services/lane-grants.ts, keyed
 //     on `project_members`
-//   - lane creation                          → `grantNewLaneStmt` above, also
-//     keyed on `project_members`
+//   - lane creation                          → the AQU-1781 grant, also
+//     keyed on `project_members` (retired by AQU-2355; see above)
 //
 // So nobody who reached a project through a team ever held a grant, and under
 // the wall they opened the project to source text only. The nightly Codex sync
@@ -162,11 +242,10 @@ export async function grantNewLane(
 //
 // Two writes close it, and both are below:
 //
-//   1. `projectWallMembersSql` makes `grantNewLaneStmt` see the team path, so a
-//      lane created on a project a team reaches is granted to that team's
-//      members on the same terms as a direct member's. That is the half of the
-//      bug a newly migrated project hits: its lanes are created by the content
-//      sweep, AFTER the project was attached to its team.
+//   1. `projectWallMembersSql` makes lane creation see the team path. Since
+//      AQU-2355 that is the first lane only (`firstTargetLaneStmts`); the
+//      Codex content sweep links its team to each later lane it creates
+//      (`linkTeamsToLaneStmts`).
 //   2. `grantTeamLaneAccessStmt` seeds the lanes a project ALREADY has when
 //      someone joins the team or the team is attached to the project. Lane
 //      creation cannot do that one: the lanes predate the membership.
@@ -208,9 +287,11 @@ export function projectWallMembersSql(): string {
 // auth-worker paths read it per person (`teamLaneAccess`): any living
 // attachment that brings the person to the project means every lane, otherwise
 // the union of the lanes the limited attachments list. The two helpers below
-// are that rule as SQL, so the sync's team seeding and lane creation follow it
-// too. A living attachment (`lanes_explicit = false`) covers every lane, which
-// is what both statements did for every attachment before.
+// are that rule as SQL, so the sync's team seeding and a lane-less project's
+// first lane (`firstTargetLaneStmts`, AQU-2355) follow it too. A living
+// attachment (`lanes_explicit = false`) covers every lane, which is what both
+// statements did for every attachment before; AQU-2355 stops writing such rows
+// and migration 0208 converts the ones left.
 
 /** Does attachment row `gpg` (a `group_project_grants` alias) cover lane `lane`? */
 function attachmentCoversLaneSql(gpg: string, lane: string): string {
@@ -261,20 +342,19 @@ function teamMembersSql(pending: boolean): string {
  *
  * Only a member with NO grant row on the project is seeded, which is the rule
  * `applyDirectAddLaneGrants` already follows: some grants means a lead narrowed
- * them deliberately, and widening that silently is the regression AQU-1781
- * guards against. A `kind='lane'` scope row says the same thing on the legacy
- * table. Together those two make the write idempotent — the second run finds
+ * them deliberately, and widening that silently is a regression. A
+ * `kind='lane'` scope row says the same thing on the legacy table. Together those two make the write idempotent — the second run finds
  * the rows it wrote and selects nothing.
  *
  * Archived lanes are granted too, exactly as `applyDirectAddLaneGrants` does.
  * They reveal nothing on their own — an archived lane is not one of the lanes a
- * project shows — but AQU-1781 gives a newly created lane only to a member who
- * already reads every OTHER target lane, archived ones included. Seeding only
- * the current lanes would therefore leave a team member silently skipping every
- * lane the project adds later, which is the AQU-1783 gap. This is a deliberate
- * deviation from AQU-1800's "archived lanes are never granted": the spec's
- * *Admission writes the whole of a member's access* says archived included, and
- * the two halves have to agree or the team path drifts from the direct one.
+ * project shows — and they keep the member's access whole if the lane is
+ * restored. This deviates from AQU-1800's "archived lanes are never granted":
+ * the spec's *Admission writes the whole of a member's access* says archived
+ * included, and the team path must not drift from the direct one. (Since
+ * AQU-2563 and AQU-2355 an attachment covers only the lanes it lists, which
+ * are current lanes, so in practice archived lanes come from a living
+ * `lanes_explicit = false` row that migration 0208 has not converted yet.)
  *
  * AQU-2563: "every lane" is every lane the member's attachments cover — this
  * one, or another team that brings them to the same project, so the order the

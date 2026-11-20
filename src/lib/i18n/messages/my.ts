@@ -3030,7 +3030,6 @@ export const my: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "ကုမ္ပဏီအဆင့်·{role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "ဤပရောဂျက်တွင်{username}၏လမ်းရထိုးအဆင်ရည်တည်းဖြတ်ပါ",
   "org.memberLaneScopeEditor.scopesHeading": "{username} ၏ အမြင်အောင်လုံးပိုင်းများ",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "အမြင်အောင်လုံးပိုင်းမပြုလုပ် — အားလုံးအယူခွင့်",
   "org.memberLaneScopeEditor.languagesLegend": "အလုပ်လုပ်နိုင်သော ဘာသာစကားများ",
   "org.memberLaneScopeEditor.mainLanguageFallback": "ပင်မဘာသာစကား",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (ဤပရောဂျက်ရှိ ဘာသာစကား မဟုတ်ပါ)",

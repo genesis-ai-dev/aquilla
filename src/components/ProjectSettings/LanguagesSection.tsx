@@ -76,6 +76,8 @@ import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { laneRowDelivers, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
+import { NewLaneGrantPicker } from "./NewLaneGrantPicker"
+import type { NewLaneGrantCandidates, NewLaneGrantPicks } from "@/lib/sync/project-settings"
 
 const MAX_LANE_LENGTH = 64
 
@@ -133,7 +135,14 @@ export interface LanguagesSectionProps {
     /** Media redesign: what the new language delivers, chosen in the add form.
      *  Sent only where the rows show Delivers. */
     delivers?: LaneDelivers
+    /** AQU-2355: the people and teams ticked in "Who else gets this language lane". */
+    grants?: NewLaneGrantPicks
   }) => Promise<"ok" | "duplicate" | "invalid" | "malformed_code">
+  /**
+   * AQU-2355: the people and teams on the project's other lanes, which the add
+   * form lists unticked. Omitted (a local project), the form lists nobody.
+   */
+  onLoadGrantCandidates?: () => Promise<NewLaneGrantCandidates | null>
   onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
   /**
    * Media redesign slice 1: the "Delivers" choice on each language row (Text,
@@ -234,6 +243,7 @@ export function LanguagesSection({
   onSetLaneArchived,
   onSetLaneDelivers,
   onLoadLaneLastChange,
+  onLoadGrantCandidates,
   startAdding = false,
 }: LanguagesSectionProps) {
   const t = useT()
@@ -243,6 +253,7 @@ export function LanguagesSection({
   const [nameEdited, setNameEdited] = useState(false)
   const [laneCode, setLaneCode] = useState("")
   const [newDelivers, setNewDelivers] = useState<LaneDelivers>("text")
+  const [grantPicks, setGrantPicks] = useState<NewLaneGrantPicks>({})
   const [addError, setAddError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   // The one row opened into its fields (a target row or the source), and the
@@ -344,6 +355,7 @@ export function LanguagesSection({
     setNameEdited(false)
     setLaneCode("")
     setNewDelivers("text")
+    setGrantPicks({})
     setAddError(null)
   }
 
@@ -394,6 +406,9 @@ export function LanguagesSection({
           // the save goes through rather than coming back refused.
           allowDuplicateName: !!duplicateActiveLane(language, name),
           ...(showDelivers ? { delivers: newDelivers } : {}),
+          ...((grantPicks.userIds?.length ?? 0) + (grantPicks.teamIds?.length ?? 0) > 0
+            ? { grants: grantPicks }
+            : {}),
         })
         if (result !== "ok") {
           setAddError(editResultMessage(result, t))
@@ -1043,6 +1058,14 @@ export function LanguagesSection({
                   </div>
                 )}
               </div>
+              {rowMode && onLoadGrantCandidates && (
+                <NewLaneGrantPicker
+                  load={onLoadGrantCandidates}
+                  value={grantPicks}
+                  onChange={setGrantPicks}
+                  disabled={adding}
+                />
+              )}
               {/* AQU-1784: the collision is named BEFORE the save, and the save
                   is still allowed — the switcher numbers the pair once both
                   exist. */}

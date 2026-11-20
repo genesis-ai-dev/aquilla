@@ -16,7 +16,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { handleMigrateGroupsRequest } from '../events/migrate-groups-route'
 import { handleMigrateProjectRequest } from '../events/migrate-project-route'
-import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
+import { firstTargetLaneStmts } from '../../../db/shared/lane-grants'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const SECRET = 'team-grants-secret'
@@ -157,16 +157,14 @@ describe('POST /migrate/groups — team membership writes lane access (AQU-1800)
     expect(await grantedLanes(9)).toEqual([])
   })
 
-  it('seeds the archived lanes too, so a lane added later still reaches the member', async () => {
+  it('seeds the archived lanes too, and a lane added later reaches nobody (AQU-2355)', async () => {
     const { orgId, teamId } = await seedOrgAndTeam()
     await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001'], archivedLanes: ['tgt00099'] })
 
     await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([7]) }), env())
 
-    // An archived lane reveals nothing on its own, but AQU-1781 hands a new
-    // lane only to a member who already reads every OTHER target lane,
-    // archived ones included — so leaving it out would silently stop this
-    // member receiving the project's future lanes (AQU-1783).
+    // An archived lane reveals nothing on its own; holding it keeps the
+    // member's access whole if the lane is restored.
     expect(await grantedLanes(7)).toEqual([
       { lane: 'tgt00001', level: CONTRIBUTOR },
       { lane: 'tgt00099', level: CONTRIBUTOR },
@@ -177,9 +175,9 @@ describe('POST /migrate/groups — team membership writes lane access (AQU-1800)
        VALUES ('tgt00002', $1, 'target', 'sw', 'sw', 1)`,
       [PROJECT],
     )
-    await grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00002' }, 1).run()
+    for (const stmt of firstTargetLaneStmts(t.db, PROJECT, { laneId: 'tgt00002' }, 1, { createdByCaller: true })) await stmt.run()
 
-    expect((await grantedLanes(7)).map((g) => g.lane)).toEqual(['tgt00001', 'tgt00002', 'tgt00099'])
+    expect((await grantedLanes(7)).map((g) => g.lane)).toEqual(['tgt00001', 'tgt00099'])
   })
 
   it('leaves a member a lead narrowed to one lane exactly as narrow', async () => {
@@ -293,8 +291,8 @@ describe('POST /migrate/project — attaching a project to a team writes lane ac
   })
 })
 
-describe('lane creation reaches team members too (AQU-1800)', () => {
-  it('grants a lane created after the attach to the team members, not only direct members', async () => {
+describe('the first lane of a lane-less project reaches team members too (AQU-1800, AQU-2355)', () => {
+  it('grants the first lane created after the attach to the team members, and links the team', async () => {
     const { orgId, teamId } = await seedOrgAndTeam()
     // The newly migrated case: project attached to its team, no direct member
     // at all, and the content sweep creates the first target lane afterwards.
@@ -306,9 +304,14 @@ describe('lane creation reaches team members too (AQU-1800)', () => {
       [PROJECT],
     )
 
-    await grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00001' }, 1).run()
+    for (const stmt of firstTargetLaneStmts(t.db, PROJECT, { laneId: 'tgt00001' }, 1, { createdByCaller: true })) await stmt.run()
 
     expect(await grantedLanes(7)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
+    const linked = await t.pg.query<{ lane_id: string }>(
+      `SELECT lane_id FROM group_project_lanes WHERE group_id = $1 AND project_id = $2`,
+      [teamId, PROJECT],
+    )
+    expect(linked.rows.map((r) => r.lane_id)).toEqual(['tgt00001'])
   })
 })
 

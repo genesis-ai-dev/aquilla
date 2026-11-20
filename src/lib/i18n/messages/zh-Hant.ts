@@ -3031,7 +3031,6 @@ export const zh_Hant: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "組織層級 · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "編輯 {username} 在這個專案上的語言軌範圍",
   "org.memberLaneScopeEditor.scopesHeading": "{username} 的範圍",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "未限定範圍 — 完整存取",
   "org.memberLaneScopeEditor.languagesLegend": "可作業的語言",
   "org.memberLaneScopeEditor.mainLanguageFallback": "主要語言",
   "org.memberLaneScopeEditor.unknownLane": "{lane}（非此專案中的語言）",

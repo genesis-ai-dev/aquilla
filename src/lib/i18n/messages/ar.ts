@@ -3033,7 +3033,6 @@ export const ar: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "على مستوى المنظمة · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "عدّل نطاقات المسارات لـ {username} على هذا المشروع",
   "org.memberLaneScopeEditor.scopesHeading": "نطاقات {username}",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "بدون نطاق — وصول كامل",
   "org.memberLaneScopeEditor.languagesLegend": "اللغات التي يمكنه العمل بها",
   "org.memberLaneScopeEditor.mainLanguageFallback": "اللغة الرئيسية",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (ليست لغة في هذا المشروع)",

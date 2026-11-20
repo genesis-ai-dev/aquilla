@@ -3030,7 +3030,6 @@ export const th: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "ระดับองค์กร · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "แก้ไขขอบเขตเลนของ {username} ในโครงการนี้",
   "org.memberLaneScopeEditor.scopesHeading": "{username} scopes",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "ไม่มีขอบเขต — เข้าถึงแบบเต็ม",
   "org.memberLaneScopeEditor.languagesLegend": "ภาษาที่ทำงานได้",
   "org.memberLaneScopeEditor.mainLanguageFallback": "ภาษาหลัก",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (ไม่ใช่ภาษาในโปรเจกต์นี้)",

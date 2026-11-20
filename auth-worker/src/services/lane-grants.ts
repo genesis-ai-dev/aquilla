@@ -239,22 +239,28 @@ const PROJECT_LEAD = 500
 const MAINTAINER = 600
 const VIEWER = 100
 
-export type TeamLaneSelection =
-  | { explicit: false }
-  | { explicit: true; laneIds: string[] }
+/**
+ * The lanes a team attachment lists. AQU-2355: always explicit — there is no
+ * "every lane, forever" attachment any more (`lanes_explicit` is always true;
+ * scripts/neon-explicit-lane-grants.ts converts the rows written before).
+ */
+export type TeamLaneSelection = { explicit: true; laneIds: string[] }
 
 /**
- * The lanes a team attachment may store. Omitting the list keeps the living
- * "every lane" attachment (Codex, and callers that predate the checkboxes).
- * Naming lanes freezes the attachment to those lanes.
+ * The lanes a team attachment may store. Omitting the list means every
+ * CURRENT target lane (callers that predate the checkboxes); a lane created
+ * later is not included until someone adds it. Naming lanes stores exactly
+ * those.
  */
 export async function resolveTeamLaneSelection(
   db: AquillaDb,
   projectId: string,
   laneIds: readonly string[] | undefined,
 ): Promise<{ ok: true; selection: TeamLaneSelection } | { ok: false; error: string }> {
-  if (laneIds == null) return { ok: true, selection: { explicit: false } }
   const current = await loadCurrentTargetLanes(db, projectId)
+  if (laneIds == null) {
+    return { ok: true, selection: { explicit: true, laneIds: current.map((lane) => lane.id) } }
+  }
   if (current.length > 0 && laneIds.length === 0) {
     return { ok: false, error: "Choose at least one target lane." }
   }
@@ -275,7 +281,7 @@ export async function saveTeamLaneSelection(
 ): Promise<void> {
   await db
     .prepare(
-      `UPDATE group_project_grants SET lanes_explicit = ${selection.explicit ? "TRUE" : "FALSE"}
+      `UPDATE group_project_grants SET lanes_explicit = TRUE
         WHERE group_id = ? AND project_id = ?`,
     )
     .bind(groupId, projectId)
@@ -284,7 +290,6 @@ export async function saveTeamLaneSelection(
     .prepare("DELETE FROM group_project_lanes WHERE group_id = ? AND project_id = ?")
     .bind(groupId, projectId)
     .run()
-  if (!selection.explicit) return
   for (const laneId of selection.laneIds) {
     await db
       .prepare(
@@ -576,6 +581,11 @@ async function teamLaneAccess(
     .all<{ group_id: number; lanes_explicit: boolean | number | string }>()
   const teams = results ?? []
   if (teams.length === 0) return { explicit: true, laneIds: [] }
+  // AQU-2355: no writer stores `lanes_explicit = false` any more. A row that
+  // still says false was written before, and keeps its old meaning (every lane
+  // the project has when the team changes) until
+  // scripts/neon-explicit-lane-grants.ts converts it. Honouring it here is what
+  // makes deploying this code before that script safe: nobody's lanes shrink.
   if (teams.some((team) => !laneFlag(team.lanes_explicit))) {
     const lanes = await loadTargetLaneIdentities(db, projectId)
     return { explicit: false, laneIds: lanes.map((lane) => lane.id) }

@@ -1253,6 +1253,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.addDuplicateNotice":
       "Another language lane is already named \"{lane}\". You can still add this one; the language " +
       "switcher numbers them.",
+    // AQU-2355: a new language lane reaches nobody below Maintainer unless
+    // picked here.
+    "projectSettings.languages.grantLegend": "Who else gets this language lane",
+    "projectSettings.languages.grantHint":
+      "People and teams on this project's other language lanes. Each gets the role they have there. " +
+      "Maintainers and Owners see every language lane already. Anyone you leave unticked can be added later.",
+    "projectSettings.languages.grantSelectAll": "Select all",
+    "projectSettings.languages.grantPersonLine": "{role} · {lanes}",
+    "projectSettings.languages.grantTeamLine": plural({
+      one: "Team · {role} · {count} person · {lanes}",
+      other: "Team · {role} · {count} people · {lanes}",
+    }),
+    "projectSettings.languages.grantLoading": "Loading people on the other language lanes…",
     "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
     "projectSettings.languages.archiveHint":
       "It leaves the language switcher, but nothing is deleted: its work is kept and " +
@@ -2323,6 +2336,37 @@ export const projectSettings = defineNamespace({
         placeholders: {
           lane: "The existing language's display name, as the switcher shows it (data, not translated).",
         },
+      },
+      "projectSettings.languages.grantLegend": {
+        description:
+          "Heading of the checklist inside the Add a language form. Lists the people and teams already on the " +
+          "project's other language lanes; none is ticked. Ticking one gives them the new language lane too.",
+      },
+      "projectSettings.languages.grantHint": {
+        description:
+          "Explanation under that heading. A new language lane is given to nobody automatically except " +
+          "Maintainers and Owners, who see every language lane.",
+      },
+      "projectSettings.languages.grantSelectAll": {
+        description: "Checkbox at the top of that checklist that ticks (or unticks) every person and team in it.",
+      },
+      "projectSettings.languages.grantPersonLine": {
+        description: "Detail line under a person's name in that checklist.",
+        placeholders: {
+          role: "The role they hold on the other language lanes, already translated (e.g. Contributor).",
+          lanes: "Comma-separated names of those language lanes (data, not translated).",
+        },
+      },
+      "projectSettings.languages.grantTeamLine": {
+        description: "Detail line under a team's name in that checklist.",
+        placeholders: {
+          role: "The team's role on this project, already translated (e.g. Contributor).",
+          count: "How many people are on the team.",
+          lanes: "Comma-separated names of the language lanes the team is on (data, not translated).",
+        },
+      },
+      "projectSettings.languages.grantLoading": {
+        description: "Shown in place of that checklist while it loads.",
       },
       "projectSettings.languages.archiveConfirmShort": {
         description:

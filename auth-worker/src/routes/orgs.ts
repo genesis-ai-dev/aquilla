@@ -1757,8 +1757,8 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
-  // AQU-1813: a named lane list freezes the attachment to those lanes. Omitting
-  // it keeps the living "every lane" attachment the Codex sync still sends.
+  // AQU-1813 / AQU-2355: the attachment lists its lanes. Omitting the list
+  // means every current lane; a lane created later is not added.
   await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
   await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {

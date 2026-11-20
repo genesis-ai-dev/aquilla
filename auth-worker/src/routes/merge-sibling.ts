@@ -43,7 +43,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listDownstreamProjects, loadProjectWithSource } from "../services/source-linking"
 import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { ensureTargetLaneStmt, listProjectLanes, retryingLaneIdCollision } from "../../../db/shared/lanes"
-import { grantNewLaneStmt } from "../../../db/shared/lane-grants"
+import { firstTargetLaneStmts } from "../../../db/shared/lane-grants"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
@@ -269,14 +269,15 @@ mergeSibling.post(
     }
 
     // A fold that matched nothing wrote no rows, so it created no lane. Create
-    // it here — with the grant the fold would have written (AQU-1781) — so the
-    // merged lane exists either way. Both statements keep an existing record.
+    // it here so the merged lane exists either way. AQU-2355: a lane created
+    // later reaches nobody below Maintainer; only a host with no target lane
+    // gives its members this first one. The statements keep an existing record.
     let hostLaneId = fold.result.hostLaneId ?? null
     if (!hostLaneId) {
       await retryingLaneIdCollision(() =>
         c.env.AQUILLA_PG.batch([
           ensureTargetLaneStmt(c.env.AQUILLA_PG, hostId, lane),
-          grantNewLaneStmt(c.env.AQUILLA_PG, hostId, { legacyTag: lane }, null),
+          ...firstTargetLaneStmts(c.env.AQUILLA_PG, hostId, { legacyTag: lane }, null),
         ]),
       )
       const created = await c.env.AQUILLA_PG.prepare(

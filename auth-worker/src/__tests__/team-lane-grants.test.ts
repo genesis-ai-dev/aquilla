@@ -52,6 +52,13 @@ async function seedOrg(opts: { attach?: boolean; lanes?: boolean; carolOrgRole?:
     )
       .bind(CONTRIBUTOR)
       .run()
+    // AQU-2355: an attachment lists its lanes; this one covers both.
+    if (opts.lanes !== false) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+         VALUES (1, 'p1', 'lane0001'), (1, 'p1', 'lane0002')`,
+      ).run()
+    }
   }
 }
 
@@ -464,7 +471,7 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
     { lane: "lane0002", level: CONTRIBUTOR },
   ]
 
-  it("revoke then attach grants every current lane and leaves no scope", async () => {
+  it("revoke then attach grants every current lane, scoped to the team's lanes", async () => {
     await seedOrg({ attach: false })
     await onTeam(3)
     expect((await addScoped()).status).toBe(200)
@@ -476,10 +483,12 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await attachProject(CONTRIBUTOR)).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
-  it("revoke then add-to-team grants every current lane and leaves no scope", async () => {
+  it("revoke then add-to-team grants every current lane, scoped to the team's lanes", async () => {
     await seedOrg()
     expect((await addScoped()).status).toBe(200)
     expect((await revokeAll()).status).toBe(200)
@@ -488,7 +497,9 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await addToTeam()).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
   it("revoking only the direct membership leaves the team's lanes in place", async () => {
@@ -502,7 +513,9 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await revokeAll()).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
   it("a current lane-scoped member who also joins the team keeps those lanes", async () => {
@@ -532,6 +545,7 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
       { lane: "lane0001", level: VIEWER },
       { lane: "lane0002", level: VIEWER },
     ])
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the ended membership's scope is replaced by the team's lanes.
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 })

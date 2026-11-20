@@ -427,18 +427,28 @@ UI chrome that used to be one smoke file per click is covered under
   wall had walled off. The verdict rule is `src/lib/lanes/grant-gap.test.ts` (all granted /
   gap / deliberate scoping / a grant below Viewer / Maintainer-by-role / wall off); the three
   rendered states, the "no access" marker and the one-click regrant are in
-  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate, the regrant
-  granting every target lane (archived included) and a lane created after the regrant still
-  reaching the member (AQU-1781) are in
+  `MemberLaneScopeEditor.test.tsx` (no "Unscoped" line since AQU-2355); the endpoint payload,
+  the lead-only gate, and the regrant granting every current target lane (archived included,
+  not lanes created later — AQU-2355) are in
   `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
   two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
-  unset locally and in e2e) AND grants that have drifted. Since AQU-1781 (a new lane is
-  granted to members who read every lane), AQU-1782 (direct add writes grants) and AQU-1801
+  unset locally and in e2e) AND grants that have drifted. Since AQU-1782 (direct add writes
+  grants) and AQU-1801
   (the three team writes do too — team add, team→project attach, team→project role change,
   pinned in `auth-worker/src/__tests__/team-lane-grants.test.ts`) the app's own flows no
   longer produce that drift — it lives in data written before them — so a walk has to delete
   a grant row by hand first. The inspector-shows-the-gap → regrant →
   contributor-reloads walk is on this issue's QA checklist rather than written blind.
+- A lane grant grants only the lanes it lists (AQU-2355): a lane created later reaches
+  Maintainers and Owners by role, its creator, and the people and teams ticked in the Add a
+  language form's "Who else gets this language lane" (the people and teams on the other lanes,
+  unticked, with their role there, plus Select all) — nobody else; a lane-less project's first
+  lane still reaches its members and links its teams. Server rules in
+  `auth-worker/src/__tests__/lane-create-grants.test.ts` (route, candidates, picks, refusals,
+  Codex team links) and `sync-worker/src/__tests__/lane-create-grants.test.ts` (the bridge as a
+  first lane only, never re-granted on a later write); the form in `LanguagesSection.test.tsx`;
+  migration 0208 equals its dry run in `scripts/explicit-lane-grants-migration.test.ts`. No smoke:
+  e2e runs with the read wall off (`LANE_READ_WALL` unset), so a walk cannot see who reads a lane.
 - Org import floor (AQU-2304): an org owner sets **Settings → Security → "Who can import files"**
   to Maintainer, and in every project of that org only maintainers and owners may bring a NEW
   source file in — the Import dialog's "New source text", the sidebar re-import and the IDML copy

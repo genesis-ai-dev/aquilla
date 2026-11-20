@@ -3018,7 +3018,6 @@ export const ms: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "aras organisasi · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "Sunting skop lorong {username} pada projek ini",
   "org.memberLaneScopeEditor.scopesHeading": "Skop {username}",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "Tiada skop — akses penuh",
   "org.memberLaneScopeEditor.languagesLegend": "Bahasa yang boleh mereka kerjakan",
   "org.memberLaneScopeEditor.mainLanguageFallback": "Bahasa utama",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (bukan bahasa dalam projek ini)",

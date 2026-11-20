@@ -11,8 +11,8 @@
  * project exists, and nothing of its translation, had no way to say it.
  *
  * "No lanes" cannot be stored as zero scope rows, because that is already how
- * "every current lane" is stored, and it is what `grantNewLaneStmt` (AQU-1781)
- * reads as "this member sees every lane, so grant them the new one too". So it
+ * "every current lane" is stored, and it is what `firstTargetLaneStmts`
+ * reads as "grant this member a lane-less project's first lane". So it
  * is stored as ONE reserved scope value that names no lane:
  *
  *   project_member_scopes  → one `kind='lane'` row holding {@link NO_LANE_SCOPE}
@@ -22,8 +22,9 @@
  * {@link planLaneGrants} writes no grant rows (it short-circuits on the
  * sentinel), `laneScopeAdmitsTag` admits no lane, the member inspector reports
  * a deliberately restricted member rather than an unscoped one, and
- * `grantNewLaneStmt` skips anyone holding a lane scope, so a lane created later
- * is not granted either.
+ * `firstTargetLaneStmts` skips anyone holding a lane scope, so not even a
+ * project's first lane is granted. (Since AQU-2355 no later lane is granted to
+ * anyone below Maintainer.)
  *
  * An invite minted BEFORE this ticket carries `scope_lanes = NULL`, which still
  * means "every lane that existed when it is accepted". Nothing re-reads those

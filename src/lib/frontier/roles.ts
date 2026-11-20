@@ -76,9 +76,10 @@ export const LINK_ROLE_ALLOWED: readonly RoleLevel[] = [
 ]
 
 /**
- * Roles offered in the per-project Members panel role picker. Owner (700)
- * is intentionally excluded — ownership is conferred on project creation
- * and isn't transferable via the picker.
+ * Roles offered in the per-project Members panel role picker. Owner is
+ * included so an Owner can grant it (AQU-2357 / AQU-985). roleChoices hides
+ * it from anyone below Owner. Invite links stay on LINK_ROLE_ALLOWED and
+ * never offer Owner.
  */
 export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.VIEWER,
@@ -87,6 +88,7 @@ export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.CONTRIBUTOR,
   ROLE.PROJECT_LEAD,
   ROLE.MAINTAINER,
+  ROLE.OWNER,
 ]
 
 /**

@@ -42,19 +42,6 @@ export interface CreateProjectInput {
   /** Creator's user id (numeric, or its string form). */
   createdBy: number | string
   /**
-   * When true, also INSERT a `project_members` row at owner level (700) for the
-   * creator.
-   *
-   * The auth-worker HTTP route leaves this false: a project's creator already
-   * resolves to 700 via the resolver's implicit "creator" path
-   * (created_by = user), so writing an explicit override row would flip that
-   * attribution from source "creator" to source "override" — a behavior change
-   * the internal route must not make. The sync-worker `CreateProject` command
-   * (spec §2), whose receipt-only apply step confers the creator role through
-   * this row rather than a live resolver, passes true.
-   */
-  writeCreatorMembership?: boolean
-  /**
    * AQU-1594: the language pair becomes lane rows in the same batch as the
    * project. It is NOT written into `project_settings` — new projects have no
    * project-level language keys. Omit both and the project still gets its
@@ -78,10 +65,10 @@ export interface CreateProjectInput {
 }
 
 /**
- * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
- * optionally, the creator's owner-level membership row. Returns whether the
- * project row was newly inserted (false on an id collision — the caller decides
- * whether that is a conflict or a benign retry).
+ * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and the
+ * creator's Owner grant (AQU-2357). `created_by` is history only. Returns
+ * whether the project row was newly inserted (false on an id collision — the
+ * caller decides whether that is a conflict or a benign retry).
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
@@ -107,19 +94,19 @@ export async function createProjectShared(
     // The project insert stays FIRST in the batch — `inserted` is read off index 0.
     const stmts: AquillaStatement[] = [projectStmt]
 
-    if (input.writeCreatorMembership) {
-      // Atomic with the project insert so a caller relying on the membership row
-      // for its role never observes a project without its creator's grant.
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
-             VALUES (?, ?, 700, ?)
-             ON CONFLICT(project_id, user_id) DO NOTHING`,
-          )
-          .bind(input.projectId, input.createdBy, input.createdBy),
-      )
-    }
+    // Atomic with the project insert. A lower row on a retry is raised to
+    // Owner; an existing Owner row is left alone.
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+           VALUES (?, ?, 700, ?)
+           ON CONFLICT(project_id, user_id) DO UPDATE
+             SET role_level = 700
+             WHERE project_members.role_level < 700`,
+        )
+        .bind(input.projectId, input.createdBy, input.createdBy),
+    )
 
     const lanes = lanesForNewProject(input)
     stmts.push(

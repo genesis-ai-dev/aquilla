@@ -214,7 +214,6 @@ function AccessProjectRow({
   const otherPaths = [
     ...p.groups.map((g) => t("org.memberAccessPanel.viaTeamLabel", { name: g.name })),
     ...(p.org != null ? [t("org.memberAccessPanel.viaOrgRoleLabel")] : []),
-    ...(p.creator ? [t("org.membersPage.sourceProjectCreator")] : []),
   ]
   return (
     <li className="rounded border bg-background p-2">
@@ -241,9 +240,9 @@ function AccessProjectRow({
           </Badge>
         )}
         {p.creator && (
-          <Badge variant="secondary" className="text-[10px]">
-            {t("org.memberAccessPanel.creatorGrantLabel")}
-          </Badge>
+          <span className="text-[10px] text-muted-foreground">
+            {t("org.membersPage.createdThisProject")}
+          </span>
         )}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">

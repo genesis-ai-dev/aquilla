@@ -2,11 +2,17 @@ name: Risk labels
 
 # Labels every pull request into dev with the production risk areas its
 # files touch (`risk:events`, `risk:auth`, `risk:offline-sync`,
-# `risk:migration`, `risk:infra`, and the noted-only `risk:export`,
-# `risk:sync`), from the one file map in scripts/release-risk.mjs. A PR
-# carrying a holding area is kept off the hourly release line by
-# scripts/release-plan.mjs until a person adds `release:approved`; see
-# docs/RELEASE-RISK-GATES.md. The planner classifies the merged diff itself,
+# `risk:migration`, `risk:infra`, `risk:release-tooling`, `risk:deps`, and
+# the noted-only `risk:export`, `risk:sync`, `risk:ci`), from the one file map
+# in scripts/release-risk.mjs. A PR carrying a holding area is kept off the
+# release line by scripts/release-plan.mjs until that area's gate job below
+# is green on its head, or a person adds `release:approved`; see
+# docs/RELEASE-RISK-GATES.md. `infra` has no gate.
+#
+# The gate jobs run only for a PR that touches their area. Four of them run a
+# checker from the BASE commit (checked out beside the PR as a worktree), so
+# a PR cannot edit the script that judges it; all of their own files are
+# `infra` in the file map for the same reason. The planner classifies the merged diff itself,
 # so these labels inform people and route review; they are not the gate.
 
 on:
@@ -17,6 +23,8 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # plan-diff runs the planner, which reads walk comments and gate checks.
+  issues: read
   checks: read
 
 concurrency:
@@ -55,8 +63,8 @@ jobs:
         env:
           AREAS: ${{ steps.label.outputs.areas }}
         run: |
-          echo "### Off the hourly line until a person approves" >> "$GITHUB_STEP_SUMMARY"
-          echo "Areas: $AREAS. After manual QA, add the \`release:approved\` label." >> "$GITHUB_STEP_SUMMARY"
+          echo "### Off the release line until its gates are green or a person approves" >> "$GITHUB_STEP_SUMMARY"
+          echo "Areas: $AREAS. Each area with a gate job below ships once that job is green; \`infra\` and a red gate wait for a person and the \`release:approved\` label." >> "$GITHUB_STEP_SUMMARY"
 
   # The events gate (docs/RELEASE-RISK-GATES.md "Replay gate"). Runs only for a
   # PR that touches the events area, on the PR's own head: the corpus of real
@@ -149,5 +157,196 @@ jobs:
         run: |
           if ! git diff --quiet "$BASE_SHA" HEAD -- auth-worker/permission-matrix/golden.json sync-worker/permission-matrix/golden.json; then
             echo "::error::permission-matrix/golden.json changed in this PR: the auth-matrix gate stays red so the hold stays on. Review the golden diff and add release:approved."
+            exit 1
+          fi
+
+  # The offline-sync gate (docs/RELEASE-RISK-GATES.md "Gates"). Runs only for
+  # a PR that touches the offline-sync area, on the PR's own head: the real
+  # outbox and both of its drains go through a table of scripted faults
+  # against a fake server, and every enqueued event must end accepted, still
+  # queued, or held by a documented rule. The per-scenario outcome must equal
+  # the committed golden. Green here lifts the `offline-sync` hold
+  # (AREA_GATES). The job also fails when golden.json changed in the PR: a
+  # change on purpose to what the outbox does with an event goes to a person.
+  offline-gate:
+    needs: label
+    if: contains(needs.label.outputs.areas, 'offline-sync')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Every scripted fault, against the real outbox
+        run: pnpm vitest run src/lib/sync/offline-gate/offline-gate.test.ts
+      - name: A changed golden means the outbox treats an event differently on purpose; a person reviews it
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git diff --quiet "$BASE_SHA" HEAD -- src/lib/sync/offline-gate/golden.json; then
+            echo "::error file=src/lib/sync/offline-gate/golden.json::golden.json changed in this PR: the offline gate stays red so the hold stays on. Review the golden diff and add release:approved."
+            exit 1
+          fi
+
+  # The migration gate (scripts/gate-migration.ts has the reasoning). Three
+  # legs, all of which must hold for a schema change to ship with no person:
+  # every new statement is additive; the base schema.sql plus the new
+  # migration files is the PR's schema.sql; and the BASE commit's replay
+  # corpus and permission matrices still answer their goldens on the PR's
+  # schema.sql, which is production's current code on the new schema, the
+  # state production is in between the migration and the deploy.
+  # Green here lifts the `migration` hold only while the AUTO_MIGRATE
+  # repository variable is `on` (release-risk.mjs GATE_SWITCHES), because
+  # release-deploy.yml then applies the migration to production itself.
+  migration-gate:
+    needs: label
+    if: contains(needs.label.outputs.areas, 'migration')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - name: Check out the base commit beside the PR, with its own packages
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          cd "$RUNNER_TEMP/base"
+          test -f scripts/gate-migration.ts || { echo "::error::scripts/gate-migration.ts is not on the base branch yet; this PR waits for a person"; exit 1; }
+          pnpm install --frozen-lockfile
+          (cd auth-worker && pnpm install --frozen-lockfile)
+          (cd sync-worker && pnpm install --frozen-lockfile)
+      - name: Additive statements only, and the result is schema.sql
+        working-directory: ${{ runner.temp }}/base
+        run: pnpm exec tsx scripts/gate-migration.ts check . "$GITHUB_WORKSPACE"
+      - name: Put the PR's schema under the base commit's code
+        run: cp db/postgres/schema.sql "$RUNNER_TEMP/base/db/postgres/schema.sql"
+      - name: Fetch the real-project corpora from R2
+        working-directory: ${{ runner.temp }}/base
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/replay-corpus.mjs fetch
+      - name: The base commit's replay corpus and sync-worker matrix, on the new schema
+        working-directory: ${{ runner.temp }}/base/sync-worker
+        env:
+          REPLAY_CORPUS_REQUIRED: "1"
+        run: pnpm exec vitest run src/__tests__/replay-corpus.test.ts src/__tests__/permission-matrix.test.ts
+      - name: The base commit's auth-worker matrix, on the new schema
+        working-directory: ${{ runner.temp }}/base/auth-worker
+        run: pnpm exec vitest run src/__tests__/permission-matrix.test.ts
+
+  # The release-tooling gate (scripts/gate-plan-diff.mjs has the reasoning):
+  # the base commit's tests pass against this PR's release scripts, and on
+  # today's real queue the PR's planner, cut and deploy check answer exactly
+  # as the base's do. A difference is the PR changing what ships on purpose,
+  # which goes to a person with the printed diff as what they review.
+  plan-diff:
+    needs: label
+    if: contains(needs.label.outputs.areas, 'release-tooling')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch tags, dev and release branches, and check out the base commit beside the PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch origin --tags
+          git fetch origin 'refs/heads/dev:refs/remotes/origin/dev' 'refs/heads/release/*:refs/remotes/origin/release/*'
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          test -f "$RUNNER_TEMP/base/scripts/gate-plan-diff.mjs" || { echo "::error::scripts/gate-plan-diff.mjs is not on the base branch yet; this PR waits for a person"; exit 1; }
+      - name: The base commit's tests, against this PR's scripts
+        run: |
+          git -C "$RUNNER_TEMP/base" ls-files 'scripts/release-*.test.*' | while read -r file; do
+            cp "$RUNNER_TEMP/base/$file" "$file"
+          done
+          pnpm vitest run scripts/release-
+      - name: Same plan, same cut, same deploy decision on today's queue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WALK_TRUSTED_LOGINS: ${{ vars.WALK_TRUSTED_LOGINS }}
+          WALK_POLICY: ${{ vars.WALK_POLICY }}
+          AUTO_MIGRATE: ${{ vars.AUTO_MIGRATE }}
+          JEV_TRUSTED_LOGINS: ${{ vars.JEV_TRUSTED_LOGINS }}
+        run: |
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
+          node "$RUNNER_TEMP/base/scripts/gate-plan-diff.mjs" "$RUNNER_TEMP/base" .
+
+  # The dependency gate (scripts/gate-deps.mjs has the reasoning): nothing
+  # but dependency versions changed in a worker's package.json, the packages
+  # the gates run through resolve to what the base resolves them to, and
+  # both goldens still hold on the new set. The checker runs from the base
+  # commit; the goldens run on the PR.
+  deps-gate:
+    needs: label
+    if: contains(needs.label.outputs.areas, 'deps')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - name: Only versions changed, and not the test engine's
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          test -f "$RUNNER_TEMP/base/scripts/gate-deps.mjs" || { echo "::error::scripts/gate-deps.mjs is not on the base branch yet; this PR waits for a person"; exit 1; }
+          node "$RUNNER_TEMP/base/scripts/gate-deps.mjs" "$RUNNER_TEMP/base" .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      - name: Fetch the real-project corpora from R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/replay-corpus.mjs fetch
+      - name: Replay corpus and sync-worker matrix on the new dependency set
+        working-directory: sync-worker
+        env:
+          REPLAY_CORPUS_REQUIRED: "1"
+        run: pnpm exec vitest run src/__tests__/replay-corpus.test.ts src/__tests__/permission-matrix.test.ts
+      - name: Auth-worker matrix on the new dependency set
+        working-directory: auth-worker
+        run: pnpm exec vitest run src/__tests__/permission-matrix.test.ts
+      - name: A changed golden is not a version bump; a person reviews it
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git diff --quiet "$BASE_SHA" HEAD -- sync-worker/replay-corpus/golden.json auth-worker/permission-matrix/golden.json sync-worker/permission-matrix/golden.json; then
+            echo "::error::a golden changed alongside a dependency change: the deps gate stays red so the hold stays on."
             exit 1
           fi

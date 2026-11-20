@@ -25,9 +25,30 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    renders to 8. *Next:* `useActiveCellStore.ts` still does its own `peekOutboxBatch(2000)` per
    notification, and its `setPendingOverlay` lands as a separate render; then the
    forbidden/refused readers.
+   *Step 2 tried and reverted (2026-11-20, failure 1 of 3 for this target):* one shared read
+   per notification, delivered to the provider's snapshot and the cell store's pending state
+   in one task (a `subscribeToOutboxRecords` module over `peekOutboxBatch(2000)`; both test
+   suites passed unchanged). It does what it says: the ack's two updates always land in one
+   render. But under the benchmark's 4× throttle they already fell into one batch most runs,
+   so `plain.commit.workspaceRenders` stayed 7 → 7 and `glossary` 7 → 7 (1× CPU: 7, 8, 7 on
+   `dev` against 6 with the change, one sample). Below the 10% bar, so it did not ship. Do
+   not retry it alone: it only clears the bar together with item 2, whose extra render is
+   the one the throttle never hides.
 2. **Audit stats are workspace state pushed into the store by an effect** (`store.setRuntime`),
    and `useSyncExternalStore`'s consistency check forces a second render. Apply them in the same
    task as their cause, or keep them out of workspace state.
+   *Traced 2026-11-20 (store emits logged in the unminified build):* this is the one
+   workspace render per commit that is its own task at every throttle. The enqueue renders
+   the workspace; that render derives the pending-validation overlay
+   (`useCellsAuditStatsWithOverlay`); the passive effect in `useActiveCellStore` hands it to
+   `setRuntime`; the store emits for the one cell; the workspace renders again about 60 ms
+   later. The whole sequence for one commit, at 4×: optimistic edit → outbox enqueue (provider
+   snapshot + pending state) → **`setRuntime` from the effect** → `event.applied` for the
+   commit (rows + audit map) → `event.applied` for the self-validation (audit map) → outbox
+   ack → the 600 ms debounced corpus (item 4). Seven renders; this item and item 4 are the
+   two that no batching removes. The fix is to compute the outbox overlay where the store
+   can read it before React renders (the overlay functions in
+   `src/lib/sync/audit-stats-overlay.ts` are already pure), not to move the effect.
 3. **Commit and self-validation are two outbox transactions.** The notification is held across
    both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
    enqueue path journals differently — read that first.
@@ -41,6 +62,21 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    one for the socket echo — inferred from counts, not traced), and the socket echo still asks
    for a whole-file audio read for the client's own write (the own-echo branch in
    `src/components/ProjectWorkspace.tsx`).
+
+40. **One cell commit renders `EditorRow` 11 times** (`plain.commit.rowRenders`; a row render is
+    about 98 components, so this is close to half of `plain.commit.componentRenders`). Traced
+    2026-11-20 by diffing the row's props per render. The committed row renders 9 times: its
+    `cell` prop changes identity five times (optimistic edit, a rebuild in which **only the
+    `globalReferences` array's identity differs**, the pending validation, the applied commit,
+    the applied validation); a state hook in `EditorRow` holding `{ value, valueHtml }` goes
+    `null` → set → `null` within 20 ms, two renders for one transition; and its health ribbon
+    point changes twice (`validated` → `automatic` → `validated`, because a commit un-validates
+    the cell and the self-validation re-validates it). The next row renders twice for the
+    ribbon's neighbouring opacity. Cheapest first: keep the previous view object when a
+    rebuilt one is equal field by field (`getCellView` / `summaryEntry` in
+    `src/hooks/useActiveCellStore.ts` cache on version only), then the set-and-clear hook.
+    `TranslatedEditor` is also handed three props that are new on every row render
+    (`onInitialIdmlSelectionApplied`, `terminologyConcepts`, `onFootnoteHover`).
 
 ## Editor — tree per commit
 
@@ -95,6 +131,15 @@ Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
     focus revalidation.
 21. **`useOrgSettings`**: `GET /orgs/:id/settings` ×2 on every org route, ×4 on the projects list.
 
+41. **The first ghost-text suggestion of a session reads every other file of the project on
+    the main thread** (`loadOtherFiles` in `src/hooks/useForecastCorpus.ts::useForecastCorpus`: `fetchAllFileCells`
+    per file, two at a time, then a row-by-row fold before the rows are posted to the
+    forecast worker). It is deliberate and happens once, but it happens while the user is
+    typing their first sentence, and on a 66-book project it is 65 whole-file reads parsed
+    beside the caret. The fetch and the fold belong in the worker. In the benchmark this is
+    the 146 KB `GET …/files/:id/cells` counted in `commit.requests` — it is for the fixture's
+    *other* file, not a read-back of the commit.
+
 ## Other surfaces
 
 From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless noted).
@@ -136,11 +181,25 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     `GET …/files/:id/cells` after one cell commit); every later run of the same tree measured
     10–11 and 2. Either the benchmark should discard a warm-up commit, or a first commit on a
     new project really does re-read the file and that is a defect — not traced.
+    *Partly traced 2026-11-20:* reproduced (28 row renders, 3 requests, 10 workspace renders,
+    14 count budgets breached on the seeding run; 11, 2 and 7 with every budget's count met on
+    the next run of the same tree). The `GET …/files/:id/cells` is in **both** runs and is
+    item 41, not a re-read of the open file. What the seeding run adds is a
+    `GET …/cell-confidence` and the extra renders. A nightly run that seeds its own fixtures
+    always starts here, so it measures twice; a discarded warm-up commit would halve that.
 39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
     separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
     under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
     one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
     6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
+
+42. **Two timing budgets sit inside run-to-run noise on the routine's machine.** Three runs of
+    `dev` at `cc20a190` on 2026-11-20: `glossary.tabReturn.longTaskTotalMs` 200, 398, 245
+    against a budget of 394, and `glossary.typing.longTaskTotalMs` 0, 117, 53 against 100.
+    The middle run failed on both by 4 ms and 17 ms with every count in budget. Separately,
+    `plain.tabReturn.reactCommits` is two-valued on one tree (13 or 19–20, with
+    `componentRenders` 878 or about 1,450), which is wider than the 5% a fix is allowed to
+    move another count metric by. Find the second mode before trusting either direction.
 
 ## Needs a person, not the routine
 

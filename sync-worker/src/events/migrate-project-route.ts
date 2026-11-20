@@ -151,24 +151,27 @@ export async function handleMigrateProjectRequest(
       // members access to it, and under the lane read wall access without a
       // lane grant shows them source text only. Last in the batch, so it sees
       // the grant row and the lanes the statements above just wrote.
-      // AQU-2355: the attachment lists its lanes. A project that already has
-      // target lanes links the team to them, unless the attachment already
-      // names some (a re-run must not re-add a lane someone unticked). The
-      // lanes the content sweep creates later are linked by the ingest
-      // (migrate-ingest-route.ts, `linkTeamsToLaneStmts`).
+      // AQU-2355: the attachment lists its lanes. When THIS request created
+      // the attachment (its `granted_at` is this transaction's `now()`), it is
+      // linked to the project's current target lanes. An attachment that was
+      // already there keeps the lanes it lists — none included (AQU-2563): a
+      // re-run must not re-add a lane a lead unticked. The lanes the content
+      // sweep creates later are linked by the ingest (migrate-ingest-route.ts,
+      // `linkTeamsToLaneStmts`).
       if (typeof body.teamId === 'number') {
         stmts.push(
           db
             .prepare(
               `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
-               SELECT ?, l.project_id, l.id
-                 FROM lanes l
-                WHERE l.project_id = ? AND l.role = 'target' AND l.archived_at IS NULL
-                  AND NOT EXISTS (SELECT 1 FROM group_project_lanes gpl
-                                   WHERE gpl.group_id = ? AND gpl.project_id = ?)
+               SELECT gpg.group_id, gpg.project_id, l.id
+                 FROM group_project_grants gpg
+                 JOIN lanes l ON l.project_id = gpg.project_id
+                             AND l.role = 'target' AND l.archived_at IS NULL
+                WHERE gpg.group_id = ? AND gpg.project_id = ?
+                  AND gpg.granted_at = now()
                ON CONFLICT DO NOTHING`,
             )
-            .bind(body.teamId, body.projectId, body.teamId, body.projectId),
+            .bind(body.teamId, body.projectId),
         )
         stmts.push(grantTeamLaneAccessStmt(db, body.teamId, body.ownerUserId))
       }

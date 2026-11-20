@@ -73,8 +73,12 @@ async function seedAttachedProject(
     PROJECT,
     orgId,
   ])
+  // A living attachment (`lanes_explicit = false`): the rows written before
+  // AQU-2355, which the code honours until migration 0208 converts them. The
+  // column's default is now true, so the seed says it.
   await t.pg.query(
-    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES ($1, $2, $3, 1)`,
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit)
+     VALUES ($1, $2, $3, 1, FALSE)`,
     [teamId, PROJECT, opts.roleLevel ?? CONTRIBUTOR],
   )
   await t.pg.query(
@@ -291,8 +295,8 @@ describe('POST /migrate/project — attaching a project to a team writes lane ac
   })
 })
 
-describe('the first lane of a lane-less project reaches team members too (AQU-1800, AQU-2355)', () => {
-  it('grants the first lane created after the attach to the team members, and links the team', async () => {
+describe('the first lane of a lane-less project reaches team members through the attachment (AQU-1800, AQU-2563, AQU-2355)', () => {
+  it('a living attachment (not yet converted by 0208) covers the first lane; one listing no lane does not', async () => {
     const { orgId, teamId } = await seedOrgAndTeam()
     // The newly migrated case: project attached to its team, no direct member
     // at all, and the content sweep creates the first target lane afterwards.
@@ -303,15 +307,16 @@ describe('the first lane of a lane-less project reaches team members too (AQU-18
        VALUES ('tgt00001', $1, 'target', 'sw', 'sw', 0)`,
       [PROJECT],
     )
-
     for (const stmt of firstTargetLaneStmts(t.db, PROJECT, { laneId: 'tgt00001' }, 1, { createdByCaller: true })) await stmt.run()
-
     expect(await grantedLanes(7)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
-    const linked = await t.pg.query<{ lane_id: string }>(
-      `SELECT lane_id FROM group_project_lanes WHERE group_id = $1 AND project_id = $2`,
-      [teamId, PROJECT],
-    )
-    expect(linked.rows.map((r) => r.lane_id)).toEqual(['tgt00001'])
+
+    // The same project with the attachment explicit and listing nothing:
+    // the team is not handed the lane (the Codex ingest and the create step
+    // link it instead).
+    await t.pg.query(`DELETE FROM project_member_lane_roles WHERE project_id = $1`, [PROJECT])
+    await limitTeamTo(teamId, [])
+    for (const stmt of firstTargetLaneStmts(t.db, PROJECT, { laneId: 'tgt00001' }, 1, { createdByCaller: true })) await stmt.run()
+    expect(await grantedLanes(7)).toEqual([])
   })
 })
 
@@ -355,7 +360,7 @@ async function seedSecondAttachedTeam(orgId: number): Promise<number> {
   )
   const teamId = Number(team.rows[0].id)
   await t.pg.query(
-    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES ($1, $2, $3, 1)`,
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES ($1, $2, $3, 1, FALSE)`,
     [teamId, PROJECT, CONTRIBUTOR],
   )
   return teamId
@@ -476,7 +481,7 @@ describe('an attachment a lead limited to some lanes (AQU-2563)', () => {
            VALUES ('tgt00003', ?, 'target', 'sw', 'sw', 1)`,
         )
         .bind(PROJECT),
-      grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00003' }, 1),
+      ...firstTargetLaneStmts(t.db, PROJECT, { laneId: 'tgt00003' }, 1),
     ])
 
     expect(await grantedLanes(6)).toEqual([])

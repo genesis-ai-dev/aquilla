@@ -281,6 +281,28 @@ describe("team writes — lane grants (AQU-1801)", () => {
 // AQU-1809: PATCH .../groups/:groupId/members/:userId wrote group_members.role_level
 // and left project_member_lane_roles at the old level. A promotion stayed
 // read-only; a demotion could still edit. The lane set does not move.
+describe("AQU-2355 unticking a lane from a team takes exactly that lane away", () => {
+  it("removes the lane's grant and scope row from a team-only member, and keeps the rest", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    const scopes = async () =>
+      ((
+        await env.AQUILLA_PG.prepare(
+          "SELECT value FROM project_member_scopes WHERE project_id = 'p1' AND user_id = 3 AND kind = 'lane' ORDER BY value",
+        ).all<{ value: string }>()
+      ).results ?? []).map((r) => r.value)
+    expect(await scopes()).toEqual(["lane0001", "lane0002"])
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1/projects/p1",
+      { method: "PATCH", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ laneIds: ["lane0002"] }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+    expect(await scopes()).toEqual(["lane0002"])
+  })
+})
+
 describe("PATCH team-scope role — lane grants (AQU-1809)", () => {
   async function seedAttached(opts: { carolOrgRole?: number } = {}) {
     await seedUser(1, "alice")

@@ -13,7 +13,10 @@
 //     (`reconcileMemberProjectLanes` rewrites a team-only member's rows from
 //     the team), so a per-person row would not survive the next team change.
 //   * teams: teams attached to the project whose attachment lists another
-//     current target lane.
+//     current target lane — and, for a Maintainer or Owner, teams attached to
+//     the project that list no lane yet (a project created inside a team gets
+//     its teams before its first language). A team reaches a lane only through
+//     its attachment (AQU-2563), so this is how such a team gets one.
 //
 // A creator below Maintainer is offered only people and teams on lanes they
 // can read themselves, and sees only those lanes' names: the strict silence
@@ -80,7 +83,8 @@ export async function loadNewLaneGrantCandidates(
     const mine = new Set((results ?? []).map((row) => row.lane))
     readable = new Set([...readable].filter((id) => mine.has(id)))
   }
-  if (readable.size === 0) return { people: [], teams: [] }
+  const laneless = caller.roleLevel >= MAINTAINER ? await loadLanelessTeams(db, projectId, excludeLaneId) : []
+  if (readable.size === 0) return { people: [], teams: laneless }
   const laneName = new Map(lanes.map((lane) => [lane.id, lane.name]))
 
   const { results: grantRows } = await db
@@ -158,10 +162,44 @@ export async function loadNewLaneGrantCandidates(
     entry.laneNames.push(laneName.get(row.lane_id) ?? row.lane_id)
     teams.set(groupId, entry)
   }
+  for (const team of laneless) if (!teams.has(team.groupId)) teams.set(team.groupId, team)
   const keptTeams = [...teams.values()]
     .map((team) => ({ ...team, laneNames: team.laneNames.sort((a, b) => a.localeCompare(b)) }))
     .sort((a, b) => a.name.localeCompare(b.name))
   return { people: keptPeople, teams: keptTeams }
+}
+
+/** Teams attached below Maintainer whose attachment lists no current target lane. */
+async function loadLanelessTeams(
+  db: AquillaDb,
+  projectId: string,
+  excludeLaneId: string | undefined,
+): Promise<NewLaneTeamCandidate[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT gpg.group_id, g.name, gpg.role_level,
+              (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gpg.group_id) AS member_count
+         FROM group_project_grants gpg
+         JOIN groups g ON g.id = gpg.group_id
+        WHERE gpg.project_id = ? AND gpg.role_level < ${MAINTAINER}
+          AND gpg.lanes_explicit
+          AND NOT EXISTS (
+            SELECT 1 FROM group_project_lanes gpl
+              JOIN lanes l ON l.project_id = gpl.project_id AND l.id = gpl.lane_id
+                          AND l.role = 'target' AND l.archived_at IS NULL
+             WHERE gpl.group_id = gpg.group_id AND gpl.project_id = gpg.project_id
+               AND l.id <> ?
+          )`,
+    )
+    .bind(projectId, excludeLaneId ?? "")
+    .all<{ group_id: number | string; name: string; role_level: number; member_count: number | string }>()
+  return (results ?? []).map((row) => ({
+    groupId: Number(row.group_id),
+    name: row.name,
+    roleLevel: Number(row.role_level),
+    memberCount: Number(row.member_count),
+    laneNames: [],
+  }))
 }
 
 /** Picks that are not on the offered list, or null when every pick is offered. */

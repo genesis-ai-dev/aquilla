@@ -1266,6 +1266,7 @@ export const projectSettings = defineNamespace({
       other: "Team · {role} · {count} people · {lanes}",
     }),
     "projectSettings.languages.grantLoading": "Loading people on the other language lanes…",
+    "projectSettings.languages.grantNoLanes": "no language lane yet",
     "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
     "projectSettings.languages.archiveHint":
       "It leaves the language switcher, but nothing is deleted: its work is kept and " +
@@ -2367,6 +2368,11 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.languages.grantLoading": {
         description: "Shown in place of that checklist while it loads.",
+      },
+      "projectSettings.languages.grantNoLanes": {
+        description:
+          "Fills the language-lane part of a team's detail line in that checklist when the team is attached " +
+          "to the project but on no language lane yet (for example a project just created inside the team).",
       },
       "projectSettings.languages.archiveConfirmShort": {
         description:

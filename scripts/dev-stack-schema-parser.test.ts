@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { parsePgSchema } from "./dev-stack-schema-parser"
+import { columnsToAdd, parsePgSchema } from "./dev-stack-schema-parser"
+import { addedColumns } from "./neon-schema-contract"
 
 describe("local dev schema parser", () => {
   it("does not treat multiline foreign-key continuations as columns", () => {
@@ -149,5 +150,62 @@ describe("local dev schema parser", () => {
       "assignment_id",
       "chapter",
     ])
+  })
+})
+
+// AQU-2689: schema.sql declares some columns with `ALTER TABLE … ADD COLUMN`
+// after their table. The parser read CREATE TABLE blocks only, so a long-lived
+// local database never got users.email_changed_at,
+// password_reset_tokens.email_at_issue or admin_elevations.factor_generation.
+describe("columns added by ALTER TABLE … ADD COLUMN", () => {
+  const parsed = parsePgSchema(`
+    CREATE TABLE org_billing (
+      org_id TEXT PRIMARY KEY,
+      plan TEXT NOT NULL DEFAULT 'free'
+    );
+    -- AQU-1491: runtime grants.
+    ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
+      CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);
+    ALTER TABLE org_billing ADD COLUMN IF NOT EXISTS plan TEXT;
+    ALTER TABLE org_billing ADD CONSTRAINT org_billing_plan_check CHECK (plan <> '');
+    ALTER TABLE never_created ADD COLUMN flag BOOLEAN;
+  `)
+  const orgBilling = parsed.tables.get("org_billing")!
+
+  it("joins them to their table's columns, flagged, with the definition whole", () => {
+    expect(orgBilling.columns).toEqual([
+      { name: "org_id", def: "org_id TEXT PRIMARY KEY" },
+      { name: "plan", def: "plan TEXT NOT NULL DEFAULT 'free'" },
+      {
+        name: "weekly_allowance",
+        def: "weekly_allowance BIGINT CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000)",
+        addedByAlter: true,
+      },
+    ])
+    expect(orgBilling.createSql).not.toContain("weekly_allowance")
+    expect([...parsed.tables.keys()]).toEqual(["org_billing"])
+  })
+
+  it("adds whatever an existing table lacks, wherever schema.sql declares it", () => {
+    expect(columnsToAdd(orgBilling, new Set(["org_id"])).map((column) => column.name)).toEqual([
+      "plan",
+      "weekly_allowance",
+    ])
+    expect(columnsToAdd(orgBilling, new Set(["org_id", "plan", "weekly_allowance"]))).toEqual([])
+  })
+
+  it("adds only the ALTER-declared columns to a table it has just created", () => {
+    expect(columnsToAdd(orgBilling, undefined).map((column) => column.name)).toEqual([
+      "weekly_allowance",
+    ])
+  })
+
+  it("places every ADD COLUMN of the real schema.sql on a table it parsed", () => {
+    const schema = readFileSync(path.resolve(import.meta.dirname, "..", "db", "postgres", "schema.sql"), "utf8")
+    const { tables } = parsePgSchema(schema)
+    const unplaced = addedColumns(schema)
+      .filter(({ table, name }) => !tables.get(table)?.columns.some((column) => column.name === name && column.addedByAlter))
+      .map(({ table, name }) => `${table}.${name}`)
+    expect(unplaced).toEqual([])
   })
 })

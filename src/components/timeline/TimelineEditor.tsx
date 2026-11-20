@@ -561,7 +561,7 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
-  /** AQU-2577: pick a line for Make speech from its ghost clip on the dub row. */
+  /** AQU-2577: pick a line for Make speech from its sparkle beside the mic on the dub row. */
   onPickGhost?(cellId: string, opts: { additive: boolean }): void
   pickedGhostIds?: ReadonlySet<string>
   makingSpeechCellIds?: ReadonlySet<string>

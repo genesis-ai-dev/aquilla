@@ -113,7 +113,7 @@ import { useRereadWhenSettingsMayHaveMoved } from "@/hooks/useRereadWhenSettings
 import { UserError } from "@/lib/errors/user-error"
 import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
-import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { canDownloadOriginals, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import {
@@ -592,6 +592,13 @@ export function ProjectOverview() {
   )
   // Primitives, so the memos below depend on values rather than on the
   // policy object (a new one every render).
+  // AQU-2476: originals are a server route. An unset floor is Maintainer,
+  // not "no floor". The plan CSV stays on `canExport` — it never leaves
+  // the browser.
+  const canDownloadImportedOriginals = canDownloadOriginals(
+    projectRoleLevel,
+    projectPolicy.exportMinRole,
+  )
   const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
   const policyAssignmentMinRole = projectPolicy.assignmentMinRole
   const policyAllowScopedLaneAssignment = projectPolicy.allowScopedLaneAssignment
@@ -2693,11 +2700,14 @@ export function ProjectOverview() {
                 />
               )}
 
-              {/* AQU-656: original imported blobs. Hidden when the org export
-                  floor forbids it, and when no file has a stored original —
+              {/* AQU-656 / AQU-2476: original imported blobs. Hidden below the
+                  effective export floor (an unset floor is Maintainer, the
+                  same default the download routes apply) and when no file
+                  has a stored original. Every control here is a download
+                  that route refuses, so a below-floor reader gets no card.
                   Codex-migrated / pre-sidecar files are AQU-991, not a
                   storage-audit empty state here. */}
-              {orgSettings.canExport && originalFiles.length > 0 && jwt && (
+              {canDownloadImportedOriginals && originalFiles.length > 0 && jwt && (
                 <div className="rounded-lg border bg-card p-5" data-testid="imported-originals">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">

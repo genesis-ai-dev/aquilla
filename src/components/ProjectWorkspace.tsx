@@ -71,7 +71,7 @@ import {
   type IdmlReimportAlignHost,
 } from "@/lib/idml/align-reimported-targets"
 import { triggerLinkSync } from "@/lib/sync/archive"
-import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useDebouncedSource } from "@/hooks/useDebouncedValue"
 import {
   useCompletion,
   FALLBACK_COMPLETION_SETTINGS,
@@ -386,7 +386,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -2231,6 +2231,7 @@ export function ProjectWorkspace() {
     fileId: activeFileId,
     getTokenForFile,
     lane: activeLane,
+    outboxRecords: outboxInspectorRecords,
   })
 
   const validationCount = project ? readValidationCount(project) : 1
@@ -7107,7 +7108,12 @@ export function ProjectWorkspace() {
   // example retrieval, none of which must be live mid-batch, so coalescing the
   // rebuild to once the batch pauses removes the storm. Health, progress, and
   // the edit/commit path keep live selectors.
-  const corpusCells = useDebouncedValue(cellSummaries, 600)
+  //
+  // A source, not state (AQU-2655): every consumer is a getter or an effect, so
+  // the debounce firing must not render the workspace. Read it with
+  // `corpusSource.get()` at call time; an open Back-translation tab follows it
+  // through `corpusSource.signal` (EditorTable's `btCorpusSignal`).
+  const corpusSource = useDebouncedSource(cellSummaries, 600)
 
   // BIA forecasting — ghost-text next words and "words that fit here" — from
   // the project's own target text, in a Web Worker (see useForecastCorpus).
@@ -7117,7 +7123,7 @@ export function ProjectWorkspace() {
     projectId: project?.id,
     files: projectFiles,
     activeFileId,
-    activeCells: corpusCells,
+    activeCells: corpusSource,
     getToken: getTokenForFile,
     lane: activeLane,
   })
@@ -8168,6 +8174,7 @@ export function ProjectWorkspace() {
     // `project.terminology` settings key.
     const terminology = laneLocalConcepts
     const alignmentSeeds = project?.alignmentSeeds
+    const corpusCells = corpusSource.get()
     const cached = glosserCacheRef.current
     if (
       cached &&
@@ -8201,13 +8208,14 @@ export function ProjectWorkspace() {
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, glossCache, laneLocalConcepts, project?.alignmentSeeds])
+  }, [corpusSource, backtranslationCache, glossCache, laneLocalConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
   // before the user asks for that surface.
   const getAlignmentModel = useCallback((): AlignmentModel => {
     const alignmentSeeds = project?.alignmentSeeds
+    const corpusCells = corpusSource.get()
     const cached = alignmentModelCacheRef.current
     if (
       cached &&
@@ -8234,7 +8242,7 @@ export function ProjectWorkspace() {
       model: m,
     }
     return m
-  }, [corpusCells, project?.alignmentSeeds])
+  }, [corpusSource, project?.alignmentSeeds])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -8373,7 +8381,7 @@ export function ProjectWorkspace() {
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
-      const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
+      const corpusByCellId = new Map(corpusSource.get().map((c) => [c.id, c]))
       const examples = selectBtFewShotExamples({
         records: backtranslationCache.values(),
         corpusByCellId,
@@ -8418,7 +8426,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser, getActiveCell])
+  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusSource, getGlosser, getActiveCell])
 
   // The back-translation queue. Two things feed it: a save this browser
   // confirms, when the project back-translates live (`notify`, debounced),
@@ -8502,10 +8510,16 @@ export function ProjectWorkspace() {
   // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
   // hydrated from the server carries no `forText`, so the only way to tell
   // whether it still describes the live cell is its pin.
-  const corpusCellsById = useMemo(
-    () => new Map(corpusCells.map((c) => [c.id, c] as const)),
-    [corpusCells],
-  )
+  const corpusCellsByIdRef = useRef<{ from: readonly CellSummary[]; byId: Map<string, CellSummary> } | null>(null)
+  const getCorpusCell = useCallback((cellId: string): CellSummary | undefined => {
+    const corpusCells = corpusSource.get()
+    let cached = corpusCellsByIdRef.current
+    if (!cached || cached.from !== corpusCells) {
+      cached = { from: corpusCells, byId: new Map(corpusCells.map((c) => [c.id, c] as const)) }
+      corpusCellsByIdRef.current = cached
+    }
+    return cached.byId.get(cellId)
+  }, [corpusSource])
 
   /**
    * The statistical gloss the BT tab shows for a cell.
@@ -8530,9 +8544,9 @@ export function ProjectWorkspace() {
       record: glossCache.get(cellId),
       computed,
       visibleTranslated: translatedText,
-      committedTargetEventId: corpusCellsById.get(cellId)?.targetEventId,
+      committedTargetEventId: getCorpusCell(cellId)?.targetEventId,
     })
-  }, [getGlosser, glossCache, corpusCellsById])
+  }, [getGlosser, glossCache, getCorpusCell])
 
   // Add-from-selection: create a concept from a source-side selection in the
   // editor. A rendering in the payload activates the concept immediately;
@@ -14414,7 +14428,7 @@ export function ProjectWorkspace() {
 
   /**
    * AQU-2577: the lines picked for Make speech on the timeline. A click on a
-   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * line's sparkle picks it and brings the Voices rail forward on the Make
    * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
    * lines already picked. Picking generates nothing: the panel's button does.
    */
@@ -14428,7 +14442,7 @@ export function ProjectWorkspace() {
     setDockTab("voices")
   }, [setDockTab])
   const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
-  /** The lines whose speech is being made right now: their ghosts show a spinner. */
+  /** The lines whose speech is being made right now: their sparkles show a spinner. */
   const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
   const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
     const running = state.kind === "running"
@@ -18107,6 +18121,18 @@ export function ProjectWorkspace() {
     }
   }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, tts.settings, tts.saveTts, activeLane])
 
+  // AQU-2476: Download original's only implementation is the server route,
+  // which reads an unset export floor as Maintainer. `canExport` stays the
+  // gate for the Export dialog, whose client-side formats work below it.
+  const downloadOriginalRole = project?.syncRole?.level ?? null
+  const downloadOriginalsAllowed = canDownloadOriginals(
+    downloadOriginalRole,
+    projectPolicy.exportMinRole,
+  )
+  const downloadOriginalDisabledReason = downloadOriginalsAllowed
+    ? undefined
+    : denialMessage(t, resolveExportFloor(projectPolicy.exportMinRole), downloadOriginalRole)
+
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
 
@@ -18259,18 +18285,22 @@ export function ProjectWorkspace() {
         },
       })
     }
-    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+    if (activeFile && projectId && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
         label: t("fileDetails.downloadOriginal"),
         icon: Download,
-        onClick: () => {
-          void downloadImportedOriginal({
-            projectId,
-            file: activeFile,
-            getToken: getTokenForFile,
-          })
-        },
+        disabled: !downloadOriginalsAllowed,
+        disabledReason: downloadOriginalDisabledReason,
+        onClick: downloadOriginalsAllowed
+          ? () => {
+              void downloadImportedOriginal({
+                projectId,
+                file: activeFile,
+                getToken: getTokenForFile,
+              })
+            }
+          : undefined,
       })
     }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
@@ -18293,8 +18323,9 @@ export function ProjectWorkspace() {
     adoptingSpeaker,
     canAssignWork,
     canDiarize,
-    canExportByOrgPolicy,
     currentRoleLevel,
+    downloadOriginalDisabledReason,
+    downloadOriginalsAllowed,
     diarizeBusy,
     diarizeError,
     diarizePhase,
@@ -19037,7 +19068,7 @@ export function ProjectWorkspace() {
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? setPendingDeleteId : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
-                  canExportByOrgPolicy={canExportByOrgPolicy}
+                  downloadOriginalDisabledReason={downloadOriginalDisabledReason}
                   assignedFileIds={myAssignedFileIds}
                   filterFocus={fileFilterFocus}
                   // AQU-1569: PROJECT_LEAD+, mirroring the server floor for
@@ -20181,6 +20212,7 @@ export function ProjectWorkspace() {
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
             getStatisticalBt={getStatisticalBt}
+            btCorpusSignal={corpusSource.signal}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
             playingCue={playingCue}

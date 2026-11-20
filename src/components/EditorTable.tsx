@@ -1171,6 +1171,10 @@ interface EditorTableProps {
    *  correction when one still describes this text, else the corpus-derived
    *  gloss computed on demand (AQU-1408 §1). */
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
+  /** AQU-2655: bumps when the debounced corpus behind `getStatisticalBt` and
+   *  `getAlignmentModel` changes. They read it at call time, so their identity
+   *  no longer says so. */
+  btCorpusSignal?: ChangeSignal
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1404,7 +1408,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt, btCorpusSignal,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -3192,7 +3196,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const onSetUpAffixesStable = useStableCallback(onSetUpAffixes)
   const getStatisticalBtStable = useStableCallback(getStatisticalBt)
   const getAlignmentModelStable = useStableCallback(getAlignmentModel)
-  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel])
+  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel], btCorpusSignal)
   const rowUiState = useMemo<RowUiState>(
     () => ({ activeEditorCellId, focusedRailCellId, detailCellId }),
     [activeEditorCellId, focusedRailCellId, detailCellId],

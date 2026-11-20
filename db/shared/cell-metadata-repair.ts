@@ -11,13 +11,23 @@
 // The projection no longer does it (`cellMetadataMergeBaseSql`). This is for
 // the rows it already did it to.
 //
-// THE ONE THING IT WRITES is a value the row itself already holds: the array's
-// first element, which is byte for byte what `metadata` was before the merge.
-// And only where the rest of the array is nothing but empty patches — where
-// putting the first element back loses nothing, because nothing was added.
+// THE ONE THING IT WRITES TO A CELL is a value the row itself already holds: the
+// array's first element, which is byte for byte what `metadata` was before the
+// merge. And only where the rest of the array is nothing but empty patches —
+// where putting the first element back loses nothing, because nothing was added.
 // An array that does not read that way (a patch that carried keys, a first
 // element that is not a string-encoded object) is counted, reported, and left
 // exactly as it is for a person to look at.
+//
+// AND THEN IT HAS TO SAY SO. A browser keeps each file's cells in IndexedDB
+// with the file's event-log watermark, and on reopen asks only for what changed
+// since (`GET /cells?since=`). Putting a row back mints no event, so the answer
+// is "nothing newer" and the browser goes on showing the damaged row it cached:
+// production's first repair (2026-11-20, Russian BSB) restored 51 cells and the
+// export went on failing on them. A projection rebuild has the same problem and
+// solves it with the project's rebuild marker, which the read route answers
+// with a full resync. `repairProjectCellMetadata` moves that marker in the same
+// transaction as the rows.
 
 import type { AquillaDb } from "../shim/postgres"
 
@@ -121,4 +131,75 @@ export async function restoreDamagedCellMetadata(
     .bind(projectId, fileId)
     .run()
   return result.meta.changes
+}
+
+/**
+ * Move the project's rebuild marker, so every client holding its cells reads
+ * them again in full. Returns the new marker.
+ *
+ * This is the statement a projection rebuild ends with
+ * (`sync-worker/src/events/rebuild.ts`, step 5) — keep the two the same. It
+ * takes one seq from the project's own counter, the one live event writes use,
+ * and records it as `rebuilt_seq`: strictly above every cursor a client could
+ * hold, so even a fully caught-up one trips the read route's
+ * `since < rebuilt_seq` resync, and the ETag changes with it. The seq it
+ * consumes is a gap in the log, as harmless as an idempotent replay's.
+ */
+export async function markProjectionRepaired(db: AquillaDb, projectId: string): Promise<number> {
+  const marker = await db
+    .prepare(
+      `INSERT INTO project_seq_counters (project_id, last_seq, rebuilt_seq)
+       SELECT ?, seed.next_seq, seed.next_seq
+       FROM (SELECT COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1 AS next_seq) seed
+       ON CONFLICT (project_id) DO UPDATE SET
+         last_seq    = GREATEST(project_seq_counters.last_seq + 1, excluded.last_seq),
+         rebuilt_seq = GREATEST(project_seq_counters.last_seq + 1, excluded.last_seq)
+       RETURNING last_seq`,
+    )
+    .bind(projectId, projectId)
+    .first<number | string | bigint>("last_seq")
+  return Number(marker ?? 0)
+}
+
+export interface ProjectCellMetadataRepair {
+  /** Rows written, by file. */
+  restoredByFile: Record<string, number>
+  restored: number
+  /** The rebuild marker this run set, or null when it had no reason to. */
+  resyncMarker: number | null
+}
+
+/**
+ * Repair one project: put back the restorable cells of each file named, and
+ * tell its clients to read the project again.
+ *
+ * The marker moves only when a row did, so a second apply writes nothing at
+ * all. `resync: true` moves it regardless: for a project whose rows were put
+ * back by something that did not (production and dev, both, before this
+ * existed), where the cells are right and every browser that had them open is
+ * still showing the old ones.
+ *
+ * One transaction: rows first, marker after. In the other order a client could
+ * resync between the two, cache the damaged rows again under a cursor above
+ * the marker, and never be told.
+ */
+export async function repairProjectCellMetadata(
+  db: AquillaDb,
+  projectId: string,
+  fileIds: readonly string[],
+  opts: { resync?: boolean } = {},
+): Promise<ProjectCellMetadataRepair> {
+  const run = async (tx: AquillaDb): Promise<ProjectCellMetadataRepair> => {
+    const restoredByFile: Record<string, number> = {}
+    let restored = 0
+    for (const fileId of fileIds) {
+      const count = await restoreDamagedCellMetadata(tx, projectId, fileId)
+      restoredByFile[fileId] = count
+      restored += count
+    }
+    const resyncMarker = restored > 0 || opts.resync ? await markProjectionRepaired(tx, projectId) : null
+    return { restoredByFile, restored, resyncMarker }
+  }
+  if (!db.transaction) throw new Error("repairProjectCellMetadata needs a database handle with transactions")
+  return db.transaction(run)
 }

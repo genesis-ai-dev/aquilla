@@ -135,6 +135,11 @@ export interface Env {
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
    * lookup for identities absent from Neon. */
   LEGACY_USER_MIGRATION_ENABLED?: string
+
+  /** AQU-2686: switch for PIN access links (routes/access-links.ts). Only the
+   * exact string "true" turns them on; unset or anything else answers every
+   * access-link route with a 404 before it reads the request or the DB. */
+  ACCESS_LINKS_ENABLED?: string
   /** Cloudflare D1 HTTP API coordinates. The token must have D1 Read only. */
   FRONTIER_D1_ACCOUNT_ID?: string
   FRONTIER_D1_DATABASE_ID?: string

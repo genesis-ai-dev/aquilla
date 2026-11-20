@@ -3,6 +3,8 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * The parts a dropdown menu and a context menu hold in common.
@@ -54,6 +56,60 @@ function MenuItem({
       className={cn(ITEM_BASE, "px-1.5 py-1", ITEM_DESTRUCTIVE, className)}
       {...props}
     />
+  )
+}
+
+/**
+ * A menu row that stays visible and does nothing on click, with the reason
+ * behind its own (i): a click opens one line under the label, a second click
+ * shuts it (AQU-2260). The reason is the row's accessible description the
+ * whole time. Shared by menus built from `MenuItem` — `OverflowMenu` has the
+ * same treatment on `disabledReason`.
+ */
+function MenuItemDisabledWithReason({
+  label,
+  reason,
+  children,
+  className,
+  ...props
+}: Omit<MenuPrimitive.Item.Props, "disabled" | "onClick"> & {
+  /** Accessible name of the row, and what the (i) says it is about. */
+  label: string
+  reason: string
+}) {
+  const t = useT()
+  const reasonId = React.useId()
+  const [open, toggle] = useInfoOpen()
+  return (
+    <MenuItem
+      {...props}
+      disabled
+      aria-label={label}
+      aria-describedby={reasonId}
+      className={className}
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">{children}</span>
+          {/* A disabled row takes no pointer events; its (i) takes them back. */}
+          <span className="pointer-events-auto">
+            <InfoToggle
+              open={open}
+              onToggle={toggle}
+              label={t("common.aboutAria", { name: label })}
+              controls={reasonId}
+            />
+          </span>
+        </span>
+        <InfoReveal
+          open={open}
+          id={reasonId}
+          className="max-w-64 text-xs leading-snug font-normal text-muted-foreground"
+        >
+          {reason}
+        </InfoReveal>
+      </span>
+    </MenuItem>
   )
 }
 
@@ -310,6 +366,7 @@ export {
   createMenuHandle,
   parentMenuEdge,
   MenuItem,
+  MenuItemDisabledWithReason,
   MenuCheckboxItem,
   MenuRadioGroup,
   MenuRadioItem,

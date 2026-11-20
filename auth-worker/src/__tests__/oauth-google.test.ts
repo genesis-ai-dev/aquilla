@@ -122,7 +122,8 @@ describe("Google login boundary", () => {
       return transact(work)
     })
     const response=await app.request("/api/v2/auth/oauth/google/"+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${jwt}`},body:JSON.stringify({code,verifier,password})},testEnv)
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(path === "connect" ? 403 : 409)
+    if (path === "connect") expect(await response.json()).toEqual({error:"fresh_verification_required"})
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM provider_identities WHERE user_id=1").first()).toEqual({n:0})
   })
 

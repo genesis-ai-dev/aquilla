@@ -4985,7 +4985,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9955,7 +9965,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14912,7 +14932,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19895,7 +19925,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26153,7 +26193,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32413,7 +32463,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38745,7 +38805,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45124,7 +45194,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51418,7 +51498,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59658,7 +59748,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67903,7 +68003,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76557,7 +76667,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84856,7 +84976,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93530,7 +93660,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102197,7 +102337,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110900,7 +111050,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119589,7 +119749,17 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128270,6 +128440,16 @@
     "workspace.targetAudioLane.slotMenu": "c5aed059e9383e85",
     "workspace.targetAudioLane.slotMenuRecord": "bfdd510698ef3ccb",
     "workspace.targetAudioLane.slotMenuMakeSpeech": "d9b02acad944d572",
-    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec"
+    "workspace.targetAudioLane.slotMenuPicked": "0a0aea954307daec",
+    "editor.completion.translatingFile": "d7a6a25c7b40f3b2",
+    "editor.completion.elapsed": "a993e02123aa32df",
+    "editor.completion.stalled": "f05552755e64b359",
+    "editor.completion.runFailed": "8a6a7a84152ebdaf",
+    "editor.completion.failedCells": "250c9b9e884da58b",
+    "editor.completion.failedReason": "ae08e67fc5e93752",
+    "editor.completion.retryRemaining": "ab30b9ffde017285",
+    "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
+    "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
+    "editor.completion.openFile": "4190c0c7ec727064"
   }
 }

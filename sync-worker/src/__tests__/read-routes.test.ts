@@ -60,11 +60,13 @@ describe('GET /events', () => {
       parent_id: null, kind, author: 'alice', payload, client_ts: seq, server_ts: seq, server_seq: seq,
     })
     const { db } = await makeTestDb({
+      lanes: [{ id: 'lane-a', project_id: 'proj-a', role: 'target', legacy_tag: '' }],
       events: [
         ev('s1', 'source.cell.create', '{"value":"src"}', 1),
         ev('a1', 'target.cell.commit', '{"value":"mine","laneId":"lane-a"}', 2),
         ev('b1', 'target.cell.commit', '{"value":"theirs","laneId":"lane-b"}', 3),
         ev('v1', 'cell.validate', '{"laneId":"lane-b"}', 4),
+        // From before lane ids: no lane named, so it is the default lane's.
         ev('u1', 'target.cell.commit', '{"value":"unstamped"}', 5),
       ],
     })
@@ -74,7 +76,7 @@ describe('GET /events', () => {
       const res = (await handleEventsReadRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
       return ((await res.json()) as { events: { id: string }[] }).events.map((e) => e.id)
     }
-    expect(await get({ role: 400, laneGrants: [{ lane: 'lane-a', level: 400 }] }, '1')).toEqual(['a1', 's1'])
+    expect(await get({ role: 400, laneGrants: [{ lane: 'lane-a', level: 400 }] }, '1')).toEqual(['u1', 'a1', 's1'])
     expect(await get({ role: 400 }, '1')).toEqual(['s1'])
     expect(await get({ role: 600 }, '1')).toHaveLength(5)
     expect(await get({ role: 400 }, undefined)).toHaveLength(5)

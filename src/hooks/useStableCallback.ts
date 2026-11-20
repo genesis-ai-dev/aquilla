@@ -1,4 +1,4 @@
-import { useCallback, useInsertionEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useInsertionEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 
 /**
  * A callback whose identity never changes but which always runs the newest
@@ -45,7 +45,7 @@ export interface ChangeSignal {
   getVersion: () => number
 }
 
-function createChangeSignal(): ChangeSignal & { bump: () => void } {
+export function createChangeSignal(): ChangeSignal & { bump: () => void } {
   let version = 0
   const listeners = new Set<() => void>()
   return {
@@ -70,10 +70,13 @@ function createChangeSignal(): ChangeSignal & { bump: () => void } {
  * stable getter plus this signal, and only a row that is showing the getter's
  * answer subscribes (`useChangeSignalVersion(signal, enabled)`) and lists the
  * version beside the getter in its memo deps. A change then re-renders that
- * row alone instead of every row.
+ * row alone instead of every row. The version also bumps when `upstream` does.
  */
-export function useChangeSignal(values: readonly unknown[]): ChangeSignal {
+export function useChangeSignal(values: readonly unknown[], upstream?: ChangeSignal): ChangeSignal {
   const [signal] = useState(createChangeSignal)
+  // `upstream` is for data the getters read without closing over it (a
+  // debounced source): its bump is this signal's bump.
+  useEffect(() => upstream?.subscribe(signal.bump), [upstream, signal])
   const seenRef = useRef(values)
   // A layout effect, not an insertion effect: the bump re-renders subscribed
   // rows, and by now `useStableCallback`'s refs already hold the new getters.

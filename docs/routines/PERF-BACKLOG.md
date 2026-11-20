@@ -31,8 +31,11 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
 3. **Commit and self-validation are two outbox transactions.** The notification is held across
    both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
    enqueue path journals differently — read that first.
-4. **`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
-   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.
+4. ~~**`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
+   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.~~
+   *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
+   that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
+   components and were left alone.
 5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
    focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
 6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request

@@ -6656,6 +6656,7 @@ export const ur: Catalog = {
   "knowledgeBase.upload": "دستاویز اپ لوڈ کریں",
   "knowledgeBase.uploading": "دستاویز اپ لوڈ ہو رہی ہے…",
   "knowledgeBase.uploadSuccess": "{name} اپ لوڈ ہو گئی۔",
+  "knowledgeBase.uploadTruncated": "{name} اپ لوڈ ہو گئی، لیکن یہ بہت طویل ہے: صرف اس کے پہلے 2 ملین حروف پڑھے گئے۔",
   "knowledgeBase.uploadError": "{name} اپ لوڈ نہیں ہو سکی۔ دوبارہ کوشش کریں۔",
   "knowledgeBase.acceptedFormats": "Markdown، TXT، DOCX، یا PDF · 25 MB تک (DOCX اور PDF 2 MB تک)",
   "knowledgeBase.emptyTitle": "ابھی کوئی علمی دستاویز نہیں",

@@ -5314,6 +5314,7 @@ export const my: Catalog = {
   "knowledgeBase.upload": "စာရွက်စာတမ်း အပ်လုဒ်တင်ရန်",
   "knowledgeBase.uploading": "စာရွက်စာတမ်း အပ်လုဒ်တင်နေသည်…",
   "knowledgeBase.uploadSuccess": "{name} ကို အပ်လုဒ်တင်ပြီးပါပြီ။",
+  "knowledgeBase.uploadTruncated": "{name} ကို အပ်လုဒ်တင်ပြီးပါပြီ၊ သို့သော် အလွန်ရှည်သဖြင့် ပထမ စာလုံး 2 သန်းကိုသာ ဖတ်ထားပါသည်။",
   "knowledgeBase.uploadError": "{name} ကို အပ်လုဒ်တင်၍မရပါ။ ပြန်ကြိုးစားပါ။",
   "knowledgeBase.acceptedFormats": "Markdown၊ TXT၊ DOCX သို့မဟုတ် PDF · 25 MB အထိ",
   "knowledgeBase.emptyTitle": "အသိပညာစာရွက်စာတမ်း မရှိသေးပါ",

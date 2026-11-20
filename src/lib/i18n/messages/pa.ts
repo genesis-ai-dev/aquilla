@@ -6664,6 +6664,7 @@ export const pa: Catalog = {
   "knowledgeBase.upload": "ਦਸਤਾਵੇਜ਼ ਅੱਪਲੋਡ ਕਰੋ",
   "knowledgeBase.uploading": "ਦਸਤਾਵੇਜ਼ ਅੱਪਲੋਡ ਹੋ ਰਿਹਾ ਹੈ…",
   "knowledgeBase.uploadSuccess": "{name} ਅੱਪਲੋਡ ਹੋਇਆ.",
+  "knowledgeBase.uploadTruncated": "{name} ਅੱਪਲੋਡ ਹੋਇਆ, ਪਰ ਇਹ ਬਹੁਤ ਲੰਮਾ ਹੈ: ਸਿਰਫ਼ ਇਸਦੇ ਪਹਿਲੇ 2 ਮਿਲੀਅਨ ਅੱਖਰ ਪੜ੍ਹੇ ਗਏ.",
   "knowledgeBase.uploadError": "{name} ਅੱਪਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ. ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX ਜਾਂ PDF · 25 MB ਤੱਕ (DOCX ਅਤੇ PDF 2 MB ਤੱਕ)",
   "knowledgeBase.emptyTitle": "ਹਾਲੇ ਕੋਈ ਗਿਆਨ ਦਸਤਾਵੇਜ਼ ਨਹੀਂ",

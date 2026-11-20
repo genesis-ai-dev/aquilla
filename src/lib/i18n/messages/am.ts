@@ -6669,6 +6669,7 @@ export const am: Catalog = {
   "knowledgeBase.upload": "ሰነድ ይስቀሉ",
   "knowledgeBase.uploading": "ሰነድ በመስቀል ላይ…",
   "knowledgeBase.uploadSuccess": "{name} ተሰቅሏል።",
+  "knowledgeBase.uploadTruncated": "{name} ተሰቅሏል፣ ነገር ግን በጣም ረጅም ነው፦ የተነበቡት የመጀመሪያዎቹ 2 ሚሊዮን ቁምፊዎች ብቻ ናቸው።",
   "knowledgeBase.uploadError": "{name}ን መስቀል አልተቻለም። እንደገና ይሞክሩ።",
   "knowledgeBase.acceptedFormats": "Markdown፣ TXT፣ DOCX ወይም PDF · እስከ 25 MB (DOCX እና PDF እስከ 2 MB)",
   "knowledgeBase.emptyTitle": "እስካሁን የእውቀት ሰነዶች የሉም",

@@ -6664,6 +6664,7 @@ export const sw: Catalog = {
   "knowledgeBase.upload": "Pakia hati",
   "knowledgeBase.uploading": "Inapakia hati…",
   "knowledgeBase.uploadSuccess": "{name} imepakiwa.",
+  "knowledgeBase.uploadTruncated": "{name} imepakiwa, lakini ni ndefu sana: herufi milioni 2 za kwanza pekee ndizo zilizosomwa.",
   "knowledgeBase.uploadError": "Imeshindwa kupakia {name}. Jaribu tena.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, au PDF · hadi 25 MB (DOCX na PDF hadi 2 MB)",
   "knowledgeBase.emptyTitle": "Bado hakuna hati za maarifa",

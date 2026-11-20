@@ -5316,6 +5316,7 @@ export const th: Catalog = {
   "knowledgeBase.upload": "อัปโหลดเอกสาร",
   "knowledgeBase.uploading": "กำลังอัปโหลดเอกสาร…",
   "knowledgeBase.uploadSuccess": "อัปโหลด {name} แล้ว",
+  "knowledgeBase.uploadTruncated": "อัปโหลด {name} แล้ว แต่ไฟล์ยาวมาก: อ่านได้เฉพาะ 2 ล้านอักขระแรกเท่านั้น",
   "knowledgeBase.uploadError": "ไม่สามารถอัปโหลด {name} ได้ โปรดลองอีกครั้ง",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX หรือ PDF · สูงสุด 25 MB",
   "knowledgeBase.emptyTitle": "ยังไม่มีเอกสารในฐานความรู้",

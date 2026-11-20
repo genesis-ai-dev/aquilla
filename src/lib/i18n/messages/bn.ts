@@ -6678,6 +6678,7 @@ export const bn: Catalog = {
   "knowledgeBase.upload": "নথি আপলোড করুন",
   "knowledgeBase.uploading": "নথি আপলোড হচ্ছে…",
   "knowledgeBase.uploadSuccess": "{name} আপলোড হয়েছে।",
+  "knowledgeBase.uploadTruncated": "{name} আপলোড হয়েছে, কিন্তু এটি অনেক দীর্ঘ: শুধু প্রথম 2 মিলিয়ন অক্ষর পড়া হয়েছে।",
   "knowledgeBase.uploadError": "{name} আপলোড হয়নি। আবার চেষ্টা করুন।",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, বা PDF · 25 MB পর্যন্ত (DOCX ও PDF 2 MB পর্যন্ত)",
   "knowledgeBase.emptyTitle": "এখনো কোনো জ্ঞান নথি নেই",

@@ -5331,6 +5331,7 @@ export const zh_Hans: Catalog = {
   "knowledgeBase.upload": "上传文档",
   "knowledgeBase.uploading": "正在上传文档…",
   "knowledgeBase.uploadSuccess": "已上传 {name}。",
+  "knowledgeBase.uploadTruncated": "已上传 {name}，但内容过长：只读取了前 200 万个字符。",
   "knowledgeBase.uploadError": "无法上传 {name}。请再试一次。",
   "knowledgeBase.acceptedFormats": "Markdown、TXT、DOCX 或 PDF · 上限 25 MB",
   "knowledgeBase.emptyTitle": "还没有任何知识文档",

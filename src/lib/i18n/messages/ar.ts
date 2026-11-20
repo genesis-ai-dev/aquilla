@@ -5323,6 +5323,7 @@ export const ar: Catalog = {
   "knowledgeBase.upload": "رفع مستند",
   "knowledgeBase.uploading": "جارٍ رفع المستند…",
   "knowledgeBase.uploadSuccess": "تم رفع {name}.",
+  "knowledgeBase.uploadTruncated": "تم رفع {name}، لكنه طويل جدًا: لم يُقرأ منه إلا أول 2 مليون حرف.",
   "knowledgeBase.uploadError": "تعذّر رفع {name}. حاول مرة أخرى.",
   "knowledgeBase.acceptedFormats": "Markdown أو TXT أو DOCX أو PDF · حتى 25 ميغابايت",
   "knowledgeBase.emptyTitle": "لا توجد مستندات معرفة بعد",

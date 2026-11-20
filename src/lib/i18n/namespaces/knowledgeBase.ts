@@ -15,6 +15,8 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.upload": "Upload document",
     "knowledgeBase.uploading": "Uploading document…",
     "knowledgeBase.uploadSuccess": "Uploaded {name}.",
+    "knowledgeBase.uploadTruncated":
+      "Uploaded {name}, but it is very long: only its first 2 million characters were read.",
     "knowledgeBase.uploadError": "Could not upload {name}. Try again.",
     // AQU-1763: "up to 25 MB" was the only limit shown, but it is just the
     // upload cap (MAX_KB_ORIGINAL_BYTES). DOCX and PDF are additionally capped
@@ -109,6 +111,11 @@ export const knowledgeBase = defineNamespace({
       },
       "knowledgeBase.uploadSuccess": {
         description: "Toast shown after a knowledge document upload succeeds.",
+        placeholders: { name: "Uploaded document filename." },
+      },
+      "knowledgeBase.uploadTruncated": {
+        description:
+          "Warning toast shown instead of the upload-success toast when a document's text was longer than the 2,000,000 characters the Knowledge Base keeps (AQU-2594): only the beginning was read and indexed.",
         placeholders: { name: "Uploaded document filename." },
       },
       "knowledgeBase.uploadError": {

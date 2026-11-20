@@ -267,7 +267,10 @@ describe("POST /:projectId/merge-sibling — success path", () => {
 
   it("adds a lane beside the host's existing lanes and leaves its settings alone", async () => {
     await seedUser(8, "u8")
-    await seedProject("host-h", "Host", 8)
+    // The host belongs to someone else, so u8 is a project lead there, not
+    // its Owner: the lane they merge in must still be readable to them.
+    await seedUser(18, "host-owner")
+    await seedProject("host-h", "Host", 18)
     await seedProject("donor-h", "Donor", 8)
     await grant("host-h", 8, 500)
     await grant("donor-h", 8, 500)
@@ -288,6 +291,16 @@ describe("POST /:projectId/merge-sibling — success path", () => {
       .bind("host-h")
       .all<{ legacy_tag: string }>()
     expect(results.map((row) => row.legacy_tag)).toEqual(["fr", "swh"])
+    // AQU-2355: a lane created later reaches nobody below Maintainer, except
+    // the project lead who ran the merge.
+    const { results: grants } = await env.AQUILLA_PG.prepare(
+      `SELECT l.legacy_tag FROM project_member_lane_roles g
+         JOIN lanes l ON l.project_id = g.project_id AND l.id = g.lane
+        WHERE g.project_id = ? AND g.user_id = 8`,
+    )
+      .bind("host-h")
+      .all<{ legacy_tag: string }>()
+    expect(grants.map((row) => row.legacy_tag)).toContain("swh")
     const host = await settingsOf("host-h")
     expect(host?.settings).toEqual({ targetLanes: ["fr"], sourceLanguage: "en" })
     expect(host?.version).toBe(2)

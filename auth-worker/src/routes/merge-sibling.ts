@@ -44,6 +44,7 @@ import { listDownstreamProjects, loadProjectWithSource } from "../services/sourc
 import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { ensureTargetLaneStmt, listProjectLanes, retryingLaneIdCollision } from "../../../db/shared/lanes"
 import { firstTargetLaneStmts } from "../../../db/shared/lane-grants"
+import { grantCreatedLaneToActor } from "../services/lane-grants"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
@@ -287,6 +288,12 @@ mergeSibling.post(
         .first<{ id: string }>()
       hostLaneId = created?.id ?? null
     }
+    // AQU-2355: the folded lane is new to the host and reaches nobody below
+    // Maintainer on its own. The person who ran the merge (project lead 500+
+    // on both projects) reads it, as the creator of any other lane does. The
+    // donor's other members are not carried over — they never were — so a
+    // Maintainer staffs the lane afterwards.
+    if (hostLaneId) await grantCreatedLaneToActor(c.env.AQUILLA_PG, hostId, hostLaneId, user.id)
 
     // Archive the donor (existing archive semantics: stamp archived_at/by).
     await c.env.AQUILLA_PG.prepare(

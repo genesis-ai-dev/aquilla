@@ -190,7 +190,7 @@ describe("AQU-2355 POST /lanes grants the new lane to nobody below Maintainer", 
     expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
   })
 
-  it("gives a lane-less project's first lane to its unscoped members and links its teams", async () => {
+  it("gives a lane-less project's first lane to its unscoped direct members, and a team only when picked", async () => {
     await seedTeam()
     await sql("DELETE FROM project_member_lane_roles WHERE project_id = ?", PROJECT)
     await sql("DELETE FROM group_project_lanes WHERE project_id = ?", PROJECT)
@@ -198,10 +198,26 @@ describe("AQU-2355 POST /lanes grants the new lane to nobody below Maintainer", 
     expect((await createLane("Spanish")).status).toBe(201)
     const laneId = await laneIdForTag("Spanish")
     expect((await grantsFor(2)).map((g) => g.lane)).toEqual([laneId])
-    expect((await grantsFor(7)).map((g) => g.lane)).toEqual([laneId])
+    // AQU-2563: a team reaches a lane only through its attachment, which lists none.
+    expect(await grantsFor(7)).toEqual([])
+    expect(await teamLanes()).toEqual([])
     expect(await grantsFor(3)).toEqual([])
     expect(await grantsFor(4)).toEqual([])
-    expect(await teamLanes()).toEqual([laneId])
+
+    // A team on no lane yet is offered to the owner, and picking it links it.
+    await sql("DELETE FROM project_member_lane_roles WHERE project_id = ?", PROJECT)
+    await sql("DELETE FROM lanes WHERE project_id = ? AND role = 'target'", PROJECT)
+    const offer = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    const body = (await offer.json()) as { teams: Array<{ groupId: number; laneNames: string[] }> }
+    expect(body.teams).toEqual([expect.objectContaining({ groupId: 9, laneNames: [] })])
+    expect((await createLane("Twi", { teamIds: [9] })).status).toBe(201)
+    const twi = await laneIdForTag("Twi")
+    expect(await teamLanes()).toEqual([twi])
+    expect((await grantsFor(7)).map((g) => g.lane)).toEqual([twi])
   })
 
   it("offers the people and teams on the other lanes, with their role, and nobody at Maintainer+", async () => {

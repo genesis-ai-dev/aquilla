@@ -483,17 +483,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               })
               if (renamed.kind !== "ok") extraLanguagesFailed = true
             }
-            // AQU-2355: a lane created later reaches nobody below Maintainer.
-            // The first lane goes to the teams picked above by itself (a
-            // lane-less project's first lane is linked to its teams); each
-            // later one names them, so the teams cover every language the
-            // project is created with.
+            // AQU-2355: a new lane reaches nobody below Maintainer unless named,
+            // and a team reaches a lane only through its attachment (AQU-2563).
+            // So each language the project is created with names the teams
+            // picked above, and those teams cover all of them.
             const pickedTeams = destination.orgId != null ? teamIds : []
-            let laneIndex = 0
             for (const lane of completeTargetLanes(project.targetLanguage, extrasToApply)) {
-              const later = laneIndex++ > 0
-              const created = await createProjectLane(jwt, project.id, {
-                ...(later && pickedTeams.length > 0 ? { grants: { teamIds: pickedTeams } } : {}),
+              const input = {
                 name: "",
                 language: lane.language,
                 delivers: value.deliversByLanguage[lane.deliversKey] ?? "text",
@@ -501,7 +497,18 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 // string, which the server refuses unless the caller says it
                 // meant it. The dialog warned about it before Create.
                 ...(lane.duplicate ? { allowDuplicateName: true } : {}),
+              } as const
+              let created = await createProjectLane(jwt, project.id, {
+                ...input,
+                ...(pickedTeams.length > 0 ? { grants: { teamIds: pickedTeams } } : {}),
               })
+              // A team whose attach did not land is not on the server's offer,
+              // which refuses the whole request. The language still matters
+              // more than the link: create it without, and say so below.
+              if (created.kind === "error" && pickedTeams.length > 0) {
+                created = await createProjectLane(jwt, project.id, input)
+                if (created.kind === "ok") extraLanguagesFailed = true
+              }
               if (created.kind !== "ok") {
                 extraLanguagesFailed = true
                 break

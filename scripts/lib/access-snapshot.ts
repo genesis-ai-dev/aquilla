@@ -180,25 +180,42 @@ export function wallMemberLevel(idx: AccessIndex, userId: number, projectId: str
   return Math.max(d ?? 0, t ?? 0)
 }
 
+/**
+ * AQU-2563: does this person's path here cover a lane the project does not
+ * have yet? A direct membership does; a team does only through a living
+ * (`lanes_explicit = false`) attachment, since an explicit one can list only
+ * lanes that exist.
+ */
+export function pathCoversNewLane(idx: AccessIndex, userId: number, projectId: string): boolean {
+  if (idx.direct.has(key(userId, projectId))) return true
+  for (const gpg of idx.attachments.get(projectId) ?? []) {
+    if (gpg.lanes_explicit) continue
+    if ((idx.membersByGroup.get(gpg.group_id) ?? []).some((gm) => Number(gm.user_id) === userId)) return true
+  }
+  return false
+}
+
 export interface FutureRule {
   name: string
   futureLanes(idx: AccessIndex, userId: number, projectId: string, role: number | null): { reach: FutureLanes; reason: string | null }
 }
 
 /**
- * BEFORE AQU-2355: `grantNewLaneStmt` (AQU-1781). A lane created later is
- * granted to every wall member at 100–599 with no kind='lane' scope row who
- * already holds a grant on every OTHER target lane, archived included. On a
- * project with no target lane that holds vacuously, and stays true for every
- * lane after (each new lane is granted, so they hold all of them).
+ * BEFORE AQU-2355: `grantNewLaneStmt` (AQU-1781, with AQU-2563's team check).
+ * A lane created later is granted to every wall member at 100–599 with no
+ * kind='lane' scope row who already holds a grant on every OTHER target lane,
+ * archived included, and whose path covers the new lane (a direct membership,
+ * or a living team attachment). On a project with no target lane the "every
+ * other lane" test holds vacuously, and stays true for every lane after.
  */
 export const AQU_1781_RULE: FutureRule = {
-  name: "AQU-1781: a new lane goes to anyone below Maintainer who holds every other lane",
+  name: "AQU-1781 (with AQU-2563): a new lane goes to anyone below Maintainer who holds every other lane and whose path covers it",
   futureLanes(idx, userId, projectId, role) {
     if (role != null && role >= MAINTAINER) return { reach: "every", reason: "Maintainer or Owner" }
     const wall = wallMemberLevel(idx, userId, projectId)
     if (wall == null || wall < VIEWER || wall >= MAINTAINER) return { reach: "none", reason: null }
     if ((idx.scopes.get(key(userId, projectId))?.size ?? 0) > 0) return { reach: "none", reason: null }
+    if (!pathCoversNewLane(idx, userId, projectId)) return { reach: "none", reason: null }
     const held = idx.grants.get(key(userId, projectId)) ?? new Map<string, number>()
     const all = idx.lanesByProject.get(projectId) ?? []
     if (!all.every((l) => held.has(l.id))) return { reach: "none", reason: null }
@@ -214,19 +231,22 @@ export const AQU_1781_RULE: FutureRule = {
 
 /**
  * AFTER AQU-2355: only Maintainer and Owner reach every later lane. The one
- * implicit grant left is a project's FIRST target lane (`grantFirstTargetLaneStmt`),
- * for the members the AQU-1781 rule would have granted it to — nobody can hold
- * a lane that does not exist yet, so on a lane-less project this is what keeps
- * them from losing the lane the first translation creates.
+ * implicit grant left is a project's FIRST target lane (`firstTargetLaneStmts`),
+ * for the members the old rule would have granted it to whose path covers it
+ * (a direct membership; a team only through a living attachment, and the plan
+ * converts those) — nobody can hold a lane that does not exist yet, so on a
+ * lane-less project this keeps them from losing the lane a first translation
+ * creates.
  */
 export const AQU_2355_RULE: FutureRule = {
-  name: "AQU-2355: later lanes reach Maintainer and Owner only; a lane-less project's first lane reaches its members",
+  name: "AQU-2355: later lanes reach Maintainer and Owner only; a lane-less project's first lane reaches its direct members",
   futureLanes(idx, userId, projectId, role) {
     if (role != null && role >= MAINTAINER) return { reach: "every", reason: "Maintainer or Owner" }
     if ((idx.lanesByProject.get(projectId) ?? []).length > 0) return { reach: "none", reason: null }
     const wall = wallMemberLevel(idx, userId, projectId)
     if (wall == null || wall < VIEWER || wall >= MAINTAINER) return { reach: "none", reason: null }
     if ((idx.scopes.get(key(userId, projectId))?.size ?? 0) > 0) return { reach: "none", reason: null }
+    if (!pathCoversNewLane(idx, userId, projectId)) return { reach: "none", reason: null }
     return { reach: "first-only", reason: "first lane of a lane-less project" }
   },
 }

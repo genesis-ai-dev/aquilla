@@ -10,12 +10,12 @@
 //
 // One implicit grant is left, the vacuous case of the old rule: a project's
 // FIRST target lane. Nobody can hold a grant for a lane that does not exist, so
-// the members a lane-less project already has — a project created inside a
-// team, a bare project whose first translation creates the `''` bridge, a Codex
-// project attached to its team before the content sweep — would otherwise read
-// source text only. The first lane goes to the same members AQU-1781 gave it
-// to, and every team attached to the project is linked to it, so the team's
-// attachment lists the lane it now covers.
+// the direct members a lane-less project already has — a bare project whose
+// first translation creates the `''` bridge — would otherwise read source text
+// only. The first lane goes to those members. A team reaches it only through
+// its attachment (AQU-2563): a team whose attachment lists no lane is not
+// handed one; the creator links it in the create step (project create sends
+// its teams), and the Codex import links its team to every lane it creates.
 //
 // Keyed by the lane's id OR its legacy tag, because the tag-keyed writers
 // (`ensureProjectLaneStmts`, `ensureTargetLaneStmt`, `ensureBlankTargetBridgeStmt`)
@@ -43,9 +43,11 @@ function laneKeyColumn(ref: NewLaneRef): { column: string; value: string } {
 
 /**
  * When the lane just created is the project's only target lane, grant it to
- * every member below Maintainer with no kind='lane' scope row, and link every
- * attached team to it. On a project that already had a target lane (archived
- * included) both statements select nothing. Safe to splice into the batch that
+ * every member below Maintainer with no kind='lane' scope row whose path here
+ * covers it: a direct `project_members` row, or a team whose attachment covers
+ * the lane (AQU-2563 — today only a `lanes_explicit = false` row that migration
+ * 0208 has not converted yet). On a project that already had a target lane
+ * (archived included) it selects nothing. Safe to splice into the batch that
  * creates the lane.
  *
  * Only a lane created IN THIS TRANSACTION (`lanes.created_at = now()`, which
@@ -56,8 +58,7 @@ function laneKeyColumn(ref: NewLaneRef): { column: string; value: string } {
  * (the AQU-2557 leak). A caller that created the lane in an earlier statement
  * of its own, outside the batch, passes `{ createdByCaller: true }`.
  *
- * "Every member" is {@link projectWallMembersSql} — the team path as well as
- * `project_members` (AQU-1800).
+ * Returns a list so callers splice it the same way whatever it grows to.
  */
 export function firstTargetLaneStmts(
   db: AquillaDb,
@@ -100,30 +101,13 @@ export function firstTargetLaneStmts(
        ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )
     // AQU-2563: the last condition keeps out a member whose only path here is
-    // a team whose attachment does not list this lane. The team statement
-    // below links every attached team to a first lane and runs FIRST, so a
-    // team member does get it; the condition reads the project through `l`,
-    // so it adds no placeholder.
+    // a team whose attachment does not list this lane. It reads the project
+    // through `l`, so it adds no placeholder.
     // Eight placeholders, in textual order: the row's project id, grantedBy,
     // the two the member source takes, the lane join's project id, the lane
     // key, the scope sub-select's and the only-lane sub-select's project ids.
     .bind(projectId, grantedBy, projectId, projectId, projectId, key.value, projectId, projectId)
-  const teams = db
-    .prepare(
-      `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
-       SELECT gpg.group_id, gpg.project_id, l.id
-         FROM group_project_grants gpg
-         JOIN lanes l
-           ON l.project_id = gpg.project_id
-          AND l.role = 'target'
-          AND l.${key.column} = ?
-        WHERE gpg.project_id = ?
-          AND ${onlyLane}
-       ON CONFLICT DO NOTHING`,
-    )
-    .bind(key.value, projectId, projectId)
-  // Teams first: the member statement's AQU-2563 check reads the link.
-  return [teams, members]
+  return [members]
 }
 
 /**

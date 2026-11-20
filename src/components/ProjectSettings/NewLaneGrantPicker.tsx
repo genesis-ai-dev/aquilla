@@ -104,7 +104,9 @@ export function NewLaneGrantPicker({ load, value, onChange, disabled }: NewLaneG
                   {t("projectSettings.languages.grantTeamLine", {
                     role: roleLabel(t, team.roleLevel),
                     count: team.memberCount,
-                    lanes: team.laneNames.join(", "),
+                    lanes: team.laneNames.length > 0
+                      ? team.laneNames.join(", ")
+                      : t("projectSettings.languages.grantNoLanes"),
                   })}
                 </span>
               </span>

@@ -7,6 +7,7 @@ import {
   classifyFiles,
   holdReason,
   isDocsOrTestOnly,
+  isLocaleCatalogOnly,
   planRelease,
   prHolds,
   prNumberFromSubject,
@@ -28,6 +29,19 @@ const exportPr = (number: number, mergedAt: string) => pr(number, mergedAt, { ar
 
 const NOW = "2026-09-24T12:00:00Z"
 const recent = "2026-09-24T10:00:00Z"
+
+// A commit pushed straight to dev: no PR number, its subject in place of a title.
+const direct = (sha: string, subject: string, files: string[], areas: string[] = []) => ({
+  sha,
+  subject,
+  direct: true,
+  mergedAt: recent,
+  files,
+  areas,
+  pathHolds: false,
+  walk: "unknown",
+})
+const CATALOGS = ["src/lib/i18n/messages/fr.ts", "src/lib/i18n/messages/zh-Hans.ts", "src/lib/i18n/source-hashes.json"]
 
 // One release in QA at a time keeps QA from re-testing a moving target. The
 // next slice cuts the instant that one closes, at whatever's ready in dev.
@@ -137,6 +151,25 @@ describe("planRelease", () => {
     expect(plan.prs[0].files).toEqual(["src/a.ts"])
     expect(plan.held[0].files).toEqual(["db/postgres/migrations/0199_x.sql"])
   })
+
+  // Until 2026-11-20 the planner skipped every commit with no PR number. Six
+  // daily localization pushes never reached the release line, and each PR
+  // that appended locale keys after them conflicted on every hourly cut.
+  it("plans a direct commit in its dev position: catalog-only is ready, anything else is held as not a PR", () => {
+    const catalogs = direct("c0ffee0001", "chore(i18n): localize labels", CATALOGS)
+    // Neither a label nor a walk can clear it: there is no PR to carry either.
+    const bump = { ...direct("b0b0b0b0b0", "chore(desktop): bump shell", ["src-tauri/tauri.conf.json"]), approved: true, walk: "PASS" }
+    const plan = planRelease({ openReleases: [], prs: [pr(1, recent), catalogs, bump, pr(2, recent)], now: NOW })
+    expect(plan.prs.map((p) => p.number ?? p.sha)).toEqual([1, "c0ffee0001", 2])
+    expect(plan.held).toEqual([expect.objectContaining({ sha: "b0b0b0b0b0", subject: "chore(desktop): bump shell", why: "not a PR" })])
+    expect(plan.reason).toBe("2 ready PR(s) and 1 direct commit(s), 1 held, no release in flight")
+    expect([plan.prCount, plan.directCount]).toEqual([2, 2])
+
+    const waiting = planRelease({ openReleases: [], prs: [bump], now: NOW })
+    expect(waiting.cut).toBe(false)
+    expect(waiting.reason).toBe("0 PR(s) and 1 direct commit(s) waiting on a person, none ready")
+    expect(waiting.held.map((p) => p.sha)).toEqual(["b0b0b0b0b0"])
+  })
 })
 
 describe("prHolds", () => {
@@ -163,6 +196,34 @@ describe("prHolds", () => {
 
   it("a passed gate does not excuse a failed walk", () => {
     expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] })).toBe(true)
+  })
+
+  it("decides a direct commit from its files alone, and names its holding areas in the reason", () => {
+    expect(prHolds(direct("a", "chore(i18n): localize", CATALOGS))).toBe(false)
+    expect(prHolds(direct("b", "docs: fix a typo", ["docs/SEO.md"]))).toBe(true)
+    expect(prHolds({ direct: true, areas: [], walk: "none" })).toBe(true)
+    expect(holdReason(direct("c", "chore: bump", ["package.json"]))).toBe("not a PR")
+    expect(holdReason(direct("d", "add a column", ["db/postgres/migrations/0199_x.sql"], ["migration"]))).toBe("not a PR; touches migration")
+  })
+})
+
+// The one kind of direct commit the line picks by itself: the generated
+// catalogs and their sidecar, nothing a person wrote.
+describe("isLocaleCatalogOnly", () => {
+  it.each([
+    [CATALOGS, true],
+    [["src/lib/i18n/source-hashes.json"], true],
+    [[], false],
+    // The English source, the registries a new locale edits, and tests are code.
+    [["src/lib/i18n/messages/fr.ts", "src/lib/i18n/messages/en.ts"], false],
+    [["src/lib/i18n/messages/fr.ts", "src/lib/i18n/messages/index.ts"], false],
+    [["src/lib/i18n/messages/all.ts"], false],
+    [["src/lib/i18n/messages/index.test.ts"], false],
+    [["src/lib/i18n/messages/fr.ts", "src/lib/i18n/namespaces/org.ts"], false],
+    [["src/lib/i18n/messages/nested/fr.ts"], false],
+    [["docs/src/lib/i18n/source-hashes.json"], false],
+  ])("%j is %s", (files, expected) => {
+    expect(isLocaleCatalogOnly(files)).toBe(expected)
   })
 })
 
@@ -357,10 +418,23 @@ describe("unreleasedPrs against a scratch repo", () => {
     git("update-ref", "refs/remotes/origin/dev", "dev")
     return git("rev-parse", "HEAD")
   }
-  // A release branch cut at `at`, built the documented way, then tagged.
-  const release = (at: string, picks: { sha: string; x?: boolean }[], tag: string) => {
+  // A commit pushed straight to dev: no PR branch, no merge, any subject.
+  const directCommit = (subject: string, files: Record<string, string>) => {
+    git("checkout", "-q", "dev")
+    for (const [file, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
+      writeFileSync(path.join(root, file), text)
+    }
+    git("add", "-A")
+    git("commit", "-qm", subject)
+    git("update-ref", "refs/remotes/origin/dev", "dev")
+    return git("rev-parse", "HEAD")
+  }
+  // A release branch cut at `at`, built the documented way, then tagged. A
+  // direct commit has one parent, so its pick takes no -m 1.
+  const release = (at: string, picks: { sha: string; x?: boolean; merge?: boolean }[], tag: string) => {
     git("checkout", "-q", "-b", `release/${tag.slice(0, 10).replaceAll(".", "/")}-01`, at)
-    for (const { sha, x = true } of picks) git("cherry-pick", ...(x ? ["-x"] : []), "-m", "1", sha)
+    for (const { sha, x = true, merge = true } of picks) git("cherry-pick", ...(x ? ["-x"] : []), ...(merge ? ["-m", "1"] : []), sha)
     git("tag", tag)
     git("checkout", "-q", "dev")
   }
@@ -421,5 +495,60 @@ describe("unreleasedPrs against a scratch repo", () => {
     expect(plan.prs.map((p) => p.number)).toEqual([5])
     expect(plan.held.map((p) => p.number)).toEqual([3])
     expect(plan.base).toBe(git("rev-parse", "2026.09.28.02^{commit}"))
+  })
+
+  it("lists direct commits between the PRs, in dev order, and leaves out only a merge that changed no file", () => {
+    const m1 = mergePr(1, "src/app.ts")
+    git("tag", "2026.09.28.01", m1)
+    const catalogs = directCommit("chore(i18n): localize labels", {
+      "src/lib/i18n/messages/fr.ts": "fr\n",
+      "src/lib/i18n/source-hashes.json": "{}\n",
+    })
+    mergePr(2, "docs/two.md")
+    const bump = directCommit("chore(desktop): bump shell", { "src-tauri/tauri.conf.json": "0.2.3\n" })
+    // Nobody reviewed it, so a rename's old path counts: this one moves app
+    // code onto a catalog path, and is not a catalog-only commit.
+    git("mv", "src/app.ts", "src/lib/i18n/messages/de.ts")
+    git("commit", "-qm", "chore(i18n): add de")
+    const rename = git("rev-parse", "HEAD")
+    // A branch merged back with nothing dev lacked: there is nothing to pick.
+    git("checkout", "-q", "-b", "backmerge", m1)
+    git("commit", "-q", "--allow-empty", "-m", "marker")
+    git("checkout", "-q", "dev")
+    git("merge", "-q", "--no-ff", "-m", "Merge branch 'main' into dev", "backmerge")
+    git("update-ref", "refs/remotes/origin/dev", "dev")
+
+    const { prs, base } = unreleasedPrs({ cwd: root })
+    expect(prs.map((p) => [p.number ?? p.subject, p.sha, p.direct ?? false, p.walk])).toEqual([
+      ["chore(i18n): localize labels", catalogs, true, "none"],
+      [2, expect.any(String), false, "none"],
+      ["chore(desktop): bump shell", bump, true, "unknown"],
+      ["chore(i18n): add de", rename, true, "unknown"],
+    ])
+    expect(prs[0].files).toEqual(["src/lib/i18n/messages/fr.ts", "src/lib/i18n/source-hashes.json"])
+    expect(prs[3].files).toEqual(["src/app.ts", "src/lib/i18n/messages/de.ts"])
+
+    const plan = planRelease({ openReleases: [], prs, now: NOW, base })
+    expect(plan.prs.map((p) => p.number ?? p.sha)).toEqual([catalogs, 2])
+    expect(plan.held.map((p) => [p.sha, p.why])).toEqual([[bump, "not a PR"], [rename, "not a PR"]])
+  })
+
+  // How a person releases a held direct commit: a pick by hand onto the
+  // release branch. Only -x proves it; a direct commit has no PR number in
+  // its subject to fall back on. #2 sits between the cut point and the
+  // commit, so the pick is ahead of its dev order, like a hotfix.
+  it.each([
+    { x: true, waiting: [2, 3], floorIsBump: true },
+    { x: false, waiting: [2, "chore(desktop): bump shell", 3], floorIsBump: false },
+  ])("a direct commit picked by hand is released, and moves the floor, only with -x ($x)", ({ x, waiting, floorIsBump }) => {
+    const m1 = mergePr(1, "docs/one.md")
+    mergePr(2, "docs/two.md")
+    const bump = directCommit("chore(desktop): bump shell", { "src-tauri/tauri.conf.json": "0.2.3\n" })
+    mergePr(3, "docs/three.md")
+    release(m1, [{ sha: bump, x, merge: false }], "2026.09.28.01")
+    const { prs, floor } = unreleasedPrs({ cwd: root })
+    expect(prs.map((p) => p.number ?? p.subject)).toEqual(waiting)
+    expect(prs[0].behindFloor).toBe(floorIsBump)
+    expect(floor).toBe(floorIsBump ? bump : m1)
   })
 })

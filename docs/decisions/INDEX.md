@@ -67,6 +67,7 @@ pinned symbol gets renamed and the check goes red.
 | 0011 | [In-flight statement cap](0011-in-flight-statement-cap.md) | a request handle never gives the driver more statements at once than its pool has connections |
 | 0012 | [A desktop release is a draft until it is verified](0012-desktop-release-is-a-draft-until-verified.md) | the shell release line cuts itself, and installed apps are offered a build only after its signed files pass verification |
 | 0013 | [An interaction costs commits × rendered tree × work in render](0013-interaction-cost-is-commits-times-tree.md) | what makes a click slow in this app, the patterns that are not allowed, and the benchmark that enforces them |
+| 0014 | [Direct dev commits on the release line](0014-direct-dev-commits-on-the-release-line.md) | a commit pushed to `dev` with no PR is picked when it only touches locale catalogs, and held as "not a PR" until a person picks it otherwise |
 
 ## Adding a record
 

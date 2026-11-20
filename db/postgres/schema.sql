@@ -227,17 +227,17 @@ CREATE TABLE group_project_grants (
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),
-    -- AQU-1813: false = this attachment still means every target lane, including
-    -- one created later (Codex attaches before the content sweep builds lanes).
-    -- true = group_project_lanes is the whole set, and a lane created later
-    -- stays off until someone edits the attachment.
-    lanes_explicit BOOLEAN NOT NULL DEFAULT false,
+    -- AQU-1813 / AQU-2355 (0208): always true. group_project_lanes is the
+    -- whole set of lanes the attachment covers, and a lane created later stays
+    -- off until someone adds it. (false meant "every lane, forever"; 0208
+    -- converted those rows to the lanes they covered.)
+    lanes_explicit BOOLEAN NOT NULL DEFAULT true,
     PRIMARY KEY (group_id, project_id)
 );
 
--- The lanes checked on an explicit team attachment (AQU-1813). Empty when
--- lanes_explicit is false. All checks the lanes that exist at that moment;
--- it does not keep watching for new ones.
+-- The lanes a team attachment covers (AQU-1813, AQU-2355). Attaching with
+-- "all" stores the lanes that exist at that moment; it does not keep watching
+-- for new ones.
 CREATE TABLE IF NOT EXISTS group_project_lanes (
     group_id   BIGINT NOT NULL,
     project_id TEXT NOT NULL,

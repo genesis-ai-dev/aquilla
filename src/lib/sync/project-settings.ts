@@ -803,6 +803,10 @@ export async function createProjectLane(
     allowDuplicateName?: boolean
     /** Media redesign slice 1: what the language delivers. Omitted, Text. */
     delivers?: LaneDelivers
+    /** AQU-2355: who else gets the new lane, from {@link fetchNewLaneGrantCandidates}.
+     *  Omitted, nobody below Maintainer does (a lane-less project's first lane
+     *  still reaches its members). */
+    grants?: NewLaneGrantPicks
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
@@ -824,6 +828,58 @@ export async function createProjectLane(
   if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
   const body = (await res.json()) as { lane: ProjectLaneView }
   return { kind: "ok", lane: body.lane }
+}
+
+/** AQU-2355: one person the create-lane step offers. */
+export interface NewLanePersonCandidate {
+  userId: number
+  username: string
+  displayName: string | null
+  /** The highest role they hold on the other lanes listed. */
+  roleLevel: number
+  laneNames: string[]
+}
+
+/** AQU-2355: one team the create-lane step offers. */
+export interface NewLaneTeamCandidate {
+  groupId: number
+  name: string
+  roleLevel: number
+  memberCount: number
+  laneNames: string[]
+}
+
+export interface NewLaneGrantCandidates {
+  people: NewLanePersonCandidate[]
+  teams: NewLaneTeamCandidate[]
+}
+
+export interface NewLaneGrantPicks {
+  userIds?: number[]
+  teamIds?: number[]
+}
+
+/**
+ * AQU-2355: the people and teams on this project's other lanes, which the
+ * create-lane step lists (unticked). Null when it could not be read — the step
+ * then offers nobody, and the lane is still created.
+ */
+export async function fetchNewLaneGrantCandidates(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<NewLaneGrantCandidates | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/grant-candidates`,
+      { headers: authHeaders(jwt) },
+    )
+    if (!res.ok) return null
+    const body = (await res.json()) as Partial<NewLaneGrantCandidates>
+    return { people: body.people ?? [], teams: body.teams ?? [] }
+  } catch {
+    return null
+  }
 }
 
 export type SetLaneDeliversResult =

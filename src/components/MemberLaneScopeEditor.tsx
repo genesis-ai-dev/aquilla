@@ -17,8 +17,9 @@
 //
 // AQU-1783 — the popover also REPORTS access, and reports it from the lane
 // grants (`project_member_lane_roles`), because that is the table the read
-// wall reads. Reading the scopes instead is what made it say "Unscoped — full
-// access" about a contributor the wall had walled off: scopes and grants drift
+// wall reads. Reading the scopes instead is what made it claim full access
+// (the old "Unscoped" line, removed in AQU-2355) about a contributor the wall
+// had walled off: scopes and grants drift
 // apart whenever grants were never written or lag behind the lane set. The
 // verdict is `memberLaneAccess`, which applies the wall's own rule, so this
 // screen cannot claim access the server denies.
@@ -188,8 +189,8 @@ export function MemberLaneScopeEditor({
 
   /**
    * AQU-1783: repair a grant gap in one click. An empty lane-scope set is the
-   * write that makes `planLaneGrants` grant every lane (archived ones too, so
-   * a lane created later still reaches them — AQU-1781), so this saves
+   * write that makes `planLaneGrants` grant every CURRENT lane (archived ones
+   * too; since AQU-2355 a lane created later is not included), so this saves
    * the member's FILE scopes alone — today's accidental repair, made explicit.
    * Offered for unscoped members only: re-granting a deliberately scoped
    * member would silently widen their access.
@@ -254,14 +255,6 @@ export function MemberLaneScopeEditor({
           </div>
         ) : (
           <>
-            {/* AQU-1783: "Unscoped — full access" is only true when the
-                grants really do cover every current lane. Where the server
-                reported a gap, the list below says so instead. */}
-            {draft.length === 0 && !byRole && (restricted === null || restricted.coversAll) && (
-              <p className="text-[11px] text-muted-foreground">
-                {t("org.memberLaneScopeEditor.unscopedFullAccess")}
-              </p>
-            )}
             {byRole && (
               <p className="text-[11px] text-muted-foreground" data-testid="member-lane-grants-by-role">
                 {t("org.memberLaneScopeEditor.visibleByRole")}
@@ -291,7 +284,7 @@ export function MemberLaneScopeEditor({
             {restricted?.warn && (
               <div className="space-y-1 rounded border border-destructive/40 bg-destructive/5 p-1.5" role="alert">
                 <p className="text-[11px] text-destructive">
-                  {t("org.memberLaneScopeEditor.grantGapWarning")}
+                  {t("org.memberLaneScopeEditor.laneGapWarning")}
                 </p>
                 <Button
                   variant="outline"

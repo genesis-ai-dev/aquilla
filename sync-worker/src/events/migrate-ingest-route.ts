@@ -38,6 +38,7 @@ import {
 import type { EventKind } from './types'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 import { dataTargetTagsFromEvents, ensureProjectLanes } from '../../../db/shared/lanes'
+import { linkTeamsToLaneStmts } from '../../../db/shared/lane-grants'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -301,9 +302,29 @@ export async function handleMigrateIngestRequest(
   // this call is still required so extra targetLang tags in the chunk get
   // rows, and so already-migrated re-runs stay idempotent.
   try {
+    const targetLaneIds = async () =>
+      new Set(
+        ((
+          await db
+            .prepare(`SELECT id FROM lanes WHERE project_id = ? AND role = 'target'`)
+            .bind(body.projectId)
+            .all<{ id: string }>()
+        ).results ?? []).map((row) => row.id),
+      )
+    const before = await targetLaneIds()
     await ensureProjectLanes(db, body.projectId, {
       dataTargetTags: dataTargetTagsFromEvents(body.events),
     })
+    // AQU-2355: a lane created later reaches nobody below Maintainer, and a
+    // team attachment lists its lanes. Codex attaches each project to its
+    // GitLab team before the sweep creates the lanes, so the import names that
+    // team for every lane it creates here — the first lane is linked by
+    // `ensureProjectLanes` itself. Only lanes new in this call, so a re-run
+    // never re-adds a lane someone has since unticked for the team.
+    const created = [...(await targetLaneIds())].filter((id) => !before.has(id))
+    for (const laneId of created) {
+      await db.batch(linkTeamsToLaneStmts(db, body.projectId, laneId, { codex: true }, null))
+    }
   } catch (err) {
     endPhase('lanes')
     emitDiagnostics('ensure-lanes-failed', errSummary(err))

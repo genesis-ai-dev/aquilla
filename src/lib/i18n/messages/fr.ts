@@ -3012,7 +3012,6 @@ export const fr: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "niveau organisation · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "Modifier les portées de piste de {username} sur ce projet",
   "org.memberLaneScopeEditor.scopesHeading": "Portées de {username}",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "Sans portée — accès complet",
   "org.memberLaneScopeEditor.languagesLegend": "Langues dans lesquelles cette personne peut travailler",
   "org.memberLaneScopeEditor.mainLanguageFallback": "Langue principale",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (n'est pas une langue de ce projet)",

@@ -413,7 +413,9 @@ function LaneScopeChips({
   const fileScopes = (scopes ?? []).filter((s) => s.kind === "file")
 
   if (!scopes || scopes.length === 0) {
-    return <span>{scopes ? "unscoped" : "scopes"}</span>
+    // AQU-2355: no "unscoped" label — no lane scope no longer means every
+    // lane, forever. The affordance just opens the scope editor.
+    return <span>scopes</span>
   }
 
   return (

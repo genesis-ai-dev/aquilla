@@ -78,6 +78,12 @@ async function seedAccessTargets(): Promise<void> {
   )
     .bind(TEAM_PROJECT, ownerId)
     .run()
+  // AQU-2355: the attachment lists its lanes (both of the project's).
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (11, ?, ?), (11, ?, ?)",
+  )
+    .bind(TEAM_PROJECT, `b${TEAM_PROJECT.slice(-6)}`, TEAM_PROJECT, `n${TEAM_PROJECT.slice(-6)}`)
+    .run()
   for (const projectId of [DIRECT_PROJECT, TEAM_PROJECT]) {
     await env.AQUILLA_PG.prepare(
       `INSERT INTO lanes (id, project_id, role, language, name, legacy_tag, position) VALUES
@@ -185,7 +191,7 @@ describe("Codex/GitLab migration writes lane access (AQU-1799)", () => {
     expect(await grantsFor(DIRECT_PROJECT, result.userId)).toEqual([])
   })
 
-  it("includes an archived lane, so a lane created later still reaches the person", async () => {
+  it("includes an archived lane, so restoring it keeps the person's access", async () => {
     await seedAccessTargets()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO lanes (id, project_id, role, language, name, legacy_tag, position, archived_at)
@@ -196,13 +202,10 @@ describe("Codex/GitLab migration writes lane access (AQU-1799)", () => {
     const result = await migrate(
       plan({ projectMemberships: [{ projectId: DIRECT_PROJECT, roleLevel: 400 }] }),
     )
-    // AQU-1781 grants a newly created lane only to someone who already holds
-    // every OTHER target lane, archived ones included, so leaving the archived
-    // lane out here would make this person "lane-limited" and silently skip
-    // them for every lane created afterwards — the AQU-1783 drift. Invite
-    // accept, direct add (AQU-1782), the one-click regrant and the AQU-730
-    // backfill all grant the archived lanes for the same reason; the member
-    // inspector still lists current lanes only, so it does not show there.
+    // Archived lanes are granted too, as invite accept, direct add
+    // (AQU-1782), the one-click regrant and the AQU-730 backfill do, so a
+    // restored lane is still theirs. The member inspector lists current lanes
+    // only, so it does not show there.
     expect((await grantsFor(DIRECT_PROJECT, result.userId)).map((g) => g.lane)).toEqual([
       "arch0001",
       `b${DIRECT_PROJECT.slice(-6)}`,

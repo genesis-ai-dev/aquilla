@@ -49,7 +49,7 @@ import {
   listProjectLanes,
   retryingLaneIdCollision,
 } from '../../../db/shared/lanes'
-import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
+import { firstTargetLaneStmts } from '../../../db/shared/lane-grants'
 import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import {
   chooseDonorLane,
@@ -285,13 +285,14 @@ export async function mergeSibling(
   // back, and the retry builds the lane statements again, so each attempt
   // carries a new id (AQU-2587: built once outside the retry, every attempt
   // reused the clashing id and the merge failed). Nothing is written twice.
-  // AQU-1781: the fold's lane is new to the host, so nobody holds a grant for
-  // it — under the read wall every host member below Maintainer would read an
-  // empty lane. The grant statement follows the lane statement in the same
-  // batch, keyed by the tag because the lane statement keeps an existing record.
+  // AQU-2355: the fold's lane is new to the host, and a lane created later
+  // reaches nobody below Maintainer — a Maintainer staffs it. Only a host with
+  // no target lane yet gives its members this first one; that statement
+  // follows the lane statement in the same batch, keyed by the tag because the
+  // lane statement keeps an existing record.
   const laneStmts = () => [
     ensureTargetLaneStmt(db, hostProjectId, lane),
-    grantNewLaneStmt(db, hostProjectId, { legacyTag: lane }, null),
+    ...firstTargetLaneStmts(db, hostProjectId, { legacyTag: lane }, null),
   ]
   const lead = await retryingLaneIdCollision(async () => {
     const head = laneStmts()

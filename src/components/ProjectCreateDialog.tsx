@@ -483,8 +483,17 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               })
               if (renamed.kind !== "ok") extraLanguagesFailed = true
             }
+            // AQU-2355: a lane created later reaches nobody below Maintainer.
+            // The first lane goes to the teams picked above by itself (a
+            // lane-less project's first lane is linked to its teams); each
+            // later one names them, so the teams cover every language the
+            // project is created with.
+            const pickedTeams = destination.orgId != null ? teamIds : []
+            let laneIndex = 0
             for (const lane of completeTargetLanes(project.targetLanguage, extrasToApply)) {
+              const later = laneIndex++ > 0
               const created = await createProjectLane(jwt, project.id, {
+                ...(later && pickedTeams.length > 0 ? { grants: { teamIds: pickedTeams } } : {}),
                 name: "",
                 language: lane.language,
                 delivers: value.deliversByLanguage[lane.deliversKey] ?? "text",

@@ -1,3 +1,4 @@
+import { requireSettingsProof, requireCurrentSecuritySession, securityFactor, deployment, grant, securityAttempt } from "../lib/account-security"
 import { accountMutation } from "../lib/account-mutation"
 import { googleLoginSchemaReady } from "../lib/google-login-schema"
 // Google is contacted only after the SPA's explicit button action. No GIS SDK,
@@ -70,18 +71,20 @@ async function managementAccount(c: import("hono").Context<AuthHonoEnv>) {
   return c.env.AQUILLA_PG.prepare("SELECT id, username, email, password_hash, session_version FROM users WHERE id=?").bind(user.id).first<Account>()
 }
 routes.post("/disconnect", authMiddleware, zValidator("json", managementProof), async c => {
+  await requireSettingsProof(c)
   const account = await managementAccount(c)
   if (!account) return c.json({ error: "rate_limited" }, 429)
   if (!account.password_hash) return c.json({ error: "last_login_method" }, 409)
   if (!(await verifyPassword(c.req.valid("json").password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
-  const removed = await c.env.AQUILLA_PG.prepare(`DELETE FROM provider_identities p
+  const removed = await accountMutation(c.env.AQUILLA_PG,account.id,async db=>{await requireSettingsProof(c,db);return db.prepare(`DELETE FROM provider_identities p
     WHERE p.provider='google' AND p.user_id=? AND EXISTS (
       SELECT 1 FROM users u WHERE u.id=p.user_id AND u.password_hash=?
-    ) RETURNING user_id`).bind(account.id, account.password_hash).first()
+    ) RETURNING user_id`).bind(account.id, account.password_hash).first() })
   if (!removed) return c.json({ error: "restart" }, 409)
   return c.json({ disconnected: true })
 })
 routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managementProof)), async c => {
+  await requireSettingsProof(c)
   const account = await managementAccount(c)
   if (!account) return c.json({ error: "rate_limited" }, 429)
   const { code, verifier, password } = c.req.valid("json")
@@ -89,7 +92,7 @@ routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managemen
   // The Google proof must belong to this selected account's email. Never adopt
   // another account or create one as a side effect of managing login methods.
   try {
-    const linked = await accountMutation(c.env.AQUILLA_PG, account.id, async tx => tx.prepare(`WITH claimed AS (
+    const linked = await accountMutation(c.env.AQUILLA_PG, account.id, async tx => { await requireSettingsProof(c,tx); return tx.prepare(`WITH claimed AS (
       UPDATE social_login_flows SET status='consumed', code_hash=NULL
       WHERE code_hash=? AND browser_challenge=? AND status='ready' AND expires_at>now()
         AND LOWER(email)=LOWER(?) AND EXISTS (
@@ -98,10 +101,25 @@ routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managemen
     ) INSERT INTO provider_identities(provider,subject,user_id)
       SELECT 'google',subject,? FROM claimed RETURNING user_id`)
       .bind(await sha256Hex(code), await pkceChallenge(verifier), account.email,
-        account.id, account.password_hash, account.email, account.session_version, account.id).first())
+        account.id, account.password_hash, account.email, account.session_version, account.id).first() })
     if (!linked) return c.json({ error: "account_mismatch" }, 409)
     return c.json({ connected: true })
-  } catch { return c.json({ error: "identity_taken" }, 409) }
+  } catch (error) { if (error instanceof Error && ["settings_verification_required", "fresh_verification_required"].includes(error.message)) throw error; return c.json({ error: "identity_taken" }, 409) }
+})
+// A Google proof grants settings reauthentication only to its existing linked account.
+routes.post("/reauthenticate",authMiddleware,zValidator("json",proof),async c=>{
+ await securityAttempt(c)
+ const {code,verifier}=c.req.valid("json")
+ const challenge=await pkceChallenge(verifier),hash=await sha256Hex(code)
+ const ok=await accountMutation(c.env.AQUILLA_PG,c.get("user").id,async db=>{
+ await requireCurrentSecuritySession(c,db)
+ const used=await db.prepare(`UPDATE social_login_flows SET status='consumed',code_hash=NULL WHERE code_hash=? AND browser_challenge=? AND status='ready' AND expires_at>now()
+ AND EXISTS(SELECT 1 FROM provider_identities p JOIN users u ON u.id=p.user_id WHERE p.provider='google' AND p.subject=social_login_flows.subject AND u.id=? AND LOWER(u.email)=LOWER(social_login_flows.email)) RETURNING subject`).bind(hash,challenge,c.get("user").id).first<{subject:string}>()
+ if(!used) return false
+ await grant(c,db,"google",used.subject)
+ return true
+ })
+ return ok?c.json({verified:true}):c.json({error:"account_mismatch"},403)
 })
 // POST avoids prefetch/link scanners starting sign-in. Only exact configured SPA
 // origins may receive a handoff; never accept an arbitrary return URL.
@@ -276,12 +294,13 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     }
   }
   if (account) {
+    if ((await securityFactor(c.env.AQUILLA_PG,account.id,deployment(c)))?.enabled) return c.json({error:"settings_verification_required"},403)
     // Require proof of the existing Aquilla account, not merely matching email.
     if (!password || !(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
     // The single SQL statement atomically claims the continuation and links.
     // Compare the password hash too: a concurrent reset invalidates this proof.
     let result: { id: number; username: string } | null
-    try { result = await accountMutation(c.env.AQUILLA_PG, account.id, async tx => tx.prepare(`WITH claimed AS (
+    try { result = await accountMutation(c.env.AQUILLA_PG, account.id, async tx => { if ((await securityFactor(tx,account.id,deployment(c)))?.enabled) throw new Error("settings_verification_required"); return tx.prepare(`WITH claimed AS (
       UPDATE social_login_flows SET status='consumed', code_hash=NULL
       WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now()
       AND EXISTS (SELECT 1 FROM users WHERE id=? AND password_hash=? AND LOWER(email)=LOWER(?) AND session_version=?)
@@ -289,7 +308,7 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     ), linked AS (
       INSERT INTO provider_identities (provider, subject, user_id) SELECT 'google', subject, ? FROM claimed RETURNING user_id
     ) SELECT u.id, u.username FROM users u JOIN linked l ON u.id=l.user_id`)
-      .bind(hash, challenge, account.id, account.password_hash, flow.email, account.session_version, account.id).first<{ id: number; username: string }>())
+      .bind(hash, challenge, account.id, account.password_hash, flow.email, account.session_version, account.id).first<{ id: number; username: string }>() })
     } catch { return c.json({ error: "restart" }, 409) }
     if (!result) return c.json({ error: "restart" }, 409)
     try { return c.json(await session(c.env, result.username, result.id, false, true, account.session_version)) }

@@ -19,6 +19,12 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    `useRefusedFileEvents`, `useRefusedComments`). The workspace subscribes to the whole outbox
    context, which is 3–4 of its renders per commit. One store, one read per notification,
    selectors for consumers. 26 test files mock the outbox per hook — do it in steps.
+   *Step 1 done (2026-11-19):* the provider publishes counts and both record lists from one read
+   in one update (`src/hooks/useOutboxSnapshot.ts`), and the workspace's stats overlay takes its
+   records from that snapshot instead of reading again. At 1× CPU a commit went from 9 workspace
+   renders to 8. *Next:* `useActiveCellStore.ts` still does its own `peekOutboxBatch(2000)` per
+   notification, and its `setPendingOverlay` lands as a separate render; then the
+   forbidden/refused readers.
 2. **Audit stats are workspace state pushed into the store by an effect** (`store.setRuntime`),
    and `useSyncExternalStore`'s consistency check forces a second render. Apply them in the same
    task as their cause, or keep them out of workspace state.
@@ -130,6 +136,11 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     `GET …/files/:id/cells` after one cell commit); every later run of the same tree measured
     10–11 and 2. Either the benchmark should discard a warm-up commit, or a first commit on a
     new project really does re-read the file and that is a defect — not traced.
+39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
+    separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
+    under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
+    one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
+    6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
 
 ## Needs a person, not the routine
 

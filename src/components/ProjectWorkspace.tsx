@@ -2231,6 +2231,7 @@ export function ProjectWorkspace() {
     fileId: activeFileId,
     getTokenForFile,
     lane: activeLane,
+    outboxRecords: outboxInspectorRecords,
   })
 
   const validationCount = project ? readValidationCount(project) : 1

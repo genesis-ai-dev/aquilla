@@ -35,7 +35,7 @@ function outboxRecordKey(record: OutboxRecord): string {
   })
 }
 
-function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): boolean {
+export function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {

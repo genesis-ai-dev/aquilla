@@ -229,7 +229,7 @@ export async function applyNewLaneGrants(
       .prepare(
         `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
+         ON CONFLICT (project_id, user_id, lane) DO UPDATE SET team_group_id = NULL`,
       )
       .bind(projectId, userId, laneId, person.roleLevel, grantedBy)
       .run()

@@ -78,8 +78,18 @@ export function firstTargetLaneStmts(
           ${fresh}`
   const members = db
     .prepare(
-      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
-       SELECT ?, m.user_id, l.id, m.role_level, ?
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by, team_group_id)
+       SELECT ?, m.user_id, l.id, m.role_level, ?,
+              -- AQU-2355 (0209): a team-only member's row is that team's.
+              CASE WHEN EXISTS (SELECT 1 FROM project_members pm0
+                                 WHERE pm0.project_id = l.project_id AND pm0.user_id = m.user_id)
+                   THEN NULL
+                   ELSE (SELECT MIN(ga.group_id) FROM group_project_grants ga
+                           JOIN group_members gma ON gma.group_id = ga.group_id
+                          WHERE ga.project_id = l.project_id
+                            AND gma.user_id = m.user_id
+                            AND ${attachmentCoversLaneSql("ga", "l.id")})
+              END
          FROM (${projectWallMembersSql()}) m
          JOIN lanes l
            ON l.project_id = ?
@@ -182,8 +192,8 @@ export function linkTeamsToLaneStmts(
                              WHERE s.project_id = gpg.project_id AND s.user_id = gm.user_id AND s.kind = 'lane')`
   const grants = db
     .prepare(
-      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
-       SELECT gpg.project_id, gm.user_id, gpl.lane_id, MAX(${level}), ?
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by, team_group_id)
+       SELECT gpg.project_id, gm.user_id, gpl.lane_id, MAX(${level}), ?, MIN(gpg.group_id)
          ${members}
           AND NOT (${directScoped})
         GROUP BY gpg.project_id, gm.user_id, gpl.lane_id
@@ -355,6 +365,14 @@ function teamLaneGrantBodySql(pending: boolean): string {
                  gm.user_id     AS user_id,
                  l.id           AS lane,
                  GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) AS role_level,
+                 -- AQU-2355 (0209): the team this row exists because of.
+                 CASE WHEN ${attachmentCoversLaneSql("gpg", "l.id")} THEN gpg.group_id
+                      ELSE (SELECT MIN(ga.group_id) FROM group_project_grants ga
+                              JOIN group_members gma ON gma.group_id = ga.group_id
+                             WHERE ga.project_id = gpg.project_id
+                               AND gma.user_id = gm.user_id
+                               AND ${attachmentCoversLaneSql("ga", "l.id")})
+                 END AS team_group_id,
                  (gpg.lanes_explicit
                   AND NOT ${memberTeamAttachmentSql("gm.user_id", "gpg.project_id", "NOT ga.lanes_explicit")}
                   AND NOT EXISTS (SELECT 1 FROM project_members pm
@@ -402,8 +420,8 @@ export function grantTeamLaneAccessStmt(
                WHERE src.scoped
               ON CONFLICT (project_id, user_id, kind, value) DO NOTHING
             )
-       INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
-       SELECT src.project_id, src.user_id, src.lane, src.role_level, ?
+       INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by, team_group_id)
+       SELECT src.project_id, src.user_id, src.lane, src.role_level, ?, src.team_group_id
          FROM src
        ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )

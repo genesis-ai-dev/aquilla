@@ -179,8 +179,10 @@ async function applyInviteLaneGrants(
       `INSERT INTO project_member_lane_roles
          (project_id, user_id, lane, role_level, granted_by)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
+       ON CONFLICT (project_id, user_id, lane) DO UPDATE SET team_group_id = NULL`,
     )
+      // AQU-2355: an accepted invite makes the lane a direct grant, so leaving
+      // a team that also gave it does not take it away.
       .bind(projectId, userId, grant.laneId, grant.level, createdBy)
       .run()
   }

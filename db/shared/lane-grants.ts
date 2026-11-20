@@ -37,8 +37,21 @@
 // upsert and may not own the row the batch ends up with. Either way the join
 // grants exactly the one lane named and nothing else, so an archived lane
 // elsewhere in the project is never picked up as a side effect. The insert is
-// `ON CONFLICT DO NOTHING`, so a lane created twice (or a creation path that
-// no-ops) writes no duplicate rows.
+// `ON CONFLICT DO NOTHING`, so a lane created twice writes no duplicate rows.
+//
+// AQU-2557: the grant is for a lane the write CREATES. The tag-keyed writers
+// run on every write to their lane, not only the one that makes it: each
+// default-language commit, each import into the default lane, each Codex
+// re-ingest. And "holds every OTHER lane" leaves out the lane being granted,
+// so on a lane that already exists it is true of a member a lead narrowed AWAY
+// from that lane, and the rule handed them the lane they had been kept out of.
+// So the lane is granted only when its row was inserted in the current
+// transaction: `created_at` defaults to now(), which is the transaction's start
+// time, and an upsert that finds the row leaves it alone. One rule for both
+// keys: the statement rides the same batch as the lane insert, which every
+// writer does (Project settings' new language included, inside
+// `insertTargetLane`), so the lane and the grants that make it readable commit
+// together or not at all.
 //
 // Lives in db/shared so auth-worker and sync-worker apply the SAME write.
 
@@ -60,9 +73,10 @@ function laneKeyColumn(ref: NewLaneRef): { column: string; value: string } {
 
 /**
  * Grant one newly created target lane to every member below Maintainer who
- * already reads every other lane of the project. Safe to splice into the batch
- * that creates the lane — it reads the lane back out of `lanes`, so a creation
- * that rolled back or no-opped grants nothing.
+ * already reads every other lane of the project. Splice it into the batch that
+ * creates the lane — it reads the lane back out of `lanes`, so a creation that
+ * rolled back or no-opped grants nothing, and a lane that was already there
+ * when the batch began is not new and is granted to nobody (AQU-2557).
  *
  * AQU-1800: "every member" is {@link projectWallMembersSql} — the team path as
  * well as `project_members`. A project a team reaches and nobody joined
@@ -86,6 +100,7 @@ export function grantNewLaneStmt(
            ON l.project_id = ?
           AND l.role = 'target'
           AND l.${key.column} = ?
+          AND l.created_at = transaction_timestamp()
         WHERE m.role_level >= ${GRANT_MIN_ROLE}
           AND m.role_level < ${GRANT_BELOW_ROLE}
           AND NOT EXISTS (
@@ -131,15 +146,6 @@ export function grantNewLaneStmt(
     )
 }
 
-/** {@link grantNewLaneStmt} for a caller that writes outside a batch. */
-export async function grantNewLane(
-  db: AquillaDb,
-  projectId: string,
-  ref: NewLaneRef,
-  grantedBy: number | null,
-): Promise<void> {
-  await grantNewLaneStmt(db, projectId, ref, grantedBy).run()
-}
 
 // ---------------------------------------------------------------------------
 // AQU-1800 — the team path has to write lane grants too.

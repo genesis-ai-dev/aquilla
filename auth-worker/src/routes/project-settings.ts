@@ -113,7 +113,6 @@ import {
 } from "../../../src/lib/lanes/read-wall"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
-import { grantNewLane } from "../../../db/shared/lane-grants"
 import { grantCreatedLaneToActor } from "../services/lane-grants"
 import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
@@ -999,6 +998,9 @@ projectSettings.post(
         allowDuplicateName: body.allowDuplicateName === true,
         ...(body.delivers ? { delivers: body.delivers } : {}),
         targetLanguage,
+        // AQU-1781: the members who read every other language are granted
+        // this one inside the batch that creates it (AQU-2557).
+        grantedBy: user.id,
         existing: (current.lanes ?? []).map((lane) => ({
           id: lane.id,
           name: lane.name,
@@ -1016,12 +1018,9 @@ projectSettings.post(
       const error = created.problem === "duplicate" ? "duplicate_name" : created.problem
       return c.json({ error }, status)
     }
-    // AQU-1781: under the read wall a member below Maintainer sees only the
-    // lanes they hold a grant for, so a lane nobody is granted is invisible to
-    // every unscoped contributor while the inspector still calls them
-    // "Unscoped — full access". Grant it in the same request that creates it.
+    // The person who added the language reads it too (the members who read
+    // every other language were granted it with the lane itself, above).
     try {
-      await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
       await grantCreatedLaneToActor(c.env.AQUILLA_PG, projectId, created.laneId, user.id)
     } catch (e) {
       // [Pen test] never echo driver text (can name tables/columns) to the client.

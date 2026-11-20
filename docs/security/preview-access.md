@@ -32,6 +32,7 @@ cuts that suite off without any error on the access side.
 | Suite | Accounts | Signs in to | If an account is unlisted |
 | --- | --- | --- | --- |
 | Adversarial Jev (`smart-tests/adversarial`) | The three usernames in the `ADVERSARIAL_USER_1..3` repository secrets (`adv-bot-1`, `adv-bot-2`, `adv-bot-3`) | dev (nightly) and each PR's preview (`pr` job) | Global setup stops at sign-in and the run reads **HARNESS UNAVAILABLE**: the `pr` check is red on every PR and the nightly files nothing (AQU-2562) |
+| PR walk bot (`e2e/journeys/PR-BOT.md`) | The standing fixtures named in `e2e/journeys/README.md` ("Fixtures on development storage"): `qa-bot` for every walk, plus `qa-bot-2` for two-user and presence stories and `qa-admin` for `/admin` claims | each PR's preview, and dev for the re-walk after merge | Sign-in is a hard stop, so no browser walk happens: the comment reads **BLOCKED** or a test-level PASS, and the release cut holds the PR as `walk fail` or `walk partial` until a person approves it |
 
 The list is keyed by email and the secrets hold usernames. Read an account's
 email from the development `users` table by its username, then add it on

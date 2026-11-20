@@ -68,10 +68,13 @@ function zlibBomb(bytes: number, { truncated = false } = {}): Uint8Array {
   // lengths: literal 0 → 2, 255 zeros, end-of-block → 2, 28 zeros, length 258
   // → 1; then distance 1 → 1.
   code(0b11, 2)
-  code(0, 1), bits(138 - 11, 7)
-  code(0, 1), bits(117 - 11, 7)
+  code(0, 1)
+  bits(138 - 11, 7)
+  code(0, 1)
+  bits(117 - 11, 7)
   code(0b11, 2)
-  code(0, 1), bits(28 - 11, 7)
+  code(0, 1)
+  bits(28 - 11, 7)
   code(0b10, 2)
   code(0b10, 2)
   // Literal/length codes: 258 = "0", literal 0 = "10", end-of-block = "11";

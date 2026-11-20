@@ -209,7 +209,6 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -4350,6 +4349,12 @@ function CellMenuAnchorSlot() {
  * kit sets `data-disabled:pointer-events-none` on every item, so a tooltip
  * anchored to a disabled one would never open.
  *
+ * Copy source text is the exception when the cell is empty. The entry stays,
+ * greyed out, and a click opens the same disabled note a greyed-out button
+ * uses ("Nothing to copy") instead of a second line under the label. The
+ * note's stand-in sits outside the item, so the item's missing pointer events
+ * are what deliver the click.
+ *
  * The one exception is Edit timestamps, which is HIDDEN on a file with no
  * clock (Sam, 2026-09-09). That is not a permission or a property of the row —
  * an ordinary text file simply has no timings, and a permanently dead entry on
@@ -4440,8 +4445,6 @@ function CellSourceMenu({
   // flag rather than another term in `structural`.
   const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
   const copyText = sourceText.trim()
-  const hasMore = structural || parkable || Boolean(onSetMilestone)
-    || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
   const onCopySource = () => {
     if (!copyText) return
     const payload = formatSelectionCopy([{
@@ -4544,14 +4547,28 @@ function CellSourceMenu({
           render={children}
         />
         <ContextMenuContent className="min-w-[13rem]">
-          <RowInsertItem
-            testId="cell-menu-copy-source"
-            icon={<Copy className="mr-2 h-3.5 w-3.5 shrink-0" />}
-            label={t("editor.cellMenu.copySource")}
-            reason={copyText ? null : t("editor.selection.copyEmpty")}
-            onSelect={copyText ? onCopySource : undefined}
-          />
-          {hasMore && <ContextMenuSeparator />}
+          {copyText ? (
+            <RowInsertItem
+              testId="cell-menu-copy-source"
+              icon={<Copy className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.cellMenu.copySource")}
+              onSelect={onCopySource}
+            />
+          ) : (
+            <AppTooltip
+              content={t("editor.selection.copyEmpty")}
+              disabledTriggerClassName="flex w-full"
+            >
+              <ContextMenuItem
+                data-testid="cell-menu-copy-source"
+                disabled
+                className="w-full"
+              >
+                <Copy className="mr-2 h-3.5 w-3.5 shrink-0" />
+                <span>{t("editor.cellMenu.copySource")}</span>
+              </ContextMenuItem>
+            </AppTooltip>
+          )}
           {(onToggleSourceEdit || sourceEditDisabledReason) && (
             <RowInsertItem
               testId="cell-menu-edit-source"
@@ -4573,9 +4590,6 @@ function CellSourceMenu({
               reason={timestamps.offerUnlock ? null : timestamps.disabledReason}
               onSelect={() => setTimesOpen(true)}
             />
-          )}
-          {(structural || parkable || onSetMilestone) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
-            <ContextMenuSeparator />
           )}
           {/* AQU-2308: a milestone is about the FILE's divisions rather than
               this row, so it sits above the row's own structural actions —

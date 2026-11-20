@@ -272,6 +272,29 @@ describe("EditorTable — the row's structural controls", () => {
     expect(pasted).toBe("First cue")
   })
 
+  it("explains an empty Copy source text on click, and draws the menu as one list", async () => {
+    // An empty cell still offers the entry. The reason is a disabled note
+    // opened by the click, not a second line, and the list is not split
+    // between copy, edit, and the row actions. Lead rank so Edit is in
+    // the list — that is the row the old divider sat under.
+    renderTable({ project: projectAt(500), sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    openMenu("added")
+    const item = await screen.findByTestId("cell-menu-copy-source")
+    expect(item).toHaveTextContent("Copy source text")
+    expect(item).not.toHaveTextContent("Nothing to copy")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(screen.queryByTestId("cell-menu-copy-source-reason")).toBeNull()
+    expect(document.querySelector("[data-slot='menu-separator']")).toBeNull()
+    expect(await entry("edit-source")).toBeInTheDocument()
+    expect(await entry("insert-above")).toBeInTheDocument()
+
+    fireEvent.click(item)
+    const note = await screen.findByText("Nothing to copy")
+    expect(note.closest("[data-slot='disabled-reason-note']")).not.toBeNull()
+    expect(screen.getByTestId("cell-menu-copy-source")).toBeInTheDocument()
+  })
+
   it("opens from a right-click on the source cell", async () => {
     // The source cell itself is a trigger. Its text is not selectable; the
     // menu's Copy source text is the way out.

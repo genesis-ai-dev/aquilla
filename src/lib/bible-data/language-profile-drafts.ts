@@ -8,12 +8,15 @@
 //
 // Pure: no React, no network.
 
+import { CANONICAL_APOSTROPHE } from "../../../db/shared/orthography"
 import type {
   DivineNamesProfile,
   KinTermsProfile,
   NumberWordsProfile,
   PronounsProfile,
   NumberFormatProfile,
+  OrthographyException,
+  OrthographyProfile,
   PunctuationProfile,
   QuestionMarkersProfile,
 } from "../../../db/shared/language-profile"
@@ -343,4 +346,100 @@ export function punctuationValue(draft: PunctuationDraft): PunctuationProfile | 
   const noTerminalMark = triValue(draft.noTerminalMark)
   if (noTerminalMark !== undefined) out.noTerminalMark = noTerminalMark
   return Object.keys(out).length > 0 ? out : null
+}
+
+// ── Orthography (AQU-2628) ──────────────────────────────────────────────────
+
+/**
+ * The orthography row edits three things at once, because they are one
+ * decision: the rules, the canonical apostrophe, and the words the rules must
+ * leave alone.
+ *
+ * `exceptions` holds the entries AS STORED, so a contributor's proposal keeps
+ * its status, its proposer and the verse it was found in through a maintainer's
+ * edit of the rules. `added` is the bulk-paste box — one word per line, added
+ * as `approved` on save, which is the only way a maintainer adds one.
+ */
+export interface OrthographyDraft {
+  /** One rule per line, written `from > to`. */
+  rules: string
+  apostrophe: string
+  exceptions: OrthographyException[]
+  added: string
+}
+
+/** The separator the rules box uses between a rule's two sides. */
+const RULE_ARROW = /\s*(?:>|→|=>|->)\s*/
+
+function exceptionEntries(stored: unknown): OrthographyException[] {
+  if (!Array.isArray(stored)) return []
+  const out: OrthographyException[] = []
+  for (const entry of stored) {
+    if (!isRecord(entry) || typeof entry.word !== "string") continue
+    const status = entry.status === "pending" ? "pending" : "approved"
+    out.push({
+      word: entry.word,
+      status,
+      ...(typeof entry.by === "string" ? { by: entry.by } : {}),
+      ...(typeof entry.ref === "string" ? { ref: entry.ref } : {}),
+    })
+  }
+  return out
+}
+
+export function orthographyDraft(stored: unknown): OrthographyDraft {
+  const value = isRecord(stored) ? stored : {}
+  const rules = Array.isArray(value.rules)
+    ? value.rules
+        .filter((rule): rule is [string, string] =>
+          Array.isArray(rule) && typeof rule[0] === "string" && typeof rule[1] === "string")
+        .map((rule) => `${rule[0]} > ${rule[1]}`)
+        .join("\n")
+    : ""
+  return {
+    rules,
+    apostrophe: typeof value.apostrophe === "string" ? value.apostrophe : CANONICAL_APOSTROPHE,
+    exceptions: exceptionEntries(value.exceptions),
+    added: "",
+  }
+}
+
+/**
+ * Null while the row holds no rules: an orthography with nothing to apply is
+ * the same as no orthography at all, and storing one would wake the
+ * old-orthography check to say nothing.
+ *
+ * A pasted word that is already on the list is not added twice, and does not
+ * silently approve a pending entry — approving is a button, not a side effect
+ * of pasting.
+ */
+export function orthographyValue(draft: OrthographyDraft): OrthographyProfile | null {
+  const rules: [string, string][] = []
+  for (const line of draft.rules.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const [from, to] = trimmed.split(RULE_ARROW)
+    if (!from || !to) return null
+    rules.push([from.toLowerCase(), to])
+  }
+  if (rules.length === 0) return null
+
+  const exceptions = [...draft.exceptions]
+  const seen = new Set(exceptions.map((entry) => entry.word.toLowerCase()))
+  for (const word of draft.added.split(/\r?\n/)) {
+    const trimmed = word.trim()
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue
+    seen.add(trimmed.toLowerCase())
+    exceptions.push({ word: trimmed, status: "approved" })
+  }
+
+  const apostrophe = Array.from(draft.apostrophe)[0] ?? CANONICAL_APOSTROPHE
+  return { rules, apostrophe, ...(exceptions.length > 0 ? { exceptions } : {}) }
+}
+
+/** The exception list as a spreadsheet file, for a reviewer to work through. */
+export function orthographyExceptionsCsv(exceptions: readonly OrthographyException[]): string {
+  const cell = (value: string | undefined) => `"${(value ?? "").replace(/"/g, '""')}"`
+  const rows = exceptions.map((entry) => [entry.word, entry.status, entry.by, entry.ref].map(cell).join(","))
+  return ["word,status,proposed_by,reference", ...rows].join("\n")
 }

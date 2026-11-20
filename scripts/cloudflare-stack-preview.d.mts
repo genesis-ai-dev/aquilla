@@ -28,7 +28,7 @@ export interface PreviewConfig {
 }
 export function previewConfig(
   surface: string,
-  options: { cwd: string; urls?: Partial<Record<PreviewSurface, string>> },
+  options: { cwd: string; branch?: string; urls?: Partial<Record<PreviewSurface, string>> },
 ): PreviewConfig
 export function previewOrigin(
   entry: Record<string, unknown>, surface: string, name: string,

@@ -75,6 +75,11 @@ describe("overlaySettings", () => {
     expect(out.harmonize_min_role).toBe("maintainer")
   })
 
+  it("carries the milestone floor (AQU-2309)", () => {
+    const out = overlaySettings(makeRecord(), { milestoneFloor: "project_lead" })
+    expect(out.milestoneFloor).toBe("project_lead")
+  })
+
   // AQU-1686: the settings card showed a stored {voices: "off"} as a switch
   // that is on. The overlay now reads the value the way the server does.
   it("drops unknown enrichment ids and values that are not booleans", () => {

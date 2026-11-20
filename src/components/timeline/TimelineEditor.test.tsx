@@ -4,6 +4,8 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
+import { toast } from "@/components/ui/toast"
+import * as history from "@/lib/history/history"
 import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -243,7 +245,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
       selectQueueStateForFile(mockQueueState, cellIds),
     useQueueStateValue: <T,>(select: (state: QueueState) => T) =>
       useSyncExternalStore(progressTicks.subscribe, () => select(mockQueueState)),
-    useMissingClipCells: () => mockMissingCells,
+    useMissingClipTakes: () => mockMissingCells,
     MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
     // 2026-08-11: the editor gates its clock write on this. Built over the REAL
     // sourceClipAudioForCell (side-effect-free) for the same reason as
@@ -1990,12 +1992,13 @@ describe("TimelineEditor — audio-first mode", () => {
       expect(place).toEqual({ targetOffsetMs: -800, recordingsOffsetMs: 200 })
     })
 
-    it("0.5 s left following the source: −1.5 s there, and following the recordings no further than its line's start", () => {
+    it("0.5 s left following the source: −1.5 s there, and the same 0.5 s back over line 1's take following the recordings (AQU-2432)", () => {
+      // Before AQU-2432 it stopped on its line's start following the recordings.
       const onRetimeTarget = vi.fn()
       renderSermon("dubbing", onRetimeTarget)
       dragBy(screen.getByTestId("tl-target-l2"), -0.5)
       const [, , , place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
-      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
+      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: -500 })
     })
   })
 
@@ -4987,6 +4990,85 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     expect(trackSlot("Source audio")).toBe(audio)
     expect(audio.style.transform).toBe("")
   })
+
+  // AQU-2492 (review of the dev merge, Nov 14): a drop is held for seconds
+  // before it saves. Undo chosen with no ⌘ and no pointer (Enter on the
+  // timeline menu's Undo, Space on a focused Undo button) skipped it and took
+  // the step before. Any Undo or Redo saves what is held first.
+  it("an Undo with no key or pointer saves the held drop first, so the drop is the step it undoes", async () => {
+    const { undoLast } = await import("@/lib/history/history")
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      layoutTrackSlots()
+      const host = trackSlot("Source text").getBoundingClientRect()
+      const start = { x: host.left + host.width / 2, y: host.top + 12 }
+      fireEvent.pointerDown(trackRowNamed("Source text"), trackPointer(start.x, start.y))
+      const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+      fireEvent.pointerMove(document, nudged)
+      fireEvent.pointerMove(document, nudged)
+      const dest = trackSlot("Source audio").getBoundingClientRect()
+      const point = trackPointer(dest.left + dest.width / 2, dest.top + 8)
+      fireEvent.pointerMove(document, point)
+      fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+      act(() => { void undoLast() })
+      expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on
+  // a phone or an iPad the 3px threshold read a tap on a track's row as a
+  // drag: the row lifted, and the tap's click was swallowed, so the track was
+  // never selected. A finger or a pen needs to travel further.
+  //
+  // The rows drag through dnd-kit now, whose own distance is 8px for every
+  // pointer; a finger or a pen still has to travel the app's touch slop.
+  it("a finger's tap on a row that wanders 10px is still a tap: it selects the track; a mouse's 10px is a drag", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    const selected = (name: string) => trackRowNamed(name).hasAttribute("data-selected")
+    const press = (name: string, pointerType: "touch" | "mouse") => {
+      layoutTrackSlots()
+      const row = trackRowNamed(name)
+      const host = trackSlot(name).getBoundingClientRect()
+      const at = (dy: number, buttons = 1) => ({ ...trackPointer(host.left + 40, host.top + 12 + dy, buttons), pointerType })
+      fireEvent.pointerDown(row, at(0))
+      fireEvent.pointerMove(document, at(10))
+      fireEvent.pointerMove(document, at(10))
+      // How far the row lifted off its place with the pointer.
+      const lift = translatedY(trackSlot(name).style.transform)
+      fireEvent.pointerUp(document, at(10, 0))
+      fireEvent.click(row)
+      return lift
+    }
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      expect(press("Source audio", "touch")).toBe(0)
+      expect(selected("Source audio")).toBe(true)
+      // Past the hold a drop waits out before it saves: nothing was dropped.
+      act(() => { vi.advanceTimersByTime(TRACK_RELEASE_SETTLE_MS + TRACK_ORDER_SAVE_QUIET_MS) })
+      expect(onReorderTrack).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(press("Source text", "mouse")).toBe(10)
+    expect(selected("Source text")).toBe(false)
+  })
 })
 
 // ── AQU-646 stage 3c ─────────────────────────────────────────────────────────
@@ -7236,6 +7318,61 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(cuts[0].atMs).toBeLessThan(2100)
   })
 
+  // AQU-2703: one key changed the file with nothing on screen to say so.
+  it("S says the take was split, and its Undo undoes the step", async () => {
+    const add = vi.spyOn(toast, "add")
+    const { playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    fireEvent.click(chip())
+    fireEvent.keyDown(window, { key: "s" })
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({
+      id: "shortcut-cue:timeline-split",
+      title: "Take split at the playhead",
+      description: expect.stringMatching(/^(⌘Z|Ctrl\+Z) to undo$/),
+    }))
+    const undo = vi.spyOn(history, "undoLast").mockResolvedValue(null)
+    const action = add.mock.calls[0][0].actionProps as { children: string; onClick: () => void }
+    expect(action.children).toBe("Undo")
+    action.onClick()
+    expect(undo).toHaveBeenCalledTimes(1)
+    add.mockRestore()
+    undo.mockRestore()
+  })
+
+  // AQU-2703: B turned the Blade on with only a small toolbar button to show it.
+  it("while the Blade is on a chip over the timeline says so, and turns it off", () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={vi.fn()} />,
+      )
+      expect(screen.queryByTestId("tl-blade-cue")).toBeNull()
+
+      // From the key.
+      fireEvent.keyDown(window, { key: "b" })
+      const cue = screen.getByTestId("tl-blade-cue")
+      expect(cue).toHaveAttribute("data-state", "on")
+      expect(cue).toHaveTextContent("Blade on — click a take to cut it")
+      expect(cue).toHaveTextContent("B or Esc")
+
+      // Off from the chip's own button: a moment of "Blade off", then gone.
+      fireEvent.click(screen.getByRole("button", { name: "Turn the Blade off" }))
+      expect(screen.getByTestId("tl-blade-toggle")).toHaveAttribute("aria-pressed", "false")
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "off")
+      expect(screen.getByTestId("tl-blade-cue")).toHaveTextContent("Blade off")
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(screen.queryByTestId("tl-blade-cue")).toBeNull()
+
+      // From the toolbar button: the same chip. Esc turns it off.
+      fireEvent.click(screen.getByTestId("tl-blade-toggle"))
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "on")
+      fireEvent.keyDown(window, { key: "Escape" })
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "off")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("clicking a take leaves the playhead where it is; double-clicking jumps to the line", () => {
     const { onSeekToTime, playheadTo, chip } = renderSplit()
     playheadTo(12)
@@ -7306,6 +7443,54 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(cuts[0]).toMatchObject({ cellId: "b1", audioId: BOOK_TAKE })
     expect(cuts[0].atMs).toBeGreaterThan(1900)
     expect(cuts[0].atMs).toBeLessThan(2100)
+  })
+})
+
+// AQU-2499 (review, Nov 9): once the take menu named the take right-clicked,
+// Change voice on a music or effects layer's clip would have sent the music
+// through the voice converter. A layer's clips are not a line's voice.
+describe("TimelineEditor — Change voice and a layer's clips (AQU-2499)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const VOICE = "audio-l1-1700000000-boaz.wav"
+  const MUSIC = "audio-l1-1700000001-music.wav"
+  const tracks = deriveTracksForFile({
+    trackOverrides: {
+      boaz: { kind: "audio", name: "Boaz", order: 5 },
+      music: { kind: "audio", name: "Music", order: 6, setsLineLengths: false },
+    },
+  })
+  const line = cell({
+    id: "l1", original: "One", translated: "Uno", startTime: 0, endTime: 5,
+    selectedBySlot: { boaz: VOICE, music: MUSIC },
+    attachments: {
+      [VOICE]: { type: "audio", url: `frontier-audio://${VOICE}`, slot: "boaz", durationMs: 3000 },
+      [MUSIC]: { type: "audio", url: `frontier-audio://${MUSIC}`, slot: "music", durationMs: 3000 },
+    },
+  } as unknown as Partial<CellData>)
+  const renderBoth = () => render(
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={[line]} onRetimeSubtitle={() => {}}
+      tracks={tracks} onRemoveTake={vi.fn()}
+      onChangeVoice={vi.fn()} changeVoiceStateFor={() => ({ voiceName: "Narrator", blocker: null })}
+    />,
+  )
+  const rightClickOn = (trackId: string) => {
+    const chip = within(screen.getByTestId(`tl-target-lane-${trackId}`)).getByTestId("tl-target-l1")
+    fireEvent.pointerDown(chip, { button: 2, clientX: 20, pointerId: 1 })
+    fireEvent.contextMenu(chip, { button: 2, clientX: 20 })
+  }
+
+  it("leaves Change voice out of a layer clip's menu", async () => {
+    renderBoth()
+    rightClickOn("music")
+    await screen.findByTestId("tl-take-menu-delete")
+    expect(screen.queryByTestId("tl-take-menu-change-voice")).toBeNull()
+  })
+
+  it("still offers it on an added voice track's take", async () => {
+    renderBoth()
+    rightClickOn("boaz")
+    expect(await screen.findByTestId("tl-take-menu-change-voice")).toBeInTheDocument()
   })
 })
 

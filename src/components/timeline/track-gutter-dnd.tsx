@@ -21,6 +21,7 @@ import {
   type DroppableContainer,
   type Modifier,
   type Over,
+  type PointerSensorProps,
 } from "@dnd-kit/core"
 import {
   SortableContext,
@@ -34,12 +35,23 @@ import { cn } from "@/lib/utils"
 import { folderIdsOf, trackScope, type TrackRow } from "@/lib/timeline/track-groups"
 import { orderForDrop, orderForInsert } from "@/lib/timeline/track-reorder"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 
 /** Sortable group for tracks that are not inside a folder. Not a track id. */
 export const TIMELINE_ROOT_GROUP = "timeline:root"
 
-/** Movement before a press becomes a drag, so a click still selects the track. */
+/** A mouse's movement before a press becomes a drag, so a click still selects
+ *  the track. A finger or a pen needs the app's touch distance (AQU-2491). */
 export const TRACK_DRAG_ACTIVATION_DISTANCE = 8
+
+/** dnd-kit's pointer sensor, with its activation distance read off the
+ *  pointer that pressed (`dragSlopPx`). */
+class TrackPointerSensor extends PointerSensor {
+  constructor(props: PointerSensorProps) {
+    const pointerType = "pointerType" in props.event ? (props.event as PointerEvent).pointerType : undefined
+    super({ ...props, options: { ...props.options, activationConstraint: { distance: dragSlopPx(pointerType, TRACK_DRAG_ACTIVATION_DISTANCE) } } })
+  }
+}
 
 export type TrackPointerDrop =
   | { kind: "move"; trackId: string; group: string; toPosition: number }
@@ -1256,7 +1268,7 @@ function ActiveTrackReorder({
   children: ReactNode
 }) {
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: TRACK_DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(TrackPointerSensor),
   )
   const boundsRef = useRef<{ top: number; bottom: number } | null>(null)
   const planRef = useRef<TrackReleasePlan | null>(null)

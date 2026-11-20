@@ -82,7 +82,8 @@ import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "
 import { loadLaneMateIds, selectMentionCandidates } from "../services/mention-candidates"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
-import { lookupUserByUsername } from "../services/user-lookup"
+import { lookupUserByUsernameOrEmail } from "../services/user-lookup"
+import { looksLikeEmail, maskEmail } from "../../../db/shared/mask-email"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { sendProjectInviteEmail } from "../services/email"
 import {
@@ -1753,9 +1754,28 @@ async function grantProjectMemberOne(
     }
   }
 
-  const target = await lookupUserByUsername(env, username)
+  // AQU-2576: the identifier may be an email. The caller already cleared the
+  // `role >= project_lead` gate on this project, which is exactly the bar the
+  // scoped lookup route applies, so no new audience gains the email oracle —
+  // and nothing else about the grant changes: the role cap, the self-grant
+  // guard and the target-level cap below all run on the resolved account.
+  const target = await lookupUserByUsernameOrEmail(env, username)
   if (!target) {
-    return { ok: false, username, code: "user_not_found", message: "user not found" }
+    return {
+      ok: false,
+      username,
+      code: "user_not_found",
+      // An email that resolves to nothing is a different situation from a
+      // username typo — the person likely has no account yet — and the
+      // invite link is the path that reaches them. AQU-2638: the lookup only
+      // matches VERIFIED addresses, and this answer is deliberately the same
+      // for "an account uses it but has not verified it", so the message names
+      // every way forward (including verification) and must stay word-for-word
+      // in step with the dropdown's workspace.typeahead.noAccountWithEmail.
+      message: looksLikeEmail(username)
+        ? "no Aquilla account has verified that email address — add them by username, send them an invite link, or ask them to verify this address in their account settings"
+        : "user not found",
+    }
   }
   if (target.id === callerUserId) {
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
@@ -2504,8 +2524,17 @@ projects.post(
       invite.email &&
       invite.email.toLowerCase() !== user.email.toLowerCase()
     ) {
+      // AQU-2576: name the address the invite wanted (masked) and tag the
+      // refusal, so the join screen can tell the recipient which account to
+      // use instead of dead-ending on "a different email address". The
+      // unmasked value stays server-side — whoever is holding this link is,
+      // by definition, not the person it was minted for.
       return c.json(
-        { error: "This invite was sent to a different email address." },
+        {
+          error: "This invite was sent to a different email address.",
+          code: "email_mismatch",
+          invitedEmail: maskEmail(invite.email),
+        },
         403,
       )
     }

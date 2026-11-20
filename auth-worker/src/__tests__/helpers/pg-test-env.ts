@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
 import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { guardPoolOverflow } from "../../../../db/shared/test-pool-guard"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -82,7 +83,9 @@ export const snapshotsBucket = {
 // Platform-admin identity is by email — the seeded "root" user gets
 // root@example.com (see seedUser), so that's the test allowlist.
 export const env = {
-  AQUILLA_PG: new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb,
+  // AQU-2613: a request may not have more statements in flight than its pool
+  // (DEFAULT_POOL_MAX) holds. See db/shared/test-pool-guard.ts.
+  AQUILLA_PG: guardPoolOverflow(new PostgresDb(pgliteExecutor(pg))) as unknown as AquillaDb,
   SNAPSHOTS: snapshotsBucket as unknown as R2Bucket,
   SECRET_KEY: "frontier-test-secret",
   SYNC_SECRET_KEY: "sync-secret",
@@ -97,6 +100,10 @@ export const env = {
   DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
   OPENROUTER_API_KEY: undefined as string | undefined,
   ENVIRONMENT: "test",
+  // AQU-2686: deployed environments switch PIN access links off. The suites
+  // that exercise the feature itself need it on; access-links-switch.test.ts
+  // covers the off state by overriding this per request.
+  ACCESS_LINKS_ENABLED: "true" as string | undefined,
   // AI budget controls (AQU-265). Tests override these per-suite as needed.
   AI_BUDGET_ENFORCE: undefined as string | undefined,
   AI_ALLOWED_MODELS: undefined as string | undefined,

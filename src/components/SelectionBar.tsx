@@ -29,7 +29,7 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
-import { hasPlayableAudio, startQueue } from "@/lib/audio/play-queue"
+import { hasAnyPlayableAudio, startQueue } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -50,7 +50,7 @@ import {
   noPermissionMessage,
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
-import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineName, lineNumber, lineReference, readLineNumbering } from "@/lib/cells/line-name"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { showBulkValidateToast, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
@@ -193,6 +193,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // can still be named the way the reader sees it.
   const fileCellIds = useCellIds(cellStore, orderedBy, mediaLayer)
   const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const readNumbering = useCallback(
+    () => readAtVersion(cellStoreVersion, () => readLineNumbering(cellStore, fileCellIds, structureCache)),
+    [cellStore, cellStoreVersion, fileCellIds, structureCache],
+  )
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
@@ -290,18 +294,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     // Lines go by their references ("GEN 1:1") when every one has one, else by
     // the table's # column ("rows 4, 5 and 10", Sam's ask), else unnamed rather
     // than half-named: a heading has no number.
-    const refs = lines.map(namedCellRef)
-    const rowNumbers = readAtVersion(cellStoreVersion, () =>
-      structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-    // The table's rule: a line's imported number, else its place in the file
-    // (a plain document numbers 1, 2, 3…). A file that has imported numbers
-    // leaves its headings unnumbered, so those name nothing.
-    const position = rowNumbers.size > 0 ? null : new Map(fileCellIds.map((id, i) => [id, i + 1]))
-    const numbers = lines.map((c) => rowNumbers.get(c.id) ?? position?.get(c.id))
+    // The same pieces `nameCell` below joins (src/lib/cells/line-name.ts).
+    const numbering = readNumbering()
+    const refs = lines.map((c) => lineReference(c, numbering))
+    const numbers = lines.map((c) => lineNumber(c, numbering))
     const names = refs.every((ref): ref is string => Boolean(ref))
       ? { key: "editor.selection.validatePartialNamed" as const, items: refs as string[] }
-      : numbers.every((n): n is number => n !== undefined)
-        ? { key: "editor.selection.validatePartialRows" as const, items: (numbers as number[]).map(String) }
+      : numbers.every((n): n is string => n !== null)
+        ? { key: "editor.selection.validatePartialRows" as const, items: numbers as string[] }
         : null
     const shown = names && names.items.length > PARTIAL_REFS_SHOWN
       ? [
@@ -324,7 +324,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         </span>
       </span>
     )
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, cellStore, cellStoreVersion, fileCellIds, structureCache])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, readNumbering])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -355,8 +355,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // with no audio and carries on, so this is a count for the button's badge and
   // the has-anything-to-play test — not a filter on what is handed to the queue
   // (dropping the silent lines would be the same run, one highlight short).
+  // AQU-2495 (review, Nov 9): each line counted the way the queue plays it,
+  // so following the recordings a line recorded only on an added track counts.
   const playableSelectedCount = useMemo(
-    () => playbackRange.filter(hasPlayableAudio).length,
+    () => playbackRange.filter((c) => hasAnyPlayableAudio([c])).length,
     [playbackRange],
   )
 
@@ -385,19 +387,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the table's # column, else nothing. The same rule the partial-validate
   // hover uses, so one line is named identically wherever it is mentioned.
   const nameCell = useCallback(
-    (cell: CellData): string => {
-      const ref = namedCellRef(cell)
-      if (ref) return ref
-      const rowNumbers = readAtVersion(cellStoreVersion, () =>
-        structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-      // A file with imported numbers leaves its headings unnumbered, so those
-      // name nothing; a plain document numbers by position instead.
-      const number = rowNumbers.size > 0
-        ? rowNumbers.get(cell.id)
-        : (fileCellIds.indexOf(cell.id) + 1) || undefined
-      return number === undefined ? "" : t("audio.batchVoice.rowName", { number })
-    },
-    [cellStore, cellStoreVersion, fileCellIds, structureCache, t],
+    (cell: CellData): string =>
+      lineName(cell, readNumbering(), {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      }),
+    [readNumbering, t],
   )
   // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for
@@ -601,7 +596,11 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     if (isBusy || !onVoiceTogether) return
     setRunning({ kind: "voice" })
     try {
-      await onVoiceTogether(selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()))
+      // AQU-2492 (review, Nov 9), finding 2: with their audio merged in. Its
+      // Undo gives each line back the voice it played before, read off these
+      // cells, and store cells carry no audio: a line with its own AI voice
+      // was left silent.
+      await onVoiceTogether(selectedCellsWithAudio.filter((c) => c.type !== "paratext" && c.translated.trim()))
     } catch (err) {
       // A failed "Voice together" used to end here as an unhandled rejection
       // with nothing on screen. The rows keep their own error badge with "Try
@@ -632,7 +631,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, onVoiceTogether, isBusy, t, project.id, analytics])
+  }, [selectedCellsWithAudio, onVoiceTogether, isBusy, t, project.id, analytics])
 
   const onValidate = useCallback(async () => {
     if (isBusy) return

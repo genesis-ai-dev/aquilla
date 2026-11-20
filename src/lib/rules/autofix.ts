@@ -5,6 +5,11 @@ import { complete } from "@/lib/completion/completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { t } from "@/lib/i18n/standalone"
+import {
+  findOldOrthography,
+  hasOrthography,
+  type OrthographyProfile,
+} from "../../../db/shared/orthography"
 
 export function applyRegexFix(fix: RuleAutofix, translated: string): string {
   const re = new RegExp(fix.pattern, fix.flags)
@@ -99,7 +104,12 @@ export interface FixPreview {
   after: string
   find?: string
   replace?: string
-  source: "llm" | "cached-regex"
+  /**
+   * How `after` was computed. `"orthography"` (AQU-2642) is the deterministic
+   * splice from the lane's own spelling rules — no model was asked. It is
+   * display/branching only; what gets persisted is `ProposalKind`.
+   */
+  source: "llm" | "cached-regex" | "orthography"
   rationale?: string
 }
 
@@ -114,6 +124,94 @@ export type FixProposal =
  * (AQU-1805); `CellHarmonizeInput.proposalKind` is the same union.
  */
 export type ProposalKind = "cached-regex" | "batch-regex" | "per-cell"
+
+/**
+ * AQU-2642 §1: the lane's orthography, when THIS rule is the check that
+ * judges a word by it. `resolveBuiltinRules` stamps the profile onto the
+ * `old-orthography` check's descriptor (AQU-2628), so the rule the underline
+ * came from already carries everything a correction needs.
+ */
+function orthographyProfileFor(rule: TranslationRule): OrthographyProfile | null {
+  const check = rule.check
+  if (check.type !== "builtin" || check.checkId !== "old-orthography") return null
+  return hasOrthography(check.orthography) ? check.orthography : null
+}
+
+/**
+ * AQU-2642 §1: can this rule be fixed without asking a model?
+ *
+ * The fix affordances are gated on AI being configured, which is right for
+ * every check whose correction only a model can guess — and wrong for this
+ * one, where the lane's own rules already say what the word should be.
+ */
+export function hasOrthographyFix(rule: TranslationRule): boolean {
+  return orthographyProfileFor(rule) != null
+}
+
+/**
+ * AQU-2642 §1: the correction for `builtin:old-orthography`, computed from the
+ * lane's rules instead of asked of a model.
+ *
+ * The bug this fixes: the check read `check.orthography` and underlined, while
+ * the fix builder described the check to the model as nothing but
+ * `Built-in check: old-orthography`. With no rules, no canonical apostrophe
+ * and no exception list in the prompt, the model correctly refused — "no
+ * safe correction can be identified" — so a flagged word offered the
+ * translator no way forward but Amend rule.
+ *
+ * Asking at all was the mistake. `findOldOrthography` is the same function
+ * that produced the underline and it already returns each flagged word's
+ * replacement, so the fix is a splice, not a guess. Two consequences, each a
+ * bug if it stops holding:
+ *
+ *   * Fix can never disagree with the underline, or with the finding's own
+ *     sentence ("use “şahar” for “shahar”") — one source of truth, read once.
+ *   * Only FLAGGED spans change. The converter also tidies apostrophe
+ *     variants, which this check deliberately stays quiet about (a translator
+ *     is not underlined for the apostrophe their keyboard types), so
+ *     converting the whole cell here would rewrite characters the translator
+ *     was never told about.
+ *
+ * Returns null when the rule is not that check, or the lane has no profile —
+ * the caller then falls back to the model, exactly as before.
+ */
+export function buildOrthographyProposal(
+  rule: TranslationRule,
+  cells: readonly CellData[],
+): FixProposal | null {
+  const profile = orthographyProfileFor(rule)
+  if (!profile) return null
+
+  const previews: FixPreview[] = []
+  for (const cell of cells) {
+    const findings = findOldOrthography(cell.translated, profile)
+    if (findings.length === 0) continue
+    // Last span first, so an earlier replacement cannot shift a later offset.
+    let after = cell.translated
+    for (let i = findings.length - 1; i >= 0; i -= 1) {
+      const finding = findings[i]
+      after = after.slice(0, finding.start) + finding.suggestion + after.slice(finding.end)
+    }
+    if (after === cell.translated) continue
+    // `find`/`replace` are what the IDML commit path needs to rewrite a
+    // protected run (AQU-742). They are only honest when every flagged word in
+    // the cell is the same word: a literal replace-all of one pair is then the
+    // same edit as the splice above. With two different words we omit them and
+    // an IDML cell refuses the fix, which is what a regex proposal already does.
+    const word = findings[0].text
+    const single = findings.every((f) => f.text === word)
+    previews.push({
+      cellId: cell.id,
+      fileId: cell.fileId,
+      before: cell.translated,
+      after,
+      ...(single ? { find: word, replace: findings[0].suggestion } : {}),
+      source: "orthography",
+    })
+  }
+  if (previews.length === 0) return null
+  return { kind: "per-cell", previews }
+}
 
 export function buildRegexProposal(
   fix: RuleAutofix,
@@ -233,13 +331,20 @@ export interface RequestBatchFixParams {
   rule: TranslationRule
   violatingCells: CellData[]
   passingCells: CellData[]
-  settings: CompletionSettings
+  /** Absent = no AI configured. Only a deterministic fix can be offered. */
+  settings?: CompletionSettings
   session: FrontierSession | null
   onLlmCall?: (meta: { kind: string; model?: string; provider: string }) => void
 }
 
 export async function requestBatchFix(params: RequestBatchFixParams): Promise<FixProposal> {
   const { rule, violatingCells, passingCells, settings, session, onLlmCall } = params
+  // AQU-2642: a check whose correction the lane's own rules already define is
+  // answered here, before any model round-trip — and so works with AI
+  // unconfigured.
+  const deterministic = buildOrthographyProposal(rule, violatingCells)
+  if (deterministic) return deterministic
+  if (!settings) return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   const provider = settings.provider || "frontier"
   const model = settings.model
   let raw: string
@@ -295,13 +400,18 @@ export async function requestBatchFix(params: RequestBatchFixParams): Promise<Fi
 export interface RequestSurgicalFixParams {
   rule: TranslationRule
   cell: CellData
-  settings: CompletionSettings
+  /** Absent = no AI configured. Only a deterministic fix can be offered. */
+  settings?: CompletionSettings
   session: FrontierSession | null
   onLlmCall?: (meta: { kind: string; model?: string; provider: string }) => void
 }
 
 export async function requestSurgicalFix(params: RequestSurgicalFixParams): Promise<FixProposal> {
   const { rule, cell, settings, session, onLlmCall } = params
+  // AQU-2642: see requestBatchFix — deterministic first, model only as fallback.
+  const deterministic = buildOrthographyProposal(rule, [cell])
+  if (deterministic) return deterministic
+  if (!settings) return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   const provider = settings.provider || "frontier"
   const model = settings.model
   let raw: string

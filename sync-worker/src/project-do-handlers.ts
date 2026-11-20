@@ -1207,6 +1207,19 @@ export type TokenRefreshOutcome =
   | { ok: true; role: number | null; tokenExpiresAt: number }
   | { ok: false; reason: "identity-mismatch" | "expired" }
 
+/**
+ * AQU-730: the frame a lane-walled socket receives. `rows` holds the cell's
+ * current text in every lane, and one payload goes to the whole project, so a
+ * walled caller gets the frame without it and refetches by ids through the
+ * cells route, which applies the wall. That is the path every client already
+ * takes when a large batch omits `rows`. Any other frame is returned as is.
+ */
+export function stripAppliedRows(msg: ProjectDoServerMessage): ProjectDoServerMessage {
+  if (msg.t !== "event.applied" || msg.rows === undefined) return msg
+  const { rows: _rows, ...rest } = msg
+  return rest
+}
+
 export function resolveTokenRefresh(
   conn: { numericUserId: number | null },
   claims: { userId: number; role: number | null; exp: number },

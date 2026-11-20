@@ -32,7 +32,8 @@ import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { characterKey } from "@/lib/export/audio-by-character"
 import { defaultTrackTakeId, isSilencedForExport } from "@/lib/export/audio-validation-scope"
-import { bookLineParts } from "@/lib/export/book-line-parts"
+import { bookLineOverlaps, bookLineParts, type BookLineOverlap } from "@/lib/export/book-line-parts"
+import { Pcm16Mixer } from "@/lib/export/overlap-mix"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 
@@ -106,6 +107,10 @@ export interface TimelineClip {
   data: Blob
   /** Sample count — `data.size / 2`, carried so offset maths needs no reads. */
   samples: number
+  /** AQU-2432: how many samples before the end of the clip before it this
+   *  one starts — its take dragged over the end of that one's, following the
+   *  recordings. Absent: right at its end. */
+  overlap?: number
 }
 
 export interface TimelinePlacement extends TimelineClip {
@@ -119,15 +124,63 @@ export interface Timeline {
 }
 
 /** Cumulative document-order offsets: every clip occupies its own span on ONE
- *  shared timeline, so per-voice stems line up sample-for-sample in a DAW. */
+ *  shared timeline, so per-voice stems line up sample-for-sample in a DAW.
+ *  AQU-2432: a clip with an `overlap` starts that far before the end of the
+ *  one before it — where playback starts it — and the timeline lasts to
+ *  whichever clip ends last. */
 export function buildTimeline(clips: readonly TimelineClip[]): Timeline {
   const placements: TimelinePlacement[] = []
-  let offset = 0
+  let prevEnd = 0
+  let total = 0
   for (const clip of clips) {
+    const offset = Math.max(0, prevEnd - Math.max(0, clip.overlap ?? 0))
     placements.push({ ...clip, offset })
-    offset += clip.samples
+    prevEnd = offset + clip.samples
+    total = Math.max(total, prevEnd)
   }
-  return { totalSamples: offset, placements }
+  return { totalSamples: total, placements }
+}
+
+/**
+ * AQU-2432: the timeline with each voice's clips that overlap each other — one
+ * speaker's take dragged over the end of their own before it — mixed into one
+ * placement, so a stem never has two clips over one stretch
+ * (`writeTimelineTrackParts` lays a voice's clips end to end). Two voices
+ * overlapping are two stems, and a DAW mixes them; nothing changes for them.
+ */
+export async function mixVoiceOverlaps(timeline: Timeline): Promise<Timeline> {
+  const out: TimelinePlacement[] = []
+  /** Per voice, its clips that sound over one another so far: where they end
+   *  (the furthest, and the last one's), mixed. */
+  const open = new Map<string, { first: TimelinePlacement; mixer: Pcm16Mixer; end: number; lastEnd: number; merged: boolean }>()
+  const close = (voiceId: string) => {
+    const g = open.get(voiceId)
+    if (!g) return
+    open.delete(voiceId)
+    if (!g.merged) {
+      out.push(g.first)
+      return
+    }
+    const parts = g.mixer.finish()
+    out.push({ ...g.first, data: new Blob(parts), samples: g.end - g.first.offset })
+  }
+  for (const p of timeline.placements) {
+    const g = open.get(p.voiceId)
+    if (g && p.offset < g.end) {
+      await g.mixer.push(p.data, p.samples, g.lastEnd - p.offset)
+      g.end = Math.max(g.end, p.offset + p.samples)
+      g.lastEnd = p.offset + p.samples
+      g.merged = true
+      continue
+    }
+    close(p.voiceId)
+    const mixer = new Pcm16Mixer()
+    await mixer.push(p.data, p.samples, 0)
+    open.set(p.voiceId, { first: p, mixer, end: p.offset + p.samples, lastEnd: p.offset + p.samples, merged: false })
+  }
+  for (const voiceId of [...open.keys()]) close(voiceId)
+  out.sort((a, b) => a.offset - b.offset)
+  return { totalSamples: timeline.totalSamples, placements: out }
 }
 
 /** Append `samples` worth of silence to `parts`, in SILENCE_CHUNK_SAMPLES
@@ -188,7 +241,9 @@ interface ResolvedClip {
   parts?: LinePart[]
 }
 
-type LinePart = { silenceSamples: number } | { piece: ResolvedClip }
+/** AQU-2432: `overlapSamples` — the piece after it starts that far before the
+ *  piece before it ends, mixed with it. */
+type LinePart = { silenceSamples: number } | { overlapSamples: number } | { piece: ResolvedClip }
 
 /**
  * AQU-1758: a book's line as playback lays it out, as parts of `clip` — or
@@ -202,6 +257,10 @@ function linePartsFor(clip: ResolvedClip): LinePart[] | null {
   for (const part of layout) {
     if (part.kind === "silence") {
       parts.push({ silenceSamples: Math.round((part.ms / 1000) * TARGET_RATE) })
+      continue
+    }
+    if (part.kind === "overlap") {
+      parts.push({ overlapSamples: Math.round((part.ms / 1000) * TARGET_RATE) })
       continue
     }
     const attachment = clip.cell.attachments?.[part.attachmentId]
@@ -391,15 +450,25 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   /** A line's audio as one PCM16 part: a book's line laid out as playback lays
    *  it out (its silences, then its pieces), else its take alone. Every piece
    *  is read, so each releases its share of the cache; null when one fails. */
+  const silenceBlob = (samples: number): Blob => {
+    const parts: Blob[] = []
+    pushSilence(parts, samples)
+    return new Blob(parts)
+  }
   const linePartFor = async (clip: ResolvedClip): Promise<{ data: Blob; samples: number } | null> => {
     if (!clip.parts) return pcm16PartFor(clip)
-    const blobs: Blob[] = []
-    let samples = 0
+    // AQU-2432: a piece dragged over the end of the one in front is mixed
+    // with it; every other part is laid end to end as before.
+    const line = new Pcm16Mixer()
+    let overlapNext = 0
     let readable = true
     for (const part of clip.parts) {
       if ("silenceSamples" in part) {
-        pushSilence(blobs, part.silenceSamples)
-        samples += part.silenceSamples
+        await line.push(silenceBlob(part.silenceSamples), part.silenceSamples, 0)
+        continue
+      }
+      if ("overlapSamples" in part) {
+        overlapNext = part.overlapSamples
         continue
       }
       const audio = await pcm16PartFor(part.piece)
@@ -407,16 +476,23 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
         readable = false
         continue
       }
-      if (isSilencedForExport(part.piece.attachment)) {
-        // AQU-965: a piece withdrawn for want of validation is silence of its
-        // own length, so the rest of the line stays where it was.
-        pushSilence(blobs, audio.samples)
-      } else {
-        blobs.push(audio.data)
-      }
-      samples += audio.samples
+      // AQU-965: a piece withdrawn for want of validation is silence of its
+      // own length, so the rest of the line stays where it was.
+      const data = isSilencedForExport(part.piece.attachment) ? silenceBlob(audio.samples) : audio.data
+      await line.push(data, audio.samples, overlapNext)
+      overlapNext = 0
     }
-    return readable ? { data: new Blob(blobs), samples } : null
+    if (!readable) return null
+    const blobs = line.finish()
+    return { data: new Blob(blobs), samples: line.samples }
+  }
+  // AQU-2432 (Sam, Nov 6, rule 7): on a book, a line whose take was dragged
+  // over the end of the line before it starts that much before it ends — when
+  // it follows that line here — and the two are mixed, as playback plays them.
+  const overlaps = args.mode === "separate-clips" ? new Map<string, BookLineOverlap>() : bookLineOverlaps(args.cells)
+  const overlapAfter = (clip: ResolvedClip, prevCellId: string | null): number => {
+    const over = overlaps.get(clip.cell.id)
+    return over && over.afterCellId === prevCellId ? Math.round((over.ms / 1000) * TARGET_RATE) : 0
   }
 
   const failReason = (err: unknown): string =>
@@ -464,19 +540,24 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
 
   if (args.mode === "file-clip") {
     // Parts, not one growing array: the concatenation of a whole file's audio
-    // exists in blob storage and never as a Float32Array (AQU-1862).
-    const parts: Blob[] = []
+    // exists in blob storage and never as a Float32Array (AQU-1862). AQU-2432:
+    // only the lines that overlap are read back, to be mixed.
+    const file = new Pcm16Mixer()
+    let prevCellId: string | null = null
     for (const clip of resolved) {
       throwIfAborted()
       try {
         const part = await linePartFor(clip)
-        if (part) parts.push(part.data)
+        if (part) {
+          await file.push(part.data, part.samples, overlapAfter(clip, prevCellId))
+          prevCellId = clip.cell.id
+        }
       } catch (err) {
         skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
       }
       step()
     }
-    const blob = wav(parts)
+    const blob = wav(file.finish())
     if (blob.size > WAV_HEADER_BYTES) {
       entries.push({ name: claimName(`${args.fileSlug}_all`, "wav"), data: blob })
     }
@@ -489,6 +570,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   const voiceOrder: string[] = []
   const voiceById = new Map<string, Voice>()
   const placed: TimelineClip[] = []
+  let prevCellId: string | null = null
   for (const clip of resolved) {
     throwIfAborted()
     try {
@@ -498,7 +580,10 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
           voiceById.set(clip.voice.id, clip.voice)
           voiceOrder.push(clip.voice.id)
         }
-        placed.push({ cellId: clip.cell.id, voiceId: clip.voice.id, data: part.data, samples: part.samples })
+        // AQU-2432: where playback starts it, over the end of the line before.
+        const overlap = overlapAfter(clip, prevCellId)
+        placed.push({ cellId: clip.cell.id, voiceId: clip.voice.id, data: part.data, samples: part.samples, ...(overlap > 0 ? { overlap } : {}) })
+        prevCellId = clip.cell.id
       }
     } catch (err) {
       skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
@@ -517,7 +602,8 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   }
 
   // voice-timeline: one shared timeline, one equal-length stem per voice.
-  const timeline = buildTimeline(placed)
+  // AQU-2432: one voice's clips that overlap are mixed into one.
+  const timeline = await mixVoiceOverlaps(buildTimeline(placed))
   if (timeline.totalSamples > 0) {
     for (const voiceId of voiceOrder) {
       entries.push({

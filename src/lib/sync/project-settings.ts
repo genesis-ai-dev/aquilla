@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { noteProjectSettingsWrite } from "./project-settings-write-signal"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "./project-org-policy"
 import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
@@ -20,6 +21,7 @@ import type { DirectionMode } from "@/lib/text-direction"
 import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import type { DraftingSettings } from "../../../db/shared/drafting-settings"
+import { milestoneFloorLevel } from "../../../db/shared/milestone-floor"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -53,6 +55,14 @@ export type CellEditingTier =
  * copy is `db/shared/cell-label-floor.ts`.
  */
 export type CellLabelTier = "maintainer" | "project_lead"
+
+/**
+ * AQU-2309: the stored `milestoneFloor` vocabulary — who may set, rename,
+ * resize and remove a hand-set milestone. Two rungs; an absent key reads as
+ * maintainer. The mapping lives in `db/shared/milestone-floor.ts`, which the
+ * events route and `canSetMilestones` both call.
+ */
+export type MilestoneFloor = "maintainer" | "project_lead"
 
 /**
  * The synced subset of project-wide fields. Mirrors the server's settings
@@ -207,6 +217,14 @@ export interface ProjectWideSettings {
    * docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
    */
   cellLabelFloor?: CellLabelTier
+  /**
+   * AQU-2309: who may set, rename, resize and remove a hand-set milestone.
+   * Absent, and any value this build does not recognise, reads as maintainer.
+   * The events route enforces the same floor, so a page that has not picked
+   * up a raised setting cannot write past it. Switching it does not rewrite
+   * milestones or mark a translation stale.
+   */
+  milestoneFloor?: MilestoneFloor
   /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
@@ -519,6 +537,19 @@ export function resolveCellLabelFloor(
   settings: Pick<ProjectWideSettings, "cellLabelFloor"> | null | undefined,
 ): RoleLevel {
   return settings?.cellLabelFloor === "project_lead" ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
+}
+
+/**
+ * The role level `milestoneFloor` admits. Never looser than maintainer: an
+ * absent key, and any value this build does not recognise, stay there.
+ * `db/shared/milestone-floor.ts` is the copy the events route uses.
+ */
+export function resolveMilestoneFloor(
+  settings: Pick<ProjectWideSettings, "milestoneFloor"> | null | undefined,
+): RoleLevel {
+  return milestoneFloorLevel(settings?.milestoneFloor) === ROLE.PROJECT_LEAD
+    ? ROLE.PROJECT_LEAD
+    : ROLE.MAINTAINER
 }
 
 /**
@@ -983,6 +1014,23 @@ export async function patchProjectSettings(
   settings: ProjectWideSettings,
   ifMatchVersion: number,
   apiUrl: string = FRONTIER_API_URL,
+): Promise<PatchResult> {
+  // Before the request and after it: a read in flight across this write may
+  // hold the row from before it (project-settings-shared-read.ts).
+  noteProjectSettingsWrite(projectId)
+  try {
+    return await sendProjectSettingsPatch(jwt, projectId, settings, ifMatchVersion, apiUrl)
+  } finally {
+    noteProjectSettingsWrite(projectId)
+  }
+}
+
+async function sendProjectSettingsPatch(
+  jwt: string,
+  projectId: string,
+  settings: ProjectWideSettings,
+  ifMatchVersion: number,
+  apiUrl: string,
 ): Promise<PatchResult> {
   let res: Response
   try {

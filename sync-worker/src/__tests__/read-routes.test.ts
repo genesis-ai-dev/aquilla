@@ -60,11 +60,13 @@ describe('GET /events', () => {
       parent_id: null, kind, author: 'alice', payload, client_ts: seq, server_ts: seq, server_seq: seq,
     })
     const { db } = await makeTestDb({
+      lanes: [{ id: 'lane-a', project_id: 'proj-a', role: 'target', legacy_tag: '' }],
       events: [
         ev('s1', 'source.cell.create', '{"value":"src"}', 1),
         ev('a1', 'target.cell.commit', '{"value":"mine","laneId":"lane-a"}', 2),
         ev('b1', 'target.cell.commit', '{"value":"theirs","laneId":"lane-b"}', 3),
         ev('v1', 'cell.validate', '{"laneId":"lane-b"}', 4),
+        // From before lane ids: no lane named, so it is the default lane's.
         ev('u1', 'target.cell.commit', '{"value":"unstamped"}', 5),
       ],
     })
@@ -74,7 +76,7 @@ describe('GET /events', () => {
       const res = (await handleEventsReadRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
       return ((await res.json()) as { events: { id: string }[] }).events.map((e) => e.id)
     }
-    expect(await get({ role: 400, laneGrants: [{ lane: 'lane-a', level: 400 }] }, '1')).toEqual(['a1', 's1'])
+    expect(await get({ role: 400, laneGrants: [{ lane: 'lane-a', level: 400 }] }, '1')).toEqual(['u1', 'a1', 's1'])
     expect(await get({ role: 400 }, '1')).toEqual(['s1'])
     expect(await get({ role: 600 }, '1')).toHaveLength(5)
     expect(await get({ role: 400 }, undefined)).toHaveLength(5)
@@ -115,6 +117,44 @@ describe('GET /cell-validators', () => {
 })
 
 describe('GET /cells/audit-stats', () => {
+  // AQU-730: one row per lane, each with that lane's content hash, edit time
+  // and validators.
+  it('gives a walled caller the source row and only the lanes they were granted', async () => {
+    const row = (side: string, laneId: string, eventId: string) => ({
+      project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1', side, lane_id: laneId,
+      value: 'v', content_hash: `hash-${eventId}`, event_id: eventId, source_event_id: null,
+      last_editor: 'a', last_edit_at: 1700, validated: 0, word_count: 1,
+    })
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: 'lane-src', project_id: 'proj-x', role: 'source', legacy_tag: null, position: 0 },
+        { id: 'lane-en', project_id: 'proj-x', role: 'target', legacy_tag: '', position: 0 },
+        { id: 'lane-es', project_id: 'proj-x', role: 'target', legacy_tag: 'es', position: 1 },
+      ],
+      cells: [row('source', 'lane-src', 'ev-src'), row('target', 'lane-en', 'ev-en'), row('target', 'lane-es', 'ev-es')],
+      cell_validators: [
+        { project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1', lane_id: 'lane-en', event_id: 'ev-en', username: 'alice', decided_ts: 1 },
+        { project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1', lane_id: 'lane-es', event_id: 'ev-es', username: 'bob', decided_ts: 2 },
+      ],
+    })
+    const read = async (claims: Record<string, unknown>, wall: string | undefined) => {
+      const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x', ...claims })
+      const req = new Request('https://w/cells/audit-stats?fileId=file-x', { headers: { Authorization: `Bearer ${token}` } })
+      const res = (await handleCellsAuditReadRequest(req, { ...envWith(db), LANE_READ_WALL: wall }))!
+      const body = (await res.json()) as { cells: { lastEditEventId: string; activeValidators: string[] }[] }
+      return {
+        heads: body.cells.map((c) => c.lastEditEventId).sort(),
+        validators: body.cells.flatMap((c) => c.activeValidators).sort(),
+      }
+    }
+    const walled = { role: 400, laneGrants: [{ lane: 'lane-en', level: 400 }] }
+    expect(await read(walled, '1')).toEqual({ heads: ['ev-en', 'ev-src'], validators: ['alice'] })
+    expect(await read({ role: 400, laneGrants: [] }, '1')).toEqual({ heads: ['ev-src'], validators: [] })
+    const all = { heads: ['ev-en', 'ev-es', 'ev-src'], validators: ['alice', 'bob'] }
+    expect(await read({ role: 600 }, '1')).toEqual(all)
+    expect(await read(walled, undefined)).toEqual(all)
+  })
+
   it('returns side, event_id (chain head), source_event_id (AD-9 pin), and active validators', async () => {
     const { db } = await makeTestDb({
       cells: [

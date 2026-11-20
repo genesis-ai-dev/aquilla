@@ -21,6 +21,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { bridgeStore } from "@/lib/paratext-bridge/store"
+import { otherCopies } from "@/lib/paratext-bridge/copies"
 import { setMirrorBase } from "@/lib/paratext-bridge/book-sync"
 import { paratextTauri } from "@/lib/paratext-bridge/tauri"
 import { decodeUtf8Strict } from "@/lib/paratext-bridge/units"
@@ -61,8 +62,11 @@ export function ParatextOpenPage() {
     started.current = true
     let cancelled = false
     const run = async () => {
-      // Already mirrored: straight to its editor.
-      const existing = await bridgeStore.link(project.stateId)
+      // Already mirrored, from this folder or from another copy of the same
+      // project (Paratext 9 and 10 each keep one): straight to its editor.
+      // A second Aquilla project for the same Paratext project is never made.
+      let existing = await bridgeStore.link(project.stateId)
+      for (const other of otherCopies(project, d.projects)) existing ??= await bridgeStore.link(other.stateId)
       if (existing) {
         const first = project.books.map((b) => existing.books[b.code]?.fileId).find(Boolean)
         navigate(editorPathForLink(existing.projectId, first), { replace: true })
@@ -102,7 +106,7 @@ export function ParatextOpenPage() {
     }
     run().catch((e: unknown) => { if (!cancelled) setPhase({ kind: "error", message: e instanceof Error ? e.message : String(e) }) })
     return () => { cancelled = true }
-  }, [project, raw, session, org?.activeOrgId, navigate])
+  }, [project, raw, session, org?.activeOrgId, navigate, d.projects])
 
   const getToken = useMemo(
     () => (phase.kind === "import" ? buildFileScopedTokenFetcher(() => phase.jwt, phase.projectId) : async () => null),

@@ -100,3 +100,33 @@ describe("VoiceCloneSection filled state", () => {
     expect(uploadVoiceReference).not.toHaveBeenCalled()
   })
 })
+
+// AQU-2487 (import sweep, Nov 2): the Voices panel is open with no file open
+// ("No file selected"). The clip is stored for the project, not for a file, so
+// the drop zone is there all the same.
+describe("VoiceCloneSection with no file open", () => {
+  beforeEach(() => {
+    vi.mocked(uploadVoiceReference).mockClear()
+  })
+
+  it("offers the drop zone and uploads the clip for the project", async () => {
+    const onChange = vi.fn()
+    render(
+      <VoiceCloneSection
+        voice={{ id: "v", name: "N" }}
+        projectId="p"
+        fileId={null}
+        session={session}
+        onChange={onChange}
+      />,
+    )
+    expect(screen.queryByText(/Open this from a project workspace/)).toBeNull()
+    const zone = screen.getByRole("group", { name: "Add a reference clip" })
+    const file = new File(["x"], "clip.wav", { type: "audio/wav" })
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } })
+    await waitFor(() => expect(uploadVoiceReference).toHaveBeenCalledOnce())
+    expect(vi.mocked(uploadVoiceReference).mock.calls[0][0]).toMatchObject({ projectId: "p", fileId: "_voices" })
+    expect(onChange).toHaveBeenCalledWith({ referenceAudioId: "ref.wav", referenceTakeKey: undefined })
+    expect(screen.queryByText("No project context for upload.")).toBeNull()
+  })
+})

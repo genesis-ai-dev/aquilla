@@ -17,6 +17,8 @@ interface Env extends MonitorEnv {
   DISCORD_WEBHOOK_URL?: string
   HEARTBEAT_URL?: string
   MONITOR_ADMIN_TOKEN?: string
+  /** Admin bearer for sync-worker's stuck-session probe (AQU-2611). */
+  SYNC_ADMIN_TOKEN?: string
 }
 
 const stateStub = (env: Env) => env.MONITOR_STATE.get(env.MONITOR_STATE.idFromName("singleton"))
@@ -39,15 +41,24 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     const config = readConfig(env)
     const stub = stateStub(env)
-    const events = await runTick(config, {
+    const { events, stuckSessions } = await runTick(config, {
       fetch: (input, init) => fetch(input, init),
       now: Date.now,
       record: (results, thresholds, now) => stub.record(results, thresholds, now),
+      recordStuckSessions: (reading, now) => {
+        // Non-null: runTick only calls this when config.stuckSessions is set.
+        const { threshold, repeatMinutes } = config.stuckSessions!
+        return stub.recordStuckSessions(reading, { threshold, repeatMinutes }, now)
+      },
+      syncAdminToken: env.SYNC_ADMIN_TOKEN,
       discordWebhookUrl: env.DISCORD_WEBHOOK_URL,
       heartbeatUrl: env.HEARTBEAT_URL,
     })
     if (events.length > 0) {
       console.log("[monitor] alerts", events.map((e) => `${e.kind}:${e.targetId}`).join(", "))
+    }
+    if (stuckSessions) {
+      console.log("[monitor] stuck-sessions alert", stuckSessions.kind, stuckSessions.count)
     }
   },
 
@@ -58,10 +69,18 @@ export default {
 
     if (request.method === "GET" && pathname === "/status") {
       const config = readConfig(env)
-      const states = await stateStub(env).snapshot()
+      const stub = stateStub(env)
+      const [states, stuckSessions] = await Promise.all([
+        stub.snapshot(),
+        stub.stuckSessionsSnapshot(),
+      ])
       return json({
         environment: config.environment,
         targets: config.targets.map((t) => ({ id: t.id, name: t.name, url: t.url, ...states[t.id] })),
+        // AQU-2611. Reports the state, never the bearer the probe is called with.
+        stuckSessions: config.stuckSessions
+          ? { url: config.stuckSessions.url, threshold: config.stuckSessions.threshold, ...(stuckSessions ?? {}) }
+          : null,
       })
     }
 

@@ -29,6 +29,7 @@ CREATE TABLE users (
     username      TEXT UNIQUE NOT NULL,
     email         TEXT UNIQUE NOT NULL,
     password_hash TEXT,
+    password_login_disabled BOOLEAN NOT NULL DEFAULT false,
     preferences   TEXT NOT NULL DEFAULT '{}',
     created_at    TIMESTAMPTZ DEFAULT now(),
     updated_at    TIMESTAMPTZ DEFAULT now(),
@@ -364,6 +365,10 @@ CREATE TABLE project_settings (
     -- every source import, so it joins this projection rather than being the
     -- one write-path read that reopens the blob (db/shared/import-floor.ts).
     wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
+    -- AQU-2309 (0205): who may set, rename, resize and remove hand-set
+    -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
+    -- The events route reads this column instead of the settings blob.
+    wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -695,6 +700,30 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
 );
 CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
     ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
+
+-- AQU-2492 (migration 0204): the approvals a cut, or the undo of a cut, took
+-- off a take, keyed by that event, so undoing the cut gives the take its
+-- approvals back and redoing it gives them to its pieces again — and the
+-- take's volume and fades as they were. Written once by the projection's live
+-- write; see the migration for the full rules.
+CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
+    event_id      TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    piece_id      TEXT NOT NULL,
+    audio_id      TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('whole', 'first')),
+    url           TEXT,
+    votes         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    archived_seq  BIGINT,
+    archived_ts   BIGINT NOT NULL,
+    gain_db       REAL,
+    fade_in_ms    BIGINT,
+    fade_out_ms   BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_cell_audio_cut_votes_cut
+    ON cell_audio_cut_votes (project_id, file_id, cell_id, piece_id, kind);
 
 -- Decision 11 (migration 0191): each person's undo history for a project, so
 -- it follows them between devices. One row per (project, person); `history`
@@ -3264,3 +3293,34 @@ CREATE TABLE email_change_requests (
 
 ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMPTZ;
 ALTER TABLE password_reset_tokens ADD COLUMN email_at_issue TEXT;
+
+-- AQU-2631: optional account settings protection; never a login requirement.
+CREATE TABLE IF NOT EXISTS account_security (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ generation TEXT NOT NULL,
+ secret_enc TEXT NOT NULL,
+ enabled BOOLEAN NOT NULL DEFAULT false,
+ setup_session TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ confirmed_step BIGINT,
+ last_step BIGINT NOT NULL DEFAULT -1,
+ recovery_hashes JSONB NOT NULL DEFAULT '[]',
+ PRIMARY KEY(user_id,deployment)
+);
+CREATE TABLE IF NOT EXISTS account_security_grants (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ session_key TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('primary','google','factor')),
+ generation TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ PRIMARY KEY(user_id,deployment,session_key,kind)
+);
+CREATE TABLE IF NOT EXISTS account_security_attempts (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ started_at TIMESTAMPTZ NOT NULL,
+ attempts INTEGER NOT NULL,
+ PRIMARY KEY(user_id,deployment)
+);

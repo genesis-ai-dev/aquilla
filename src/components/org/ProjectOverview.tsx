@@ -14,7 +14,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
+import { preloadWorkspace, useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -24,6 +24,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
+import { RestoreProjectDialog } from "@/components/RestoreProjectDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
@@ -48,6 +49,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
+import { readPortfolioRowSeed } from "@/lib/frontier/portfolio-seed"
 import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
@@ -111,7 +113,7 @@ import { useRereadWhenSettingsMayHaveMoved } from "@/hooks/useRereadWhenSettings
 import { UserError } from "@/lib/errors/user-error"
 import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
-import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { canDownloadOriginals, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import {
@@ -415,7 +417,10 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
-  const [audio, setAudio] = useState<PortfolioProject | null>(null)
+  const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
+  // The portfolio row the list this page was opened from was already showing.
+  // `loadRow` below still reads the org's portfolio and replaces it.
+  const [audio, setAudio] = useState<PortfolioProject | null>(() => readPortfolioRowSeed(jwt, id))
   const [files, setFiles] = useState<FileSummary[]>([])
   // fileId → display name for the autopilot panel, which knows runs by file id
   // only (its rollup comes from the run table, not the file list).
@@ -587,6 +592,13 @@ export function ProjectOverview() {
   )
   // Primitives, so the memos below depend on values rather than on the
   // policy object (a new one every render).
+  // AQU-2476: originals are a server route. An unset floor is Maintainer,
+  // not "no floor". The plan CSV stays on `canExport` — it never leaves
+  // the browser.
+  const canDownloadImportedOriginals = canDownloadOriginals(
+    projectRoleLevel,
+    projectPolicy.exportMinRole,
+  )
   const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
   const policyAssignmentMinRole = projectPolicy.assignmentMinRole
   const policyAllowScopedLaneAssignment = projectPolicy.allowScopedLaneAssignment
@@ -1209,6 +1221,7 @@ export function ProjectOverview() {
       const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
       let cellId: string | null = null
       if (wanted) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
@@ -1252,6 +1265,7 @@ export function ProjectOverview() {
       if (!id) return
       let cellId: string | null = null
       if (unit.sectionKey && getPlanToken) {
+        preloadWorkspace()
         try {
           cellId = await getPlanFirstOpenCell(
             id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
@@ -1946,7 +1960,12 @@ export function ProjectOverview() {
                       </Link>
                     )}
                     {canManage && isArchived && (
-                      <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setRestoreConfirmOpen(true)}
+                        disabled={busy}
+                      >
                         {t("common.restore")}
                       </Button>
                     )}
@@ -2268,6 +2287,14 @@ export function ProjectOverview() {
                   </DialogContent>
                 </Dialog>
 
+                <RestoreProjectDialog
+                  open={restoreConfirmOpen}
+                  onOpenChange={setRestoreConfirmOpen}
+                  onConfirm={() => {
+                    void handleRestore()
+                  }}
+                />
+
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}
                   onOpenChange={setArchiveConfirmOpen}
@@ -2503,6 +2530,7 @@ export function ProjectOverview() {
                 <OverviewLaneTable
                   projectId={id}
                   projectName={project?.name}
+                  orgName={orgs.find((org) => org.id === portfolioOrgId)?.name ?? (activeOrg?.id === portfolioOrgId ? activeOrg.name : null)}
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={activeProjectLanes}
@@ -2672,11 +2700,14 @@ export function ProjectOverview() {
                 />
               )}
 
-              {/* AQU-656: original imported blobs. Hidden when the org export
-                  floor forbids it, and when no file has a stored original —
+              {/* AQU-656 / AQU-2476: original imported blobs. Hidden below the
+                  effective export floor (an unset floor is Maintainer, the
+                  same default the download routes apply) and when no file
+                  has a stored original. Every control here is a download
+                  that route refuses, so a below-floor reader gets no card.
                   Codex-migrated / pre-sidecar files are AQU-991, not a
                   storage-audit empty state here. */}
-              {orgSettings.canExport && originalFiles.length > 0 && jwt && (
+              {canDownloadImportedOriginals && originalFiles.length > 0 && jwt && (
                 <div className="rounded-lg border bg-card p-5" data-testid="imported-originals">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">

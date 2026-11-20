@@ -15,6 +15,16 @@ import posthog from "@/lib/posthog"
 
 vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
+// AQU-2654: the real hook returns a NEW scope object whenever the account's
+// analytics generation moves (several times per return to the tab). A test
+// swaps `analyticsScope.current` and re-renders to reproduce that; left null,
+// the hook returns the one mocked SDK object, as src/test-setup.ts does.
+const analyticsScope = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }))
+vi.mock("@/hooks/useAccountAnalytics", async () => {
+  const { default: sdk } = await import("@/lib/posthog")
+  return { useAccountAnalytics: () => analyticsScope.current ?? sdk }
+})
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
 }))
@@ -47,7 +57,10 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  analyticsScope.current = null
+  vi.restoreAllMocks()
+})
 
 describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
   it("applies server settings (incl. rules/sourceLanguage) after StrictMode mount→cleanup→remount", async () => {
@@ -1214,8 +1227,9 @@ describe("useProjectSettings — refreshAfterWrite (AQU-1816)", () => {
     await waitFor(() => expect(laneIds(overview)).toEqual(["ln-src", "ln-fr", "ln-es"]))
     // …and so does the writer, through its own refresh.
     expect(laneIds(dialog)).toEqual(["ln-src", "ln-fr", "ln-es"])
-    // One GET per instance: the writer skips its own broadcast.
-    expect(fetchSpy.mock.calls.length).toBe(before + 2)
+    // One GET for both (AQU-2654): the sibling's read, started by the broadcast
+    // after the write, is the one the writer's own refresh joins.
+    expect(fetchSpy.mock.calls.length).toBe(before + 1)
   })
 
   it("tells the page behind with the project id and its own origin", async () => {
@@ -1328,7 +1342,8 @@ describe("useProjectSettings — hydration event once per open (AQU-1470)", () =
       useProjectSettings("aqu1470-a", 700),
     ])
     await waitFor(() => expect(result.current.every((s) => s.hasFetched)).toBe(true))
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    // AQU-2654: the two consumers share one read.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(hydratedCaptures()).toHaveLength(1)
     expect(hydratedCaptures()[0][1]).toMatchObject({
       project_id: "aqu1470-a",
@@ -1359,5 +1374,114 @@ describe("useProjectSettings — hydration event once per open (AQU-1470)", () =
     await waitFor(() => expect(hydratedCaptures()).toHaveLength(2))
     expect(hydratedCaptures()[1][1]).toMatchObject({ project_id: "aqu1470-d" })
     expect(result.current.hasFetched).toBe(true)
+  })
+})
+
+// AQU-2654 — "coming back to the tab is one refresh, not one per hook". One
+// return to the tab sent GET /settings 8 to 13 times: every mounted instance
+// read on its own, and each re-read every time the analytics scope changed
+// identity, which it does several times per return.
+describe("useProjectSettings — one shared read (AQU-2654)", () => {
+  const row = (): restClient.ProjectSettingsResponse => ({
+    version: 4,
+    updatedAt: "2026-11-19T00:00:00Z",
+    updatedBy: null,
+    settings: { sourceLanguage: "fr", validationCount: 2 },
+    lanes: [],
+  })
+  // A new, equal object per GET, as the network gives.
+  const mockFreshRows = () =>
+    vi.spyOn(restClient, "fetchProjectSettingsResult").mockImplementation(async () => ({ ok: true, value: row() }))
+
+  it("does not re-send the GET when the analytics generation moves", async () => {
+    const fetchSpy = mockFreshRows()
+    const { result, rerender } = renderHook(() => useProjectSettings("aqu2654-a", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const refreshBefore = result.current.refresh
+    const patchBefore = result.current.patch
+    // What hiding the tab and coming back does to the analytics account: a
+    // new scope object, more than once.
+    for (let generation = 0; generation < 2; generation++) {
+      analyticsScope.current = { capture: vi.fn(), captureException: vi.fn(), enabled: () => true }
+      await act(async () => {
+        rerender()
+        await Promise.resolve()
+      })
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(result.current.refresh).toBe(refreshBefore)
+    expect(result.current.patch).toBe(patchBefore)
+  })
+
+  it("two mounted consumers send one GET for a focus wave, and nothing re-renders when nothing changed", async () => {
+    const fetchSpy = mockFreshRows()
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return [useProjectSettings("aqu2654-b", 700), useProjectSettings("aqu2654-b", 700)]
+    })
+    await waitFor(() => expect(result.current.every((s) => s.hasFetched)).toBe(true))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    const settingsBefore = result.current.map((s) => s.settings)
+    const lanesBefore = result.current.map((s) => s.lanes)
+    const rendersBefore = renders
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    result.current.forEach((s, i) => {
+      expect(s.settings).toBe(settingsBefore[i])
+      expect(s.lanes).toBe(lanesBefore[i])
+    })
+    expect(renders).toBe(rendersBefore)
+  })
+
+  it("still applies a focus read that did change (AQU-349)", async () => {
+    const fetchSpy = mockFreshRows()
+    const { result } = renderHook(() => [
+      useProjectSettings("aqu2654-c", 700),
+      useProjectSettings("aqu2654-c", 700),
+    ])
+    await waitFor(() => expect(result.current.every((s) => s.hasFetched)).toBe(true))
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      value: { ...row(), version: 5, settings: { sourceLanguage: "fr", validationCount: 1 } },
+    }))
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.every((s) => s.settings.validationCount === 1)).toBe(true))
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("a consumer that mounts just after another's read is hydrated from it; one that mounts after a write is not", async () => {
+    const fetchSpy = mockFreshRows()
+    const first = renderHook(() => useProjectSettings("aqu2654-d", 700))
+    await waitFor(() => expect(first.result.current.hasFetched).toBe(true))
+    // A panel that renders once the project resolved, a lazy chunk…
+    const late = renderHook(() => useProjectSettings("aqu2654-d", 700))
+    await waitFor(() => expect(late.result.current.hasFetched).toBe(true))
+    expect(late.result.current.settings.validationCount).toBe(2)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // Someone changes the row; every mounted consumer is told and re-reads once.
+    fetchSpy.mockImplementation(async () => ({
+      ok: true,
+      value: { ...row(), version: 5, settings: { sourceLanguage: "fr", validationCount: 1 } },
+    }))
+    act(() => broadcastProjectSettingsUpdated({ projectId: "aqu2654-d" }))
+    await waitFor(() => expect(late.result.current.settings.validationCount).toBe(1))
+    expect(first.result.current.settings.validationCount).toBe(1)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+
+    // A consumer mounting now gets the written row, never the one kept from before.
+    const afterWrite = renderHook(() => useProjectSettings("aqu2654-d", 700))
+    await waitFor(() => expect(afterWrite.result.current.hasFetched).toBe(true))
+    expect(afterWrite.result.current.settings.validationCount).toBe(1)
   })
 })

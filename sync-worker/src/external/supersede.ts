@@ -19,6 +19,8 @@ import type { EmitEventInput } from './commands-emit-events'
 import { normalizeSettings } from '../../../db/shared/projects'
 import { isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
 import { briefPatchOf } from './commands-set-brief'
+import { mergeOrthographyExceptions } from '../../../db/shared/orthography-exceptions'
+import { readLanguageProfile } from '../../../db/shared/language-profile'
 
 /** One live target cell, as the projection holds it. */
 export interface LiveTargetValue {
@@ -114,6 +116,26 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
       if (!isBriefPatchSatisfied(liveBrief, briefPatchOf(c))) {
         return no('live brief sections differ from the planned text')
       }
+      return YES
+    }
+    // AQU-2642: the merge command's end-state IS readable — every add's word
+    // present and APPROVED, every remove's word gone. Asked at the strictest
+    // reading (`canApprove: true`), so a word that is merely PENDING counts as
+    // work still to do rather than a satisfied plan: this module's bias is
+    // always toward false, and discarding a real approval would be the costly
+    // mistake. A maintainer who added these words in the app while the plan
+    // waited superseded it, which is a healthy outcome.
+    case 'PatchOrthographyExceptions': {
+      if (!live.settings) return no('live settings were not resolved')
+      const orthography = readLanguageProfile(live.settings.languageProfile).orthography
+      if (!orthography) return no('the project has no languageProfile.orthography block')
+      const merge = mergeOrthographyExceptions(
+        orthography.exceptions ?? [],
+        c.ops,
+        { userId: live.actorUsername, canApprove: true },
+        orthography.apostrophe,
+      )
+      if (merge.changed) return no('the live exception list still differs from the plan')
       return YES
     }
     case 'EmitEvents': {

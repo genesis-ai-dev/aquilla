@@ -90,6 +90,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.place": ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   "cell.audio.cut": ROLE.CONTRIBUTOR,
+  // AQU-2492: undoing a cut needs what cutting it needed.
+  "cell.audio.uncut": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.
@@ -125,14 +127,15 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
-  // AQU-2308: hand-set milestones. MAINTAINER, matching file.track.set — a
-  // division relayouts the navigator for everyone who opens the file. This
-  // mirror matters more than it looks: `canPerform` fails OPEN on a kind it
-  // has never heard of (see the AQU-646 note below), so without these two rows
-  // the cell menu would offer "Set a new milestone…" to a contributor and the
-  // server's 403 would be the only thing stopping them.
-  "file.milestone.set": ROLE.MAINTAINER,
-  "file.milestone.remove": ROLE.MAINTAINER,
+  // AQU-2308 / AQU-2309: hand-set milestones. PROJECT_LEAD is the static
+  // floor — the lowest rung the project's milestoneFloor can admit. The tier
+  // itself (maintainer unless opened) is canSetMilestones, not this table.
+  // This mirror matters more than it looks: `canPerform` fails OPEN on a kind
+  // it has never heard of (see the AQU-646 note below), so without these two
+  // rows the cell menu would offer "Set a new milestone…" to a contributor
+  // and the server's 403 would be the only thing stopping them.
+  "file.milestone.set": ROLE.PROJECT_LEAD,
+  "file.milestone.remove": ROLE.PROJECT_LEAD,
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
@@ -613,4 +616,48 @@ export function importDenialFloor(
     requiredRoleFor("file.create") ?? DEFAULT_IMPORT_MIN_ROLE,
     resolveImportFloor(importMinRole),
   )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2476: the org-configurable export floor, for server-only downloads.
+//
+// CLIENT MIRROR of sync-worker/src/events/export-floor.ts. The server
+// re-resolves the floor on every original download, so this is an affordance
+// value — never authority.
+//
+// An unset, non-numeric, or off-ladder value is MAINTAINER (600), the same
+// reading as the route. That is the opposite of `canExport`, which treats an
+// unset floor as "no client gate" because the Export dialog's client-side
+// formats really do work below it. Download original has no client-side half,
+// so it has to use this resolver. Unknown-and-not-read-yet resolves like
+// unset: the only answer that changes once the org's settings land is an org
+// that lowered the floor.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for downloading an imported original when the org hasn't configured one. */
+export const DEFAULT_EXPORT_MIN_ROLE = ROLE.MAINTAINER
+
+/** Clamp an org-configured export floor to the role ladder, else Maintainer. */
+export function resolveExportFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_EXPORT_MIN_ROLE
+  }
+  if (minRole < ROLE.VIEWER || minRole > ROLE.OWNER) return DEFAULT_EXPORT_MIN_ROLE
+  return minRole
+}
+
+/**
+ * Whether `roleLevel` may download an imported original. The org's floor,
+ * defaulting to Maintainer — there is no separate static bar, and the org
+ * may lower it.
+ *
+ * Fail-open on an unknown role, exactly as `canPerform`: a local project
+ * has no sync role and no org floor to apply.
+ */
+export function canDownloadOriginals(
+  roleLevel: number | null | undefined,
+  exportMinRole?: number | null,
+): boolean {
+  if (roleLevel == null) return true
+  return roleLevel >= resolveExportFloor(exportMinRole)
 }

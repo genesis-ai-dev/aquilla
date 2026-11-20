@@ -26,6 +26,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { useIsLgUp } from "@/hooks/useIsLgUp"
+import { useAppFrame } from "@/hooks/useAppFrame"
+import { useAppShellTitlebar } from "@/hooks/useAppShellTitlebar"
 
 export { useIsLgUp } from "@/hooks/useIsLgUp"
 
@@ -54,8 +56,8 @@ const VIDEO_STORAGE_KEY = "aquilla:video-height"
 const VIDEO_DEFAULT_HEIGHT = 320
 const VIDEO_MIN_HEIGHT = 120
 
-function readStoredDockWidth(storageKey: string | undefined): number {
-  if (!storageKey) return DOCK_DEFAULT_WIDTH
+function readStoredDockWidth(storageKey: string | undefined, fallback = DOCK_DEFAULT_WIDTH): number {
+  if (!storageKey) return fallback
   try {
     const saved = localStorage.getItem(`left-dock-width:${storageKey}`)
     if (saved) {
@@ -65,7 +67,7 @@ function readStoredDockWidth(storageKey: string | undefined): number {
   } catch {
     // ignore
   }
-  return DOCK_DEFAULT_WIDTH
+  return fallback
 }
 
 function writeStoredDockWidth(storageKey: string | undefined, width: number) {
@@ -105,6 +107,10 @@ interface Props {
   leftDock?: ReactNode
   /** Persist dock width per project (`left-dock-width:${key}`). */
   dockStorageKey?: string
+  /** Width the dock opens at until one is stored under `dockStorageKey`
+   *  (default 256). A tab whose panel needs more room passes its own key and
+   *  width, so widening it leaves the other tabs alone (AQU-2577). */
+  dockDefaultWidth?: number
   /** @deprecated Use `leftDock` for ProjectWorkspace. Other pages still use
    * this for OrgSidebar until they migrate. */
   sidebar?: ReactNode
@@ -149,6 +155,7 @@ interface Props {
 export function AppShell({
   leftDock,
   dockStorageKey,
+  dockDefaultWidth,
   sidebar,
   logoSlot,
   logoAccessory,
@@ -178,7 +185,7 @@ export function AppShell({
   // ~20 page-level tests that don't wrap I18nProvider, so this reads null
   // there instead of throwing — the switcher just doesn't render.
   const i18n = useI18nOptional()
-  const resolvedLogo = logoSlot ?? (brand ? (
+  const brandLogo = logoSlot ?? (brand ? (
     <Link
       to="/"
       aria-label={`${brand.app.name} — home`}
@@ -189,7 +196,7 @@ export function AppShell({
   ) : null)
 
   const dockPanelRef = usePanelRef()
-  const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
+  const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey, dockDefaultWidth))
   /** The dock's last reported width, to tell a reopening clamp from a drag. */
   const dockSizeRef = useRef<number | null>(null)
   const [videoHeight] = useState(() => readStoredVideoHeight())
@@ -204,6 +211,15 @@ export function AppShell({
   }, [dockOpenRequest, mobileNav])
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
+  // macOS desktop: the top strip doubles as the window's title bar.
+  const { insetSidebarRow, sidebarChromeProps, headerProps } = useAppShellTitlebar({
+    mobileNav,
+    rtl: i18n?.dir === "rtl",
+    chromeCollapsed,
+    railIsNarrow: chromeCollapsed && useDockResize,
+    collapsedRailWidth: DOCK_COLLAPSED_WIDTH,
+  })
+  const resolvedLogo = insetSidebarRow ? null : brandLogo
 
   // A pick inside the sheet can navigate by query alone — choosing an Agent
   // conversation while already on /agent only changes ?conversation=. The
@@ -214,26 +230,8 @@ export function AppShell({
     setNavOpen(false)
   }, [pathname, search])
 
-  /**
-   * Mark the document while this frame is on screen, so the base stylesheet
-   * can refuse a viewport scroll ONLY here.
-   *
-   * Scoped rather than global, and a page that is not in this frame is why:
-   * the in-app privacy policy (removed in AQU-2243, now a 301 to /privacy)
-   * rendered a 3,400px document straight into the body, and a blanket
-   * `overflow: hidden` on html made two thirds of it unreachable — no wheel,
-   * no scrollbar, no End key — including its own analytics opt-out. Login,
-   * the invite and verify routes, the approval page and the 404 are all in
-   * the same position, and three of them carry a comment saying they scroll
-   * the document by design, so the scoping still earns its keep.
-   *
-   * Inside the frame the opposite holds: every pane scrolls on its own, so a
-   * document scroll can only slide the whole application off the top.
-   */
-  useEffect(() => {
-    document.documentElement.dataset.appFrame = "true"
-    return () => { delete document.documentElement.dataset.appFrame }
-  }, [])
+  // `html[data-app-frame]` while on screen: no document scroll, no title-bar band.
+  useAppFrame()
 
   useEffect(() => {
     if (lgUp) setNavOpen(false)
@@ -250,10 +248,10 @@ export function AppShell({
     }
     // A frame later: the panel's open limits (200–520 px) land after this
     // effect, and until they do a resize is held to the rail's 48 px.
-    const width = readStoredDockWidth(dockStorageKey)
+    const width = readStoredDockWidth(dockStorageKey, dockDefaultWidth)
     const frame = requestAnimationFrame(() => dockPanelRef.current?.resize(width))
     return () => cancelAnimationFrame(frame)
-  }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef, mobileNav])
+  }, [railCollapsed, useDockResize, dockStorageKey, dockDefaultWidth, dockPanelRef, mobileNav])
 
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
   // so the transport/volume share the editor's right edge when drawers/sidebars
@@ -321,9 +319,10 @@ export function AppShell({
         chromeCollapsed && "ps-2",
       )}
     >
-      {(resolvedLogo || logoAccessory) && (
+      {(brandLogo || logoAccessory) && (
         <div
           data-slot="app-shell-sidebar-chrome"
+          {...sidebarChromeProps}
           className={cn(
             // Align every chrome child on the same vertical midline — no fixed
             // height; natural content size with items-center.
@@ -342,12 +341,13 @@ export function AppShell({
           {/* History cluster, then sidebar collapse on the far right. */}
           <div
             className={cn(
-              "flex items-center gap-1.5",
+              "flex min-w-0 items-center gap-1.5",
               chromeCollapsed && "flex-col gap-1",
             )}
           >
-            {/* Text chip — hide in the 40px icon rail so it can't clip. */}
-            {!chromeCollapsed && <BetaBadge />}
+            {/* Text chip — hide in the 40px icon rail so it can't clip, and
+                beside the traffic lights so the row fits a 200px dock. */}
+            {!chromeCollapsed && !insetSidebarRow && <BetaBadge />}
             <NavHistoryControls orientation={chromeCollapsed ? "vertical" : "horizontal"} />
             {logoAccessory && !mobileNav ? (
               <div className="flex shrink-0 items-center">{logoAccessory}</div>
@@ -426,7 +426,11 @@ export function AppShell({
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Every route gets the same fixed header band. File tabs are a
           separate row below it and must not move the breadcrumb baseline. */}
-      <div data-slot="app-shell-header" className="flex h-[52px] min-h-[52px] shrink-0 items-center">
+      <div
+        data-slot="app-shell-header"
+        {...headerProps}
+        className="flex h-[52px] min-h-[52px] shrink-0 items-center"
+      >
         {mobileNav ? (
           <div className="flex shrink-0 items-center pl-2" data-slot="app-shell-sidebar-trigger">
             <AppTooltip content={openSidebarLabel} side="bottom">

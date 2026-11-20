@@ -29,6 +29,7 @@
 
 import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
+import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
@@ -43,6 +44,8 @@ import { uniqueZipEntryName } from "../../../shared/import-contract"
 export interface ExportBundleEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" or "true" turns the lane read wall on. */
+  LANE_READ_WALL?: string
   SNAPSHOTS: R2Bucket
 }
 
@@ -96,6 +99,12 @@ export async function handleExportBundleRequest(
       new Response(`${floorName} role required to export`, { status: 403 }),
       request,
     )
+  }
+
+  // AQU-730 read wall: an org may lower the export floor below Maintainer, and
+  // the export overlays `lane`'s translation, which is the caller's choice.
+  if (!(await canReadRequestedLane(db, projectId, visibleLanesForRead(env.LANE_READ_WALL, auth.claims), lane))) {
+    return withCors(new Response("lane not readable", { status: 403 }), request)
   }
 
   const blobs = await db

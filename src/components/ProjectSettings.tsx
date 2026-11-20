@@ -154,9 +154,9 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier, MilestoneFloor } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
-import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, MILESTONE_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -254,6 +254,8 @@ interface SavedSettings {
   fewShotExampleFormat: "source-and-target" | "target-only"
   completionBatchSize: number
   validationBatchSize: number
+  liveBacktranslation: boolean
+  backtranslationModel: string
   autoSyncEnabled: boolean
   autoSyncInterval: number
   /** AQU-1771: the project's own numbers; null = take the organization's default. */
@@ -273,6 +275,8 @@ interface SavedSettings {
   cellEditingFloor: CellEditingTier | null
   /** AQU-2408: who may type a label on a cell; null = maintainer (the default). */
   cellLabelFloor: CellLabelTier | null
+  /** AQU-2309: who may set milestones; null = maintainer (the default). */
+  milestoneFloor: MilestoneFloor | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
   /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
@@ -318,6 +322,8 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     completionBatchSize: project.completionSettings?.completionBatchSize ?? MAX_BATCH_COMPLETIONS,
     // 0 = validate all eligible cells (default, unchanged behavior).
     validationBatchSize: project.completionSettings?.validationBatchSize ?? 0,
+    liveBacktranslation: project.completionSettings?.liveBacktranslation ?? false,
+    backtranslationModel: project.completionSettings?.backtranslationModel ?? "",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     // AQU-1771: `project` here carries only the project's own blob (this page
@@ -337,6 +343,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     cellLabelFloor: project.cellLabelFloor ?? null,
+    milestoneFloor: project.milestoneFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
     filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
@@ -642,17 +649,6 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     },
     [session?.jwt, id],
   )
-  const {
-    metrics: postEditMetrics,
-    isLoading: metricsLoading,
-    isError: metricsError,
-    revalidate: revalidateMetrics,
-  } = usePostEditMetrics({
-    projectId: isCloudProject ? (id ?? null) : null,
-    files: metricsFiles,
-    getJwt,
-    enabled: isCloudProject && !!id,
-  })
 
   // AQU-478: file-scoped sync-token minter for the Upstream-changes panel
   // (mirrors ProjectWorkspace's getTokenForFile — per-file JWTs, cached).
@@ -765,10 +761,11 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     name, provider, endpoint, apiKey, model, maxTokens, temperature,
     top_k: topK, contextSize, fewShotExampleFormat,
     main_chat_language: mainChatLanguage, completionBatchSize, validationBatchSize,
+    liveBacktranslation, backtranslationModel,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    cellEditingFloor, cellLabelFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
+    cellEditingFloor, cellLabelFloor, milestoneFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
     bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   } = live
@@ -787,6 +784,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-2408: no organization default — the built-in one is maintainer.
   const effectiveCellLabelFloor: CellLabelTier = cellLabelFloor ?? "maintainer"
+  // AQU-2309: no organization default — the built-in one is maintainer.
+  const effectiveMilestoneFloor: MilestoneFloor = milestoneFloor ?? "maintainer"
+  // A known role below project lead does not see the control. A project lead
+  // sees it and cannot change it (changing a shared setting takes a
+  // maintainer). No role — a local project — sees it, the same as the rows
+  // beside it.
+  const milestoneFloorVisible = projectRoleLevel == null || projectRoleLevel >= ROLE.PROJECT_LEAD
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -1025,7 +1029,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label", "milestone", "who can set milestones"] },
     // AQU-2342: the ONE instructions text every AI draft reads (it replaced
     // the brief, the system prompt and Living Memory's instruction entries).
     // Its own section id gives it a row in the AI pane AND makes a search for
@@ -1035,9 +1039,9 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // built-in checks, and the Language profile they read). A row in the AI
     // pane, findable by every old name.
     { id: "section-checks", label: t("terminology.livingMemory.section.checks.title"), keywords: ["checks", "rules", "style rules", "quality", "translation quality", "built-in checks", "org rules", "decisions", "project decisions", "language profile", "quotation marks", "quote marks", "bible data checks"] },
-    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "back-translation", "backtranslation", "live back-translation"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom", "back-translation model"] },
     // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
     { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
     { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
@@ -1068,6 +1072,24 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   // mount; the box stays user-editable/clearable afterward.
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
+  // AQU-2654: the post-edit figures cost a sync-token and an /events read PER
+  // FILE (40 requests on a 20-file project, 132 on a whole Bible), and they
+  // were read every time project settings opened, on any pane and in the
+  // in-place dialog. They are read when the pane that shows them is the one
+  // on screen: the Metrics pane, or a settings search (which lists every
+  // matching card, this one included).
+  const metricsOnScreen = sectionParam === "metrics" || lowerQuery.length > 0
+  const {
+    metrics: postEditMetrics,
+    isLoading: metricsLoading,
+    isError: metricsError,
+    revalidate: revalidateMetrics,
+  } = usePostEditMetrics({
+    projectId: isCloudProject ? (id ?? null) : null,
+    files: metricsFiles,
+    getJwt,
+    enabled: isCloudProject && !!id && metricsOnScreen,
+  })
 
   // AQU-2031: `?focus=<target>` is the pane-mode counterpart of `?q=`. A caller
   // that wants one card reachable in one click deep-links to the card's GROUP
@@ -1693,6 +1715,47 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                   </DisabledFieldTooltip>
                 }
               />
+              {/* AQU-2309: who may set, rename, resize and remove a milestone.
+                  Two rungs, maintainer unless opened to project leads. Below
+                  project lead the row is absent; a project lead sees it locked. */}
+              {milestoneFloorVisible && (
+              <SettingsRow
+                saveId="milestoneFloor"
+                label={<label htmlFor="milestone-floor">{t("projectSettings.milestones.label")}</label>}
+                description={t("projectSettings.milestones.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={MILESTONE_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: FLOOR_LABEL[o.level] ?? t(o.labelKey),
+                      }))}
+                      disabled={!canChangeShared}
+                      value={effectiveMilestoneFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveMilestoneFloor) setShared("milestoneFloor", value as MilestoneFloor)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="milestone-floor"
+                        data-testid="settings-milestone-floor"
+                        aria-label={t("projectSettings.milestones.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {MILESTONE_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+              )}
               {/* AQU-2408: who may type a label on a cell. Two rungs, maintainer
                   unless opened to project leads; no organization default. The
                   tier is enforced where the Label field is drawn, like the one
@@ -1947,6 +2010,20 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                     onCommit={(next, info) => setDrafting("validationBatchSize", next, info)}
                     aria-label={t("projectSettings.ai.validationBatchSizeLabel")}
                     className="w-24 bg-background"
+                  />
+                }
+              />
+              <SettingsRow
+                saveId="draftingSettings.liveBacktranslation"
+                label={<label htmlFor="live-backtranslation">{t("projectSettings.ai.liveBacktranslationLabel")}</label>}
+                description={t("projectSettings.ai.liveBacktranslationDescription")}
+                control={
+                  <Switch
+                    id="live-backtranslation"
+                    checked={liveBacktranslation}
+                    onCheckedChange={(checked) => setDrafting("liveBacktranslation", checked)}
+                    disabled={!canChangeShared}
+                    aria-label={t("projectSettings.ai.liveBacktranslationLabel")}
                   />
                 }
               />
@@ -2298,6 +2375,22 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 />
               )}
 
+              <SettingsRow
+                saveId="draftingSettings.backtranslationModel"
+                label={<label htmlFor="backtranslation-model">{t("projectSettings.ai.backtranslationModelLabel")}</label>}
+                description={t("projectSettings.ai.backtranslationModelDescription")}
+                control={
+                  <CommitTextInput
+                    id="backtranslation-model"
+                    disabled={!canChangeShared}
+                    value={backtranslationModel}
+                    onCommit={(next, info) => setDrafting("backtranslationModel", next.trim(), info)}
+                    placeholder={t("projectSettings.ai.backtranslationModelPlaceholder")}
+                    aria-label={t("projectSettings.ai.backtranslationModelLabel")}
+                    className="w-56 bg-background"
+                  />
+                }
+              />
               <SettingsRow
                 saveId="draftingSettings.maxTokens"
                 label={<label htmlFor="mt">{t("projectSettings.advancedLlm.maxTokensLabel")}</label>}

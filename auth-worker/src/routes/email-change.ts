@@ -1,3 +1,4 @@
+import { requireSettingsProof } from "../lib/account-security"
 import { accountMutation } from "../lib/account-mutation"
 import { legacyD1Config } from "./auth"
 import { hasLegacyIdentityCollision } from "../services/frontier-d1"
@@ -38,6 +39,7 @@ routes.use(
   authMiddleware,
   async (c, next) => {
     c.header("Cache-Control", "no-store")
+    await requireSettingsProof(c)
     await next()
   },
 )
@@ -176,7 +178,7 @@ routes.post(
     const refusal = await guard(c, old, pending.new_email)
     if (refusal) return c.json({ error: refusal }, 403)
     try {
-      const changed = await accountMutation(c.env.AQUILLA_PG, old.id, tx => tx.prepare(
+      const changed = await accountMutation(c.env.AQUILLA_PG, old.id, async tx => { await requireSettingsProof(c,tx); return tx.prepare(
         `WITH changed AS (
       UPDATE users u SET email=r.new_email,email_verified_at=now(),email_changed_at=now(),updated_at=now(),
         password_changed_at=now(),session_version=u.session_version+1
@@ -200,11 +202,30 @@ routes.post(
     SELECT id FROM changed`,
       )
         .bind(old.id, hash, old.admin, old.email, old.email)
-        .first())
+        .first() })
       if (!changed) return c.json({ error: "restart" }, 409)
       evictUserSessions(old.id)
+      // [Pen test] Auth & session (2026-11-16): tell the mailbox that just lost
+      // the account. The code only ever went to the NEW address, so someone
+      // holding a stolen session and password could move the account (and its
+      // password recovery) away without the owner hearing of it. Best-effort:
+      // the change is already committed, and delivery must not undo or delay it.
+      const notice = (async () => {
+        try {
+          await c.env.EMAIL?.send({
+            from: c.env.EMAIL_FROM || "noreply@support.aquilla.app",
+            to: [old.email],
+            subject: "Your Aquilla account email was changed",
+            text: "The email address on your Aquilla account was just changed, and this address no longer signs in to it or receives its password resets.\nIf you made this change, there is nothing to do. If you did not, contact Aquilla support straight away.",
+          })
+        } catch {
+          console.warn("[email-change] old-address notice failed (non-fatal)")
+        }
+      })()
+      try { c.executionCtx.waitUntil(notice) } catch { await notice }
       return c.json({ changed: true, login_required: true })
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && ["settings_verification_required", "fresh_verification_required"].includes(error.message)) throw error
       return c.json({ error: "email_unavailable" }, 409)
     }
   },

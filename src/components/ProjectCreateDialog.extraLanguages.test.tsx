@@ -248,19 +248,73 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(targetLangInput()).toHaveProperty("value", "French")
   })
 
-  it("flags a case-insensitive duplicate of an earlier box", () => {
+  // AQU-2445: a repeated language used to read as a red error and was then
+  // dropped on submit — the project came out with one lane where the person
+  // asked for two. It is a warning now, and both lanes are created.
+  it("warns about a case-insensitive duplicate of an earlier box, without marking it invalid", () => {
     openDialogWithBasics()
     addExtraLanguage("es")
     addExtraLanguage("ES")
 
-    expect(screen.getByText("Already added.")).toBeTruthy()
+    expect(screen.getByTestId("create-target-lang-warning-2")).toHaveTextContent(
+      "Duplicate language lane",
+    )
+    expect(screen.queryByText("Already added.")).toBeNull()
+    expect(targetLangInput(2)).not.toHaveAttribute("aria-invalid", "true")
   })
 
-  it("flags a duplicate of the primary target language (case-insensitive)", () => {
+  it("warns about a duplicate of the primary target language (case-insensitive)", () => {
     openDialogWithBasics({ target: "French" })
     addExtraLanguage("french")
 
-    expect(screen.getByText("Already added.")).toBeTruthy()
+    expect(screen.getByTestId("create-target-lang-warning-1")).toHaveTextContent(
+      "Duplicate language lane",
+    )
+  })
+
+  it("creates BOTH lanes when a language is added twice, saying it meant the duplicate", async () => {
+    openDialogWithBasics({ target: "Spanish" })
+    addExtraLanguage("spanish")
+
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
+
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
+    })
+    // Both carry the language as typed — the lane surfaces tell the colliding
+    // labels apart themselves (AQU-1784), and either can be renamed after.
+    // Only the repeat asks the server to accept a name the project has.
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "Spanish", delivers: "text" },
+      { name: "", language: "spanish", delivers: "text", allowDuplicateName: true },
+    ])
+  })
+
+  it("keeps each duplicate lane's own Delivers choice", async () => {
+    openDialogWithBasics({ target: "Spanish" })
+    addExtraLanguage("Spanish")
+
+    // Both selects read "What Spanish delivers", so go by the box they sit in.
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByTestId("create-target-lang-delivers-1").querySelector("button") ??
+        screen.getByTestId("create-target-lang-delivers-1"),
+    )
+    await user.click(await screen.findByRole("option", { name: "Audio" }))
+    expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Text")
+    expect(screen.getByTestId("create-target-lang-delivers-1")).toHaveTextContent("Audio")
+
+    await screen.findByTestId("project-create-destination")
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
+
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
+    })
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "Spanish", delivers: "text" },
+      { name: "", language: "Spanish", delivers: "audio", allowDuplicateName: true },
+    ])
   })
 
   it("keeps the plus button disabled until the last box has a value", () => {

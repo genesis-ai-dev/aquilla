@@ -56,7 +56,8 @@ import {
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { stepLabel } from "@/lib/history/step-label"
-import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { beforeHistoryMove, redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { announceShortcutAction, ModeCue, undoKeysLabel } from "@/components/ui/shortcut-cue"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -65,7 +66,6 @@ import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
-import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -190,7 +190,7 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueStateValue, useMissingClipCells } from "@/lib/audio/play-queue"
+import { useQueueStateValue, useMissingClipTakes } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
@@ -213,7 +213,7 @@ import { TimelineHorizontalList, TimelineScrollingRuler } from "./TimelineHorizo
 import { TimelineOrigin } from "./timeline-origin"
 import { createTimelineScrollBus, TimelineScrollBusContext, type TimelineScrollBus } from "./timeline-scroll-bus"
 import { TimelineLane } from "./TimelineLane"
-import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TakeRoomsMove, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelineTransportClock } from "./TimelineTransportClock"
 import { useCreatePlayheadStore } from "./playhead-store"
@@ -315,6 +315,11 @@ export interface TimelineEditorProps {
    *  AQU-2267: `place` is what to store — the take's place in both timings
    *  after the move, each held by its own timing's limits. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /** AQU-2432 (Sam, Nov 9): following the recordings, a take dragged against
+   *  a line nobody has recorded sets that line's ROOM — every room the drag
+   *  changed, and the take's own place when it changed that too, as one step.
+   *  Fired instead of `onRetimeTarget` for such a drag. */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -334,9 +339,10 @@ export interface TimelineEditorProps {
   onRegenerateVoice?(cellId: string, slot: string): void
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
-   *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string): void
-  changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+   *  says what it may do (see `TakeMenuActions`). AQU-2499: both name the
+   *  take right-clicked, so an added track's take is the one re-voiced. */
+  onChangeVoice?(cellId: string, take?: { audioId?: string }): void
+  changeVoiceStateFor?(cellId: string, audioId?: string): ChangeVoiceMenuState | null
   /** AQU-1758 / AQU-2291: "Train a voice from this recording" on a take's
    *  menu. Absent leaves it out (someone who may not make voices). */
   onTrainFromTake?(cellId: string, audioId: string): void
@@ -390,14 +396,6 @@ export interface TimelineEditorProps {
    * authority is now the thing that keeps the surfaces agreeing.
    */
   canAddLine?: boolean
-  /**
-   * May they remove an IMPORTED cell, not just a line added here?
-   *
-   * The second gate, maintainer-only, whatever tier the project runs. An
-   * imported line is the client's own work; the confirmation dialog upstream
-   * is what makes taking one back safe.
-   */
-  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs project lead access,
@@ -564,6 +562,10 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
+  /** AQU-2577: pick a line for Make speech from its sparkle beside the mic on the dub row. */
+  onPickGhost?(cellId: string, opts: { additive: boolean }): void
+  pickedGhostIds?: ReadonlySet<string>
+  makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-1684: the slot the recorder is recording into while it is open, else
    *  null — that track may not be hidden from under the take. */
   recordingSlot?: string | null
@@ -1129,9 +1131,11 @@ function LaneLabel({
       {/* The indent is on the CONTENT, not the row, so the row's background
           still spans the full gutter. A member steps in past the folder's
           own name, which is what makes the nest readable. It eases on the
-          rows' slide curve, so a track dragged over a folder steps in with
-          the gap opening for it. */}
+          rows' slide curve while this node stays mounted (a drag). A menu
+          move remounts the row in its new folder, so that transition never
+          runs; playTrackMove eases this element's padding instead. */}
       <div
+        data-tl-track-indent=""
         className={cn(
           "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
           indented && !collapsed && "pl-6",
@@ -1306,6 +1310,7 @@ export function TimelineEditor({
   sequenceOrdered = false,
   showSources = true,
   onRetimeTarget,
+  onMoveTakeRooms,
   onRetimeCue,
   virtualIsTransport = false,
   skipSilentLinesApplies,
@@ -1331,7 +1336,6 @@ export function TimelineEditor({
   film,
   onAddLine,
   canAddLine,
-  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -1368,6 +1372,9 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
+  onPickGhost,
+  pickedGhostIds,
+  makingSpeechCellIds,
   recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
@@ -2053,7 +2060,8 @@ export function TimelineEditor({
   const queueActive = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).active)
   const queueRunning = useQueueStateValue((state) => selectQueueStateForFile(state, cellIdSet).running)
   // A definitively 404'd dub shows a missing badge.
-  const missingCellIds = useMissingClipCells()
+  // AQU-2495 (review, Nov 9): by take, so one dead file marks one clip.
+  const missingTakeKeys = useMissingClipTakes()
   /**
    * AQU-646 stage 5: the playhead is being dragged, so the hand owns the
    * clock. The transport writers in `TimelineTransportClock` stand down while
@@ -2886,6 +2894,18 @@ export function TimelineEditor({
   }
   const splitAtPlayheadRef = useRef(selectedTakeCutAtPlayhead)
   splitAtPlayheadRef.current = selectedTakeCutAtPlayhead
+  // AQU-2703: S changes the file with one key, so it says so, with its Undo.
+  // (B's cue is the Blade chip below: it follows the mode, however it was
+  // turned on.)
+  const announceSplitRef = useRef<() => void>(() => {})
+  announceSplitRef.current = () =>
+    announceShortcutAction({
+      id: "timeline-split",
+      title: t("editor.timeline.cueSplit"),
+      undoHint: t("editor.timeline.cueUndoHint", { keys: undoKeysLabel() }),
+      undoLabel: t("editor.history.undoThis"),
+      onUndo: () => runHistory("undo"),
+    })
   useEffect(() => {
     if (!canCut) return
     function onKeyDown(event: KeyboardEvent) {
@@ -2899,6 +2919,7 @@ export function TimelineEditor({
         if (!cut || !onCutTargets) return
         event.preventDefault()
         onCutTargets([cut])
+        announceSplitRef.current()
       } else if (event.key === "Escape") {
         setBladeOn(false)
       }
@@ -2908,13 +2929,15 @@ export function TimelineEditor({
   }, [canCut, onCutTargets])
   // AQU-1767 (Sam, 2026-10-14): a take's right-click menu, per track slot.
   const [renamingTake, setRenamingTake] = useState<{ cellId: string; audioId: string; label: string } | null>(null)
-  const takeMenuFor = (slot: string): TakeMenuActions | undefined =>
+  // AQU-2499 (review, Nov 9): `layer`, a track made a layer (music, effects):
+  // its clips are no line's voice, so Change voice is left out there.
+  const takeMenuFor = (slot: string, layer = false): TakeMenuActions | undefined =>
     editable
       ? {
           ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
-          ...(onChangeVoice && changeVoiceStateFor
-            ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
+          ...(onChangeVoice && changeVoiceStateFor && !layer
+            ? { changeVoice: (cellId: string, audioId: string) => onChangeVoice(cellId, { audioId }), changeVoiceState: changeVoiceStateFor }
             : {}),
           ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
           // The line's own voice and its take: the line's own track only.
@@ -3750,6 +3773,10 @@ export function TimelineEditor({
       saveUnsavedOrders()
     }
   }, [fileId, saveUnsavedOrders, saveDragWrites])
+  // AQU-2492: …and so does every Undo and Redo, however it was chosen (Enter
+  // on the menu's Undo, Space on a focused button, the History panel), so the
+  // Undo pressed straight after a drop undoes the drop.
+  useEffect(() => beforeHistoryMove(saveUnsavedOrders), [saveUnsavedOrders])
 
   function onTrackDragStart(event: DragStartEvent) {
     // The next drag measures the list, so the last drop must be painted in it.
@@ -4553,19 +4580,11 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here.
-            // AQU-1068 widened this: a MAINTAINER may take back any cell,
-            // imported ones included, and the confirmation dialog upstream is
-            // what makes that safe. Below that rank only a line added here can
-            // go — but a line added here can ALWAYS go, however full it is.
-            // The same shared predicate the text table asks, so the two
-            // surfaces can never disagree about what is removable; see
-            // `isImportedRow` for the emptiness clause that used to live here.
-            canRemove={
-              canAddLine
-                ? (c) => canRemoveImportedCells || !isImportedRow(c)
-                : undefined
-            }
+            // Anyone who may restructure the project may take back any line,
+            // imported ones included: the project's "who can add and remove
+            // cells" setting decides who that is (AQU-2632), and the
+            // confirmation dialog upstream is what makes it safe.
+            canRemove={canAddLine ? () => true : undefined}
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would
@@ -4660,7 +4679,7 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
@@ -4678,6 +4697,7 @@ export function TimelineEditor({
             // which takes can hold a pause at all, so the mode question is
             // answered in one module instead of by withholding the handler.
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4685,6 +4705,9 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
+            onPickGhost={onPickGhost}
+            pickedGhostIds={pickedGhostIds}
+            makingSpeechCellIds={makingSpeechCellIds}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"
@@ -4747,7 +4770,7 @@ export function TimelineEditor({
             viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             // AQU-2252: a layer's takes snap as they do following the source.
@@ -4759,13 +4782,18 @@ export function TimelineEditor({
             }}
             onSeek={laneProps.onSeek}
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
-            takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeMenu={takeMenuFor(slotForTrack(track.id), track.setsLineLengths === false)}
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
+            // AQU-2432 (Sam, Nov 9): a line with no room is marked on every
+            // track whose takes are laid end to end; a track made a layer
+            // (music, effects) has no seam to mark.
+            lineMarkers={track.setsLineLengths !== false}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
             fileId={fileId}
@@ -5431,7 +5459,7 @@ export function TimelineEditor({
       ref={editorRef}
       data-testid="tl-editor"
       data-tl-lane-epoch={laneEpoch.current}
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden"
       style={
         {
           "--tl-row-h": `${rowMetrics.rowH}px`,
@@ -5520,6 +5548,21 @@ export function TimelineEditor({
           </button>
         </div>
       )}
+
+      {/* AQU-2703: while the Blade is on, a chip over the tracks says so —
+          the toolbar button alone was missed, and is folded into ⋯ on a
+          narrow timeline. It turns off from here too. */}
+      <ModeCue
+        active={bladeActive}
+        testId="tl-blade-cue"
+        onLabel={t("editor.timeline.cueBladeOn")}
+        offKeys={t("editor.timeline.cueBladeOffKeys")}
+        offLabel={t("editor.timeline.cueBladeOff")}
+        turnOffLabel={t("editor.timeline.cueBladeTurnOff")}
+        onTurnOff={() => setBladeOn(false)}
+        // Clear of the status line under the tracks ("Target: 3.9s").
+        className="bottom-12"
+      />
 
       {/* timeline */}
       {/* Stage 3, and the layout the whole round turns on: the TRACK COLUMN

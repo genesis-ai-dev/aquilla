@@ -32,6 +32,7 @@ import { emitCellAudioCut } from "@/lib/sync/events-emit"
 import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { probeDurationMsSafe } from "@/lib/import"
 import type { UploadJob } from "./match"
+import type { TakePlace } from "@/lib/audio/new-take-place"
 
 /** The largest file bulk upload accepts: R2's multipart cap (AQU-1853). */
 export const BULK_MAX_FILE_BYTES = MAX_AUDIO_OBJECT_BYTES
@@ -93,6 +94,9 @@ export interface BulkUploadRequest {
   files: readonly File[]
   /** "Genesis 1:3" for a job, as the preview named it. */
   targetLabel: (job: UploadJob) => string
+  /** AQU-2491 (review, Nov 9): each new take's own place on its line
+   *  (`bornTakePlace`: the line's start when it has times). Absent: none. */
+  placeOf?: (fileId: string, cellId: string) => TakePlace | null
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -266,6 +270,11 @@ async function uploadWithRetry(ctx: RunContext, args: { fileId: string; audioId:
   }
 }
 
+/** AQU-2491 (review, Nov 9): the take's own place on its line. */
+function placeFor(ctx: RunContext, fileId: string, cellId: string): { place: TakePlace | null } {
+  return { place: ctx.req.placeOf?.(fileId, cellId) ?? null }
+}
+
 function attachFields(ctx: RunContext) {
   return {
     projectId: ctx.req.projectId,
@@ -291,6 +300,7 @@ async function uploadOne(ctx: RunContext, fileId: string, cellId: string, file: 
     url: result.url,
     mimeType: file.type || undefined,
     durationMs,
+    ...placeFor(ctx, fileId, cellId),
   })
   scheduleNotify(ctx, fileId)
 }
@@ -325,6 +335,7 @@ async function uploadRange(ctx: RunContext, fileId: string, cellIds: readonly st
       url: result.url,
       mimeType: file.type || undefined,
       durationMs,
+      ...placeFor(ctx, fileId, cellId),
       })
     } catch (e) {
       throw new Unfinished(e, { kind: "range", result, durationMs, attached: i })
@@ -376,6 +387,8 @@ async function uploadPieces(ctx: RunContext, fileId: string, cellId: string, fil
         url: result.url,
         mimeType: "audio/wav",
         durationMs: Math.round(lengthsMs.reduce((a, b) => a + b, 0)),
+        // Placed before it is cut: each piece is made from it, place and all.
+        ...placeFor(ctx, fileId, cellId),
       })
       progress.rootAttached = true
     }

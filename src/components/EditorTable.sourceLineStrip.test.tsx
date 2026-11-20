@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -253,12 +253,12 @@ describe("EditorTable — the row's structural controls", () => {
     renderTable({ project: projectAt(400) })
     await screen.findByText("First cue")
     expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
+    expect(screen.queryByTestId("cell-menu-button-cue-a")).toBeNull()
   })
 
   it("opens from a right-click on the source cell", async () => {
-    // The menu used to be a three-dot button in the cell's corner. It is the
-    // source cell itself now: right-click the text, and the text stays
-    // selectable (the trigger's default is select-none).
+    // The source cell itself is a trigger: right-click the text, and the text
+    // stays selectable (the trigger's default is select-none).
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
     const trigger = menuBtn("cue-a")
@@ -266,8 +266,54 @@ describe("EditorTable — the row's structural controls", () => {
     expect(trigger).toHaveAttribute("data-slot", "context-menu-trigger")
     expect(trigger.className).toContain("select-text")
     expect(trigger.className).not.toContain("select-none")
-    expect(within(rowEl("cue-a")).queryByRole("button", { name: "Cell actions" })).toBeNull()
     fireEvent.contextMenu(trigger)
+    expect(await entry("insert-above")).toBeInTheDocument()
+  })
+
+  it("opens the SAME menu from the three-dot button in the cell's corner", async () => {
+    // A right-click is invisible: an owner who had just opened add/remove to
+    // contributors looked for the ellipsis, found none, and concluded the
+    // setting had not taken. The button is the visible way in, and it opens
+    // the context menu itself rather than a second copy of the list.
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
+    await screen.findByText("First cue")
+    const button = within(rowEl("added")).getByRole("button", { name: "Cell actions" })
+    expect(button).toHaveAttribute("data-testid", "cell-menu-button-added")
+    // It lives inside the trigger, so the event it sends reaches it.
+    expect(menuBtn("added")).toContainElement(button)
+    expect(button).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(button)
+    expect(await entry("insert-above")).toBeInTheDocument()
+    expect(await entry("remove")).toBeInTheDocument()
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
+
+    fireEvent.click(await entry("insert-above"))
+    expect(onAddLineAt).toHaveBeenCalledWith(20, 25)
+  })
+
+  it("does not re-open the menu when the button is pressed to close it", async () => {
+    // Pressing the button while its menu is open dismisses the menu (an outside
+    // press); the click that completes the same press must not open it again.
+    renderTable({ sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    const button = within(rowEl("added")).getByRole("button", { name: "Cell actions" })
+    fireEvent.click(button)
+    await entry("insert-above")
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
+
+    fireEvent.pointerDown(button)
+    closeMenu()
+    await waitFor(() => expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull())
+    // `detail: 1` is a pointer click; 0 would be the keyboard.
+    fireEvent.click(button, { detail: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull()
+
+    // The next press starts clean.
+    fireEvent.pointerDown(button)
+    fireEvent.click(button, { detail: 1 })
     expect(await entry("insert-above")).toBeInTheDocument()
   })
 

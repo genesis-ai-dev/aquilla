@@ -43,6 +43,10 @@ export interface DraftingSettings {
   fewShotExampleFormat?: DraftingExampleFormat
   completionBatchSize?: number
   validationBatchSize?: number
+  /** Read each translation back as soon as it is drafted or edited. Off unless set. */
+  liveBacktranslation?: boolean
+  /** The model back-translations use; blank = the drafting model. */
+  backtranslationModel?: string
 }
 
 type FieldSpec =
@@ -70,6 +74,8 @@ const FIELD_SPECS: Readonly<Record<keyof DraftingSettings, FieldSpec>> = {
   fewShotExampleFormat: { kind: 'enum', values: ['source-and-target', 'target-only'] },
   completionBatchSize: { kind: 'number', min: 1, max: 50, integer: true },
   validationBatchSize: { kind: 'number', min: 0, max: 500, integer: true },
+  liveBacktranslation: { kind: 'boolean' },
+  backtranslationModel: { kind: 'string', maxLength: 256 },
 }
 
 export const DRAFTING_SETTINGS_FIELDS = Object.keys(FIELD_SPECS) as (keyof DraftingSettings)[]
@@ -93,7 +99,7 @@ export const DRAFTING_SETTINGS_TYPE_NAME =
   'temperature?: 0–2, top_k?: 1–50, contextSize?: "small" | "medium" | "large", ' +
   'useOnlyValidatedExamples?: boolean, main_chat_language?: string, ' +
   'fewShotExampleFormat?: "source-and-target" | "target-only", completionBatchSize?: 1–50, ' +
-  'validationBatchSize?: 0–500 } (no API keys)'
+  'validationBatchSize?: 0–500, liveBacktranslation?: boolean, backtranslationModel?: string } (no API keys)'
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)

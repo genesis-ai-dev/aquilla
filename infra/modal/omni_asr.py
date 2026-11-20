@@ -1,20 +1,25 @@
 # Aquilla Omnilingual ASR — Modal service (facebookresearch/omnilingual-asr, Apache 2.0).
 #
-# Two GPU classes behind one app:
-#   OmniCTC — omniASR_CTC_1B, used automatically for languages Whisper doesn't know.
-#   OmniZS  — omniASR_LLM_7B_ZS, opt-in zero-shot: learns the language from 1–10
-#             (audio, transcript) pairs taken from the same project.
-# Both also load omniASR_CTC_300M as a forced aligner: the pipeline returns
-# plain text, and Aquilla needs word timings.
+# Two GPU classes and one CPU class behind one app:
+#   OmniCTC  — omniASR_CTC_1B, used automatically for languages Whisper doesn't know.
+#   OmniZS   — omniASR_LLM_7B_ZS, opt-in zero-shot: learns the language from 1–10
+#              (audio, transcript) pairs taken from the same project.
+#   OmniFast — omniASR_CTC_300M on CPU, model `fast`: one forward pass gives the
+#              text and the word timings. No GPU queue and a short cold start
+#              (docs/benchmarks/omni-asr-cpu.md: 1.7–2.4 s per 30 s clip).
+# The GPU classes also load omniASR_CTC_300M as a forced aligner: the pipeline
+# returns plain text, and Aquilla needs word timings.
 #
 # Spec: docs/superpowers/specs/2026-10-16-omnilingual-asr.md
 #
 # Deploy (Ryder):  modal deploy infra/modal/omni_asr.py
 #   Secret: modal secret create aquilla-omni-asr OMNI_SHARED_SECRET=<same value as
 #   the auth-worker's OMNI_SHARED_SECRET>. Optional env: OMNI_EXAMPLE_HOSTS
-#   (comma-separated allow-list for example URLs), OMNI_EST_CTC / OMNI_EST_ZS.
+#   (comma-separated allow-list for example URLs), OMNI_EST_CTC / OMNI_EST_ZS /
+#   OMNI_EST_FAST.
 # Smoke (no deploy needed):
 #   modal run infra/modal/omni_asr.py::smoke --audio a.wav --model both --examples ex.json
+#   modal run infra/modal/omni_asr.py::smoke --audio a.wav --model fast
 
 import os
 import time
@@ -100,6 +105,20 @@ class _Aligner:
         layout = BatchLayout(seqs.shape, seq_lens=[seqs.shape[1]], device=seqs.device)
         logits, _ = model(seqs, layout)
         return torch.log_softmax(logits.float(), dim=-1)[0]
+
+    def transcribe(self, wav: "object") -> tuple[str, list[dict], bool]:
+        """One forward pass: the text by CTC greedy decode, then the word
+        timings from the same emissions. Returns (text, words, approximate)."""
+        import torch
+
+        emis = self.emissions(wav)
+        # As upstream's _apply_model_wav2vec2asr does: collapse repeats; the
+        # decoder drops blanks.
+        ids = emis.argmax(dim=-1)
+        keep = torch.ones_like(ids, dtype=torch.bool)
+        keep[1:] = ids[1:] != ids[:-1]
+        text = self.pipe.token_decoder(ids[keep]).strip()
+        return (text, *self.align(wav, text, emis))
 
     def align(self, wav: "object", text: str, emis: "object" = None) -> tuple[list[dict], bool]:
         """Return ([{text,start,end}], approximate). Pass `emis` (from
@@ -188,7 +207,10 @@ def _ctc_viterbi(log_probs: "object", targets: list[int], blank: int) -> list[in
 state = modal.Dict.from_name("aquilla-omni-asr-state", create_if_missing=True)
 ZS_SCALEDOWN_SEC = 600
 CTC_SCALEDOWN_SEC = 300
-STALE_AFTER_SEC = {"zs": ZS_SCALEDOWN_SEC + 60, "ctc": CTC_SCALEDOWN_SEC + 60}
+# A CPU container is cheap to keep, so `fast` stays up longer between requests.
+FAST_SCALEDOWN_SEC = 900
+STALE_AFTER_SEC = {"zs": ZS_SCALEDOWN_SEC + 60, "ctc": CTC_SCALEDOWN_SEC + 60,
+                   "fast": FAST_SCALEDOWN_SEC + 60}
 
 
 def _set_state(model: str, value: str) -> None:
@@ -307,9 +329,85 @@ class OmniZS:
                 "loadSec": round(self.load_sec, 1)}
 
 
+# Physical cores of the `fast` container. PyTorch would otherwise size its
+# thread pool from the host's core count, not the container's share.
+FAST_CPU_CORES = 4
+# Billing prices CPU work under this name (db/shared/omni-asr-cost.ts).
+FAST_CPU_LABEL = "modal-cpu"
+# A cold start then restores the loaded model from a memory snapshot instead
+# of importing torch and reading the weights again. Not yet proven with
+# fairseq2: if a restored container misbehaves, set this to False (the
+# snap=True hook then runs as an ordinary enter hook on every start).
+FAST_MEMORY_SNAPSHOT = True
+
+
+@app.cls(image=image, cpu=float(FAST_CPU_CORES), memory=8192, volumes={WEIGHTS_DIR: weights},
+         timeout=600, scaledown_window=FAST_SCALEDOWN_SEC, max_containers=4,
+         enable_memory_snapshot=FAST_MEMORY_SNAPSHOT)
+class OmniFast:
+    @modal.enter(snap=True)
+    def load(self) -> None:
+        import torch
+
+        cache = os.environ["FAIRSEQ2_CACHE_DIR"]
+
+        def cached_files() -> int:
+            return sum(len(files) for _, _, files in os.walk(cache))
+
+        before = cached_files()
+        t0 = time.time()
+        torch.set_num_threads(FAST_CPU_CORES)
+        # fp32 on CPU, as the self-hosted server does (bf16 is for GPUs).
+        self.aligner = _Aligner(device=torch.device("cpu"), dtype=torch.float32)
+        # The commit must run here, in the container that downloaded the
+        # weights: a container restored from the snapshot mounts the Volume
+        # afresh and has nothing to commit. It runs only when this load wrote
+        # files, which is rare (OmniCTC and OmniZS load the same 300M card and
+        # commit it), so the snapshot normally holds no Volume call at all. A
+        # failed commit costs a later download, not this container.
+        if cached_files() > before:
+            try:
+                weights.commit()
+            except Exception as e:  # noqa: BLE001
+                print(f"[fast] weights commit failed: {e}", flush=True)
+        self.load_sec = time.time() - t0
+        print(f"[fast] loaded in {self.load_sec:.1f}s on {FAST_CPU_CORES} cores", flush=True)
+
+    @modal.enter(snap=False)
+    def started(self) -> None:
+        # Separate from load(): with snapshots on, load() runs once, when the
+        # snapshot is taken. The state write must happen on every start.
+        _set_state("fast", "ready")
+
+    @modal.exit()
+    def unload(self) -> None:
+        _set_state("fast", "cold")
+
+    @modal.method()
+    def ping(self) -> None:
+        """No-op used by /warm: calling it starts a container."""
+        _set_state("fast", "ready")
+
+    @modal.method()
+    def transcribe(self, audio: bytes, lang: str | None = None) -> dict:
+        # `lang` is accepted for the same call shape as OmniCTC; CTC has no
+        # language conditioning, so one pass does not use it.
+        _set_state("fast", "ready")  # heartbeat: a busy container is not stale
+        t0 = time.time()
+        wav = _decode_wav(audio)
+        if wav.shape[0] / SAMPLE_RATE >= MAX_AUDIO_SEC:
+            raise ValueError("audio must be shorter than 40 s")
+        text, words, approx = self.aligner.transcribe(wav)
+        # No GPU here: `gpuSeconds` is the wall time of the call, and `gpu` is
+        # the CPU container's name in the price table.
+        return {"text": text, "words": words, "timingsApproximate": approx,
+                "gpuSeconds": round(time.time() - t0, 3), "gpu": FAST_CPU_LABEL,
+                "loadSec": round(self.load_sec, 1)}
+
+
 # ── Web API ──────────────────────────────────────────────────────────────────
 # One CPU ASGI app, so the auth-worker uses a single base URL:
-#   POST /transcribe   POST /warm   GET /status?model=ctc|zs
+#   POST /transcribe   POST /warm   GET /status?model=ctc|zs|fast
 # Example audio is fetched here, on CPU, so GPU time (which is billed) is not
 # spent waiting on R2.
 
@@ -320,7 +418,11 @@ web_image = modal.Image.debian_slim(python_version="3.11").pip_install(
 
 # GPU-seconds per audio-second, measured in the spike; the client uses it for
 # the batch credit estimate. Override with env if a re-benchmark moves it.
-EST_GPU_SEC_PER_AUDIO_SEC = {"ctc": 0.1, "zs": 0.5}
+EST_GPU_SEC_PER_AUDIO_SEC = {"ctc": 0.1, "zs": 0.5, "fast": 0.1}
+MODELS = ("ctc", "zs", "fast")
+# The auth-worker reads this text: an older deploy answers "model must be ctc
+# or zs" to `fast`, and the worker then runs the call as `ctc`.
+BAD_MODEL = "model must be ctc, zs or fast"
 MAX_EXAMPLES = 10
 MAX_EXAMPLE_BYTES = 8 * 1024 * 1024
 
@@ -399,19 +501,19 @@ def api():
     @web.get("/status")
     def status(model: str = "zs", x_omni_secret: str | None = Header(default=None)):
         check(x_omni_secret)
-        if model not in ("ctc", "zs"):
-            raise HTTPException(status_code=400, detail="model must be ctc or zs")
+        if model not in MODELS:
+            raise HTTPException(status_code=400, detail=BAD_MODEL)
         return status_body(model)
 
     @web.post("/warm")
     def warm(payload: dict, x_omni_secret: str | None = Header(default=None)):
         check(x_omni_secret)
         model = payload.get("model", "zs")
-        if model not in ("ctc", "zs"):
-            raise HTTPException(status_code=400, detail="model must be ctc or zs")
+        if model not in MODELS:
+            raise HTTPException(status_code=400, detail=BAD_MODEL)
         if _get_state(model) == "cold":
             _set_state(model, "starting")
-            (OmniCTC() if model == "ctc" else OmniZS()).ping.spawn()
+            {"ctc": OmniCTC, "zs": OmniZS, "fast": OmniFast}[model]().ping.spawn()
         return status_body(model)
 
     @web.post("/transcribe")
@@ -430,8 +532,13 @@ def api():
             if _get_state("ctc") == "cold":
                 _set_state("ctc", "starting")
             return OmniCTC().transcribe.remote(audio, payload.get("lang") or None)
+        if model == "fast":
+            # Blocks like CTC: the CPU container starts in seconds.
+            if _get_state("fast") == "cold":
+                _set_state("fast", "starting")
+            return OmniFast().transcribe.remote(audio, payload.get("lang") or None)
         if model != "zs":
-            raise HTTPException(status_code=400, detail="model must be ctc or zs")
+            raise HTTPException(status_code=400, detail=BAD_MODEL)
         examples = payload.get("examples") or []
         if not examples:
             raise HTTPException(status_code=400, detail="zero-shot needs at least one example")
@@ -455,16 +562,22 @@ def api():
 
 @app.local_entrypoint()
 def smoke(audio: str, examples: str = "", model: str = "both", lang: str = "") -> None:
-    """Spike harness. --examples is a JSON file: [{"path": ..., "text": ...}]."""
+    """Spike harness. --examples is a JSON file: [{"path": ..., "text": ...}].
+    --model is ctc, zs, fast, or both/all (every model; ZS needs --examples)."""
     import json
 
     data = open(audio, "rb").read()
-    if model in ("ctc", "both"):
+    if model in ("fast", "both", "all"):
+        t0 = time.time()
+        r = OmniFast().transcribe.remote(data, lang or None)
+        r["wallSec"] = round(time.time() - t0, 1)
+        print("FAST", json.dumps(r, ensure_ascii=False, indent=1))
+    if model in ("ctc", "both", "all"):
         t0 = time.time()
         r = OmniCTC().transcribe.remote(data, lang or None)
         r["wallSec"] = round(time.time() - t0, 1)
         print("CTC", json.dumps(r, ensure_ascii=False, indent=1))
-    if model in ("zs", "both") and examples:
+    if model in ("zs", "both", "all") and examples:
         pairs = [(open(e["path"], "rb").read(), e["text"]) for e in json.load(open(examples))]
         t0 = time.time()
         r = OmniZS().transcribe.remote(data, pairs)

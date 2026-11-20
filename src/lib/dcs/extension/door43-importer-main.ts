@@ -26,7 +26,7 @@ interface Bridge {
   }
   web: { fetch: (url: string, opts?: { as?: "text" | "json" | "bytes" }) => Promise<WebResponse> }
   files: {
-    upsert: (spec: Door43UpsertSpec & { meta?: Record<string, unknown> }) => Promise<{ fileId: string; created: boolean; creates: number; commits: number; deletes: number }>
+    upsert: (spec: Door43UpsertSpec & { meta?: Record<string, unknown> }) => Promise<{ fileId: string; created: boolean; creates: number; commits: number; deletes: number; cellIds?: Record<string, string> }>
     list: (filter?: Record<string, unknown>) => Promise<FileView[]>
   }
   data: {
@@ -140,11 +140,14 @@ async function alignmentAsData(
   rawUsfm: string,
   entry: DcsCatalogEntry,
   progress: (message: string, fraction: number) => Promise<unknown>,
+  /** files.upsert's `cell key → cell id`: on a revisioned file the cells do
+   *  not carry the ids this plan derives, so anchors must use what landed. */
+  cellIds: Record<string, string> | undefined,
 ): Promise<number> {
   if (!/\\zaln-s/.test(rawUsfm) || !w.aq?.parse?.usfm) return 0
   const book = spec.bookCode ?? "all"
   await progress(`Reading word alignment (${book})`, 0)
-  const byRef = new Map(spec.cells.filter((c) => c.ref).map((c) => [c.ref as string, c.cellId]))
+  const byRef = new Map(spec.cells.filter((c) => c.ref).map((c) => [c.ref as string, cellIds?.[c.key] ?? c.cellId]))
   const groups = alignmentsFromWords(w.aq.parse.usfm(rawUsfm).verses)
   const items: Array<{ id: string; doc: unknown; anchor: Record<string, unknown> }> = []
   for (const [ref, g] of groups) {
@@ -220,7 +223,7 @@ async function importResource(options: Record<string, unknown>, onlyBooks: strin
     const out = await w.aquilla.files.upsert({ ...spec, meta: metaOf(spec) })
     if (out.created || out.creates + out.commits + out.deletes > 0) changed++
     if (withAlignment) {
-      aligned += await alignmentAsData(spec, p.rawSource, entry, (message, f) => w.aquilla.import.progress(message, base + slot * (0.3 + 0.7 * f)))
+      aligned += await alignmentAsData(spec, p.rawSource, entry, (message, f) => w.aquilla.import.progress(message, base + slot * (0.3 + 0.7 * f)), out.cellIds)
     }
   }
   return [

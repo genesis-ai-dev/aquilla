@@ -453,9 +453,30 @@ CRUD surface with MCP bolted on.
 | Transcription | `transcribe_audio`, `transcription_status` — **implemented (Omnilingual ASR, 2026-10-16)**: speech to text with word timings for a cell's selected take or raw WAV, including low-resource languages through Omnilingual zero-shot. Output only; store results with a changeset (`SetTranslation` for a target take, `SetTranscription` for a source media cell). See the addendum at the end. |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
 | Membership | `list_members` — **implemented (AQU-2403)**: the project roster, `{ userId, username, role, roleName, roleSource, direct }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged: the rows kept are the top of the ladder, so a cut never hides somebody a membership command could be aimed at). Floored at MAINTAINER 600, the same floor as changing membership, so the read half of governance is never visible to a credential that cannot act on it; a caller below the floor gets `permission_denied`, not an empty list. `role` is the EFFECTIVE (max-wins, AD-12) level — the same number `commands-membership.ts`'s target cap is judged against, resolved through the shared `resolveFromGrants` so the roster and the gate cannot drift. `direct` says whether a `project_members` row exists, which is what picks the command: `SetRole`/`RemoveMember` act on that row only and 409 `not_a_direct_member` without one, while `InviteMember` 409s `already_member` with one. `roleSource` (`override`/`group`/`org`/`creator`) is why `RemoveMember` is not revocation — the other paths are additive and survive it. REST: `GET …/projects/:projectId/members`. The three write commands (`InviteMember`, `SetRole`, `RemoveMember` — AQU-1185) now have MCP staging via `prepare_translations`'s `commands` argument and, on the OAuth connector, the dedicated `prepare_invite_member` / `prepare_set_role` / `prepare_remove_member` tools; prepare forces ask-mode on all three, so an `act` credential still cannot re-role a project's staff without a human at the approvalUrl. People are named by USERNAME, not email. |
+| Org membership | `list_org_members` — **implemented (AQU-2662)**: the ORG roster, `{ userId, username, role, roleName, roleSource, direct, orgOwner }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged). Floored at **OWNER 700 on that org** — the same floor as changing org membership (AQU-780), so the read half is never visible to a credential that cannot act on it; below it you get `permission_denied`, not an empty list, and a **project-scoped credential gets `scope_denied`** because org governance is out of its reach entirely. No platform-admin elevation and no AQU-2504 support-access widening apply here: this is the one org read that names people. `role` is the `org_members.role_level` the gates judge, resolved through the same shared `resolveOrgMemberLevel` the write half calls — deliberately **not** the max-wins blend `GET /orgs` reports for your own orgs, because a roster that disagreed with the gate would hand an agent a plan the gate then refuses. `direct` picks the command (`SetOrgRole`/`RemoveOrgMember` need an `org_members` row, `AddOrgMember` is refused when there is one) and `orgOwner` marks the `organizations.owner_user_id` seat, which the last-owner guard will not let any of them demote or remove. REST: `GET …/orgs/:orgId/members`. The three write commands (`AddOrgMember`, `SetOrgRole`, `RemoveOrgMember` — AQU-1235) stage through `prepare_translations`'s `commands` argument; each must be the SOLE command in its changeset and prepare forces ask-mode on all three, so an `act` credential still cannot restaff an org without a human at the approvalUrl. The changeset URL's `:projectId` is only where the plan is filed — no project is touched. People are named by USERNAME; no emails are returned. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
 | Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
+
+### Confining an org member to N projects (AQU-2662)
+
+An org role reaches **every** project in the org, so "give her only these five" is never a
+project-level edit — it is the removal of one org row plus N project grants:
+
+1. `list_org_members { orgId }` — confirm she is there at `maintainer` with `direct: true`
+   (an `org_members` row to remove) and `orgOwner: false` (not the undemotable seat).
+2. Stage `RemoveOrgMember { orgId, username }`, show the `approvalUrl`, then
+   `confirm_changeset`. She now reaches no project through the org path.
+3. For each of the N projects she should keep, stage `InviteMember { projectId, username,
+   role }`. These batch with each other (at most 25, one per person) but **never** with the
+   org command, so this is a second changeset and a second approval.
+
+Order matters: do step 2 first and her access narrows immediately, with step 3 restoring the
+five. Do step 3 first and she holds the five twice over — harmless, but `list_members` on each
+will show `roleSource: override` rather than `org`, which is the point of the exercise.
+Removing the org row does not revoke anything granted by a team or by having created a
+project: those paths are additive (AD-12), and `list_members`'s `roleSource` on each project is
+where you check that before you promise a partner the access is gone.
 
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.
@@ -1271,10 +1292,14 @@ Spec: `docs/superpowers/specs/2026-10-16-omnilingual-asr.md` §7.
 `{ text, words: [{ text, start, end }], model, timingsApproximate, creditsCharged }`.
 Times are seconds from the start of the whole clip.
 
-**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs`.
+**Models.** `model` is `auto` (default) | `whisper` | `qwen3-asr` | `omni-ctc` | `omni-zs` | `omni-fast`.
 `auto` picks Whisper for its 99 languages, Qwen3-ASR for Chinese varieties, and
-Omnilingual CTC for any other language code. It never picks zero-shot. `language`
+Omnilingual CTC for any other language code. It never picks zero-shot or fast. `language`
 (BCP-47) defaults to the lane's language code.
+
+**Fast (`omni-fast`).** A fast first pass: Omnilingual CTC 300M, CPU, no GPU queue; less accurate than zero-shot.
+It needs no warm-up. A service that does not have it yet runs the call as `omni-ctc`,
+and the reply's `model` says so.
 
 **Zero-shot (`omni-zs`).** It learns the language from up to 10 of the lane's own
 takes that have a transcript (2–30 s each). By default the examples are ranked by
@@ -1300,7 +1325,7 @@ and project credit admission still apply.
 **Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
 Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
 a word is not split. A stored compressed take (webm/ogg) cannot be decoded in a
-Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`, because
+Worker, so it must fit one window. webm goes only to `omni-ctc`/`omni-zs`/`omni-fast`, because
 OpenRouter does not document webm input.
 
 **Errors.**
@@ -1528,3 +1553,52 @@ with the answers, and the provenance fields are whatever the agent typed.
 - **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
   because the brief lives *inside* the settings blob and an agent that found
   `patch_settings` first had no reason to look further.
+
+## Status addendum (2026-11-17, AQU-2642 §4 — the orthography exception list is merged, not replaced)
+
+AQU-2628 gave a project's target lane a spelling configuration
+(`languageProfile.orthography`: the digraphs the alphabet replaced, its canonical
+apostrophe, and the words those rules must leave alone). The exception list was writable
+only through `PatchSettings { key: 'languageProfile' }` — a wholesale replace. That makes
+proposing one word a read-modify-write of the whole profile, and two people doing it around
+the same time is last-write-wins on a list where **every entry records who asked for the
+word and whether a maintainer approved it**. Losing one of those entries to a race, with
+nothing to say it happened, is not an acceptable outcome; the version guard turns the race
+into a `plan_stale` the caller has to retry, which is only half an answer when the two
+writes never actually conflicted.
+
+- **`PatchOrthographyExceptions { projectId, ops: [{ action: "add" | "remove", word, ref? }],
+  ifMatchVersion? }`** — sole command, receipt-only. It carries **ops, not a list**, and the
+  list is recomputed **at commit** from the then-current stored value, so an entry someone
+  else wrote while the plan waited for approval survives it. At most 200 ops per changeset;
+  the merged list caps at the profile's 2000.
+- **Roles are resolved live, and the acting role decides the STATUS** — the command cannot
+  assert one. `contributor` (400+) proposes: the entry lands `pending`, which is inert, so
+  it changes no text and silences no flag. `maintainer` (600+) adds as `approved`, and an
+  add naming an already-pending word **is** the approval — the entry keeps the original
+  proposer's `by` / `ref`, because it records who found the word, not who approved it.
+  `remove` is maintainer-only: dropping an approved exception re-exposes the word to the
+  rules, which rewrites text.
+- **`ifMatchVersion` is OPTIONAL, and here that is a design statement rather than an
+  ergonomic one.** A settings-version bump under a merge is not a conflict — it is the case
+  the merge exists for — so pinning is how a caller *asserts* nothing moved since it read
+  the profile (`plan_stale` at prepare), not a precondition of writing. The write itself is
+  still version-guarded (`patchProjectSettingsShared` pinned to the version read in the same
+  commit pass), so the rest of the blob can never be clobbered; a lost race re-reads and
+  re-merges, up to three times, and then marks the changeset stale rather than overwriting.
+- **An op whose state already holds is a no-op, not an error.** Approving an approved word or
+  removing an absent one is reported in the receipt's `orthographyExceptions.words` and
+  leaves the rest of the batch to apply; a plan where *every* op is a no-op stages with an
+  `inert_write` warning and commits without bumping the settings version. Words are compared
+  **folded** (case-insensitively, with apostrophe variants treated as one mark) because that
+  is how the converter matches, so one word can never sit in the list twice.
+- **A project with no `languageProfile.orthography` block is refused**, at prepare and again
+  at commit. The rules and the canonical apostrophe are a maintainer's decision — this
+  command never seeds one from a single word.
+- **`prepare_orthography_exceptions`** is the MCP door onto it; `mcp-handlers.ts` marshals
+  arguments and nothing else. The merge is pure and lives in
+  `db/shared/orthography-exceptions.ts`, so the prepare preview, the commit write, the
+  supersede predicate and the in-app affordance all run one rule table.
+- The **reviewer-facing** half — **Propose exception** / **Add as exception** beside Fix in
+  the violation panel — is still open on AQU-2642 §1. The rules above are enforced on the
+  write, so whichever surface adds the button inherits them.

@@ -110,11 +110,11 @@ function fakeCommands(version: string | null = "1.2.0", staged: StagedBundle | n
 
 const STAGED: StagedBundle = { version: "2026.11.05.03", sha: "abc123" }
 
-function renderPrompt(commands: DesktopUpdateCommands, graceMs = 60_000) {
+function renderPrompt(commands: DesktopUpdateCommands, graceMs = 60_000, bundleRecheckMs?: number) {
   return render(
     <>
       <Toaster />
-      <DesktopUpdatePrompt commands={commands} graceMs={graceMs} />
+      <DesktopUpdatePrompt commands={commands} graceMs={graceMs} bundleRecheckMs={bundleRecheckMs} />
     </>,
   )
 }
@@ -170,18 +170,18 @@ describe("DesktopUpdatePrompt", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull())
   })
 
-  it("offers Update anyway when the queue doesn't drain within the grace period", async () => {
+  it("offers Update now when the queue doesn't drain within the grace period", async () => {
     const user = userEvent.setup()
     store!.commit(queued("q1"), queued("q2"))
     const commands = fakeCommands()
     renderPrompt(commands, 50)
 
     expect(await screen.findByText(/2 changes haven't reached the server yet/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Update anyway" }))
+    await user.click(screen.getByRole("button", { name: "Update now" }))
     expect(commands.install).toHaveBeenCalledTimes(1)
   })
 
-  it("offers Update anyway at once when a queued edit has failed", async () => {
+  it("offers Update now at once when a queued edit has failed", async () => {
     store!.commit(queued("q1"))
     store!.commit(events.eventQueueStatusSet({ id: "q1", status: "failed" }))
     renderPrompt(fakeCommands())
@@ -200,15 +200,15 @@ describe("DesktopUpdatePrompt", () => {
     expect(document.querySelector('[data-slot="toast"]')).toBeNull()
   })
 
-  it("warns instead of claiming all is sent when the offline store failed to boot", async () => {
+  it("reassures that unsent changes are kept, without claiming all is sent, when the offline store failed to boot", async () => {
     const user = userEvent.setup()
     store = null
     const commands = fakeCommands()
     renderPrompt(commands)
 
     expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
-    expect(screen.getByText(/couldn't confirm that every change has reached the server/)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Update anyway" }))
+    expect(screen.getByText(/haven't reached the server yet stay saved on this device/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Update now" }))
     expect(commands.install).toHaveBeenCalledTimes(1)
   })
 
@@ -224,7 +224,7 @@ describe("DesktopUpdatePrompt", () => {
     expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
   })
 
-  it("counts both queues in the Update anyway warning", async () => {
+  it("counts both queues in the Update now warning", async () => {
     store!.commit(queued("q1"))
     outbox = { count: 2, failed: 0 }
     renderPrompt(fakeCommands(), 50)
@@ -239,13 +239,13 @@ describe("DesktopUpdatePrompt", () => {
     expect(screen.queryByText(/send after the restart/)).toBeNull()
   })
 
-  it("warns instead of claiming all is sent when the outbox can't be read", async () => {
+  it("reassures that unsent changes are kept, without claiming all is sent, when the outbox can't be read", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
     outboxUnreadable = true
     renderPrompt(fakeCommands())
 
     expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
-    expect(screen.getByText(/couldn't confirm that every change has reached the server/)).toBeInTheDocument()
+    expect(screen.getByText(/haven't reached the server yet stay saved on this device/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull()
   })
 
@@ -354,6 +354,22 @@ describe("DesktopUpdatePrompt", () => {
 
       act(() => commands.emit("bundle://staged", STAGED))
       expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+    })
+
+    // Releases are hourly: an app left open must not make the user restart once per release.
+    it("replaces the offer with a newer bundle found while the app stays open, so one restart reaches the latest", async () => {
+      const user = userEvent.setup()
+      const commands = fakeCommands(null, STAGED)
+      renderPrompt(commands, 60_000, 40)
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+
+      commands.checkBundle.mockResolvedValue({ version: "2026.11.05.07", sha: "def456" })
+      expect(await screen.findByText("Aquilla 2026.11.05.07 is ready to install.")).toBeInTheDocument()
+      expect(screen.queryByText("Aquilla 2026.11.05.03 is ready to install.")).toBeNull()
+      expect(screen.getAllByRole("button", { name: "Restart to update" })).toHaveLength(1)
+
+      await user.click(screen.getByRole("button", { name: "Restart to update" }))
+      expect(commands.restart).toHaveBeenCalledTimes(1)
     })
 
     it("prefers the shell update when both are pending, since installing it relaunches anyway", async () => {

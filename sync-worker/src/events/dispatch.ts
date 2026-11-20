@@ -101,6 +101,7 @@ export function dispatchEvent(
     case 'cell.audio.gain':
     case 'cell.audio.place':
     case 'cell.audio.cut':
+    case 'cell.audio.uncut':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':

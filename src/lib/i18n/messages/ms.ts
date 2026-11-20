@@ -5321,6 +5321,7 @@ export const ms: Catalog = {
   "knowledgeBase.upload": "Muat naik dokumen",
   "knowledgeBase.uploading": "Memuat naik dokumen…",
   "knowledgeBase.uploadSuccess": "{name} telah dimuat naik.",
+  "knowledgeBase.uploadTruncated": "{name} telah dimuat naik, tetapi ia sangat panjang: hanya 2 juta aksara pertamanya dibaca.",
   "knowledgeBase.uploadError": "Tidak dapat memuat naik {name}. Cuba lagi.",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX, atau PDF · sehingga 25 MB",
   "knowledgeBase.emptyTitle": "Belum ada dokumen pengetahuan",

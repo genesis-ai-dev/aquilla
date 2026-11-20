@@ -5361,6 +5361,7 @@ export const zh_Hant: Catalog = {
   "knowledgeBase.upload": "上傳文件",
   "knowledgeBase.uploading": "正在上傳文件…",
   "knowledgeBase.uploadSuccess": "已上傳 {name}。",
+  "knowledgeBase.uploadTruncated": "已上傳 {name}，但內容過長：只讀取了前 200 萬個字元。",
   "knowledgeBase.uploadError": "無法上傳 {name}。請再試一次。",
   "knowledgeBase.acceptedFormats": "Markdown、TXT、DOCX 或 PDF · 上限 25 MB",
   "knowledgeBase.emptyTitle": "還沒有任何知識文件",

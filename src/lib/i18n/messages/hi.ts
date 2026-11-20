@@ -6435,6 +6435,7 @@ export const hi: Catalog = {
   "knowledgeBase.upload": "दस्तावेज़ अपलोड करें",
   "knowledgeBase.uploading": "दस्तावेज़ अपलोड हो रहा है…",
   "knowledgeBase.uploadSuccess": "{name} अपलोड हो गया।",
+  "knowledgeBase.uploadTruncated": "{name} अपलोड हो गया, लेकिन यह बहुत लंबा है: केवल इसके पहले 2 मिलियन अक्षर पढ़े गए।",
   "knowledgeBase.uploadError": "{name} अपलोड नहीं हो सका। फिर कोशिश करें।",
   "knowledgeBase.acceptedFormats": "Markdown, TXT, DOCX या PDF · अधिकतम 25 MB (DOCX और PDF अधिकतम 2 MB)",
   "knowledgeBase.emptyTitle": "अभी कोई ज्ञान दस्तावेज़ नहीं",

@@ -63,6 +63,15 @@ empty, and listed as `empty pick: already in base, or needs #N`. Neither
 is a failed run and neither is dropped: when nothing could be picked, the
 run summary lists each PR with its reason.
 
+**Not a hard stop either:** a commit pushed straight to `dev` with no PR.
+The plan carries it in its dev position. One that touches only the
+generated locale catalogs is picked like a PR. Any other is held as `not
+a PR` and listed on every cut until a person picks it onto a release
+branch with `git cherry-pick -x` (`docs/RELEASE-RISK-GATES.md`, section
+3, *Releasing a held direct commit*); `release:approved` cannot release
+it, because there is no PR to label. A run that cuts nothing because
+nothing is ready still names each one in its summary.
+
 ## Steps
 
 `scripts/release-cut.mjs` runs steps 3 and 4 from the plan's JSON.
@@ -75,8 +84,10 @@ run summary lists each PR with its reason.
    live in the planner on purpose; if a result looks wrong, fix the code.
 3. If `cut` is `false`, stop.
 4. If `cut` is `true`, start `plan.branch` at `plan.base` (the tagged tip
-   production runs) and `git cherry-pick -x` every PR in `plan.prs` onto
-   it, in order (`-m 1` for a merge commit). Push the result. Then post
+   production runs) and `git cherry-pick -x` every entry in `plan.prs`
+   onto it, in order (`-m 1` for a merge commit; a direct commit, which
+   has `direct: true` and no `number`, has one parent and takes none).
+   Push the result. Then post
    the release notes (template below) as a **commit comment** on the
    branch HEAD, where QA and whoever deploys both find it. The branch is
    never the tip of `dev`: it is production plus exactly the picked PRs.
@@ -110,23 +121,27 @@ and files Linear tickets. It does not affect the cut or the deploy.
 ## Release notes template
 
 ```
-## Release release/2026/10/30-02 · 3 PRs · areas: sync
+## Release release/2026/10/30-02 · 3 PRs + 1 direct commit · areas: sync
 
 | PR | Title | Walk @ head sha | Areas |
 | --- | --- | --- | --- |
 | #771 | Remove Inworld companion preset | PASS | — |
 | #772 | Comment thread polish | PASS | sync |
+| 8ddd5c959 | chore(i18n): localize translation progress and recovery controls | none (locale catalogs, no PR) | — |
 | #774 | Retention tab copy | none (docs only) | — |
 
-**Held, not in this release:** #773 (walk fail), #775 (touches migration), #776 (pick conflict in src/lib/sync/outbox.ts; needs #775).
+**Held, not in this release:** #773 (walk fail), #775 (touches migration), #776 (pick conflict in src/lib/sync/outbox.ts; needs #775), cafabc90f "fix(desktop): restore the logo in the macOS app icon" (not a PR).
 A held PR joins the next cut once it carries the `release:approved` label.
+A direct commit has no PR to label: it stays held until a person picks it onto a release branch with `git cherry-pick -x <sha>` (docs/RELEASE-RISK-GATES.md, Cut).
 ```
 
-- Title line: `## Release <plan.branch> · <plan.prs.length> PRs · areas: <plan.areas joined by ", ", or omit "areas:" entirely if plan.areas is empty>`.
+- Title line: `## Release <plan.branch> · <N> PRs · areas: <plan.areas joined by ", ", or omit "areas:" entirely if plan.areas is empty>`.
+  `N` is the PRs in `plan.prs`; when it also holds direct commits the
+  count reads `<N> PRs + <M> direct commit(s)`.
   Note `plan.prCount` is a different number — the total unreleased PRs on
   `dev` at plan time (a PR the tagged release tip already carries as a
-  cherry-pick counts as released), not this slice's size. Use
-  `plan.prs.length`.
+  cherry-pick counts as released), not this slice's size; `plan.directCount`
+  is the same total for direct commits.
 - One table row per picked PR, oldest first (the plan already returns
   them in that order). "Title" is the PR's title, fetched from the GitHub
   API — the plan itself doesn't carry it. "Walk @ head sha" is `pr.walk`
@@ -134,13 +149,25 @@ A held PR joins the next cut once it carries the `release:approved` label.
   `unknown`. `none` prints as `none (docs only)`. A title the API can't
   return prints as `(title unavailable)` rather than failing the cut.
   "Areas" is `pr.areas.join(", ")` or `—`.
-- The **Held** line lists every PR in `plan.held` plus every pick that
+- A picked direct commit gets a row in its dev position: the first nine
+  characters of its dev sha in place of `#<number>`, its commit subject
+  as the title (the plan carries it; nothing is fetched), and `none
+  (locale catalogs, no PR)` as the walk.
+- The **Held** line lists every entry in `plan.held` plus every pick that
   did not land, as `#<number> (<why>)` separated by commas, followed by
-  the fixed sentence about `release:approved`. Omit both lines when
-  nothing is held. `why` is `touches <areas>`, `walk <verdict>`, `pick
-  conflict in <paths>` (with `; needs #N` when the plan's files name the
-  held PR it was built on), or `empty pick: already in base, or needs
-  #N` (`a held PR` when none is named); copy it verbatim.
+  the fixed sentence about `release:approved` when a PR is among them.
+  Omit both lines when nothing is held. `why` is `touches <areas>`,
+  `walk <verdict>`, `pick conflict in <paths>` (with `; needs #N` when
+  the plan's files name the held PR it was built on), or `empty pick:
+  already in base, or needs #N` (`a held PR` when none is named); copy
+  it verbatim.
+- A held direct commit is written `<short sha> "<subject>" (<why>)`.
+  `why` is `not a PR` (with `; touches <areas>` when it touches a holding
+  area) for one the plan held, and a pick reason for a catalog-only one
+  that did not land. `needs direct commit <short sha>` in a pick reason
+  names a held direct commit the pick was built on. When any entry is
+  held as `not a PR`, the line is followed by the fixed sentence about
+  picking it by hand.
 
 ## Say only what the plan measured
 
@@ -156,7 +183,8 @@ result, not walking a UI) but the ones it has are worth naming:
   equal later: the workflow never touches this branch again.
 - **"Held" is derived from the merged diff, the walk and the label, never
   from the PR's size or author.** A one-line PR can hold; a large PR can
-  be ready.
+  be ready. A direct commit is decided by its files alone, whoever pushed
+  it.
 
 ## What the comment is for
 
@@ -165,4 +193,5 @@ commit comment is the whole of what they need to start: which PRs are in,
 what each one's walk said, and which PRs were left out and why. Nothing
 here is a sign-off — the deploy gate is `release-verify` plus Jev on this
 HEAD (`scripts/release-deploy-check.mjs`), and a held PR's sign-off is the
-`release:approved` label on that PR.
+`release:approved` label on that PR. A held direct commit's sign-off is a
+person's pick of it onto a release branch.

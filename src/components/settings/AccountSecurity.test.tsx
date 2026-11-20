@@ -152,9 +152,45 @@ it("never offers removal for the last login method and stops a change after a wr
   fireEvent.change(screen.getByLabelText("auth.security.newAquillaPassword"), {
     target: { value: "new-password" },
   })
+  fireEvent.change(screen.getByLabelText("auth.security.confirmNewPassword"), {
+    target: { value: "new-password" },
+  })
   fireEvent.click(
     screen.getByRole("button", { name: "auth.security.changePassword" }),
   )
   await screen.findByText("auth.security.wrongPassword")
   expect(requests.some((r) => r.url.endsWith("/password"))).toBe(false)
+})
+
+it("keeps a backup password unsent until the confirmation matches", async () => {
+  render(
+    <PasswordManagement
+      jwt="token"
+      username="alice"
+      google={false}
+      googleAvailable={false}
+      passwordSet={false}
+      onChanged={vi.fn()}
+    />,
+  )
+  fireEvent.change(screen.getByLabelText("auth.security.newAquillaPassword"), {
+    target: { value: "new-password" },
+  })
+  fireEvent.change(screen.getByLabelText("auth.security.confirmNewPassword"), {
+    target: { value: "other-password" },
+  })
+  const submit = screen.getByRole("button", { name: "auth.security.setAPassword" })
+  expect(submit).toBeDisabled()
+  fireEvent.click(submit)
+  expect(requests.some((r) => r.url.endsWith("/password"))).toBe(false)
+  fireEvent.change(screen.getByLabelText("auth.security.confirmNewPassword"), {
+    target: { value: "new-password" },
+  })
+  fireEvent.click(submit)
+  await waitFor(() =>
+    expect(requests.some((r) => r.url.endsWith("/password"))).toBe(true),
+  )
+  expect(requests.find((r) => r.url.endsWith("/password"))?.body).toEqual({
+    password: "new-password",
+  })
 })

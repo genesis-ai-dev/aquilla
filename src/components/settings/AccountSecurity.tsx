@@ -502,13 +502,20 @@ export function PasswordManagement({
   const t = useT()
   const { adopt } = useAccounts()
   const currentId = useId(),
-    newId = useId()
+    newId = useId(),
+    confirmId = useId()
   const [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
+    [confirmPassword, setConfirmPassword] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [confirmed, setConfirmed] = useState(false)
+  const passwordsMatch = password === confirmPassword
   const run = async (remove = false) => {
+    if (!remove && !passwordsMatch) {
+      setError(t("auth.security.passwordsDoNotMatch"))
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -530,6 +537,7 @@ export function PasswordManagement({
         await adopt(await finalizeSession(r.username, r))
       }
       setPassword("")
+      setConfirmPassword("")
       setCurrent("")
       setConfirmed(false)
       onChanged()
@@ -608,7 +616,16 @@ export function PasswordManagement({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <Button disabled={busy || password.length < 8} onClick={() => void run()}>
+      <label htmlFor={confirmId}>{t("auth.security.confirmNewPassword")}</label>
+      <RevealableInput
+        id={confirmId}
+        aria-label={t("auth.security.confirmNewPassword")}
+        autoComplete="new-password"
+        minLength={8}
+        value={confirmPassword}
+        onChange={(e) => setConfirmPassword(e.target.value)}
+      />
+      <Button disabled={busy || password.length < 8 || !passwordsMatch} onClick={() => void run()}>
         {passwordSet
           ? t("auth.security.changePassword")
           : t("auth.security.setAPassword")}

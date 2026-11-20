@@ -161,7 +161,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 ]
 
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
-const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
+// src/lib/sync/offline-gate/ is a Vitest harness (docs/RELEASE-RISK-GATES.md,
+// the offline-sync gate): its table, fakes and golden sit beside the test
+// file and nothing in the app imports them, so a change there is a unit-test
+// change, not a change to the sync journey.
+const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$|^src\/lib\/sync\/offline-gate\//i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
 const PRODUCT_RUNTIME = /^(?:plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
 

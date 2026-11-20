@@ -305,7 +305,12 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([
       "docs/E2E.md",
       "src/lib/search/search.test.ts",
+      // The offline gate's table, fakes and golden: a Vitest harness, not app code.
+      "src/lib/sync/offline-gate/harness.ts",
+      "src/lib/sync/offline-gate/golden.json",
     ], specs).specs).toEqual([])
+    // The outbox itself still selects its journey.
+    expect(selectAffectedE2E(["src/lib/sync/outbox.ts"], specs).specs).not.toEqual([])
   })
 
   it("runs core sentinels for harness changes instead of the whole suite", () => {

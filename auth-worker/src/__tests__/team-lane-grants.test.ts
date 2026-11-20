@@ -303,6 +303,99 @@ describe("AQU-2355 unticking a lane from a team takes exactly that lane away", (
   })
 })
 
+// AQU-2355 / AQU-2354 (Luke, 2026-11-20): taking a team away removes exactly
+// the access the team gave, and nothing a direct grant gave.
+describe("AQU-2355 leaving a team takes exactly the team's lanes", () => {
+  const REVIEWER = 300
+  async function removeFromTeam() {
+    return app.request(
+      "/api/v2/orgs/1/groups/1/members/3",
+      { method: "DELETE", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+  }
+  async function scopes(): Promise<string[]> {
+    return ((
+      await env.AQUILLA_PG.prepare(
+        "SELECT value FROM project_member_scopes WHERE project_id = 'p1' AND user_id = 3 AND kind = 'lane' ORDER BY value",
+      ).all<{ value: string }>()
+    ).results ?? []).map((r) => r.value)
+  }
+  /** carol: a direct Reviewer on lane0001 only (a direct grant, no scope row). */
+  async function directReviewer() {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1', 3, ?, 1)",
+    )
+      .bind(REVIEWER)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by) VALUES ('p1', 3, 'lane0001', ?, 1)",
+    )
+      .bind(REVIEWER)
+      .run()
+  }
+
+  it("(a) a team-only member removed from the team loses the team's lanes and the scope rows copied with them", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([
+      { lane: "lane0001", level: CONTRIBUTOR },
+      { lane: "lane0002", level: CONTRIBUTOR },
+    ])
+    expect(await scopes()).toEqual(["lane0001", "lane0002"])
+    expect((await removeFromTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopes()).toEqual([])
+  })
+
+  it("(b) a direct Reviewer who was also on a Contributor team keeps Reviewer, and only that", async () => {
+    await seedOrg()
+    await directReviewer()
+    expect((await addToTeam()).status).toBe(200)
+    // The team adds the lane it covers that she did not have; her direct row is hers.
+    expect(await grantsFor(3)).toEqual([
+      { lane: "lane0001", level: REVIEWER },
+      { lane: "lane0002", level: CONTRIBUTOR },
+    ])
+    // A team role change re-levels the team's rows, never her direct one.
+    expect((await setAttachmentRole(PROJECT_LEAD)).status).toBe(200)
+    expect((await grantsFor(3)).find((g) => g.lane === "lane0001")).toEqual({ lane: "lane0001", level: REVIEWER })
+
+    expect((await removeFromTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0001", level: REVIEWER }])
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = 'p1' AND user_id = 3",
+    ).first<{ role_level: number }>()
+    expect(member?.role_level).toBe(REVIEWER)
+  })
+
+  it("unlinking a team from a lane takes that lane from a direct member too, and keeps her direct lane", async () => {
+    await seedOrg()
+    await directReviewer()
+    expect((await addToTeam()).status).toBe(200)
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1/projects/p1",
+      { method: "PATCH", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ laneIds: ["lane0001"] }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0001", level: REVIEWER }])
+  })
+
+  it("deleting the team takes its lanes from a team-only member", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1",
+      { method: "DELETE", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopes()).toEqual([])
+  })
+})
+
 describe("PATCH team-scope role — lane grants (AQU-1809)", () => {
   async function seedAttached(opts: { carolOrgRole?: number } = {}) {
     await seedUser(1, "alice")

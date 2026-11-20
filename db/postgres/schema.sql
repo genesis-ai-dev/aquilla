@@ -1716,6 +1716,11 @@ CREATE TABLE IF NOT EXISTS project_member_lane_roles (
     role_level INTEGER NOT NULL,
     granted_by BIGINT,
     granted_at TIMESTAMPTZ DEFAULT now(),
+    -- 0209 (AQU-2355): the team this row exists because of. NULL = a direct
+    -- grant (and every row written before 0209). Removing someone from that
+    -- team, or unlinking the team from the lane, removes the row unless another
+    -- of their teams still covers the lane.
+    team_group_id BIGINT,
     PRIMARY KEY (project_id, user_id, lane)
 );
 CREATE INDEX IF NOT EXISTS idx_pmlr_project_user

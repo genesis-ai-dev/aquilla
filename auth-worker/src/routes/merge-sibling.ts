@@ -45,6 +45,7 @@ import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { ensureTargetLaneStmt, listProjectLanes, retryingLaneIdCollision } from "../../../db/shared/lanes"
 import { firstTargetLaneStmts } from "../../../db/shared/lane-grants"
 import { grantCreatedLaneToActor } from "../services/lane-grants"
+import { carryDonorLaneAccess } from "../services/merge-lane-access"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
@@ -290,10 +291,21 @@ mergeSibling.post(
     }
     // AQU-2355: the folded lane is new to the host and reaches nobody below
     // Maintainer on its own. The person who ran the merge (project lead 500+
-    // on both projects) reads it, as the creator of any other lane does. The
-    // donor's other members are not carried over — they never were — so a
-    // Maintainer staffs the lane afterwards.
-    if (hostLaneId) await grantCreatedLaneToActor(c.env.AQUILLA_PG, hostId, hostLaneId, user.id)
+    // on both projects) reads it, as the creator of any other lane does, and
+    // the people who worked on the donor keep access to that work: its teams
+    // are linked to the new lane and its members get the lane role they had
+    // (services/merge-lane-access.ts). Before the archive, which ends every
+    // path into the donor.
+    if (hostLaneId) {
+      await grantCreatedLaneToActor(c.env.AQUILLA_PG, hostId, hostLaneId, user.id)
+      await carryDonorLaneAccess(c.env.AQUILLA_PG, {
+        donorProjectId,
+        donorLaneId: fold.result.donorLaneId ?? null,
+        hostProjectId: hostId,
+        hostLaneId,
+        grantedBy: user.id,
+      })
+    }
 
     // Archive the donor (existing archive semantics: stamp archived_at/by).
     await c.env.AQUILLA_PG.prepare(

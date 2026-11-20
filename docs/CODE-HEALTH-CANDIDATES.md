@@ -4611,3 +4611,70 @@ Recorded so a later run does not re-derive them. The rotation pushed away from d
   `src/lib/project-status.test.ts`**, so collapsing it would mean editing a test file, which
   this routine may not do. Not a candidate; treat theme 4 as exhausted for `src/lib` unless
   someone retires that test first.
+
+### Gate results — 2026-11-20
+
+All gates run **serially** (never lint alongside vitest — the 2026-11-16 sandbox note still
+holds), with `rm -rf packages/*/dist` before both lints so the two are comparable.
+
+| Gate | Baseline (clean `origin/dev` `34b38961c`) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1071 problems (0 errors, 1071 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2518 files passed / **1 failed**; 29762 tests passed / **1 failed** | exit 1 — **identical counts, identical single failure** |
+| `pnpm test:e2e:smoke` | the documented set below | exit 1 — s1 42 passed / 3 failed, s2 33 passed, s3 37 passed / 1 failed |
+
+Worker suites were **not** run and are not required: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+**The one root-suite failure is pre-existing and environmental**, and is the same one the
+2026-11-18 entry recorded: `scripts/release-cut.test.ts` → *"fails loud when the pick cannot
+commit, and leaves nothing in progress"* (`:321`). The test sets `commit.gpgsign=true` with a
+deliberately bogus `gpg.program` and expects `buildReleaseBranch` to throw; in this container
+git does not fail on that, so nothing is thrown. Identical before and after, and `scripts/` is
+nowhere near this run's files. Out of scope — **frozen for this run, not fixed.**
+
+**The four smoke failures are the two documented pre-existing sets, and the per-shard counts
+match the 2026-11-18 entry exactly** (s1 42/3, s2 33/0, s3 37/1 — the same three numbers):
+- **s1, 3 failures**, all `editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a
+  15 s `locator.click` timeout on `Play all`. That is now **six consecutive runs** failing this
+  way on clean `dev`.
+- **s3, 1 failure**, `projects/admin-console-billing.smoke.spec.ts:51` — the same
+  `ENOENT: no such file or directory, scandir 'auth-worker/.wrangler/tmp/email'` harness
+  artifact at line 77 the last three entries recorded. Not an assertion failure.
+
+Neither set is reachable from this diff, and the mechanical proof is stronger than the suites
+anyway: the moved block is byte-identical, the rendered markdown + JSON sidecar + writes list
+are byte-identical at 5,919 bytes against a pristine worktree, and a `grep` of all built
+`dist/assets/*.js` chunks after a green `pnpm build` finds **no** `planLaneBatch` or
+`renderLaneBatchReport` — the module's only non-test importer is the
+`scripts/neon-backfill-lane-batch.ts` ops script, so it never reaches the SPA at all (the same
+check the 2026-10-12 entry ran).
+
+### Sandbox notes — 2026-11-20
+
+The 2026-11-16/18 notes all still hold and were all needed again, plus one new one:
+
+- Serialize lint and vitest; `rm -rf packages/*/dist` before the baseline lint too.
+- Worker `node_modules` absent in a fresh container (`npm install` in `auth-worker/`,
+  `sync-worker/`, `agent-worker/` — **then `git checkout -- */package-lock.json`**). Needed for
+  the smoke stack even when the diff touches no worker.
+- Playwright browsers one revision off. `playwright-core@1.65.0` wants chromium **1254** /
+  chromium-headless-shell **1254** / ffmpeg **1013**; the image carries 1243/1243/1011, so:
+  `ln -sfn /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1254` and the same for
+  `chromium_headless_shell` and `ffmpeg-1011`→`1013`. Read the wanted revisions out of
+  `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json` rather than
+  trusting a previous entry's numbers.
+- `bash scripts/e2e-pg-native.sh` for Postgres, exporting the single `E2E_PG_ADMIN_URL` line it
+  prints.
+- **NEW — a full `pnpm test` can finish long after it looks dead.** This run's baseline wrote
+  its last line, dropped every `vitest` process from `ps`, and sat with no summary for minutes
+  before printing `Test Files 2518 passed`. Do not conclude a suite was killed from `ps` plus a
+  quiet log; wait for the summary line. Running the suite as three `--shard=N/3` passes (what
+  CI's `unit (shard N/3)` matrix does) gives legible intermediate results and the same totals:
+  840 + 839 + 839 = 2518 files, 10535 + 9721 + 9506 = 29762 tests.
+- **Also NEW — take the per-file baseline in a `git worktree`, before editing.** This run's
+  edits were on disk while the baseline suite was still walking the tree, so the full-suite
+  baseline is contaminated for the touched file. A `git worktree add … origin/dev` with
+  `node_modules` symlinked from the main checkout runs a single test file in ~1 s and settles it
+  (15/15, 920 ms here). The 2026-09-07 entry already recommended this; treat it as mandatory.

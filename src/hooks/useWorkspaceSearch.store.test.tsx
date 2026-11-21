@@ -92,6 +92,30 @@ describe("useWorkspaceSearchController (AQU-2654)", () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  // AQU-2655: the dock clears at once when the box is emptied; a slower answer
+  // to the query typed before must not repaint hits under an empty box.
+  it("clearing retires a search still in flight", async () => {
+    let answer!: (rows: ReturnType<typeof hit>[]) => void
+    vi.mocked(fetchProjectSearch).mockReturnValue(new Promise((r) => { answer = r }))
+    const { result } = renderHook(() =>
+      useWorkspaceSearch({ projectId: "p1", getToken: async () => "jwt" }),
+    )
+    let inFlight!: Promise<void>
+    await act(async () => {
+      inFlight = result.current.search("light")
+      await Promise.resolve()
+    })
+    expect(result.current.loading).toBe(true)
+    act(() => result.current.clear())
+    expect(result.current.loading).toBe(false)
+    await act(async () => {
+      answer([hit("c1")])
+      await inFlight
+    })
+    expect(result.current.results).toHaveLength(0)
+    expect(result.current.loading).toBe(false)
+  })
+
   it("drops the previous project's hits when the project changes", async () => {
     vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1")])
     const { result, rerender } = renderHook(

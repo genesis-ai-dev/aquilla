@@ -329,8 +329,11 @@ export function useWorkspaceSearchController(
     [store],
   )
 
+  // Clearing also retires any search still in flight, so a slow answer to an
+  // older query cannot land after the box was emptied.
   const clear = useCallback(() => {
-    store.set({ results: NO_RESULTS })
+    generationRef.current += 1
+    store.set({ results: NO_RESULTS, loading: false })
   }, [store])
 
   // buildIndex / rebuild are kept as no-ops for back-compat. There's no

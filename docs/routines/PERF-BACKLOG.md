@@ -152,10 +152,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 
 ## The harness itself
 
-37. **`plain.open.componentRenders` is not stable enough for its budget.** Five runs of one tree
-    on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
-    and 9,077 was the budget commit itself. Find what makes the open's render count depend on
-    timing before trusting a breach of it.
 38. **A first translation of an empty cell is not measured, and may cost more than it should.**
     The scenario edits the same cells every run. On a newly seeded fixture they are
     untranslated, and `plain.commit` measured 28 row renders, 10 workspace renders and one or
@@ -165,11 +161,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     (2026-11-20), so the budgets describe an edit and a new machine no longer sees a false
     breach. What is left: whether 28 row renders for a first translation is the price of the
     cell changing state or a defect — not traced. Trace it, then give it its own phase.
-39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
-    separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
-    under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
-    one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
-    6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
 
 40. **`plain.commit.requests` counts a one-time corpus load.** One of the commit phase's two
     requests is `GET …/files/<the other file>/cells?limit=500&lane=…`: the forecast corpus

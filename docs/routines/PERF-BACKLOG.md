@@ -40,10 +40,14 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
 6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
    in 7.5 s with a file open and no cell active.
-7. **Two cell GETs per `cell.audio.*` write** (apparently one for the POST's applied frames and
-   one for the socket echo — inferred from counts, not traced), and the socket echo still asks
-   for a whole-file audio read for the client's own write (the own-echo branch in
-   `src/components/ProjectWorkspace.tsx`).
+7. **The socket echo of the client's own `cell.audio.*` write asks for a whole-file audio read**
+   (the own-echo branch in `src/components/ProjectWorkspace.tsx`): one `audio-attachments` GET
+   per transcribe save. It is not a pure duplicate today: `saveTranscript`
+   (`src/lib/transcript-cleanup/save.ts`) only injects an optimistic overlay and relies on that
+   read to reconcile it, while other writers notify themselves. Dropping it needs every audio
+   writer (about 14 call sites) to land or reconcile its own write first. *(2026-11-20: the two
+   cell GETs per write are fixed — row-less frames are refetched once per event,
+   `src/lib/sync/refetch-once-per-event.ts`.)*
 
 ## Editor — tree per commit
 

@@ -406,6 +406,7 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
 import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
+import { refetchOncePerEvent } from "@/lib/sync/refetch-once-per-event"
 import { confirmCommittedBatch, createFlushAppliedTracker, type FlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
@@ -2606,7 +2607,10 @@ export function ProjectWorkspace() {
   // the store — no per-cell GET, no range refresh — with a per-cell seq guard.
   // Frames without rows fall through to the existing refresh path.
   const liveApplier = useMemo(
-    () => createLiveApplier({ store: cellStore, revalidateCell }),
+    // AQU-2655: a row-less frame (every `cell.audio.*` event) arrives twice
+    // for this tab's own write — in the POST response and as its echo — and
+    // is read back once, not once per copy.
+    () => refetchOncePerEvent(createLiveApplier({ store: cellStore, revalidateCell })),
     [cellStore, revalidateCell],
   )
   useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])

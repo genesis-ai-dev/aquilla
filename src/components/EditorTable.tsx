@@ -2906,6 +2906,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   // In the open text pane, Command-A or Control-A checks the cells, unless
   // the key is going to a text field. A cell editor still selects its text.
+  // Split into milestones checks the chapter on the page; the continuous
+  // list still checks the whole file. getMilestoneSplit is read at key time
+  // so turning the page on does not wait for this listener to rebind.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const root = tableRootRef.current
@@ -2918,6 +2921,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
         const ids = idsForSelectAll({
           fileIds: fileCellIdsRef.current,
           filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
+          milestoneIds: getMilestoneSplit() ? displayCellIdsRef.current : null,
         })
         if (ids.length > 0) setSelection(ids, ids[0] ?? null)
       }

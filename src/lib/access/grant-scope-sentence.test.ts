@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE } from "@/lib/frontier/roles"
+import { laneOptionLabel } from "@/lib/lanes/lane-language"
 import { describeGrant, grantButtonLabel, grantProjectName } from "./grant-scope-sentence"
 
 describe("describeGrant", () => {
@@ -53,6 +54,31 @@ describe("describeGrant", () => {
       "Maria will join as a Maintainer of the whole organization — every project",
     )
     expect(copy.scopeEcho).toBe("every project")
+  })
+
+  // AQU-2635: a project migrated from Codex can hold one target lane whose row
+  // records no language and no name and whose tag is ''. Labelling it through
+  // the shared helper is what keeps this sentence honest: a blank label was
+  // filtered out below, the label list went empty, and the every-lane fallback
+  // claimed "every language lane" for a grant that limits the person to that
+  // one lane. Chained from the real helper so relabelling it cannot silently
+  // reopen the gap.
+  it("names a lane whose row records no language, instead of claiming every lane", () => {
+    const label = laneOptionLabel(
+      { id: "ln-main", role: "target", name: "", language: "", legacyTag: "" },
+      t("org.memberLaneScopeEditor.mainLanguageFallback"),
+    )
+    const copy = describeGrant(t, {
+      names: ["matthew_test"],
+      roleLevel: ROLE.CONTRIBUTOR,
+      scope: { kind: "project", projectName: "Dari_prs_The_Chosen_Audio", lanes: [label] },
+    })
+    expect(copy.sentence).toBe(
+      "matthew_test will join as a Contributor on Dari_prs_The_Chosen_Audio, Main language language lane only",
+    )
+    expect(copy.scopeEcho).toBe("Main language language lane only")
+    expect(copy.sentence).not.toContain("every language lane")
+    expect(grantButtonLabel(t, "Add", copy.scopeEcho)).toBe("Add — Main language language lane only")
   })
 
   it("names a project grant with no lane scope as every lane", () => {

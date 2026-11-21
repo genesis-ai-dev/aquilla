@@ -77,6 +77,37 @@ export const org = defineNamespace({
     "org.access.page.csvGrantedBy": "Granted by",
     "org.access.page.csvGrantedAt": "Granted at",
 
+    // -- AQU-2318 Places lens: one selected place, direct grants and what reaches it --
+    "org.access.places.tab": "Places",
+    "org.access.places.search": "Search people or places",
+    "org.access.places.giveAccess": "Give access",
+    "org.access.places.giveAccessSoon": "Coming next",
+    "org.access.places.grantedHere": "Granted here",
+    "org.access.places.reachesHere": "Reaches here from above",
+    "org.access.places.noReaches": "No one reaches this place from above",
+    "org.access.places.noMatches": "No people or places match",
+    "org.access.places.invitePending": "Invite pending",
+    "org.access.places.kindOrg": "organization",
+    "org.access.places.viaProject": "Via project {name}",
+    "org.access.places.fromOrg": "From {name}",
+    "org.access.places.fromTeam": "From the {name} team",
+    "org.access.places.fromPlace": "From {name}",
+    "org.access.places.reachesFrom": "{name} or a team",
+    "org.access.places.reachesFromAbove": "above",
+    "org.access.places.openPlaceAriaLabel": "Show the grant at {name}",
+    "org.access.places.openPeople": plural({
+      one: "{count} person can open this {place}.",
+      other: "{count} people can open this {place}.",
+    }),
+    "org.access.places.grantedCount": plural({
+      one: "{count} is granted here",
+      other: "{count} are granted here",
+    }),
+    "org.access.places.reachesCount": plural({
+      one: "{count} reaches it from {from}",
+      other: "{count} reach it from {from}",
+    }),
+
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
@@ -1881,6 +1912,48 @@ export const org = defineNamespace({
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project Lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.places.viaProject": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the project, shown when a language lane is selected.",
+        placeholders: { name: "The project's name. Not translated." },
+      },
+      "org.access.places.fromOrg": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the organization.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.fromTeam": {
+        description: "AQU-2318: one-line reason on an inherited row that is a team grant.",
+        placeholders: { name: "The team's name. Not translated." },
+      },
+      "org.access.places.fromPlace": {
+        description: "AQU-2318: one-line reason on an inherited row when the source is not an organization, team, or project.",
+        placeholders: { name: "The place's name. Not translated." },
+      },
+      "org.access.places.reachesFrom": {
+        description: "AQU-2318: the tail of the summary sentence naming where inherited access comes from, when the organization is visible.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.openPlaceAriaLabel": {
+        description: "AQU-2318: accessible name of the chevron that selects the place an inherited grant is set at.",
+        placeholders: { name: "The source place's name. Not translated." },
+      },
+      "org.access.places.openPeople": {
+        description: "AQU-2318: first sentence of the selected place's summary. The count is the number of rows in the two lists, not expanded team membership.",
+        placeholders: {
+          count: "How many rows can open this place; also selects the plural form.",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.places.grantedCount": {
+        description: "AQU-2318: the summary clause whose count equals the Granted here rows.",
+        placeholders: { count: "Number of direct grants at this place; also selects the plural form." },
+      },
+      "org.access.places.reachesCount": {
+        description: "AQU-2318: the summary clause whose count equals the Reaches here from above rows.",
+        placeholders: {
+          count: "Number of inherited sources at this place; also selects the plural form.",
+          from: "Already-translated phrase naming the organization or the word above.",
+        },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",

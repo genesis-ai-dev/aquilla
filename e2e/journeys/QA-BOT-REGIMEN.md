@@ -62,8 +62,15 @@ deploys it with its migration, and the bot re-walks it there
 holds it: a migration is a holding area, and only `release:approved` clears
 that.
 
-`scripts/release-plan.mjs` reads the same walk comment later and holds a cut
-unless the walk is `PASS` or `none`.
+`walk-status.yml` reports the walk on the PR's head as the `qa-walk` status,
+so a head nobody walked shows as pending before the merge. `scripts/release-plan.mjs`
+reads the same walk comment later. Since 2026-11-19 it holds a PR only when
+the walk failed (FAIL, FLAKY, BLOCKED); a PR with no walk, or a test-level
+one, ships, with the release slice's full suite, smart Jev and the rollback
+watch behind it (`docs/RELEASE-RISK-GATES.md`, §6). The repository variable
+`WALK_POLICY=strict` restores "anything but `PASS` or `none` holds". Neither
+policy changes the merge rule above: the walker is a scheduled routine
+(`docs/routines/WALK-PRS.md`), and a PR still waits for its walk.
 
 Branch protection on `dev` requires those `ci.yml` jobs. The Cloudflare preview
 can stay required. Admins are exempt today (`enforce_admins` is false). The

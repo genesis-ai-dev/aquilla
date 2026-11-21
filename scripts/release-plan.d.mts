@@ -49,12 +49,24 @@ export interface UnreleasedPr extends FileClassification {
   files?: string[]
 }
 
+/** How a walk verdict is read: `fail-only` holds only a failed walk, `strict` anything but PASS or none. */
+export type WalkPolicy = "fail-only" | "strict"
+export const WALK_POLICIES: WalkPolicy[]
+export const DEFAULT_WALK_POLICY: WalkPolicy
+
+/** The policy named by WALK_POLICY in `env`, or the default. */
+export function walkPolicy(env?: Record<string, string | undefined>): WalkPolicy
+
+/** Whether this walk verdict keeps a PR off the line under `policy`. */
+export function walkHolds(walk: string, policy?: WalkPolicy): boolean
+
 /**
- * Off the automatic line: an ungated holding area or an unproven walk, unless
- * a person approved it. A direct commit holds unless every file it touches is
- * a generated locale catalog; no walk, gate or label is read for it.
+ * Off the automatic line: an ungated holding area or a walk that holds under
+ * `policy`, unless a person approved it. A direct commit holds unless every
+ * file it touches is a generated locale catalog; no walk, gate or label is
+ * read for it.
  */
-export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates" | "direct" | "files">): boolean
+export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates" | "direct" | "files">, policy?: WalkPolicy): boolean
 
 /** The hold reason of a direct commit the line does not pick by itself. */
 export const NOT_A_PR: string
@@ -152,10 +164,13 @@ export interface ReleasePlan {
   /** Ready PRs and ready direct commits, in dev order, oldest first: what the cut picks. */
   prs: Omit<UnreleasedPr, "pathHolds" | "behindFloor">[]
   /**
-   * Entries skipped by this cut, with why. A PR waits for `release:approved`;
-   * a direct commit waits for a person to pick it onto a release branch.
+   * Entries off the line, with why, on every plan (cut or not). A PR waits
+   * for a gate or `release:approved`; a direct commit waits for a person to
+   * pick it onto a release branch.
    */
   held: HeldPr[]
+  /** The walk policy the plan was made under. */
+  walkPolicy?: WalkPolicy
 }
 
 export function planRelease(input: {
@@ -167,4 +182,5 @@ export function planRelease(input: {
   usedSuffixesToday?: string[]
   /** See ReleasePlan.base. */
   base?: string
+  policy?: WalkPolicy
 }): ReleasePlan

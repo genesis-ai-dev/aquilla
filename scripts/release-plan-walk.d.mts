@@ -71,3 +71,19 @@ export function fillWalks<T extends { sha: string; walk: string; direct?: boolea
   prs: T[],
   opts: Omit<LookupWalkOptions, "mergeSha">,
 ): Promise<(T & { approved?: boolean; gates?: string[] })[]>
+
+/**
+ * The planner's walk value for one PR at one head, from its comments oldest
+ * first: only trusted authors, only walks naming this head, newest wins, and
+ * a test-level PASS never replaces a plain verdict.
+ */
+export function walkFromComments(
+  comments: Array<{ body?: unknown; author_association?: string; user?: { login?: string } | null }>,
+  pr: { number: number; headSha: string; trustedLogins?: string[] },
+): "PASS" | "fail" | "none" | "partial" | "unknown"
+
+/** Every comment on a PR, oldest first. */
+export function prComments(
+  prNumber: number,
+  opts: { repo?: string; token: string; fetchImpl?: FetchImpl },
+): Promise<Array<{ body?: unknown; author_association?: string; user?: { login?: string } | null }>>

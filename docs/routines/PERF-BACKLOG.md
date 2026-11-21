@@ -110,7 +110,8 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     fill in (`src/components/ProjectSettings/RulesSection.tsx`). Each built-in row's text part
     still re-renders on each one (new `rule` objects and `leading` chips from `RulesSurface`);
     its Select and Switch no longer do (AQU-2655).
-26. **`src/components/ui/data-table.tsx`:** a ContextMenu root and a DropdownMenu root per row.
+26. **`src/components/ui/data-table.tsx`:** a ContextMenu root per mounted row (the ⋯ menu is one
+    shared root since AQU-2655; Base UI's context menu has no detached triggers).
 27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
 28. **`src/components/SearchDockPanel.tsx`:** one search request per keystroke, no debounce.
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests

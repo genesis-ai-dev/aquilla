@@ -7,9 +7,10 @@
 -- (pre-AQU-1813, and the Codex sync before AQU-2355), which the team paths
 -- read as "every target lane the project has when the team changes".
 --
--- WHAT. Each such attachment gets one `group_project_lanes` row per CURRENT
--- (non-archived) target lane of its project — the lanes it covers today —
--- and the flag is set true. The column's default becomes true, so a writer
+-- WHAT. Each such attachment gets one `group_project_lanes` row per target
+-- lane of its project — the lanes it covers today, archived ones included
+-- (a living attachment covered those too, so a lane restored later still
+-- reaches the team) — and the flag is set true. The column's default becomes true, so a writer
 -- that forgets to name it still stores an explicit (possibly empty) list.
 -- Nothing here touches `project_member_lane_roles`: a member's readable
 -- lanes are those rows under the read wall, so nobody gains or loses a lane.
@@ -31,7 +32,6 @@ SELECT gpg.group_id, gpg.project_id, l.id
   JOIN lanes l
     ON l.project_id = gpg.project_id
    AND l.role = 'target'
-   AND l.archived_at IS NULL
  WHERE gpg.lanes_explicit = false
 ON CONFLICT DO NOTHING;
 

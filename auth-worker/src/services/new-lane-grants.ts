@@ -24,7 +24,6 @@
 // Contributor's lane-grant cap, and nothing here can raise anyone: the level
 // written is the one they already hold on another lane.
 
-import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { loadCurrentTargetLanes } from "../../../db/shared/lane-visibility"
 import { linkTeamsToLaneStmts } from "../../../db/shared/lane-grants"
 import { applyTeamRosterLaneChecks } from "./lane-grants"
@@ -94,7 +93,21 @@ export async function loadNewLaneGrantCandidates(
          FROM project_member_lane_roles g
          JOIN project_members pm ON pm.project_id = g.project_id AND pm.user_id = g.user_id
          JOIN users u ON u.id = g.user_id
-        WHERE g.project_id = ? AND g.role_level >= ${VIEWER}`,
+        WHERE g.project_id = ? AND g.role_level >= ${VIEWER}
+          AND pm.role_level < ${MAINTAINER}
+          -- Maintainers and Owners see the new lane by role: not offered. One
+          -- read for every path the resolver counts at 600+ (creator, team,
+          -- org), instead of resolving each person in turn.
+          AND NOT EXISTS (SELECT 1 FROM projects p
+                           WHERE p.id = g.project_id AND p.created_by = g.user_id)
+          AND NOT EXISTS (SELECT 1 FROM group_project_grants gpg
+                            JOIN group_members gm ON gm.group_id = gpg.group_id
+                           WHERE gpg.project_id = g.project_id AND gm.user_id = g.user_id
+                             AND gpg.role_level >= ${MAINTAINER})
+          AND NOT EXISTS (SELECT 1 FROM projects p
+                            JOIN org_members om ON om.org_id = p.org_id
+                           WHERE p.id = g.project_id AND om.user_id = g.user_id
+                             AND om.role_level >= ${MAINTAINER})`,
     )
     .bind(projectId)
     .all<{
@@ -105,7 +118,7 @@ export async function loadNewLaneGrantCandidates(
       username: string
       display_name: string | null
     }>()
-  const people = new Map<number, NewLanePersonCandidate & { projectRole: number }>()
+  const people = new Map<number, NewLanePersonCandidate>()
   for (const row of grantRows ?? []) {
     if (!readable.has(row.lane)) continue
     const userId = Number(row.user_id)
@@ -116,25 +129,19 @@ export async function loadNewLaneGrantCandidates(
       displayName: row.display_name ?? null,
       roleLevel: 0,
       laneNames: [],
-      projectRole: Number(row.project_role),
     }
     entry.roleLevel = Math.max(entry.roleLevel, Number(row.role_level))
     entry.laneNames.push(laneName.get(row.lane) ?? row.lane)
     people.set(userId, entry)
   }
-  const keptPeople: NewLanePersonCandidate[] = []
-  for (const entry of people.values()) {
-    // Maintainers and Owners see the new lane by role; nothing to offer.
-    const role = await resolveProjectRoleShared(db, { id: String(entry.userId) }, projectId)
-    if (!role || role.level >= MAINTAINER || role.level < VIEWER) continue
-    keptPeople.push({
-      userId: entry.userId,
-      username: entry.username,
-      displayName: entry.displayName,
-      roleLevel: Math.min(Math.max(entry.roleLevel, entry.projectRole), MAINTAINER - 100),
-      laneNames: entry.laneNames.sort((a, b) => a.localeCompare(b)),
-    })
-  }
+  // The role offered is the highest LANE role they hold on the lanes listed
+  // (capped at Lane lead), never their project role: a lead who lowered
+  // someone to Viewer on every lane meant Viewer.
+  const keptPeople: NewLanePersonCandidate[] = [...people.values()].map((entry) => ({
+    ...entry,
+    roleLevel: Math.min(entry.roleLevel, MAINTAINER - 100),
+    laneNames: entry.laneNames.sort((a, b) => a.localeCompare(b)),
+  }))
   keptPeople.sort((a, b) => (a.displayName ?? a.username).localeCompare(b.displayName ?? b.username))
 
   const { results: teamRows } = await db

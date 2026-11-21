@@ -670,3 +670,75 @@ describe("POST /:projectId/merge-sibling — the donor's people keep their work 
     expect(teamLanes.map((row) => row.lane_id)).toEqual([newLane!.id])
   })
 })
+
+describe("POST /:projectId/merge-sibling — carried access stays on the lane (AQU-2355 review)", () => {
+  it("a donor Maintainer leads the merged lane only; a team already higher on the host is carried as people", async () => {
+    const sql = (text: string, ...params: unknown[]) => env.AQUILLA_PG.prepare(text).bind(...params).run()
+    for (const [id, name] of [
+      [80, "lead80"],
+      [81, "donor-maint"],
+      [82, "crew-member"],
+      [89, "owner89"],
+    ] as const) {
+      await seedUser(id, name)
+    }
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (80, 'Org80', 89)")
+    await seedProject("host-r", "Host", 89)
+    await seedProject("donor-r", "Donor", 89)
+    await sql("UPDATE projects SET org_id = 80 WHERE id IN ('host-r', 'donor-r')")
+    await grant("host-r", 80, 500)
+    await grant("donor-r", 80, 500)
+    await seedHostLane("host-r", { id: "lane-rfr", tag: "fr" })
+    await seedHostLane("donor-r", { id: "lane-rsw", tag: "", name: "Swahili" })
+    // A Maintainer of the donor, not on the host.
+    await grant("donor-r", 81, 600)
+    // A team that is a Reviewer team on the donor but a Project Lead team on the host.
+    await sql("INSERT INTO groups (id, org_id, name, created_by) VALUES (86, 80, 'Crew', 89)")
+    await sql("INSERT INTO group_members (group_id, user_id) VALUES (86, 82)")
+    await sql(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES (86, 'donor-r', 300, 89, TRUE), (86, 'host-r', 500, 89, TRUE)",
+    )
+    await sql("INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (86, 'donor-r', 'lane-rsw'), (86, 'host-r', 'lane-rfr')")
+
+    mockFold({ merged: 0, skipped: [], lane: "sw", donorLaneId: "lane-rsw" })
+    const res = await post("host-r", await jwtFor("lead80"), { donorProjectId: "donor-r", lane: "sw", donorLaneId: "lane-rsw" })
+    expect(res.status).toBe(200)
+    const lane = await env.AQUILLA_PG.prepare(
+      "SELECT id FROM lanes WHERE project_id = 'host-r' AND role = 'target' AND legacy_tag = 'sw'",
+    ).first<{ id: string }>()
+    const row = async (userId: number) =>
+      env.AQUILLA_PG.prepare(
+        "SELECT role_level, team_group_id FROM project_member_lane_roles WHERE project_id = 'host-r' AND user_id = ? AND lane = ?",
+      )
+        .bind(userId, lane!.id)
+        .first<{ role_level: number; team_group_id: number | null }>()
+
+    // Finding 1: Lane lead on the merged lane, Contributor on the project.
+    expect((await row(81))?.role_level).toBe(500)
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = 'host-r' AND user_id = 81",
+    ).first<{ role_level: number }>()
+    expect(member?.role_level).toBe(400)
+    const jwt81 = await jwtFor("donor-maint")
+    const invite = await app.request(
+      "/api/v2/projects/host-r/invites",
+      { method: "POST", headers: authHeader(jwt81), body: JSON.stringify({ role: 400 }) },
+      env,
+    )
+    expect(invite.status).toBe(403)
+    const addLanguage = await app.request(
+      "/api/v2/projects/host-r/lanes",
+      { method: "POST", headers: authHeader(jwt81), body: JSON.stringify({ name: "", language: "Zulu" }) },
+      env,
+    )
+    expect(addLanguage.status).toBe(403)
+
+    // Finding 2: the team's host role (500) does not reach B's work; its member
+    // is carried at the donor role (300), as a person, and the team is not linked.
+    expect(await row(82)).toEqual({ role_level: 300, team_group_id: null })
+    const { results: linked } = await env.AQUILLA_PG.prepare(
+      "SELECT lane_id FROM group_project_lanes WHERE group_id = 86 AND project_id = 'host-r'",
+    ).all<{ lane_id: string }>()
+    expect(linked.map((r) => r.lane_id)).toEqual(["lane-rfr"])
+  })
+})

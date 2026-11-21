@@ -623,17 +623,17 @@ async function teamLaneAccess(
   // the project has when the team changes) until
   // scripts/neon-explicit-lane-grants.ts converts it. Honouring it here is what
   // makes deploying this code before that script safe: nobody's lanes shrink.
+  // A living attachment covers every target lane: read them once per call.
+  const living = teams.some((team) => !laneFlag(team.lanes_explicit))
+  const allLaneIds = living ? (await loadTargetLaneIdentities(db, projectId)).map((lane) => lane.id) : []
   for (const team of teams) {
     const groupId = Number(team.group_id)
     const covered = laneFlag(team.lanes_explicit)
       ? await loadStoredTeamLaneIds(db, groupId, projectId)
-      : (await loadTargetLaneIdentities(db, projectId)).map((lane) => lane.id)
+      : allLaneIds
     for (const laneId of covered) if (!teamByLane.has(laneId)) teamByLane.set(laneId, groupId)
   }
-  if (teams.some((team) => !laneFlag(team.lanes_explicit))) {
-    const lanes = await loadTargetLaneIdentities(db, projectId)
-    return { explicit: false, laneIds: lanes.map((lane) => lane.id), teamByLane }
-  }
+  if (living) return { explicit: false, laneIds: allLaneIds, teamByLane }
   return { explicit: true, laneIds: [...teamByLane.keys()], teamByLane }
 }
 

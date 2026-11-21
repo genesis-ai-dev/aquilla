@@ -56,6 +56,8 @@ export interface ProjectInfo {
   orgId: number | null
   /** Current target lanes, in display order. */
   lanes: ReadonlyArray<{ id: string; name: string }>
+  /** Archived target lanes, only so a row naming one can print its name. */
+  archivedLanes?: ReadonlyArray<{ id: string; name: string }>
 }
 
 export interface UserInfo {
@@ -293,8 +295,12 @@ export function renderContext(...computations: AccessComputation[]): RenderConte
 
 function laneNames(ctx: RenderContext, projectId: string, ids: readonly string[]): string {
   if (ids.length === 0) return "—"
-  const lanes = ctx.projects.get(projectId)?.lanes ?? []
-  return ids.map((id) => lanes.find((l) => l.id === id)?.name || id).join(", ")
+  const p = ctx.projects.get(projectId)
+  const lanes = p?.lanes ?? []
+  const archived = p?.archivedLanes ?? []
+  return ids
+    .map((id) => lanes.find((l) => l.id === id)?.name || (archived.find((l) => l.id === id)?.name ?? id) + (archived.some((l) => l.id === id) ? " (archived)" : ""))
+    .join(", ")
 }
 
 function lanesCell(ctx: RenderContext, projectId: string, role: number | null, ids: readonly string[]): string {

@@ -296,26 +296,34 @@ mergeSibling.post(
     // are linked to the new lane and its members get the lane role they had
     // (services/merge-lane-access.ts). Before the archive, which ends every
     // path into the donor.
-    if (hostLaneId) {
-      await grantCreatedLaneToActor(c.env.AQUILLA_PG, hostId, hostLaneId, user.id)
-      await carryDonorLaneAccess(c.env.AQUILLA_PG, {
-        donorProjectId,
-        donorLaneId: fold.result.donorLaneId ?? null,
-        hostProjectId: hostId,
-        hostLaneId,
-        grantedBy: user.id,
-      })
+    // One transaction where the handle offers one, so the donor is never
+    // archived with its people half carried (the carry is idempotent too, so
+    // a retried merge on a handle without transactions finishes the job).
+    const carryAndArchive = async (db: AquillaDb) => {
+      if (hostLaneId) {
+        await grantCreatedLaneToActor(db, hostId, hostLaneId, user.id)
+        await carryDonorLaneAccess(db, {
+          donorProjectId,
+          donorLaneId: fold.result.donorLaneId ?? null,
+          hostProjectId: hostId,
+          hostLaneId,
+          grantedBy: user.id,
+        })
+      }
+      // Archive the donor (existing archive semantics: stamp archived_at/by).
+      await db
+        .prepare(
+          `UPDATE projects
+              SET archived_at = CURRENT_TIMESTAMP,
+                  archived_by = ?
+            WHERE id = ? AND archived_at IS NULL`,
+        )
+        .bind(user.id, donorProjectId)
+        .run()
     }
-
-    // Archive the donor (existing archive semantics: stamp archived_at/by).
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE projects
-          SET archived_at = CURRENT_TIMESTAMP,
-              archived_by = ?
-        WHERE id = ? AND archived_at IS NULL`,
-    )
-      .bind(user.id, donorProjectId)
-      .run()
+    const pg = c.env.AQUILLA_PG
+    if (pg.transaction) await pg.transaction(carryAndArchive)
+    else await carryAndArchive(pg)
 
     // Write the merge pointer into the donor's settings blob so the donor
     // knows where its content went (and the UI can render a "merged into …"

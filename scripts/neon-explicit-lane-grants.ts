@@ -32,6 +32,7 @@ import {
   applyPlanToRaw,
   ddCrossCheck,
   planExplicitLaneGrants,
+  untaggedTeamLaneRows,
   planGrantsAdded,
   type ExplicitLaneGrantsPlan,
 } from "./lib/explicit-lane-grants-plan"
@@ -78,6 +79,27 @@ function ddAppendix(raw: RawAccessTables): string {
   return lines.join("\n")
 }
 
+function untaggedAppendix(raw: RawAccessTables): string {
+  const u = untaggedTeamLaneRows(raw)
+  const lines = [
+    "## Appendix: grants a team change cannot place (for AQU-2354)",
+    "",
+    "Since migration 0209 a lane grant records the team it exists because of, and leaving that team removes it. " +
+      "Rows written before 0209 carry no team, so for a **direct** member they count as direct and survive a team change, " +
+      "even where a team gave them. These are a direct member's untagged rows on a lane one of their teams covers — " +
+      "each could be direct, team-given, or both; the data cannot tell. Read-only count; behaviour is unchanged.",
+    "",
+    `**${u.rows} row(s), ${u.people} people.**`,
+    "",
+  ]
+  if (u.byOrg.length > 0) {
+    lines.push("| Organization | Rows | People | Projects |", "|---|---|---|---|")
+    for (const o of u.byOrg) lines.push(`| ${o.org.replace(/\|/g, "\\|")} | ${o.rows} | ${o.people} | ${o.projects} |`)
+    lines.push("")
+  }
+  return lines.join("\n")
+}
+
 function buildReport(raw: RawAccessTables, plan: ExplicitLaneGrantsPlan, mode: string, sourceNote?: string): { markdown: string; json: unknown; unintendedLosses: number } {
   const before = computeAccess(raw, AQU_1781_RULE)
   const after = computeAccess(applyPlanToRaw(raw, plan), AQU_2355_RULE)
@@ -97,7 +119,7 @@ function buildReport(raw: RawAccessTables, plan: ExplicitLaneGrantsPlan, mode: s
       ` and ${plan.teamLinks.reduce((n, t) => n + t.laneIds.length, 0)} \`group_project_lanes\` row(s) (migration ${MIGRATION_NAME}). It writes no lane-grant row and deletes nothing.`,
   ].join("\n")
   const ctx = renderContext(before, after)
-  const markdown = renderAccessReportMarkdown(report, ctx, { intro, appendix: ddAppendix(raw) })
+  const markdown = renderAccessReportMarkdown(report, ctx, { intro, appendix: ddAppendix(raw) + "\n" + untaggedAppendix(raw) })
   return { markdown, json: { report, plan }, unintendedLosses: report.totals.unintendedLosses }
 }
 

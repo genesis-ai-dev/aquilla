@@ -7,11 +7,12 @@
 // (2026-11-20): B's people keep it.
 //
 //   * Teams attached to B that covered the folded lane are linked to the new
-//     lane on A (attached to A if they were not, at their role on B capped
-//     below Maintainer, listing only that lane), and their roster is
-//     reconciled — so the access stays a TEAM path, and leaving the team
-//     takes it away again (AQU-2354). A team from another organization cannot
-//     be attached to A; its members are carried as people instead.
+//     lane on A (attached to A if they were not, listing only that lane), and
+//     their roster is reconciled — so the access stays a TEAM path, and
+//     leaving the team takes it away again (AQU-2354). A team from another
+//     organization cannot be attached to A, and a team already on A at a
+//     HIGHER role than it had on B would hand B's work to its members at that
+//     higher role; in both cases its members are carried as people instead.
 //   * People with access to B in their own right (a direct membership or B's
 //     creator) get a direct grant on the new lane at the lane role they had on
 //     B: their grant on the folded lane, or Lane lead (500) for a Maintainer or
@@ -19,6 +20,16 @@
 //     lane on B gets nothing. Someone new to A joins it limited to that lane.
 //   * Nobody is raised: a person already at Maintainer or above on A is left
 //     alone, and an existing grant on the lane is never lowered.
+//   * The role on the merged LANE is what carries (up to Lane lead, 500). The
+//     project-level role written on A — a new member's `project_members` row,
+//     a newly attached team — is at most Contributor (400): project-wide 500
+//     opens A's invites, languages and assignment, which B's people never had
+//     on A. The lane row at 500 makes them Lane lead on that lane only (the
+//     wall takes the max of the project role and the lane row).
+//
+// Idempotent: every write is an upsert or `ON CONFLICT`, so a retried merge
+// writes nothing twice. The route runs this and the donor's archive in one
+// transaction where the database handle offers one.
 //
 // Org-level Maintainers of B's organization are not carried: in the same
 // organization they already reach A, and across organizations a merge is not
@@ -28,6 +39,7 @@ import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { applyTeamRosterLaneChecks } from "./lane-grants"
 
 const VIEWER = 100
+const CONTRIBUTOR = 400
 const LANE_LEAD = 500
 const MAINTAINER = 600
 
@@ -93,15 +105,23 @@ export async function carryDonorLaneAccess(
         .first<{ ok: number }>()
       if (!covered) continue
     }
-    const role = Math.min(Number(row.role_level), LANE_LEAD)
-    if (hostOrg != null && Number(row.org_id) === hostOrg) {
+    const laneRole = Math.min(Number(row.role_level), LANE_LEAD)
+    const onHost = await db
+      .prepare("SELECT role_level FROM group_project_grants WHERE group_id = ? AND project_id = ?")
+      .bind(groupId, hostProjectId)
+      .first<{ role_level: number }>()
+    const linkable =
+      hostOrg != null &&
+      Number(row.org_id) === hostOrg &&
+      (onHost == null || Number(onHost.role_level) <= Number(row.role_level))
+    if (linkable) {
       await db
         .prepare(
           `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit)
            VALUES (?, ?, ?, ?, TRUE)
            ON CONFLICT (group_id, project_id) DO NOTHING`,
         )
-        .bind(groupId, hostProjectId, role, grantedBy)
+        .bind(groupId, hostProjectId, Math.min(laneRole, CONTRIBUTOR), grantedBy)
         .run()
       await db
         .prepare(
@@ -111,9 +131,19 @@ export async function carryDonorLaneAccess(
         .bind(groupId, hostProjectId, hostLaneId)
         .run()
       await applyTeamRosterLaneChecks(db, groupId, hostProjectId, grantedBy)
+      // The team's rows on the merged lane carry its B role (up to Lane lead),
+      // even where the attachment on A stops at Contributor.
+      await db
+        .prepare(
+          `UPDATE project_member_lane_roles SET role_level = GREATEST(role_level, ?)
+            WHERE project_id = ? AND lane = ? AND team_group_id = ?`,
+        )
+        .bind(laneRole, hostProjectId, hostLaneId, groupId)
+        .run()
       teams++
       continue
     }
+    const role = laneRole
     const { results: members } = await db
       .prepare("SELECT user_id, role_level FROM group_members WHERE group_id = ?")
       .bind(groupId)
@@ -164,9 +194,10 @@ export async function carryDonorLaneAccess(
       await db
         .prepare(
           `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
-           VALUES (?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (project_id, user_id) DO NOTHING`,
         )
-        .bind(hostProjectId, userId, level, grantedBy)
+        .bind(hostProjectId, userId, Math.min(level, CONTRIBUTOR), grantedBy)
         .run()
     }
     if (!member || scoped) {

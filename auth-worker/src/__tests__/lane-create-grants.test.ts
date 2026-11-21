@@ -256,6 +256,21 @@ describe("AQU-2355 POST /lanes grants the new lane to nobody below Maintainer", 
     expect(await teamLanes()).toEqual([laneId, "ln-fr"].sort())
   })
 
+  it("offers and grants the lane role someone holds, not their project role (a Viewer stays a Viewer)", async () => {
+    // Project role Contributor (400), lowered by a lead to Viewer on French.
+    await sql("UPDATE project_member_lane_roles SET role_level = 100 WHERE project_id = ? AND user_id = 2", PROJECT)
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    const body = (await res.json()) as { people: Array<{ userId: number; roleLevel: number }> }
+    expect(body.people.find((p) => p.userId === 2)?.roleLevel).toBe(100)
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
+    const laneId = await laneIdForTag("Spanish")
+    expect((await grantsFor(2)).find((g) => g.lane === laneId)?.level).toBe(100)
+  })
+
   it("refuses a pick that is not on the offer, and creates no lane", async () => {
     // 4 is a Maintainer (sees every lane by role); 5 holds no lane.
     for (const userId of [4, 5]) {

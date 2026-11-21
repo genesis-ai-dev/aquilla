@@ -11,7 +11,7 @@ import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { diffAccess } from "./lib/access-report"
 import { AQU_1781_RULE, AQU_2355_RULE, computeAccess, loadRawAccessTables, type ReadQuery } from "./lib/access-snapshot"
-import { applyPlanToRaw, ddCrossCheck, planExplicitLaneGrants, planGrantsAdded } from "./lib/explicit-lane-grants-plan"
+import { applyPlanToRaw, ddCrossCheck, planExplicitLaneGrants, planGrantsAdded, untaggedTeamLaneRows } from "./lib/explicit-lane-grants-plan"
 
 const migration = readFileSync(
   new URL("../db/postgres/migrations/0208_team_attachments_list_their_lanes.sql", import.meta.url),
@@ -72,7 +72,8 @@ describe("AQU-2355 dry run and migration 0208", () => {
     const raw = await loadRawAccessTables(query)
     const plan = planExplicitLaneGrants(raw)
     expect(plan.teamLinks).toEqual([
-      { groupId: 10, projectId: "p-two", laneIds: ["fr", "es"], roleLevel: 100, projectArchived: false },
+      // Archived "old" too: the living attachment covered it (AQU-2355 review).
+      { groupId: 10, projectId: "p-two", laneIds: ["fr", "es", "old"], roleLevel: 100, projectArchived: false },
     ])
     const expected = applyPlanToRaw(raw, plan)
 
@@ -134,5 +135,14 @@ describe("AQU-2355 dry run and migration 0208", () => {
       ["Viewer 100", 1, 1, 0, 1, 0, 0],
       ["200–500", 3, 2, 1, 0, 1, 1],
     ])
+  })
+
+  it("counts a direct member's untagged rows on lanes a team of theirs covers (AQU-2354 backfill question)", async () => {
+    // every-lane (2) is a direct member of p-one and on the Codex team that lists Swahili there.
+    expect(untaggedTeamLaneRows(await loadRawAccessTables(query))).toEqual({
+      rows: 1,
+      people: 1,
+      byOrg: [{ org: "Come and See", rows: 1, people: 1, projects: 1 }],
+    })
   })
 })

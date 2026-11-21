@@ -38,7 +38,8 @@ export interface RawAccessTables {
   groupMembers: Array<{ group_id: number; user_id: number; role_level: number | null }>
   groupProjectGrants: Array<{ group_id: number; project_id: string; role_level: number; lanes_explicit: boolean }>
   groupProjectLanes: Array<{ group_id: number; project_id: string; lane_id: string }>
-  laneGrants: Array<{ project_id: string; user_id: number; lane: string; role_level: number }>
+  /** `team_group_id` (0209) is null on a database without the column. */
+  laneGrants: Array<{ project_id: string; user_id: number; lane: string; role_level: number; team_group_id?: number | null }>
   /** `project_member_scopes` rows with kind = 'lane'. */
   laneScopes: Array<{ project_id: string; user_id: number; value: string }>
 }
@@ -310,6 +311,7 @@ export function computeAccess(raw: RawAccessTables, rule: FutureRule): AccessCom
       name: p.name,
       orgId: p.org_id == null ? null : Number(p.org_id),
       lanes: currentLanes(idx, p.id).map((l) => ({ id: l.id, name: l.name })),
+      archivedLanes: (idx.lanesByProject.get(p.id) ?? []).filter((l) => l.archived).map((l) => ({ id: l.id, name: l.name })),
     }))
   const users: UserInfo[] = raw.users.filter((u) => userIds.has(Number(u.id))).map((u) => ({ id: Number(u.id), username: u.username }))
   return { orgs, projects, users, access }
@@ -328,6 +330,12 @@ function bool(v: unknown): boolean {
 export async function loadRawAccessTables(db: ReadQuery): Promise<RawAccessTables> {
   const rows = async (sql: string) => (await db.query(sql)).rows
   const num = (v: unknown) => Number(v)
+  const hasColumn = async (table: string, column: string) =>
+    (
+      await rows(
+        `SELECT 1 FROM information_schema.columns WHERE table_name = '${table}' AND column_name = '${column}'`,
+      )
+    ).length > 0
   return {
     orgs: (await rows(`SELECT id, name FROM organizations`)).map((r) => ({ id: num(r.id), name: (r.name as string | null) ?? null })),
     projects: (await rows(`SELECT id, name, org_id, created_by, archived_at IS NOT NULL AS archived FROM projects`)).map((r) => ({
@@ -377,11 +385,18 @@ export async function loadRawAccessTables(db: ReadQuery): Promise<RawAccessTable
       project_id: String(r.project_id),
       lane_id: String(r.lane_id),
     })),
-    laneGrants: (await rows(`SELECT project_id, user_id, lane, role_level FROM project_member_lane_roles`)).map((r) => ({
+    laneGrants: (
+      await rows(
+        (await hasColumn("project_member_lane_roles", "team_group_id"))
+          ? `SELECT project_id, user_id, lane, role_level, team_group_id FROM project_member_lane_roles`
+          : `SELECT project_id, user_id, lane, role_level, NULL AS team_group_id FROM project_member_lane_roles`,
+      )
+    ).map((r) => ({
       project_id: String(r.project_id),
       user_id: num(r.user_id),
       lane: String(r.lane),
       role_level: num(r.role_level),
+      team_group_id: r.team_group_id == null ? null : num(r.team_group_id),
     })),
     laneScopes: (await rows(`SELECT project_id, user_id, value FROM project_member_scopes WHERE kind = 'lane'`)).map((r) => ({
       project_id: String(r.project_id),

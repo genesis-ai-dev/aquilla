@@ -1,0 +1,61 @@
+name: Walk status
+
+# Reports each PR's QA walk on its head commit as the `qa-walk` status
+# (scripts/release-walk-status.mjs has the reasoning). The walk itself is a
+# comment an agent posts (e2e/journeys/PR-BOT.md); this turns "is there one,
+# at this head, and what did it say" into something the PR page shows.
+#
+# Two triggers:
+# - A comment on a PR: a walk may just have been posted or edited.
+# - A push to a PR, or its opening: the head moved, so the walk at the old
+#   head no longer counts and the status starts again at pending.
+#
+# The script is always dev's copy. `issue_comment` runs this workflow from
+# the default branch; `pull_request` checks out the base, so a PR cannot
+# report its own walk as passed by editing the reader.
+
+on:
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  group: walk-status-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  status:
+    # A comment on an issue that is not a PR has no walk to read.
+    # A push from a fork carries a read-only token and cannot post a status;
+    # the comment trigger, which runs from this repository, covers those PRs.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WALK_TRUSTED_LOGINS: ${{ vars.WALK_TRUSTED_LOGINS }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        # Read from base, so until this workflow's own PR merges there is
+        # nothing to run.
+        run: |
+          if [ ! -f scripts/release-walk-status.mjs ]; then
+            echo "scripts/release-walk-status.mjs is not on the base branch yet; nothing to report"
+            exit 0
+          fi
+          node scripts/release-walk-status.mjs "$PR_NUMBER"

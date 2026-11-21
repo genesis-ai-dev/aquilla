@@ -217,9 +217,9 @@ describe("EditorTable — Hide cell / Show cell", () => {
     renderTable({ project: projectAt(ROLE.CONTRIBUTOR), cellStore: makeStore() }, { onSetCellHidden: () => {} })
     await screen.findByText("First cue")
 
-    // A contributor on an editable untimed file has nothing else to offer
-    // either, so the trigger itself does not render.
-    expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
+    // Copy source text is still offered. Hide is not, even as a disabled row.
+    openMenu("cue-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(screen.queryByTestId("cell-menu-toggle-hidden")).toBeNull()
   })
 

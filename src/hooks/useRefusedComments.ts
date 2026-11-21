@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox } from "@/lib/sync/outbox"
 import {
   commentRefusalsIn,
   sameCommentRefusals,
@@ -29,7 +29,7 @@ export function useRefusedComments(projectId: string | null): CommentRefusal[] {
     let cancelled = false
 
     async function refresh() {
-      const all = await peekOutboxBatch(1000)
+      const all = await peekOutboxShared(1000)
       if (cancelled || !projectId) return
       const next = commentRefusalsIn(all, projectId)
       setRefusals((prev) => (sameCommentRefusals(prev, next) ? prev : next))

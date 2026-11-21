@@ -1284,6 +1284,8 @@ export const id: Catalog = {
   "editor.empty.noMediaSegments": "Belum ada segmen media",
   "editor.empty.mediaLayerHint": "Impor file audio atau video, atau rekam sebuah take, untuk mengisi lapisan media.",
   "editor.empty.mediaLayerWaiting": "Rekaman file ini belum ditambahkan. Ketua proyek dapat menambahkannya.",
+  "editor.empty.mediaNeedsEveryLanguage": "Menambahkan rekaman file ini memerlukan akses ke setiap bahasa dalam proyek ini. Pengelola dapat menambahkannya.",
+  "editor.empty.mediaAccessChecking": "Memeriksa apakah Anda dapat menambahkan rekaman file ini…",
   "editor.note.footnote": "Catatan kaki",
   "editor.note.endnote": "Catatan akhir",
   "editor.note.crossReference": "Rujuk silang",

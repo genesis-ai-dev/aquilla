@@ -1539,6 +1539,8 @@ export const am: Catalog = {
   "editor.empty.noMediaSegments": "እስካሁን የሚዲያ ክፍሎች የሉም",
   "editor.empty.mediaLayerHint": "የሚዲያውን ንብርብር ለመሙላት የድምጽ ወይም የቪዲዮ ፋይል ያስመጡ፣ ወይም ቀረጻ ይቅረጹ።",
   "editor.empty.mediaLayerWaiting": "የዚህ ፋይል ቀረጻ እስካሁን አልተጨመረም። የፕሮጀክት መሪ መጨመር ይችላል።",
+  "editor.empty.mediaNeedsEveryLanguage": "የዚህን ፋይል ቀረጻ ለመጨመር በዚህ ፕሮጀክት ውስጥ ላሉ ሁሉም ቋንቋዎች መዳረሻ ያስፈልጋል። ጠባቂ መጨመር ይችላል።",
+  "editor.empty.mediaAccessChecking": "የዚህን ፋይል ቀረጻ መጨመር እንደሚችሉ በማረጋገጥ ላይ…",
   "editor.note.footnote": "የግርጌ ማስታወሻ",
   "editor.note.endnote": "የመጨረሻ ማስታወሻ",
   "editor.note.crossReference": "ተሻጋሪ ማጣቀሻ",

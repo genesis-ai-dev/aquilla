@@ -1539,6 +1539,8 @@ export const ur: Catalog = {
   "editor.empty.noMediaSegments": "ابھی کوئی میڈیا قطعہ نہیں",
   "editor.empty.mediaLayerHint": "میڈیا پرت بھرنے کے لیے آڈیو یا ویڈیو فائل درآمد کریں، یا ٹیک ریکارڈ کریں۔",
   "editor.empty.mediaLayerWaiting": "اس فائل کی ریکارڈنگ ابھی شامل نہیں ہوئی۔ سربراہِ منصوبہ اسے شامل کر سکتا ہے۔",
+  "editor.empty.mediaNeedsEveryLanguage": "اس فائل کی ریکارڈنگ شامل کرنے کے لیے اس منصوبے کی ہر زبان تک رسائی درکار ہے۔ نگہدار اسے شامل کر سکتا ہے۔",
+  "editor.empty.mediaAccessChecking": "جانچ ہو رہی ہے کہ کیا آپ اس فائل کی ریکارڈنگ شامل کر سکتے ہیں…",
   "editor.note.footnote": "حاشیہ",
   "editor.note.endnote": "اختتامی حاشیہ",
   "editor.note.crossReference": "حوالہ جات",

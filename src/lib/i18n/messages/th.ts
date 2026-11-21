@@ -1272,6 +1272,8 @@ export const th: Catalog = {
   "editor.lane.showArchived": "แสดงที่เก็บถาวร ({count})",
   "editor.empty.noMediaSegments": "ยังไม่มีช่วงสื่อ",
   "editor.empty.mediaLayerHint": "นำเข้าไฟล์เสียงหรือวิดีโอ หรือบันทึกเสียงสักเทค เพื่อเพิ่มข้อมูลในเลเยอร์สื่อ",
+  "editor.empty.mediaNeedsEveryLanguage": "การเพิ่มเสียงบันทึกของไฟล์นี้ต้องมีสิทธิ์เข้าถึงทุกภาษาในโปรเจกต์นี้ ผู้ดูแลสามารถเพิ่มได้",
+  "editor.empty.mediaAccessChecking": "กำลังตรวจสอบว่าคุณเพิ่มเสียงบันทึกของไฟล์นี้ได้หรือไม่…",
   "editor.note.footnote": "เชิงอรรถ",
   "editor.note.endnote": "เชิงอรรถท้ายเล่ม",
   "editor.note.crossReference": "อ้างอิงโยง",

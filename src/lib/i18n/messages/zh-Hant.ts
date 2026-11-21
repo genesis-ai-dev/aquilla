@@ -1272,6 +1272,8 @@ export const zh_Hant: Catalog = {
   "editor.lane.showArchived": "顯示已封存的（{count}）",
   "editor.empty.noMediaSegments": "尚無任何媒體區段",
   "editor.empty.mediaLayerHint": "請匯入音訊或影片檔案，或錄製一段錄音，以填入媒體層。",
+  "editor.empty.mediaNeedsEveryLanguage": "新增此檔案的錄音需要能存取此專案的所有語言。維護者可以新增。",
+  "editor.empty.mediaAccessChecking": "正在檢查你是否可以新增此檔案的錄音…",
   "editor.note.footnote": "註腳",
   "editor.note.endnote": "尾註",
   "editor.note.crossReference": "相互參照",

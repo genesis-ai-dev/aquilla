@@ -1539,6 +1539,8 @@ export const ha: Catalog = {
   "editor.empty.noMediaSegments": "Babu sassan midiya tukuna",
   "editor.empty.mediaLayerHint": "Ku shigo da fayil ɗin sauti ko bidiyo, ko ku naɗa ɗauka, don cika bangaren midiya.",
   "editor.empty.mediaLayerWaiting": "Ba a ƙara rikodin wannan fayil ba tukuna. Shugaban aiki zai iya ƙara shi.",
+  "editor.empty.mediaNeedsEveryLanguage": "Ƙara rikodin wannan fayil yana buƙatar damar shiga dukkan harsunan wannan aiki. Mai kula zai iya ƙara shi.",
+  "editor.empty.mediaAccessChecking": "Ana duba ko za ka iya ƙara rikodin wannan fayil…",
   "editor.note.footnote": "Bayanin ƙasa",
   "editor.note.endnote": "Bayanin ƙarshe",
   "editor.note.crossReference": "Maganganun ƙetare",

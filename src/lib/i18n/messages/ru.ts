@@ -1298,6 +1298,8 @@ export const ru: Catalog = {
   "editor.empty.noMediaSegments": "Медиафрагментов пока нет",
   "editor.empty.mediaLayerHint": "Импортируйте аудио- или видеофайл либо запишите дубль, чтобы заполнить медиаслой.",
   "editor.empty.mediaLayerWaiting": "Запись для этого файла ещё не добавлена. Её может добавить руководитель проекта.",
+  "editor.empty.mediaNeedsEveryLanguage": "Чтобы добавить запись для этого файла, нужен доступ ко всем языкам проекта. Её может добавить куратор.",
+  "editor.empty.mediaAccessChecking": "Проверяем, можете ли вы добавить запись для этого файла…",
   "editor.note.footnote": "Сноска",
   "editor.note.endnote": "Примечание в конце",
   "editor.note.crossReference": "Перекрёстная ссылка",

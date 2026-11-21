@@ -1278,6 +1278,8 @@ export const fr: Catalog = {
   "editor.empty.noMediaSegments": "Aucun segment média",
   "editor.empty.mediaLayerHint": "Importez un fichier audio ou vidéo, ou enregistrez une prise, pour remplir le calque média.",
   "editor.empty.mediaLayerWaiting": "L'enregistrement de ce fichier n'a pas encore été ajouté. Un chef de projet peut l'ajouter.",
+  "editor.empty.mediaNeedsEveryLanguage": "Ajouter l'enregistrement de ce fichier nécessite l'accès à toutes les langues de ce projet. Un mainteneur peut l'ajouter.",
+  "editor.empty.mediaAccessChecking": "Vérification de votre accès pour ajouter l'enregistrement de ce fichier…",
   "editor.note.footnote": "Note de bas de page",
   "editor.note.endnote": "Note de fin",
   "editor.note.crossReference": "Référence croisée",

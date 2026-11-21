@@ -1532,6 +1532,8 @@ export const sw: Catalog = {
   "editor.empty.noMediaSegments": "Bado hakuna vipande vya midia",
   "editor.empty.mediaLayerHint": "Ingiza faili ya sauti au ya video, au rekodi toleo, ili kujaza tabaka la midia.",
   "editor.empty.mediaLayerWaiting": "Rekodi ya faili hii bado haijaongezwa. Kiongozi wa mradi anaweza kuiongeza.",
+  "editor.empty.mediaNeedsEveryLanguage": "Kuongeza rekodi ya faili hii kunahitaji ufikiaji wa kila lugha katika mradi huu. Mtunzaji anaweza kuiongeza.",
+  "editor.empty.mediaAccessChecking": "Inakagua kama unaweza kuongeza rekodi ya faili hii…",
   "editor.note.footnote": "Dokezo",
   "editor.note.endnote": "Dokezo la mwisho",
   "editor.note.crossReference": "Rejea mtambuka",

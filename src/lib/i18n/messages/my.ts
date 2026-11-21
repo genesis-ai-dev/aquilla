@@ -1273,6 +1273,8 @@ export const my: Catalog = {
   "editor.lane.showArchived": "သိမ်းထားများ ပြရန် ({count})",
   "editor.empty.noMediaSegments": "မီဒီယာအပိုင်း မရှိသေးပါ",
   "editor.empty.mediaLayerHint": "မီဒီယာအလွှာကို ဖြည့်ရန် အသံ သို့မဟုတ် ဗီဒီယိုဖိုင် တင်သွင်းပါ၊ သို့မဟုတ် အကြိမ်တစ်ခု အသံသွင်းပါ။",
+  "editor.empty.mediaNeedsEveryLanguage": "ဤဖိုင်၏ အသံသွင်းချက်ကို ထည့်ရန် ဤပရောဂျက်ရှိ ဘာသာစကားအားလုံးကို ဝင်ရောက်ခွင့် လိုအပ်သည်။ ထိန်းသိမ်းသူက ထည့်နိုင်သည်။",
+  "editor.empty.mediaAccessChecking": "ဤဖိုင်၏ အသံသွင်းချက်ကို သင် ထည့်နိုင်မနိုင် စစ်ဆေးနေသည်…",
   "editor.note.footnote": "အောက်ခြေမှတ်စု",
   "editor.note.endnote": "နိဂုံးမှတ်စု",
   "editor.note.crossReference": "ဆက်စပ်ကိုးကားချက်",

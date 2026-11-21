@@ -2428,6 +2428,12 @@ export const editor = defineNamespace({
     // telling them to import or record would be a dead end.
     "editor.empty.mediaLayerWaiting":
       "This file's recording hasn't been added yet. A project lead can add it.",
+    // AQU-2682: the same empty file for a Project Lead the server will not
+    // take source audio from (his access does not cover every language), and
+    // the moment before the server has answered.
+    "editor.empty.mediaNeedsEveryLanguage":
+      "Adding this file's recording needs access to every language in this project. A maintainer can add it.",
+    "editor.empty.mediaAccessChecking": "Checking whether you can add this file's recording…",
 
     // — USFM note chips in the source text ————————————————————————
     "editor.note.footnote": "Footnote",
@@ -9510,6 +9516,18 @@ export const editor = defineNamespace({
           "file's recording themselves (below Project Lead, or a viewer): nothing " +
           "is here until a project lead uploads the audio or video. 'Project Lead' " +
           "is the project role name; match the members screen.",
+      },
+      "editor.empty.mediaNeedsEveryLanguage": {
+        description:
+          "Body under editor.empty.noMediaSegments for a Project Lead who may not add " +
+          "the file's recording: it is shared by every language, so adding it needs " +
+          "access to every language of the project, and his does not cover them all. " +
+          "'Maintainer' is the project role name; match the members screen.",
+      },
+      "editor.empty.mediaAccessChecking": {
+        description:
+          "Shown briefly (or while offline) in place of the 'add a recording' action " +
+          "while the app asks the server whether this person may add the file's recording.",
       },
       "editor.note.footnote": {
         description:

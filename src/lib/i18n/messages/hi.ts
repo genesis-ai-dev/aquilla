@@ -1502,6 +1502,8 @@ export const hi: Catalog = {
   "editor.empty.noMediaSegments": "अभी कोई मीडिया खंड नहीं",
   "editor.empty.mediaLayerHint": "मीडिया परत भरने के लिए एक ऑडियो या वीडियो फ़ाइल आयात करें, या एक टेक रिकॉर्ड करें।",
   "editor.empty.mediaLayerWaiting": "इस फ़ाइल की रिकॉर्डिंग अभी नहीं जोड़ी गई। एक परियोजना प्रमुख उसे जोड़ सकता है।",
+  "editor.empty.mediaNeedsEveryLanguage": "इस फ़ाइल की रिकॉर्डिंग जोड़ने के लिए इस परियोजना की हर भाषा तक पहुँच चाहिए। एक अनुरक्षक उसे जोड़ सकता है।",
+  "editor.empty.mediaAccessChecking": "जाँचा जा रहा है कि क्या आप इस फ़ाइल की रिकॉर्डिंग जोड़ सकते हैं…",
   "editor.note.footnote": "पादटिप्पणी",
   "editor.note.endnote": "अंतटिप्पणी",
   "editor.note.crossReference": "प्रति-संदर्भ",

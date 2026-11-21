@@ -1541,6 +1541,8 @@ export const bn: Catalog = {
   "editor.empty.noMediaSegments": "এখনো কোনো মিডিয়া সেগমেন্ট নেই",
   "editor.empty.mediaLayerHint": "মিডিয়া স্তর ভরতে একটি অডিও বা ভিডিও ফাইল আমদানি করুন, অথবা একটি টেক রেকর্ড করুন।",
   "editor.empty.mediaLayerWaiting": "এই ফাইলের রেকর্ডিং এখনো যোগ হয়নি। একজন প্রকল্প প্রধান যোগ করতে পারেন।",
+  "editor.empty.mediaNeedsEveryLanguage": "এই ফাইলের রেকর্ডিং যোগ করতে এই প্রকল্পের প্রতিটি ভাষায় অ্যাক্সেস লাগে। একজন রক্ষণাবেক্ষক যোগ করতে পারেন।",
+  "editor.empty.mediaAccessChecking": "আপনি এই ফাইলের রেকর্ডিং যোগ করতে পারেন কি না যাচাই করা হচ্ছে…",
   "editor.note.footnote": "পাদটীকা",
   "editor.note.endnote": "প্রান্তটীকা",
   "editor.note.crossReference": "ক্রস রেফারেন্স",

@@ -1272,6 +1272,8 @@ export const zh_Hans: Catalog = {
   "editor.lane.showArchived": "显示已封存的（{count}）",
   "editor.empty.noMediaSegments": "尚无任何媒体区段",
   "editor.empty.mediaLayerHint": "请导入音频或视频文件，或录制一段录音，以填入媒体层。",
+  "editor.empty.mediaNeedsEveryLanguage": "添加此文件的录音需要能访问此项目的所有语言。维护者可以添加。",
+  "editor.empty.mediaAccessChecking": "正在检查你是否可以添加此文件的录音…",
   "editor.note.footnote": "注脚",
   "editor.note.endnote": "尾注",
   "editor.note.crossReference": "相互参照",

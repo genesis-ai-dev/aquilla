@@ -1539,6 +1539,8 @@ export const pa: Catalog = {
   "editor.empty.noMediaSegments": "ਹਾਲੇ ਕੋਈ ਮੀਡੀਆ ਹਿੱਸਾ ਨਹੀਂ",
   "editor.empty.mediaLayerHint": "ਮੀਡੀਆ ਪਰਤ ਭਰਨ ਲਈ ਇੱਕ ਆਡੀਓ ਜਾਂ ਵੀਡੀਓ ਫ਼ਾਈਲ ਇੰਪੋਰਟ ਕਰੋ, ਜਾਂ ਇੱਕ ਟੇਕ ਰਿਕਾਰਡ ਕਰੋ.",
   "editor.empty.mediaLayerWaiting": "ਇਸ ਫ਼ਾਈਲ ਦੀ ਰਿਕਾਰਡਿੰਗ ਹਾਲੇ ਨਹੀਂ ਜੁੜੀ. ਪ੍ਰੋਜੈਕਟ ਲੀਡ ਇਸਨੂੰ ਜੋੜ ਸਕਦਾ ਹੈ.",
+  "editor.empty.mediaNeedsEveryLanguage": "ਇਸ ਫ਼ਾਈਲ ਦੀ ਰਿਕਾਰਡਿੰਗ ਜੋੜਨ ਲਈ ਇਸ ਪ੍ਰੋਜੈਕਟ ਦੀ ਹਰ ਭਾਸ਼ਾ ਤੱਕ ਪਹੁੰਚ ਚਾਹੀਦੀ ਹੈ. ਸੰਭਾਲਕ ਇਸਨੂੰ ਜੋੜ ਸਕਦਾ ਹੈ.",
+  "editor.empty.mediaAccessChecking": "ਜਾਂਚ ਕੀਤੀ ਜਾ ਰਹੀ ਹੈ ਕਿ ਕੀ ਤੁਸੀਂ ਇਸ ਫ਼ਾਈਲ ਦੀ ਰਿਕਾਰਡਿੰਗ ਜੋੜ ਸਕਦੇ ਹੋ…",
   "editor.note.footnote": "ਫੁਟਨੋਟ",
   "editor.note.endnote": "ਐਂਡਨੋਟ",
   "editor.note.crossReference": "ਪਾਰ-ਹਵਾਲਾ",

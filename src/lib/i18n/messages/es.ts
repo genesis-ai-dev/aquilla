@@ -1497,6 +1497,8 @@ export const es: Catalog = {
   "editor.empty.noMediaSegments": "Aún sin segmentos de medios",
   "editor.empty.mediaLayerHint": "Importa un archivo de audio o video, o graba una toma, para llenar la capa de medios.",
   "editor.empty.mediaLayerWaiting": "La grabación de este archivo aún no se agregó. Un líder de proyecto puede agregarla.",
+  "editor.empty.mediaNeedsEveryLanguage": "Para agregar la grabación de este archivo se necesita acceso a todos los idiomas de este proyecto. Un mantenedor puede agregarla.",
+  "editor.empty.mediaAccessChecking": "Comprobando si puedes agregar la grabación de este archivo…",
   "editor.note.footnote": "Nota al pie",
   "editor.note.endnote": "Nota final",
   "editor.note.crossReference": "Referencia cruzada",

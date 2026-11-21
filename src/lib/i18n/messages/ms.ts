@@ -1266,6 +1266,8 @@ export const ms: Catalog = {
   "editor.lane.showArchived": "Tunjuk arkib ({count})",
   "editor.empty.noMediaSegments": "Belum ada segmen media",
   "editor.empty.mediaLayerHint": "Import fail audio atau video, atau rakam satu ambilan, untuk mengisi lapisan media.",
+  "editor.empty.mediaNeedsEveryLanguage": "Menambah rakaman fail ini memerlukan akses kepada setiap bahasa dalam projek ini. Penyelenggara boleh menambahnya.",
+  "editor.empty.mediaAccessChecking": "Menyemak sama ada anda boleh menambah rakaman fail ini…",
   "editor.note.footnote": "Nota kaki",
   "editor.note.endnote": "Nota hujung",
   "editor.note.crossReference": "Rujukan silang",

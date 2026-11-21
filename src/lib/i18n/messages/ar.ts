@@ -1273,6 +1273,8 @@ export const ar: Catalog = {
   "editor.lane.showArchived": "عرض المؤرشفة ({count})",
   "editor.empty.noMediaSegments": "لا شرائح وسائط بعد",
   "editor.empty.mediaLayerHint": "استورد ملفًا صوتيًا أو مرئيًا، أو سجّل محاولة، لتعبئة طبقة الوسائط.",
+  "editor.empty.mediaNeedsEveryLanguage": "تتطلب إضافة تسجيل هذا الملف صلاحية الوصول إلى كل لغات هذا المشروع. يمكن للمُشرِف إضافته.",
+  "editor.empty.mediaAccessChecking": "جارٍ التحقق مما إذا كان بإمكانك إضافة تسجيل هذا الملف…",
   "editor.note.footnote": "حاشية",
   "editor.note.endnote": "حاشية ختامية",
   "editor.note.crossReference": "إحالة مرجعية",

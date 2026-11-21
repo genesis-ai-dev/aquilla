@@ -30,7 +30,7 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   // Seed bob in alice's org and give him access to the project.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   // Alice creates a project and imports a file.
   const dash = new Dashboard(alice)
@@ -56,7 +56,7 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   // AQU-1815: carol shares bob's lane (both are added to every current lane)
   // and sits below the org roster floor like him, so she is a lane-mate the
   // @mention picker must name even though the roster is hidden from bob.
-  await addOrgMember(aliceSession.jwt, acme.id, "carol", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "carol", ROLE.VIEWER)
   await addProjectMember(aliceSession.jwt, projectId!, "carol", ROLE.CONTRIBUTOR)
 
   // Alice opens comments drawer and posts.

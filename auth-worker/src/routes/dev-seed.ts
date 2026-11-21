@@ -348,24 +348,25 @@ async function seedDev(db: AquillaDb): Promise<{
   await upsertOrgMember(db, orgId, aliceId, ROLE.MAINTAINER, userId)
   await upsertProjectMember(db, GENESIS_PROJECT_ID, aliceId, ROLE.OWNER, userId)
 
-  // carol is an org contributor with a direct CONTRIBUTOR row on Dev Project.
-  // Below the MAINTAINER settings-write floor, so local QA can hover locked
-  // shared-settings controls (password `dev`; /__dev/login?as=carol).
-  await upsertOrgMember(db, orgId, carolId, ROLE.CONTRIBUTOR, userId)
+  // carol is an org Member (AQU-2352: org roles are Member, Maintainer and
+  // Owner) with a direct CONTRIBUTOR row on Dev Project. Below the MAINTAINER
+  // settings-write floor, so local QA can hover locked shared-settings
+  // controls (password `dev`; /__dev/login?as=carol).
+  await upsertOrgMember(db, orgId, carolId, ROLE.VIEWER, userId)
   await upsertProjectMember(db, DEV_PROJECT_ID, carolId, ROLE.CONTRIBUTOR, userId)
 
-  // AQU-2259: vera is a Viewer and cora a Commenter — on the org (so the org
-  // settings pages show them their read-only view) and with a direct row on
-  // Dev Project (password `dev`; /__dev/login?as=vera, ?as=cora).
+  // AQU-2259: vera is a Viewer and cora a Commenter on Dev Project (direct
+  // rows), and both are org Members, so the org settings pages show them their
+  // read-only view (password `dev`; /__dev/login?as=vera, ?as=cora).
   await upsertOrgMember(db, orgId, veraId, ROLE.VIEWER, userId)
   await upsertProjectMember(db, DEV_PROJECT_ID, veraId, ROLE.VIEWER, userId)
-  await upsertOrgMember(db, orgId, coraId, ROLE.COMMENTER, userId)
+  await upsertOrgMember(db, orgId, coraId, ROLE.VIEWER, userId)
   await upsertProjectMember(db, DEV_PROJECT_ID, coraId, ROLE.COMMENTER, userId)
 
   // Product default for rosterViewMinRole is MAINTAINER, which hides the
-  // members list from carol. Open it to Contributor on Dev Org so the
+  // members list from carol. Open it to Member on Dev Org so the
   // locked-settings hint can link "View Maintainers" and the roster is reachable.
-  await upsertOrgSettingFloor(db, orgId, userId, "rosterViewMinRole", ROLE.CONTRIBUTOR)
+  await upsertOrgSettingFloor(db, orgId, userId, "rosterViewMinRole", ROLE.VIEWER)
 
   // bob is NOT an org member. He reaches Exodus (and only Exodus) via the
   // Reviewers group → the "group" path, and has empty cells everywhere else.

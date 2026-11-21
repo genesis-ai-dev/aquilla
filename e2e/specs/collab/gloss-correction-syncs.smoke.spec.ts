@@ -74,8 +74,8 @@ test("a corrected statistical gloss persists and reaches other members", async (
   test.setTimeout(150_000)
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
-  await addOrgMember(aliceSession.jwt, acme.id, "carol", ROLE.REVIEWER)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
+  await addOrgMember(aliceSession.jwt, acme.id, "carol", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()

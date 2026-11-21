@@ -5,7 +5,7 @@
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TVars } from "@/lib/i18n/translate"
-import { ORG_WIDE_ACCESS_FLOOR, roleDisplayLabel, roleNameKey } from "@/lib/frontier/roles"
+import { ORG_WIDE_ACCESS_FLOOR, orgRoleName, roleDisplayLabel, roleNameKey } from "@/lib/frontier/roles"
 
 export type GrantTranslator = (key: MessageKey, vars?: TVars) => string
 
@@ -56,8 +56,9 @@ function formatList(items: readonly string[], locale: string): string {
   return new Intl.ListFormat(locale, { type: "conjunction", style: "long" }).format([...items])
 }
 
-function roleLabel(t: GrantTranslator, level: number, count: number): string {
-  const key = roleNameKey(level)
+function roleLabel(t: GrantTranslator, level: number, count: number, scope?: GrantScope): string {
+  // AQU-2352: 100 at organization scope is Member, which opens nothing.
+  const key = roleNameKey(scope?.kind === "organization" ? orgRoleName(level) : level)
   return key ? t(key, { count }) : roleDisplayLabel(level)
 }
 
@@ -145,7 +146,7 @@ export function describeGrant(t: GrantTranslator, input: DescribeGrantInput): Gr
   const locale = input.locale ?? "en"
   const names = (input.names ?? []).map((name) => name.trim()).filter(Boolean)
   const several = !input.link && names.length > 1
-  const role = roleLabel(t, input.roleLevel, several ? names.length : 1)
+  const role = roleLabel(t, input.roleLevel, several ? names.length : 1, input.scope)
   const parts = scopeParts(t, input.scope, input.roleLevel, locale)
   let sentence: string
   if (input.link) {

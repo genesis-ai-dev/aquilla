@@ -67,8 +67,9 @@ import {
   ALL_ROLE_LEVELS,
   ROLE,
   humanRoleName,
+  orgRoleHelpText,
+  orgRoleName,
   resolveRoleName,
-  roleHelpText,
   type RoleT,
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -85,7 +86,7 @@ function roleLabel(t: RoleT, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
   return ALL_ROLE_LEVELS.includes(roleLevel as (typeof ALL_ROLE_LEVELS)[number])
-    ? resolveRoleName(t, roleLevel)
+    ? resolveRoleName(t, orgRoleName(roleLevel))
     : humanRoleName(roleLevel)
 }
 
@@ -96,7 +97,7 @@ const REMOVE_REQUIRES_MAINTAINER_TOOLTIP =
   "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone."
 
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
-  const help = roleLevel != null ? roleHelpText(roleLevel) : ""
+  const help = roleLevel != null ? orgRoleHelpText(roleLevel) : ""
   const prefix = help || "This member's org-level role is unknown."
   return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
 }
@@ -569,7 +570,7 @@ export function TeamDetail() {
             )
           }
 
-          const label = <RoleLabel name={m.roleLevel} />
+          const label = <RoleLabel name={orgRoleName(m.roleLevel)} />
 
           // Owners change roles via the actions menu dialog — badge is display-only.
           // Non-owners get a note explaining the org-level lock, opened by a

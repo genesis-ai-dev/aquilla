@@ -744,6 +744,8 @@ export const org = defineNamespace({
     // by MembersMatrixCellEditor/ProjectMembersPage/SharePanel — both are
     // real, separately-live UI copy; see the ROLE_INFO doc comment. --
     "org.role.descriptionViewer": "Read-only access. No edit or management actions.",
+    "org.role.descriptionMember":
+      "In the organization's directory. Opens no project or Language lane until they're added to one, or to a team that has it.",
     "org.role.descriptionCommenter": "Can read and leave comments. Cannot edit content.",
     "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
     "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
@@ -2597,6 +2599,12 @@ export const org = defineNamespace({
           "common.role.viewerDescription used elsewhere (see the ROLE_INFO doc comment in " +
           "src/lib/frontier/roles.ts). Also composed into roleHelpText()'s 'Viewer (100) " +
           "— …' tooltip form, lowercasing its own first letter there.",
+      },
+      "org.role.descriptionMember": {
+        description:
+          "AQU-2352: capability blurb under 'Member' in the organization role picker (add, " +
+          "invite, change role) and in the org role tooltip. Must say plainly that an " +
+          "organization Member sees no project or language lane by membership alone.",
       },
       "org.role.descriptionCommenter": {
         description: "Same shape as org.role.descriptionViewer, for the Commenter role.",

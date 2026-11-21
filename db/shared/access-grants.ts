@@ -3,8 +3,8 @@
 // `access_grants` (migration 0119) is a UNION ALL view over org_members,
 // project_members, group_members x group_project_grants and projects.created_by.
 // resolveFromGrants reproduces db/shared/project-roles.ts
-// resolveProjectRoleShared EXACTLY (AD-12 max-wins, AQU-435 floor, AQU-1274
-// org-path rule, creator, platform admin). It also returns the `chain` of
+// resolveProjectRoleShared EXACTLY (AD-12 max-wins, AQU-435 floor — no
+// AQU-1274 lift since AQU-2352 — creator, platform admin). It also returns the `chain` of
 // contributing grants for the future member inspector.
 //
 // Callers reach resolveProjectRoleViaGrants through ACCESS_GRANTS_RESOLVER
@@ -107,11 +107,7 @@ export function resolveFromGrants(
   for (const t of teamPaths) {
     if (t !== bestTeam) chain.push({ source: "group", level: t.roleLevel, grant: t })
   }
-  const orgLevel = orgPathContribution({
-    orgLevel: org?.roleLevel ?? null,
-    hasDirectGrant: direct != null,
-    hasGroupGrant: bestTeam != null,
-  })
+  const orgLevel = orgPathContribution(org?.roleLevel ?? null)
   if (orgLevel != null && org) chain.push({ source: "org", level: orgLevel, grant: org })
   if (ctx.isPlatformAdmin) chain.push({ source: "platform", level: 700, grant: null })
 

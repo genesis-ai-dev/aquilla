@@ -80,7 +80,7 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   test.setTimeout(120_000)
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.REVIEWER)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()

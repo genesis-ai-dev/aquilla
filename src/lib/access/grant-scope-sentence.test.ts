@@ -30,16 +30,13 @@ describe("describeGrant", () => {
   })
 
   // AQU-2289: below Maintainer an organization role opens no project
-  // (AQU-1107), so the add row must not promise "every project".
-  it("never promises every project to an organization role below Maintainer", () => {
-    for (const roleLevel of [ROLE.VIEWER, ROLE.CONTRIBUTOR, ROLE.PROJECT_LEAD]) {
-      const copy = describeGrant(t, { names: ["Maria"], roleLevel, scope: { kind: "organization" } })
-      expect(copy.sentence).not.toMatch(/every project/)
-      expect(copy.scopeEcho).not.toMatch(/every project/)
-    }
-    const copy = describeGrant(t, { names: ["Maria"], roleLevel: ROLE.CONTRIBUTOR, scope: { kind: "organization" } })
+  // (AQU-1107), so the add row must not promise "every project". AQU-2352:
+  // the one such role left is Member.
+  it("never promises every project to an organization Member", () => {
+    const copy = describeGrant(t, { names: ["Maria"], roleLevel: ROLE.VIEWER, scope: { kind: "organization" } })
+    expect(copy.scopeEcho).not.toMatch(/every project/)
     expect(copy.sentence).toBe(
-      "Maria will join as a Contributor of the organization — no projects until added to one",
+      "Maria will join as a Member of the organization — no projects until added to one",
     )
     expect(grantButtonLabel(t, "Add", copy.scopeEcho)).toBe("Add — organization only")
   })

@@ -16,8 +16,8 @@ import { NoteOnClick } from "@/components/ui/info-note"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
-import { resolveRoleName } from "@/lib/frontier/roles"
-import { RoleLevelLabel } from "@/components/RoleLabel"
+import { orgRoleName, resolveRoleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -76,7 +76,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
                   {t("org.memberAccessDrillDown.orgLevelBaseline")}
                 </p>
                 <p className="text-sm font-medium">
-                  <RoleLevelLabel level={state.data.orgRole} />
+                  <RoleLabel name={orgRoleName(state.data.orgRole)} />
                 </p>
               </div>
             )}

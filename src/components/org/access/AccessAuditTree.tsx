@@ -1,4 +1,4 @@
-import { roleLabel } from "@/components/access/labels"
+import { orgRoleLabel, roleLabel } from "@/components/access/labels"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   auditSourceLabel,
@@ -27,7 +27,7 @@ function PersonNode({ person }: { person: AccessAuditPerson }) {
   const t = useT()
   const orgRole = person.orgRole == null
     ? t("org.accessAudit.notOrgMember")
-    : roleLabel(t, person.orgRole)
+    : orgRoleLabel(t, person.orgRole)
   return (
     <li className="access-audit-person rounded-md border bg-card px-3 py-3" data-testid={`access-audit-person-${person.userId}`}>
       <div className="flex flex-wrap items-baseline gap-x-2">

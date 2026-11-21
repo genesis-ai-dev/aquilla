@@ -25,8 +25,8 @@ test("alice adds bob to Acme via API; bob sees Acme in the org switcher", async 
   const acme = await getMyOrg(aliceSession.jwt)
   expect(acme.name).toBe("Acme")
 
-  // Add bob as a contributor.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  // Add bob as a Member (AQU-2352: org roles are Member, Maintainer, Owner).
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   // Sanity check: bob can authenticate (would have already failed during
   // multi-user fixture setup if not, but explicit call makes the failure

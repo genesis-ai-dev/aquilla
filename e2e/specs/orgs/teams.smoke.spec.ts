@@ -35,7 +35,7 @@ test("team add member workflow shows new member in members list", async ({ alice
   // Seed bob in alice's org.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   await alice.goto(orgRoute(alice, "/teams"))
   // Create a team.
@@ -78,7 +78,7 @@ test("team add member workflow shows new member in members list", async ({ alice
 test("team remove member button removes the member from the team", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   // Navigate to teams and create a team.
   await alice.goto(orgRoute(alice, "/teams"))
@@ -137,7 +137,7 @@ test("team member role select changes member role", async ({ alice }) => {
   // Seed bob in alice's org.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   // Create a team.
   await alice.goto(orgRoute(alice, "/teams"))
@@ -180,7 +180,8 @@ test("team member role select changes member role", async ({ alice }) => {
   // Bob now appears in the member list.
   const actionsBtn = alice.getByRole("button", { name: /Actions for bob/i })
   await expect(actionsBtn).toBeVisible({ timeout: 10_000 })
-  await expect(alice.getByText("Contributor")).toBeVisible({ timeout: 5_000 })
+  // AQU-2352: his organization role reads Member.
+  await expect(alice.getByRole("row", { name: /bob/i }).getByText(/^Member$/)).toBeVisible({ timeout: 5_000 })
 
   // Open Change role dialog from the three-dot menu.
   await actionsBtn.click()

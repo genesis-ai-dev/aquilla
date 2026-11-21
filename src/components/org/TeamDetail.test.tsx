@@ -596,7 +596,8 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // Role column shows the current role as a badge, not a combobox.
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    expect(screen.getByText("Viewer")).toBeInTheDocument()
+    // AQU-2352: 100 at org scope reads Member.
+    expect(screen.getByText("Member")).toBeInTheDocument()
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
     expect(screen.getByRole("dialog", { name: /change role for anna/i })).toBeInTheDocument()
@@ -612,9 +613,9 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
-    await pickSelectOption(/role for anna/i, /contributor/i)
+    await pickSelectOption(/role for anna/i, /^maintainer/i)
     await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
-    await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
+    await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 600))
   })
 
   it("maintainer (600) cannot see Change role — only a read-only role badge with tooltip", async () => {
@@ -629,8 +630,8 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     // Read-only org-level role label. AQU-2260: why it is read-only opens on
     // click, in a note anchored to it, never on hover.
     await expectClickNote(
-      screen.getByRole("button", { name: /org-level role: viewer/i }),
-      /can only be changed by an org owner/,
+      screen.getByRole("button", { name: /org-level role: member/i }),
+      /Opens no project[\s\S]*can only be changed by an org owner/,
     )
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
@@ -640,7 +641,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
 // AQU-2289 (Sam, Oct 29, settings cleanup 4c option A): every Change role and
 // Add member opens the same dialog, with the same roles for the same level.
 describe("TeamDetail one role dialog (AQU-2289)", () => {
-  const ALL = ["Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer", "Owner"]
+  const ALL = ["Member", "Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer", "Owner"]
 
   async function offered(comboName: RegExp): Promise<string[]> {
     fireEvent.click(screen.getByRole("combobox", { name: comboName }))
@@ -656,14 +657,14 @@ describe("TeamDetail one role dialog (AQU-2289)", () => {
     await act(async () => { (await screen.findByRole("button", { name: new RegExp(`actions for ${name}`, "i") })).click() })
   }
 
-  it("a member's Change role sets their organization role from the five, never Commenter or Reviewer", async () => {
+  it("a member's Change role sets their organization role from Member, Maintainer and Owner (AQU-2352)", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
     await openMemberMenu("anna")
     await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "org")
-    expect(await offered(/role for anna/i)).toEqual(["Viewer", "Contributor", "Project Lead", "Maintainer", "Owner"])
+    expect(await offered(/role for anna/i)).toEqual(["Member", "Maintainer", "Owner"])
   })
 
   it("offers no organization Change role for someone outside the org: saving it would add them to the org", async () => {

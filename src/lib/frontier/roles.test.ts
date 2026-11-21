@@ -5,6 +5,8 @@ import {
   LINK_ROLE_ALLOWED,
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
+  orgRoleHelpText,
+  orgRoleName,
   ORG_WIDE_ACCESS_FLOOR,
   orgRoleGrantsProjectAccess,
   roleName,
@@ -108,10 +110,12 @@ describe("picker subsets", () => {
     expect(PROJECT_ROLE_PICKER.at(-1)).toBe(ROLE.OWNER)
   })
 
-  it("ORG_ROLE_PICKER excludes commenter, reviewer, and owner", () => {
-    expect(ORG_ROLE_PICKER).not.toContain(ROLE.COMMENTER)
-    expect(ORG_ROLE_PICKER).not.toContain(ROLE.REVIEWER)
-    expect(ORG_ROLE_PICKER).not.toContain(ROLE.OWNER)
+  // AQU-2352: Member (100) and Maintainer; no 200–500 at org scope.
+  it("ORG_ROLE_PICKER is Member and Maintainer", () => {
+    expect(ORG_ROLE_PICKER).toEqual([ROLE.VIEWER, ROLE.MAINTAINER])
+    expect(orgRoleName(ROLE.VIEWER)).toBe("member")
+    expect(orgRoleName(ROLE.CONTRIBUTOR)).toBe("contributor")
+    expect(orgRoleHelpText(ROLE.VIEWER)).toMatch(/^Member — in the organization's directory\. Opens no project/)
   })
 
   // AQU-952: workspace handover. The change-role rung must reach Owner, while

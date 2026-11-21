@@ -182,6 +182,8 @@
     "neon:explicit-lane-grants:prod": "tsx scripts/neon-target.ts production explicit-lane-grants",
     "neon:repair-creator-owner-grants:dev": "tsx scripts/neon-target.ts dev repair-creator-owner-grants",
     "neon:repair-creator-owner-grants:prod": "tsx scripts/neon-target.ts production repair-creator-owner-grants",
+    "neon:org-roles:dev": "tsx scripts/neon-target.ts dev org-roles",
+    "neon:org-roles:prod": "tsx scripts/neon-target.ts production org-roles",
     "neon:repair-cell-metadata:local": "tsx scripts/neon-target.ts local repair-cell-metadata",
     "neon:repair-cell-metadata:dev": "tsx scripts/neon-target.ts dev repair-cell-metadata",
     "neon:repair-cell-metadata:prod": "tsx scripts/neon-target.ts production repair-cell-metadata",

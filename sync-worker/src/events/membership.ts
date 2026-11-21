@@ -20,8 +20,9 @@
 // Grant paths are resolved by the SHARED max-wins resolver in
 // db/shared/project-roles.ts (AD-12) — the same one auth-worker mints the
 // sync token from and the Agent API authority already uses. It encodes the
-// AQU-435 org floor, the AQU-1274 org-path rule, the creator path and the
-// `ACCESS_GRANTS_RESOLVER` view mode once, in one place.
+// AQU-435 org floor, the creator path and the `ACCESS_GRANTS_RESOLVER` view
+// mode once, in one place. (The AQU-1274 org-path lift below is history:
+// AQU-2352 removed it from every resolver.)
 //
 // AQU-1787: this check used to carry its OWN copy of the grant SQL, which
 // counted `org_members` at ROLE.MAINTAINER+ only (the AQU-435 rule alone).

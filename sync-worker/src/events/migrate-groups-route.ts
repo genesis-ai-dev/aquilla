@@ -12,6 +12,7 @@
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 import { countTeamLaneAccessStmt, grantTeamLaneAccessStmt } from '../../../db/shared/lane-grants'
+import { orgRoleForStorage } from '../../../db/shared/org-roles'
 
 const PATH = '/migrate/groups'
 
@@ -156,7 +157,8 @@ export async function handleMigrateGroupsRequest(
           .prepare(
             'INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (?, ?, ?, NULL) ON CONFLICT DO NOTHING',
           )
-          .bind(orgIdByUuid.get(m.orgUuid), m.userId, m.roleLevel),
+          // AQU-2352: only Member, Maintainer and Owner are stored at org level.
+          .bind(orgIdByUuid.get(m.orgUuid), m.userId, orgRoleForStorage(m.roleLevel)),
       ),
   )
 

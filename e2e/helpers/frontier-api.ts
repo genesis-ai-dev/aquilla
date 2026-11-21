@@ -76,7 +76,8 @@ export async function addOrgMember(
   jwt: string,
   orgId: number,
   username: string,
-  role: number = ROLE.CONTRIBUTOR,
+  // AQU-2352: Member (100). An org role is Member, Maintainer or Owner.
+  role: number = ROLE.VIEWER,
 ): Promise<void> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
     method: "POST",

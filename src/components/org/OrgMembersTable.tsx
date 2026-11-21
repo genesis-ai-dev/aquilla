@@ -30,8 +30,9 @@ import {
   ALL_ROLE_LEVELS,
   humanRoleName,
   ROLE,
+  orgRoleHelpText,
+  orgRoleName,
   resolveRoleName,
-  roleHelpText,
   type RoleT,
 } from "@/lib/frontier/roles"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
@@ -52,12 +53,12 @@ const REMOVE_REQUIRES_OWNER_TOOLTIP =
 function roleLabel(t: RoleT, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   return ALL_ROLE_LEVELS.includes(roleLevel as (typeof ALL_ROLE_LEVELS)[number])
-    ? resolveRoleName(t, roleLevel)
+    ? resolveRoleName(t, orgRoleName(roleLevel))
     : humanRoleName(roleLevel)
 }
 
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
-  const help = roleLevel != null ? roleHelpText(roleLevel) : ""
+  const help = roleLevel != null ? orgRoleHelpText(roleLevel) : ""
   const prefix = help || "This member's org-level role is unknown."
   return `${prefix} This permission is set at the org level and can only be changed by an org owner.`
 }
@@ -197,7 +198,7 @@ export function OrgMembersTable({
         meta: { className: "w-[11rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
-          const label = <RoleLabel name={m.role.level} />
+          const label = <RoleLabel name={orgRoleName(m.role.level)} />
           // AQU-1352 §3.7 rule 1: org is the top scope, so org rows are always direct.
           const badge = <GrantOriginBadge origin={{ kind: "direct" }} />
           if (isOwner) return <span className="inline-flex items-center gap-2">{label}{badge}</span>
@@ -271,7 +272,8 @@ export function OrgMembersTable({
           people={{
             kind: "row",
             row: {
-              defaultRole: ROLE.CONTRIBUTOR,
+              // AQU-2352: Member, which opens nothing (it was Contributor).
+              defaultRole: ROLE.VIEWER,
               grantScope: { kind: "organization" },
               scopedUserSearch: false,
               excludedUserIds: members.map((m) => m.userId),

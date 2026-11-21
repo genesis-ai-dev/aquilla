@@ -28,48 +28,22 @@ import { resolveProjectRoleViaGrants } from "./access-grants"
 export const ORG_WIDE_ACCESS_FLOOR = 600
 
 /**
- * AQU-1274: how much the org path contributes to max-wins.
+ * How much the org path contributes to max-wins: the org role at Maintainer
+ * and above, and nothing below (AQU-435).
  *
- * AQU-435 made a sub-maintainer `org_members` row contribute *nothing*, which
- * conflated two separate questions:
- *
- *   (a) may an org grant OPEN a project the user has no other path into?
- *       — correctly Maintainer+ only; that is what AQU-435 was about.
- *   (b) may an org grant raise the LEVEL on a project the user already
- *       reaches by another path? — collateral damage: it was silenced too.
- *
- * The result was a silent demotion. A Project Lead (500) on the org who
- * reaches a project through a team attached at Contributor (400) resolved to
- * 400: her higher org role was dropped on the floor, which is exactly the
- * demotion AD-12 max-wins forbids ("adding a grant at a lower role does not
- * demote"). Reported live by the Biblica ETT Pattani Malay team.
- *
- * So a sub-floor org role contributes its level iff:
- *
- *   1. a **team (group) grant already opens the project** — the user gains no
- *      project they could not already see, so AQU-435's visibility floor is
- *      fully intact (a sub-maintainer org member with no other path still
- *      resolves to null and still 403s); and
- *   2. there is **no direct `project_members` row** — an explicit per-person,
- *      per-project grant is a deliberate decision and must still be able to
- *      restrict someone below their org role. Only the bulk team attachment,
- *      which is routinely left at the Contributor default, stops demoting.
+ * AQU-2352 (AQU-2351 D-j) removed the AQU-1274 "lift", under which an org
+ * role below Maintainer raised a team path that had no direct grant beside
+ * it (an org Project Lead on a team attached at Contributor resolved to
+ * Project Lead). Partners could not predict that from the screen, and org
+ * roles below Maintainer are now only Member (100), which opens nothing.
+ * Migration 0210 gave everyone the lift raised an explicit direct grant at
+ * the level they had, so nobody's access changed.
  *
  * Returns the level the org path contributes, or null for no contribution.
  */
-export function orgPathContribution(args: {
-  orgLevel: number | null
-  hasDirectGrant: boolean
-  hasGroupGrant: boolean
-}): number | null {
-  const { orgLevel, hasDirectGrant, hasGroupGrant } = args
+export function orgPathContribution(orgLevel: number | null | undefined): number | null {
   if (orgLevel == null) return null
-  // Maintainer+ is an access path in its own right (AQU-435, unchanged).
-  if (orgLevel >= ORG_WIDE_ACCESS_FLOOR) return orgLevel
-  // Below the floor: never creates access, and never overrides an explicit
-  // per-project grant. It only stops a team attachment from demoting.
-  if (hasDirectGrant || !hasGroupGrant) return null
-  return orgLevel
+  return orgLevel >= ORG_WIDE_ACCESS_FLOOR ? orgLevel : null
 }
 
 const ROLE_NAMES: Record<number, string> = {
@@ -308,16 +282,11 @@ async function resolveProjectRoleSharedInternal(
   if (override) contributions.push({ source: "override", level: override.role_level })
   if (group?.role_level != null)
     contributions.push({ source: "group", level: group.role_level })
-  // AQU-435 / AQU-1274: Maintainer+ is an access path on its own; below that
-  // the org role only keeps a team attachment from demoting someone. Without
-  // the floor a PAT held by any org member (down to Viewer) resolved to full
-  // org-wide project access via the external Agent API — see
-  // orgPathContribution for the full rule.
-  const orgContribution = orgPathContribution({
-    orgLevel: org?.role_level ?? null,
-    hasDirectGrant: override != null,
-    hasGroupGrant: group?.role_level != null,
-  })
+  // AQU-435: Maintainer+ is an access path on its own; below that the org
+  // role contributes nothing (AQU-2352 removed the AQU-1274 lift). Without
+  // the floor a PAT held by any org member resolved to full org-wide project
+  // access via the external Agent API.
+  const orgContribution = orgPathContribution(org?.role_level ?? null)
   if (orgContribution != null)
     contributions.push({ source: "org", level: orgContribution })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

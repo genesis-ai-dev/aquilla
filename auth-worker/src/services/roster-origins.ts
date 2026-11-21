@@ -72,9 +72,8 @@ export function rosterOriginFor(
   const direct = resolved.chain.find((l) => l.source === "override")
   let afterDirectRemoval: RosterGrantOrigin | null = null
   if (direct) {
-    // Rule 4 dry-run: re-resolve without the direct row. The org path can
-    // change here (AQU-1274: a sub-floor org role only counts beside a team
-    // grant once there is no direct grant), so re-run rather than slice.
+    // Rule 4 dry-run: re-resolve without the direct row, rather than slice
+    // the chain, so this always agrees with the resolver.
     const without = grants.filter(
       (g) => !(g.scopeType === "project" && g.scopeId === ctx.projectId && g.source === "direct"),
     )

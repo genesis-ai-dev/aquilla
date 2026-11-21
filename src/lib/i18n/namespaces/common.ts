@@ -127,6 +127,8 @@ export const common = defineNamespace({
     "common.role.projectLead": plural({ one: "Project Lead", other: "Project Leads" }),
     "common.role.maintainer": plural({ one: "Maintainer", other: "Maintainers" }),
     "common.role.owner": plural({ one: "Owner", other: "Owners" }),
+    // AQU-2352: 100 at organization scope.
+    "common.role.member": plural({ one: "Member", other: "Members" }),
 
     "common.role.viewerDescription": "Read-only access to cells + comments",
     "common.role.commenterDescription": "Read + add comments on cells",
@@ -135,6 +137,7 @@ export const common = defineNamespace({
     "common.role.projectLeadDescription": "Contributor + manage members",
     "common.role.maintainerDescription": "Lead + manage roles",
     "common.role.ownerDescription": "Full control",
+    "common.role.memberDescription": "In the organization; opens nothing",
 
     // Permission-denial sentence (src/lib/permissions/denial.ts), split so
     // the two embedded role names are translated through the keys above
@@ -758,6 +761,21 @@ export const common = defineNamespace({
         description:
           "The highest role: full control. Same singular/plural label usage as " +
           "common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.member": {
+        description:
+          "AQU-2352: the lowest ORGANIZATION role (level 100). The person is in the " +
+          "organization's directory and can be added to teams, projects and language " +
+          "lanes, but membership alone opens no project. Not the same word as Viewer, " +
+          "which is the lowest role on a project or language lane. Same singular/plural " +
+          "label usage as common.role.viewer.",
+        screenshot: "project-settings",
+      },
+      "common.role.memberDescription": {
+        description:
+          "AQU-2352: one-line summary of the organization Member role, shown beside its " +
+          "name where a short blurb fits. States plainly that Member opens nothing.",
         screenshot: "project-settings",
       },
       "common.role.viewerDescription": {

@@ -92,15 +92,37 @@ export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
 ]
 
 /**
- * Roles offered in the org Members panel role picker. Commenter (200) and
- * reviewer (300) are absent — those are per-project niches (SharePanel).
- * Org membership below Maintainer does not grant project access (AQU-435 /
- * AQU-1107); only Maintainer+ is org-wide oversight.
+ * AQU-2352 (AQU-2351 D-j): the only organization roles. 100 is **Member** at
+ * org scope: in the directory, can be added to teams, projects and lanes, and
+ * opens nothing by membership alone. Maintainer reaches every project and
+ * lane; Owner adds the org's governance. Mirrors db/shared/org-roles.ts,
+ * which the server refuses anything else against.
+ */
+export const ORG_ROLE_LEVELS: readonly RoleLevel[] = [ROLE.VIEWER, ROLE.MAINTAINER, ROLE.OWNER]
+
+/** True for a level an organization role may hold (100, 600, 700). */
+export function isOrgRoleLevel(level: number | null | undefined): boolean {
+  return level != null && (ORG_ROLE_LEVELS as readonly number[]).includes(level)
+}
+
+/** The canonical name for Member, the org-scope reading of 100. */
+export const ORG_MEMBER_ROLE_NAME = "member"
+
+/**
+ * The name an organization role shows: 100 is Member at org scope (it is
+ * Viewer on a project or lane). Any other level keeps its ladder name, so a
+ * row written before migration 0210 still reads as what it is.
+ */
+export function orgRoleName(level: number): string {
+  return level === ROLE.VIEWER ? ORG_MEMBER_ROLE_NAME : roleName(level)
+}
+
+/**
+ * Roles offered when adding someone to an organization or inviting them:
+ * Member and Maintainer. Owner is change-only (below).
  */
 export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.VIEWER,
-  ROLE.CONTRIBUTOR,
-  ROLE.PROJECT_LEAD,
   ROLE.MAINTAINER,
 ]
 
@@ -246,6 +268,8 @@ const ROLE_NAME_KEY: Partial<Record<string, MessageKey>> = {
   project_lead: "common.role.projectLead",
   maintainer: "common.role.maintainer",
   owner: "common.role.owner",
+  // AQU-2352: 100 at organization scope.
+  member: "common.role.member",
 }
 
 const ROLE_DESCRIPTION_KEY: Partial<Record<number, MessageKey>> = {
@@ -280,6 +304,17 @@ export function roleHelpText(level: number): string {
   if (!description) return ""
   const blurb = description.charAt(0).toLowerCase() + description.slice(1)
   return `${roleDisplayLabel(level)} — ${blurb}`
+}
+
+/**
+ * `roleHelpText` for an ORGANIZATION role (AQU-2352): 100 reads "Member — …
+ * opens no project or lane by itself" instead of the project Viewer blurb.
+ */
+export function orgRoleHelpText(level: number): string {
+  if (level !== ROLE.VIEWER) return roleHelpText(level)
+  const description = tStandalone("org.role.descriptionMember")
+  const blurb = description.charAt(0).toLowerCase() + description.slice(1)
+  return `${tStandalone("common.role.member", { count: 1 })} — ${blurb}`
 }
 
 /**
@@ -359,6 +394,12 @@ export interface RoleOption {
   name: string
   nameKey: MessageKey
   descriptionKey: MessageKey
+  /**
+   * The blurb a role picker shows under the name, when it differs from the
+   * level's default (`roleDescription`). Set on the org Member option, whose
+   * point is that it opens nothing.
+   */
+  pickerDescriptionKey?: MessageKey
 }
 
 function toOption(level: RoleLevel): RoleOption {
@@ -377,12 +418,24 @@ export const ALL_ROLE_OPTIONS: readonly RoleOption[] =
 export const PROJECT_ROLE_OPTIONS: readonly RoleOption[] =
   PROJECT_ROLE_PICKER.map(toOption)
 
+/** AQU-2352: an organization option — 100 is Member, which opens nothing. */
+function toOrgOption(level: RoleLevel): RoleOption {
+  if (level !== ROLE.VIEWER) return toOption(level)
+  return {
+    level,
+    name: ORG_MEMBER_ROLE_NAME,
+    nameKey: "common.role.member",
+    descriptionKey: "common.role.memberDescription",
+    pickerDescriptionKey: "org.role.descriptionMember",
+  }
+}
+
 export const ORG_ROLE_OPTIONS: readonly RoleOption[] =
-  ORG_ROLE_PICKER.map(toOption)
+  ORG_ROLE_PICKER.map(toOrgOption)
 
 /** AQU-952: change-role dialog only — includes the Owner handover rung. */
 export const ORG_ROLE_CHANGE_OPTIONS: readonly RoleOption[] =
-  ORG_ROLE_CHANGE_PICKER.map(toOption)
+  ORG_ROLE_CHANGE_PICKER.map(toOrgOption)
 
 export const LINK_ROLE_OPTIONS: readonly RoleOption[] =
   LINK_ROLE_ALLOWED.map(toOption)

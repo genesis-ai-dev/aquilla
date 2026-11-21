@@ -21,6 +21,8 @@ import { UserError } from "@/lib/errors/user-error"
 import { INVITE_REDEEMED } from "@/lib/event-names"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { RoleLabel } from "@/components/RoleLabel"
+import { orgRoleName } from "@/lib/frontier/roles"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
@@ -123,9 +125,8 @@ function OrgInvitation({ token }: { token?: string }) {
             ...(preview.invitedBy
               ? { inviter: <span className="font-medium">{preview.invitedBy}</span> }
               : {}),
-            role: (
-              <span className="capitalize">{preview.role.name.replace(/_/g, " ")}</span>
-            ),
+            // AQU-2352: 100 on an org invite reads Member, which opens nothing.
+            role: <RoleLabel name={orgRoleName(preview.role.level)} plain />,
             ...(preview.email
               ? { email: <span className="font-mono">{preview.email}</span> }
               : {}),

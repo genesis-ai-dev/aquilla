@@ -19,13 +19,13 @@ vi.mock("@/lib/frontier/orgs", async (importOriginal) => ({
   acceptOrgInvite: vi.fn(async () => ({
     orgId: 7,
     orgName: "Come and See",
-    role: { level: 400, name: "contributor" },
+    role: { level: 100, name: "viewer" },
   })),
 }))
 
 const preview = {
   orgId: 7, orgName: "Come and See", invitedBy: "Prabhu",
-  role: { level: 400, name: "contributor" }, expiresAt: null, email: null,
+  role: { level: 100, name: "viewer" }, expiresAt: null, email: null,
 }
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -96,7 +96,8 @@ describe("JoinOrgPage invite context (AQU-471)", () => {
     expect(await screen.findByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/invited by/i)).toBeInTheDocument()
     expect(screen.getByText("Prabhu")).toBeInTheDocument()
-    expect(screen.getByText("contributor")).toBeInTheDocument()
+    // AQU-2352: an org invite at 100 reads Member, not Viewer.
+    expect(screen.getByText("Member")).toBeInTheDocument()
     expect(screen.getByText("do-login")).toBeInTheDocument()
   })
 

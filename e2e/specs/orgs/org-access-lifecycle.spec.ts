@@ -57,7 +57,7 @@ async function expectOrgProjectsPage(page: Page, orgId: number): Promise<void> {
 // Test 1: org membership below Maintainer does NOT grant project visibility
 // ---------------------------------------------------------------------------
 
-test("invite contributor to org → bob does not see org projects (AQU-435)", async ({ alice: _alice, bob }) => {
+test("add bob to the org as Member → bob sees no org project (AQU-435, AQU-2352)", async ({ alice: _alice, bob }) => {
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
 
@@ -70,12 +70,14 @@ test("invite contributor to org → bob does not see org projects (AQU-435)", as
   const bobProjectsBefore = await listProjectsApi(bobSession.jwt, acme.id)
   expect(bobProjectsBefore.some((p) => p.id === projectId)).toBe(false)
 
-  // Alice invites Bob to the org as Contributor. AQU-435: that is not enough
-  // for the org path — Bob still has no direct/team grant.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  // Alice adds Bob to the org as Member. AQU-435 / AQU-2352: Member opens
+  // nothing — Bob still has no direct/team grant.
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
 
   const bobProjectsAfter = await listProjectsApi(bobSession.jwt, acme.id)
   expect(bobProjectsAfter.some((p) => p.id === projectId)).toBe(false)
+  // The project URL is denied, not just hidden.
+  expect((await fetchProjectApi(bobSession.jwt, projectId)).status).toBe(403)
 
   // UI: bob can open Acme (he's a member) but the project is absent.
   await expectOrgProjectsPage(bob, acme.id)
@@ -186,7 +188,6 @@ test("revoke org membership → bob can no longer list org projects", async ({ a
   // Bob can no longer list org projects.
   const bobProjectsAfter = await listProjectsApi(bobSession.jwt, acme.id)
   expect(bobProjectsAfter.some((p) => p.id === projectId)).toBe(false)
-
   // UI: bob's own dashboard no longer shows the project.
   await expectOrgProjectsPage(bob, bob.orgId)
   await expect(bob.getByText("Secret Project")).toHaveCount(0)
@@ -204,7 +205,7 @@ test("full revoke (all paths) → project endpoint returns 403 for bob", async (
   await createProjectServerSide(aliceSession.jwt, { id: projectId, name: "Full-Revoke Project" })
 
   // Grant bob via org AND direct project_members.
-  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.VIEWER)
   await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.PROJECT_LEAD)
 
   const bobSession = await ensureAuthState("bob")

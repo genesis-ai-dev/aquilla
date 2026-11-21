@@ -5,8 +5,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
-import { ROLE, orgRoleGrantsProjectAccess } from "@/lib/frontier/roles"
-import { RoleLevelLabel } from "@/components/RoleLabel"
+import { ROLE, orgRoleGrantsProjectAccess, orgRoleName } from "@/lib/frontier/roles"
+import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -172,7 +172,7 @@ export function MemberAccessDetails({
           <p className="inline-flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
             {data.orgRole != null ? (
               <>
-                {t("org.memberAccessPanel.orgRoleLabel")} <RoleLevelLabel level={data.orgRole} />{" "}
+                {t("org.memberAccessPanel.orgRoleLabel")} <RoleLabel name={orgRoleName(data.orgRole)} />{" "}
                 {orgRoleGrantsProjectAccess(data.orgRole)
                   ? t("org.memberAccessPanel.orgRoleAppliesNote")
                   : t("org.memberAccessPanel.orgRoleNoProjectAccessNote")}

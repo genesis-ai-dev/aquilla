@@ -8,21 +8,16 @@ import { roleChoices } from "./role-choices"
 const levels = (list: ReadonlyArray<{ level: number }>) => list.map((r) => r.level)
 
 describe("roleChoices", () => {
-  it("offers an organization role from the Members table's five, never Commenter or Reviewer", () => {
-    expect(levels(roleChoices("org", { callerLevel: ROLE.OWNER, purpose: "change" }))).toEqual([
-      ROLE.VIEWER,
-      ROLE.CONTRIBUTOR,
-      ROLE.PROJECT_LEAD,
-      ROLE.MAINTAINER,
-      ROLE.OWNER,
-    ])
+  // AQU-2352 (D-j): an organization role is Member, Maintainer or Owner.
+  it("offers an organization role from Member, Maintainer and Owner only, Member named as such", () => {
+    const change = roleChoices("org", { callerLevel: ROLE.OWNER, purpose: "change" })
+    expect(levels(change)).toEqual([ROLE.VIEWER, ROLE.MAINTAINER, ROLE.OWNER])
+    expect(change[0]).toMatchObject({ name: "member", nameKey: "common.role.member", pickerDescriptionKey: "org.role.descriptionMember" })
   })
 
   it("keeps Owner out of adding and inviting: handing over a workspace is a change of an existing member", () => {
     expect(levels(roleChoices("org", { callerLevel: ROLE.OWNER, purpose: "add" }))).toEqual([
       ROLE.VIEWER,
-      ROLE.CONTRIBUTOR,
-      ROLE.PROJECT_LEAD,
       ROLE.MAINTAINER,
     ])
   })
@@ -62,8 +57,6 @@ describe("roleChoices", () => {
     ])
     expect(levels(roleChoices("org", { callerLevel: ROLE.MAINTAINER, purpose: "change" }))).toEqual([
       ROLE.VIEWER,
-      ROLE.CONTRIBUTOR,
-      ROLE.PROJECT_LEAD,
       ROLE.MAINTAINER,
     ])
   })

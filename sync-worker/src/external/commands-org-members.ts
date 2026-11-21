@@ -46,6 +46,7 @@
 // same split commands-emit-events.ts / emit-events-engine.ts uses.
 
 import { ROLE } from '../events/role-policy'
+import { ORG_ROLE_LEVELS } from '../../../db/shared/org-roles'
 
 /** Structurally identical to commands.ts's CommandValidationIssue; declared
  *  locally so this module never imports back from commands.ts (the same
@@ -93,20 +94,13 @@ export function isOrgMemberCommand(c: { kind: string }): c is OrgMemberCommand {
   return (ORG_MEMBER_COMMAND_KINDS as readonly string[]).includes(c.kind)
 }
 
-/** The canonical org role levels, mirroring auth-worker's ALL_ROLE_LEVELS. */
-const CANONICAL_ROLE_LEVELS: readonly number[] = [
-  ROLE.VIEWER,
-  ROLE.COMMENTER,
-  ROLE.REVIEWER,
-  ROLE.CONTRIBUTOR,
-  ROLE.PROJECT_LEAD,
-  ROLE.MAINTAINER,
-  ROLE.OWNER,
-]
+/** AQU-2352 (D-j): the org role levels — Member, Maintainer, Owner. */
+const CANONICAL_ROLE_LEVELS: readonly number[] = ORG_ROLE_LEVELS
 
 /** Level → name, mirroring auth-worker's ROLE_NAMES, for the approval page. */
 const ROLE_NAME: Record<number, string> = {
-  [ROLE.VIEWER]: 'viewer',
+  // AQU-2352: 100 at org scope is Member, which opens nothing.
+  [ROLE.VIEWER]: 'member',
   [ROLE.COMMENTER]: 'commenter',
   [ROLE.REVIEWER]: 'reviewer',
   [ROLE.CONTRIBUTOR]: 'contributor',

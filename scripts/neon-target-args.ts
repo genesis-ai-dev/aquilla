@@ -31,6 +31,7 @@ export const NEON_TARGET_COMMANDS = [
   "repair-lane-grants",
   "explicit-lane-grants",
   "repair-creator-owner-grants",
+  "org-roles",
   "repair-cell-metadata",
   "prune-phantom-voices",
   "fold-cast-by-character",
@@ -62,6 +63,9 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "explicit-lane-grants") return "scripts/neon-explicit-lane-grants.ts"
   // AQU-2357: Owner rows for projects created between the migration and the deploy.
   if (command === "repair-creator-owner-grants") return "scripts/neon-repair-creator-owner-grants.ts"
+  // AQU-2352: the per-org dry run for "org roles are Member, Maintainer and
+  // Owner". Read-only; the write is migration 0210.
+  if (command === "org-roles") return "scripts/neon-org-roles.ts"
   // AQU-2658: put back the source cells a metadata merge turned into arrays.
   if (command === "repair-cell-metadata") return "scripts/neon-repair-cell-metadata.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
@@ -96,6 +100,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "repair-lane-grants" ||
     command === "explicit-lane-grants" ||
     command === "repair-creator-owner-grants" ||
+    command === "org-roles" ||
     command === "repair-cell-metadata" ||
     command === "prune-phantom-voices" ||
     command === "fold-cast-by-character" ||

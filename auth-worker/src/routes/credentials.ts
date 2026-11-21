@@ -169,8 +169,12 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
           await getEffectiveOrgRole(c.env, numericOrgId, user),
         )
       : null
-    if (level == null || level < ROLE.CONTRIBUTOR) {
-      return c.json({ error: "scope_denied", message: "You need contributor access on this org to scope a credential to it." }, 403)
+    // AQU-2352: an org role below Maintainer is Member now (it was mostly
+    // Contributor), so any member may scope a credential to the org. Scoping
+    // only narrows: each project is still resolved on its own, and Member
+    // opens none.
+    if (level == null || level < ROLE.VIEWER) {
+      return c.json({ error: "scope_denied", message: "You need to be a member of this org to scope a credential to it." }, 403)
     }
     scopeLevel = level
   }

@@ -387,7 +387,7 @@ function chainEntry(link: ChainLink, byKey: Map<string, NamedGrant>): { key: str
   const named = byKey.get(key)
   if (!named) return { key, entry: { scopePath: [], roleLevel: link.level, origin: { kind: "direct" } } }
   const entry = toEntry(named)
-  // The org path contributes the resolver's level (AQU-1274 orgPathContribution), not the raw row.
+  // The org path contributes the resolver's level (orgPathContribution), not the raw row.
   entry.roleLevel = link.level
   if (link.source === "org") entry.origin = { kind: "inherited", from: scopePathOf(named) }
   return { key, entry }

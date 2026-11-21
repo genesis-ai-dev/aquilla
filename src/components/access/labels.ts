@@ -1,5 +1,5 @@
 import type { TFunction } from "@/lib/i18n/I18nProvider"
-import { roleNameKey } from "@/lib/frontier/roles"
+import { orgRoleName, roleNameKey } from "@/lib/frontier/roles"
 import { formatScopePath, viaTeamName } from "@/lib/access/scope-path"
 import type { GrantOrigin } from "@/lib/access/types"
 
@@ -32,6 +32,13 @@ export function originLabel(t: TFunction, origin: GrantOrigin): string {
  * off-ladder level gets a translated generic label, not resolveRoleName's
  * English "Level N" fallback.
  */
+/** An ORGANIZATION role's label: 100 is Member, which opens nothing (AQU-2352). */
+export function orgRoleLabel(t: TFunction, level: number | null): string {
+  if (level == null) return t("org.access.noAccess")
+  const key = roleNameKey(orgRoleName(level))
+  return key ? t(key, { count: 1 }) : t("org.access.unknownRole")
+}
+
 export function roleLabel(t: TFunction, level: number | null): string {
   if (level == null) return t("org.access.noAccess")
   const key = roleNameKey(level)

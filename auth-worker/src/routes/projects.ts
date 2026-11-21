@@ -666,19 +666,13 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?5-?6  : user.id for WHERE access check (pm, om)
   //   ?7-?8  : orgFilter (IS NULL bypass + equality)
   //   ?9-?10 : minRole (IS NULL bypass + threshold)
-  // AQU-1274: the org path's contribution to max-wins, as SQL. Must stay
-  // equivalent to db/shared/project-roles.ts::orgPathContribution — this list
-  // endpoint is where `project.syncRole` comes from, so if it disagrees with
-  // the single-project resolver the SPA gates panels on the wrong role (which
-  // is how the Biblica ETT report surfaced). Maintainer+ contributes outright;
-  // below that the org role only stops a team attachment from demoting, so it
-  // contributes when a group grant exists and no explicit direct grant does.
+  // The org path's contribution to max-wins, as SQL. Must stay equivalent to
+  // db/shared/project-roles.ts::orgPathContribution — this list endpoint is
+  // where `project.syncRole` comes from. Maintainer+ contributes; below that
+  // nothing (AQU-2352 removed the AQU-1274 lift).
   // Contains no `?` placeholders, so positional binds are unaffected.
   const orgContribSql = `CASE
               WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level
-              WHEN om.role_level IS NOT NULL
-                AND pm.role_level IS NULL
-                AND gg.max_grant IS NOT NULL THEN om.role_level
               ELSE 0 END`
 
   const extraWhere: string[] = []

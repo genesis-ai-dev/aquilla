@@ -34,8 +34,11 @@ async function offeredLevels(comboName: RegExp): Promise<number[]> {
   return offered
 }
 
+/** AQU-2352: the organization Member option, named and described as opening nothing. */
+const ORG_MEMBER_OPTION = /^Member\s*In the organization's directory\. Opens no project/
+
 describe("RoleDialog — Change role", () => {
-  it("offers an organization role from the five, never the project-only Commenter or Reviewer", async () => {
+  it("offers an organization role from Member, Maintainer and Owner only (AQU-2352)", async () => {
     render(
       <RoleDialog
         open
@@ -50,9 +53,8 @@ describe("RoleDialog — Change role", () => {
     )
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "org")
     expect(screen.getByRole("heading", { name: "Change role for bob" })).toBeInTheDocument()
-    expect(await offeredLevels(/role for bob/i)).toEqual([
-      ROLE.VIEWER, ROLE.CONTRIBUTOR, ROLE.PROJECT_LEAD, ROLE.MAINTAINER, ROLE.OWNER,
-    ])
+    expect(await offeredLevels(/role for bob/i)).toEqual([ROLE.MAINTAINER, ROLE.OWNER])
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: ORG_MEMBER_OPTION })).toBeInTheDocument()
   })
 
   it("never offers a project role above the chooser's own", async () => {
@@ -188,7 +190,7 @@ describe("RoleDialog — Change role", () => {
 })
 
 describe("RoleDialog — Add member", () => {
-  it("offers the organization's add list in the people row: no Owner, no Commenter or Reviewer", async () => {
+  it("offers the organization's add list in the people row: Member and Maintainer, no Owner", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
       <RoleDialog
@@ -200,7 +202,7 @@ describe("RoleDialog — Add member", () => {
         title="Add a member"
         people={{
           kind: "row",
-          row: { defaultRole: ROLE.CONTRIBUTOR, grantScope: { kind: "organization" }, scopedUserSearch: false, onAdd: vi.fn() },
+          row: { defaultRole: ROLE.VIEWER, grantScope: { kind: "organization" }, scopedUserSearch: false, onAdd: vi.fn() },
         }}
         otherTabs={[{ value: "invite", label: "Invite by email", content: <p>invite</p> }]}
       />
@@ -209,9 +211,8 @@ describe("RoleDialog — Add member", () => {
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-dialog-mode", "add")
     expect(screen.getByRole("tab", { name: "Add members" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Invite by email" })).toBeInTheDocument()
-    expect(await offeredLevels(/^role$/i)).toEqual([
-      ROLE.VIEWER, ROLE.CONTRIBUTOR, ROLE.PROJECT_LEAD, ROLE.MAINTAINER,
-    ])
+    expect(await offeredLevels(/^role$/i)).toEqual([ROLE.MAINTAINER])
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: ORG_MEMBER_OPTION })).toBeInTheDocument()
   })
 
   it("keeps the long explanation behind a click (i)", () => {

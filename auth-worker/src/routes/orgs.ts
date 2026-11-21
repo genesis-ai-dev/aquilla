@@ -60,7 +60,6 @@ import {
   updateGroupProjectRole,
 } from "../services/org-permissions"
 import {
-  ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   resolveProjectRoles,
   ROLE_NAMES,
@@ -71,6 +70,7 @@ import { lookupUserByUsername, lookupUserByUsernameOrEmail } from "../services/u
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
+import { ORG_MEMBER, ORG_ROLE_REFUSAL, isOrgRoleLevel, orgRoleForStorage } from "../../../db/shared/org-roles"
 import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
 import { emailBoundInviteUnverified } from "../services/verified-email-invite"
@@ -1088,15 +1088,14 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   return c.json({ userId: targetUserId, teamRoleLevel: roleLevel })
 })
 
-// Strict role validation — only the seven canonical levels are accepted.
+// AQU-2352 (D-j): an org role is Member (100), Maintainer (600) or Owner
+// (700). Viewer through Project Lead are refused here: they are lane roles.
 const orgMemberSingle = z.object({
   username: z.string().min(1),
   role: z
     .number()
     .int()
-    .refine(isCanonicalRoleLevel, {
-      message: `role must be one of ${ALL_ROLE_LEVELS.join(", ")}`,
-    }),
+    .refine(isOrgRoleLevel, { message: ORG_ROLE_REFUSAL }),
 })
 
 // AQU-736: accept EITHER the legacy single-user body or a batch
@@ -1293,8 +1292,15 @@ interface OrgInviteRow {
 }
 
 const createOrgInviteBody = z.object({
-  // Org-grantable levels only; OWNER (700) is never grantable via link.
-  role: z.number().int().min(100).max(600).optional(),
+  // AQU-2352: Member or Maintainer. Owner (700) is never grantable via an
+  // invite, and Viewer through Project Lead are not org roles.
+  role: z
+    .number()
+    .int()
+    .refine((r) => isOrgRoleLevel(r) && r < ROLE.OWNER, {
+      message: "an organization invite gives Member (100) or Maintainer (600)",
+    })
+    .optional(),
   email: z.string().email().optional(),
   // null = no expiry; undefined = server default (30 days).
   expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
@@ -1317,9 +1323,8 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
   if (typeof callerRole !== "number") return callerRole
 
   const { role, email, expires_in_days } = c.req.valid("json")
-  let grantedRole = role ?? ROLE.CONTRIBUTOR
-  if (grantedRole >= ROLE.OWNER) grantedRole = ROLE.MAINTAINER
-  if (grantedRole < ROLE.VIEWER) grantedRole = ROLE.VIEWER
+  // AQU-2352: the default is Member, which opens nothing (it was Contributor).
+  const grantedRole = role ?? ORG_MEMBER
 
   const token = crypto.randomUUID().replace(/-/g, "")
   const expiresAt =
@@ -1512,11 +1517,15 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   if (invite.used_at && invite.used_by === user.id && !existing) {
     return c.json({ error: "Invite already used" }, 410)
   }
-  const finalRole = existing
-    ? invite.used_at
-      ? existing.role_level
-      : Math.max(existing.role_level, invite.role_level)
-    : invite.role_level
+  // AQU-2352: an invite written before 0210 may still carry 200–500, and a
+  // member row could too; neither is stored again as anything but an org role.
+  const finalRole = orgRoleForStorage(
+    existing
+      ? invite.used_at
+        ? existing.role_level
+        : Math.max(existing.role_level, invite.role_level)
+      : invite.role_level,
+  )
 
   try {
     // [Pen test 2026-09-29] Claim the single-use invite (CAS) BEFORE granting

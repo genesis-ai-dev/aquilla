@@ -32,7 +32,8 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [email, setEmail] = useState("")
-  const [role, setRole] = useState<number>(ROLE.CONTRIBUTOR)
+  // AQU-2352: Member, which opens nothing (it was Contributor).
+  const [role, setRole] = useState<number>(ROLE.VIEWER)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

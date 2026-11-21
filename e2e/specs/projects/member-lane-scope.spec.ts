@@ -42,7 +42,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   const forgedText = `forged lane A ${stamp}`
   const nextSource = `Source moved ${stamp}`
 
-  await addOrgMember(await jwtFor("alice"), alice.orgId, "bob", ROLE.CONTRIBUTOR)
+  await addOrgMember(await jwtFor("alice"), alice.orgId, "bob", ROLE.VIEWER)
 
   const dash = new Dashboard(alice)
   await dash.goto()

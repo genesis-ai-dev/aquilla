@@ -24,6 +24,7 @@ import {
   verifyPassword,
 } from "../utils/password"
 import { applyMigratedMemberLaneGrants } from "./lane-grants"
+import { orgRoleForStorage } from "../../../db/shared/org-roles"
 import type { AquillaDb } from "../../../db/shim/postgres"
 
 export type LegacyMigrationFailure =
@@ -341,7 +342,9 @@ export async function applyLegacyUserMigration(
            VALUES (?, ?, ?, NULL)
            ON CONFLICT (org_id, user_id)
            DO UPDATE SET role_level = excluded.role_level`,
-        ).bind(org.id, userId, membership.roleLevel).run()
+        // AQU-2352: an org role is Member, Maintainer or Owner. A legacy
+        // level below Maintainer opened nothing here and becomes Member.
+        ).bind(org.id, userId, orgRoleForStorage(membership.roleLevel)).run()
       }
 
       stage = "team-memberships"

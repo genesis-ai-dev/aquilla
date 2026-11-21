@@ -342,15 +342,11 @@ function roleFromGrantPaths(
     contributions.push({ source: "override", level: override.row.role_level })
   if (group.row?.role_level != null)
     contributions.push({ source: "group", level: group.row.role_level })
-  // AQU-435 / AQU-1274: Maintainer+ is an access path on its own; below that
-  // the org role contributes only to stop a team attachment from silently
-  // demoting a higher org role. The rule lives in db/shared/project-roles.ts
-  // so this resolver and the Agent-API port cannot drift apart on it.
-  const orgContribution = orgPathContribution({
-    orgLevel: org.row?.role_level ?? null,
-    hasDirectGrant: override.row != null,
-    hasGroupGrant: group.row?.role_level != null,
-  })
+  // AQU-435: Maintainer+ is an access path on its own; below that the org
+  // role contributes nothing (AQU-2352 removed the AQU-1274 lift). The rule
+  // lives in db/shared/project-roles.ts so this resolver and the Agent-API
+  // port cannot drift apart on it.
+  const orgContribution = orgPathContribution(org.row?.role_level ?? null)
   if (orgContribution != null)
     contributions.push({ source: "org", level: orgContribution })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

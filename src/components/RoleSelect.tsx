@@ -9,12 +9,15 @@ import {
 import { RoleLabel } from "@/components/RoleLabel"
 import { resolveRoleName, roleDescription, roleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { cn } from "@/lib/utils"
 
 export type RoleSelectOption = {
   level: number
   name: string
   description?: string
+  /** A picker blurb other than the level's default (AQU-2352: org Member). */
+  pickerDescriptionKey?: MessageKey
 }
 
 export interface RoleSelectProps {
@@ -38,11 +41,12 @@ export interface RoleSelectProps {
   contentClassName?: string
 }
 
-function resolveOption(opt: RoleSelectOption): Required<RoleSelectOption> {
+function resolveOption(opt: RoleSelectOption, t: (key: MessageKey) => string): Required<Omit<RoleSelectOption, "pickerDescriptionKey">> {
   return {
     level: opt.level,
     name: opt.name || roleName(opt.level),
-    description: opt.description ?? roleDescription(opt.level),
+    description:
+      opt.description ?? (opt.pickerDescriptionKey ? t(opt.pickerDescriptionKey) : roleDescription(opt.level)),
   }
 }
 
@@ -64,12 +68,12 @@ export function RoleSelect({
   contentClassName,
 }: RoleSelectProps) {
   const t = useT()
-  const resolved = options.map(resolveOption)
+  const resolved = options.map((o) => resolveOption(o, t))
   const valueStr = value != null ? String(value) : ""
   const valueInOptions = resolved.some((o) => o.level === value)
   const extra =
     currentOption && !valueInOptions && currentOption.level === value
-      ? resolveOption(currentOption)
+      ? resolveOption(currentOption, t)
       : null
 
   // The closed trigger shows these labels: the catalog's name, so it reads

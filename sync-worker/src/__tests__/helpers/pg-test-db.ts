@@ -180,7 +180,8 @@ async function withSeedLane(
   if (!("target_lang" in row) || typeof row.project_id !== "string") return row
   const source =
     (table === "cells" && row.side === "source") ||
-    (table === "artifact_bindings" && row.binding_role === "source")
+    // AQU-2554: every binding but a target one belongs to the source lane.
+    (table === "artifact_bindings" && row.binding_role !== "target")
   const tag = row.target_lang == null ? "" : String(row.target_lang)
   const resolved = await pg.query<{ id: string | null }>(
     source

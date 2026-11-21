@@ -2,7 +2,9 @@
 
 import unittest
 
-from text_fallback import FALLBACK_TEXT_MODELS, post_text
+import json
+
+from text_fallback import FALLBACK_TEXT_MODELS, post_text, post_valid_text
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 PRIMARY = "inception/mercury-2.5"
@@ -68,6 +70,49 @@ class TextFallbackTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Model connection failed"):
             post_text(post, URL, "key", {"model": PRIMARY, "messages": []})
         self.assertEqual(calls, [PRIMARY])
+
+
+def reply(content):
+    return {"choices": [{"message": {"content": content}}]}
+
+
+def helper(contents):
+    """A text helper that answers each call with the next canned reply."""
+    remaining = list(contents)
+    calls = []
+
+    def post(url, key, body):
+        calls.append(body["model"])
+        return reply(remaining.pop(0))
+
+    return post, calls
+
+
+class TextRetryTests(unittest.TestCase):
+    BODY = {"model": PRIMARY, "messages": []}
+
+    def test_one_unusable_reply_does_not_end_the_journey(self):
+        # Upstream raises "nothing typed" on the first malformed reply, which
+        # made the attack inconclusive. The second ask must reach the agent.
+        for bad in ("not json", json.dumps({"text": "  "}), json.dumps({"text": "x", "note": "y"}), json.dumps(["x"])):
+            post, calls = helper([bad, json.dumps({"text": "Adversarial one"})])
+            result = post_valid_text(post, URL, "key", self.BODY)
+            self.assertEqual(json.loads(result["choices"][0]["message"]["content"]), {"text": "Adversarial one"})
+            self.assertEqual(len(calls), 2, bad)
+
+    def test_a_usable_reply_is_never_asked_for_twice(self):
+        # A second ask could return a different value than the one the run pays for and types.
+        post, calls = helper([json.dumps({"text": "Adversarial one"})])
+        post_valid_text(post, URL, "key", self.BODY)
+        self.assertEqual(calls, [PRIMARY])
+
+    def test_two_unusable_replies_still_reach_upstreams_own_error(self):
+        # The reporter keys "not attributable to the product" on upstream's
+        # message, so the bad reply must be handed back, not swallowed or looped on.
+        post, calls = helper(["nope", "still nope"])
+        result = post_valid_text(post, URL, "key", self.BODY)
+        self.assertEqual(result, reply("still nope"))
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == "__main__":

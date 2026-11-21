@@ -243,6 +243,39 @@ describe("EditorTable — selection targeting (AQU-348)", () => {
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
   })
 
+  it("Command-A checks the cells from the row, and leaves a cell editor's text alone", () => {
+    const cells = ["1", "2", "3", "4", "5"].map(makeCell)
+    renderTable(cells)
+    const wanted = new Set(["1", "2", "3", "4", "5"])
+    const row = screen.getByLabelText("GEN 1:1 cell")
+
+    const editor = document.createElement("div")
+    editor.contentEditable = "true"
+    editor.textContent = "In the beginning"
+    row.appendChild(editor)
+    editor.focus()
+    const inEditor = new KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    editor.dispatchEvent(inEditor)
+    expect(inEditor.defaultPrevented).toBe(false)
+    expect(getSelectedIds().size).toBe(0)
+
+    if (row instanceof HTMLElement) row.focus()
+    const onRow = new KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    row.dispatchEvent(onRow)
+    expect(onRow.defaultPrevented).toBe(true)
+    expect(new Set(getSelectedIds())).toEqual(wanted)
+  })
+
   it("keeps the select control out of the source column, in its own leading track", () => {
     renderTable([makeCell("1")])
 

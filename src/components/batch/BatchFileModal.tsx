@@ -164,7 +164,7 @@ export function BatchFileModal({
     ? t("editor.batchFile.validateTitle")
     : t("editor.batchFile.draftTitle")
 
-  let description = ""
+  let description: string
   let canConfirm = false
   if (request.kind === "validate" && validateGroups.blocked) {
     description = validateGroups.blockedSummary.outcome === "no-permission"

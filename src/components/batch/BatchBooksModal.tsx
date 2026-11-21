@@ -5,7 +5,7 @@
  * Each checked book is taken whole; a chapter belongs to the open book's own
  * dialog.
  */
-import { useCallback, useEffect, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -250,6 +250,40 @@ function BookCheckRow({
     </Field>
   )
 }
+
+export interface BatchBooksDialogHandle {
+  open: (request: BatchBooksRequest) => void
+}
+
+/**
+ * Owns which run the header asked for. The workspace only holds a ref, so
+ * opening the dialog does not add state to ProjectWorkspace.
+ */
+export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
+  books: readonly BatchBook[]
+  initialFileId: string | null
+  canIncludeUntouchedAi: boolean
+  onConfirm: (request: BatchBooksRequest, choices: BatchBooksChoices) => void
+}>(function BatchBooksDialog({ books, initialFileId, canIncludeUntouchedAi, onConfirm }, ref) {
+  const [request, setRequest] = useState<BatchBooksRequest | null>(null)
+  useImperativeHandle(ref, () => ({ open: setRequest }), [])
+  if (!request) return null
+  return (
+    <BatchBooksModal
+      open
+      onOpenChange={(open) => { if (!open) setRequest(null) }}
+      request={request}
+      books={books}
+      initialFileId={initialFileId}
+      canIncludeUntouchedAi={canIncludeUntouchedAi}
+      onConfirm={(choices) => {
+        const kind = request
+        setRequest(null)
+        onConfirm(kind, choices)
+      }}
+    />
+  )
+})
 
 function OptionRow({
   id, checked, disabled, onCheckedChange, label, help,

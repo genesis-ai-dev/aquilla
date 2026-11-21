@@ -5,7 +5,7 @@
  * run the close handler, so handing from "running" to "finished" does not
  * also cancel the run.
  */
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useInsertionEffect, useRef, type ReactNode } from "react"
 import { toast } from "@/components/ui/toast"
 
 export function useProgressToast({
@@ -22,9 +22,13 @@ export function useProgressToast({
   onClose?: () => void
 }) {
   const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
   const bodyRef = useRef(body)
-  bodyRef.current = body
+  // Written before the toast effect, and never during render: a close click
+  // and the first paint both see the latest handler and body.
+  useInsertionEffect(() => {
+    onCloseRef.current = onClose
+    bodyRef.current = body
+  })
 
   useEffect(() => {
     if (!active) return

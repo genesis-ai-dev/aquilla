@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react"
+import { createRef } from "react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { BatchBooksModal } from "./BatchBooksModal"
+import { BatchBooksDialog, BatchBooksModal, type BatchBooksDialogHandle } from "./BatchBooksModal"
 
 const books = [
   { id: "gen", bookCode: "GEN", name: "Genesis" },
@@ -59,5 +60,31 @@ describe("BatchBooksModal", () => {
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
     }))
+  })
+
+  it("opens from the header's handle and reports which run was asked for", async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    const ref = createRef<BatchBooksDialogHandle>()
+    render(
+      <I18nProvider>
+        <BatchBooksDialog
+          ref={ref}
+          books={books}
+          initialFileId="gen"
+          canIncludeUntouchedAi
+          onConfirm={onConfirm}
+        />
+      </I18nProvider>,
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    act(() => { ref.current?.open("draft") })
+    await user.click(screen.getByRole("button", { name: "Draft books" }))
+    expect(onConfirm).toHaveBeenCalledWith("draft", expect.objectContaining({
+      fileIds: ["gen"],
+      includeEmpty: true,
+      refreshAiDrafts: false,
+    }))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 })

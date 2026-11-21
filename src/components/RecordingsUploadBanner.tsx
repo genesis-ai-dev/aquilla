@@ -3,7 +3,7 @@
 // how many uploaded, how many failed and why (behind "Show which"), and how
 // many were never started if the person stopped it.
 
-import { useRef, useState } from "react"
+import { useInsertionEffect, useRef, useState } from "react"
 import { AlertTriangle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -35,7 +35,9 @@ const FAILURE_KEY: Record<BulkFailureCode, MessageKey> = {
 export function RecordingsUploadBanner() {
   const state = useBulkUploadState()
   const stateRef = useRef(state)
-  stateRef.current = state
+  useInsertionEffect(() => {
+    stateRef.current = state
+  })
   const [showFailures, setShowFailures] = useState(false)
   const problem = !!state && (state.failed.length > 0 || state.cancelled)
   useProgressToast({

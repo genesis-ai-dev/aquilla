@@ -673,7 +673,7 @@ import {
   type ValidateRunChoices,
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
-import { BatchBooksModal, type BatchBooksChoices, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
+import { BatchBooksDialog, type BatchBooksChoices, type BatchBooksDialogHandle, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
 import { listBatchBooks } from "@/lib/review/batch-books"
 import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
 import { listChapterLabels } from "@/lib/export/chapter-scope"
@@ -13522,20 +13522,27 @@ export function ProjectWorkspace() {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
     return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
   }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
-  const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
-  const [booksRun, setBooksRun] = useState<BatchBooksRequest | null>(null)
-  // The chapter the table is showing, including the text view. The timeline's
-  // own pick stays on chosenScopeKey so a scroll here does not move playback.
-  const [viewChapterKey, setViewChapterKey] = useState<string | null>(null)
-  useEffect(() => { setViewChapterKey(null) }, [activeFileId])
+  const [batchFileModal, setBatchFileModal] = useState<(BatchFileModalRequest & { chapterKey: string | null }) | null>(null)
+  // The chapter the table is showing, including the text view. A scroll writes
+  // the ref and does not re-render the workspace. The file id rides along so
+  // a chapter from the previous file cannot open the next book's dialog.
+  // The timeline's own pick stays on chosenScopeKey.
+  const viewChapterKeyRef = useRef<{ fileId: string | null; key: string | null }>({ fileId: null, key: null })
+  const booksDialogRef = useRef<BatchBooksDialogHandle>(null)
+  const openBatchFileModal = useCallback((request: BatchFileModalRequest) => {
+    const seen = viewChapterKeyRef.current
+    setBatchFileModal({
+      ...request,
+      chapterKey: seen.fileId === activeFileId ? seen.key : null,
+    })
+  }, [activeFileId])
   const openFileChapters = useMemo(
     () => listChapterLabels(activeFileId ? cellSummaries.filter((cell) => cell.fileId === activeFileId) : []),
     [cellSummaries, activeFileId],
   )
   const batchBooks = useMemo(() => listBatchBooks(project?.files ?? []), [project?.files])
-  const runAcrossBooks = useCallback((choices: BatchBooksChoices) => {
+  const runAcrossBooks = useCallback((request: BatchBooksRequest, choices: BatchBooksChoices) => {
     if (!project) return
-    setBooksRun(null)
     const names = new Map(batchBooks.map((book) => [book.id, book.name]))
     const readingId = toast.add({
       type: "loading",
@@ -13568,7 +13575,7 @@ export function ProjectWorkspace() {
           byFile.set(fileId, cells)
         }
         toast.close(readingId)
-        if (booksRun === "draft") {
+        if (request === "draft") {
           for (const cells of byFile.values()) {
             const chosen = selectBatchDraft(classifyBatchDraft(cells), {
               includeEmpty: choices.includeEmpty,
@@ -13628,7 +13635,7 @@ export function ProjectWorkspace() {
         })
       }
     })()
-  }, [project, batchBooks, booksRun, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, actionCtx, actionArgs, t])
+  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, actionCtx, actionArgs, t])
   const booksMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
     const level = project.syncRole?.level ?? null
@@ -13640,7 +13647,7 @@ export function ProjectWorkspace() {
         id: "validate-books",
         label: t("editor.batchBooks.menuValidate"),
         icon: CheckSquare,
-        onClick: () => setBooksRun("validate"),
+        onClick: () => booksDialogRef.current?.open("validate"),
       })
     }
     if (canPerform("target.cell.commit", level)) {
@@ -13648,7 +13655,7 @@ export function ProjectWorkspace() {
         id: "draft-books",
         label: t("editor.batchBooks.menuDraft"),
         icon: Sparkles,
-        onClick: () => setBooksRun("draft"),
+        onClick: () => booksDialogRef.current?.open("draft"),
       })
     }
     return items.length > 1 ? items : []
@@ -13669,11 +13676,11 @@ export function ProjectWorkspace() {
     // AQU-983: drafting and text validation open the file modal. The plain
     // confirm dialog stays for the actions that only need a yes.
     if (action.opensFileModal === "validate") {
-      setBatchFileModal({ kind: "validate" })
+      openBatchFileModal({ kind: "validate" })
       return
     }
     if (action.opensFileModal === "draft-next" || action.opensFileModal === "draft-all") {
-      setBatchFileModal({
+      openBatchFileModal({
         kind: "draft",
         scope: action.opensFileModal === "draft-next" ? "next" : "all",
       })
@@ -13684,7 +13691,7 @@ export function ProjectWorkspace() {
     } else {
       action.run(actionCtx, actionArgs)
     }
-  }, [actionCtx, actionArgs])
+  }, [actionCtx, actionArgs, openBatchFileModal])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -15688,9 +15695,9 @@ export function ProjectWorkspace() {
   // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
-    setViewChapterKey(key)
+    viewChapterKeyRef.current = { fileId: activeFileId ?? null, key }
     if (sequenceTimeline) setChosenScopeKey(key)
-  }, [sequenceTimeline])
+  }, [sequenceTimeline, activeFileId])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line, on the whole book's clock.
   // Picking one while playback is paused ends that playback, as before
@@ -21303,7 +21310,7 @@ export function ProjectWorkspace() {
             ? (activeFile.bookCode ? (getBookName(activeFile.bookCode) ?? activeFile.name) : activeFile.name)
             : undefined}
           chapters={openFileChapters}
-          initialChapter={initialChapterScope(openFileChapters, viewChapterKey)}
+          initialChapter={initialChapterScope(openFileChapters, batchFileModal.chapterKey)}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           validateCandidates={activeFileId
             ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
@@ -21337,11 +21344,9 @@ export function ProjectWorkspace() {
           }}
         />
       )}
-      {booksRun && project && (
-        <BatchBooksModal
-          open
-          onOpenChange={(open) => { if (!open) setBooksRun(null) }}
-          request={booksRun}
+      {project && (
+        <BatchBooksDialog
+          ref={booksDialogRef}
           books={batchBooks}
           initialFileId={activeFileId}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}

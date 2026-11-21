@@ -41,17 +41,17 @@ describe("POST /api/v2/orgs/:orgId/invites (mint)", () => {
   beforeEach(seedOrg)
 
   it("lets an owner mint an invite and stores the row", async () => {
-    const res = await mint("wendi", { email: "bob@example.com", role: 400 })
+    const res = await mint("wendi", { email: "bob@example.com", role: 600 })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { token: string; role: { level: number } }
     expect(body.token).toHaveLength(32)
-    expect(body.role.level).toBe(400)
+    expect(body.role.level).toBe(600)
     const row = await env.AQUILLA_PG.prepare(
       "SELECT org_id, role_level, email FROM org_invites WHERE token = ?",
     )
       .bind(body.token)
       .first<{ org_id: number; role_level: number; email: string }>()
-    expect(row).toMatchObject({ org_id: 1, role_level: 400, email: "bob@example.com" })
+    expect(row).toMatchObject({ org_id: 1, role_level: 600, email: "bob@example.com" })
   })
 
   it("rejects a non-owner with 403", async () => {
@@ -73,13 +73,13 @@ describe("POST /api/v2/orgs/accept-invite (redeem)", () => {
   beforeEach(seedOrg)
 
   it("adds the redeemer to org_members for an open invite", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     const res = await accept("bob", minted.token)
     expect(res.status).toBe(200)
     const mem = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM org_members WHERE org_id = 1 AND user_id = 3",
     ).first<{ role_level: number }>()
-    expect(mem?.role_level).toBe(400)
+    expect(mem?.role_level).toBe(600)
     // Token is stamped used.
     const inv = await env.AQUILLA_PG.prepare(
       "SELECT used_by FROM org_invites WHERE token = ?",
@@ -87,6 +87,22 @@ describe("POST /api/v2/orgs/accept-invite (redeem)", () => {
       .bind(minted.token)
       .first<{ used_by: number }>()
     expect(inv?.used_by).toBe(3)
+  })
+
+  // AQU-2352: an invite written before migration 0210 may still say 400.
+  // Accepting it stores Member, never a 200–500 org row.
+  it("stores Member for an old invite at 200–500, and defaults a new invite to Member", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_invites (token, org_id, role_level, created_by)
+       VALUES ('oldcontrib1234567890abcdef000000', 1, 400, 1)`,
+    ).run()
+    expect((await accept("bob", "oldcontrib1234567890abcdef000000")).status).toBe(200)
+    const mem = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM org_members WHERE org_id = 1 AND user_id = 3",
+    ).first<{ role_level: number }>()
+    expect(mem?.role_level).toBe(100)
+    const dflt = (await (await mint("wendi", {})).json()) as { role: { level: number } }
+    expect(dflt.role.level).toBe(100)
   })
 
   it("honors an email-bound invite for the matching email", async () => {
@@ -145,7 +161,7 @@ describe("GET /api/v2/orgs/invite-preview/:token (AQU-347 still-member re-click)
   }
 
   it("returns a continue-preview (200) for the still-member redeemer re-clicking a used invite", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     await accept("bob", minted.token) // bob is now a member; token is stamped used
     const res = await preview(minted.token, "bob")
     expect(res.status).toBe(200)
@@ -154,14 +170,14 @@ describe("GET /api/v2/orgs/invite-preview/:token (AQU-347 still-member re-click)
   })
 
   it("returns 410 for a used invite previewed by a different user", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     await accept("bob", minted.token)
     const res = await preview(minted.token, "carol")
     expect(res.status).toBe(410)
   })
 
   it("returns 410 for the redeemer once they've been removed from the org", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     await accept("bob", minted.token)
     await env.AQUILLA_PG.prepare(
       "DELETE FROM org_members WHERE org_id = 1 AND user_id = 3",
@@ -175,7 +191,7 @@ describe("same-user re-redeem of a used org invite (pen test 2026-10-06)", () =>
   beforeEach(seedOrg)
 
   it("does not re-add a member who was removed", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     await accept("bob", minted.token)
     await env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = 1 AND user_id = 3").run()
     const res = await accept("bob", minted.token)
@@ -187,7 +203,7 @@ describe("same-user re-redeem of a used org invite (pen test 2026-10-06)", () =>
   })
 
   it("does not restore a demoted member's role", async () => {
-    const minted = (await (await mint("wendi", { role: 400 })).json()) as { token: string }
+    const minted = (await (await mint("wendi", { role: 600 })).json()) as { token: string }
     await accept("bob", minted.token)
     await env.AQUILLA_PG.prepare(
       "UPDATE org_members SET role_level = 100 WHERE org_id = 1 AND user_id = 3",

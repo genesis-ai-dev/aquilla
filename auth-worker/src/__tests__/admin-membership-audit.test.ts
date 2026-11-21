@@ -64,7 +64,7 @@ const call = async (as: string, method: string, path: string, body?: unknown) =>
 
 describe("org membership by a platform admin", () => {
   it("writes one row per add, role change, and remove", async () => {
-    const add = await call("root", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 200 })
+    const add = await call("root", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 100 })
     expect(add.status).toBe(200)
     let rows = await auditRows()
     expect(rows).toHaveLength(1)
@@ -79,15 +79,15 @@ describe("org membership by a platform admin", () => {
       groupId: null,
       projectId: null,
       roleBefore: null,
-      roleAfter: 200,
+      roleAfter: 100,
     })
 
-    const change = await call("root", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 400 })
+    const change = await call("root", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 600 })
     expect(change.status).toBe(200)
     rows = await auditRows()
     expect(rows).toHaveLength(2)
     expect(rows[1].action).toBe("org.member.role")
-    expect(detailOf(rows[1])).toMatchObject({ roleBefore: 200, roleAfter: 400, orgId: 1 })
+    expect(detailOf(rows[1])).toMatchObject({ roleBefore: 100, roleAfter: 600, orgId: 1 })
 
     const remove = await call("root", "DELETE", `/api/v2/orgs/1/members/${ALICE_ID}`)
     expect(remove.status).toBe(200)
@@ -96,7 +96,7 @@ describe("org membership by a platform admin", () => {
     expect(rows[2].action).toBe("org.member.remove")
     expect(detailOf(rows[2])).toMatchObject({
       target: { userId: ALICE_ID, username: "alice" },
-      roleBefore: 400,
+      roleBefore: 600,
       roleAfter: null,
       scope: "org",
     })
@@ -105,9 +105,9 @@ describe("org membership by a platform admin", () => {
   it("writes one row per successful person in a batch and none for failures", async () => {
     const res = await call("root", "POST", "/api/v2/orgs/1/members", {
       members: [
-        { username: "alice", role: 200 },
-        { username: "ghost", role: 200 },
-        { username: "bob", role: 300 },
+        { username: "alice", role: 100 },
+        { username: "ghost", role: 100 },
+        { username: "bob", role: 100 },
       ],
     })
     expect(res.status).toBe(200)
@@ -116,13 +116,13 @@ describe("org membership by a platform admin", () => {
   })
 
   it("writes nothing when the request fails", async () => {
-    const res = await call("root", "POST", "/api/v2/orgs/1/members", { username: "ghost", role: 200 })
+    const res = await call("root", "POST", "/api/v2/orgs/1/members", { username: "ghost", role: 100 })
     expect(res.status).toBe(404)
     expect(await auditRows()).toHaveLength(0)
   })
 
   it("writes nothing when a non-owner, non-admin is denied", async () => {
-    const res = await call("alice", "POST", "/api/v2/orgs/1/members", { username: "bob", role: 200 })
+    const res = await call("alice", "POST", "/api/v2/orgs/1/members", { username: "bob", role: 100 })
     expect(res.status).toBe(403)
     expect(await auditRows()).toHaveLength(0)
   })
@@ -130,11 +130,11 @@ describe("org membership by a platform admin", () => {
 
 describe("org membership by a genuine owner", () => {
   it("writes no audit rows and keeps the same responses", async () => {
-    const add = await call("owner", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 200 })
+    const add = await call("owner", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 100 })
     expect(add.status).toBe(200)
-    expect(await add.json()).toEqual({ userId: ALICE_ID, username: "alice", role: { level: 200, name: "commenter" } })
+    expect(await add.json()).toEqual({ userId: ALICE_ID, username: "alice", role: { level: 100, name: "viewer" } })
 
-    const change = await call("owner", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 400 })
+    const change = await call("owner", "POST", "/api/v2/orgs/1/members", { username: "alice", role: 600 })
     expect(change.status).toBe(200)
 
     const remove = await call("owner", "DELETE", `/api/v2/orgs/1/members/${ALICE_ID}`)

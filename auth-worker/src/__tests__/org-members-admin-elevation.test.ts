@@ -111,7 +111,7 @@ describe("org membership writes via the platform-admin fallback", () => {
     ).run()
     await seedUser(3, "recruit")
 
-    const res = await addMember(await jwtFor("genuineowner"), 5, "recruit", 400)
+    const res = await addMember(await jwtFor("genuineowner"), 5, "recruit", 100)
     expect(res.status).toBe(200)
   })
 
@@ -142,7 +142,7 @@ describe("org membership writes by deployment (AQU-2470)", () => {
     await seedUser(7, "root")
     await seedUser(9, "helper")
 
-    const res = await addMember(await jwtFor("root"), 1, "helper", 400)
+    const res = await addMember(await jwtFor("root"), 1, "helper", 100)
     expect(res.status).toBe(200)
 
     const audit = await env.AQUILLA_PG.prepare(
@@ -163,7 +163,7 @@ describe("org membership writes by deployment (AQU-2470)", () => {
       await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES ('root@example.com')").run()
     await seedUser(9, "helper")
 
-    const res = await addMember(await jwtFor("root"), 1, "helper", 400)
+    const res = await addMember(await jwtFor("root"), 1, "helper", 100)
     expect(res.status).toBe(403)
     const row = await env.AQUILLA_PG.prepare(
       "SELECT 1 FROM org_members WHERE org_id = 1 AND user_id = 9",

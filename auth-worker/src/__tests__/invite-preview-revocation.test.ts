@@ -154,7 +154,7 @@ async function usedMultiProjectInvite(): Promise<string> {
 async function usedOrgInvite(): Promise<string> {
   const created = await app.request(
     "/api/v2/orgs/1/invites",
-    { method: "POST", headers: authHeader(wendi.token), body: JSON.stringify({ role: 400 }) },
+    { method: "POST", headers: authHeader(wendi.token), body: JSON.stringify({ role: 100 }) },
     env,
   )
   expect(created.status).toBe(200)

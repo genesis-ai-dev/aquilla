@@ -56,9 +56,9 @@ describe("AQU-1352 §3.8 member access payload", () => {
     expect(top.origin.from?.map((r) => r.name)).toEqual(["Fixture Org", "fixture/translators"])
     expect(top.grantedBy).toBe("owner") // named, not a raw user id
     expect(projectIds(body.elsewhere)).toEqual(["p2"])
-    // AQU-1274: org 300 contributes here (a team opens p1, no direct row), so it
-    // is part of the chain, not "everything else".
-    expect(body.effectiveHere.chain.some((e) => inner(e)?.type === "org")).toBe(true)
+    // AQU-2352: an org role below Maintainer contributes nothing, even beside
+    // a team path (the AQU-1274 lift is gone), so it is not in the chain.
+    expect(body.effectiveHere.chain.some((e) => inner(e)?.type === "org")).toBe(false)
     expect(body.isGuest).toBe(false)
   })
 

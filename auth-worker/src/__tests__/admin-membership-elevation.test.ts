@@ -119,7 +119,7 @@ const orgCases: Case[] = [
   { name: "team project attach", method: "POST", path: "/api/v2/orgs/1/groups/10/projects", body: { projectId: "proj-c", roleLevel: 400 }, action: "team.project.attach" },
   { name: "team project role", method: "PATCH", path: "/api/v2/orgs/1/groups/10/projects/proj-a", body: { roleLevel: 400 }, action: "team.project.role" },
   { name: "team project detach", method: "DELETE", path: "/api/v2/orgs/1/groups/10/projects/proj-a", action: "team.project.detach" },
-  { name: "org invite create", method: "POST", path: "/api/v2/orgs/1/invites", body: { role: 400, email: "new@example.com" }, action: "org.invite.create" },
+  { name: "org invite create", method: "POST", path: "/api/v2/orgs/1/invites", body: { role: 100, email: "new@example.com" }, action: "org.invite.create" },
   { name: "org invite revoke", method: "DELETE", path: "/api/v2/orgs/1/invites/tok-org-1", action: "org.invite.revoke" },
 ]
 
@@ -164,7 +164,7 @@ describe("audit detail for team and invite changes", () => {
     const jwt = await jwtFor("root")
     await elevate(jwt)
     await call("root", "POST", "/api/v2/orgs/1/groups/10/projects", { projectId: "proj-c", roleLevel: 400 }, jwt)
-    const mint = await call("root", "POST", "/api/v2/orgs/1/invites", { role: 400, email: "new@example.com" }, jwt)
+    const mint = await call("root", "POST", "/api/v2/orgs/1/invites", { role: 100, email: "new@example.com" }, jwt)
     const { token } = (await mint.json()) as { token: string }
     await call("root", "PATCH", "/api/v2/orgs/1/groups/10/members/2", { roleLevel: 600 }, jwt)
 
@@ -186,7 +186,7 @@ describe("audit detail for team and invite changes", () => {
       orgId: 1,
       groupId: null,
       target: null,
-      roleAfter: 400,
+      roleAfter: 100,
       email: "new@example.com",
     })
     expect(rows[1].detail).not.toContain(token)
@@ -239,7 +239,7 @@ describe("platform admin who is a genuine org Maintainer", () => {
   })
 
   it("still needs elevation for invites (the gate is Owner, 600 is not enough)", async () => {
-    const res = await call("root", "POST", "/api/v2/orgs/2/invites", { role: 400 })
+    const res = await call("root", "POST", "/api/v2/orgs/2/invites", { role: 100 })
     expect(res.status).toBe(403)
     expect(((await res.json()) as { error: string }).error).toContain("elevation required")
   })
@@ -285,7 +285,7 @@ describe("non-admin callers see the same responses and no audit rows", () => {
   })
 
   it("org Maintainer still cannot manage invites", async () => {
-    const res = await call("mara", "POST", "/api/v2/orgs/1/invites", { role: 400 })
+    const res = await call("mara", "POST", "/api/v2/orgs/1/invites", { role: 100 })
     expect(res.status).toBe(403)
     expect(await res.json()).toEqual({ error: "only org owners can invite members" })
     const del = await call("mara", "DELETE", "/api/v2/orgs/1/invites/tok-org-1")
@@ -312,7 +312,7 @@ describe("non-admin callers see the same responses and no audit rows", () => {
   })
 
   it("org Owner mints and revokes invites", async () => {
-    const mint = await call("owner", "POST", "/api/v2/orgs/1/invites", { role: 400, email: "new@example.com" })
+    const mint = await call("owner", "POST", "/api/v2/orgs/1/invites", { role: 100, email: "new@example.com" })
     expect(mint.status).toBe(200)
     const del = await call("owner", "DELETE", "/api/v2/orgs/1/invites/tok-org-1")
     expect(del.status).toBe(200)

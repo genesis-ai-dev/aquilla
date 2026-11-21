@@ -504,11 +504,35 @@ describe("Role × Scope edit gates", () => {
         {
           method: "POST",
           headers: authHeader(await jwtFor("owner")),
-          body: JSON.stringify({ username: "new_user", role: 200 }),
+          body: JSON.stringify({ username: "new_user", role: 100 }),
         },
         env,
       )
       expect(res.status).toBe(200)
+    })
+
+    // AQU-2352 (D-j): an org role is Member, Maintainer or Owner. Viewer
+    // through Project Lead are lane roles; the API refuses them at org scope
+    // (one add, a batch, and an org invite) and writes nothing.
+    it("refuses an org grant or org invite at 200–500, naming the allowed roles", async () => {
+      await seedBaseOrg()
+      await seedUser(5, "new_user")
+      const owner = authHeader(await jwtFor("owner"))
+      for (const role of [200, 300, 400, 500]) {
+        for (const body of [{ username: "new_user", role }, { members: [{ username: "new_user", role }] }]) {
+          const res = await app.request("/api/v2/orgs/1/members", { method: "POST", headers: owner, body: JSON.stringify(body) }, env)
+          expect(res.status).toBe(400)
+          expect(await res.text()).toMatch(/Member \(100\), Maintainer \(600\) or Owner \(700\)/)
+        }
+        const invite = await app.request("/api/v2/orgs/1/invites", { method: "POST", headers: owner, body: JSON.stringify({ role }) }, env)
+        expect(invite.status).toBe(400)
+      }
+      const row = await env.AQUILLA_PG.prepare("SELECT 1 AS x FROM org_members WHERE org_id = 1 AND user_id = 5").first()
+      expect(row).toBeNull()
+      // Member and Maintainer invites are fine, and the default is Member.
+      const dflt = await app.request("/api/v2/orgs/1/invites", { method: "POST", headers: owner, body: JSON.stringify({}) }, env)
+      expect(dflt.status).toBe(200)
+      expect(((await dflt.json()) as { role: { level: number } }).role.level).toBe(100)
     })
   })
 

@@ -100,14 +100,14 @@ describe("GET /api/v2/orgs/invite-preview/:token (public, AQU-471)", () => {
   }
 
   it("returns org name, inviter, and role WITHOUT auth", async () => {
-    const token = await mintOrgInvite({ role: 400, email: "bob@example.com" })
+    const token = await mintOrgInvite({ role: 600, email: "bob@example.com" })
     const res = await app.request(`/api/v2/orgs/invite-preview/${token}`, {}, env)
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({
       orgId: 1,
       orgName: "Come and See",
       invitedBy: "Wendi M.",
-      role: { level: 400 },
+      role: { level: 600 },
       email: "bob@example.com",
     })
   })

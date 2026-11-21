@@ -386,7 +386,7 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findApprovedRenderingMatches } from "@/lib/richtext/terminology-chip-plugin"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isFlagEnabled, isSmartEditsEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import { readLanguageProfile } from "../../db/shared/language-profile"
 import {
@@ -3741,10 +3741,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
 
-  // Smart edits (flag `smartEdits`): one passage request around the active
-  // cell; rows read their own suggestions through SmartEditsProvider.
+  // Smart edits (project-wide, on by default): one passage request around the
+  // active cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
-    enabled: isFlagEnabled(project, "smartEdits"),
+    enabled: isSmartEditsEnabled(project),
     llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
     harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
     projectId: project.id,

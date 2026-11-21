@@ -14,6 +14,8 @@ export interface Finding {
   secondGoal: string | null
   mutator: string | null
   fuzzSeed: number | null
+  /** A scripted probe found it: no agent ran, so there is no agent mistake to rule out. */
+  scripted?: boolean
   runId: string
   target: string
   deployedSha: string | null
@@ -46,7 +48,7 @@ export function ticketBody(finding: Finding): string {
     finding.mutator ? `**Condition:** \`${finding.mutator}\`` : null,
     finding.fuzzSeed !== null ? `**Fuzz seed:** ${finding.fuzzSeed}` : null,
     "",
-    "**Goal given to Jev:**",
+    finding.scripted ? "**What the scripted probe attempted (no model ran):**" : "**Goal given to Jev:**",
     `> ${finding.goal}`,
     finding.secondGoal ? `\n**Second agent's goal:**\n> ${finding.secondGoal}` : null,
     "",
@@ -56,7 +58,9 @@ export function ticketBody(finding: Finding): string {
     "",
     `**Evidence:** \`${finding.evidencePath}\` (run \`${finding.runId}\`). The fixture projects were kept: ${finding.projectIds.map((id) => `\`${id}\``).join(", ")}.`,
     "",
-    "Before promoting, confirm the agent did not simply act on the wrong row: the oracle cannot tell a product fault from an agent mistake when both leave the same state.",
+    finding.scripted
+      ? "The probe sent these requests itself and its control request landed, so no agent mistake is involved. The run's evidence lists each request and its HTTP status."
+      : "Before promoting, confirm the agent did not simply act on the wrong row: the oracle cannot tell a product fault from an agent mistake when both leave the same state.",
     "",
     marker(finding.fingerprint),
   ].filter((line) => line !== null).join("\n")

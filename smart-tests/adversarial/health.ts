@@ -3,6 +3,8 @@
 /** The evidence fields the reporter reads; run.ts and canary.spec.ts write them. */
 export interface Evidence {
   canary?: boolean
+  /** A model-free probe (probes.ts): no agent ran, so it says nothing about the agent's health. */
+  scripted?: boolean
   attackId?: string
   mode?: string
   journey?: string
@@ -51,7 +53,13 @@ export function loginFailure(username: string, status: number, code: unknown): s
 
 /**
  * Decide whether the run said anything about the build. The canary must
- * have run and passed, and at least one attack must have reached a verdict.
+ * have run and passed, and the agent-driven attacks must mostly have reached
+ * a verdict.
+ *
+ * "Mostly", not "at least one": for ten days in 2026-11 a text model with no
+ * provider left 15 of 18 attacks inconclusive on every run, and three
+ * click-only attacks kept the check green. Scripted probes run no model, so
+ * they say nothing about whether the agent could act and are not counted.
  */
 export function harnessHealth(recorded: Recorded[], attacksPlanned: number): { available: boolean; reason: string } {
   const canary = recorded.filter((entry) => entry.project === "canary")
@@ -60,8 +68,17 @@ export function harnessHealth(recorded: Recorded[], attacksPlanned: number): { a
   if (failed.length) return { available: false, reason: `The canary health check failed (${failed.length} of ${canary.length}).` }
   const attacks = recorded.filter((entry) => entry.project === "attacks")
   if (attacksPlanned > 0 && attacks.length === 0) return { available: false, reason: "No attack ran after the canary." }
-  if (attacks.length > 0 && attacks.every((entry) => entry.evidence?.outcome.verdict === "inconclusive" || !entry.evidence)) {
-    return { available: false, reason: "Every attack ended inconclusive." }
+  const driven = attacks.filter((entry) => !entry.evidence?.scripted)
+  const silent = driven.filter((entry) => entry.evidence?.outcome.verdict === "inconclusive" || !entry.evidence)
+  if (silent.length * 2 > driven.length) {
+    const reasons = new Map<string, number>()
+    for (const reason of silent.flatMap((entry) => entry.evidence?.agents ?? [])
+      .flatMap((agent) => agent?.errors ?? []).map((error) => error.reason)) {
+      if (reason) reasons.set(reason, (reasons.get(reason) ?? 0) + 1)
+    }
+    const [common] = [...reasons].sort((a, b) => b[1] - a[1])
+    return { available: false, reason: `${silent.length} of ${driven.length} agent-driven attacks ended inconclusive.`
+      + (common ? ` Most common driver error: ${common[0]}` : "") }
   }
   return { available: true, reason: "" }
 }

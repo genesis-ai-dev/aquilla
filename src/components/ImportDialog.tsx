@@ -68,6 +68,7 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import { countReimportDiff, type ReimportCountedCell } from "@/lib/import/reimport-diff"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
+import { DriveFolderSyncCard } from "@/components/import/DriveFolderSyncCard"
 import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
@@ -3091,6 +3092,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }}
         />
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        <DriveFolderSyncCard projectId={projectId} getToken={getToken} />
       </div>
     )
   }

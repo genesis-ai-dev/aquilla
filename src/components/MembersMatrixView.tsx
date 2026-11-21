@@ -6,10 +6,10 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
+import { MembersMatrixCellEditor, MembersMatrixCellPopoverProvider } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
-import { MemberLaneScopeEditor } from "./MemberLaneScopeEditor"
+import { MemberLaneScopeEditor, MemberLaneScopeEditorProvider } from "./MemberLaneScopeEditor"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { Spinner } from "@/components/ui/spinner"
@@ -170,6 +170,10 @@ export function MembersMatrixView() {
       <div className="flex-1 overflow-x-auto">
         {/* Access model legend — collapsible, rendered above the table */}
         <AccessModelLegend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
+        {/* AQU-2655: one role popover and one scope editor for the whole
+            matrix; each cell holds only their triggers. */}
+        <MembersMatrixCellPopoverProvider>
+        <MemberLaneScopeEditorProvider>
         <Table className="min-w-full">
           <TableHeader>
             <TableRow>
@@ -213,6 +217,8 @@ export function MembersMatrixView() {
             ))}
           </TableBody>
         </Table>
+        </MemberLaneScopeEditorProvider>
+        </MembersMatrixCellPopoverProvider>
       </div>
 
       {/* Per-member drill-down panel — shown when a member row is selected */}

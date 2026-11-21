@@ -157,12 +157,13 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     editor render re-renders every lane. The CPU profile of the lens open is led by
     `getBoundingClientRect` (88 ms self time at 4×, caller not traced) and
     `scrollIntoViewIfNeeded` (19 ms) — forced layout, not rendering.
-24. **Rules surface:** every built-in check row (a Select and a Switch each) re-renders on each
-    of the 10 renders per open (`src/components/RulesSurface.tsx`, `BuiltinChecksList.tsx`); on 20
-    files the quality section is 59 commits and 46 requests and keeps committing for 7.5 s.
-25. **Project overview** (`src/components/org/ProjectOverview.tsx`, 3.1k lines, not compiled): new
-    `columns` and `data` for the lanes table on 7 of 7 renders; 14 commits, 18 requests to open.
-26. **`src/components/ui/data-table.tsx`:** a ContextMenu root and a DropdownMenu root per row.
+24. **Rules surface on 20 files:** the quality section is still about 50 commits and 46 requests
+    (19 `sync-token`, 22 cell reads) — a commit per slice of `useProjectInfractions` as the counts
+    fill in (`src/components/ProjectSettings/RulesSection.tsx`). Each built-in row's text part
+    still re-renders on each one (new `rule` objects and `leading` chips from `RulesSurface`);
+    its Select and Switch no longer do (AQU-2655).
+26. **`src/components/ui/data-table.tsx`:** a ContextMenu root per mounted row (the ⋯ menu is one
+    shared root since AQU-2655; Base UI's context menu has no detached triggers).
 27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
 28. **`src/components/SearchDockPanel.tsx`:** one search request per keystroke, no debounce.
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests
@@ -170,7 +171,8 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
     no comments).
 31. **Glossary page:** 664 row mounts remain on open; `GlossaryEditor` is not compiled.
-32. **Members matrix:** a Popover root and a lane-scope editor per populated cell; not virtualized.
+32. **Members matrix:** not virtualized (`src/components/MembersMatrixView.tsx`). Its per-cell
+    popover roots are one shared root each since AQU-2655.
 33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
     `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.
 

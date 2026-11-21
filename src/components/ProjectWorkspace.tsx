@@ -228,7 +228,7 @@ import { ExtensionsBar } from "./tools/ExtensionsBar"
 import { useToolsMount } from "./tools/ToolsMountContext"
 import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
 import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
-import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
+import { CloneVoiceModalHost as CloneVoiceModalHostImpl } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
@@ -730,8 +730,12 @@ const AgentWorkbench = lazy(() =>
 const StationPanel = lazy(() =>
   import("@/components/station/StationPanel").then((m) => ({ default: m.StationPanel })),
 )
+// AQU-2655: not re-rendered while closed, except for the film picture it
+// resolves ahead of an opening (see `closedDialogInputs.ts`).
 const AudioRecordingModal = lazy(() =>
-  import("./AudioRecorder/AudioRecordingModal").then((m) => ({ default: m.AudioRecordingModal })),
+  Promise.all([import("./AudioRecorder/AudioRecordingModal"), import("./closedDialogInputs")]).then(([m, closed]) => ({
+    default: memoWhileClosed(m.AudioRecordingModal, undefined, closed.audioRecordingModalUnchangedWhileClosed),
+  })),
 )
 const VoiceSidebar = lazy(() =>
   import("./voice/VoiceSidebar").then((m) => ({ default: m.VoiceSidebar })),
@@ -771,16 +775,25 @@ const CueLinkDrawer = lazy(() =>
 const AlignTimelineScriptDialog = lazy(() =>
   import("./import/AlignTimelineScriptDialog").then((m) => ({ default: m.AlignTimelineScriptDialog })),
 )
+// AQU-2655: not re-rendered while closed, except for the lane inputs that can
+// finish a pending import while closed (see `importDialogUnchangedWhileClosed`).
 const ImportDialog = lazy(() =>
-  import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
+  Promise.all([import("./ImportDialog"), import("./closedDialogInputs")]).then(([mod, closed]) => ({
+    default: memoWhileClosed(mod.ImportDialog, undefined, closed.importDialogUnchangedWhileClosed),
+  })),
 )
 
 // AQU-2559: a Bible book as one continuous document.
 const BibleDocumentView = lazy(() =>
   import("@/components/bible-document/BibleDocumentView").then((m) => ({ default: m.BibleDocumentView })),
 )
+// AQU-2655: not re-rendered while closed, except for the file and project
+// inputs its format and base-name effects follow (see
+// `exportDialogUnchangedWhileClosed`).
 const ExportDialog = lazy(() =>
-  import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
+  Promise.all([import("./ExportDialog"), import("./closedDialogInputs")]).then(([mod, closed]) => ({
+    default: memoWhileClosed(mod.ExportDialog, undefined, closed.exportDialogUnchangedWhileClosed),
+  })),
 )
 
 // FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
@@ -928,8 +941,10 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 // renders with `open={false}` for the whole session. Each stays mounted — its
 // exit animation and any state it keeps between opens are untouched — but is
 // not re-rendered while it stays closed. Every one here was checked to do
-// nothing while closed; see `memoWhileClosed` for the rule and for the four
-// that are deliberately left as they were.
+// nothing while closed; see `memoWhileClosed` for the rule. The lazy Export,
+// Import and recorder dialogs above do react to a few props while closed, and
+// say which.
+const CloneVoiceModalHost = memoWhileClosed(CloneVoiceModalHostImpl)
 const AiSetupDialog = memoWhileClosed(AiSetupDialogImpl)
 const AssignModal = memoWhileClosed(AssignModalImpl)
 const ParallelPassagesPanel = memoWhileClosed(ParallelPassagesPanelImpl)

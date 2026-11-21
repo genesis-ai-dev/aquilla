@@ -63,10 +63,6 @@ render is about 98.
     One instance per table, or mount on hover. `AppTooltip` documents that remounting its trigger
     flashes popovers, and a delegated tooltip changes the accessibility wiring — decide the
     design first.
-11. **`ExportDialog` (3.6k lines), `ImportDialog` (5.2k), `AudioRecordingModal` and
-    `CloneVoiceModalHost` still render while closed** — about 12 components per workspace render.
-    Export's effect order picks a format while closed; Import can finish a pending import while
-    closed. Audit each, then skip while closed (`src/components/memoWhileClosed.ts`).
 12. **List wrappers:** every store emit runs five wrapper components for each mounted row, because
     `extraData` carries the store version by design — about 400 renders per commit.
 13. **Left dock, file-options menu, header, resizable panels, side rail** re-render with every

@@ -294,13 +294,10 @@ import {
   type EditorParallelBiblesConfig,
 } from "./parallel-bibles/EditorBibleColumns"
 import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineNumberLabel, scriptureNumberingOf } from "@/lib/cells/line-name"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
-import {
-  cellNumberLabel,
-  importDisplayLabel,
-  verseRangeLabel,
-} from "@/lib/scripture-reference"
+import { verseRangeLabel } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
@@ -1174,6 +1171,10 @@ interface EditorTableProps {
    *  correction when one still describes this text, else the corpus-derived
    *  gloss computed on demand (AQU-1408 §1). */
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
+  /** AQU-2655: bumps when the debounced corpus behind `getStatisticalBt` and
+   *  `getAlignmentModel` changes. They read it at call time, so their identity
+   *  no longer says so. */
+  btCorpusSignal?: ChangeSignal
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1407,7 +1408,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt, btCorpusSignal,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -2792,11 +2793,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
   // A file of chapters numbers its lines by verse; anything else counts them.
-  const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
-    item.kind === "chapter"
-    || item.kind === "chapter-range"
-    || item.kind === "preface"
-  )), [milestoneNavigationItems])
+  const scriptureNumbering = useMemo(() => scriptureNumberingOf(milestoneNavigationItems), [milestoneNavigationItems])
 
   // Numbering and paragraph groups depend on structure/validation, not save
   // timestamps or ordinary text edits. One version scan serves both caches;
@@ -3199,7 +3196,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const onSetUpAffixesStable = useStableCallback(onSetUpAffixes)
   const getStatisticalBtStable = useStableCallback(getStatisticalBt)
   const getAlignmentModelStable = useStableCallback(getAlignmentModel)
-  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel])
+  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel], btCorpusSignal)
   const rowUiState = useMemo<RowUiState>(
     () => ({ activeEditorCellId, focusedRailCellId, detailCellId }),
     [activeEditorCellId, focusedRailCellId, detailCellId],
@@ -8315,17 +8312,8 @@ function EditorRow({
   const issueSummary = issueLines.length > 0
     ? issueLines.map(formatCellIssueLine).join(". ")
     : issueHint
-  const numberLabel = cellNumberLabel({
-    lineNumbersEnabled,
-    cellType: cell.type,
-    canonicalRef: cell.group,
-    sourceCanonicalRef: cell.globalReferences?.[0],
-    scriptureNumbering,
-    rowIndex,
-    contentNumber,
-    displayLabel: importDisplayLabel(cell.metadata),
-    versePart,
-  })
+  // AQU-2278: the same function a line's name reads its number from.
+  const numberLabel = lineNumberLabel(cell, { contentNumber, versePart, scriptureNumbering, rowIndex }, lineNumbersEnabled)
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
   // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
   // the same set whose number pill is suppressed, so the two left-edge

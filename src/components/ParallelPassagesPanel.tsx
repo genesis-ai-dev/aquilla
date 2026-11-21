@@ -273,7 +273,7 @@ function SearchResultContent({
         <div className={showBothSides ? "mt-1 flex w-full flex-col gap-2 p-0" : "mt-1"}>
           {(!isSourceHit || showBothSides) && (
             <div className="min-w-0 p-0">
-              <div className="text-xs text-muted-foreground">{t("editor.column.target")}</div>
+              <div className="text-xs text-muted-foreground">{t("search.side.translation")}</div>
               <div className="mt-0.5 text-sm leading-snug">
                 {showInlineDiff ? (
                   <InlineReplacePreview
@@ -299,7 +299,7 @@ function SearchResultContent({
           )}
           {(isSourceHit || showBothSides) && (
             <div className="min-w-0 p-0">
-              <div className="text-xs text-muted-foreground">{t("editor.column.source")}</div>
+              <div className="text-xs text-muted-foreground">{t("search.side.sourceText")}</div>
               <div className="mt-0.5 text-sm leading-snug">
                 {sourceBody ? (
                   isSourceHit ? (
@@ -589,7 +589,13 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         onSearchPassages?.(q)
         return
       }
-      if (findPatternError(q, { matchCase: flags.caseSensitive, wholeWord: flags.matchWord, useRegexp: flags.useRegexp })) {
+      // Match case, whole word, and regular expression are a Replace control.
+      // Search keeps a plain query even when those flags are still set from
+      // Replace or were seeded by the dock.
+      const effectiveFlags = currentMode === "replace"
+        ? flags
+        : { caseSensitive: false, matchWord: false, useRegexp: false }
+      if (findPatternError(q, { matchCase: effectiveFlags.caseSensitive, wholeWord: effectiveFlags.matchWord, useRegexp: effectiveFlags.useRegexp })) {
         clearResults?.()
         return
       }
@@ -598,9 +604,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         scope: currentScope === "file" ? "file" : "project",
         fileId: currentScope === "file" ? (activeFileId ?? undefined) : undefined,
         side: searchSide === "both" ? undefined : searchSide,
-        ...(flags.caseSensitive ? { caseSensitive: true } : {}),
-        ...(flags.matchWord ? { matchWord: true } : {}),
-        ...(flags.useRegexp ? { useRegexp: true } : {}),
+        ...(effectiveFlags.caseSensitive ? { caseSensitive: true } : {}),
+        ...(effectiveFlags.matchWord ? { matchWord: true } : {}),
+        ...(effectiveFlags.useRegexp ? { useRegexp: true } : {}),
       }
       return onSearch?.(q, opts)
     },
@@ -683,7 +689,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       : t("search.dialog.scopeEntireProject")
 
   const patternError =
-    mode !== "passages" && query.trim() !== ""
+    mode === "replace" && query.trim() !== ""
       ? findPatternError(query, replaceOptions)
       : null
 
@@ -781,8 +787,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             aria-label={t("search.dialog.contentSideLabel")}
             options={[
               { label: t("search.side.both"), value: "both", disabled: mode === "replace" },
-              { label: t("editor.column.source"), value: "source", disabled: mode === "replace" },
-              { label: t("editor.column.target"), value: "target" },
+              { label: t("search.side.sourceText"), value: "source", disabled: mode === "replace" },
+              { label: t("search.side.translation"), value: "target" },
             ]}
             onValueChange={handleSideChange}
           />
@@ -799,7 +805,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               aria-busy={loading}
               aria-invalid={patternError ? true : undefined}
               trailing={
-                mode === "passages" ? undefined : (
+                mode === "replace" ? (
                   <FindOptionToggles
                     matchCase={matchCase}
                     wholeWord={wholeWord}
@@ -808,7 +814,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                     onWholeWordChange={(next) => handleFindChange({ ...find, matchWord: next })}
                     onUseRegexpChange={(next) => handleFindChange({ ...find, useRegexp: next })}
                   />
-                )
+                ) : undefined
               }
             />
           </div>
@@ -928,8 +934,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               {assignMatchPlaces(results).map((place, index) => {
                 const r = results[index]
                 const columnLabel = r.original
-                  ? t("editor.column.source")
-                  : t("editor.column.target")
+                  ? t("search.side.sourceText")
+                  : t("search.side.translation")
                 const itemKey = `${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`
                 const location = formatMatchPlace(place, t)
                 return (

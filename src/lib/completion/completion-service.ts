@@ -684,6 +684,10 @@ export interface CompleteOptions {
   timeoutMs?: number
   /** Called when the response carries an X-AB-* model-experiment assignment. */
   onAbAssignment?: (ab: AbAssignment) => void
+  /** The project this spend belongs to (Frontier only). Pass it for work that
+   *  can outlive its route — a batch draft keeps running after the user
+   *  navigates away. Omitted → derived from the current URL. */
+  projectId?: string
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
@@ -713,11 +717,16 @@ export async function complete(options: CompleteOptions): Promise<string> {
   // old `provider !== "frontier"` guard outlived the bug it worked around.
   const useStream = options.stream === true
 
-  // Frontier only: attribute this spend to the project being edited (see
-  // activeProjectIdFromPath). Custom OpenAI-compatible endpoints may reject
-  // unknown body fields, so the hint is never sent to them.
+  // Frontier only: attribute this spend to the project the caller named, else
+  // the project being edited (see activeProjectIdFromPath). The server bills
+  // and, when the meter is on, admits the call by this project's org, so a
+  // long-running caller must not depend on where the user is now. Custom
+  // OpenAI-compatible endpoints may reject unknown body fields, so the hint
+  // is never sent to them.
   const projectId =
-    provider === "frontier" ? activeProjectIdFromPath(window.location.pathname) : null
+    provider === "frontier"
+      ? options.projectId || activeProjectIdFromPath(window.location.pathname)
+      : null
 
   const request = completionRequestSignal(options.signal, options.timeoutMs)
   try {

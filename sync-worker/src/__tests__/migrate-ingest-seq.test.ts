@@ -196,6 +196,54 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     }
   }, 120_000)
 
+  // The pinning select lands once; a re-run's copy is an id replay. So when an
+  // old recording's bytes only turn up on a later run, its attach is the one
+  // event that run adds, and it must not be able to select: it used to, which
+  // left migrated verses playing a superseded take with the validated one
+  // deselected beside it.
+  it("a take that first lands on a later import run joins the cell without taking it over", async () => {
+    const cellId = "late-take"
+    const opts = { projectId: PROJECT, fileId: FILE, fallbackAuthor: "legacy-import", fallbackTs: 1800000000000 }
+    const recording = (name: string, createdAt: number, validated = false): AudioImport => ({
+      legacyAudioId: name, aquillaAudioId: `${name}.wav`, diskRelPath: `.project/attachments/files/${name}.wav`,
+      slot: "recording", createdAt,
+      ...(validated ? { validatedBy: [{ username: "validator", creationTimestamp: createdAt + 1000 }] } : {}),
+    })
+    const early = recording("early", 1650000000000)
+    const chosen = recording("chosen", 1700000000000, true)
+    const rows = async () =>
+      (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+
+    // Actual producer -> actual ingest handler -> real Postgres projection.
+    const first = buildCellAudioEvents(cellId, [early, chosen], chosen.aquillaAudioId, opts)
+    expect((await handleMigrateIngestRequest(ingestRequest(first), env()))?.status).toBe(200)
+    const before = await rows()
+    expect(before.map((r) => [r.audio_id, r.selected, r.validator_count])).toEqual([
+      ["chosen.wav", 1, 1],
+      ["early.wav", 0, 0],
+    ])
+
+    const late = recording("late", 1600000000000)
+    const second = buildCellAudioEvents(cellId, [late, early, chosen], chosen.aquillaAudioId, opts)
+    const response = await handleMigrateIngestRequest(ingestRequest(second), env())
+    expect(await response!.json()).toMatchObject({ accepted: 1, replayed: first.length })
+    const after = await rows()
+    for (const row of before) expect(after.find((x) => x.audio_id === row.audio_id)).toEqual(row)
+    expect(after.find((x) => x.audio_id === "late.wav")).toMatchObject({ selected: 0, deleted: 0, validator_count: 0 })
+
+    // The saved payloads recreate the same state from scratch.
+    await t.pg.query("DELETE FROM cell_audio")
+    const rebuild = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+      method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+    }), env())
+    expect(rebuild?.status, await rebuild?.clone().text()).toBe(200)
+    expect((await rows()).map((r) => [r.audio_id, r.selected, r.validator_count])).toEqual([
+      ["chosen.wav", 1, 1],
+      ["early.wav", 0, 0],
+      ["late.wav", 0, 0],
+    ])
+  }, 120_000)
+
   it("assigns unique ascending seqs from one allocated block (eventsOnly firehose)", async () => {
     const events = ["e1", "e2", "e3", "e4", "e5"].map((id, i) => cellCreate(id, `c${i}`, `v${i}`))
     const res = await handleMigrateIngestRequest(ingestRequest(events, { eventsOnly: true }), env())

@@ -103,6 +103,7 @@ export function ProjectCombobox({
       inputValue={query}
       onInputValueChange={(next: string) => setQuery(next)}
       autoHighlight
+      highlightItemOnHover={false}
       onValueChange={(row: Row | null) => {
         if (!row) return
         onValueChange(isClear(row) ? "" : row.id)

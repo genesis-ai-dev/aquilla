@@ -453,9 +453,30 @@ CRUD surface with MCP bolted on.
 | Transcription | `transcribe_audio`, `transcription_status` — **implemented (Omnilingual ASR, 2026-10-16)**: speech to text with word timings for a cell's selected take or raw WAV, including low-resource languages through Omnilingual zero-shot. Output only; store results with a changeset (`SetTranslation` for a target take, `SetTranscription` for a source media cell). See the addendum at the end. |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
 | Membership | `list_members` — **implemented (AQU-2403)**: the project roster, `{ userId, username, role, roleName, roleSource, direct }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged: the rows kept are the top of the ladder, so a cut never hides somebody a membership command could be aimed at). Floored at MAINTAINER 600, the same floor as changing membership, so the read half of governance is never visible to a credential that cannot act on it; a caller below the floor gets `permission_denied`, not an empty list. `role` is the EFFECTIVE (max-wins, AD-12) level — the same number `commands-membership.ts`'s target cap is judged against, resolved through the shared `resolveFromGrants` so the roster and the gate cannot drift. `direct` says whether a `project_members` row exists, which is what picks the command: `SetRole`/`RemoveMember` act on that row only and 409 `not_a_direct_member` without one, while `InviteMember` 409s `already_member` with one. `roleSource` (`override`/`group`/`org`/`creator`) is why `RemoveMember` is not revocation — the other paths are additive and survive it. REST: `GET …/projects/:projectId/members`. The three write commands (`InviteMember`, `SetRole`, `RemoveMember` — AQU-1185) now have MCP staging via `prepare_translations`'s `commands` argument and, on the OAuth connector, the dedicated `prepare_invite_member` / `prepare_set_role` / `prepare_remove_member` tools; prepare forces ask-mode on all three, so an `act` credential still cannot re-role a project's staff without a human at the approvalUrl. People are named by USERNAME, not email. |
+| Org membership | `list_org_members` — **implemented (AQU-2662)**: the ORG roster, `{ userId, username, role, roleName, roleSource, direct, orgOwner }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged). Floored at **OWNER 700 on that org** — the same floor as changing org membership (AQU-780), so the read half is never visible to a credential that cannot act on it; below it you get `permission_denied`, not an empty list, and a **project-scoped credential gets `scope_denied`** because org governance is out of its reach entirely. No platform-admin elevation and no AQU-2504 support-access widening apply here: this is the one org read that names people. `role` is the `org_members.role_level` the gates judge, resolved through the same shared `resolveOrgMemberLevel` the write half calls — deliberately **not** the max-wins blend `GET /orgs` reports for your own orgs, because a roster that disagreed with the gate would hand an agent a plan the gate then refuses. `direct` picks the command (`SetOrgRole`/`RemoveOrgMember` need an `org_members` row, `AddOrgMember` is refused when there is one) and `orgOwner` marks the `organizations.owner_user_id` seat, which the last-owner guard will not let any of them demote or remove. REST: `GET …/orgs/:orgId/members`. The three write commands (`AddOrgMember`, `SetOrgRole`, `RemoveOrgMember` — AQU-1235) stage through `prepare_translations`'s `commands` argument; each must be the SOLE command in its changeset and prepare forces ask-mode on all three, so an `act` credential still cannot restaff an org without a human at the approvalUrl. The changeset URL's `:projectId` is only where the plan is filed — no project is touched. People are named by USERNAME; no emails are returned. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
 | Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
+
+### Confining an org member to N projects (AQU-2662)
+
+An org role reaches **every** project in the org, so "give her only these five" is never a
+project-level edit — it is the removal of one org row plus N project grants:
+
+1. `list_org_members { orgId }` — confirm she is there at `maintainer` with `direct: true`
+   (an `org_members` row to remove) and `orgOwner: false` (not the undemotable seat).
+2. Stage `RemoveOrgMember { orgId, username }`, show the `approvalUrl`, then
+   `confirm_changeset`. She now reaches no project through the org path.
+3. For each of the N projects she should keep, stage `InviteMember { projectId, username,
+   role }`. These batch with each other (at most 25, one per person) but **never** with the
+   org command, so this is a second changeset and a second approval.
+
+Order matters: do step 2 first and her access narrows immediately, with step 3 restoring the
+five. Do step 3 first and she holds the five twice over — harmless, but `list_members` on each
+will show `roleSource: override` rather than `org`, which is the point of the exercise.
+Removing the org row does not revoke anything granted by a team or by having created a
+project: those paths are additive (AD-12), and `list_members`'s `roleSource` on each project is
+where you check that before you promise a partner the access is gone.
 
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.

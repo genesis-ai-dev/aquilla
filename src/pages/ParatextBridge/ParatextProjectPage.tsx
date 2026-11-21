@@ -16,6 +16,8 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { useParatextProgress, type BookProgress, type BookStatus } from "@/lib/paratext-bridge/use-paratext-progress"
 import { bridgeStore, type MirrorLink } from "@/lib/paratext-bridge/store"
+import { otherCopies } from "@/lib/paratext-bridge/copies"
+import { ParatextCopiesCard } from "@/components/paratext/ParatextCopiesCard"
 import type { UserAccess } from "@/lib/paratext-bridge/access"
 import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
@@ -97,6 +99,22 @@ export function ParatextProjectPage() {
     return () => { cancelled = true }
   }, [stateId])
 
+  // Other folders holding this project, and the link of whichever of them
+  // Aquilla writes to: opening this copy then goes to that Aquilla project.
+  const others = useMemo(() => (project ? otherCopies(project, d.projects) : []), [project, d.projects])
+  const [otherLink, setOtherLink] = useState<MirrorLink | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      let found: MirrorLink | null = null
+      for (const o of others) found ??= await bridgeStore.link(o.stateId).catch(() => null)
+      if (!cancelled) setOtherLink(found)
+    })()
+    return () => { cancelled = true }
+  }, [others])
+  const liveLink = link ?? otherLink
+  const onMoved = (moved: MirrorLink) => { setLink(moved); setOtherLink(null) }
+
   useEffect(() => {
     if (!stateId || !link) return
     let cancelled = false
@@ -140,8 +158,8 @@ export function ParatextProjectPage() {
                 <h1 className="truncate text-xl font-semibold leading-tight">{title}</h1>
                 <Badge variant="outline">{project.settings.name}</Badge>
                 <Badge variant="secondary">{t("paratextBridge.project.onThisComputer")}</Badge>
-                <Badge variant={link ? "default" : "outline"} data-testid="paratext-link-badge">
-                  {link ? t("paratextBridge.project.inAquilla") : t("paratextBridge.project.notInAquilla")}
+                <Badge variant={link ? "default" : otherLink ? "secondary" : "outline"} data-testid="paratext-link-badge">
+                  {link ? t("paratextBridge.project.inAquilla") : otherLink ? t("paratextBridge.copies.otherCopy") : t("paratextBridge.project.notInAquilla")}
                 </Badge>
                 {d.discovery ? (
                   <Badge variant="outline">
@@ -162,7 +180,7 @@ export function ParatextProjectPage() {
               {!project.utf8 ? <p className="mt-2 text-sm text-destructive">{t("paratextBridge.notUtf8")}</p> : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Button disabled={!canOpen} data-testid="paratext-open-in-aquilla" onClick={() => navigate(openTarget(project, link))}>
+              <Button disabled={!canOpen} data-testid="paratext-open-in-aquilla" onClick={() => navigate(openTarget(project, liveLink))}>
                 <ExternalLink />{t("paratextBridge.project.open")}
               </Button>
               <DropdownMenu>
@@ -245,6 +263,8 @@ export function ParatextProjectPage() {
             </div>
           </Card>
         ) : null}
+
+        {others.length > 0 ? <ParatextCopiesCard project={project} others={others} liveLink={liveLink} onMoved={onMoved} /> : null}
 
         <Card title={t("paratextBridge.project.team")} hint={t("paratextBridge.project.teamHint")} testId="paratext-team-card">
           {project.access && project.access.users.length > 0 ? (

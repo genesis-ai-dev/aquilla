@@ -6,7 +6,8 @@ import {
   mergeBlotInfractions,
   termRulesOf,
 } from "./live-term-check"
-import { checkRulesForCell } from "./rule-engine"
+import { checkRulesForCell, ruleSourceGateMatches } from "./rule-engine"
+import { compiledPatternCount } from "@/lib/terminology/match"
 import { compileConceptsToRulesCore } from "@/lib/terminology/compile-core"
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -154,12 +155,12 @@ const TERM_MATCHING = {
 }
 
 /** `n` active concepts, each compiling to an approved + a forbidden rule. */
-function compileTermbase(n: number): TranslationRule[] {
+function compileTermbase(n: number, stem = "covenant"): TranslationRule[] {
   const concepts = []
   for (let i = 0; i < n; i++) {
     concepts.push({
       id: `c${i}`,
-      sourceTerm: `covenant${i}`,
+      sourceTerm: `${stem}${i}`,
       status: "active",
       match: {
         affixes: true,
@@ -248,6 +249,25 @@ describe("selectSourceApplicableTermRules (AQU-2654)", () => {
     const kept = new Set(selectSourceApplicableTermRules(cell, rules).map((r) => r.id))
     expect(reported.size).toBeGreaterThan(0)
     for (const id of reported) expect(kept.has(id)).toBe(true)
+  })
+
+  it("compiles only the patterns that can occur in the source, not the termbase", () => {
+    // Every editor row runs this selection when it mounts. Testing each rule's
+    // gate compiled the source pattern of every glossary term on the first
+    // row — seconds of main thread before a file with a large glossary could
+    // paint. A stem no other test uses, so nothing here is compiled already.
+    const rules = compileTermbase(300, "sanctuary")
+    const cell = makeCell({ original: "They built the sanctuary7 in the wilderness.", translated: "" })
+    const before = compiledPatternCount()
+    const picked = selectSourceApplicableTermRules(cell, rules)
+    const compiled = compiledPatternCount() - before
+    expect(picked.length).toBeGreaterThan(0)
+    expect(picked.every((r) => r.id.startsWith("term:c7:"))).toBe(true)
+    // The index cannot tell sanctuary7 from sanctuary70…79 or sanctuary17, so
+    // some neighbours are tested — never the 300 concepts.
+    expect(compiled).toBeLessThanOrEqual(24)
+    // And it is the same answer as testing every rule's gate.
+    expect(picked).toEqual(rules.filter((rule) => ruleSourceGateMatches(rule, cell)))
   })
 
   it("makes the per-keystroke live check orders of magnitude cheaper than the full sweep", () => {

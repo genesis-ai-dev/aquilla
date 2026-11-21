@@ -143,7 +143,12 @@ down in this routine.** The ratchet is what makes the improvement permanent.
    sentence), the metric before → after, PR link.
 2. Commit as `perf(<area>): <what changed> (AQU-####)` using the standing issue id recorded at the
    top of `docs/routines/PERF-NIGHTLY.md`.
-3. Push the branch and open a PR to `dev` per `.github/pull_request_template.md`. The body carries
+3. Push the branch and open a PR to `dev` per `.github/pull_request_template.md`. If the
+   pre-push hook fails, run each failing spec on unmodified `origin/dev`
+   (`npx tsx scripts/e2e-up.ts -- <spec>`). When **every** failure also fails there, the same
+   way, push with `--no-verify` and list those specs in the PR body under the Test Checklist
+   as failing on `dev` before this change (decided 2026-11-20, AQU-2655). A spec that passes on
+   `dev` and fails on the branch is a regression: fix it, do not push around it. The body carries
    the before/after table for every metric that moved and the one-sentence mechanism.
 4. If the conditions in `AGENTS.md` → "What actually gates a pull request" hold, merge it.
    Otherwise leave it; Step 2 of the next run picks it up.

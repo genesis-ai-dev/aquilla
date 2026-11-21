@@ -323,6 +323,34 @@ export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): bo
 }
 
 /**
+ * The rules whose source gate holds for this cell, in the caller's order: the
+ * same answer as `rules.filter((rule) => ruleSourceGateMatches(rule, cell))`.
+ *
+ * It asks the plan's index first, as `checkRulesForCell` does, so a `term:`
+ * rule whose source pattern cannot occur in this source is dropped without
+ * its regex being compiled. Every editor row asks this when it mounts; testing
+ * each rule's gate directly made the first row compile the source pattern of
+ * every glossary term — about 1.5 s of main thread for 664 terms, before any
+ * row could paint.
+ */
+export function rulesPassingSourceGate(cell: CellData, rules: TranslationRule[]): TranslationRule[] {
+  if (rules.length === 0) return rules
+  const plan = planFor(rules)
+  if (!plan.index) return rules.filter((rule) => ruleSourceGateMatches(rule, cell))
+  const source = effectiveSourceText(cell)
+  const order = rulesToCheck(plan, source)
+  if (prefilterMode() === "verify") verifySkipped(plan, rules, order, source)
+  // `order` leaves out the empty-aware builtins, which carry no source gate.
+  const positions =
+    plan.emptyAware.length === 0 ? order : [...plan.emptyAware, ...order].sort((a, b) => a - b)
+  const passing: TranslationRule[] = []
+  for (const i of positions) {
+    if (ruleSourceGateMatches(rules[i], cell)) passing.push(rules[i])
+  }
+  return passing
+}
+
+/**
  * True when `source` has at least one NON-EMPTY match for `re`. Zero-length
  * matches are not instances of a term — the same rule both source-gated
  * branches of `checkRule` apply.

@@ -1,7 +1,29 @@
+import { addedColumns } from "./neon-schema-contract"
+
+export type SchemaColumn = {
+  name: string
+  def: string
+  /**
+   * Declared by an `ALTER TABLE … ADD COLUMN` after the table, so `createSql`
+   * does not contain it: a table created from `createSql` still needs it added.
+   */
+  addedByAlter?: true
+}
+
 export type SchemaTable = {
   /** Full CREATE TABLE block, with IF NOT EXISTS forced in. */
   createSql: string
-  columns: Array<{ name: string; def: string }>
+  columns: SchemaColumn[]
+}
+
+/**
+ * The columns to ADD to one table: all that schema.sql declares and the
+ * database lacks. `live` is the table's current column names, or undefined for
+ * a table that was created from `createSql` a moment ago — that one has every
+ * CREATE TABLE column and none of the ALTER-added ones.
+ */
+export function columnsToAdd(table: SchemaTable, live: Set<string> | undefined): SchemaColumn[] {
+  return table.columns.filter((col) => (live ? !live.has(col.name) : col.addedByAlter === true))
 }
 
 export type SchemaView = {
@@ -58,6 +80,10 @@ const TABLE_CONSTRAINT_KEYWORDS = new Set([
  * expression), which are folded into the entry that opened them. Index and
  * view statements may span lines and are accumulated through their semicolon;
  * views come back in file order, which is also their dependency order.
+ *
+ * A column schema.sql adds with `ALTER TABLE … ADD COLUMN` joins its table's
+ * columns, flagged `addedByAlter` (AQU-2689). Those come from the drift
+ * check's own `addedColumns`, so the two readers of the file agree on them.
  */
 export function parsePgSchema(sql: string): {
   tables: Map<string, SchemaTable>
@@ -77,7 +103,7 @@ export function parsePgSchema(sql: string): {
   // the open entry. openColumn is that entry when it is a column (null for
   // constraints), so continuation lines extend its ALTER-able definition.
   let expectNewEntry = true
-  let openColumn: { name: string; def: string } | null = null
+  let openColumn: SchemaColumn | null = null
   const recordIndex = (lines: string[]): void => {
     const statement = lines.join(" ").replace(/\s+/g, " ").trim()
     const index = statement.match(
@@ -189,6 +215,11 @@ export function parsePgSchema(sql: string): {
       def: trimmed.replace(/,\s*$/, ""),
     }
     current.columns.push(openColumn)
+  }
+  for (const { table, name, def } of addedColumns(sql)) {
+    const target = tables.get(table)
+    if (!target || target.columns.some((col) => col.name === name)) continue
+    target.columns.push({ name, def, addedByAlter: true })
   }
   return { tables, indexesByTable, views }
 }

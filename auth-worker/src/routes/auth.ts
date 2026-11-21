@@ -1,3 +1,5 @@
+import { accountMutation } from "../lib/account-mutation"
+import { requireSettingsProof, deployment, securityFactor, consumeFactor, securityAttempt } from "../lib/account-security"
 import { ANALYTICS_CONSENT_KEY, ANALYTICS_DISCLOSURE_VERSION, parseAnalyticsDecision } from "../../../shared/analytics-consent"
 // Auth routes ported from frontier-server/cloudflare/src/routes/auth.ts.
 //
@@ -134,6 +136,8 @@ const passwordResetSchema = z.object({
   token: z.string(),
   username: z.string(),
   new_password: z.string().min(8).max(MAX_PASSWORD_LENGTH),
+  factor_code: z.string().max(64).optional(),
+  recovery: z.boolean().optional(),
 })
 
 const verifyResetTokenSchema = z.object({
@@ -172,7 +176,7 @@ export function legacyD1Config(
   }
 }
 
-function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+export function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
   const d1 = legacyD1Config(env)
   if (!d1) return null
 
@@ -1279,6 +1283,7 @@ auth.post("/password-reset/request", zValidator("json", passwordResetRequestSche
 // Settings never accepts a destination email from the client. Resolve the
 // selected authenticated account afresh, rather than trusting a JWT email claim.
 auth.post("/me/password-reset/request", authMiddleware, async c => {
+  await requireSettingsProof(c)
   const user = await c.env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=?")
     .bind(c.get("user").id).first<{ email: string }>()
   if (!user) return c.json({ error: "Unauthorized" }, 401)
@@ -1318,7 +1323,7 @@ async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, retu
       // from the migration source), returning the generic 200 without ever
       // minting a token or sending the reset email.
       const found = await c.env.AQUILLA_PG.prepare(
-        "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?)",
+        "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?) AND NOT password_login_disabled",
       )
         .bind(email)
         .first<{ id: number; username: string; email: string }>()
@@ -1471,7 +1476,7 @@ auth.post(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
            AND token_hash = ? AND EXISTS (
-             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id AND NOT u.password_login_disabled
              AND (password_reset_tokens.email_at_issue=u.email OR
                (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
            )`,
@@ -1506,7 +1511,7 @@ auth.post(
   "/password-reset/reset",
   zValidator("json", passwordResetSchema),
   async (c) => {
-    const { token, username, new_password } = c.req.valid("json")
+    const { token, username, new_password, factor_code, recovery } = c.req.valid("json")
     try {
       // [Pen test] Auth & session mgmt (2026-08-10): same throttle as
       // /password-reset/verify — this is the endpoint that actually spends
@@ -1543,7 +1548,7 @@ auth.post(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
            AND token_hash = ? AND EXISTS (
-             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id AND NOT u.password_login_disabled
              AND (password_reset_tokens.email_at_issue=u.email OR
                (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
            )`,
@@ -1566,16 +1571,34 @@ auth.post(
       }
       await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
 
+      if ((await securityFactor(c.env.AQUILLA_PG,user.id,deployment(c)))?.enabled) {
+        const recoveryUser=await c.env.AQUILLA_PG.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first<import("../types").AuthUser>()
+        if(!recoveryUser) return c.json({error:"Invalid token"},400)
+        c.set("user",recoveryUser)
+        await securityAttempt(c)
+      }
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
       // AQU-2536: claim once and commit all recovery effects together. A
       // competing request waits on the same token rows, then claims nothing.
       // Failure in any CTE rolls back the password, generation and token claim.
-      const changed = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      const changed = await accountMutation(c.env.AQUILLA_PG,user.id,async db=>{
+        const valid=await db.prepare(`SELECT 1 FROM password_reset_tokens p JOIN users u ON u.id=p.user_id WHERE p.user_id=? AND p.token_hash=? AND p.expires_at>now() AND NOT u.password_login_disabled AND (p.email_at_issue=u.email OR (p.email_at_issue IS NULL AND u.email_changed_at IS NULL))`).bind(user.id,await sha256Hex(token)).first()
+        if(!valid) return null
+        const factor=await securityFactor(db,user.id,deployment(c))
+        if(factor?.enabled){
+          if(!factor_code) throw new Error("settings_verification_required")
+          // Token possession authorizes only this recovery identity, never a session.
+          const recoveryUser=await db.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first<import("../types").AuthUser>()
+          if(!recoveryUser) throw new Error("invalid_code")
+          c.set("user",recoveryUser)
+          await consumeFactor(c,db,factor_code,!!recovery,false)
+        }
+        return db.prepare(`WITH claimed AS (
         DELETE FROM password_reset_tokens
         WHERE user_id=? AND EXISTS (
           SELECT 1 FROM password_reset_tokens proof
           WHERE proof.user_id=? AND proof.token_hash=? AND proof.expires_at>now()
-          AND EXISTS(SELECT 1 FROM users u WHERE u.id=proof.user_id
+          AND EXISTS(SELECT 1 FROM users u WHERE u.id=proof.user_id AND NOT u.password_login_disabled
             AND (proof.email_at_issue=u.email OR (proof.email_at_issue IS NULL AND u.email_changed_at IS NULL)))
         ) RETURNING user_id
       ), changed AS (
@@ -1591,11 +1614,13 @@ auth.post(
       ) SELECT id FROM changed`)
         .bind(user.id, user.id, await sha256Hex(token), passwordHash)
         .first<{ id: number }>()
+      })
       if (!changed) return c.json({ error: "Invalid or expired token" }, 400)
       evictUserSessions(user.id)
 
       return c.json({ message: "Password reset successful" })
     } catch (error) {
+      if(error instanceof Error && ["settings_verification_required","invalid_code","rate_limited"].includes(error.message)) return c.json({error:error.message},403)
       console.error("Password reset error:", error)
       return c.json({ error: "Failed to reset password" }, 500)
     }

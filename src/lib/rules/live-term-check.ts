@@ -1,6 +1,6 @@
 import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { checkRulesForCell, ruleSourceGateMatches } from "./rule-engine"
+import { checkRulesForCell, rulesPassingSourceGate } from "./rule-engine"
 
 /**
  * AQU-664: live terminology-blot support.
@@ -49,13 +49,16 @@ export function termRulesOf(ruleMap: ReadonlyMap<string, TranslationRule>): Tran
  * takes 1328 candidate rules down to ~2, turning a ~32 ms per-keystroke regex
  * sweep into ~0.03 ms. The output of `computeLiveTermInfractions` is unchanged:
  * dropping a rule that cannot infract removes no infraction.
+ *
+ * Every row computes this when it mounts, so it must not test each rule's gate
+ * itself: `rulesPassingSourceGate` rules out the terms that cannot occur in
+ * the source without compiling their patterns.
  */
 export function selectSourceApplicableTermRules(
   cell: CellData,
   termRules: TranslationRule[],
 ): TranslationRule[] {
-  if (termRules.length === 0) return termRules
-  return termRules.filter((rule) => ruleSourceGateMatches(rule, cell))
+  return rulesPassingSourceGate(cell, termRules)
 }
 
 /**

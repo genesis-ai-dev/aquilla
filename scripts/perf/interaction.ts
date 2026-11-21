@@ -116,9 +116,21 @@ function handlePath(variant: Variant): string {
   return path.join(REPO_ROOT, ".perf", `interaction-${variant}.json`)
 }
 
-async function ensureFixture(variant: Variant, target: PerfTarget): Promise<BigBibleHandle> {
+/**
+ * The fixture, and whether this call seeded it.
+ *
+ * `fresh` matters because the scenario edits the same cells every run. On a
+ * fixture nobody has run against, those cells are untranslated, and a first
+ * translation is a different action from an edit: the row goes from empty to
+ * translated, confidence is scored, examples are fetched. Measured on the same
+ * code, `plain.commit.rowRenders` was 28 on a fresh fixture and 11 on a reused
+ * one (budget 14). The budgets describe the reused state, so a fresh fixture
+ * gets one unmeasured pass first — see `main`.
+ */
+async function ensureFixture(variant: Variant, target: PerfTarget): Promise<{ handle: BigBibleHandle; fresh: boolean }> {
   const file = handlePath(variant)
-  if (!existsSync(file)) {
+  const fresh = !existsSync(file)
+  if (fresh) {
     log(`seeding the ${variant} fixture (2 files, 400 cells)`)
     const seeded = spawnSync(
       "pnpm",
@@ -128,7 +140,7 @@ async function ensureFixture(variant: Variant, target: PerfTarget): Promise<BigB
     if (seeded.status !== 0) throw new Error(`seeding the ${variant} fixture failed — is the dev stack running (pnpm dev)?`)
     if (variant === "glossary") await seedGlossary(readHandle(file), target)
   }
-  return readHandle(file)
+  return { handle: readHandle(file), fresh }
 }
 
 async function seedGlossary(handle: BigBibleHandle, target: PerfTarget): Promise<void> {
@@ -471,7 +483,12 @@ async function main(): Promise<void> {
     const metrics: Record<string, number> = {}
     const phases: Record<string, PhaseResult[]> = {}
     for (const variant of options.variants) {
-      const handle = await ensureFixture(variant, options.target)
+      const { handle, fresh } = await ensureFixture(variant, options.target)
+      if (fresh) {
+        log(`${variant}: new fixture — one settling pass first; the lines up to "settled" are not the measurement`)
+        await measureVariant(variant, handle, appBase, options)
+        log(`${variant}: settled`)
+      }
       const measured = await measureVariant(variant, handle, appBase, options)
       Object.assign(metrics, measured.metrics)
       phases[variant] = measured.phases

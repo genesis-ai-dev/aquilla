@@ -164,17 +164,29 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     its Select and Switch no longer do (AQU-2655).
 26. **`src/components/ui/data-table.tsx`:** a ContextMenu root per mounted row (the ⋯ menu is one
     shared root since AQU-2655; Base UI's context menu has no detached triggers).
-27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
-28. **`src/components/SearchDockPanel.tsx`:** one search request per keystroke, no debounce.
+27. **Export dialog open:** 27 commits (not re-measured in the drawer pass). The comment and
+    edit-history drawers were measured on 2026-11-20 (21 and 23 commits, 823 and 902 renders):
+    the drawers themselves render 1–4 times; the rest is the row hover and the "More actions"
+    popover with its tooltips that the probe opens them from — item 10. `HistoryDrawer`'s three
+    own renders are `useCellEditHistory`'s loading flips (item 20's family).
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests
     for about 23 projects). Needs an org-level endpoint — escalate, do not fix client-side.
-30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
-    no comments).
-31. **Glossary page:** 664 row mounts remain on open; `GlossaryEditor` is not compiled.
+30. **Comments page** (`src/components/CommentsPage.tsx`), measured 2026-11-20 with 300 threads /
+    600 comments added to a small fixture: open is 382 ms blocked at 4×, 10 commits, 12,300
+    renders. Nearly all of it is mounting — each comment row mounts a `UserChip` avatar and a
+    `DateTooltip` / `AppTooltip` root (about 20 components a row). The cards re-render once per
+    comments page that arrives (three here), but their compiled rows hand back cached children,
+    so letting `CommentsPage` itself compile (its `getToken` memo stops the compiler) moved
+    nothing and was not kept. Left: a design call — window the list (find-in-page, as for the
+    glossary) or mount the date tooltip on hover (item 10's question). Also `useCommentCellPlaces`
+    reads one file's cells twice as the comment pages land.
+31. **Glossary page:** 664 row mounts on open (664 terms: 15 commits, about 10,600 renders).
+    Every row is drawn on purpose — find-in-page is how a glossary is searched
+    (`src/hooks/useProgressiveCount.ts`) — so windowing the list is a product decision, not a perf
+    fix. `GlossaryEditor` compiles since 2026-11-20, which stopped the first 80 rows rendering a
+    second time when the rest arrive (`GlossaryRow` 744 → 664 renders).
 32. **Members matrix:** not virtualized (`src/components/MembersMatrixView.tsx`). Its per-cell
     popover roots are one shared root each since AQU-2655.
-33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
-    `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.
 
 ## Transcribe view
 

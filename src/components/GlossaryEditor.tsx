@@ -14,7 +14,7 @@
  * save cannot wipe another lane.
  */
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
-import { useMemo, useState, useCallback, useRef, useEffect } from "react"
+import { useMemo, useState, useCallback, useRef, useEffect, type RefObject } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus, Merge } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -29,6 +29,7 @@ import { useTerminologyViolations } from "@/hooks/useTerminologyViolations"
 /** Stable identity so the memo below holds when a workspace project has none. */
 const EMPTY_SERVER_CONCEPTS: Concept[] = []
 import type { Concept, ConceptExternalIds, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
+import type { TerminologyCandidatesPage } from "@/lib/terminology/project-scan"
 import { isBibleEntityLinkAvailable } from "@/lib/bible-data/experiment"
 import { cellVerses } from "@/lib/bible-data/voice-index"
 import {
@@ -117,6 +118,95 @@ function downloadBlob(content: string, filename: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
+type TermImportPlan =
+  | { kind: "empty" }
+  | { kind: "nothing-new" }
+  | { kind: "add"; fresh: Concept[]; already: number }
+
+/**
+ * What importing a term-list file would add: its terms stamped with the active
+ * lane (when the project has a `''` lane row), minus those the list already
+ * has word for word (AQU-2487). Throws when the file cannot be parsed. Kept
+ * out of the component so its `try` holds a single call: the React Compiler
+ * cannot compile conditionals inside a `try` (AQU-2655).
+ */
+function planTermImport(
+  fileName: string,
+  text: string,
+  existing: Concept[],
+  lanes: NonNullable<ProjectRecord["lanes"]>,
+  activeLane: string,
+): TermImportPlan {
+  const imported = importTermbaseFile(fileName, text)
+  if (imported.length === 0) return { kind: "empty" }
+  const activeId = laneIdForLegacyTag(activeLane, lanes)
+  const stamp = legacyEmptyLaneId(lanes) && activeId
+  const stamped = stamp
+    ? imported.map((concept) => ({
+        ...concept,
+        renderings: concept.renderings.map((rendering) =>
+          rendering.laneId ? rendering : { ...rendering, laneId: activeId },
+        ),
+      }))
+    : imported
+  // AQU-2487 (import sweep, Nov 2): a term the list already has, word for
+  // word, is not added a second time.
+  const fresh = termsNotAlreadyListed(existing, stamped)
+  if (fresh.length === 0) return { kind: "nothing-new" }
+  return { kind: "add", fresh, already: stamped.length - fresh.length }
+}
+
+/** The project with each new candidate term added as a draft: not managed,
+ *  and not already listed (case-insensitive). */
+function withCandidateDrafts(
+  project: ProjectRecord,
+  listed: Concept[],
+  candidates: TerminologyCandidatesPage["candidates"],
+): ProjectRecord {
+  const existing = new Set(listed.map((c) => c.sourceTerm.trim().toLowerCase()))
+  let working = project
+  for (const cand of candidates) {
+    if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
+    working = addConcept(working, { sourceTerm: cand.term, renderings: [], status: "draft" })
+    existing.add(cand.term.trim().toLowerCase())
+  }
+  return working
+}
+
+/** A project-scope sync token, or a throw with `failure` as the message. Kept
+ *  out of the component: the React Compiler cannot compile a `throw` inside a
+ *  `try` (AQU-2655). */
+async function requireToken(
+  getToken: (fileId: string) => Promise<string | null>,
+  failure: string,
+): Promise<string> {
+  const token = await getToken("any")
+  if (!token) throw new Error(failure)
+  return token
+}
+
+/**
+ * The file-scoped sync-token fetcher for this project. Its own hook because
+ * the fetcher reads the session JWT through a ref when it is called (from
+ * effects and handlers, never during render); written inline, that ref read
+ * stopped the React Compiler from compiling the whole editor (AQU-2655).
+ */
+function useProjectTokenFetcher(
+  jwtRef: RefObject<string | null>,
+  project: ProjectRecord | null,
+): (fileId: string) => Promise<string | null> {
+  const projectId = project?.id
+  const projectName = project?.name
+  const origin = project?.origin
+  return useMemo(() => {
+    if (!projectId) return async (_fileId: string) => null as string | null
+    return buildFileScopedTokenFetcher(() => jwtRef.current, projectId, {
+      projectName: projectName ?? undefined,
+      gitlabProjectId: origin?.kind === "git" ? origin.gitlabProjectId : undefined,
+    })
+  }, [jwtRef, projectId, projectName, origin])
+}
+
 export function GlossaryEditor({
   files: workspaceFiles,
   project: workspaceProject,
@@ -157,14 +247,7 @@ export function GlossaryEditor({
         .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files, workspaceFiles],
   )
-  const getToken = useMemo(() => {
-    if (!project?.id) return async (_fileId: string) => null as string | null
-    return buildFileScopedTokenFetcher(() => jwtRef.current, project.id, {
-      projectName: project.name ?? undefined,
-      gitlabProjectId:
-        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
-    })
-  }, [project?.id, project?.name, project?.origin])
+  const getToken = useProjectTokenFetcher(jwtRef, project)
 
   // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
   // retired `project.terminology` settings key.
@@ -327,25 +410,28 @@ export function GlossaryEditor({
       setOptimisticConcepts(next)
       setImportNotice(null)
       pendingWritesRef.current += 1
+      // No try/finally here: the React Compiler cannot compile a component
+      // that contains one (AQU-2655), and this one has to compile.
+      let ok: boolean
       try {
         await emitConceptDelta({ projectId, author, prev, next })
         setError(null)
-        return true
+        ok = true
       } catch (err) {
         conceptsRef.current = prev
         if (pendingWritesRef.current === 1) setOptimisticConcepts(null)
         setError(err instanceof Error ? err.message : t("terminology.editor.errorBlocked"))
-        return false
-      } finally {
-        pendingWritesRef.current -= 1
+        ok = false
       }
+      pendingWritesRef.current -= 1
+      return ok
     },
     [projectId, author, t],
   )
 
   // ── Row callbacks (all reuse store.ts helpers over the live project) ────────
   // AQU-1340: the mutation callbacks below are memoized on
-  // `[project, canManage, persist]`, so they hold the `guard` from an older
+  // `[guard, persist]`, so they hold the `guard` from an older
   // render. The live flag is read through a ref (written in an effect, never
   // during render) rather than from that stale closure.
   const termbaseUnknownRef = useRef(termbaseUnknown)
@@ -357,7 +443,7 @@ export function GlossaryEditor({
   // deny for different reasons — the management verbs name the termbase floor,
   // a refused suggestion names the contributor bar. The unknown-termbase stop
   // below applies to both: it is about the delta, not about the role.
-  const guardWith = (allowed: boolean, denial: string) => {
+  const guardWith = useCallback((allowed: boolean, denial: string) => {
     if (!project) return null
     if (!allowed) {
       setError(denial)
@@ -373,10 +459,16 @@ export function GlossaryEditor({
       return null
     }
     return { ...project, terminology: conceptsRef.current }
-  }
+  }, [project, t])
 
-  const guard = () => guardWith(canManage, t("terminology.editor.errorRequiresProjectLead"))
-  const suggestGuard = () => guardWith(canSuggest, t("terminology.editor.errorBlocked"))
+  const guard = useCallback(
+    () => guardWith(canManage, t("terminology.editor.errorRequiresProjectLead")),
+    [guardWith, canManage, t],
+  )
+  const suggestGuard = useCallback(
+    () => guardWith(canSuggest, t("terminology.editor.errorBlocked")),
+    [guardWith, canSuggest, t],
+  )
 
   // Writes replace one lane's slice. With no `''` lane row yet, the list is
   // still the whole termbase, which is today's behavior.
@@ -407,7 +499,7 @@ export function GlossaryEditor({
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { sourceTerm }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   const onEditPrimary = useCallback(
     (cid: string, text: string) => {
@@ -418,7 +510,7 @@ export function GlossaryEditor({
       const next = setPrimaryRendering({ ...concept, renderings: laneSlice(concept.renderings) }, text)
       void persist(updateConcept(p, cid, { renderings: mergeRenderings(concept.renderings, next.renderings) }))
     },
-    [project, canManage, persist, laneSlice, mergeRenderings],
+    [guard, persist, laneSlice, mergeRenderings],
   )
   const onEditRenderings = useCallback(
     (cid: string, update: (current: TermRendering[]) => TermRendering[]) => {
@@ -429,14 +521,14 @@ export function GlossaryEditor({
       const nextSlice = update(laneSlice(concept.renderings))
       void persist(updateConcept(p, cid, { renderings: mergeRenderings(concept.renderings, nextSlice) }))
     },
-    [project, canManage, persist, laneSlice, mergeRenderings],
+    [guard, persist, laneSlice, mergeRenderings],
   )
   const onEditNotes = useCallback(
     (cid: string, notes: string) => {
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { notes: notes.trim() || undefined }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   // AQU-1271: the Forms section on the term detail. Both fields ride the same
   // concept-delta write path as every other row edit, so an exclusion lands as
@@ -446,14 +538,14 @@ export function GlossaryEditor({
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { match }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   const onCaseSensitiveChange = useCallback(
     (cid: string, caseSensitive: boolean) => {
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { caseSensitive }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   // AQU-1693: link the concept to a Bible person, place or group (or unlink
   // it). The delta sends `externalIds` only when it changed, so no other edit
@@ -463,7 +555,7 @@ export function GlossaryEditor({
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { externalIds }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   // The picker is offered only with this device's Bible data experiment and
   // the project's Bible data switch; it lists the book the term first occurs in.
@@ -477,14 +569,14 @@ export function GlossaryEditor({
       const p = guard()
       if (p) void persist(updateConcept(p, cid, { status: "deprecated" }))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   const onRestore = useCallback(
     (cid: string) => {
       const p = guard()
       if (p) void persist(approveConcept(p, cid))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
   const onAccept = onRestore // draft → active is the same status flip
   const onDismiss = useCallback(
@@ -492,7 +584,7 @@ export function GlossaryEditor({
       const p = guard()
       if (p) void persist(rejectConcept(p, cid, "delete"))
     },
-    [project, canManage, persist],
+    [guard, persist],
   )
 
   // The form's fields are GlossaryAddTermDialog's own state (AQU-2654): this
@@ -523,35 +615,25 @@ export function GlossaryEditor({
     setError(null)
     setAddOpen(false)
     return true
-  }, [project, canManage, canSuggest, persist, activeLane])
+  }, [suggestGuard, project?.lanes, canManage, persist, activeLane, t])
 
   const handleSuggest = useCallback(() => {
     if (!guard()) return
     setSuggestRequested(true)
-  }, [project, canManage])
+  }, [guard])
 
   useEffect(() => {
     if (!suggestRequested || !project || !canManage) return
     let cancel = false
     void (async () => {
       try {
-        const token = await getToken("any")
-        if (!token) throw new Error(t("terminology.editor.suggestFailed"))
+        const token = await requireToken(getToken, t("terminology.editor.suggestFailed"))
         const page = await fetchTerminologyCandidates(project.id, token)
-        if (cancel) return
-        const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
-        let working = project
-        for (const cand of page.candidates) {
-          if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
-          working = addConcept(working, { sourceTerm: cand.term, renderings: [], status: "draft" })
-          existing.add(cand.term.trim().toLowerCase())
-        }
-        await persist(working)
+        if (!cancel) await persist(withCandidateDrafts(project, serverConcepts, page.candidates))
       } catch (err) {
         if (!cancel) setError(err instanceof Error ? err.message : t("terminology.editor.suggestFailed"))
-      } finally {
-        if (!cancel) setSuggestRequested(false)
       }
+      if (!cancel) setSuggestRequested(false)
     })()
     return () => {
       cancel = true
@@ -563,17 +645,15 @@ export function GlossaryEditor({
     setSuggestionsLoading(true)
     void (async () => {
       try {
-        const token = await getToken("any")
-        if (!token) throw new Error(t("terminology.editor.suggestFailed"))
+        const token = await requireToken(getToken, t("terminology.editor.suggestFailed"))
         const suggestions = await fetchConceptSuggestions(project.id, selectedConcept.id, token, {
           lane: activeLane,
         })
         setPredictedSuggestions(suggestions)
       } catch (err) {
         setError(err instanceof Error ? err.message : t("terminology.editor.suggestFailed"))
-      } finally {
-        setSuggestionsLoading(false)
       }
+      setSuggestionsLoading(false)
     })()
   }, [project, selectedConcept, getToken, t, activeLane])
 
@@ -614,7 +694,7 @@ export function GlossaryEditor({
         ]),
       }))
     },
-    [project, canManage, persist, laneSlice, mergeRenderings],
+    [guard, persist, laneSlice, mergeRenderings],
   )
 
   // AQU-1337: a merge is the survivor's union-merged renderings/notes plus the
@@ -630,7 +710,7 @@ export function GlossaryEditor({
         throw new Error(t("terminology.mergeDialog.mergeFailed"))
       }
     },
-    [project, canManage, persist, t],
+    [guard, persist, t],
   )
 
   const handleImport = useCallback(
@@ -640,52 +720,41 @@ export function GlossaryEditor({
       setImportNotice(null)
       const reader = new FileReader()
       reader.onload = () => {
+        const text = String(reader.result ?? "")
+        const existing = p.terminology ?? []
+        const lanes = project?.lanes ?? []
+        let plan: TermImportPlan
         try {
-          const text = String(reader.result ?? "")
-          const imported = importTermbaseFile(file.name, text)
-          // AQU-684: a file that yields nothing used to persist an unchanged
-          // list and look like success — the exact way a FLEx export failed
-          // silently. Say so instead.
-          if (imported.length === 0) {
-            setError(t("terminology.editor.errorImportFailed"))
-            return
-          }
-          const lanes = project?.lanes ?? []
-          const activeId = laneIdForLegacyTag(activeLane, lanes)
-          const stamp = legacyEmptyLaneId(lanes) && activeId
-          const stamped = stamp
-            ? imported.map((concept) => ({
-                ...concept,
-                renderings: concept.renderings.map((rendering) =>
-                  rendering.laneId ? rendering : { ...rendering, laneId: activeId },
-                ),
-              }))
-            : imported
-          // AQU-2487 (import sweep, Nov 2): a term the list already has,
-          // word for word, is not added a second time.
-          const existing = p.terminology ?? []
-          const fresh = termsNotAlreadyListed(existing, stamped)
-          if (fresh.length === 0) {
-            setError(t("terminology.editor.importNothingNew"))
-            return
-          }
-          // AQU-2487 (review, Nov 9): an updated list adds a few terms and
-          // leaves the rest out; say how many of each once they are saved.
-          const already = stamped.length - fresh.length
-          void persist({ terminology: [...existing, ...fresh] }).then((saved) => {
-            if (!saved) return
-            const added = t("terminology.editor.importAdded", { count: fresh.length })
-            setImportNotice(
-              already > 0 ? `${added} ${t("terminology.editor.importAlreadyListed", { count: already })}` : added,
-            )
-          })
+          plan = planTermImport(file.name, text, existing, lanes, activeLane)
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
+          return
         }
+        // AQU-684: a file that yields nothing used to persist an unchanged
+        // list and look like success — the exact way a FLEx export failed
+        // silently. Say so instead.
+        if (plan.kind === "empty") {
+          setError(t("terminology.editor.errorImportFailed"))
+          return
+        }
+        if (plan.kind === "nothing-new") {
+          setError(t("terminology.editor.importNothingNew"))
+          return
+        }
+        // AQU-2487 (review, Nov 9): an updated list adds a few terms and
+        // leaves the rest out; say how many of each once they are saved.
+        const { fresh, already } = plan
+        void persist({ terminology: [...existing, ...fresh] }).then((saved) => {
+          if (!saved) return
+          const added = t("terminology.editor.importAdded", { count: fresh.length })
+          setImportNotice(
+            already > 0 ? `${added} ${t("terminology.editor.importAlreadyListed", { count: already })}` : added,
+          )
+        })
       }
       reader.readAsText(file)
     },
-    [project, canManage, persist, activeLane, t],
+    [guard, persist, project, activeLane, t],
   )
 
   if (loading) {

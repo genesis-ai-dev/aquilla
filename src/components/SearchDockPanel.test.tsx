@@ -82,6 +82,57 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
   })
 })
 
+// AQU-2655: every keystroke used to send its own search request. Typing a word
+// must ask the server once, after the pause — and while it waits the panel must
+// say it is searching, never "no results" for a query it has not run.
+describe("SearchDockPanel — one search per pause", () => {
+  it("debounces typing into one search and shows the spinner while it waits", () => {
+    vi.useFakeTimers()
+    try {
+      const onSearch = vi.fn()
+      render(<SearchDockPanel {...baseProps({ onSearch })} />)
+      const box = screen.getByRole("combobox")
+      for (const value of ["l", "li", "lig", "ligh", "light"]) {
+        fireEvent.change(box, { target: { value } })
+        act(() => {
+          vi.advanceTimersByTime(100)
+        })
+      }
+      expect(onSearch).not.toHaveBeenCalled()
+      expect(screen.getByRole("status")).toBeInTheDocument()
+      expect(screen.queryByText("No results")).toBeNull()
+
+      act(() => {
+        vi.advanceTimersByTime(300)
+      })
+      expect(onSearch).toHaveBeenCalledTimes(1)
+      expect(onSearch).toHaveBeenCalledWith("light", {})
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("clearing the box clears at once and drops the pending search", () => {
+    vi.useFakeTimers()
+    try {
+      const onSearch = vi.fn()
+      const onClearResults = vi.fn()
+      render(<SearchDockPanel {...baseProps({ onSearch, onClearResults })} />)
+      const box = screen.getByRole("combobox")
+      fireEvent.change(box, { target: { value: "light" } })
+      fireEvent.change(box, { target: { value: "" } })
+      expect(onClearResults).toHaveBeenCalledTimes(1)
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(onSearch).not.toHaveBeenCalled()
+      expect(screen.queryByRole("status")).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The mode
 // toggles and "Expand all" carry their own words, so they have no hover.
 describe("SearchDockPanel — hover only names icon buttons", () => {

@@ -48,6 +48,9 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 
 export type SearchDockMode = "search" | "replace" | "bible"
 
+/** How long typing must pause before the dock asks the server. */
+const SEARCH_DEBOUNCE_MS = 250
+
 export interface SearchDockPanelProps {
   activeFileId: string | null
   activeFileName: string | null
@@ -141,14 +144,43 @@ export function SearchDockPanel({
     [onSearch, onClearResults, scope, activeFileId],
   )
 
+  // One search per pause, not per keystroke (AQU-2655). While a keystroke's
+  // search waits out the debounce, `pending` keeps the spinner up so the panel
+  // never says "no results" for a query it has not asked about yet.
+  const pendingSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [pending, setPending] = useState(false)
+  useEffect(() => () => {
+    if (pendingSearchRef.current) clearTimeout(pendingSearchRef.current)
+  }, [])
+
+  function cancelPendingSearch() {
+    if (pendingSearchRef.current) clearTimeout(pendingSearchRef.current)
+    pendingSearchRef.current = null
+    setPending(false)
+  }
+
   function searchWith(flags: FindToggles) {
+    cancelPendingSearch()
     handleSearch(query, flags)
   }
 
   function handleQueryChange(q: string) {
     setQuery(q)
-    handleSearch(q, find)
+    cancelPendingSearch()
+    // Clearing the box, or a pattern that cannot run, applies at once.
+    if (!q.trim() || findPatternError(q, { matchCase, wholeWord, useRegexp })) {
+      handleSearch(q, find)
+      return
+    }
+    setPending(true)
+    pendingSearchRef.current = setTimeout(() => {
+      pendingSearchRef.current = null
+      setPending(false)
+      handleSearch(q, find)
+    }, SEARCH_DEBOUNCE_MS)
   }
+
+  const busy = loading || pending
 
   const searchPlaceholder =
     scope === "file" && activeFileName
@@ -290,17 +322,17 @@ export function SearchDockPanel({
         </div>
 
         <CommandList className="max-h-none flex-1 overflow-y-auto px-2 py-1">
-          {loading && (
+          {busy && (
             <CommandEmpty>
               <span className="inline-flex items-center justify-center text-muted-foreground">
                 <Spinner className="size-3.5" />
               </span>
             </CommandEmpty>
           )}
-          {!loading && query && results.length === 0 && (
+          {!busy && query && results.length === 0 && (
             <CommandEmpty>{t("search.noResults")}</CommandEmpty>
           )}
-          {!loading && !query && (
+          {!busy && !query && (
             <CommandEmpty>
               {scope === "file" ? t("search.dock.typeToSearchFile") : t("search.dock.typeToSearchProject")}
             </CommandEmpty>

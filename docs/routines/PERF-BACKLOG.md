@@ -105,9 +105,11 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 22. **Voice studio open:** 2.4 s blocked, 25 commits, 10,800 renders — a tooltip root per slot
     button (`TimelineSlotButton` ×208).
 23. **Timeline lens open:** 1.5–1.9 s blocked, 19–23 commits, about 6,000 renders.
-24. **Rules surface:** every built-in check row (a Select and a Switch each) re-renders on each
-    of the 10 renders per open (`src/components/RulesSurface.tsx`, `BuiltinChecksList.tsx`); on 20
-    files the quality section is 59 commits and 46 requests and keeps committing for 7.5 s.
+24. **Rules surface on 20 files:** the quality section is still about 50 commits and 46 requests
+    (19 `sync-token`, 22 cell reads) — a commit per slice of `useProjectInfractions` as the counts
+    fill in (`src/components/ProjectSettings/RulesSection.tsx`). Each built-in row's text part
+    still re-renders on each one (new `rule` objects and `leading` chips from `RulesSurface`);
+    its Select and Switch no longer do (AQU-2655).
 26. **`src/components/ui/data-table.tsx`:** a ContextMenu root and a DropdownMenu root per row.
 27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
 28. **`src/components/SearchDockPanel.tsx`:** one search request per keystroke, no debounce.

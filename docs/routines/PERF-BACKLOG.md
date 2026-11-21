@@ -118,8 +118,15 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     own renders are `useCellEditHistory`'s loading flips (item 20's family).
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests
     for about 23 projects). Needs an org-level endpoint — escalate, do not fix client-side.
-30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
-    no comments).
+30. **Comments page** (`src/components/CommentsPage.tsx`), measured 2026-11-20 with 300 threads /
+    600 comments added to a small fixture: open is 382 ms blocked at 4×, 10 commits, 12,300
+    renders. Nearly all of it is mounting — each comment row mounts a `UserChip` avatar and a
+    `DateTooltip` / `AppTooltip` root (about 20 components a row). The cards re-render once per
+    comments page that arrives (three here), but their compiled rows hand back cached children,
+    so letting `CommentsPage` itself compile (its `getToken` memo stops the compiler) moved
+    nothing and was not kept. Left: a design call — window the list (find-in-page, as for the
+    glossary) or mount the date tooltip on hover (item 10's question). Also `useCommentCellPlaces`
+    reads one file's cells twice as the comment pages land.
 31. **Glossary page:** 664 row mounts on open (664 terms: 15 commits, about 10,600 renders).
     Every row is drawn on purpose — find-in-page is how a glossary is searched
     (`src/hooks/useProgressiveCount.ts`) — so windowing the list is a product decision, not a perf

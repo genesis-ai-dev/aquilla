@@ -14,6 +14,7 @@ vi.mock('partyserver', () => ({
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { handleEventsWriteRequest } from '../events/route'
 import { handleSourceAudioAccessRequest } from '../events/source-audio-access-route'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -189,7 +190,7 @@ describe('GET /api/v1/projects/:id/source-audio-access', () => {
 
 describe('worker routing', () => {
   it('dispatches the read from the worker entry, behind CORS', async () => {
-    const src = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)), 'utf8')
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../index.ts'), 'utf8')
     expect(src).toMatch(/import \{ handleSourceAudioAccessRequest \} from "\.\/events\/source-audio-access-route"/)
     expect(src).toMatch(/const sourceAudioAccessResponse = await handleSourceAudioAccessRequest\(request, env\)\s*\n\s*if \(sourceAudioAccessResponse\) return withCors\(sourceAudioAccessResponse, request\)/)
   })

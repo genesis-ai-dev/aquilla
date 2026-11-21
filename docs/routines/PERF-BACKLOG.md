@@ -22,9 +22,15 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    *Step 1 done (2026-11-19):* the provider publishes counts and both record lists from one read
    in one update (`src/hooks/useOutboxSnapshot.ts`), and the workspace's stats overlay takes its
    records from that snapshot instead of reading again. At 1× CPU a commit went from 9 workspace
-   renders to 8. *Next:* `useActiveCellStore.ts` still does its own `peekOutboxBatch(2000)` per
-   notification, and its `setPendingOverlay` lands as a separate render; then the
-   forbidden/refused readers.
+   renders to 8. *Step 2 done (2026-11-19):* the eight hooks that re-read on a notification
+   (`useActiveCellStore`, `useOutboxSnapshot`, `usePendingOutboxRecords`,
+   `useForbiddenOutboxRecords`, `useRefusedFileEvents`, `useRefusedComments`, `useCells`,
+   `useProjectCells` up to 2,000 rows) share one in-flight scan (`peekOutboxShared` in
+   `src/lib/sync/outbox.ts`), so they resume in one task and React renders them together:
+   7 → 5 workspace renders per commit at 1× (after item 4 landed); at 4× the count varies
+   from run to run (7, 7, 6, 5 → 6, 5, 6, 5). *Left:* each hook still keeps its own
+   subscription and its own state; the workspace still subscribes to the whole outbox context.
+   The two `store#` version bumps that remain on this path are item 2.
 2. **Audit stats are workspace state pushed into the store by an effect** (`store.setRuntime`),
    and `useSyncExternalStore`'s consistency check forces a second render. Apply them in the same
    task as their cause, or keep them out of workspace state.

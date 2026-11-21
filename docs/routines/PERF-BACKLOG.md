@@ -89,7 +89,12 @@ Measured after the pass (664 terms, 12 occurring): open 6.9 s blocked against 5.
 Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
 
 17. **`audio-attachments` ×3 on open** — a default-lane read before the lane resolves (AQU-2160),
-    and instances that mount after first paint. The hook deliberately has no answer cache.
+    and instances that mount after first paint. The hook deliberately has no answer cache. A mount
+    now joins the read already in flight (AQU-2655); what is left needs `ProjectWorkspace.tsx`:
+    the `''`-lane read comes from `useActiveLane` starting at `''` before the lane rows arrive (the
+    callers at PW `audioValidation…` and `EditorTable` read it; they need a "lane resolved" gate),
+    and on the Text lens neither the PW:2375 instance nor EditorTable's needs the map before
+    first paint.
 18. **`sync-token` ×3 on open** for three scopes (the open file, `'any'`, the project's first
     file). The claims differ only in `fileId`; check every project-level route before sharing.
 19. **33 distinct reads to open one file.** Which of them the first screen needs is a product

@@ -500,20 +500,36 @@ export interface EnqueueBatchOptions {
   splitToJournal?: boolean
 }
 
-/** One batch write, journaled whole when it fits (or, for a lone target
- *  commit too big for a batch entry, under its own per-commit entry). */
+/** One batch write, journaled whole when it fits (or, for a target commit
+ *  too big for a batch entry, under its own per-commit entry). */
 async function writeJournaledBatch(records: OutboxRecord[], ownerKey: OutboxRecord["ownerKey"] | undefined): Promise<void> {
   let clearEntry = () => {}
   if (ownerKey !== undefined) {
     const journalKey = journalBatch(records)
+    const commit = journalKey ? null : commitJournaledAlone(records)
     if (journalKey) {
       clearEntry = () => clearJournalBatch(journalKey)
-    } else if (records.length === 1 && records[0].event.kind === "target.cell.commit") {
-      journalTargetCommit(records[0])
-      clearEntry = () => clearJournalRecord(records[0].id)
+    } else if (commit) {
+      journalTargetCommit(commit)
+      clearEntry = () => clearJournalRecord(commit.id)
     }
   }
   await writeOutboxRecords(records, { routeOffline: isTauriRuntime(), clearJournal: clearEntry })
+}
+
+/**
+ * The target commit of a batch too big to journal whole, when journaling it
+ * on its own is still safe: the batch is that commit alone, or that commit
+ * and validations of it (an edit that validates itself). Recovering the commit
+ * without them is what the per-event path does; recovering a commit without
+ * the create it chains on is not, so any other batch gets null.
+ */
+function commitJournaledAlone(records: readonly OutboxRecord[]): OutboxRecord | null {
+  const [commit, ...rest] = records
+  if (commit?.event.kind !== "target.cell.commit") return null
+  const validatesCommit = (rec: OutboxRecord) => rec.event.kind === "cell.validate"
+    && (rec.event.payload as { editEventId?: unknown } | null)?.editEventId === commit.id
+  return rest.every(validatesCommit) ? commit : null
 }
 
 /**

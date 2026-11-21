@@ -17,7 +17,8 @@ import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-aut
 import { laneOfAudioEvent, laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
-import { decideLaneWrite, effectiveRoleInLane, laneReadWallEnabled, revealingGrantLevel } from '../../../src/lib/lanes/write-wall'
+import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { audioLaneLimited, coversEveryLanguage } from './source-audio-access'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import {
@@ -1044,21 +1045,19 @@ export async function authorize<K extends EventKind>(
     if (fileRefusal) return { ok: false, status: 403, reason: fileRefusal }
     // Only look anything up when a language limit can apply at all: below
     // Maintainer under the wall, or a token with language scopes.
-    const laneLimited = wallOn
-      ? tokenClaims.role < ROLE.MAINTAINER && tokenClaims.src !== 'platform'
-      : (tokenClaims.scopes ?? []).some((sc) => sc.kind === 'lane')
+    const laneLimited = audioLaneLimited(wallOn, tokenClaims)
     const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown; wordsOnly?: unknown } | null
     // Source audio acts in every language at once, so declaring it needs
-    // access to every language. Under the wall that is the caller's own
-    // grants: one on each of the project's target lanes (a Project Lead set
-    // up on every language keeps "Upload a recording" and attaching media).
-    // With the wall off, any lane scope limits the caller.
+    // access to every language (source-audio-access.ts; the app asks the
+    // same question through GET .../source-audio-access before it offers
+    // "Upload a recording" or attaching media).
     if (laneLimited && raw.kind === 'cell.audio.attach' && ap?.role === 'source') {
-      const coversEveryLane = wallOn &&
-        (await targetLanesFor(db, raw.projectId, settings)).every((lane) => {
-          const effective = effectiveRoleInLane(tokenClaims.role, revealingGrantLevel(tokenClaims.laneGrants, lane.id))
-          return effective != null && effective >= requiredRole
-        })
+      const coversEveryLane = await coversEveryLanguage({
+        wallOn,
+        claims: tokenClaims,
+        requiredRole,
+        loadLanes: () => targetLanesFor(db, raw.projectId, settings),
+      })
       if (!coversEveryLane) {
         return { ok: false, status: 403, reason: 'marking a clip as source audio requires access to every language' }
       }

@@ -84,11 +84,10 @@ import { canSetMilestones } from "@/lib/milestone-gate"
 import { ROLE } from "@/lib/frontier/roles"
 import { notifyElevationRequired } from "@/lib/errors/elevation-required-signal"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
-import { holdOutboxNotifications } from "@/lib/sync/outbox"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
 import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitTargetCellCommitAndValidate, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
@@ -7319,10 +7318,9 @@ function EditorRow({
     // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
     // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
     // byte-identical.
-    // AQU-2654: an edit that validates itself queues two events back to back.
-    // Subscribers are told once, when both are queued — otherwise every one of
-    // them re-reads and re-renders for the half-way state (edit pending,
-    // approvals cleared) a few milliseconds before the real one.
+    // AQU-2655: an edit that validates itself queues both events in ONE outbox
+    // write (emitTargetCellCommitAndValidate): subscribers are told once, and a
+    // crash cannot keep the edit and lose its validation.
     const autoValidate = !tmInsert && shouldAutoValidateHumanEdit({
       value,
       canValidate,
@@ -7330,9 +7328,8 @@ function EditorRow({
       roleLevel: project.syncRole?.level ?? null,
       scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
     })
-    const releaseOutboxNotify = autoValidate ? holdOutboxNotifications() : null
     try {
-      const eventId = await emitTargetCellCommit({
+      const commitInput = {
         id: reservedEventId,
         projectId: project.id,
         fileId: cell.fileId,
@@ -7343,7 +7340,23 @@ function EditorRow({
         valueHtml,
         author: username,
         targetLang: activeLane,
-      })
+      }
+      const committed = autoValidate
+        ? await emitTargetCellCommitAndValidate(commitInput, {
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          author: username,
+          // The same lane the commit goes to. Without it the validation
+          // landed on the MAIN language: editing Spanish silently validated the
+          // German row, and a member limited to Spanish had it refused.
+          targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
+          surface: "cell",
+        })
+        : { eventId: await emitTargetCellCommit(commitInput), validation: null }
+      const eventId = committed.eventId
       lastCommittedEventIdRef.current = eventId
       // AQU-1767 phase 2: the session's step — first "before", latest "after".
       textStepRef.current = {
@@ -7371,42 +7384,27 @@ function EditorRow({
       // dropped in whole. It still lands as an ordinary edit (and so clears any
       // prior validators), but it stays unvalidated until the translator
       // validates it or edits it; that later edit commits without the flag.
-      if (autoValidate) {
-        void emitCellValidate({
-          projectId: project.id,
-          fileId: cell.fileId,
-          cellId: cell.id,
-          editEventId: eventId,
-          author: username,
-          // The same lane the commit above went to. Without it the validation
-          // landed on the MAIN language: editing Spanish silently validated the
-          // German row, and a member limited to Spanish had it refused.
-          targetLang: activeLane,
-          // AQU-1572: the vote your own edit casts for itself, not a review.
-          auto: true,
-          surface: "cell",
-        }).then(() => {
-          // AQU-1484: validated — the repetitions are owed this text. Paid
-          // right here when the commit came from a settled gesture (the blur
-          // commit, accepting a draft, inserting a footnote); an idle save
-          // with the caret still in the cell leaves it for the blur.
-          repetitionOwedRef.current = true
-          settleOwedRepetitions()
-        }).catch((err) => {
-          // Telemetry-adjacent, non-blocking: the commit already landed.
-          console.warn("[auto-validate] emit failed:", err)
-        }).finally(() => releaseOutboxNotify?.())
-      }
+      // The validation was queued with the commit, above.
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId)
+      if (committed.validation?.ok) {
+        // AQU-1484: validated — the repetitions are owed this text. Paid
+        // right here when the commit came from a settled gesture (the blur
+        // commit, accepting a draft, inserting a footnote); an idle save
+        // with the caret still in the cell leaves it for the blur.
+        repetitionOwedRef.current = true
+        settleOwedRepetitions()
+      } else if (committed.validation) {
+        // Non-blocking: the commit landed; only its validation was refused.
+        console.warn("[auto-validate] emit failed:", committed.validation.error)
+      }
       return true
     } catch (err) {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
-      releaseOutboxNotify?.()
       // AQU-1578: the reserved head exists nowhere durable — undo it, unless a
       // newer commit has already reserved over it.
       releaseReservation?.()

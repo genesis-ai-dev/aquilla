@@ -35,10 +35,12 @@ const { emitCellValidate, emitCellUnvalidate, emitTargetCellCommit, reviewContex
   emitTargetCellCommit: vi.fn(() => Promise.resolve("commit-event")),
   reviewContextualDraft: vi.fn(() => Promise.resolve()),
 }))
-vi.mock("@/lib/sync/events-emit", () => ({
+vi.mock("@/lib/sync/events-emit", async () => ({
   emitCellValidate,
   emitCellUnvalidate,
   emitTargetCellCommit,
+  emitTargetCellCommitAndValidate: (await import("@/test-utils/commit-and-validate-double"))
+    .commitAndValidateDouble(emitTargetCellCommit, emitCellValidate),
   emitSourceCellCommit: vi.fn(() => Promise.resolve("source-event")),
   emitCellWaive: vi.fn(() => Promise.resolve("waive-event")),
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),

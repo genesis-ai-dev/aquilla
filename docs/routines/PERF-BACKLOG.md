@@ -50,9 +50,14 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    in separate tasks and `WHOLE_FILE_NOTIFY_MS` cannot merge them. The fix is one pipeline: the
    store computes the audit overlay from the pending records it already reads. That interacts
    with item 1's remaining step, so design the two together.
-3. **Commit and self-validation are two outbox transactions.** The notification is held across
-   both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
-   enqueue path journals differently — read that first.
+3. ~~**Commit and self-validation are two outbox transactions.**~~ *Done (2026-11-20, AQU-2655):*
+   the editor queues both through `emitTargetCellCommitAndValidate` — one IndexedDB transaction,
+   one journal entry (a crash can no longer keep the edit and lose its validation), one
+   notification. No render saving: the hold already gave one notification, and `plain.commit`
+   stayed at 7 workspace renders at 1× CPU and 6 at 4× (two runs each, before and after).
+   *Left:* `holdOutboxNotifications` in `src/lib/sync/outbox.ts` has no caller
+   now. Delete it and its two tests after `claude/perf-active-cell-outbox` merges — that branch
+   edits the lines around it, and deleting it first would conflict.
 4. ~~**`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
    commit for the forecast and glosser corpus. Move the consumer out of the workspace render.~~
    *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal

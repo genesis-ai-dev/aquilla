@@ -1,0 +1,105 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+import { checkMigrations, classifyStatement } from "./gate-migration"
+
+// The gate ships a schema change with no person in the loop, so the list is
+// the whole risk: a statement production's current code can notice must
+// never read as additive. Each row is a statement, and why it is or is not.
+describe("classifyStatement", () => {
+  it.each([
+    ["CREATE TABLE IF NOT EXISTS email_changes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL)"],
+    ["CREATE INDEX IF NOT EXISTS idx_email_changes_user ON email_changes(user_id)"],
+    ["CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_events_x ON events (project_id, server_seq)"],
+    ["ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS wp_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'floor') STORED"],
+    ["ALTER TABLE users ADD COLUMN totp_secret TEXT, ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT false"],
+    ["ALTER TABLE cells ADD COLUMN note TEXT"],
+    ["ALTER TABLE events ADD COLUMN seen_at TIMESTAMPTZ DEFAULT now()"],
+    ["CREATE TYPE lane_kind AS ENUM ('text', 'audio')"],
+    ["ALTER TYPE lane_kind ADD VALUE IF NOT EXISTS 'video'"],
+    ["COMMENT ON COLUMN users.totp_secret IS 'DROP TABLE users; is only a comment'"],
+    ["BEGIN"],
+    ["COMMIT"],
+    ["SET LOCAL lock_timeout = '5s'"],
+    ["-- nothing but a comment\n"],
+  ])("additive: %s", (statement) => {
+    expect(classifyStatement(statement)).toEqual({ ok: true })
+  })
+
+  it.each([
+    ["DROP TABLE cell_waivers", /not on the additive list/],
+    ["ALTER TABLE users DROP COLUMN legacy_name", /only ADD COLUMN/],
+    ["ALTER TABLE users RENAME COLUMN name TO display_name", /only ADD COLUMN/],
+    ["ALTER TABLE users ALTER COLUMN email SET NOT NULL", /only ADD COLUMN/],
+    ["ALTER TABLE users ADD COLUMN ok TEXT, DROP COLUMN gone", /only ADD COLUMN/],
+    ["ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email)", /only ADD COLUMN/],
+    ["ALTER TABLE users ADD COLUMN tenant TEXT NOT NULL", /NOT NULL column with no DEFAULT/],
+    ["ALTER TABLE cells ADD COLUMN h TEXT GENERATED ALWAYS AS (md5(original)) STORED", /rewrites the table/],
+    ["ALTER TABLE public.events ADD COLUMN token UUID DEFAULT gen_random_uuid()", /may rewrite the table/],
+    ["CREATE INDEX idx_events_kind ON events (kind)", /without CONCURRENTLY/],
+    ['CREATE INDEX idx_cells_file ON "cells" (file_id)', /without CONCURRENTLY/],
+    ["UPDATE users SET role = 'admin'", /not on the additive list/],
+    ["DELETE FROM events WHERE kind = 'x'", /not on the additive list/],
+    ["INSERT INTO lanes (id) VALUES ('a')", /not on the additive list/],
+    ["CREATE OR REPLACE FUNCTION next_seq() RETURNS bigint AS $$ SELECT 1 $$ LANGUAGE sql", /not on the additive list/],
+    ["CREATE TRIGGER t BEFORE INSERT ON cells FOR EACH ROW EXECUTE FUNCTION f()", /not on the additive list/],
+    ["DO $$ BEGIN ALTER TABLE users ADD COLUMN x TEXT; END $$", /not on the additive list/],
+    ["GRANT ALL ON users TO app", /not on the additive list/],
+  ])("a person's call: %s", (statement, why) => {
+    const verdict = classifyStatement(statement)
+    expect(verdict.ok).toBe(false)
+    expect(verdict).toHaveProperty("why", expect.stringMatching(why))
+  })
+})
+
+// Two checkouts, as the workflow hands them over: the base commit and the PR.
+describe("checkMigrations", () => {
+  const roots: string[] = []
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+
+  const checkout = (schema: string, migrations: Record<string, string>) => {
+    const root = mkdtempSync(path.join(tmpdir(), "gate-migration-"))
+    roots.push(root)
+    mkdirSync(path.join(root, "db/postgres/migrations"), { recursive: true })
+    writeFileSync(path.join(root, "db/postgres/schema.sql"), schema)
+    for (const [name, sql] of Object.entries(migrations)) writeFileSync(path.join(root, "db/postgres/migrations", name), sql)
+    return root
+  }
+
+  const USERS = "CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL);\n"
+  const OLD = { "0001_users.sql": USERS }
+  const ADD = "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp TEXT;\nCREATE INDEX IF NOT EXISTS idx_users_totp ON users(totp);\n"
+
+  it("passes an additive migration whose result is the committed schema.sql", async () => {
+    const base = checkout(USERS, OLD)
+    // schema.sql declares the column in place; the migration appends it.
+    const head = checkout("CREATE TABLE users (id TEXT PRIMARY KEY, totp TEXT, email TEXT NOT NULL);\nCREATE INDEX idx_users_totp ON users(totp);\n", { ...OLD, "0002_totp.sql": ADD })
+    expect(await checkMigrations(base, head)).toEqual({ added: ["0002_totp.sql"], problems: [] })
+  })
+
+  it("fails when schema.sql and the migration disagree, in either direction, naming the object", async () => {
+    const base = checkout(USERS, OLD)
+    const stale = checkout(USERS, { ...OLD, "0002_totp.sql": ADD })
+    expect((await checkMigrations(base, stale)).problems).toEqual([
+      "the migrations create column users.totp; schema.sql does not have it",
+      "the migrations create index idx_users_totp; schema.sql does not have it",
+    ])
+    const unported = checkout("CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL, totp TEXT);\n", OLD)
+    expect((await checkMigrations(base, unported)).problems).toEqual(["schema.sql has column users.totp; the migrations do not create it"])
+    const mistyped = checkout("CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL, totp INTEGER);\nCREATE INDEX idx_users_totp ON users(totp);\n", { ...OLD, "0002_totp.sql": ADD })
+    expect((await checkMigrations(base, mistyped)).problems[0]).toMatch(/^column users\.totp differs/)
+  })
+
+  it("fails on a statement off the list, an edited file, and a migration that does not apply", async () => {
+    const base = checkout(USERS, OLD)
+    const dropping = checkout("CREATE TABLE users (id TEXT PRIMARY KEY);\n", { ...OLD, "0002_drop.sql": "ALTER TABLE users DROP COLUMN email;\n" })
+    expect((await checkMigrations(base, dropping)).problems).toEqual(["0002_drop.sql: ALTER TABLE users: only ADD COLUMN is additive, not `DROP COLUMN email`"])
+    const edited = checkout(USERS, { "0001_users.sql": `${USERS}-- touched\n` })
+    expect((await checkMigrations(base, edited)).problems[0]).toMatch(/^0001_users\.sql: an existing migration file was edited/)
+    const broken = checkout(USERS, { ...OLD, "0002_bad.sql": "CREATE INDEX idx_nope ON no_such_table(id);\n" })
+    expect((await checkMigrations(base, broken)).problems[0]).toMatch(/^applying the new migrations to the base schema failed/)
+  })
+})

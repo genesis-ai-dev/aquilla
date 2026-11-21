@@ -12,6 +12,8 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { handleEventsWriteRequest } from '../events/route'
 import { handleSourceAudioAccessRequest } from '../events/source-audio-access-route'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -34,21 +36,26 @@ beforeEach(async () => {
 })
 afterAll(async () => { await h?.close() })
 
-interface Who { username: string; userId: number; role: number; scopes?: unknown; laneGrants?: unknown }
+interface Who { username: string; userId: number; role: number; scopes?: unknown; laneGrants?: unknown; src?: string; fileId?: string }
 const OWNER: Who = { username: 'owner', userId: 1, role: 700 }
 const LEAD: Who = { username: 'ravi', userId: 3, role: 500 }
 const LEAD_ALL: Who = { ...LEAD, laneGrants: [{ lane: AR, level: 500 }, { lane: ES, level: 500 }] }
 const LEAD_AR: Who = { ...LEAD, laneGrants: [{ lane: AR, level: 500 }] }
 const MAINTAINER_AR: Who = { username: 'max', userId: 4, role: 600, laneGrants: [{ lane: AR, level: 600 }] }
 const LEAD_SCOPED: Who = { ...LEAD, scopes: [{ kind: 'lane', value: 'es' }] }
+const MAINTAINER_SCOPED: Who = { username: 'max', userId: 4, role: 600, scopes: [{ kind: 'lane', value: 'es' }] }
+const PLATFORM_LEAD: Who = { username: 'ops', userId: 9, role: 500, src: 'platform' }
+// The Agent API's write token (token-bridge.ts) carries no laneGrants.
+const AGENT_LEAD: Who = { username: 'agent', userId: 5, role: 500, src: 'external' }
+const AGENT_MAINTAINER: Who = { ...AGENT_LEAD, role: 600 }
 
 const env = (wall: boolean) =>
   ({ AQUILLA_PG: h.db, SYNC_SECRET_KEY: SECRET, ...(wall ? { LANE_READ_WALL: '1' } : {}) }) as never
 
-async function ask(who: Who, opts: { wall: boolean; projectId?: string; token?: string | null }) {
+async function ask(who: Who, opts: { wall: boolean; projectId?: string; token?: string | null; query?: string }) {
   const tok = opts.token !== undefined ? opts.token : await makeTestToken(SECRET, { projectId: P, fileId: F, ...who } as never)
   const res = await handleSourceAudioAccessRequest(
-    new Request(`https://worker/api/v1/projects/${opts.projectId ?? P}/source-audio-access`, {
+    new Request(`https://worker/api/v1/projects/${opts.projectId ?? P}/source-audio-access${opts.query ?? ''}`, {
       headers: tok ? { Authorization: `Bearer ${tok}` } : {},
     }),
     env(opts.wall),
@@ -101,6 +108,10 @@ describe('GET /api/v1/projects/:id/source-audio-access', () => {
     ['the owner, under the wall', OWNER, true, true],
     ['an unscoped Project Lead, wall off', LEAD, false, true],
     ['a Project Lead with a language scope, wall off', LEAD_SCOPED, false, false],
+    ['a Maintainer with a language scope, wall off', MAINTAINER_SCOPED, false, false],
+    ['a platform token below Maintainer, under the wall', PLATFORM_LEAD, true, true],
+    ['an Agent API token below Maintainer (no grants on the token), under the wall', AGENT_LEAD, true, false],
+    ['an Agent API token at Maintainer, under the wall', AGENT_MAINTAINER, true, true],
   ] as const)('%s', async (_name, who, wall, expected) => {
     await fileReady()
     expect(await answer(who, wall)).toBe(expected)
@@ -119,5 +130,67 @@ describe('GET /api/v1/projects/:id/source-audio-access', () => {
     const post = await handleSourceAudioAccessRequest(
       new Request(`https://worker/api/v1/projects/${P}/source-audio-access`, { method: 'POST' }), env(true))
     expect(post).toBeNull()
+  })
+
+  it('counts an archived language too, as the events route does', async () => {
+    await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, archived_at) VALUES
+      ('ee55ff66', '${P}', 'target', 'French', 'fr', 'fr', now())`)
+    await fileReady()
+    expect(await answer(LEAD_ALL, true)).toBe(false)
+    expect(await attachSource(LEAD_ALL, true)).toBe(false)
+  })
+
+  it('agrees in a project whose languages all carry their own tag (no former default lane)', async () => {
+    // New projects' languages are tagged with the language, never ''; the
+    // app's source attach names no language.
+    await h.pg.exec(`UPDATE lanes SET legacy_tag = 'ar' WHERE id = '${AR}'`)
+    await fileReady()
+    expect(await answer(LEAD_ALL, true)).toBe(true)
+    expect(await attachSource(LEAD_ALL, true)).toBe(true)
+    expect(await answer(LEAD_AR, true)).toBe(false)
+    expect(await attachSource(LEAD_AR, true)).toBe(false)
+  })
+
+  it('says yes to a Project Lead in a project with no languages yet, as the events route does', async () => {
+    await h.pg.exec(`DELETE FROM lanes WHERE project_id = '${P}'`)
+    await fileReady()
+    expect(await answer(LEAD, true)).toBe(true)
+    expect(await attachSource(LEAD, true)).toBe(true)
+  })
+
+  it('says no once the member is removed or his role is lowered, before the token expires', async () => {
+    await fileReady()
+    await h.pg.exec(`INSERT INTO projects (id, name, created_by) VALUES ('${P}', 'Access', 999)`)
+    // Removed: no grant left.
+    expect(await answer(LEAD_ALL, true)).toBe(false)
+    expect(await attachSource(LEAD_ALL, true)).toBe(false)
+    // Lowered below the token's Project Lead.
+    await h.pg.exec(`INSERT INTO project_members (project_id, user_id, role_level) VALUES ('${P}', 3, 400)`)
+    expect(await answer(LEAD_ALL, true)).toBe(false)
+    expect(await attachSource(LEAD_ALL, true)).toBe(false)
+    // Still a Project Lead: yes again.
+    await h.pg.exec(`UPDATE project_members SET role_level = 500 WHERE project_id = '${P}' AND user_id = 3`)
+    expect(await answer(LEAD_ALL, true)).toBe(true)
+    expect(await attachSource(LEAD_ALL, true)).toBe(true)
+  })
+
+  it('says no to a token limited to other files, for its own file or the one asked about', async () => {
+    await fileReady()
+    const elsewhere: Who = { ...LEAD_ALL, scopes: [{ kind: 'file', value: 'file-other' }] }
+    expect(await answer(elsewhere, true)).toBe(false)
+    expect(await attachSource(elsewhere, true)).toBe(false)
+    const here: Who = { ...LEAD_ALL, scopes: [{ kind: 'file', value: F }] }
+    expect(await answer(here, true)).toBe(true)
+    expect(await attachSource(here, true)).toBe(true)
+    const res = await ask(here, { wall: true, query: '?fileId=file-other' })
+    expect(((await res.json()) as { coversEveryLanguage: boolean }).coversEveryLanguage).toBe(false)
+  })
+})
+
+describe('worker routing', () => {
+  it('dispatches the read from the worker entry, behind CORS', async () => {
+    const src = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)), 'utf8')
+    expect(src).toMatch(/import \{ handleSourceAudioAccessRequest \} from "\.\/events\/source-audio-access-route"/)
+    expect(src).toMatch(/const sourceAudioAccessResponse = await handleSourceAudioAccessRequest\(request, env\)\s*\n\s*if \(sourceAudioAccessResponse\) return withCors\(sourceAudioAccessResponse, request\)/)
   })
 })

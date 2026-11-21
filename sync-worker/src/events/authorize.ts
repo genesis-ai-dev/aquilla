@@ -1085,12 +1085,19 @@ export async function authorize<K extends EventKind>(
       //     chosen there un-chooses that language's take), and, for a piece,
       //     the language of the take it is a piece of too (the projection
       //     gives it its root's lane). A piece of the source clip adds none.
+      //   - a source attach (role 'source') passed the every-language check
+      //     above, which covers any language its tag can name, so its tag is
+      //     not checked again. It names none in practice (the app sends no
+      //     targetLang), and '' resolves to no lane in a project whose
+      //     languages all carry their own tag, which refused every Project
+      //     Lead the check had just let through.
+      const coveredSource = raw.kind === 'cell.audio.attach' && ap?.role === 'source'
       const lanes = new Set<string>()
       if (take) {
         if (take.role !== 'source') lanes.add(take.tag)
-        else if (raw.kind === 'cell.audio.select' || (raw.kind === 'cell.audio.attach' && ap?.wordsOnly !== true)) lanes.add(eventLane)
+        else if (raw.kind === 'cell.audio.select' || (raw.kind === 'cell.audio.attach' && ap?.wordsOnly !== true && !coveredSource)) lanes.add(eventLane)
       } else {
-        lanes.add(eventLane)
+        if (!coveredSource) lanes.add(eventLane)
         if (raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {
           const root = await takeLane(ap.pieceOf)
           if (root && root.role !== 'source') lanes.add(root.tag)

@@ -146,6 +146,11 @@ describe("AQU-1352 §3.6 org People & access", () => {
       `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
        VALUES ('p1', 6, 'lanefr01', 300, 1)`,
     ).run()
+    // The creator also has a direct project row. Both are the same place, so
+    // the lane lists that person once under the project, not twice.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1', 1, 700, 1)`,
+    ).run()
     const body = (await (await orgAccess("owner")).json()) as Payload
     const french = findPlace(body, "lane", "lanefr01")
     const spanish = findPlace(body, "lane", "lanees01")
@@ -154,6 +159,8 @@ describe("AQU-1352 §3.6 org People & access", () => {
     const viaProject = (node: Node | undefined) =>
       node?.inherited.filter((row) => row.from.type === "project" && row.displayName === "direct_below") ?? []
     expect(viaProject(french)).toEqual([expect.objectContaining({ roleLevel: 300, from: { type: "project", id: "p1", name: "Alpha" } })])
+    const ownerViaProject = french?.inherited.filter((row) => row.from.type === "project" && row.displayName === "owner") ?? []
+    expect(ownerViaProject).toHaveLength(1)
     expect(viaProject(spanish)).toEqual([expect.objectContaining({ roleLevel: 300, from: { type: "project", id: "p1", name: "Alpha" } })])
     expect(french?.directGrantees.some((g) => g.displayName === "direct_below")).toBe(true)
     expect(spanish?.directGrantees.some((g) => g.displayName === "direct_below")).toBe(false)

@@ -436,10 +436,20 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
         [...granted.values()],
         invites.filter((invite) => inviteMatchesLane(invite, lane)),
       )
-      const viaProject = projectDirect(project.id)
-        .filter((g) => grantAppliesToLane(g, lane))
-        .map((g) => personSource(g, g.roleLevel, projectRef))
-        .sort(byName)
+      // A creator who also holds a project_members row is two view rows for one
+      // grant at this project. Collapse them the same way Granted here does,
+      // or the lane lists that person twice under "via project".
+      const viaProject: InheritedSource[] = directOf(
+        projectDirect(project.id).filter((g) => grantAppliesToLane(g, lane)),
+      ).map((person) => ({
+        kind: "person",
+        roleLevel: person.roleLevel,
+        from: projectRef,
+        userId: person.userId,
+        displayName: person.displayName,
+        email: person.email,
+        isGuest: person.isGuest,
+      }))
       const viaTeam = teamRows(teamsOn(project.id).filter((a) => attachmentApplies(a, lane.id)))
       const viaOrg = orgPeopleReaching(project.id).filter((row) => {
         if (!wallOn || row.roleLevel >= ORG_WIDE_ACCESS_FLOOR) return true

@@ -322,7 +322,7 @@ import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
-import { candidateConcepts, findConceptMatches } from "@/lib/terminology/match"
+import { useSourceTermMatches } from "@/hooks/useSourceTermMatches"
 import { activeConceptsOf } from "@/lib/terminology/source-lookup"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -851,6 +851,7 @@ const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
 const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+const NO_LIVE_TERM_RULES: TranslationRule[] = []
 // AQU-2654: the table's column-heading row. The table function is not compiled
 // by the React Compiler, so each of its renders (one per cell activation, one
 // per store emit) re-ran these although their props had not changed.
@@ -5481,38 +5482,18 @@ export function SourceWithTermLookup({
   // costs what its own terms cost, not the size of the glossary. Each kept
   // span remembers the concepts that matched exactly it, so the popover knows
   // it has something to show without looking the surface up again.
-  const matches = useMemo(() => {
-    const found: Array<{ start: number; end: number; concept: Concept }> = []
-    for (const concept of candidateConcepts(text, activeConcepts, termMatching)) {
-      for (const m of findConceptMatches(text, concept, termMatching)) {
-        found.push({ start: m.start, end: m.end, concept })
-      }
-    }
-    // Longest-first at each offset, then drop anything overlapping an already
-    // taken span — a highlight may not start inside another one.
-    found.sort((a, b) => a.start - b.start || b.end - a.end)
-    const kept: Array<{ start: number; end: number; concepts: Concept[] }> = []
-    let taken = -1
-    for (const m of found) {
-      const last = kept[kept.length - 1]
-      if (last && last.start === m.start && last.end === m.end) {
-        last.concepts.push(m.concept)
-        continue
-      }
-      if (m.start < taken) continue
-      kept.push({ start: m.start, end: m.end, concepts: [m.concept] })
-      taken = m.end
-    }
-    return kept
-  }, [text, activeConcepts, termMatching])
+  //
+  // AQU-2655: `null` while a dense screen's term patterns compile in idle
+  // slices; the text draws plain, marked busy, until its highlights are ready.
+  const matches = useSourceTermMatches(text, activeConcepts, termMatching)
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
   // Font size inherits from the source column wrapper (per-file pref) — no
   // fixed text-* class here.
-  if (activeConcepts.length === 0 || matches.length === 0) {
+  if (activeConcepts.length === 0 || matches === null || matches.length === 0) {
     const Wrapper = inline ? "span" : "div"
     return (
-      <Wrapper>
+      <Wrapper aria-busy={matches === null ? true : undefined}>
         <HighlightedText
           text={text}
           highlights={highlights}
@@ -6968,10 +6949,15 @@ function EditorRow({
   // Deliberately keyed on the source fields `effectiveSourceText` reads rather
   // than on `cell`: the cell object gets a fresh identity on every commit and
   // overlay update, and depending on it would re-run the whole sweep each time.
+  //
+  // AQU-2655: only the row being edited runs the live check, so only it pays
+  // for the gate — which compiles the source pattern of every term occurring in
+  // the cell. Every row doing it on mount put a dense first screen's compiles
+  // back in render, ahead of the source highlights that defer theirs.
   const liveTermCandidates = useMemo(
-    () => selectSourceApplicableTermRules(cell, enabledTermRules),
+    () => (isEditorActive ? selectSourceApplicableTermRules(cell, enabledTermRules) : NO_LIVE_TERM_RULES),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [enabledTermRules, cell.original, cell.medium, cell.transcription],
+    [isEditorActive, enabledTermRules, cell.original, cell.medium, cell.transcription],
   )
 
   // Live terminology infractions computed from the un-committed buffer. Only

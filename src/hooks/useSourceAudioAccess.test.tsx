@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { SOURCE_AUDIO_ACCESS_RETRY_MS, useSourceAudioAccess } from "./useSourceAudioAccess"
+import { SOURCE_AUDIO_ACCESS_RETRY_MS, SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS, useSourceAudioAccess } from "./useSourceAudioAccess"
 
 // AQU-2682: the app offers "Upload a recording to make lines" and attaching
 // media only once the server has said this person's access covers every
@@ -14,7 +14,8 @@ const reply = (body: unknown, status = 200) =>
 
 beforeEach(() => {
   fetchMock.mockReset()
-  getToken.mockClear()
+  getToken.mockReset()
+  getToken.mockImplementation(async () => "tok")
   vi.stubGlobal("fetch", fetchMock)
 })
 afterEach(() => {
@@ -93,5 +94,42 @@ describe("useSourceAudioAccess", () => {
     fetchMock.mockReturnValueOnce(new Promise(() => {}))
     rerender({ enabled: true, projectId: "p2" })
     expect(result.current).toBeNull()
+  })
+
+  it("asks again when the sync token is re-minted, and takes the new answer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: true }))
+    const { result } = render()
+    await waitFor(() => expect(result.current).toBe(true))
+
+    // Same token: the check costs no read.
+    await act(async () => { vi.advanceTimersByTime(SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS) })
+    await act(async () => { await Promise.resolve() })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // A new token (the lead lost Spanish meanwhile): the server now says no.
+    getToken.mockImplementation(async () => "tok-2")
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: false }))
+    await act(async () => { vi.advanceTimersByTime(SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS) })
+    await waitFor(() => expect(result.current).toBe(false))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-2" })
+  })
+
+  it("keeps the previous answer while a re-ask fails, then retries", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: true }))
+    const { result } = render()
+    await waitFor(() => expect(result.current).toBe(true))
+
+    getToken.mockImplementation(async () => "tok-2")
+    fetchMock.mockReturnValueOnce(Promise.reject(new TypeError("Failed to fetch")))
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: false }))
+    await act(async () => { vi.advanceTimersByTime(SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS) })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+    expect(result.current).toBe(true)
+    await act(async () => { vi.advanceTimersByTime(SOURCE_AUDIO_ACCESS_RETRY_MS[0]!) })
+    await waitFor(() => expect(result.current).toBe(false))
   })
 })

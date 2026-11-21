@@ -305,7 +305,7 @@ export function OrgMembersTable({
           loading={loading}
           loadingLabel={t("org.membersPage.loadingMembers")}
           getRowId={(m) => String(m.userId)}
-          getRowAttributes={(m) => ({ "data-user-id": String(m.userId) })}
+          getRowAttributes={(m) => ({ "data-user-id": String(m.userId), id: `member-${m.userId}` })}
           initialSorting={[{ id: "name", desc: false }]}
           searchPlaceholder="Search by name or email"
           globalFilterFn={(row, _columnId, filterValue) => {

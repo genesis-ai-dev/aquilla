@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { ChevronRight, UserPlus } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 
@@ -9,7 +8,6 @@ import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { UserChip } from "@/components/UserChip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { filterPlaceTree, placeParam, placeRowCounts } from "@/lib/access/place-lens"
 import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
@@ -32,10 +30,9 @@ const PLACE_KIND = {
  * person can see; the detail is the grants at the selected place and the
  * ancestor grants that resolve to it. Nothing here edits a grant.
  */
-export function PlacesLens({ tree }: { tree: AccessTreeNode[] }) {
+export function PlacesLens({ tree, query }: { tree: AccessTreeNode[]; query: string }) {
   const t = useT()
   const [params, setParams] = useSearchParams()
-  const [query, setQuery] = useState("")
   const filtered = filterPlaceTree(tree, query)
   const selected = locate(tree, params.get("place")) ?? locate(tree, tree[0] ? placeParam(tree[0].scope) : null)
 
@@ -53,13 +50,6 @@ export function PlacesLens({ tree }: { tree: AccessTreeNode[] }) {
       className="flex min-w-0 flex-col gap-4 overflow-x-hidden md:flex-row md:items-start"
     >
       <div className="flex w-full min-w-0 flex-col gap-2 md:w-72 md:shrink-0">
-        <Input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("org.access.places.search")}
-          aria-label={t("org.access.places.search")}
-        />
         {filtered.length === 0 ? (
           <p className="px-2 text-sm text-muted-foreground">{t("org.access.places.noMatches")}</p>
         ) : (

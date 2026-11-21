@@ -22,7 +22,10 @@ vi.mock("@/components/org/access/PlacesLens", () => ({
     return <div>{names}</div>
   },
 }))
-vi.mock("@/components/org/access/AccessPeopleView", () => ({ AccessPeopleView: () => null }))
+vi.mock("@/components/org/access/PeopleLens", () => ({
+  PeopleLens: () => null,
+  PeoplePrintReport: () => null,
+}))
 
 let jwt: string | null = "jwt"
 vi.mock("@/hooks/useFrontierSession", () => ({

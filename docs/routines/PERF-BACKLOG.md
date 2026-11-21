@@ -111,7 +111,11 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 25. **Project overview** (`src/components/org/ProjectOverview.tsx`, 3.1k lines, not compiled): new
     `columns` and `data` for the lanes table on 7 of 7 renders; 14 commits, 18 requests to open.
 26. **`src/components/ui/data-table.tsx`:** a ContextMenu root and a DropdownMenu root per row.
-27. **Comment and edit-history drawers:** 24–25 commits to open one. **Export dialog open:** 27.
+27. **Export dialog open:** 27 commits (not re-measured in the drawer pass). The comment and
+    edit-history drawers were measured on 2026-11-20 (21 and 23 commits, 823 and 902 renders):
+    the drawers themselves render 1–4 times; the rest is the row hover and the "More actions"
+    popover with its tooltips that the probe opens them from — item 10. `HistoryDrawer`'s three
+    own renders are `useCellEditHistory`'s loading flips (item 20's family).
 29. **`src/hooks/useOrgComments.ts`:** a sync-token and a comments read per project (48 requests
     for about 23 projects). Needs an org-level endpoint — escalate, do not fix client-side.
 30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has

@@ -9,6 +9,7 @@
  *   pnpm perf:interaction --only plain --throttle 1
  *   pnpm perf:interaction --suggest-budgets
  *   pnpm perf:interaction --no-ghost-text   # see the flag's note in measureVariant
+ *   pnpm perf:interaction --no-1x           # skip the unthrottled count pass (see COUNT_PASS_THROTTLE)
  *
  * Two fixtures of the same small project (2 files, 400 cells): `plain`, and
  * `glossary` with 664 active terms that use forms, affixes and mark folding —
@@ -74,6 +75,8 @@ interface Options {
   enforce: boolean
   /** False: the editor's ghost-text suggestions are switched off for the run. */
   ghostText: boolean
+  /** True: after the measured pass, run the scenario again at 1× and report its counts. */
+  countPass: boolean
   target: PerfTarget
 }
 
@@ -88,6 +91,7 @@ function parseOptions(argv: string[]): Options {
       "suggest-budgets": { type: "boolean" },
       "no-budgets": { type: "boolean" },
       "no-ghost-text": { type: "boolean" },
+      "no-1x": { type: "boolean" },
     },
   })
   const only = values.only?.split(",").map((s) => s.trim()).filter(Boolean)
@@ -104,11 +108,25 @@ function parseOptions(argv: string[]): Options {
     suggestBudgets: !!values["suggest-budgets"],
     enforce: !values["no-budgets"],
     ghostText: !values["no-ghost-text"],
+    countPass: !values["no-1x"] && throttle !== COUNT_PASS_THROTTLE,
     target: DEFAULT_TARGET,
   }
 }
 
 const log = (line: string) => console.log(`[perf] ${line}`)
+
+/**
+ * Item 39 of docs/routines/PERF-BACKLOG.md: under the 4× throttle, separate
+ * state updates that land close together fall into one React batch, so a
+ * change that removes one of them can leave the 4× count unchanged (commit
+ * path: 9 workspace renders at 1×, 7 at 4×). The second pass runs the same
+ * scenario unthrottled and reports its counts as `<fixture>.<phase>@1x.<name>`.
+ * Timings from that pass are not reported (they would read as a different
+ * machine), it skips tabReturn (a 30 s wait that is not commit path), and its
+ * metrics are not budgeted: they are there to be compared before and after.
+ */
+const COUNT_PASS_THROTTLE = 1
+const COUNT_PASS_SUFFIX = "@1x"
 
 // ── fixture ────────────────────────────────────────────────────────────────
 
@@ -296,11 +314,21 @@ async function signIn(page: Page, appBase: string, target: PerfTarget): Promise<
   )
 }
 
+/** The measured pass, or the unthrottled count pass that follows it. */
+interface Pass {
+  throttle: number
+  /** Appended to every phase name, so `commit` becomes `commit@1x`. */
+  suffix: string
+  /** Report only count metrics (drop timings: `ms`, `…Ms`) and skip tabReturn. */
+  countsOnly: boolean
+}
+
 async function measureVariant(
   variant: Variant,
   handle: BigBibleHandle,
   appBase: string,
   options: Options,
+  pass: Pass = { throttle: options.throttle, suffix: "", countsOnly: false },
 ): Promise<{ metrics: Record<string, number>; phases: PhaseResult[] }> {
   const { chromium } = await import("@playwright/test")
   // A cloud session ships its own Chromium, not the one this lockfile pins.
@@ -327,10 +355,12 @@ async function measureVariant(
     const editable = (i: number) => targetCell(i).locator('.ProseMirror[contenteditable="true"], textarea').first()
     const put = (phase: string, values: Record<string, number | null>) => {
       for (const [key, value] of Object.entries(values)) {
-        if (value !== null) metrics[`${variant}.${phase}.${key}`] = value
+        if (value === null || (pass.countsOnly && /(^ms|Ms)$/.test(key))) continue
+        metrics[`${variant}.${phase}${pass.suffix}.${key}`] = value
       }
     }
     const record = (result: { phase: PhaseResult }) => {
+      result.phase.name += pass.suffix
       phases.push(result.phase)
       log(
         `${variant} ${result.phase.name}: ${result.phase.reactCommits} commits, ${result.phase.componentRenders} renders, `
@@ -339,7 +369,7 @@ async function measureVariant(
     }
 
     await signIn(page, appBase, options.target)
-    if (options.throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: options.throttle })
+    if (pass.throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: pass.throttle })
 
     // open
     await recorder.begin()
@@ -432,6 +462,7 @@ async function measureVariant(
     })
 
     // tabReturn: hidden for 30s, then back
+    if (pass.countsOnly) return { metrics, phases }
     await page.evaluate(HIDE_TAB)
     await page.waitForTimeout(30_000)
     await recorder.begin()
@@ -461,6 +492,7 @@ async function measureVariant(
 function suggestBudgets(metrics: Record<string, number>): { max: Record<string, number> } {
   const max: Record<string, number> = {}
   for (const [metric, value] of Object.entries(metrics)) {
+    if (metric.includes(COUNT_PASS_SUFFIX)) continue // reported for comparison, never budgeted
     const isTiming = /Ms$/.test(metric)
     const headroom = isTiming ? 2 : 1.25
     const floor = isTiming ? 100 : 2
@@ -492,6 +524,16 @@ async function main(): Promise<void> {
       const measured = await measureVariant(variant, handle, appBase, options)
       Object.assign(metrics, measured.metrics)
       phases[variant] = measured.phases
+      if (options.countPass) {
+        log(`${variant}: count pass at ${COUNT_PASS_THROTTLE}× (reported as …${COUNT_PASS_SUFFIX}, not budgeted)`)
+        const counted = await measureVariant(variant, handle, appBase, options, {
+          throttle: COUNT_PASS_THROTTLE,
+          suffix: COUNT_PASS_SUFFIX,
+          countsOnly: true,
+        })
+        Object.assign(metrics, counted.metrics)
+        phases[variant].push(...counted.phases)
+      }
     }
 
     const sha = spawnSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).stdout.trim()

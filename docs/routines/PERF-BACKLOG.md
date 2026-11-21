@@ -143,11 +143,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     (2026-11-20), so the budgets describe an edit and a new machine no longer sees a false
     breach. What is left: whether 28 row renders for a first translation is the price of the
     cell changing state or a defect — not traced. Trace it, then give it its own phase.
-39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
-    separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
-    under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
-    one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
-    6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
 
 ## Needs a person, not the routine
 

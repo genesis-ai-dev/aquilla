@@ -139,7 +139,12 @@ pnpm perf:interaction                  # build → serve → seed if needed → 
 pnpm perf:interaction --no-build       # reuse .perf/interaction-dist from the last run
 pnpm perf:interaction --only plain     # one fixture; budgets for the other are not required
 pnpm perf:interaction --suggest-budgets
+pnpm perf:interaction --no-1x          # skip the unthrottled count pass (below)
 ```
+
+The workers do not have to be on :8788/:8789. `PERF_AUTH_BASE` / `PERF_SYNC_BASE` point the whole
+run (the build's `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST`, the seeding, the sign-in) at another
+stack. The harness never uses a Vite dev server on :5173: it serves its own build on :4175.
 
 It builds the SPA in production mode, **unminified** (so the report can name components), serves
 it with `vite preview` on :4175, signs in through the dev stack's login bypass, and drives one
@@ -173,6 +178,14 @@ by hand gets the same treatment on the next run.
 Every metric is `<fixture>.<phase>.<name>`. The report (`perf-report/interaction-latest.json`)
 also carries, per phase, `topRenders` (the 25 components that rendered most) and
 `repeatedRoutes` (requests sent more than once for that one action).
+
+**The 1× count pass.** Under the 4× throttle, state updates that land close together fall into one
+React batch, so removing one of them can leave a 4× count unchanged (backlog item 39: 9 workspace
+renders per commit at 1×, 7 at 4×). After the measured pass the harness therefore runs the scenario
+again unthrottled, without `tabReturn`, and reports its counts as `<fixture>.<phase>@1x.<name>`
+(`plain.commit@1x.workspaceRenders`). Those metrics are not budgeted and `--suggest-budgets` leaves
+them out; compare them before and after a change that removes an update. `--no-1x` skips the pass,
+and `--throttle 1` makes it redundant, so it is skipped then too.
 
 ## Budgets
 

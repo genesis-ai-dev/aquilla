@@ -111,8 +111,8 @@ export const search = defineNamespace({
     "search.replace.applyButtonAll": "Replace all",
     "search.replace.noSource": "No source text for this cell",
     "search.replace.targetOnlyReason":
-      "Replace changes target text only. Each match shows its source so you can check the wording.",
-    "search.replace.sourceMatchNotReplaced": "Source match — not replaced",
+      "Replace changes the translation only. Each match shows the source text so you can check the wording.",
+    "search.replace.sourceMatchNotReplaced": "Source text match — not replaced",
 
     // Result row column badge (aria-hidden decorative label on a search hit)
 
@@ -134,11 +134,13 @@ export const search = defineNamespace({
     "search.dialog.modeLabel": "Search mode",
     "search.dialog.contentSideLabel": "Content side",
     "search.side.both": "Both",
+    "search.side.sourceText": "Source text",
+    "search.side.translation": "Translation",
     "search.dialog.openFileHint": "Open a file to enable file-scoped search.",
-    "search.dialog.replaceSectionHeading": "Replace (target cells only)",
+    "search.dialog.replaceSectionHeading": "Replace (translation only)",
     "search.dialog.idlePassages":
-      "Type to find parallel passages — results show source and target side by side.",
-    "search.dialog.idleReplace": "Type a search term above to find target cells for replacement.",
+      "Type to find parallel passages — results show the source text and the translation side by side.",
+    "search.dialog.idleReplace": "Type a search term above to find translation cells to replace.",
     "search.dialog.idleSearchFile": "Type to search across the open file.",
     "search.dialog.idleSearchProject": "Type to search across the project.",
     "search.dialog.noResultsFor": "No results for",
@@ -513,13 +515,15 @@ export const search = defineNamespace({
       },
       "search.replace.targetOnlyReason": {
         description:
-          "Note in Replace mode explaining why only target text is changed, and that " +
-          "each match shows its source for review. Both and Source are unavailable in " +
-          "this mode, so the search is target text only.",
+          "Note in Replace mode explaining that replace changes the translation only, and " +
+          "that each match shows the source text for review. Both and Source text are " +
+          "unavailable in this mode, so the search reads the translation only. 'Translation' " +
+          "and 'source text' are the Command-K dialog's words; the editor columns stay " +
+          "Source and Target.",
       },
       "search.replace.sourceMatchNotReplaced": {
         description:
-          "Label on a source-side hit inside Replace mode, explaining that the row stays " +
+          "Label on a source-text hit inside Replace mode, explaining that the row stays " +
           "visible for review and is not part of the replacement.",
       },
       "search.dialog.titlePassages": {
@@ -617,12 +621,25 @@ export const search = defineNamespace({
       },
       "search.dialog.contentSideLabel": {
         description:
-          "Accessible name (aria-label) of the Both/Source/Target toggle in the full " +
-          "dialog. Stays visible in Replace mode so a reviewer can see why a source " +
-          "match is listed and switch sides without the control disappearing.",
+          "Accessible name (aria-label) of the Both / Source text / Translation toggle in " +
+          "the Command-K dialog. Stays visible in Replace mode so a reviewer can see why a " +
+          "source-text match is listed and switch sides without the control disappearing. " +
+          "These tab labels are dialog-only; the editor columns stay Source and Target.",
       },
       "search.side.both": {
-        description: "Tab option: search both source and target text.",
+        description: "Tab option: search both the source text and the translation.",
+      },
+      "search.side.sourceText": {
+        description:
+          "Tab, and the label above a hit, for the text being translated from, in the " +
+          "Command-K dialog only. One or two words. Pairs with search.side.translation. " +
+          "Does not rename the editor column, which stays editor.column.source ('Source').",
+      },
+      "search.side.translation": {
+        description:
+          "Tab, and the label above a hit, for the text being written, in the Command-K " +
+          "dialog only. One word. Pairs with search.side.sourceText. Does not rename the " +
+          "editor column, which stays editor.column.target ('Target').",
       },
       "search.dialog.openFileHint": {
         description:
@@ -632,7 +649,7 @@ export const search = defineNamespace({
       "search.dialog.replaceSectionHeading": {
         description:
           "Small heading introducing the replace input/diff-preview block in the full " +
-          "dialog's Replace mode, clarifying that replace only ever touches target text.",
+          "dialog's Replace mode, clarifying that replace only ever touches the translation.",
       },
       "search.dialog.idlePassages": {
         description:

@@ -1602,7 +1602,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                       id="pname"
                       required
                       value={name}
-                      onCommit={(next, info) => void commit.name(next, info)}
+                      onCommit={(next, info) => commit.name(next, info)}
                       disabled={!canRenameProject}
                       aria-label={t("projectSettings.info.titleLabel")}
                       className="w-56 bg-background"

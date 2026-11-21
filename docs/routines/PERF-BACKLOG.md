@@ -122,8 +122,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     fix. `GlossaryEditor` compiles since 2026-11-20, which stopped the first 80 rows rendering a
     second time when the rest arrive (`GlossaryRow` 744 → 664 renders).
 32. **Members matrix:** a Popover root and a lane-scope editor per populated cell; not virtualized.
-33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
-    `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.
 
 ## Transcribe view
 

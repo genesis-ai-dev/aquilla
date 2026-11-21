@@ -27,7 +27,10 @@
 
 import { verifyDocScope, verifySyncToken } from '../auth'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
-import { ROLE } from './role-policy'
+import { ROLE, requiredRoleFor } from './role-policy'
+import { coversEveryLanguage } from './source-audio-access'
+import { loadTargetLanes } from './lane-read-wall'
+import { laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { withCors } from '../cors'
@@ -162,6 +165,7 @@ export interface ImportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   ProjectSync?: DurableObjectNamespace
+  LANE_READ_WALL?: string
 }
 
 interface ImportFileMeta {
@@ -642,6 +646,22 @@ export async function handleBulkImportRequest(
           clientTs,
           serverTs: eventTs++,
         } as PersistedEvent<'cell.audio.attach'>)
+      }
+      // AQU-2682: a source attachment is the clip every language hears, so
+      // the import is held to the events route's rule for a source attach
+      // (source-audio-access.ts): the caller's access must cover every
+      // language. Checked before anything below is written, so a refusal
+      // leaves the staged file hidden and no attach row behind.
+      if (finalizeEvents.some((event) => (event.payload as { role?: unknown }).role === 'source')) {
+        const covers = await coversEveryLanguage({
+          wallOn: laneReadWallEnabled(env.LANE_READ_WALL),
+          claims: auth.claims,
+          requiredRole: requiredRoleFor('cell.audio.attach'),
+          loadLanes: () => loadTargetLanes(db, body.projectId),
+        })
+        if (!covers) {
+          return withCors(new Response('importing source audio requires access to every language', { status: 403 }), request)
+        }
       }
       if (finalizeEvents.length > 0) {
         const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]

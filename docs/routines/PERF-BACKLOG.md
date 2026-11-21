@@ -59,7 +59,12 @@ render is about 98.
    with the compiler off, so verify in a build with the benchmark.
 9. **`AppShell` re-renders with every workspace render**: all eight slot props (`logoAccessory`,
    `leftDock`, `header`, `aboveCard`, `beforeMain`, `main`, `asideEdge`, `statusBar`) are
-   elements built in the workspace's render.
+   elements built in the workspace's render. *Traced 2026-11-20* (`surfaces-probe --why
+   AppShell`): all eight change identity on every workspace render (39 of 40 renders on a file
+   open), and so do `LeftDock`'s four panels and `WorkspaceHeader`'s `onImport`. AppShell's own
+   share is small — it is compiled, so its chrome (version tag, help, history) is cached; what
+   re-renders is AppShell, its `ErrorBoundary` and the resizable panels. The cause is item 8:
+   the workspace is not compiled, so nothing it builds is cached. Fix item 8, not AppShell.
 10. **Per-row overlay roots.** The action rail is about 46 components (three or four buttons, each
     under a full tooltip tree, plus the overflow popover), the source context menu about 18.
     One instance per table, or mount on hover. `AppTooltip` documents that remounting its trigger
@@ -68,7 +73,11 @@ render is about 98.
 12. **List wrappers:** every store emit runs five wrapper components for each mounted row, because
     `extraData` carries the store version by design — about 400 renders per commit.
 13. **Left dock, file-options menu, header, resizable panels, side rail** re-render with every
-    workspace render (inline callbacks; menu items rebuilt from `actionCtx`).
+    workspace render (inline callbacks; menu items rebuilt from `actionCtx`). *Traced
+    2026-11-20*: `FileChapterToolbar` gets new `historyControl`, `layoutSwitch`,
+    `onCheckToggle`, `menuItems` and `viewSettingsMenu` each render; `ResizablePanelGroup` new
+    `children` and `onLayoutChanged`. Same cause as item 9: hand-memoizing each of these would
+    duplicate, with long hand-kept dependency lists, what compiling the workspace (item 8) does.
 
 ## Editor — glossary
 

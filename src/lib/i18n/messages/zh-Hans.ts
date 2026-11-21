@@ -3035,7 +3035,6 @@ export const zh_Hans: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "组织层级 · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "编辑 {username} 在这个项目上的语言轨范围",
   "org.memberLaneScopeEditor.scopesHeading": "{username} 的范围",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "未限定范围 — 完整访问",
   "org.memberLaneScopeEditor.languagesLegend": "可工作的语言",
   "org.memberLaneScopeEditor.mainLanguageFallback": "主要语言",
   "org.memberLaneScopeEditor.unknownLane": "{lane}（不是此项目中的语言）",

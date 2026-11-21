@@ -53,7 +53,7 @@ import {
 import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
-import { grantNewLaneStmt } from "./lane-grants"
+import { firstTargetLaneStmts } from "./lane-grants"
 import { seedLaneProgressStmt } from "./lane-progress"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
@@ -462,12 +462,13 @@ export function ensureProjectLaneStmts(
         position,
       ),
     )
-    // AQU-1781: a target lane nobody is granted is invisible to every member
-    // below Maintainer under the read wall. The grant rides the same batch, so
-    // the lane and the grants that make it readable commit together. Keyed by
-    // the tag because the INSERT above upserts: the row the batch ends up with
-    // may be one an earlier writer created.
-    stmts.push(grantNewLaneStmt(db, projectId, { legacyTag }, null))
+    // AQU-2355: a lane created later reaches nobody below Maintainer. Only a
+    // project's FIRST target lane goes to the members it already has (and links
+    // its attached teams), in the same batch, so a lane-less project's members
+    // are not left reading source only. Keyed by the tag because the INSERT
+    // above upserts: the row the batch ends up with may be one an earlier
+    // writer created. The Codex sweep links its team to later lanes itself.
+    stmts.push(...firstTargetLaneStmts(db, projectId, { legacyTag }, null))
   }
   return stmts
 }

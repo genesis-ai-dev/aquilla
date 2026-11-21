@@ -74,7 +74,9 @@ import {
   applyTeamMemberLaneGrants,
   applyTeamProjectLaneGrants,
   applyTeamRosterLaneChecks,
+  loadTeamProjectIds,
   reconcileMemberProjectLanes,
+  removeTeamLaneAccess,
   relevelTeamMemberLaneGrants,
   resolveTeamLaneSelection,
   saveTeamLaneSelection,
@@ -847,7 +849,12 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
   const callerRole = await resolveTeamWriteRole(c, orgId)
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  // AQU-2355: read who and where before the rows go, then take away exactly
+  // the lanes this team gave.
+  const deletedTeamProjects = await loadTeamProjectIds(c.env.AQUILLA_PG, groupId)
+  const deletedTeamMembers = await teamMemberIds(c.env, groupId)
   await deleteGroup(c.env, orgId, groupId)
+  await removeTeamLaneAccess(c.env.AQUILLA_PG, deletedTeamProjects, deletedTeamMembers, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.delete",
     where: { scope: "team", orgId, groupId },
@@ -1004,6 +1011,9 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
   if (typeof callerRole !== "number") return callerRole
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await removeGroupMember(c.env, groupId, targetUserId)
+  // AQU-2355 / AQU-2354: leaving a team removes exactly the lanes the team gave
+  // (rows a direct grant wrote stay, at their own level).
+  await removeTeamLaneAccess(c.env.AQUILLA_PG, await loadTeamProjectIds(c.env.AQUILLA_PG, groupId), [targetUserId], user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.member.remove",
     where: { scope: "team", orgId, groupId },
@@ -1611,12 +1621,14 @@ orgs.delete("/:orgId/members/me", async (c) => {
     }
   }
 
+  const leftTeamProjects = await orgTeamProjectsOf(c.env, orgId, user.id)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, user.id),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(user.id, orgId),
   ])
+  await removeTeamLaneAccess(c.env.AQUILLA_PG, leftTeamProjects, [user.id], user.id)
   await auditMembershipChange(c.env, user, {
     action: "org.member.remove",
     where: { scope: "org", orgId },
@@ -1644,12 +1656,14 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
   }
 
   const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
+  const removedTeamProjects = await orgTeamProjectsOf(c.env, orgId, targetUserId)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
   ])
+  await removeTeamLaneAccess(c.env.AQUILLA_PG, removedTeamProjects, [targetUserId], user.id)
   await auditMembershipChange(c.env, user, {
     action: "org.member.remove",
     where: { scope: "org", orgId },
@@ -1757,8 +1771,8 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
-  // AQU-1813: a named lane list freezes the attachment to those lanes. Omitting
-  // it keeps the living "every lane" attachment the Codex sync still sends.
+  // AQU-1813 / AQU-2355: the attachment lists its lanes. Omitting the list
+  // means every current lane; a lane created later is not added.
   await saveTeamLaneSelection(c.env.AQUILLA_PG, groupId, projectId, selection.selection)
   await applyTeamRosterLaneChecks(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
@@ -1846,5 +1860,27 @@ orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   })
   return c.json({ removed: true })
 })
+
+/** AQU-2355: the people on a team, read before the team is deleted. */
+async function teamMemberIds(env: Env, groupId: number): Promise<number[]> {
+  const { results } = await env.AQUILLA_PG.prepare("SELECT user_id FROM group_members WHERE group_id = ?")
+    .bind(groupId)
+    .all<{ user_id: number | string }>()
+  return (results ?? []).map((row) => Number(row.user_id))
+}
+
+/** AQU-2355: the projects a person reaches through this org's teams, read before they leave them. */
+async function orgTeamProjectsOf(env: Env, orgId: number, userId: number): Promise<string[]> {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT gpg.project_id
+       FROM group_members gm
+       JOIN groups g ON g.id = gm.group_id AND g.org_id = ?
+       JOIN group_project_grants gpg ON gpg.group_id = gm.group_id
+      WHERE gm.user_id = ?`,
+  )
+    .bind(orgId, userId)
+    .all<{ project_id: string }>()
+  return (results ?? []).map((row) => row.project_id)
+}
 
 export default orgs

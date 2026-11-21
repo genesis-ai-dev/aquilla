@@ -113,8 +113,9 @@ import {
 } from "../../../src/lib/lanes/read-wall"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
-import { grantNewLane } from "../../../db/shared/lane-grants"
+import { grantFirstTargetLane } from "../../../db/shared/lane-grants"
 import { grantCreatedLaneToActor } from "../services/lane-grants"
+import { applyNewLaneGrants, loadNewLaneGrantCandidates, unofferedPicks } from "../services/new-lane-grants"
 import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
@@ -883,6 +884,19 @@ const createLaneSchema = z.object({
    * sends each language's choice; absent (every other caller) is Text.
    */
   delivers: z.enum(LANE_DELIVERS).optional(),
+  /**
+   * AQU-2355: who else gets the new lane. A lane created later reaches nobody
+   * below Maintainer on its own; the create step offers the people and teams
+   * on the project's other lanes (GET …/lanes/grant-candidates) and sends the
+   * ones ticked. Each person gets the role they hold on those lanes; each team
+   * is linked to the lane. Anyone not on that list is refused.
+   */
+  grants: z
+    .object({
+      userIds: z.array(z.number().int()).max(500).optional(),
+      teamIds: z.array(z.number().int()).max(200).optional(),
+    })
+    .optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -965,6 +979,22 @@ async function pushMondayAfterLaneChange(
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
 // is refused; the database does not have a unique constraint on name.
+// AQU-2355: the people and teams on this project's other lanes, for the
+// create-lane step to offer (unticked). Same floor as creating a lane. A caller
+// below Maintainer is offered only people and teams on lanes they can read.
+projectSettings.get("/:projectId/lanes/grant-candidates", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const denied = await denyLanguageWrite(c.env, user, projectId)
+  if (denied) return c.json(denied, 403)
+  const role = await resolveProjectRole(c.env, user, projectId)
+  const candidates = await loadNewLaneGrantCandidates(c.env.AQUILLA_PG, projectId, {
+    id: user.id,
+    roleLevel: role?.level ?? 0,
+  })
+  return c.json(candidates)
+})
+
 projectSettings.post(
   "/:projectId/lanes",
   authMiddleware,
@@ -975,6 +1005,18 @@ projectSettings.post(
     const denied = await denyLanguageWrite(c.env, user, projectId)
     if (denied) return c.json(denied, 403)
     const body = c.req.valid("json")
+    // AQU-2355: the picks are checked against the offer before anything is
+    // written, so a refused pick leaves no lane behind.
+    const callerRole = (await resolveProjectRole(c.env, user, projectId))?.level ?? 0
+    const picks = body.grants ?? {}
+    const offered =
+      (picks.userIds?.length ?? 0) + (picks.teamIds?.length ?? 0) > 0
+        ? await loadNewLaneGrantCandidates(c.env.AQUILLA_PG, projectId, { id: user.id, roleLevel: callerRole })
+        : null
+    if (offered) {
+      const problem = unofferedPicks(offered, picks)
+      if (problem) return c.json({ error: problem }, 400)
+    }
     const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     // Only a real `legacy_tag ''` row is the old default. A missing row must
     // not borrow settings.targetLanguage — that would tag the new lane with
@@ -1016,13 +1058,17 @@ projectSettings.post(
       const error = created.problem === "duplicate" ? "duplicate_name" : created.problem
       return c.json({ error }, status)
     }
-    // AQU-1781: under the read wall a member below Maintainer sees only the
-    // lanes they hold a grant for, so a lane nobody is granted is invisible to
-    // every unscoped contributor while the inspector still calls them
-    // "Unscoped — full access". Grant it in the same request that creates it.
+    // AQU-2355: a lane grant grants only the lanes it lists. Under the read
+    // wall the new lane reaches Maintainers and Owners by role, its creator,
+    // and the people and teams picked in this step — nobody else. A project's
+    // FIRST target lane still goes to the members it already has, who could
+    // not have held a grant for a lane that did not exist.
     try {
-      await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
+      await grantFirstTargetLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
       await grantCreatedLaneToActor(c.env.AQUILLA_PG, projectId, created.laneId, user.id)
+      if (offered) {
+        await applyNewLaneGrants(c.env.AQUILLA_PG, projectId, created.laneId, offered, picks, user.id)
+      }
     } catch (e) {
       // [Pen test] never echo driver text (can name tables/columns) to the client.
       console.error("[project-settings] write failed:", e)

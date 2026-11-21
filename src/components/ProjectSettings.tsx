@@ -111,6 +111,8 @@ import { ChecksRow, InstructionsRow } from "./ProjectSettings/AiGuidanceRows"
 import {
   resolveTimingLocked,
   createProjectLane,
+  fetchNewLaneGrantCandidates,
+  type NewLaneGrantPicks,
   renameProjectLane,
   setProjectLaneArchived,
   setProjectLaneDelivers,
@@ -602,6 +604,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       allowDuplicateName?: boolean
       /** Media redesign: the add form's Delivers choice. */
       delivers?: LaneDelivers
+      /** AQU-2355: the people and teams ticked to get the new lane too. */
+      grants?: NewLaneGrantPicks
     },
   ) => {
     const jwt = session?.jwt
@@ -615,6 +619,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
+
+  // AQU-2355: who the add form offers the new lane to.
+  const loadGrantCandidates = useCallback(async () => {
+    const jwt = session?.jwt
+    if (!jwt || !id) return null
+    return fetchNewLaneGrantCandidates(jwt, id)
+  }, [session?.jwt, id])
 
   // Media redesign slice 1: the "Delivers" choice on one language row.
   const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
@@ -1653,6 +1664,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
             laneRecords={isCloudProject ? sharedLanes ?? undefined : undefined}
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
+            onLoadGrantCandidates={isCloudProject ? loadGrantCandidates : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
             onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}

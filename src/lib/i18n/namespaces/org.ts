@@ -1089,7 +1089,6 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.editScopesAriaLabel":
       "Edit {username}'s language lane scopes on this project",
     "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
     "org.memberLaneScopeEditor.languagesLegend": "Language lanes they can work in",
     "org.memberLaneScopeEditor.mainLanguageFallback": "Main language",
     "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language lane in this project)",
@@ -1101,8 +1100,9 @@ export const org = defineNamespace({
     // so the inspector reports the grants rather than claiming "full access".
     "org.memberLaneScopeEditor.grantsLegend": "Language lanes they can read",
     "org.memberLaneScopeEditor.laneNoAccess": "no access",
-    "org.memberLaneScopeEditor.grantGapWarning":
-      "This member is unscoped, but has no grant for every language lane. The language lanes marked " +
+    // AQU-2355: "unscoped" described the retired "every lane, forever" meaning.
+    "org.memberLaneScopeEditor.laneGapWarning":
+      "This member has no grant on some language lanes. The language lanes marked " +
       "“no access” read as empty for them.",
     "org.memberLaneScopeEditor.grantAllButton": "Grant all current language lanes",
     "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",

@@ -3062,7 +3062,6 @@ export const ru: Catalog = {
   "org.memberAccessDrillDown.pathOrgLevel": "уровень организации · {role}",
   "org.memberLaneScopeEditor.editScopesAriaLabel": "Изменить дорожки {username} в этом проекте",
   "org.memberLaneScopeEditor.scopesHeading": "Дорожки {username}",
-  "org.memberLaneScopeEditor.unscopedFullAccess": "Без ограничения — полный доступ",
   "org.memberLaneScopeEditor.languagesLegend": "Языки, в которых можно работать",
   "org.memberLaneScopeEditor.mainLanguageFallback": "Основной язык",
   "org.memberLaneScopeEditor.unknownLane": "{lane} (не язык этого проекта)",

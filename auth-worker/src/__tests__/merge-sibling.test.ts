@@ -267,7 +267,10 @@ describe("POST /:projectId/merge-sibling — success path", () => {
 
   it("adds a lane beside the host's existing lanes and leaves its settings alone", async () => {
     await seedUser(8, "u8")
-    await seedProject("host-h", "Host", 8)
+    // The host belongs to someone else, so u8 is a project lead there, not
+    // its Owner: the lane they merge in must still be readable to them.
+    await seedUser(18, "host-owner")
+    await seedProject("host-h", "Host", 18)
     await seedProject("donor-h", "Donor", 8)
     await grant("host-h", 8, 500)
     await grant("donor-h", 8, 500)
@@ -288,6 +291,16 @@ describe("POST /:projectId/merge-sibling — success path", () => {
       .bind("host-h")
       .all<{ legacy_tag: string }>()
     expect(results.map((row) => row.legacy_tag)).toEqual(["fr", "swh"])
+    // AQU-2355: a lane created later reaches nobody below Maintainer, except
+    // the project lead who ran the merge.
+    const { results: grants } = await env.AQUILLA_PG.prepare(
+      `SELECT l.legacy_tag FROM project_member_lane_roles g
+         JOIN lanes l ON l.project_id = g.project_id AND l.id = g.lane
+        WHERE g.project_id = ? AND g.user_id = 8`,
+    )
+      .bind("host-h")
+      .all<{ legacy_tag: string }>()
+    expect(grants.map((row) => row.legacy_tag)).toContain("swh")
     const host = await settingsOf("host-h")
     expect(host?.settings).toEqual({ targetLanes: ["fr"], sourceLanguage: "en" })
     expect(host?.version).toBe(2)
@@ -568,5 +581,92 @@ describe("POST /:projectId/merge-sibling — admin power needs elevation (OPS-44
     mockFold({ merged: 1, skipped: [], lane: "fr" })
     const res = await post("host-e5", await jwtFor("u44"), { donorProjectId: "donor-e5", lane: "fr" })
     expect(res.status).toBe(200)
+  })
+})
+
+// AQU-2355 (Luke, 2026-11-20): the people who worked on the donor keep access
+// to that work on the host's new lane — its team stays a team path, and its
+// direct members get the lane role they had there. Nobody else gains it.
+describe("POST /:projectId/merge-sibling — the donor's people keep their work (AQU-2355)", () => {
+  it("links the donor's team to the new lane and carries its people at their lane role", async () => {
+    const sql = (text: string, ...params: unknown[]) => env.AQUILLA_PG.prepare(text).bind(...params).run()
+    for (const [id, name] of [
+      [60, "lead"],
+      [61, "translator"],
+      [62, "reviewer"],
+      [63, "other-lane"],
+      [64, "team-only"],
+      [65, "host-member"],
+      [69, "host-owner"],
+    ] as const) {
+      await seedUser(id, name)
+    }
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (60, 'Org', 69)")
+    await seedProject("host-q5", "Host", 69)
+    await seedProject("donor-q5", "Donor", 69)
+    await sql("UPDATE projects SET org_id = 60 WHERE id IN ('host-q5', 'donor-q5')")
+    await grant("host-q5", 60, 500)
+    await grant("donor-q5", 60, 500)
+    await seedHostLane("host-q5", { id: "lane-hfr", tag: "fr" })
+    await seedHostLane("donor-q5", { id: "lane-dsw", tag: "", name: "Swahili" })
+    await seedHostLane("donor-q5", { id: "lane-dzu", tag: "zu", position: 1 })
+    // Direct members of the donor, by the lane they could read.
+    await grant("donor-q5", 61, 400)
+    await grant("donor-q5", 62, 300)
+    await grant("donor-q5", 63, 400)
+    for (const [userId, lane, level] of [
+      [61, "lane-dsw", 400],
+      [62, "lane-dsw", 300],
+      [63, "lane-dzu", 400],
+    ] as const) {
+      await sql(
+        "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('donor-q5', ?, ?, ?)",
+        userId,
+        lane,
+        level,
+      )
+    }
+    // A team on the donor that covers the folded lane; 64 reaches the donor only through it.
+    await sql("INSERT INTO groups (id, org_id, name, created_by) VALUES (66, 60, 'Swahili crew', 69)")
+    await sql("INSERT INTO group_members (group_id, user_id) VALUES (66, 64)")
+    await sql(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES (66, 'donor-q5', 400, 69, TRUE)",
+    )
+    await sql("INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (66, 'donor-q5', 'lane-dsw')")
+    // Someone already on the host's French lane gains nothing from the merge.
+    await grant("host-q5", 65, 400)
+    await sql("INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('host-q5', 65, 'lane-hfr', 400)")
+
+    mockFold({ merged: 0, skipped: [], lane: "sw", donorLaneId: "lane-dsw" })
+    const res = await post("host-q5", await jwtFor("lead"), { donorProjectId: "donor-q5", lane: "sw", donorLaneId: "lane-dsw" })
+    expect(res.status).toBe(200)
+    const newLane = await env.AQUILLA_PG.prepare(
+      "SELECT id FROM lanes WHERE project_id = 'host-q5' AND role = 'target' AND legacy_tag = 'sw'",
+    ).first<{ id: string }>()
+    expect(newLane).not.toBeNull()
+
+    const onNewLane = async (userId: number) =>
+      (
+        await env.AQUILLA_PG.prepare(
+          "SELECT role_level FROM project_member_lane_roles WHERE project_id = 'host-q5' AND user_id = ? AND lane = ?",
+        )
+          .bind(userId, newLane!.id)
+          .first<{ role_level: number }>()
+      )?.role_level ?? null
+    expect(await onNewLane(61)).toBe(400)
+    expect(await onNewLane(62)).toBe(300)
+    expect(await onNewLane(63)).toBeNull()
+    expect(await onNewLane(64)).toBe(400)
+    expect(await onNewLane(65)).toBeNull()
+    // The translator joins the host limited to that lane, not to French.
+    const french = await env.AQUILLA_PG.prepare(
+      "SELECT 1 AS ok FROM project_member_lane_roles WHERE project_id = 'host-q5' AND user_id = 61 AND lane = 'lane-hfr'",
+    ).first()
+    expect(french).toBeNull()
+    // The team is a team path on the host, listing only the new lane.
+    const { results: teamLanes } = await env.AQUILLA_PG.prepare(
+      "SELECT lane_id FROM group_project_lanes WHERE group_id = 66 AND project_id = 'host-q5'",
+    ).all<{ lane_id: string }>()
+    expect(teamLanes.map((row) => row.lane_id)).toEqual([newLane!.id])
   })
 })

@@ -29,6 +29,7 @@ export const NEON_TARGET_COMMANDS = [
   "backfill-lanes",
   "backfill-lane-batch",
   "repair-lane-grants",
+  "explicit-lane-grants",
   "repair-cell-metadata",
   "prune-phantom-voices",
   "fold-cast-by-character",
@@ -55,6 +56,9 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
+  // AQU-2355: the per-org dry run for "a lane grant lists its lanes" (and, with
+  // --apply, migration 0208 on its own).
+  if (command === "explicit-lane-grants") return "scripts/neon-explicit-lane-grants.ts"
   // AQU-2658: put back the source cells a metadata merge turned into arrays.
   if (command === "repair-cell-metadata") return "scripts/neon-repair-cell-metadata.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
@@ -87,6 +91,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command.startsWith("backfill-") ||
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
+    command === "explicit-lane-grants" ||
     command === "repair-cell-metadata" ||
     command === "prune-phantom-voices" ||
     command === "fold-cast-by-character" ||

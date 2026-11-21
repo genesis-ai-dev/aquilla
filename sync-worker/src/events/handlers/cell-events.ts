@@ -36,7 +36,7 @@ import { buildChainClaimStmt, eventQualifiedParentKey, type ChainSlot } from '..
 import { buildEventInsertStmt } from '../event-insert'
 import { eventLaneTag } from '../../../../src/lib/lanes/event-lane'
 import { ensureBlankTargetBridgeStmt } from '../../../../db/shared/lanes'
-import { grantNewLaneStmt } from '../../../../db/shared/lane-grants'
+import { firstTargetLaneStmts } from '../../../../db/shared/lane-grants'
 import type { DispatchResult } from './types'
 
 export interface HandleCellEventOptions {
@@ -146,10 +146,11 @@ export function handleCellEvent(
     eventLaneTag(event.kind, event.payload) === ''
   ) {
     stmts.push(ensureBlankTargetBridgeStmt(db, event.projectId))
-    // AQU-1781: the bridge is a new target lane, and a new lane nobody is
+    // The bridge is the project's first target lane, and a lane nobody is
     // granted is unreadable to every member below Maintainer under the read
-    // wall. The grant rides the same batch as the lane that needs it.
-    stmts.push(grantNewLaneStmt(db, event.projectId, { legacyTag: '' }, null))
+    // wall. The grant rides the same batch as the lane that needs it (AQU-2355:
+    // the first lane only — it selects nothing once the project has one).
+    stmts.push(...firstTargetLaneStmts(db, event.projectId, { legacyTag: '' }, null))
   }
 
   // Atomic AD-2 arbitration: chain-arbitrated events claim their chain slot in

@@ -892,6 +892,61 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
+  // AQU-2355: a new lane reaches nobody below Maintainer unless picked. The
+  // add form lists the people and teams on the other lanes, UNTICKED, with
+  // their role there, and sends only the ticked ones.
+  it("offers the people and teams on the other lanes unticked, and sends only the ticked ones", async () => {
+    const onCreateLane = vi.fn(async () => "ok" as const)
+    const onLoadGrantCandidates = vi.fn(async () => ({
+      people: [
+        { userId: 2, username: "ama", displayName: "Ama", roleLevel: 400, laneNames: ["French", "Spanish"] },
+        { userId: 3, username: "kofi", displayName: null, roleLevel: 300, laneNames: ["French"] },
+      ],
+      teams: [{ groupId: 9, name: "Crew", roleLevel: 400, memberCount: 3, laneNames: ["French"] }],
+    }))
+    renderWithTooltips(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={["Yoruba"]}
+        canEdit
+        disabledTooltip={null}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={[DEFAULT_LANE, LANGUAGE_ONLY]}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={onCreateLane}
+        onSetLaneArchived={vi.fn(async () => true)}
+        onLoadGrantCandidates={onLoadGrantCandidates}
+      />,
+    )
+    openAddForm()
+    const picker = await screen.findByTestId("add-lane-grants")
+    expect(picker).toHaveTextContent("Ama")
+    expect(picker).toHaveTextContent("Contributor · French, Spanish")
+    expect(picker).toHaveTextContent("Team · Contributor · 3 people · French")
+    for (const id of ["add-lane-grant-user-2", "add-lane-grant-user-3", "add-lane-grant-team-9"]) {
+      expect(screen.getByTestId(id)).not.toBeChecked()
+    }
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("add-lane-grant-user-2"))
+    expect(screen.getByTestId("add-lane-grant-user-2")).toBeChecked()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Swahili" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith(expect.objectContaining({ language: "Swahili", grants: { userIds: [2] } })),
+    )
+
+    openAddForm()
+    await screen.findByTestId("add-lane-grants")
+    await user.click(screen.getByTestId("add-lane-grants-select-all"))
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Twi" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenLastCalledWith(
+        expect.objectContaining({ language: "Twi", grants: { userIds: [2, 3], teamIds: [9] } }),
+      ),
+    )
+  })
+
   it("creates a lane from a language alone, submitting no name", async () => {
     const { onCreateLane } = renderIdentity()
     openAddForm()

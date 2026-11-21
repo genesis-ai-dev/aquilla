@@ -125,7 +125,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 ## Transcribe view
 
 34. A save still renders the workspace about 5 times (about 1,600 components) — items 1–4 above.
-35. `TypedText` ticks every 30 ms during a pass: most of the 407 commits left in "transcribe all".
 36. The quantise loop runs on the main thread (73 ms at 4× for a 60 s window).
 
 ## The harness itself

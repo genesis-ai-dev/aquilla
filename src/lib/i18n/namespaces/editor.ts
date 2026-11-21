@@ -926,6 +926,8 @@ export const editor = defineNamespace({
       one: "{count} hidden cell stays parked.",
       other: "{count} hidden cells stay parked.",
     }),
+    "editor.batchFile.chapterLabel": "Chapter",
+    "editor.batchFile.wholeBook": "Whole book",
     "editor.batchFile.scopeLegend": "How many",
     "editor.batchFile.scopeNext": plural({
       one: "Next {count}",
@@ -941,6 +943,28 @@ export const editor = defineNamespace({
     }),
     "editor.batchFile.nothingToDraft": "Nothing in this file can be drafted with these choices.",
     "editor.batchFile.confirmDraft": "Draft",
+    "editor.batchBooks.section": "Books",
+    "editor.batchBooks.validateTitle": "Validate books",
+    "editor.batchBooks.draftTitle": "Draft books",
+    "editor.batchBooks.description":
+      "Each book you check is included in full. To limit one book to a chapter, open that book and use its file menu.",
+    "editor.batchBooks.ready": "Cells ready for your check",
+    "editor.batchBooks.aiDrafts": "AI drafts nobody has checked",
+    "editor.batchBooks.flagged": "Cells with open check flags",
+    "editor.batchBooks.flaggedHelp":
+      "Flags are known for the book you have open. Other books are signed off without that check. Turn this on to sign flagged cells off anyway.",
+    "editor.batchBooks.empty": "Empty cells",
+    "editor.batchBooks.refresh": "Untouched AI drafts to refresh",
+    "editor.batchBooks.confirmValidate": "Validate books",
+    "editor.batchBooks.confirmDraft": "Draft books",
+    "editor.batchBooks.menuValidate": "Validate books…",
+    "editor.batchBooks.menuDraft": "Draft books…",
+    "editor.batchBooks.reading": "Reading {name}…",
+    "editor.batchBooks.loadFailed": "Could not read {name}. Nothing was changed.",
+    "editor.batchBooks.historyName": plural({
+      one: "{count} book",
+      other: "{count} books",
+    }),
     "editor.batchValidate.skip.alreadyMine": plural({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
@@ -970,6 +994,11 @@ export const editor = defineNamespace({
     // AQU-2507: one action validates the whole file, so the run says where it
     // has got to rather than stopping at a chunk boundary.
     "editor.batchValidate.progress": "Validating… {done} of {total} cells signed off.",
+    "editor.batchValidate.audioProgress": "Validating… {done} of {total} recordings signed off.",
+    "editor.batchValidate.audioDone": plural({
+      one: "{count} recording signed off.",
+      other: "{count} recordings signed off.",
+    }),
     "editor.batchValidate.nothingEligibleTitle": "Nothing was validated",
     "editor.batchValidate.nothingEligibleNoReason":
       "None of these cells is eligible for bulk validation.",
@@ -7679,6 +7708,86 @@ export const editor = defineNamespace({
           + "(autopilot.graph.node.draft), which is a noun.",
         maxLength: 16,
       },
+      "editor.batchFile.chapterLabel": {
+        description: "Accessible name of the chapter dropdown in the open-book batch dialog.",
+        maxLength: 24,
+      },
+      "editor.batchFile.wholeBook": {
+        description: "Chapter dropdown option that keeps every chapter of the open book.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.section": {
+        description:
+          "Label beside the checkbox that checks or clears every book in the header batch dialog.",
+        maxLength: 16,
+      },
+      "editor.batchBooks.validateTitle": {
+        description: "Title of the header dialog that validates whole books.",
+        maxLength: 32,
+      },
+      "editor.batchBooks.draftTitle": {
+        description: "Title of the header dialog that drafts whole books.",
+        maxLength: 32,
+      },
+      "editor.batchBooks.description": {
+        description:
+          "Explains that each checked book is taken in full, and that a chapter "
+          + "is chosen from the open book's file menu instead.",
+      },
+      "editor.batchBooks.ready": {
+        description: "Checkbox for committed text the reader has not signed off. No count: the books are not loaded yet.",
+      },
+      "editor.batchBooks.aiDrafts": {
+        description: "Checkbox for untouched AI drafts. Off unless a reviewer turns it on.",
+      },
+      "editor.batchBooks.flagged": {
+        description: "Checkbox for cells with open check flags. Off by default.",
+      },
+      "editor.batchBooks.flaggedHelp": {
+        description:
+          "Says check flags are known only for the open book, and that turning "
+          + "the box on signs flagged cells off anyway.",
+      },
+      "editor.batchBooks.empty": {
+        description: "Checkbox for cells with source text and no translation.",
+      },
+      "editor.batchBooks.refresh": {
+        description: "Checkbox for replacing untouched AI drafts. Off by default.",
+      },
+      "editor.batchBooks.confirmValidate": {
+        description: "Confirm button that starts validation of the checked books.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.confirmDraft": {
+        description: "Confirm button that starts drafting the checked books.",
+        maxLength: 24,
+      },
+      "editor.batchBooks.menuValidate": {
+        description: "Header menu item that opens the validate-books dialog.",
+        maxLength: 28,
+      },
+      "editor.batchBooks.menuDraft": {
+        description: "Header menu item that opens the draft-books dialog.",
+        maxLength: 28,
+      },
+      "editor.batchBooks.reading": {
+        description: "Loading toast while a book's cells are fetched.",
+        placeholders: {
+          name: "The book being read.",
+        },
+      },
+      "editor.batchBooks.loadFailed": {
+        description: "Error toast when a book could not be read. Nothing was validated or drafted.",
+        placeholders: {
+          name: "The book that could not be read.",
+        },
+      },
+      "editor.batchBooks.historyName": {
+        description: "History step name when a batch covers more than one book.",
+        placeholders: {
+          count: "How many books the run covers. Selects the plural form.",
+        },
+      },
       "editor.batchValidate.skip.alreadyMine": {
         description:
           "One clause inside {reasons}: cells this same reader had already signed "
@@ -7743,6 +7852,23 @@ export const editor = defineNamespace({
           total: "How many cells the run will sign off in all.",
         },
         maxLength: 80,
+      },
+      "editor.batchValidate.audioProgress": {
+        description:
+          "Toast shown WHILE a file-wide recording validation runs. Same rule as "
+          + "the text progress toast: it reports progress and does not ask for another click.",
+        placeholders: {
+          done: "How many recordings have been signed off so far.",
+          total: "How many recordings the run will sign off in all.",
+        },
+        maxLength: 90,
+      },
+      "editor.batchValidate.audioDone": {
+        description: "Toast when a file-wide recording validation finishes and every take was signed off.",
+        placeholders: {
+          count: "How many recordings were signed off. Selects the plural form.",
+        },
+        maxLength: 60,
       },
       "editor.batchValidate.nothingEligibleTitle": {
         description:

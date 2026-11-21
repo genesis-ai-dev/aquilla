@@ -5,9 +5,10 @@
  * AQU-2507: and where they choose to overrule open check flags, and are told
  * the one click finishes the file rather than a batch of it.
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { WHOLE_BOOK } from "@/lib/review/batch-scope"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
 import { BatchFileModal } from "./BatchFileModal"
@@ -72,6 +73,7 @@ describe("BatchFileModal — validation", () => {
       includeReadyCells: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 
@@ -84,6 +86,7 @@ describe("BatchFileModal — validation", () => {
       includeReadyCells: true,
       includeUntouchedAiDrafts: true,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 
@@ -98,6 +101,7 @@ describe("BatchFileModal — validation", () => {
       includeReadyCells: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
+      chapter: WHOLE_BOOK,
     })
   })
 })
@@ -136,6 +140,7 @@ describe("BatchFileModal — open check flags (AQU-2507)", () => {
       includeReadyCells: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: true,
+      chapter: WHOLE_BOOK,
     })
   })
 
@@ -188,6 +193,7 @@ describe("BatchFileModal — drafting", () => {
       refreshAiDrafts: true,
       scope: "all",
       batchSize: 10,
+      chapter: WHOLE_BOOK,
     })
   })
 
@@ -203,5 +209,32 @@ describe("BatchFileModal — drafting", () => {
     })
     expect(screen.getByRole("radio", { name: "Next 1" })).toBeChecked()
     expect(screen.getByText(/This drafts 1 cell/)).toBeInTheDocument()
+  })
+})
+
+describe("BatchFileModal — chapter of the open book", () => {
+  it("opens on the chapter in view and can widen to the whole book", async () => {
+    const { onConfirmValidate } = renderModal({
+      bookName: "Genesis",
+      chapters: ["GEN 1", "GEN 2"],
+      initialChapter: "GEN 2",
+      validateCandidates: [
+        cell({ id: "a", group: "GEN 1:1" }),
+        cell({ id: "b", group: "GEN 2:1" }),
+        cell({ id: "c", group: "GEN 2:2" }),
+      ],
+    })
+    expect(screen.getByText("Genesis")).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("GEN 2")
+    expect(screen.getByRole("checkbox", { name: /2 cells ready for your check/ })).toBeChecked()
+    fireEvent.click(screen.getByRole("combobox", { name: "Chapter" }))
+    const whole = await screen.findByRole("option", { name: "Whole book" })
+    fireEvent.pointerMove(whole)
+    fireEvent.mouseMove(whole)
+    fireEvent.keyDown(whole, { key: "Enter" })
+    expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("Whole book")
+    expect(screen.getByRole("checkbox", { name: /3 cells ready for your check/ })).toBeChecked()
+    fireEvent.click(screen.getByRole("button", { name: "Validate text" }))
+    expect(onConfirmValidate).toHaveBeenCalledWith(expect.objectContaining({ chapter: WHOLE_BOOK }))
   })
 })

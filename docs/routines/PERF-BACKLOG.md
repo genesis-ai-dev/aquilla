@@ -102,8 +102,6 @@ Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
 
 From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless noted).
 
-22. **Voice studio open:** 2.4 s blocked, 25 commits, 10,800 renders — a tooltip root per slot
-    button (`TimelineSlotButton` ×208).
 23. **Timeline lens open:** 1.5–1.9 s blocked, 19–23 commits, about 6,000 renders.
 24. **Rules surface:** every built-in check row (a Select and a Switch each) re-renders on each
     of the 10 renders per open (`src/components/RulesSurface.tsx`, `BuiltinChecksList.tsx`); on 20

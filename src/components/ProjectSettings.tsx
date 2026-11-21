@@ -2887,6 +2887,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
             onSetSmartExtensionsEnabled={(enabled) => {
               void commit.recordedPatch()({ smartExtensionsEnabled: enabled }).then(() => notifySmartExtensionsChanged(id))
             }}
+            smartEditsEnabled={sharedSettingsBlob.smartEditsEnabled}
+            onSetSmartEditsEnabled={(enabled) => { void commit.recordedPatch()({ smartEditsEnabled: enabled }) }}
           />
         )}
           </div>

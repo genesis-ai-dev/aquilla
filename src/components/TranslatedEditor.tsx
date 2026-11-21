@@ -481,7 +481,7 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
-  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+  /** Smart edits for this cell (`isSmartEditsEnabled`). Offsets are into the
    *  committed plain text; see smart-edit-decoration-plugin.ts. */
   smartEdits?: SmartEditSuggestion[]
   onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void

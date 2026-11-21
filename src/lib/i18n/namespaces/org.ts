@@ -347,6 +347,7 @@ export const org = defineNamespace({
     "org.membersPage.sourceViaTeam": "via team",
     "org.membersPage.sourceViaOrg": "via org",
     "org.membersPage.sourceProjectCreator": "project creator",
+    "org.membersPage.createdThisProject": "Created this project",
     "org.membersPage.changeRoleAria": "Change role",
     "org.membersPage.inviteLinkReadyHeading": "Invite link ready",
     "org.membersPage.inviteLinkReadyBody":
@@ -1817,6 +1818,10 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.membersPage.createdThisProject": {
+        description:
+          "AQU-2357: extra note on a member who created this project. It is history, not the source of their role. The role source is Direct, Organization, or a team.",
+      },
       "org.roleDialog.addPersonTitle": {
         description:
           "AQU-2289: title of the role dialog when it adds one known person, e.g. from an empty cell of the members matrix.",

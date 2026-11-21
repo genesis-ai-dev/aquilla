@@ -13,7 +13,8 @@
  *   when adding or inviting (AQU-952): handing over a workspace is a change of
  *   someone already in it, and the email-invite route caps at Maintainer.
  * - Project: Viewer, Commenter, Reviewer, Contributor, Project lead,
- *   Maintainer. Ownership comes with creating a project; it is never picked.
+ *   Maintainer, and Owner when the person choosing is an Owner (AQU-2357).
+ *   A Maintainer does not see Owner. Invite links never offer it.
  * - Team-scope roles are a different thing and are not here: their own three
  *   (`TEAM_ROLE_LEVELS`), set in a team's Team role column.
  *

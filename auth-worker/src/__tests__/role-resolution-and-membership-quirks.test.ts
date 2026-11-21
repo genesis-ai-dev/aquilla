@@ -38,13 +38,7 @@ async function seedBase() {
 // ─── Suite 1: Max-wins — five paths ───────────────────────────────────────────
 
 describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () => {
-  it("creator path grants 700 when no org or direct grant exists for the creator", async () => {
-    // NOTE: seedBase() adds owner to org_members(700). The sort is max-wins,
-    // with tie-breaking by declaration order (override > group > org > creator).
-    // When the creator is ALSO an org member at 700, "org" beats "creator" in
-    // the tie-break (sourcePriority org=2 > creator=1).
-    // To isolate the creator path, create a project by a user who has NO
-    // org_members row.
+  it("created_by alone does not grant access", async () => {
     await seedBase()
     await seedUser(9, "sole_creator")
     await env.AQUILLA_PG.prepare(
@@ -56,13 +50,10 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
       { headers: authHeader(await jwtFor("sole_creator")) },
       env,
     )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { role: { level: number; source: string } }
-    expect(body.role.level).toBe(700)
-    expect(body.role.source).toBe("creator")
+    expect(res.status).toBe(403)
   })
 
-  it("when creator is ALSO an org member at 700, source=org wins the tie-break (org priority > creator priority)", async () => {
+  it("an org Owner resolves as org when that is their only path", async () => {
     // This is the tie-breaking declaration order: org(2) > creator(1)
     // Both contribute level=700; the sort picks org as the winner.
     await seedBase()
@@ -75,7 +66,6 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
     expect(res.status).toBe(200)
     const body = (await res.json()) as { role: { level: number; source: string } }
     expect(body.role.level).toBe(700)
-    // CHARACTERIZATION: org wins the tie-break, not creator
     expect(body.role.source).toBe("org")
   })
 

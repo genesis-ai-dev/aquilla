@@ -27,6 +27,8 @@ export interface MatrixCell {
    * render the secondary-path icon + tooltip in MembersMatrixCellEditor.
    */
   secondarySources: ProjectMember["secondarySources"];
+  /** AQU-2357: this person created the project. History, not the role source. */
+  createdThisProject?: boolean;
 }
 
 export interface MembersMatrix {
@@ -92,7 +94,11 @@ export function buildMembersMatrix(
 
       // Cell.
       if (!cells.has(m.userId)) cells.set(m.userId, new Map());
-      cells.get(m.userId)!.set(project.id, { role: m.role, secondarySources: m.secondarySources ?? [] });
+      cells.get(m.userId)!.set(project.id, {
+        role: m.role,
+        secondarySources: m.secondarySources ?? [],
+        createdThisProject: m.createdThisProject,
+      });
 
       if (m.role.level >= 700) ownerCount++;
     }

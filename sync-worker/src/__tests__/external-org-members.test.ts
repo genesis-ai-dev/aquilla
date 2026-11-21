@@ -298,10 +298,10 @@ describe('AddOrgMember — happy path', () => {
     expect(body.receipt.channel).toBe('rest')
     expect(body.receipt.orgId).toBe(ORG_ID)
     expect(body.receipt.targetUserId).toBe('2')
-    expect(body.receipt.role).toBe(400)
+    expect(body.receipt.role).toBe(100)
 
     const rows = await orgMemberRows(tdb)
-    expect(rows.find((r) => r.user_id === '2')?.role_level).toBe(400)
+    expect(rows.find((r) => r.user_id === '2')?.role_level).toBe(100)
 
     // granted_by stamps the acting user on the row itself.
     const raw = await tdb.rows<{ user_id: number | string; granted_by: number | string | null }>('org_members')

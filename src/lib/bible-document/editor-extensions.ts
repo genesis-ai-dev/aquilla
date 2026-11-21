@@ -117,12 +117,28 @@ const Note = Node.create({
 export interface BibleDocumentRules {
   layout: () => ReadonlyMap<string, UnitLayout>
   editable: () => boolean
+  /** False when the book's export cannot carry added layout (any book not
+   *  imported as USFM): paragraphs, headings and styles then stay as they are,
+   *  and only the words change. */
+  layoutEditable: () => boolean
   /** The person holding this cell, when it is not us. */
   lockedBy: (cellId: string) => string | null
   activeCellId: () => string | null
   /** The source words of a cell, drawn faintly where it has no translation. */
   ghost: (cellId: string) => string
-  onRejected?: (reason: "skeleton" | "locked" | "read-only") => void
+  onRejected?: (reason: BibleDocumentRejection) => void
+}
+
+export type BibleDocumentRejection = "skeleton" | "locked" | "read-only" | "layout"
+
+/** The document's blocks as a string: their kinds and paragraph styles. Any
+ *  change to it is a change of layout. */
+function blockShape(doc: PMNode): string {
+  const parts: string[] = []
+  doc.forEach((block) => {
+    parts.push(`${block.type.name}:${(block.attrs.marker as string | undefined) ?? ""}`)
+  })
+  return parts.join("|")
 }
 
 export const decorationsKey = new PluginKey<number>("bibleDocumentDecorations")
@@ -155,6 +171,13 @@ function guardPlugin(rules: BibleDocumentRules): Plugin {
       const same = before.skeleton.length === after.skeleton.length && before.skeleton.every((id, i) => id === after.skeleton[i])
       if (!same || after.orphanText) {
         rules.onRejected?.("skeleton")
+        return false
+      }
+      // Decision 0010 stores added layout as USFM markers in the verse's
+      // value. Only the USFM export reads them; any other export would print
+      // them as text, so a book from another format keeps its layout fixed.
+      if (!rules.layoutEditable() && blockShape(state.doc) !== blockShape(tr.doc)) {
+        rules.onRejected?.("layout")
         return false
       }
       if (changedCells(state.doc, tr.doc, layout).some((id) => rules.lockedBy(id) !== null)) {

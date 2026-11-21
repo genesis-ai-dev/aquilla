@@ -8,7 +8,7 @@
  * for the device, because they are about the screen, not the book.
  *
  * Key schema: `aq.bible-document-view.v1` (JSON; absent = table, source pane
- * shown, export preview hidden, linked scrolling on).
+ * shown, export preview hidden and in the reading format, linked scrolling on).
  */
 
 import { useSyncExternalStore } from "react"
@@ -20,10 +20,15 @@ export interface BibleDocumentViewPref {
   files: Record<string, true>
   source: boolean
   preview: boolean
+  /** What the preview pane shows: the book laid out as a page, or (for a USFM
+   *  book) the USFM file an export would write. */
+  previewMode: BibleDocumentPreviewMode
   linked: boolean
 }
 
-const DEFAULTS: BibleDocumentViewPref = { files: {}, source: true, preview: false, linked: true }
+export type BibleDocumentPreviewMode = "reading" | "usfm"
+
+const DEFAULTS: BibleDocumentViewPref = { files: {}, source: true, preview: false, previewMode: "reading", linked: true }
 
 const listeners = new Set<() => void>()
 let cached: BibleDocumentViewPref | undefined
@@ -38,6 +43,7 @@ function read(): BibleDocumentViewPref {
       files: parsed.files && typeof parsed.files === "object" ? parsed.files : {},
       source: parsed.source !== false,
       preview: parsed.preview === true,
+      previewMode: parsed.previewMode === "usfm" ? "usfm" : "reading",
       linked: parsed.linked !== false,
     }
   } catch {
@@ -69,7 +75,7 @@ export function setBibleDocumentViewForFile(fileId: string, document: boolean): 
   write({ ...peek(), files })
 }
 
-export function setBibleDocumentPanes(patch: Partial<Pick<BibleDocumentViewPref, "source" | "preview" | "linked">>): void {
+export function setBibleDocumentPanes(patch: Partial<Pick<BibleDocumentViewPref, "source" | "preview" | "previewMode" | "linked">>): void {
   write({ ...peek(), ...patch })
 }
 

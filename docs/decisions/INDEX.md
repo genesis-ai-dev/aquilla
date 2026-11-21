@@ -69,6 +69,7 @@ pinned symbol gets renamed and the check goes red.
 | 0013 | [An interaction costs commits × rendered tree × work in render](0013-interaction-cost-is-commits-times-tree.md) | what makes a click slow in this app, the patterns that are not allowed, and the benchmark that enforces them |
 | 0014 | [Direct dev commits on the release line](0014-direct-dev-commits-on-the-release-line.md) | a commit pushed to `dev` with no PR is picked when it only touches locale catalogs, and held as "not a PR" until a person picks it otherwise |
 | 0015 | [A release hold is a gate to build, not a label to add](0015-a-release-hold-is-a-gate-to-build.md) | what may keep a merged PR out of production, how an area gets a gate, and what watches a release nobody walked |
+| 0017 | [A settings collection moves to rows, and the key never leaves the API](0017-settings-collections-move-to-rows.md) | how a large `project_settings` key leaves the multi-MB blob without any reader being able to tell |
 
 ## Adding a record
 

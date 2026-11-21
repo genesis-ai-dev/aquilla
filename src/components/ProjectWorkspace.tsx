@@ -71,7 +71,7 @@ import {
   type IdmlReimportAlignHost,
 } from "@/lib/idml/align-reimported-targets"
 import { triggerLinkSync } from "@/lib/sync/archive"
-import { useDebouncedValue } from "@/hooks/useDebouncedValue"
+import { useDebouncedSource } from "@/hooks/useDebouncedValue"
 import {
   useCompletion,
   FALLBACK_COMPLETION_SETTINGS,
@@ -98,6 +98,7 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
 import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { createHealthCardNamer, healthCardRows } from "@/lib/health/health-card-rows"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
@@ -235,8 +236,9 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
-  timelineChaptersOf, type TimelineChapter,
+  timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
+import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
@@ -385,7 +387,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -569,6 +571,7 @@ import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
+import { RestoreProjectButton } from "@/components/RestoreProjectDialog"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -668,6 +671,7 @@ import {
 import {
   canIncludeUntouchedAiDrafts,
   classifyBatchDraft,
+  draftableCount,
   selectBatchDraft,
   type DraftRunChoices,
   type ValidateRunChoices,
@@ -808,6 +812,7 @@ const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_BT_QUEUE_STATE: { waiting: ReadonlySet<string>; pending: number } = { waiting: new Set<string>(), pending: 0 }
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
+const EMPTY_MILESTONE_PAGES: readonly { key: string; cellIds: readonly string[] }[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 /** AQU-2507: the "no cell carries a check flag" answer, allocated once. */
@@ -2228,6 +2233,7 @@ export function ProjectWorkspace() {
     fileId: activeFileId,
     getTokenForFile,
     lane: activeLane,
+    outboxRecords: outboxInspectorRecords,
   })
 
   const validationCount = project ? readValidationCount(project) : 1
@@ -7104,7 +7110,12 @@ export function ProjectWorkspace() {
   // example retrieval, none of which must be live mid-batch, so coalescing the
   // rebuild to once the batch pauses removes the storm. Health, progress, and
   // the edit/commit path keep live selectors.
-  const corpusCells = useDebouncedValue(cellSummaries, 600)
+  //
+  // A source, not state (AQU-2655): every consumer is a getter or an effect, so
+  // the debounce firing must not render the workspace. Read it with
+  // `corpusSource.get()` at call time; an open Back-translation tab follows it
+  // through `corpusSource.signal` (EditorTable's `btCorpusSignal`).
+  const corpusSource = useDebouncedSource(cellSummaries, 600)
 
   // BIA forecasting — ghost-text next words and "words that fit here" — from
   // the project's own target text, in a Web Worker (see useForecastCorpus).
@@ -7114,7 +7125,7 @@ export function ProjectWorkspace() {
     projectId: project?.id,
     files: projectFiles,
     activeFileId,
-    activeCells: corpusCells,
+    activeCells: corpusSource,
     getToken: getTokenForFile,
     lane: activeLane,
   })
@@ -8165,6 +8176,7 @@ export function ProjectWorkspace() {
     // `project.terminology` settings key.
     const terminology = laneLocalConcepts
     const alignmentSeeds = project?.alignmentSeeds
+    const corpusCells = corpusSource.get()
     const cached = glosserCacheRef.current
     if (
       cached &&
@@ -8198,13 +8210,14 @@ export function ProjectWorkspace() {
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, glossCache, laneLocalConcepts, project?.alignmentSeeds])
+  }, [corpusSource, backtranslationCache, glossCache, laneLocalConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
   // before the user asks for that surface.
   const getAlignmentModel = useCallback((): AlignmentModel => {
     const alignmentSeeds = project?.alignmentSeeds
+    const corpusCells = corpusSource.get()
     const cached = alignmentModelCacheRef.current
     if (
       cached &&
@@ -8231,7 +8244,7 @@ export function ProjectWorkspace() {
       model: m,
     }
     return m
-  }, [corpusCells, project?.alignmentSeeds])
+  }, [corpusSource, project?.alignmentSeeds])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -8370,7 +8383,7 @@ export function ProjectWorkspace() {
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
-      const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
+      const corpusByCellId = new Map(corpusSource.get().map((c) => [c.id, c]))
       const examples = selectBtFewShotExamples({
         records: backtranslationCache.values(),
         corpusByCellId,
@@ -8415,7 +8428,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser, getActiveCell])
+  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusSource, getGlosser, getActiveCell])
 
   // The back-translation queue. Two things feed it: a save this browser
   // confirms, when the project back-translates live (`notify`, debounced),
@@ -8499,10 +8512,16 @@ export function ProjectWorkspace() {
   // AQU-1408 §1: committed-head lookup for the gloss resolver. A gloss
   // hydrated from the server carries no `forText`, so the only way to tell
   // whether it still describes the live cell is its pin.
-  const corpusCellsById = useMemo(
-    () => new Map(corpusCells.map((c) => [c.id, c] as const)),
-    [corpusCells],
-  )
+  const corpusCellsByIdRef = useRef<{ from: readonly CellSummary[]; byId: Map<string, CellSummary> } | null>(null)
+  const getCorpusCell = useCallback((cellId: string): CellSummary | undefined => {
+    const corpusCells = corpusSource.get()
+    let cached = corpusCellsByIdRef.current
+    if (!cached || cached.from !== corpusCells) {
+      cached = { from: corpusCells, byId: new Map(corpusCells.map((c) => [c.id, c] as const)) }
+      corpusCellsByIdRef.current = cached
+    }
+    return cached.byId.get(cellId)
+  }, [corpusSource])
 
   /**
    * The statistical gloss the BT tab shows for a cell.
@@ -8527,9 +8546,9 @@ export function ProjectWorkspace() {
       record: glossCache.get(cellId),
       computed,
       visibleTranslated: translatedText,
-      committedTargetEventId: corpusCellsById.get(cellId)?.targetEventId,
+      committedTargetEventId: getCorpusCell(cellId)?.targetEventId,
     })
-  }, [getGlosser, glossCache, corpusCellsById])
+  }, [getGlosser, glossCache, getCorpusCell])
 
   // Add-from-selection: create a concept from a source-side selection in the
   // editor. A rendering in the payload activates the concept immediately;
@@ -11262,11 +11281,22 @@ export function ProjectWorkspace() {
   const showFileStats = centerSurface === "editor"
     && (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty")
   const getCharacterImportCells = useCallback(() => cellSummaries, [cellSummaries])
-  const getStatusBarHealth = useCallback(() => cellSummaries.map(cell => ({
-    cellId: cell.id,
-    label: cell.cellLabel || cell.id,
-    health: healthMap.get(cell.id) ?? 0,
-  })), [cellSummaries, healthMap])
+  // AQU-2278: the card ranks the lines the footer counts, and names only the
+  // drags it shows, by the app's one rule for a line (lib/cells/line-name.ts).
+  const getStatusBarHealth = useCallback(
+    () => healthCardRows(cellSummaries, healthMap, countStructuralCells),
+    [cellSummaries, healthMap, countStructuralCells],
+  )
+  const healthCardNamer = useMemo(() => createHealthCardNamer(cellStore), [cellStore])
+  const activeFileOrderedBy = activeFile ? fileOrderedBy(activeFile) : undefined
+  const nameStatusBarCells = useCallback(
+    (cellIds: readonly string[]) => readAtVersion(cellStoreVersion, () =>
+      healthCardNamer(cellIds, activeFileOrderedBy, {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      })),
+    [healthCardNamer, cellStoreVersion, activeFileOrderedBy, t],
+  )
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
@@ -12925,11 +12955,20 @@ export function ProjectWorkspace() {
     return { rows: cellIds.length, lines }
   }, [quoteSplitFileCandidates])
 
+  // AQU-1397: what the Draft window would offer for the open file, counted
+  // over the same cells by its own rule, so the two draft entries never open it
+  // onto "nothing to draft" and never hide while it has lines to draft.
+  const draftable = useMemo(
+    () => activeFileId ? draftableCount(cellSummaries.filter((cell) => cell.fileId === activeFileId)) : 0,
+    [activeFileId, cellSummaries],
+  )
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
     audioOnlyLane: activeLaneDelivers === "audio",
     fileProgress,
+    draftable,
     canExportByOrgPolicy,
     // The registry reads one shape; the two halves are counted apart only
     // because they read different maps (see validatableTakes above).
@@ -12937,7 +12976,7 @@ export function ProjectWorkspace() {
     batchValidateSummary,
     canSplitAtQuotes,
     quoteSplitSummary,
-  }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
+  }), [project, activeFileId, activeLaneDelivers, fileProgress, draftable, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -14391,7 +14430,7 @@ export function ProjectWorkspace() {
 
   /**
    * AQU-2577: the lines picked for Make speech on the timeline. A click on a
-   * line's ghost clip picks it and brings the Voices rail forward on the Make
+   * line's sparkle picks it and brings the Voices rail forward on the Make
    * speech panel; with Shift, Ctrl or ⌘ it is added to, or taken out of, the
    * lines already picked. Picking generates nothing: the panel's button does.
    */
@@ -14405,7 +14444,7 @@ export function ProjectWorkspace() {
     setDockTab("voices")
   }, [setDockTab])
   const clearPickedGhosts = useCallback(() => setPickedGhostIds([]), [])
-  /** The lines whose speech is being made right now: their ghosts show a spinner. */
+  /** The lines whose speech is being made right now: their sparkles show a spinner. */
   const [makingSpeechCellIds, setMakingSpeechCellIds] = useState<ReadonlySet<string>>(() => new Set())
   const handleMakeSpeechLineState = useCallback((cellId: string, state: MakeSpeechLineState) => {
     const running = state.kind === "running"
@@ -15467,19 +15506,23 @@ export function ProjectWorkspace() {
     freeTiming: timingMode === "audioFirst",
   }
 
-  // ── A book or document on the timeline, the whole file ──
+  // ── A book or document on the timeline ──
   //
-  // A book's timeline lays out EVERY chapter, end to end, on one clock. The
-  // chapter the table is on (`chosenScopeKey`) only names where the reader
-  // is; scrolling the table does not swap the timeline for that chapter. A
-  // file with no chapters is the same list (Sam, Oct 28: the long-file parts
-  // are dropped — the timeline draws the clips in view, so length costs
-  // nothing). The timeline, the bottom strip's Play all and every timeline
-  // seek share ONE list of lines (`timelineCells`), so the programme they
-  // each lay out is the same one. On a book, headings follow "Count headings
-  // as translatable content" and hidden lines stay off unless recorded
+  // Split into milestones off: a book's timeline lays out EVERY chapter, end
+  // to end, on one clock. The chapter the table is on (`chosenScopeKey`) only
+  // names where the reader is; scrolling the table does not swap the timeline
+  // for that chapter. A file with no chapters is the same list (Sam, Oct 28:
+  // the long-file parts are dropped — the timeline draws the clips in view, so
+  // length costs nothing).
+  // Split into milestones on: the timeline draws only the milestone the table
+  // is on, including a part or a time range the continuous timeline ignores.
+  // The timeline, the bottom strip's Play all and every timeline seek share
+  // ONE list of lines (`timelineCells`), so the programme they each lay out
+  // is the same one. On a book, headings follow "Count headings as translatable
+  // content" and hidden lines stay off unless recorded
   // (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
+  const splitByMilestone = useMilestoneSplit()
   const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
   // The lines a book's timeline may draw at all, before any chapter.
   const timelineLines = useMemo(
@@ -15498,8 +15541,9 @@ export function ProjectWorkspace() {
     const queue = selectQueueStateForFile(state, fileCellIds)
     return queue.active ? (chapterOfCell(timelineScopes, queue.cellId)?.key ?? null) : null
   })
-  // Remembered so a scroll of the table still has a chapter to name. The
-  // timeline itself is `timelineLines`: every chapter, in the file's order.
+  // Remembered so a scroll of the table still has a chapter to name. With the
+  // split off, the timeline itself is `timelineLines`: every chapter, in the
+  // file's order. With the split on, it is the milestone the table is on.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
       ? (timelineScopes.find((chapter) => chapter.key === queueChapterKey)
@@ -15507,7 +15551,20 @@ export function ProjectWorkspace() {
       : null,
     [timelineScopes, chosenScopeKey, queueChapterKey],
   )
-  const timelineCells = timelineLines
+  const milestonePages = useMemo(
+    () => (splitByMilestone
+      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
+      : EMPTY_MILESTONE_PAGES),
+    [splitByMilestone, cellStore, cellStoreVersion],
+  )
+  const timelineCells = useMemo(
+    () => timelineCellsForMilestoneSplit(timelineLines, {
+      split: splitByMilestone,
+      milestones: milestonePages,
+      milestoneKey: chosenScopeKey,
+    }),
+    [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
+  )
   // The bottom strip reads its own audio and merges it in; it gets the same
   // lines by id.
   const timelineBarCells = useMemo(() => {
@@ -15517,16 +15574,18 @@ export function ProjectWorkspace() {
   }, [audioMergedCells, legacyCells, timelineCells])
   // The table reports the chapter on screen as it scrolls. Scrolling is
   // reading, never a pick, so it leaves playback alone — a paused Play all
-  // resumes where it was. The timeline keeps every chapter either way
-  // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
+  // resumes where it was. With the split off, the timeline keeps every
+  // chapter (lib/timeline/chapter-pick). With it on, the same report is which
+  // milestone the timeline draws. A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
-  // it and keeps playing, from its first line, on the whole book's clock.
-  // Picking one while playback is paused ends that playback, as before
-  // (lib/timeline/chapter-pick).
+  // it and keeps playing, from its first line. With the split off, that run
+  // stays on the whole book's clock. With the split on, the run is the
+  // milestone picked. Picking one while playback is paused ends that
+  // playback, as before (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
@@ -15538,6 +15597,8 @@ export function ProjectWorkspace() {
     chapters: readonly TimelineChapter[]
     cells: readonly CellData[]
     onScreen: TimelineChapter | null
+    /** Split into milestones: a pick plays that milestone, and the run stops there. */
+    oneMilestone: boolean
   } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
@@ -15549,7 +15610,10 @@ export function ProjectWorkspace() {
       playingKey: queueChapterKeyRef.current,
       queueKind: getQueueState().kind,
     })
-    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
+    const lines = run?.oneMilestone && plan.kind === "play"
+      ? scopeCells(run.cells, plan.chapter)
+      : run?.cells ?? []
+    return applyChapterPick(plan, { lines, ...chapterPickRunRef.current })
   }, [])
   // The chapter navigator eases the text so the chapter's first row is at the
   // top. When the Media timeline is open, the same pick eases the timeline so
@@ -15572,9 +15636,14 @@ export function ProjectWorkspace() {
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
-    chapterRunRef.current = timelineScopes.length > 0
-      ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter }
+    const milestoneChapters = splitByMilestone && milestonePages.length > 0
+      ? milestonePages.map((page) => ({ key: page.key, cellIds: page.cellIds }))
       : null
+    chapterRunRef.current = milestoneChapters
+      ? { chapters: milestoneChapters, cells: timelineLines, onScreen: timelineChapter, oneMilestone: true }
+      : timelineScopes.length > 0
+        ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter, oneMilestone: false }
+        : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
       if (!chapter) return
@@ -15585,7 +15654,10 @@ export function ProjectWorkspace() {
   })
   useEffect(() => onQueueRanOut((ctx) => {
     const run = chapterRunRef.current
-    if (!run || ctx.snapshot) return
+    // Split into milestones plays the page on screen and stops. The arrows
+    // turn the page; starting the next milestone here would play lines the
+    // timeline is no longer drawing.
+    if (!run || ctx.snapshot || run.oneMilestone) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     // A run that already holds the later chapters plays them itself. Starting
@@ -17275,24 +17347,28 @@ export function ProjectWorkspace() {
   useSkipSilentLinesOnVirtualClock(dubDriverCells, targetSlots, virtualIsTransport)
 
   // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
-  // is offered only where it can change something. Over the whole file — a
-  // book's every chapter, since Play all carries on into the next — laid out
-  // as the queue plays it, or as the built-in clock does while it drives.
-  // Handed over as a question, which the timeline asks when its ⋯ opens: the
-  // answer lays out every chapter, too much to redo on every edit.
+  // is offered only where it can change something. Over the programme Play
+  // all will run — the whole file when the split is off (a book's every
+  // chapter, since Play all carries on into the next), and the milestone on
+  // screen when the split is on — laid out as the queue plays it, or as the
+  // built-in clock does while it drives. Handed over as a question, which
+  // the timeline asks when its ⋯ opens: the answer lays out that programme,
+  // too much to redo on every edit.
   const skipSilentLinesApplies = useCallback(
     () =>
       skipSilentLinesCanChange({
         timing: timingMode,
-        runs: timelineScopes.length > 0
-          ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
-          : [timelineLines],
+        runs: splitByMilestone
+          ? [timelineCells]
+          : timelineScopes.length > 0
+            ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
+            : [timelineLines],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
         // AQU-2252: laid out with the tracks the queue plays them with.
         tracks: programmeTracks,
       }),
-    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
+    [timingMode, splitByMilestone, timelineCells, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -18084,6 +18160,18 @@ export function ProjectWorkspace() {
     }
   }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, tts.settings, tts.saveTts, activeLane])
 
+  // AQU-2476: Download original's only implementation is the server route,
+  // which reads an unset export floor as Maintainer. `canExport` stays the
+  // gate for the Export dialog, whose client-side formats work below it.
+  const downloadOriginalRole = project?.syncRole?.level ?? null
+  const downloadOriginalsAllowed = canDownloadOriginals(
+    downloadOriginalRole,
+    projectPolicy.exportMinRole,
+  )
+  const downloadOriginalDisabledReason = downloadOriginalsAllowed
+    ? undefined
+    : denialMessage(t, resolveExportFloor(projectPolicy.exportMinRole), downloadOriginalRole)
+
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
 
@@ -18236,18 +18324,22 @@ export function ProjectWorkspace() {
         },
       })
     }
-    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+    if (activeFile && projectId && originalSourceIds.has(activeFile.id)) {
       items.push({
         id: "file-download-original",
         label: t("fileDetails.downloadOriginal"),
         icon: Download,
-        onClick: () => {
-          void downloadImportedOriginal({
-            projectId,
-            file: activeFile,
-            getToken: getTokenForFile,
-          })
-        },
+        disabled: !downloadOriginalsAllowed,
+        disabledReason: downloadOriginalDisabledReason,
+        onClick: downloadOriginalsAllowed
+          ? () => {
+              void downloadImportedOriginal({
+                projectId,
+                file: activeFile,
+                getToken: getTokenForFile,
+              })
+            }
+          : undefined,
       })
     }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
@@ -18270,8 +18362,9 @@ export function ProjectWorkspace() {
     adoptingSpeaker,
     canAssignWork,
     canDiarize,
-    canExportByOrgPolicy,
     currentRoleLevel,
+    downloadOriginalDisabledReason,
+    downloadOriginalsAllowed,
     diarizeBusy,
     diarizeError,
     diarizePhase,
@@ -18779,6 +18872,7 @@ export function ProjectWorkspace() {
       className="p-0"
       progress={editorStatusBarProgress}
       getHealthByCell={getStatusBarHealth}
+      nameCells={nameStatusBarCells}
       projectHealth={projectHealth}
       staleSourceCount={staleCellIds.size}
       onJumpToCell={jumpToCellId}
@@ -19013,7 +19107,7 @@ export function ProjectWorkspace() {
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? setPendingDeleteId : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
-                  canExportByOrgPolicy={canExportByOrgPolicy}
+                  downloadOriginalDisabledReason={downloadOriginalDisabledReason}
                   assignedFileIds={myAssignedFileIds}
                   filterFocus={fileFilterFocus}
                   // AQU-1569: PROJECT_LEAD+, mirroring the server floor for
@@ -20157,6 +20251,7 @@ export function ProjectWorkspace() {
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
             getStatisticalBt={getStatisticalBt}
+            btCorpusSignal={corpusSource.signal}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
             playingCue={playingCue}
@@ -20233,8 +20328,11 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
-            // AQU-1758: a book's timeline shows the chapter the table is on.
-            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            // The table names the milestone on screen. A book always reports it.
+            // A timed file reports it while Split into milestones is on, so
+            // the timeline follows that page and does not re-render the shell
+            // on every scroll while the split is off.
+            onActiveChapterChange={sequenceTimeline || splitByMilestone ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               </ChapterNavTrailingContext.Provider>
@@ -20460,6 +20558,16 @@ export function ProjectWorkspace() {
                   setAttachmentsDrawerOpen(false)
                   setCommentsCellId(cellId)
                 }}
+                // Comment from the finding itself, without leaving the check.
+                // Same gate as the comments drawer's composer: a viewer below
+                // the org's create floor gets the drawer, which says why.
+                onAddComment={
+                  (project?.syncRole?.level != null
+                    ? canMutateComment("comment.create", project.syncRole.level, true, commentFloorsFrom(project))
+                    : perms.canEditComments)
+                    ? addThread
+                    : undefined
+                }
               />
             )}
             {drawerRuleId && (
@@ -20580,6 +20688,7 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 progress={editorStatusBarProgress}
                 getHealthByCell={getStatusBarHealth}
+                nameCells={nameStatusBarCells}
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
@@ -21752,10 +21861,12 @@ function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectS
             {t("workspace.backToDashboard")}
           </Button>
           {canRestore && (
-            <Button onClick={() => onRestore()}>
-              <Undo2 className="me-1 h-4 w-4" />
-              {t("common.restore")}
-            </Button>
+            <RestoreProjectButton onRestore={onRestore}>
+              <Button>
+                <Undo2 className="me-1 h-4 w-4" />
+                {t("common.restore")}
+              </Button>
+            </RestoreProjectButton>
           )}
         </div>
       </div>

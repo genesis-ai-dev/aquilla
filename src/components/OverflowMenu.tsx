@@ -52,6 +52,12 @@ export interface OverflowMenuItem {
   onClick?: () => void
   checked?: boolean
   onCheckedChange?: (checked: boolean) => void
+  /**
+   * A checkbox row stays open after a click by default. Set this when the
+   * toggle opens a surface of its own (Check file opens its findings panel),
+   * where a menu left hanging over that surface only gets in the way.
+   */
+  closeOnClick?: boolean
   disabled?: boolean
   destructive?: boolean
   testId?: string
@@ -187,6 +193,7 @@ function OverflowMenuPanel({
       <DropdownMenuCheckboxItem
         key={item.id}
         checked={item.checked}
+        closeOnClick={item.closeOnClick}
         disabled={item.disabled}
         data-testid={item.testId}
         aria-describedby={describedBy(item)}

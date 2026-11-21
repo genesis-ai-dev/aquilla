@@ -21,7 +21,9 @@ interface StatusBarProps {
    * lines DONE on both halves — `validated` — and what is left of each.
    */
   progress: FileStats
-  getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
+  getHealthByCell: () => Array<{ cellId: string; health: number }>
+  /** AQU-2278: names the drags the health card shows. */
+  nameCells: (cellIds: readonly string[]) => string[]
   projectHealth: number
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
@@ -49,7 +51,7 @@ export function statusBarFigure(progress: FileStats): { fraction: number; audio:
 }
 
 export function StatusBar({
-  progress, getHealthByCell, projectHealth, staleSourceCount, onJumpToCell, className,
+  progress, getHealthByCell, nameCells, projectHealth, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
@@ -106,6 +108,7 @@ export function StatusBar({
           scopeLabel={t("workspace.statusBar.healthTitle")}
           label={t("workspace.statusBar.healthAria", { percent: projectHealth })}
           getHealthByCell={getHealthByCell}
+          nameCells={nameCells}
           staleSourceCount={staleSourceCount}
           onJumpToCell={onJumpToCell}
         >

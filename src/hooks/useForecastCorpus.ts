@@ -22,6 +22,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { DebouncedSource } from "@/hooks/useDebouncedValue"
 import { createForecastClient, type ForecastClient } from "@/lib/forecast/forecast-client"
 import type { ForecastCell } from "@/lib/forecast/bia-index"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
@@ -39,7 +40,9 @@ export interface UseForecastCorpusOpts {
   /** Project files in reading order. */
   files: ReadonlyArray<{ id: string }>
   activeFileId: string | null | undefined
-  activeCells: readonly ActiveCell[]
+  /** The active file's cells, debounced by the caller. The feed re-runs when
+   *  the source's signal bumps, so the caller does not render for it. */
+  activeCells: DebouncedSource<readonly ActiveCell[]>
   getToken: (fileId: string) => Promise<string | null>
   lane: string
 }
@@ -91,6 +94,7 @@ export function useForecastCorpus({
   // Incremental feed of the active file.
   useEffect(() => {
     if (!client || !activeFileId) return
+    const feed = () => {
     let sent = sentByClient.get(client)
     if (!sent) {
       sent = new Map()
@@ -99,7 +103,7 @@ export function useForecastCorpus({
     const fileOrder = Math.max(0, files.findIndex((f) => f.id === activeFileId))
     const upserts: ForecastCell[] = []
     const present = new Set<string>()
-    for (const cell of activeCells) {
+    for (const cell of activeCells.get()) {
       if (cell.fileId !== activeFileId) continue
       present.add(cell.id)
       const text = cell.translated.trim()
@@ -119,6 +123,9 @@ export function useForecastCorpus({
     }
     client.upsert(upserts)
     client.remove(removed)
+    }
+    feed()
+    return activeCells.signal.subscribe(feed)
   }, [client, activeFileId, activeCells, files])
 
   return client

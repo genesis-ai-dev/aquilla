@@ -106,8 +106,15 @@ export function grantNewLaneStmt(
                     AND g.lane = other.id
                )
           )
+          AND (EXISTS (SELECT 1 FROM project_members pm
+                        WHERE pm.project_id = l.project_id
+                          AND pm.user_id = m.user_id)
+               OR ${memberTeamAttachmentSql("m.user_id", "l.project_id", attachmentCoversLaneSql("ga", "l.id"))})
        ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )
+    // AQU-2563: the last condition keeps out a member whose only path here is
+    // a team a lead limited to other lanes (see `attachmentCoversLaneSql`).
+    // It reads the project through `l`, so it adds no placeholder.
     // Nine placeholders, in textual order: the row's project id, grantedBy,
     // the two the member source takes, the lane join's project id, the lane
     // key, and the three sub-selects' project ids.
@@ -195,6 +202,38 @@ export function projectWallMembersSql(): string {
            GROUP BY x.user_id`
 }
 
+// AQU-2563 — a team attachment a lead limited to chosen lanes (AQU-1813:
+// `lanes_explicit` + `group_project_lanes`) reaches only those lanes, for the
+// people already on the team and for the people added later alike. The
+// auth-worker paths read it per person (`teamLaneAccess`): any living
+// attachment that brings the person to the project means every lane, otherwise
+// the union of the lanes the limited attachments list. The two helpers below
+// are that rule as SQL, so the sync's team seeding and lane creation follow it
+// too. A living attachment (`lanes_explicit = false`) covers every lane, which
+// is what both statements did for every attachment before.
+
+/** Does attachment row `gpg` (a `group_project_grants` alias) cover lane `lane`? */
+function attachmentCoversLaneSql(gpg: string, lane: string): string {
+  return `(NOT ${gpg}.lanes_explicit
+           OR EXISTS (SELECT 1 FROM group_project_lanes gpl
+                       WHERE gpl.group_id = ${gpg}.group_id
+                         AND gpl.project_id = ${gpg}.project_id
+                         AND gpl.lane_id = ${lane}))`
+}
+
+/**
+ * Is `user` on a team attached to `project` whose attachment row (alias `ga`)
+ * satisfies `condition`? Reads the stored `group_members`, so a dry run's
+ * pending member is seen only through the attachment being seeded.
+ */
+function memberTeamAttachmentSql(user: string, project: string, condition: string): string {
+  return `EXISTS (SELECT 1 FROM group_project_grants ga
+                    JOIN group_members gma ON gma.group_id = ga.group_id
+                   WHERE ga.project_id = ${project}
+                     AND gma.user_id = ${user}
+                     AND ${condition})`
+}
+
 /** The member source of {@link grantTeamLaneAccessStmt}, as SQL. */
 function teamMembersSql(pending: boolean): string {
   if (!pending) {
@@ -236,17 +275,34 @@ function teamMembersSql(pending: boolean): string {
  * deviation from AQU-1800's "archived lanes are never granted": the spec's
  * *Admission writes the whole of a member's access* says archived included, and
  * the two halves have to agree or the team path drifts from the direct one.
+ *
+ * AQU-2563: "every lane" is every lane the member's attachments cover — this
+ * one, or another team that brings them to the same project, so the order the
+ * sync runs its teams in does not decide what a member of two teams gets. A
+ * limited attachment with nothing checked covers nothing. `scoped` marks the
+ * rows whose lane set is a limit (no living attachment brings the member here)
+ * and who have no direct membership: those also get a kind='lane' scope row,
+ * which is what `replaceLaneRows` leaves them with on the auth-worker side.
+ * A direct member's scope rows belong to the direct membership, and the
+ * auth-worker leaves them alone too (`unionTeamLanesIntoDirect`).
  */
 function teamLaneGrantBodySql(pending: boolean): string {
   return `SELECT gpg.project_id AS project_id,
                  gm.user_id     AS user_id,
                  l.id           AS lane,
-                 GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) AS role_level
+                 GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) AS role_level,
+                 (gpg.lanes_explicit
+                  AND NOT ${memberTeamAttachmentSql("gm.user_id", "gpg.project_id", "NOT ga.lanes_explicit")}
+                  AND NOT EXISTS (SELECT 1 FROM project_members pm
+                                   WHERE pm.project_id = gpg.project_id
+                                     AND pm.user_id = gm.user_id)) AS scoped
             FROM (${teamMembersSql(pending)}) gm
             JOIN group_project_grants gpg ON gpg.group_id = ?
             JOIN lanes l ON l.project_id = gpg.project_id
                         AND l.role = 'target'
-           WHERE GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) >= ${GRANT_MIN_ROLE}
+           WHERE (${attachmentCoversLaneSql("gpg", "l.id")}
+                  OR ${memberTeamAttachmentSql("gm.user_id", "gpg.project_id", attachmentCoversLaneSql("ga", "l.id"))})
+             AND GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) >= ${GRANT_MIN_ROLE}
              AND GREATEST(gpg.role_level, COALESCE(gm.role_level, 0)) < ${GRANT_BELOW_ROLE}
              AND NOT EXISTS (SELECT 1 FROM project_member_lane_roles g
                               WHERE g.project_id = gpg.project_id
@@ -269,14 +325,25 @@ export function grantTeamLaneAccessStmt(
   teamId: number | string,
   grantedBy: number | null,
 ): AquillaStatement {
+  // One statement, so the scope rows and the grants are both chosen from the
+  // state before either is written: the body's "holds no grant and no scope
+  // row yet" test would otherwise see the other half and select nothing.
   return db
     .prepare(
-      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+      `WITH src AS (${teamLaneGrantBodySql(false)}),
+            scopes AS (
+              INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
+              SELECT src.project_id, src.user_id, 'lane', src.lane, ?::TEXT, ?
+                FROM src
+               WHERE src.scoped
+              ON CONFLICT (project_id, user_id, kind, value) DO NOTHING
+            )
+       INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
        SELECT src.project_id, src.user_id, src.lane, src.role_level, ?
-         FROM (${teamLaneGrantBodySql(false)}) src
+         FROM src
        ON CONFLICT (project_id, user_id, lane) DO NOTHING`,
     )
-    .bind(grantedBy, teamId, teamId)
+    .bind(teamId, teamId, grantedBy == null ? "0" : String(grantedBy), Date.now(), grantedBy)
 }
 
 /**

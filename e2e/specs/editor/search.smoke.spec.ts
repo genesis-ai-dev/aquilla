@@ -93,7 +93,7 @@ test("search panel open paths, scope, and mode surface session", async ({ alice 
     await bothTab.click()
     await expect(bothTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })
 
-    const sourceTab = panel.getByRole("tab", { name: /^Source$/i })
+    const sourceTab = panel.getByRole("tab", { name: /^Source text$/i })
     await expect(sourceTab).toBeVisible({ timeout: 3_000 })
     await sourceTab.click()
     await expect(sourceTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })

@@ -173,12 +173,12 @@ interface Props {
    */
   deferSectionProgress?: boolean
   /**
-   * AQU-253 (a fix): whether org policy allows export. When false, the
-   * per-file export menu items are hidden so dashboard affordances match
-   * the workspace. Defaults to true (no gate) for callers that haven't
-   * wired up org settings.
+   * AQU-2476: why Download original is refused. When set, a file that has
+   * an original keeps the row and shows this reason behind its (i); nothing
+   * is downloaded. Omit it when the caller may download — the row then
+   * works as before. A file with no original never shows the row.
    */
-  canExportByOrgPolicy?: boolean
+  downloadOriginalDisabledReason?: string
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
   /**
@@ -239,7 +239,7 @@ export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
   assignedFileIds,
-  onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
+  onApplySuggestion, onRenameCorpus, downloadOriginalDisabledReason,
   hasActiveChapters, getActiveChapterHealth, activeChapterHealthSignal,
   deferSectionProgress,
   lane = "",
@@ -668,12 +668,17 @@ export function ExpandableFileList({
                             onUploadRecordings={onUploadRecordings ? () => onUploadRecordings(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
-                              canExportByOrgPolicy && originalSourceIds.has(file.id)
+                              !downloadOriginalDisabledReason && originalSourceIds.has(file.id)
                                 ? () => { void downloadImportedOriginal({
                                     projectId,
                                     file,
                                     getToken: getTokenForFile,
                                   }) }
+                                : undefined
+                            }
+                            downloadOriginalDisabledReason={
+                              downloadOriginalDisabledReason && originalSourceIds.has(file.id)
+                                ? downloadOriginalDisabledReason
                                 : undefined
                             }
                             onApplySuggestion={

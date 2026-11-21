@@ -14,9 +14,21 @@ import {
   MenuSubContent,
   MenuSubTrigger,
 } from "@/components/ui/menu-parts"
+import { PlainUntilKeyboard } from "@/components/ui/plain-until-keyboard"
 
-function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
-  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+function DropdownMenu({
+  // A row lights up from the keyboard, not from the pointer. See
+  // plain-until-keyboard.tsx.
+  highlightItemOnHover = false,
+  ...props
+}: MenuPrimitive.Root.Props) {
+  return (
+    <MenuPrimitive.Root
+      data-slot="dropdown-menu"
+      {...props}
+      highlightItemOnHover={highlightItemOnHover}
+    />
+  )
 }
 
 function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
@@ -34,6 +46,7 @@ function DropdownMenuContent({
   sideOffset = 4,
   anchor,
   className,
+  children,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<
@@ -58,7 +71,10 @@ function DropdownMenuContent({
             className,
           )}
           {...props}
-        />
+        >
+          {children}
+          <PlainUntilKeyboard />
+        </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   )

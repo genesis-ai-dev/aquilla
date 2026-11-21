@@ -157,3 +157,28 @@ describe("OverflowMenu item (i)", () => {
     expect(document.getElementById(info.getAttribute("aria-controls")!)).toHaveTextContent("Track editing is off for this project.")
   })
 })
+
+// "Check file" opens its findings panel; a menu left open over that panel only
+// gets in the way. A plain toggle (Draft as you read) stays open as before.
+describe("OverflowMenu checkbox rows", () => {
+  const items = (onCheck: () => void): OverflowMenuItem[] => [
+    { id: "check-file", type: "checkbox", label: "Check file", checked: false, closeOnClick: true, onCheckedChange: onCheck },
+    { id: "toggle", type: "checkbox", label: "Draft as you read", checked: false, onCheckedChange: () => {} },
+  ]
+
+  it("closes the menu when the row asks to", async () => {
+    const onCheck = vi.fn()
+    render(<OverflowMenu ariaLabel="File options" items={items(onCheck)} />)
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Check file" }))
+    expect(onCheck).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+  })
+
+  it("stays open for an ordinary toggle", async () => {
+    render(<OverflowMenu ariaLabel="File options" items={items(() => {})} />)
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Draft as you read" }))
+    expect(screen.getByRole("menu")).toBeInTheDocument()
+  })
+})

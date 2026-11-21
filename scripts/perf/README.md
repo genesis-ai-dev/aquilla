@@ -151,6 +151,14 @@ several times faster than a translator's laptop). Two fixtures, seeded once into
 
 The project is small on purpose. None of the cost this measures comes from the amount of data.
 
+The scenario edits the same cells every run, so a fixture that has been run against is in a
+different state from a new one: on a new fixture those cells are untranslated, and a first
+translation renders more and reads more than an edit does (`plain.commit.rowRenders` 28 against
+11 on the same code). The budgets describe the run-against state. When the harness seeds a
+fixture it therefore runs the scenario once without measuring ("settling pass" in the log), which
+is why the first run on a new machine takes about twice as long. Deleting `.perf/interaction-*.json`
+by hand gets the same treatment on the next run.
+
 ## What is measured
 
 | Phase | The user… | Headline metrics |

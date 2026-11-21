@@ -1,6 +1,7 @@
 // Acts on one release-plan.mjs result: builds the planned release branch by
-// cherry-picking every ready PR onto the tagged base, pushes it, and posts
-// the release notes as a commit comment, exactly as RELEASE-CUT.md says.
+// cherry-picking every ready PR (and every ready direct commit, in its dev
+// position) onto the tagged base, pushes it, and posts the release notes as
+// a commit comment, exactly as RELEASE-CUT.md says.
 // It decides nothing; the plan already did. The Release cut workflow
 // (.github/workflows/release-cut.yml) runs it after a tag push, on the hour,
 // or when a person presses the button.
@@ -10,6 +11,7 @@
 import { execFileSync } from "node:child_process"
 import { appendFileSync, readFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
+import { entryLabel, NOT_A_PR, tally } from "./release-plan.mjs"
 
 const REPO = "genesis-ai-dev/aquilla"
 
@@ -26,11 +28,18 @@ const lines = (text) => text.split("\n").filter(Boolean)
 // planner writes it with the merge's own UTC offset, and dev's merges come
 // from several time zones); a candidate without one is not ruled out, so
 // a hand-built plan still gets a hint.
+//
+// A held direct commit (pushed to dev with no PR) is a candidate like any
+// held PR, and the likelier one when a pick touches the files it changed:
+// the answer is then its short sha, since it has no number. `pr` itself may
+// be a direct commit; two entries are the same one by sha when either is
+// direct, by PR number otherwise.
 export function dependencyHint(pr, paths, candidates) {
   const when = (entry) => (entry.mergedAt === undefined ? undefined : Date.parse(entry.mergedAt))
   const at = when(pr)
+  const isPick = (candidate) => (candidate.direct || pr.direct ? candidate.sha === pr.sha : candidate.number === pr.number)
   const before = (candidate) => {
-    if (candidate.number === pr.number) return false
+    if (isPick(candidate)) return false
     const merged = when(candidate)
     return merged === undefined || at === undefined || merged <= at
   }
@@ -38,11 +47,15 @@ export function dependencyHint(pr, paths, candidates) {
     .filter(before)
     .reverse()
     .sort((a, b) => (when(b) ?? 0) - (when(a) ?? 0))
-  return newestFirst.find((candidate) => candidate.files?.some((file) => paths.includes(file)))?.number
+  const needed = newestFirst.find((candidate) => candidate.files?.some((file) => paths.includes(file)))
+  if (!needed) return undefined
+  return needed.direct ? entryLabel(needed) : needed.number
 }
 
-const conflictReason = (paths, needs) => `pick conflict in ${paths.join(", ")}${needs === undefined ? "" : `; needs #${needs}`}`
-const emptyReason = (needs) => `empty pick: already in base, or needs ${needs === undefined ? "a held PR" : `#${needs}`}`
+// `needs` as dependencyHint answers: a PR number, or a direct commit's short sha.
+const needsLabel = (needs) => (typeof needs === "number" ? `#${needs}` : `direct commit ${needs}`)
+const conflictReason = (paths, needs) => `pick conflict in ${paths.join(", ")}${needs === undefined ? "" : `; needs ${needsLabel(needs)}`}`
+const emptyReason = (needs) => `empty pick: already in base, or needs ${needs === undefined ? "a held PR" : needsLabel(needs)}`
 
 // How a failed `git cherry-pick` left the repo. A pick git stopped on is
 // still in progress (CHERRY_PICK_HEAD exists): with unmerged paths it is a
@@ -84,9 +97,11 @@ function stoppedPick(run) {
 // `held` is the plan's held list, with files: the candidates for "needs",
 // together with the PRs this cut has already left unpicked.
 //
-// A merge commit is picked with -m 1 (its dev side); a squash commit has one
-// parent and is picked as is. -x records the dev sha in the body, which is
-// how release-plan.mjs later proves production carries the PR.
+// A merge commit is picked with -m 1 (its dev side); a squash commit, and a
+// commit pushed straight to dev, has one parent and is picked as is. -x
+// records the dev sha in the body, which is how release-plan.mjs later
+// proves production carries the PR, and for a direct commit, which has no
+// PR number in its subject, the only way it can.
 export function buildReleaseBranch({ branch, base, prs, held = [], cwd }) {
   const run = (args) => git(args, { cwd })
   run(["checkout", "-q", "-B", branch, base])
@@ -127,21 +142,36 @@ export function buildReleaseBranch({ branch, base, prs, held = [], cwd }) {
   return { sha: run(["rev-parse", "HEAD"]), picked, unpicked }
 }
 
+// A held or unpicked entry as the notes and the run summary name it: a PR by
+// number; a direct commit by short sha and subject, because it has no PR
+// page to open and the sha alone tells a person nothing.
+const heldLabel = (entry) => (entry.direct && entry.subject ? `${entryLabel(entry)} "${entry.subject}"` : entryLabel(entry))
+
+// What a person does about a direct commit held as "not a PR". There is no
+// PR to carry `release:approved`, so the sign-off is the pick itself.
+export const DIRECT_HELD_NOTE =
+  "A direct commit has no PR to label: it stays held until a person picks it onto a release branch with `git cherry-pick -x <sha>` (docs/RELEASE-RISK-GATES.md, Cut)."
+
 // RELEASE-CUT.md "Release notes template". titles maps PR number to title; a
 // missing title prints as "(title unavailable)" rather than failing the cut.
+// A direct commit's row carries its short sha and its subject, which the
+// plan holds, so it needs no title lookup.
 export function releaseNotes(plan, titles = {}) {
   const areas = plan.areas?.length ? ` · areas: ${plan.areas.join(", ")}` : ""
-  const lines = [`## Release ${plan.branch} · ${plan.prs.length} PRs${areas}`, ""]
-  const title = (number) => (titles[number] ?? "(title unavailable)").replaceAll("|", "\\|")
+  const direct = plan.prs.filter((pr) => pr.direct).length
+  const count = `${plan.prs.length - direct} PRs${direct ? ` + ${direct} direct commit${direct === 1 ? "" : "s"}` : ""}`
+  const lines = [`## Release ${plan.branch} · ${count}${areas}`, ""]
+  const title = (pr) => ((pr.direct ? pr.subject : titles[pr.number]) ?? "(title unavailable)").replaceAll("|", "\\|")
   lines.push("| PR | Title | Walk @ head sha | Areas |", "| --- | --- | --- | --- |")
   for (const pr of plan.prs) {
-    const walk = pr.walk === "none" ? "none (docs only)" : pr.walk
-    lines.push(`| #${pr.number} | ${title(pr.number)} | ${walk} | ${pr.areas.length ? pr.areas.join(", ") : "—"} |`)
+    const walk = pr.walk === "none" ? (pr.direct ? "none (locale catalogs, no PR)" : "none (docs only)") : pr.walk
+    lines.push(`| ${entryLabel(pr)} | ${title(pr)} | ${walk} | ${pr.areas.length ? pr.areas.join(", ") : "—"} |`)
   }
   const held = plan.held ?? []
   if (held.length) {
-    lines.push("", `**Held, not in this release:** ${held.map((pr) => `#${pr.number} (${pr.why})`).join(", ")}.`)
-    lines.push("A held PR joins the next cut once it carries the `release:approved` label.")
+    lines.push("", `**Held, not in this release:** ${held.map((pr) => `${heldLabel(pr)} (${pr.why})`).join(", ")}.`)
+    if (held.some((pr) => !pr.direct)) lines.push("A held PR joins the next cut once it carries the `release:approved` label.")
+    if (held.some((pr) => pr.direct && pr.why.startsWith(NOT_A_PR))) lines.push(DIRECT_HELD_NOTE)
   }
   return lines.join("\n")
 }
@@ -150,7 +180,17 @@ export function releaseNotes(plan, titles = {}) {
 // line carries, so the run summary says which PR and why before anyone
 // opens the notes.
 export function unpickedReport(unpicked) {
-  return unpicked.map((pr) => `- #${pr.number}: ${pr.why}`).join("\n")
+  return unpicked.map((pr) => `- ${heldLabel(pr)}: ${pr.why}`).join("\n")
+}
+
+// The run summary of a plan that cuts nothing. A direct commit the plan
+// holds is named here as well: no PR page shows it waiting, so the cut's
+// own output is the only place a person will ever see it.
+export function noCutSummary(plan) {
+  const head = `No cut: ${plan.reason}.`
+  const direct = (plan.held ?? []).filter((entry) => entry.direct)
+  if (!direct.length) return head
+  return `${head}\n\nDirect commits on dev waiting for a person:\n${unpickedReport(direct)}\n\n${DIRECT_HELD_NOTE}`
 }
 
 // The run summary's opening, before the notes: what landed, and when a
@@ -159,7 +199,7 @@ export function unpickedReport(unpicked) {
 export function cutSummary(plan, built) {
   const report = unpickedReport(built.unpicked)
   if (!built.picked.length) {
-    return `No cut: none of the ${plan.prs.length} ready PR(s) could be picked onto \`${plan.base}\`:\n${report}`
+    return `No cut: none of the ${tally(plan.prs, "ready")} could be picked onto \`${plan.base}\`:\n${report}`
   }
   const notPicked = built.unpicked.length ? `, ${built.unpicked.length} not picked` : ""
   const head = `Cut \`${plan.branch}\` at \`${built.sha}\` (${built.picked.length} picked onto \`${plan.base}\`${notPicked}).`
@@ -178,9 +218,11 @@ async function githubApi(path, { token, method = "GET", body }) {
   return response.json()
 }
 
+// Titles for the PRs only: a direct commit has no PR to ask about, and its
+// subject is already in the plan.
 async function prTitles(prs, token) {
   const titles = {}
-  await Promise.all(prs.map(async ({ number }) => {
+  await Promise.all(prs.filter((pr) => !pr.direct).map(async ({ number }) => {
     try {
       titles[number] = (await githubApi(`/pulls/${number}`, { token })).title
     } catch {
@@ -202,7 +244,7 @@ async function main() {
   const plan = JSON.parse(readFileSync(planPath, "utf8"))
 
   if (!plan.cut) {
-    summary(`No cut: ${plan.reason}.`)
+    summary(noCutSummary(plan))
     return
   }
 

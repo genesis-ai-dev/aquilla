@@ -33,7 +33,7 @@ interface AudioRowRaw {
   gain_db?: number | null
   fade_in_ms?: number | null
   fade_out_ms?: number | null
-  /** AQU-2664 (0206): loudness, true peak, evened-out target. Optional, absent = none. */
+  /** AQU-2664 (0207): loudness, true peak, evened-out target. Optional, absent = none. */
   loudness_lufs?: number | null
   true_peak_db?: number | null
   loudness_from_ms?: number | string | null

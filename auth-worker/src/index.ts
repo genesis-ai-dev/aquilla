@@ -1,3 +1,4 @@
+import accountSecurityRoutes from "./routes/account-security"
 // aquilla-identity (Phase D) — full identity worker for the codex-web frontend.
 //
 // Promoted from stub auth surface to the complete identity + project surface.
@@ -317,6 +318,7 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 app.get("/api/v2/health", (c) => c.json({ ok: true, name: "aquilla-identity" }))
 
 app.route("/api/v2/auth/email-change", emailChangeRoutes)
+app.route("/api/v2/auth/security", accountSecurityRoutes)
 app.route("/api/v2/auth/oauth/google", googleLoginRoutes)
 app.route("/api/v2/auth", authRoutes)
 // Legacy alias: old clients (and frontier-server-era tokens) still hit
@@ -503,6 +505,8 @@ app.route("/__marketing__", marketingSeedRoutes)
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 
 app.onError((err, c) => {
+  if (err.message === "rate_limited") return c.json({error:err.message},429)
+  if (["settings_verification_required","fresh_verification_required"].includes(err.message)) return c.json({error:err.message},403)
   console.error("Unhandled error in auth-worker:", err)
   return c.json({ error: "Internal server error" }, 500)
 })

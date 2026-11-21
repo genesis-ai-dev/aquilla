@@ -18,6 +18,11 @@ import {
   useVirtualColumnWidths,
   VirtualizedDataTableBody,
 } from "@/components/ui/data-table-virtual"
+import {
+  ROW_INDEX_ATTRIBUTE,
+  RowWindowSpacer,
+  useRowWindow,
+} from "@/components/ui/data-table-window"
 
 import {
   InputGroup,
@@ -380,6 +385,16 @@ interface DataTableProps<TData, TValue> {
    */
   fillHeight?: boolean
   /**
+   * Keep every row in the DOM as one plain HTML table, with no row windowing.
+   *
+   * For a table that has no bounded scroll parent — it grows the document
+   * instead of scrolling inside a pane — because a virtualizer has no
+   * scrollport to window against there. `DataTable` windows rows by default
+   * (AQU-2708) and detects that case at runtime too, so this is how a call
+   * site says out loud that its table is one of them.
+   */
+  plainRows?: boolean
+  /**
    * Optional last body row (e.g. "Show N more"). Renders as a single colSpan
    * cell so it sits in the table instead of as a detached header/footer control.
    * Hidden while loading or when there are no rows.
@@ -419,6 +434,7 @@ function DataTable<TData, TValue>({
   className,
   tableClassName,
   fillHeight = false,
+  plainRows = false,
   footer,
   hasMore = false,
   onLoadMore,
@@ -524,6 +540,60 @@ function DataTable<TData, TValue>({
       getRowAttributes,
     ],
   )
+
+  const bodyRef = React.useRef<HTMLTableSectionElement>(null)
+
+  /**
+   * Row windowing for the plain table (AQU-2708): with a bounded scroll parent
+   * only the rows near the scrollport are mounted, so an uncapped list — every
+   * project the platform has ever had — costs a screenful of rows to paint
+   * instead of all of them. Null means "mount every row", as before.
+   *
+   * Off for `fillHeight` (LegendList owns that body), while loading or empty,
+   * for a table whose rows carry `renderSubRow` detail rows (their heights are
+   * not uniform), and wherever a call site passes `plainRows`.
+   */
+  const rowWindow = useRowWindow({
+    rowCount: tableRows.length,
+    getRowKey: (index) => tableRows[index]?.id ?? index,
+    estimateRowPx: dense ? 36 : 44,
+    enabled:
+      !fillHeight && !plainRows && !renderSubRow && hasRows && !loading && !showEmpty,
+    bodyRef,
+  })
+
+  /** One body row of the plain table — the same markup windowed or not. */
+  const renderBodyRow = (row: Row<TData>, windowIndex?: number) => {
+    const sub = renderSubRow?.(row.original)
+    const menuItems = renderRowMenuItems?.(row.original) ?? null
+    const cells = dataTableRowCells(row, dense, rowLink)
+    const rowProps = {
+      ...dataTableRowProps(row, {
+        rowClassName,
+        onRowClick,
+        getRowAttributes,
+        hasMenu: Boolean(menuItems),
+      }),
+      // A windowed row names its index in the whole list and hands the
+      // window its element, so its real height replaces the estimate — a row
+      // whose name wraps is not taken for a one-line row.
+      ...(windowIndex == null
+        ? {}
+        : { [ROW_INDEX_ATTRIBUTE]: windowIndex, ref: rowWindow?.measureRow }),
+    }
+    return (
+      <React.Fragment key={row.id}>
+        {menuItems ? (
+          <DataTableRowMenu rowProps={rowProps} items={menuItems}>
+            {cells}
+          </DataTableRowMenu>
+        ) : (
+          <TableRow {...rowProps}>{cells}</TableRow>
+        )}
+        {sub}
+      </React.Fragment>
+    )
+  }
 
   const loadMoreFooter =
     (footer || hasMore || loadingMore) && hasRows && !loading ? (
@@ -658,7 +728,12 @@ function DataTable<TData, TValue>({
                 </TableRow>
               ))}
             </TableHeader>
-            <TableBody data-reveal="">
+            <TableBody
+              ref={bodyRef}
+              // The reveal stagger is a mount animation. A windowed body mounts
+              // rows as they scroll into view, so it must not run there.
+              data-reveal={rowWindow ? undefined : ""}
+            >
               {loading ? (
                 // One cursor where the first row will start; the rows below
                 // keep the table's height so the page does not jump.
@@ -670,29 +745,24 @@ function DataTable<TData, TValue>({
                   </TableRow>
                 ))
               ) : hasRows ? (
-                tableRows.map((row) => {
-                  const sub = renderSubRow?.(row.original)
-                  const menuItems = renderRowMenuItems?.(row.original) ?? null
-                  const cells = dataTableRowCells(row, dense, rowLink)
-                  const rowProps = dataTableRowProps(row, {
-                    rowClassName,
-                    onRowClick,
-                    getRowAttributes,
-                    hasMenu: Boolean(menuItems),
-                  })
-                  return (
-                    <React.Fragment key={row.id}>
-                      {menuItems ? (
-                        <DataTableRowMenu rowProps={rowProps} items={menuItems}>
-                          {cells}
-                        </DataTableRowMenu>
-                      ) : (
-                        <TableRow {...rowProps}>{cells}</TableRow>
-                      )}
-                      {sub}
-                    </React.Fragment>
-                  )
-                })
+                rowWindow ? (
+                  <>
+                    <RowWindowSpacer
+                      height={rowWindow.paddingTop}
+                      colSpan={visibleColumnCount}
+                    />
+                    {rowWindow.indexes.map((index) => {
+                      const row = tableRows[index]
+                      return row ? renderBodyRow(row, index) : null
+                    })}
+                    <RowWindowSpacer
+                      height={rowWindow.paddingBottom}
+                      colSpan={visibleColumnCount}
+                    />
+                  </>
+                ) : (
+                  tableRows.map((row) => renderBodyRow(row))
+                )
               ) : (
                 <TableRow>
                   <TableCell colSpan={visibleColumnCount} className="h-24 text-center">

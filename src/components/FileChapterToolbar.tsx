@@ -129,6 +129,7 @@ export function FileChapterToolbar({
         label: checkLabel,
         icon: ListChecks,
         checked: checkOpen,
+        closeOnClick: true,
         badge,
         disabled: checkRunning,
         onCheckedChange: onCheckToggle,

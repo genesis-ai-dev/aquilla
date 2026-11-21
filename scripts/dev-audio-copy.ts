@@ -28,7 +28,7 @@
 // `db/shared/media-refs.ts`. One copy of those queries, so "what dev keeps" and
 // "what dev copies" cannot drift apart.
 
-import { classifyKey } from "../db/shared/media-refs"
+import { classifyKey, LOSSLESS_SIBLING_REF_SUFFIX } from "../db/shared/media-refs"
 import type { AquillaDb } from "../db/shim/postgres"
 
 /** Read-only source. Nothing here ever writes to or deletes from this bucket. */
@@ -156,7 +156,7 @@ export function isOwnOriginal(projectId: string, key: string): boolean {
 
 /**
  * The keys a project's referenced media is expected to occupy in prod — the
- * takes, clips and originals themselves, not their sidecars. A `.peaks`
+ * takes, clips and originals themselves, not their sidecars or `.wav` siblings. A `.peaks`
  * waveform or an `.inworld.json` clone cache legitimately may never have been
  * written, so including them here would report healthy projects as missing
  * media; they ride along in `selectReferencedObjects`, which only ever keeps
@@ -164,7 +164,12 @@ export function isOwnOriginal(projectId: string, key: string): boolean {
  */
 export function expectedMediaKeys(projectId: string, refs: ProjectMediaRefs): string[] {
   const keys = new Set<string>()
-  for (const ref of refs.audio) keys.add(audioKey(projectId, ref))
+  for (const ref of refs.audio) {
+    // A take's `.wav` sibling (AQU-2671) may never have been written; like a
+    // sidecar it rides along in `selectReferencedObjects` when it exists.
+    if (ref.endsWith(LOSSLESS_SIBLING_REF_SUFFIX)) continue
+    keys.add(audioKey(projectId, ref))
+  }
   for (const ref of refs.voice) keys.add(voiceKey(projectId, ref))
   for (const key of refs.original) if (isOwnOriginal(projectId, key)) keys.add(key)
   return [...keys].sort()

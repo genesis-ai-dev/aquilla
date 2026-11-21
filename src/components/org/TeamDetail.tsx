@@ -18,12 +18,10 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
 import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
-import { formatScopePath } from "@/lib/access/scope-path"
-import type { GrantOrigin, ScopePath } from "@/lib/access/types"
+import type { GrantOrigin } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -699,11 +697,6 @@ export function TeamDetail() {
     activeOrgId != null && groupIdNum != null
       ? orgPath(activeOrgId, `/teams/${groupIdNum}`)
       : null
-  const teamScopePath: ScopePath = [
-    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
-    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
-  ]
-
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -842,9 +835,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
+                    {/* A team is a group, not a scope level (AQU-2351). The title is its name. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      <ScopeBreadcrumb path={teamScopePath} />
+                      {team.name}
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -1049,7 +1042,7 @@ export function TeamDetail() {
                       mode="add"
                       level="team"
                       callerLevel={callerOrgLevel}
-                      title={t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
+                      title={t("org.access.addPeopleTo", { path: team.name })}
                       summary={t("org.roleDialog.teamAddSummary")}
                       people={{
                         kind: "custom",

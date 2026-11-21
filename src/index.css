@@ -1237,3 +1237,26 @@ textarea,
 @utility role-rung-5-edge { border-color: var(--role-rung-5); }
 @utility role-rung-6-edge { border-color: var(--role-rung-6); }
 @utility role-rung-7-edge { border-color: var(--role-rung-7); }
+
+/*
+ * Dropdown rows stay plain until the keyboard moves the highlight
+ * (data-plain-until-key, set by plain-until-keyboard.tsx). The pointer still
+ * gets the same wash the notification inbox uses. Unlayered so it wins over
+ * the focus / data-highlighted utilities while the popup is held plain.
+ * An open submenu row (data-open / data-popup-open) keeps its path highlight.
+ */
+[data-plain-until-key] :is(
+  [data-slot="menu-item"],
+  [data-slot="menu-checkbox-item"],
+  [data-slot="menu-radio-item"],
+  [data-slot="menu-sub-trigger"],
+  [data-slot="select-item"],
+  [data-slot="combobox-item"],
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"]
+):is(:focus, [data-highlighted]):not(:hover, [data-open], [data-popup-open]) {
+  background-color: transparent;
+  color: inherit;
+}

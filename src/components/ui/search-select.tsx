@@ -147,6 +147,7 @@ export function SearchSelect<O extends SearchSelectOption = SearchSelectOption>(
       inputValue={query}
       onInputValueChange={(next: string) => setQuery(next)}
       autoHighlight
+      highlightItemOnHover={false}
       virtualized
       onValueChange={(option: O | null) => {
         if (option && option.value !== value) onValueChange(option.value)

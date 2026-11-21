@@ -536,7 +536,8 @@ describe("external read surface", () => {
       await testDb.pg.query(
         `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq) VALUES
           ('evt-es', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"mio","laneId":"eslane01"}', 300, 300, NULL, 3),
-          ('evt-fr', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"secret","laneId":"frlane01"}', 400, 400, NULL, 4)`,
+          ('evt-fr', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"secret","laneId":"frlane01"}', 400, 400, NULL, 4),
+          ('evt-old', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"viejo","targetLang":"es"}', 500, 500, NULL, 5)`,
       )
       await testDb.pg.query(
         `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
@@ -555,9 +556,11 @@ describe("external read surface", () => {
         )
         return ((await res!.json()) as { data: Array<{ id: string }> }).data.map((e) => e.id)
       }
-      // evt-2 predates lane ids and fails closed, as on the in-app route.
-      expect(await ids("1")).toEqual(["evt-es", "evt-1"])
-      expect(await ids(undefined)).toEqual(["evt-fr", "evt-es", "evt-2", "evt-1"])
+      // Both evt-old and evt-2 predate lane ids. evt-old names its lane by tag
+      // and is placed on it. evt-2 names none, and this project has no default
+      // lane, so it stays hidden, as on the in-app route.
+      expect(await ids("1")).toEqual(["evt-old", "evt-es", "evt-1"])
+      expect(await ids(undefined)).toEqual(["evt-old", "evt-fr", "evt-es", "evt-2", "evt-1"])
     })
   })
 

@@ -30,6 +30,14 @@ export function completionBatchSizeFor(project: ProjectRecord): number {
   return MAX_BATCH_COMPLETIONS
 }
 
+// AQU-1397: does the Draft window have anything to offer for the open file?
+// `draftable` is the same list the Draft window offers: its empty lines plus
+// its untouched AI drafts to refresh. Both draft entries open that window, so
+// they show only when it has something to do, and not before it is counted.
+function hasDraftable(c: WorkspaceActionContext): boolean {
+  return c.activeFileId != null && (c.draftable ?? 0) > 0
+}
+
 export function getVisibleActions(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
 ): WorkspaceAction[] {
@@ -69,12 +77,8 @@ export const workspaceActions: WorkspaceAction[] = [
   {
     id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
     opensFileModal: "draft-next",
-    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && roleAllows(c, "target.cell.commit"),
-    isDefault: (c) => {
-      if (!c.activeFileId) return false
-      const p = c.fileProgress.get(c.activeFileId)
-      return !!p && p.total > 0 && p.translated < p.total
-    },
+    isAvailable: (c) => hasDraftable(c) && !c.audioOnlyLane && roleAllows(c, "target.cell.commit"),
+    isDefault: hasDraftable,
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.runCompletions.title",
       description: (c, t) => {
@@ -97,12 +101,7 @@ export const workspaceActions: WorkspaceAction[] = [
   {
     id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
     opensFileModal: "draft-all",
-    isAvailable: (c) => {
-      if (!c.activeFileId || c.audioOnlyLane) return false
-      if (!roleAllows(c, "target.cell.commit")) return false
-      const p = c.fileProgress.get(c.activeFileId)
-      return !!p && p.total > 0 && p.translated < p.total
-    },
+    isAvailable: (c) => hasDraftable(c) && !c.audioOnlyLane && roleAllows(c, "target.cell.commit"),
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.completeAll.title",
       description: (c, t) => {

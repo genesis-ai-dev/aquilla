@@ -723,6 +723,28 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "source-column text region inside the cell editor. A mapping-field label " +
     "and an accessibility name for an existing pane serve different purposes " +
     "and different audiences (sighted vs. screen-reader users).",
+  // AQU-2710: Command-K's side tabs reuse two English phrases that already
+  // have a reviewed split. Each tab is its own grammatical role, so excusing
+  // the older keys must not drag the new labels onto them.
+  "search.side.sourceText":
+    "One-or-two-word tab in the Command-K dialog, and the label above each " +
+    "source hit, paired with the one-word 'Translation' tab. " +
+    "editor.source.textAria is the screen-reader name of the source column " +
+    "and can grow into a fuller phrase. importExport.paratext.sourceTextTitle " +
+    "is the choice-card heading for importing a file as source, and " +
+    "importExport.columnMapping.sourceColumnLabel is the spreadsheet mapping " +
+    "field. Thai and Myanmar already translate those two import labels " +
+    "differently, and a language that shortens a tab beside 'Translation' " +
+    "while spelling out a column name or an import choice needs this one apart.",
+  "search.side.translation":
+    "One-word tab in the Command-K dialog, and the label above each written " +
+    "hit, paired with 'Source text' — the side being written, not a file kind " +
+    "and not one stored rendering. importExport.upload.categoryTranslation is " +
+    "the upload picker's file category beside 'Source' and 'Audio' (Simplified " +
+    "Chinese '翻译'). terminology.livingMemory.translationAria names one stored " +
+    "translation in living memory and may take a deictic form (Simplified " +
+    "Chinese '译文'). Sharing either key would let an upload-category edit or " +
+    "an instance name rewrite this tab.",
 
   // -- AQU-832 (Monday.com integration wave) -----------------------------
   "projectSettings.monday.orgSettingsLinkText":

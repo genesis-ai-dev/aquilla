@@ -1,4 +1,4 @@
--- 0206_cell_audio_loudness.sql — AQU-2664: evening out the loudness of takes,
+-- 0207_cell_audio_loudness.sql — AQU-2664: evening out the loudness of takes,
 -- non-destructively.
 --
 -- Two facts on the clip, beside its volume (0193):

@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { OrgMembersTable } from "@/components/org/OrgMembersTable"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { DataTablePanelSkeleton } from "@/components/ui/data-table"
@@ -196,7 +197,9 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     <MembersShell>
       <Page size="wide">
       <PageHeader
-        title={t("editor.navTitle.members")}
+        title={
+          <ScopeBreadcrumb path={[{ type: "org", id: String(orgId), name: orgName }]} />
+        }
         description={t("org.membersPage.orgPage.description")}
         inset={false}
       />

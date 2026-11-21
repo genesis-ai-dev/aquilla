@@ -13,7 +13,7 @@ import { formatScopePath } from "@/lib/access/scope-path"
 import type { ScopePath } from "@/lib/access/types"
 import { ALL_ROLE_LEVELS } from "@/lib/frontier/roles"
 
-import { PlaceBreadcrumb } from "./PlaceBreadcrumb"
+import { ScopeBreadcrumb } from "./ScopeBreadcrumb"
 import { RoleBadge } from "./RoleBadge"
 
 const org = { type: "org" as const, id: "o1", name: "Biblica ETT" }
@@ -61,7 +61,7 @@ describe("RoleBadge — the role ladder", () => {
 
   it("draws an inherited grant as a dashed pill naming its place, linked to it", () => {
     render(<RoleBadge roleLevel={400} origin={{ kind: "inherited", from: teamPath }} hrefFor={accessNodeHref} />)
-    expect(badge().textContent).toBe(`Contributor · via ${formatScopePath(teamPath)}`)
+    expect(badge().textContent).toBe("Contributor · via team biblica/pattani-malay")
     expect(badge().className).toContain("border-dashed")
     expect(badge().className).toContain("role-rung-4-edge")
     // The rung lives in the dashed edge here; the ink stays the theme's own pair.
@@ -90,32 +90,36 @@ describe("RoleBadge — the role ladder", () => {
   })
 })
 
-describe("PlaceBreadcrumb", () => {
+describe("ScopeBreadcrumb icons", () => {
   it.each([
     ["1 deep", [org] as ScopePath],
     ["2 deep", [org, team] as ScopePath],
     ["3 deep", [org, team, project] as ScopePath],
     ["4 deep", [org, team, project, lane] as ScopePath],
   ])("reads byte-identical to formatScopePath, %s", (_name, path) => {
-    const { container } = render(<PlaceBreadcrumb path={path} />)
+    const { container } = render(<ScopeBreadcrumb path={path} icons />)
     expect(container.textContent).toBe(formatScopePath(path))
   })
 
-  it("carries one icon per kind of place", () => {
-    const { container } = render(<PlaceBreadcrumb path={[org, team, project, lane]} />)
+  it("draws a place icon for each tree crumb, and for a team that is the whole path", () => {
+    const { container, unmount } = render(<ScopeBreadcrumb path={[org, team, project, lane]} icons />)
     expect([...container.querySelectorAll("[data-place-icon]")].map((n) => n.getAttribute("data-place-icon")))
-      .toEqual(["org", "team", "project", "lane"])
+      .toEqual(["org", "project", "lane"])
+    unmount()
+    const teamOnly = render(<ScopeBreadcrumb path={[team]} icons />)
+    expect([...teamOnly.container.querySelectorAll("[data-place-icon]")].map((n) => n.getAttribute("data-place-icon")))
+      .toEqual(["team"])
   })
 
   it("links ancestors but not the place itself", () => {
-    render(<PlaceBreadcrumb path={[org, team, project]} hrefFor={accessNodeHref} />)
+    render(<ScopeBreadcrumb path={[org, team, project]} icons hrefFor={accessNodeHref} />)
     expect(screen.getByRole("link", { name: org.name })).toHaveAttribute("href", `#${accessNodeId(org)}`)
     expect(screen.queryByRole("link", { name: project.name })).toBeNull()
   })
 
   it("collapses ancestors the viewer cannot see into one ellipsis crumb", () => {
-    const { container } = render(<PlaceBreadcrumb path={[hiddenOrg, project]} />)
+    const { container } = render(<ScopeBreadcrumb path={[hiddenOrg, project]} icons />)
     expect(container.textContent).toBe(`… › ${project.name}`)
-    expect(screen.getByTestId("place-hidden-ancestors")).toBeTruthy()
+    expect(screen.getByTestId("scope-hidden-ancestors")).toBeTruthy()
   })
 })

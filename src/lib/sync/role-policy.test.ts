@@ -17,7 +17,12 @@ import {
   resolveImportFloor,
   canImportSourceFiles,
   importDenialFloor,
+  DEFAULT_EXPORT_MIN_ROLE,
+  resolveExportFloor,
+  canDownloadOriginals,
 } from "./role-policy"
+import { denialMessage, type DenialT } from "@/lib/permissions/denial"
+import { translate } from "@/lib/i18n/translate"
 
 describe("role-policy (client mirror)", () => {
   it("mirrors the server's required roles for the kinds that broke in prod", () => {
@@ -536,5 +541,59 @@ describe("canSetTrackVolume", () => {
 
   it("leaves the track's other settings at the maintainer floor", () => {
     expect(canPerform("file.track.set", ROLE.CONTRIBUTOR)).toBe(false)
+    })
+  })
+
+// AQU-2476: the export floor the original-download routes actually apply.
+// `canExport` treats an unset floor as no gate; these do not.
+const denialT: DenialT = (key, vars) => translate(undefined, key, vars)
+
+describe("resolveExportFloor", () => {
+  it("keeps an in-range org value, lowered or raised", () => {
+    expect(resolveExportFloor(ROLE.CONTRIBUTOR)).toBe(ROLE.CONTRIBUTOR)
+    expect(resolveExportFloor(ROLE.MAINTAINER)).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(ROLE.OWNER)).toBe(ROLE.OWNER)
+  })
+
+  it("reads unset, non-numeric, or off-ladder as Maintainer — including not-read-yet", () => {
+    expect(DEFAULT_EXPORT_MIN_ROLE).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(undefined)).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(null)).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(NaN)).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(-1)).toBe(ROLE.MAINTAINER)
+    expect(resolveExportFloor(9999)).toBe(ROLE.MAINTAINER)
+    // A string stored in the JSON is the server's non-numeric case.
+    expect(resolveExportFloor("owner" as unknown as number)).toBe(ROLE.MAINTAINER)
+  })
+})
+
+describe("canDownloadOriginals", () => {
+  it("refuses a Contributor when the org never set a floor", () => {
+    expect(canDownloadOriginals(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canDownloadOriginals(ROLE.CONTRIBUTOR, null)).toBe(false)
+    expect(canDownloadOriginals(ROLE.PROJECT_LEAD, undefined)).toBe(false)
+    expect(canDownloadOriginals(ROLE.MAINTAINER, null)).toBe(true)
+    expect(canDownloadOriginals(ROLE.OWNER)).toBe(true)
+  })
+
+  it("follows a floor the org lowered or raised", () => {
+    expect(canDownloadOriginals(ROLE.CONTRIBUTOR, ROLE.CONTRIBUTOR)).toBe(true)
+    expect(canDownloadOriginals(ROLE.REVIEWER, ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canDownloadOriginals(ROLE.MAINTAINER, ROLE.OWNER)).toBe(false)
+    expect(canDownloadOriginals(ROLE.OWNER, ROLE.OWNER)).toBe(true)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    expect(canDownloadOriginals(null, null)).toBe(true)
+    expect(canDownloadOriginals(undefined, ROLE.OWNER)).toBe(true)
+  })
+
+  it("names the effective floor in the shared denial line", () => {
+    const unset = denialMessage(denialT, resolveExportFloor(null), ROLE.CONTRIBUTOR)
+    expect(unset).toContain("Contributors cannot perform this action")
+    expect(unset).toContain("at least Maintainer access")
+    const raised = denialMessage(denialT, resolveExportFloor(ROLE.OWNER), ROLE.MAINTAINER)
+    expect(raised).toContain("Maintainers cannot perform this action")
+    expect(raised).toContain("at least Owner access")
   })
 })

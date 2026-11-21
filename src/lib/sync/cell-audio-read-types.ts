@@ -42,7 +42,7 @@ export interface AudioAttachmentOut {
   gainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
-  /** AQU-2664 (0206): the recording's loudness (LUFS) and true peak (dBTP),
+  /** AQU-2664 (0207): the recording's loudness (LUFS) and true peak (dBTP),
    *  measured once; and the target it is evened out to. Absent = none. */
   loudnessLufs?: number | null
   truePeakDb?: number | null

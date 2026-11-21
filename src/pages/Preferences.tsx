@@ -582,6 +582,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   const { t } = useI18n()
   const navigate = useNavigate()
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
+  const location = useLocation()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section || (section.tauriOnly && !isTauriRuntime())) return <Navigate to="/preferences" replace />
@@ -594,6 +595,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
         <EmptyState variant="inline" icon={UserRound}
           title={t("auth.settings.loginRequired")}
           description={t("auth.settings.loginDescription")}
+          action={modal && slug === "login-methods" ? <Button onClick={() => navigate(`/login?next=${encodeURIComponent(location.pathname + location.search)}`)}>{t("common.logIn")}</Button> : undefined}
         />}
     </div>
     return modal ? content : <AppShell sidebar={<OrgSidebar />}
@@ -602,11 +604,14 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   }
   if (modal) {
     // In the route-modal there is no breadcrumb, so the BackLink is the way
-    // back to the index; it pops history to keep the dialog's depth intact.
+    // back to the index. A direct link has no Preferences entry to pop.
     return (
       <Page>
         <div className="space-y-6">
-          <BackLink to="/preferences" onClick={() => navigate(-1)} label={t("nav.account.preferences")} />
+          <BackLink label={t("nav.account.preferences")} onClick={() => {
+            if (location.state?.preferencesModalDepth === 2) navigate(-1)
+            else navigate("/preferences", { replace: true, state: location.state })
+          }} />
           <PageHeader title={t(section.titleKey)} description={sectionDescription(section, t(section.descriptionKey))} />
           {section.render()}
         </div>
@@ -644,8 +649,7 @@ export function Preferences() {
   )
 }
 
-/** Route-modal presentation used by in-app entry points. Direct URLs continue
- * to render the full-page Preferences surface above. */
+/** Used by in-app Preferences navigation and direct Login methods links. */
 export function PreferencesDialog() {
   const { t } = useI18n()
   const { section } = useParams<{ section?: string }>()
@@ -658,7 +662,11 @@ export function PreferencesDialog() {
   const backgroundLocation = modalState?.backgroundLocation
   const modalDepth = modalState?.preferencesModalDepth ?? 1
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
+    <Dialog open onOpenChange={(open) => {
+      if (open) return
+      if (backgroundLocation) navigate(-modalDepth)
+      else navigate("/orgs/all", { replace: true })
+    }}>
       <DialogContent
         className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
         data-testid="preferences-dialog"

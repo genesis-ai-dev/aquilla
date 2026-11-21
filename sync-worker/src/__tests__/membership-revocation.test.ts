@@ -214,19 +214,19 @@ describe('AQU-346 — membership re-check on POST /events', () => {
 })
 
 describe('AQU-1787 — the write perimeter resolves through the shared role resolver', () => {
-  // The Biblica ETT shape: org role Project Lead (500), the project reached
-  // ONLY through a team attached at Contributor (400), no direct
-  // project_members row. AQU-1274 taught the mint-side resolver that the org
-  // role contributes here, so the token claims 500; the write perimeter's own
-  // SQL still resolved 400 and the downgrade gate 403'd every write.
+  // The Biblica ETT shape after migration 0210 (AQU-2352): the org role is
+  // Member (100), the team is attached at Contributor (400), and the Project
+  // Lead (500) the AQU-1274 lift used to give is a direct project row. The
+  // token claims 500 and the write perimeter resolves 500.
   const teamOnlyOrgLeadFixture = () => ({
     projects: [projectRow({ org_id: 5 })],
-    org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
+    org_members: [{ org_id: 5, user_id: 1, role_level: 100 }],
     group_members: [{ group_id: 7, user_id: 1 }],
     group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+    project_members: [{ project_id: PROJECT, user_id: 1, role_level: 500 }],
   })
 
-  it('accepts a target-cell write from an org Project Lead reaching the project only through a Contributor team', async () => {
+  it('accepts a target-cell write from a former org Project Lead holding the direct grant 0210 wrote', async () => {
     const { db } = await makeTestDb(teamOnlyOrgLeadFixture())
     const result = await post(db, [commitEvent('evt-1787-cell', 1)], await tokenFor(1, { role: 500 }))
     expect(result.rejected).toHaveLength(0)
@@ -240,6 +240,22 @@ describe('AQU-1787 — the write perimeter resolves through the shared role reso
     expect(result.accepted.map((a) => a.id)).toContain('evt-1787-cmt')
   })
 
+  it('AQU-2352: an org Project Lead row left at 500 no longer lifts the team path', async () => {
+    // Without 0210's direct row the live role is the team's 400, so a token
+    // minted at 500 under the old lift reads as a downgrade until it is
+    // refreshed. This is why 0210 runs before the code (DEPLOY ORDER).
+    const { db } = await makeTestDb({
+      projects: [projectRow({ org_id: 5 })],
+      org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
+      group_members: [{ group_id: 7, user_id: 1 }],
+      group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
+    })
+    const result = await post(db, [commitEvent('evt-2352-nolift', 1)], await tokenFor(1, { role: 500 }))
+    expect(result.rejected).toEqual([
+      { id: 'evt-2352-nolift', status: 403, reason: 'role downgraded since token was issued' },
+    ])
+  })
+
   it('still rejects a genuine downgrade of a DIRECT project role (the AQU-1331 gate is intact)', async () => {
     const { db } = await makeTestDb({
       projects: [projectRow()],
@@ -249,19 +265,6 @@ describe('AQU-1787 — the write perimeter resolves through the shared role reso
     expect(result.accepted).toHaveLength(0)
     expect(result.rejected).toEqual([
       { id: 'evt-1787-down', status: 403, reason: 'role downgraded since token was issued' },
-    ])
-  })
-
-  it('an explicit lower DIRECT row still restricts someone below their org role (AQU-1274 rule 2)', async () => {
-    // Same org/team shape, but with a deliberate per-person grant at Viewer:
-    // the org path must NOT lift it, so a token claiming 500 is a downgrade.
-    const { db } = await makeTestDb({
-      ...teamOnlyOrgLeadFixture(),
-      project_members: [{ project_id: PROJECT, user_id: 1, role_level: 100 }],
-    })
-    const result = await post(db, [commitEvent('evt-1787-direct-floor', 1)], await tokenFor(1, { role: 500 }))
-    expect(result.rejected).toEqual([
-      { id: 'evt-1787-direct-floor', status: 403, reason: 'role downgraded since token was issued' },
     ])
   })
 
@@ -296,13 +299,19 @@ describe('AQU-1787 — the write perimeter resolves through the shared role reso
       expected: 600,
     },
     {
-      name: 'org sub-Maintainer + team (AQU-1787)',
+      // AQU-2352: no lift — the team's role is the role.
+      name: 'org sub-Maintainer + team (AQU-1787, AQU-2352)',
       seed: {
         projects: [projectRow({ org_id: 5 })],
         org_members: [{ org_id: 5, user_id: 1, role_level: 500 }],
         group_members: [{ group_id: 7, user_id: 1 }],
         group_project_grants: [{ group_id: 7, project_id: PROJECT, role_level: 400 }],
       },
+      expected: 400,
+    },
+    {
+      name: 'org Member + team + the direct row 0210 wrote',
+      seed: teamOnlyOrgLeadFixture(),
       expected: 500,
     },
     {

@@ -192,7 +192,7 @@ describe('org membership — validation', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: '   ', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: '   ', role: 100 },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
@@ -202,7 +202,7 @@ describe('org membership — validation', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
       { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
@@ -214,7 +214,7 @@ describe('org membership — validation', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'nobody', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'nobody', role: 100 },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
@@ -226,7 +226,7 @@ describe('org membership — validation', () => {
     const token = await ownerToken(tdb)
     await seedMember(tdb, 2, 400)
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 500 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 600 },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
@@ -237,11 +237,26 @@ describe('org membership — validation', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { res, body } = await prepare(env, token, [
-      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'bob', role: 500 },
+      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'bob', role: 600 },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
     expect(body.error.message).toContain('not a member')
+  })
+
+  // AQU-2352 (D-j): an org role is Member, Maintainer or Owner.
+  it('refuses an org role at 200–500, naming the allowed roles', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await ownerToken(tdb)
+    for (const role of [200, 300, 400, 500]) {
+      const { res, body } = await prepare(env, token, [
+        { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role },
+      ])
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expect(JSON.stringify(body.error)).toContain('100, 600, 700')
+    }
+    expect(await orgMemberRows(tdb)).not.toContainEqual(expect.objectContaining({ user_id: '2' }))
   })
 })
 
@@ -253,7 +268,7 @@ describe('AddOrgMember — happy path', () => {
     const token = await ownerToken(tdb) // act-mode credential
 
     const { body: prep } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     expect(prep.changeset.status).toBe('staged')
     // Forced ask regardless of the act credential — staffing an org always
@@ -263,7 +278,7 @@ describe('AddOrgMember — happy path', () => {
     // The approval page's plain-language facts: who, which org, what role.
     expect(prep.changeset.summary.command).toBe('AddOrgMember')
     expect(prep.changeset.summary.orgMemberUsername).toBe('bob')
-    expect(prep.changeset.summary.orgMemberNewRole).toBe('contributor')
+    expect(prep.changeset.summary.orgMemberNewRole).toBe('member')
     expect(prep.changeset.summary.orgMemberCurrentRole).toBe('not a member')
     expect(prep.changeset.summary.targetOrg).toContain('Acme')
 
@@ -358,7 +373,7 @@ describe('org membership — escalation gates', () => {
       orgId: String(ORG_ID), projectId: null,
     })
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('permission_denied')
@@ -376,7 +391,7 @@ describe('org membership — escalation gates', () => {
     })
     await seedUser(tdb, 1, 'alice')
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('permission_denied')
@@ -391,7 +406,7 @@ describe('org membership — escalation gates', () => {
       orgId: null, projectId: 'some-project',
     })
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('scope_denied')
@@ -406,7 +421,7 @@ describe('org membership — escalation gates', () => {
       orgId: '999', projectId: null,
     })
     const { res, body } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('scope_denied')
@@ -478,7 +493,7 @@ describe('org membership — escalation gates', () => {
       orgId: String(ORG_ID), projectId: null,
     })
     const { res, body } = await prepare(env, token, [
-      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'alice', role: 400 },
+      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'alice', role: 100 },
     ])
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('permission_denied')
@@ -487,7 +502,7 @@ describe('org membership — escalation gates', () => {
     // A NON-owner-row owner is still demotable — the guard is precise, not a
     // blanket "owners are frozen".
     const other = await prepare(env, token, [
-      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'dave', role: 400 },
+      { kind: 'SetOrgRole', orgId: ORG_ID, username: 'dave', role: 100 },
     ])
     expect(other.res.status).toBe(400) // dave does not exist; the gate got that far
   })
@@ -496,7 +511,7 @@ describe('org membership — escalation gates', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { body: prep } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     await approve(tdb, prep.changeset.id, prep.digest, 1, OWNER_CRED)
 
@@ -513,7 +528,7 @@ describe('org membership — escalation gates', () => {
     const env = makeEnv(tdb.db)
     const token = await ownerToken(tdb)
     const { body: prep } = await prepare(env, token, [
-      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
+      { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 100 },
     ])
     await approve(tdb, prep.changeset.id, prep.digest, 1, OWNER_CRED)
 

@@ -27,8 +27,6 @@ export interface OrgRoleExtras {
   rosterFloors: Map<number, number>
   /** Unused org invites (expired ones included; their row is still accepted-checked). */
   pendingOrgInvites: Array<{ token: string; org_id: number; role_level: number; email: string | null; expired: boolean }>
-  /** `lane` → team_group_id for lane-grant rows, `${project}:${user}:${lane}`. */
-  laneGrantTeams: Map<string, number | null>
   /** When each org was created and when each org row was granted, for the cross-check. */
   orgCreatedAt: Map<number, string | null>
   orgMemberGrantedAt: Map<string, string | null>
@@ -120,11 +118,15 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
       const team = idx.teamRole.get(k)
       if (team == null || c.from <= team) continue
       const grants = idx.grants.get(k) ?? new Map<string, number>()
+      const rowTeam = new Map(
+        raw.laneGrants
+          .filter((g) => g.project_id === p.id && Number(g.user_id) === c.userId)
+          .map((g) => [g.lane, g.team_group_id ?? null]),
+      )
       const lanes: LaneFix[] = []
       for (const lane of idx.lanesByProject.get(p.id) ?? []) {
         const grant = grants.get(lane.id)
         if (grant == null || grant < VIEWER) continue
-        const rowTeam = extras.laneGrantTeams.get(`${p.id}:${c.userId}:${lane.id}`) ?? null
         lanes.push({
           laneId: lane.id,
           archived: lane.archived,
@@ -133,7 +135,7 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
           // Without the fix the project role is the team attachment's.
           laneRoleWithoutFix: laneRole(team, grant)!,
           grantAfter: Math.max(grant, c.from),
-          becomesDirect: rowTeam != null,
+          becomesDirect: (rowTeam.get(lane.id) ?? null) != null,
         })
       }
       const teamLevel = team
@@ -172,6 +174,7 @@ export function applyPlanToRaw(raw: RawAccessTables, plan: OrgRolesPlan): RawAcc
   for (const pair of plan.lifted) {
     for (const l of pair.lanes) laneTo.set(`${pair.projectId}:${pair.userId}:${l.laneId}`, l.grantAfter)
   }
+  // Every target-lane row of a lifted pair becomes direct (team_group_id NULL).
   return {
     ...raw,
     orgMembers: raw.orgMembers.map((m) => {
@@ -184,7 +187,7 @@ export function applyPlanToRaw(raw: RawAccessTables, plan: OrgRolesPlan): RawAcc
     ],
     laneGrants: raw.laneGrants.map((g) => {
       const to = laneTo.get(`${g.project_id}:${g.user_id}:${g.lane}`)
-      return to == null ? g : { ...g, role_level: to }
+      return to == null ? g : { ...g, role_level: to, team_group_id: null }
     }),
   }
 }
@@ -266,17 +269,6 @@ export async function loadOrgRoleExtras(db: ReadQuery): Promise<OrgRoleExtras> {
     email: (r.email as string | null) ?? null,
     expired: r.expired === true || r.expired === "t",
   }))
-  const laneGrantTeams = new Map<string, number | null>()
-  const hasTeamCol = (
-    await db.query(
-      `SELECT 1 FROM information_schema.columns WHERE table_name = 'project_member_lane_roles' AND column_name = 'team_group_id'`,
-    )
-  ).rows.length > 0
-  if (hasTeamCol) {
-    for (const r of (await db.query(`SELECT project_id, user_id, lane, team_group_id FROM project_member_lane_roles WHERE team_group_id IS NOT NULL`)).rows) {
-      laneGrantTeams.set(`${r.project_id}:${Number(r.user_id)}:${r.lane}`, Number(r.team_group_id))
-    }
-  }
   const orgCreatedAt = new Map<number, string | null>()
   for (const r of (await db.query(`SELECT id, created_at FROM organizations`)).rows) {
     orgCreatedAt.set(Number(r.id), r.created_at == null ? null : new Date(r.created_at as string).toISOString())
@@ -285,5 +277,5 @@ export async function loadOrgRoleExtras(db: ReadQuery): Promise<OrgRoleExtras> {
   for (const r of (await db.query(`SELECT org_id, user_id, granted_at FROM org_members`)).rows) {
     orgMemberGrantedAt.set(`${Number(r.org_id)}:${Number(r.user_id)}`, r.granted_at == null ? null : new Date(r.granted_at as string).toISOString())
   }
-  return { rosterFloors, pendingOrgInvites, laneGrantTeams, orgCreatedAt, orgMemberGrantedAt }
+  return { rosterFloors, pendingOrgInvites, orgCreatedAt, orgMemberGrantedAt }
 }

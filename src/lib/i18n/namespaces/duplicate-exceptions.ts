@@ -36,6 +36,14 @@
  * longer collides). The 10 that remain are genuine meaning splits.
  */
 export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
+  "org.teamsList.memberBadge":
+    "AQU-2352: a STATUS BADGE on a team row saying the reader belongs to that " +
+    "team. common.role.member is now the NAME OF A ROLE (the lowest " +
+    "organization role, count-governed Member / Members, shown in pickers " +
+    "beside Maintainer and Owner), and org.membersMatrixView.memberColumnHeader " +
+    "heads a column of people. A 'you are in this' marker and a role title are " +
+    "different words in most target languages (a participle or 'joined' " +
+    "against a titled noun), so the badge cannot share the role's translation.",
   "importExport.dialog.characterPreviewHeading":
     "Noun heading over the list of characters an audio export will produce — " +
     "'the preview', a thing on screen. common.preview is the imperative button " +

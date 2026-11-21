@@ -64,7 +64,7 @@ export interface AddOrgMemberCommand {
   orgId: string | number
   /** Target user's username (trimmed; resolved case-insensitively). */
   username: string
-  /** Canonical org role level (100…700), capped at the caller's own level. */
+  /** Org role level: Member 100, Maintainer 600 or Owner 700 (AQU-2352), capped at the caller's own level. */
   role: number
 }
 

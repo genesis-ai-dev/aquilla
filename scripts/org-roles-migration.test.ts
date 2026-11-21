@@ -118,7 +118,8 @@ describe("AQU-2352 dry run and migration 0210", () => {
     expect(sorted(after.orgMembers, om)).toEqual(sorted(expected.orgMembers, om))
     expect(sorted(after.projectMembers, pm)).toEqual(sorted(expected.projectMembers, pm))
     expect(sorted(after.laneGrants, lg)).toEqual(sorted(expected.laneGrants, lg))
-    // Every lane row of a lifted pair is direct now; the source-lane row was not touched.
+    // Every target-lane row of a lifted pair is direct now (team_group_id NULL,
+    // also checked by the laneGrants comparison above); the source-lane row was not touched.
     const teams = (await db.query<{ k: string; team_group_id: number | null; role_level: number }>(
       "SELECT project_id || ':' || user_id || ':' || lane AS k, team_group_id, role_level FROM project_member_lane_roles ORDER BY 1",
     )).rows

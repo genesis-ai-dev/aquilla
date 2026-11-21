@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react"
+import { createContext, useContext, useState, type ReactNode } from "react"
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
 import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice"
 import { Trash2, GitMerge, ShieldUser } from "lucide-react"
@@ -107,7 +108,68 @@ const BADGE_CLASSES: Record<string, string> = {
   C: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
 }
 
-export function MembersMatrixCellEditor({
+/** What a populated cell hands the matrix's one role popover when it opens. */
+interface CellPopoverPayload {
+  cell: MatrixCell
+  userId: number
+  username: string
+  projectId: string
+  callerLevel: number | null
+  secondarySources: SecondarySrc[]
+  onMutated: () => Promise<void> | void
+  /** Opens this cell's RoleDialog (the popover closes first). */
+  onOpenDialog: () => void
+}
+
+type CellPopoverHandle = PopoverPrimitive.Handle<CellPopoverPayload>
+
+const CellPopoverHandleContext = createContext<CellPopoverHandle | null>(null)
+
+/**
+ * AQU-2655: one role popover for every cell inside it. The matrix is members ×
+ * projects cells, and a closed popover root in each populated one was a large
+ * share of what a cell rendered. Inside this provider a cell renders only its
+ * trigger — a detached trigger of the one root here, carrying that cell.
+ */
+export function MembersMatrixCellPopoverProvider({ children }: { children: ReactNode }) {
+  const [handle] = useState<CellPopoverHandle>(() => PopoverPrimitive.createHandle<CellPopoverPayload>())
+  return (
+    <CellPopoverHandleContext.Provider value={handle}>
+      {children}
+      <Popover handle={handle}>
+        {({ payload }) => {
+          const target = payload as CellPopoverPayload | undefined
+          return target ? (
+            <PopoverContent className="w-64 p-2" side="bottom">
+              {/* Mounts on each open (the popup unmounts when it closes), so a
+                  cell's remove state starts clean every time. */}
+              <CellPopoverPanel
+                key={`${target.userId}:${target.projectId}`}
+                {...target}
+                onClose={() => handle.close()}
+              />
+            </PopoverContent>
+          ) : null
+        }}
+      </Popover>
+    </CellPopoverHandleContext.Provider>
+  )
+}
+
+export function MembersMatrixCellEditor(props: CellEditorProps) {
+  const handle = useContext(CellPopoverHandleContext)
+  if (!handle) {
+    // On its own (outside the matrix's provider) a cell brings its own root.
+    return (
+      <MembersMatrixCellPopoverProvider>
+        <MembersMatrixCellEditor {...props} />
+      </MembersMatrixCellPopoverProvider>
+    )
+  }
+  return <CellEditorCell {...props} handle={handle} />
+}
+
+function CellEditorCell({
   cell,
   userId,
   username,
@@ -120,7 +182,8 @@ export function MembersMatrixCellEditor({
   sourceBadge,
   secondarySources = [],
   footer,
-}: CellEditorProps) {
+  handle,
+}: CellEditorProps & { handle: CellPopoverHandle }) {
   const t = useT()
   const { locale } = useI18n()
   const { session } = useFrontierSession()
@@ -129,35 +192,15 @@ export function MembersMatrixCellEditor({
     projectName: grantProjectName(t, projectName),
     lanes: grantLanes,
   }
-  const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   // AQU-2654: the matrix is members × projects cells, and a closed RoleDialog
   // in each one was most of what a cell rendered. The dialog mounts the first
   // time this cell opens it and then stays, so closing still animates out.
   const [dialogMounted, setDialogMounted] = useState(false)
-  const [removing, setRemoving] = useState(false)
-  const [removeError, setRemoveError] = useState<string | null>(null)
   // Only an add of someone new asks for Language lanes; load them then.
   const { lanes: targetLanes } = useCurrentTargetLanes(!cell && dialogOpen ? projectId : null)
 
   const source = cell?.role.source
-  const isImmutable =
-    source === "creator" || source === "group" || source === "org"
-  const canEdit = !isImmutable && Boolean(session?.jwt)
-  const block = cell
-    ? roleChangeBlock({
-        callerLevel,
-        targetLevel: cell.role.level,
-        isSelf: session?.username != null && session.username === username,
-        isLocked: false,
-      })
-    : null
-  const blockNote =
-    block === "caller-below-floor"
-      ? t("projectSettings.members.roleChangeNeedsRole", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })
-      : block === "target-outranks-caller"
-        ? t("projectSettings.members.roleChangeOutranked")
-        : null
 
   /** Saves through the dialog, which shows a failure and stays open. */
   async function grant(level: number, laneAccess?: MemberLaneAccess) {
@@ -179,29 +222,9 @@ export function MembersMatrixCellEditor({
     await onMutated()
   }
 
-  async function removeFromProject() {
-    if (!session?.jwt) return
-    setRemoving(true)
-    setRemoveError(null)
-    try {
-      await removeProjectMember(session.jwt, projectId, userId)
-      await onMutated()
-      setOpen(false)
-    } catch (e) {
-      setRemoveError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRemoving(false)
-    }
-  }
-
   function showDialog() {
     setDialogMounted(true)
     setDialogOpen(true)
-  }
-
-  function openDialog() {
-    setOpen(false)
-    showDialog()
   }
 
   const dialog = !dialogMounted ? null : (
@@ -245,50 +268,122 @@ export function MembersMatrixCellEditor({
     )
   }
 
+  const payload: CellPopoverPayload = {
+    cell,
+    userId,
+    username,
+    projectId,
+    callerLevel,
+    secondarySources,
+    onMutated,
+    onOpenDialog: showDialog,
+  }
+
   // Populated cell — render colored badge with role label. Click opens the
   // cell's popover (always — even for immutable cells, where the popover
   // shows the explanation).
   return (
     <TableCell className={`border-s p-0 ${cellClassName}`}>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-              <button
-                type="button"
-                className="block w-full px-2 py-1.5 text-start text-[11px] hover:bg-muted/30"
-                aria-label={t("org.membersMatrixCellEditor.editRoleAriaLabel", { username })}
-              />
-          }
-        >
-          <div className="flex items-center justify-between gap-1">
-            <RoleLabel name={cell.role.name} className="truncate" />
-            <div className="flex items-center gap-0.5 shrink-0">
-              {/* AQU-2260: these two marks say nothing on hover. The cell is
-                  itself the button, so what they stand for is in the popover
-                  it opens: the legend above the table names each letter, and
-                  the other access paths are listed under the role picker. */}
-              {sourceBadge && (
-                <span
-                  aria-hidden
-                  className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold ${
-                    BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {sourceBadge}
-                </span>
-              )}
-              {secondarySources.length > 0 && (
-                <span
-                  aria-hidden
-                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground"
-                >
-                  <GitMerge className="h-2.5 w-2.5" />
-                </span>
-              )}
-            </div>
+      <PopoverTrigger
+        handle={handle}
+        payload={payload}
+        render={
+            <button
+              type="button"
+              className="block w-full px-2 py-1.5 text-start text-[11px] hover:bg-muted/30"
+              aria-label={t("org.membersMatrixCellEditor.editRoleAriaLabel", { username })}
+            />
+        }
+      >
+        <div className="flex items-center justify-between gap-1">
+          <RoleLabel name={cell.role.name} className="truncate" />
+          <div className="flex items-center gap-0.5 shrink-0">
+            {/* AQU-2260: these two marks say nothing on hover. The cell is
+                itself the button, so what they stand for is in the popover
+                it opens: the legend above the table names each letter, and
+                the other access paths are listed under the role picker. */}
+            {sourceBadge && (
+              <span
+                aria-hidden
+                className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold ${
+                  BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
+                }`}
+              >
+                {sourceBadge}
+              </span>
+            )}
+            {secondarySources.length > 0 && (
+              <span
+                aria-hidden
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground"
+              >
+                <GitMerge className="h-2.5 w-2.5" />
+              </span>
+            )}
           </div>
-        </PopoverTrigger>
-        <PopoverContent className="w-64 p-2" side="bottom">
+        </div>
+      </PopoverTrigger>
+      {dialog}
+      {footer}
+    </TableCell>
+  )
+}
+
+/** The open role popover of one populated cell. */
+function CellPopoverPanel({
+  cell,
+  userId,
+  username,
+  projectId,
+  callerLevel,
+  secondarySources,
+  onMutated,
+  onOpenDialog,
+  onClose,
+}: CellPopoverPayload & { onClose: () => void }) {
+  const t = useT()
+  const { session } = useFrontierSession()
+  const [removing, setRemoving] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+
+  const isImmutable =
+    cell.role.source === "creator" || cell.role.source === "group" || cell.role.source === "org"
+  const canEdit = !isImmutable && Boolean(session?.jwt)
+  const block = roleChangeBlock({
+    callerLevel,
+    targetLevel: cell.role.level,
+    isSelf: session?.username != null && session.username === username,
+    isLocked: false,
+  })
+  const blockNote =
+    block === "caller-below-floor"
+      ? t("projectSettings.members.roleChangeNeedsRole", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })
+      : block === "target-outranks-caller"
+        ? t("projectSettings.members.roleChangeOutranked")
+        : null
+
+  async function removeFromProject() {
+    if (!session?.jwt) return
+    setRemoving(true)
+    setRemoveError(null)
+    try {
+      await removeProjectMember(session.jwt, projectId, userId)
+      await onMutated()
+      onClose()
+    } catch (e) {
+      setRemoveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  function openDialog() {
+    onClose()
+    onOpenDialog()
+  }
+
+  return (
+    <>
           {canEdit ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2 border-b px-1 pb-1 text-xs font-medium">
@@ -339,11 +434,7 @@ export function MembersMatrixCellEditor({
               </ul>
             </div>
           )}
-        </PopoverContent>
-      </Popover>
-      {dialog}
-      {footer}
-    </TableCell>
+    </>
   )
 }
 

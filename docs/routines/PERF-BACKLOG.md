@@ -119,7 +119,8 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
     no comments).
 31. **Glossary page:** 664 row mounts remain on open; `GlossaryEditor` is not compiled.
-32. **Members matrix:** a Popover root and a lane-scope editor per populated cell; not virtualized.
+32. **Members matrix:** not virtualized (`src/components/MembersMatrixView.tsx`). Its per-cell
+    popover roots are one shared root each since AQU-2655.
 33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
     `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.
 

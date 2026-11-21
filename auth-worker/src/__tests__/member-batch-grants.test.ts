@@ -255,9 +255,9 @@ describe("POST /api/v2/orgs/:id/members — batch (AQU-736)", () => {
         headers: authHeader(await jwtFor("alice")),
         body: JSON.stringify({
           members: [
-            { username: "bob", role: 400 },
-            { username: "ghost", role: 400 },
-            { username: "alice", role: 400 },
+            { username: "bob", role: 100 },
+            { username: "ghost", role: 100 },
+            { username: "alice", role: 100 },
           ],
         }),
       },
@@ -269,7 +269,7 @@ describe("POST /api/v2/orgs/:id/members — batch (AQU-736)", () => {
     expect(byName.bob.ok).toBe(true)
     expect(byName.ghost).toMatchObject({ ok: false, error: { code: "user_not_found" } })
     expect(byName.alice).toMatchObject({ ok: false, error: { code: "self_grant" } })
-    expect(await orgRole(2)).toBe(400)
+    expect(await orgRole(2)).toBe(100)
 
     // Legacy single body.
     const single = await app.request(
@@ -277,12 +277,12 @@ describe("POST /api/v2/orgs/:id/members — batch (AQU-736)", () => {
       {
         method: "POST",
         headers: authHeader(await jwtFor("alice")),
-        body: JSON.stringify({ username: "carol", role: 300 }),
+        body: JSON.stringify({ username: "carol", role: 600 }),
       },
       env,
     )
     expect(single.status).toBe(200)
-    expect(await orgRole(3)).toBe(300)
+    expect(await orgRole(3)).toBe(600)
   })
 
   it("rejects a non-owner (maintainer) with 403 for the whole call", async () => {
@@ -292,7 +292,7 @@ describe("POST /api/v2/orgs/:id/members — batch (AQU-736)", () => {
       {
         method: "POST",
         headers: authHeader(await jwtFor("mallory")),
-        body: JSON.stringify({ members: [{ username: "bob", role: 400 }] }),
+        body: JSON.stringify({ members: [{ username: "bob", role: 100 }] }),
       },
       env,
     )
@@ -308,7 +308,7 @@ describe("POST /api/v2/orgs/:id/members — batch (AQU-736)", () => {
         method: "POST",
         headers: authHeader(await jwtFor("alice")),
         body: JSON.stringify({
-          members: Array.from({ length: 101 }, (_, i) => ({ username: `u${i}`, role: 400 })),
+          members: Array.from({ length: 101 }, (_, i) => ({ username: `u${i}`, role: 100 })),
         }),
       },
       env,

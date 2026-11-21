@@ -383,13 +383,16 @@ export async function resetPassword(
   token: string,
   username: string,
   newPassword: string,
+  factorCode?: string,
+  recovery?: boolean,
 ): Promise<void> {
   const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, username, new_password: newPassword }),
+    body: JSON.stringify({ token, username, new_password: newPassword, factor_code: factorCode, recovery }),
   });
   if (!res.ok) {
+    if(res.status===403) throw new FrontierAuthError(t("auth.security.resetVerification"),403);
     // AQU-820: the server's { error: "Invalid token" | "Token expired" } (400)
     // vs "Failed to reset password" (500) is dropped in favour of our own
     // translated messages — a 400 here means the token lapsed between the

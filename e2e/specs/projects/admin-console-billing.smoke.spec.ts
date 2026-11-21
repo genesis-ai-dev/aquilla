@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-import { readFile, readdir } from "node:fs/promises"
+import { capturedEmailFiles, capturedEmailTexts } from "../../helpers/captured-email"
 import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
 import { test, expect } from "../../helpers/multi-user"
 
@@ -64,32 +64,20 @@ test("admin authenticator enrollment keeps email until activation and supports r
   await alice
     .getByRole("button", { name: "Verify and set up authenticator" })
     .click()
-  const oldMail = new Set(
-    await readdir("auth-worker/.wrangler/tmp/email", { recursive: true }).catch(
-      () => [],
-    ),
-  )
+  const oldMail = new Set(await capturedEmailFiles())
   await alice.getByRole("button", { name: "Email me a code" }).click()
-  // Miniflare captures email locally; exercise the real delivery path.
+  // Miniflare captures email locally; exercise the real delivery path. The
+  // mail folder may not exist until this email lands, so the poll reads
+  // through the helper, which treats a missing folder or file as "no mail yet".
   let emailCode = ""
   await expect
     .poll(async () => {
-      const files = await readdir("auth-worker/.wrangler/tmp/email", {
-        recursive: true,
-      })
-      for (const file of files.filter(
-        (f) =>
-          !oldMail.has(f) && f.includes("email-text/") && f.endsWith(".txt"),
-      )) {
-        const text = await readFile(
-          `auth-worker/.wrangler/tmp/email/${file}`,
-          "utf8",
-        )
+      for (const text of await capturedEmailTexts(oldMail)) {
         const match = text.match(/\b\d{6}\b/)
         if (match) emailCode = match[0]
       }
       return emailCode
-    })
+    }, { message: "admin verification email with a 6-digit code" })
     .not.toBe("")
   await alice.getByLabel("Verification code", { exact: true }).fill(emailCode)
   const seed = alice.locator("section.ph-no-capture code")

@@ -5,6 +5,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon } from "lucide-react"
+import { PlainUntilKeyboard } from "@/components/ui/plain-until-keyboard"
 
 /** True when the popup is a dropdown (`data-side` is not `none`), not an overlay on the trigger. */
 const SelectDropdownContext = React.createContext<{
@@ -15,9 +16,10 @@ const SelectDropdownContext = React.createContext<{
   setDropdown: () => {},
 })
 
-function Select<Value, Multiple extends boolean | undefined = false>(
-  props: SelectPrimitive.Root.Props<Value, Multiple>,
-) {
+function Select<Value, Multiple extends boolean | undefined = false>({
+  highlightItemOnHover = false,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
   const [dropdown, setDropdown] = React.useState(false)
   const value = React.useMemo(
     () => ({ dropdown, setDropdown }),
@@ -25,7 +27,7 @@ function Select<Value, Multiple extends boolean | undefined = false>(
   )
   return (
     <SelectDropdownContext.Provider value={value}>
-      <SelectPrimitive.Root {...props} />
+      <SelectPrimitive.Root {...props} highlightItemOnHover={highlightItemOnHover} />
     </SelectDropdownContext.Provider>
   )
 }
@@ -169,6 +171,7 @@ function SelectContent({
           {...props}
         >
           <SelectPrimitive.List>{children}</SelectPrimitive.List>
+          <PlainUntilKeyboard />
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>
     </SelectPrimitive.Portal>
@@ -204,7 +207,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pe-8 ps-1.5 text-sm outline-hidden select-none focus:bg-accent/40 focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:gap-2",
+        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pe-8 ps-1.5 text-sm outline-hidden select-none hover:bg-accent/40 focus:bg-accent/40 focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:gap-2",
         multiline ? "items-start py-1.5" : "items-center",
         multiline
           ? "*:[span]:last:items-start"

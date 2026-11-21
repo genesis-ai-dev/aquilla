@@ -4,21 +4,29 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { StatusBar as StatusBarView } from "./StatusBar"
 import { useHealth } from "@/hooks/useHealth"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { healthCardRows } from "@/lib/health/health-card-rows"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { useCallback, type ComponentProps } from "react"
 
 function StatusBar({ cells, healthMap, countStructural = true, ...props }: {
   cells: readonly CellSummary[]; healthMap: Map<string, number>; countStructural?: boolean
-} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell">) {
+} & Omit<ComponentProps<typeof StatusBarView>, "progress" | "getHealthByCell" | "nameCells">) {
   // Use the same live counter source as the workspace, including when health
   // scoring is off. The footer must not regress to server snapshot counters.
   // AQU-1083: and the same policy step the workspace applies on top of it.
   const { fileProgress } = useHealth(new Map([["active", cells]]), [], { enabled: false })
   const progress = applyStructuralPolicy(fileProgress.get("active")!, cells, countStructural)
-  const getHealthByCell = useCallback(() => cells.map(cell => ({
-    cellId: cell.id, label: cell.cellLabel || cell.id, health: healthMap.get(cell.id) ?? 0,
-  })), [cells, healthMap])
-  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} {...props} />
+  // The workspace's rows; how they are named is DecayBreakdown.test's and
+  // line-name.test's business, so these go by each fixture's own label.
+  const getHealthByCell = useCallback(
+    () => healthCardRows(cells, healthMap, countStructural),
+    [cells, healthMap, countStructural],
+  )
+  const nameCells = useCallback(
+    (ids: readonly string[]) => ids.map((id) => cells.find((c) => c.id === id)?.cellLabel ?? id),
+    [cells],
+  )
+  return <StatusBarView progress={progress} getHealthByCell={getHealthByCell} nameCells={nameCells} {...props} />
 }
 
 const cells = [
@@ -178,7 +186,7 @@ it("never reads 100% while a cell is untranslated", () => {
 describe("StatusBar and audio figures", () => {
   const plain = (el: HTMLElement) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
   const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
-    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={0} />)
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} nameCells={(ids) => [...ids]} projectHealth={0} />)
 
   it("reports the recorded figure, and no text figures, on an audio-only file", () => {
     const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 5, audioValidated: 5 })
@@ -255,7 +263,7 @@ describe("StatusBar in a language that counts its recordings", () => {
   }) {
     const { fileProgress } = useHealth(new Map([["active", rows]]), [], { enabled: false })
     const progress = { ...fileProgress.get("active")!, delivers, ...extra }
-    return <StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={50} />
+    return <StatusBarView progress={progress} getHealthByCell={() => []} nameCells={(ids) => [...ids]} projectHealth={50} />
   }
 
   it("Audio: 45 lines with 10 recorded and 6 approved, and no text badges (P2.1)", () => {
@@ -272,6 +280,7 @@ describe("StatusBar in a language that counts its recordings", () => {
       <StatusBarView
         progress={{ total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" }}
         getHealthByCell={() => []}
+        nameCells={(ids) => [...ids]}
         projectHealth={50}
       />,
     )
@@ -285,6 +294,7 @@ describe("StatusBar in a language that counts its recordings", () => {
       <StatusBarView
         progress={{ total: 10, translated: 0, validated: 0, recorded: 8, audioValidated: 3 }}
         getHealthByCell={() => []}
+        nameCells={(ids) => [...ids]}
         projectHealth={50}
       />,
     )
@@ -336,7 +346,7 @@ describe("StatusBar in a language that counts its recordings", () => {
 // badges sit in a separate wrapping row that can drop below them.
 describe("StatusBar layout in the status popover (AQU-2337)", () => {
   const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
-    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={60} />)
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} nameCells={(ids) => [...ids]} projectHealth={60} />)
 
   it("keeps the summary on one line beside the ring, with the two long badges in their own wrapping row", () => {
     // The reported file: EXO — 1,208 lines, 1,207 recorded, 1 of them not yet

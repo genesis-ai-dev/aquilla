@@ -14,6 +14,7 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { FALLBACK_MILESTONE_SIZE } from "@/lib/import/milestones"
+import { clearSelection, getSelectedIds } from "@/lib/audio/selection"
 import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
@@ -159,7 +160,14 @@ describe("EditorTable — split into milestones", () => {
     localStorage.clear()
     resetMilestoneSplitCacheForTests()
     setMilestoneSplit(false)
+    clearSelection()
   })
+
+  function pressSelectAll(name: string) {
+    const row = screen.getByLabelText(name)
+    if (row instanceof HTMLElement) row.focus()
+    fireEvent.keyDown(row, { key: "a", metaKey: true })
+  }
 
   it("lists every cell until the settings preference pages one chapter at a time", () => {
     renderTable()
@@ -178,6 +186,27 @@ describe("EditorTable — split into milestones", () => {
     expect(cellRow("cell-ch1-b")).toBeTruthy()
     expect(cellRow("cell-ch2-a")).toBeNull()
     expect(cellRow("cell-ch2-b")).toBeNull()
+  })
+
+  it("Command-A checks the chapter on the page while split is on", () => {
+    renderTable()
+    pressSelectAll("GEN 1:1 cell")
+    expect(new Set(getSelectedIds())).toEqual(new Set([
+      "cell-ch1-a",
+      "cell-ch1-b",
+      "cell-ch2-a",
+      "cell-ch2-b",
+    ]))
+
+    act(() => {
+      setMilestoneSplit(true)
+    })
+    pressSelectAll("GEN 1:1 cell")
+    expect(new Set(getSelectedIds())).toEqual(new Set(["cell-ch1-a", "cell-ch1-b"]))
+
+    fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
+    pressSelectAll("GEN 2:1 cell")
+    expect(new Set(getSelectedIds())).toEqual(new Set(["cell-ch2-a", "cell-ch2-b"]))
   })
 
   it("turns the page with the next-chapter arrow while split is on", () => {

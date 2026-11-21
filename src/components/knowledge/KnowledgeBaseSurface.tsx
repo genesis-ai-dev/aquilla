@@ -250,10 +250,16 @@ export function KnowledgeBaseSurface({
     if (!jwt || !canManage) return
     setUploading(true)
     try {
-      const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
+      const { doc, textTruncated } = await uploadKnowledgeDocument(stableScope, jwt, file)
       listGenRef.current++
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
-      toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })
+      // AQU-2594: a document past the 2 M character cap is kept only in part;
+      // say so instead of reporting a plain success.
+      toast.add(
+        textTruncated
+          ? { type: "warning", title: t("knowledgeBase.uploadTruncated", { name: file.name }) }
+          : { type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) },
+      )
     } catch (err) {
       // AQU-1499: show the server's reason when it sent one. "Try again" is
       // actively misleading for a rejection that no retry can clear (a .docx

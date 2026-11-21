@@ -305,7 +305,12 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([
       "docs/E2E.md",
       "src/lib/search/search.test.ts",
+      // The offline gate's table, fakes and golden: a Vitest harness, not app code.
+      "src/lib/sync/offline-gate/harness.ts",
+      "src/lib/sync/offline-gate/golden.json",
     ], specs).specs).toEqual([])
+    // The outbox itself still selects its journey.
+    expect(selectAffectedE2E(["src/lib/sync/outbox.ts"], specs).specs).not.toEqual([])
   })
 
   it("runs core sentinels for harness changes instead of the whole suite", () => {
@@ -330,4 +335,10 @@ describe("affected E2E run mode", () => {
     expect(shouldWriteTestEnvFile(false, "preview")).toBe(true)
     expect(shouldWriteTestEnvFile(true, "preview")).toBe(false)
   })
+})
+
+it("keeps login-settings protection in the push gate for security changes",()=>{
+ const pool=affectedSpecPool(realSmokeSpecs(),spec=>existsSync(spec))
+ for(const file of ["src/components/settings/AccountSecurity.tsx","auth-worker/src/routes/account-security.ts","auth-worker/src/routes/auth.ts","auth-worker/src/routes/email-change.ts","auth-worker/src/routes/oauth-google.ts","db/postgres/migrations/0206_login_method_security.sql"])
+  expect(selectAffectedE2E([file],pool).specs,file).toContain("e2e/specs/auth/account-security.spec.ts")
 })

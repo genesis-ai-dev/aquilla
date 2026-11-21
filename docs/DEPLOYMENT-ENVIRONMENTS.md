@@ -349,7 +349,11 @@ branches cut from `dev`; `main` is retired.
    the tag's cherry-picks to learn which `dev` PRs shipped) and the ready
    PRs to pick onto it, in `dev` order. A PR whose files touch a holding
    risk area, or whose walk is not proven, is skipped until a person adds
-   `release:approved` (`docs/RELEASE-RISK-GATES.md`). A release branch may
+   `release:approved` (`docs/RELEASE-RISK-GATES.md`). A commit pushed
+   straight to `dev` with no PR is planned in its `dev` position too:
+   picked when it touches only generated locale catalogs, otherwise held
+   as `not a PR` until a person picks it onto the release branch with
+   `git cherry-pick -x`. A release branch may
    carry the plain cut date, `release/YYYY/MM/DD`, or a same-day `-NN`
    suffix for the Nth slice cut that date; both are production branches.
    The **Release cut** workflow runs the plan, builds the branch by
@@ -358,8 +362,10 @@ branches cut from `dev`; `main` is retired.
    (`e2e/journeys/RELEASE-CUT.md`).
 2. The push runs `release-verify` (the full suite) and smart Jev on the
    branch; QA reads the branch's preview as needed.
-3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below at
-   `:45` once both reported on the branch HEAD with no FAIL. By hand: from
+3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below as
+   soon as both reported on the branch HEAD with no FAIL (it looks when
+   `release-verify` finishes and every ten minutes), then watches the
+   release for ten minutes (`scripts/release-rollback.mjs`). By hand: from
    a clean checkout of that branch, checked out by name (not a detached
    HEAD — the branch guard and the tag script both need it), run
    `pnpm run deploy:aquilla`. After the live checks pass,

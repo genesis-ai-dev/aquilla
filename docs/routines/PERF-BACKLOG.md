@@ -77,8 +77,18 @@ render is about 98.
     `CloneVoiceModalHost` still render while closed** — about 12 components per workspace render.
     Export's effect order picks a format while closed; Import can finish a pending import while
     closed. Audit each, then skip while closed (`src/components/memoWhileClosed.ts`).
-12. **List wrappers:** every store emit runs five wrapper components for each mounted row, because
-    `extraData` carries the store version by design — about 400 renders per commit.
+12. **List wrappers:** every whole-file store version re-runs `renderListItem` in each mounted
+    row's LegendList container, which renders five wrappers (`Container`, `PositionView`,
+    `CellStoreRow`, `PlayingCueRow`, `RowWithUiState`) before `MemoizedRow`'s compare stops it —
+    about 200 wrapper renders per cell commit (2026-11-20, compiled table: `Container2` 36,
+    `CellStoreRow` 40 in `plain.commit`). Why the version is in `extraData` by design: the item
+    body reads the store across rows at call time (`getFootnoteOffsets`, the previous row's
+    `fileId`, `timestampNeighbours`), and those answers change without the row's own cell
+    changing. Dropping it alone would save nothing, by reading: `renderListItem` itself depends
+    on `healthRibbonByCellId`, whose cache hands out fresh readers on every version, so its
+    identity changes per version anyway. A fix needs both: the row subscribes to its own
+    cross-row answers (a `useSyncExternalStore` over `subscribeAll` returning a primitive key),
+    and per-version maps leave `renderListItem`'s deps (the row reads its ribbon point itself).
 13. **Left dock, file-options menu, header, resizable panels, side rail** re-render with every
     workspace render (inline callbacks; menu items rebuilt from `actionCtx`).
 

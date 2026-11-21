@@ -5,11 +5,11 @@
 //
 // Deliberately UNAUTHENTICATED, like /skills: public help text from the help
 // site, no project data, the same bytes for every caller. Reads go through
-// help-site.ts, which fetches only pages listed in the site's index.
+// db/shared/help-site.ts, which fetches only pages listed in the site's index.
 //
 // Mounted in index.ts just after handleExternalSkillsRequest.
 
-import { helpIndex, helpPage, type HelpSiteEnv } from './help-site'
+import { helpIndex, helpPage, type HelpSiteEnv } from '../../../db/shared/help-site'
 import { errorResponse } from './errors'
 
 const HELP_INDEX_RE = /^\/api\/v1\/external\/help\/?$/

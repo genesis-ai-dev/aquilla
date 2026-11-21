@@ -154,7 +154,7 @@ const TOOLS_CONTRACT = `## Your tools
 - draft({fileId?|ref?, cellIds?, limit?, instructions?, alternatives?}) — the drafting pipeline: drafts untranslated cells with exemplars + discourse context, lints, and STAGES a proposal. Preferred over writing translations yourself. alternatives:2-5 with ONE cell in cellIds stages that many wordings of that cell for the user to choose between, instead of drafting a batch.
 - propose({events:[{kind, fileId?, cellId?, payload}]}) — STAGE any other events for user approval (validations, comments, renames, back-translations, hand-written commits). Nothing is written until the user clicks Apply. The result says, per event: staged / rejected (reason) / stale (re-read and redraft).
 - sql({query}) — ESCAPE HATCH: one read-only SELECT (CTEs allowed) when no tool above fits (counts, history, assignments). 4s timeout; 200 rows max. Bind :project (required), :user, :file, :cell.
-- docs({topic}) — cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief.
+- docs({topic}) — cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief. How-to questions about the Aquilla app: docs({topic:"help"}), then docs({topic:"help/<path>"}); answer from the page and link it.
 
 Results come back as pipe tables: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 events, #f1 files) and you may hand aliases (and :vars) back to any tool. Aliases are OPAQUE handles assigned in first-seen order — they carry no document order or numbering; NEVER show them to the user — not even in parentheses — and never treat #c8 as "segment 8" (use canonical_ref / sequence position when talking to the user).
 

@@ -26,6 +26,7 @@ import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/agent/emit-stage"
 import { getCookbook } from "../lib/agent/docs"
+import { getHelpDocs, isHelpTopic } from "../lib/agent/help-docs"
 import { readModelTurn, type ToolCall, type UpstreamMessage } from "../lib/agent/upstream"
 import { compactConvo, loadSession, saveSession, type StoredMessage } from "../lib/agent/sessions"
 import { executeRead, type ReadArgs } from "../lib/agent/tools/read"
@@ -304,7 +305,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "docs",
         description:
-          "Fetch a cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief.",
+          "Fetch a cookbook: checking | terminology | validation | history | assignments | files-and-refs | brief. Questions about using the Aquilla app: docs({topic:\"help\"}) lists the help pages, docs({topic:\"help/<path>\"}) reads one; answer from it and link it.",
         parameters: {
           type: "object",
           properties: { topic: { type: "string" } },
@@ -1485,14 +1486,15 @@ async function runEmitTool(events: unknown[], t: ToolCallEnv): Promise<string> {
   return modelVerdictBlock
 }
 
-function runDocsTool(topic: string, t: ToolCallEnv): string {
+async function runDocsTool(topic: string, t: ToolCallEnv): Promise<string> {
   t.send({ type: "code_start", step: t.step, kind: "docs", summary: topic })
-  const book = getCookbook(topic)
+  const help = isHelpTopic(topic)
+  const book = help ? await getHelpDocs(t.env, topic) : getCookbook(topic)
   t.send({
     type: "code_result",
     step: t.step,
     ok: book.ok,
-    summary: book.ok ? `cookbook: ${topic} (${book.text.length} chars)` : book.text,
+    summary: book.ok ? `${help ? "help" : "cookbook"}: ${topic} (${book.text.length} chars)` : book.text,
   })
   return book.text
 }
@@ -1673,7 +1675,7 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
         t.send({ type: "code_result", step: t.step, ok: false, summary: msg })
         return msg
       }
-      return runDocsTool(args.topic, t)
+      return await runDocsTool(args.topic, t)
     }
     case "aquifer":
       return runAquiferCall(args, t)
@@ -1709,7 +1711,7 @@ async function executeLegacyCall(
   }
   if (fields[0] === "sql" && typeof args.sql === "string") return runSqlTool(args.sql, t)
   if (fields[0] === "emit" && Array.isArray(args.emit)) return runEmitTool(args.emit, t)
-  if (fields[0] === "docs" && typeof args.docs === "string") return runDocsTool(args.docs, t)
+  if (fields[0] === "docs" && typeof args.docs === "string") return await runDocsTool(args.docs, t)
   if (fields[0] === "aquifer") return runAquiferCall(args.aquifer, t)
 
   const kind = fields[0] as "sql" | "emit" | "docs"

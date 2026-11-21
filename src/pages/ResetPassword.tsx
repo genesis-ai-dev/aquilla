@@ -1,3 +1,4 @@
+import { SecurityCode } from "@/components/settings/AccountSecurity"
 import { passwordResetReturnTo } from "../../shared/password-reset-return-to"
 /**
  * AQU-270: /reset-password page
@@ -226,6 +227,9 @@ export function ResetPassword() {
   const username = searchParams.get("username") ?? ""
   const returnTo = passwordResetReturnTo(searchParams.get("returnTo"))
 
+  const [factorCode,setFactorCode]=useState("")
+  const [recovery,setRecovery]=useState(false)
+  const [factorRequired,setFactorRequired]=useState(false)
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const [verifyRevision, setVerifyRevision] = useState(0)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -240,10 +244,12 @@ export function ResetPassword() {
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await resetPassword(token, username, value.password)
+        if(factorRequired) await resetPassword(token, username, value.password, factorCode,recovery)
+        else await resetPassword(token, username, value.password)
         await login(username, value.password)
         navigate(returnTo ?? "/", { replace: true })
       } catch (err) {
+        if(err instanceof FrontierAuthError && err.status===403) setFactorRequired(true)
         setSubmitError(
           err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToReset"),
         )
@@ -335,6 +341,7 @@ export function ResetPassword() {
                 />
               </FieldGroup>
               {submitError && <FieldError>{submitError}</FieldError>}
+              {factorRequired&&<div className="flex flex-col gap-3"><p>{t("auth.security.verifyWithYourAuthenticatorAppOrARecovery")}</p>{recovery?<Input aria-label={t("auth.security.recoveryCode")} value={factorCode} onChange={e=>setFactorCode(e.target.value)}/>:<SecurityCode value={factorCode} onChange={setFactorCode}/>}<Button type="button" variant="link" onClick={()=>{setRecovery(!recovery);setFactorCode("")}}>{recovery?t("auth.security.useAnAuthenticatorCode"):t("auth.security.useARecoveryCode")}</Button></div>}
               <Button type="submit" size="lg" form="reset-password-form" className="w-full">
                 {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
                 {form.state.isSubmitting

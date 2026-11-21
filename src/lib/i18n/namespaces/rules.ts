@@ -213,6 +213,15 @@ export const rules = defineNamespace({
     }),
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
+    "rules.checkDrawer.commentFailed": "The comment did not post. Try again.",
+    "rules.checkDrawer.openThreads": "Open this cell's comments",
+    // A flagged cell with no verse reference or cue time, named by its place in the file.
+    "rules.checkDrawer.cellNumber": "Cell {number}",
+    "rules.checkDrawer.unknownCell": "A cell no longer in this file",
+    "rules.checkDrawer.showMoreCells": plural({
+      one: "Show {count} more cell",
+      other: "Show {count} more cells",
+    }),
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
     "rules.checkDrawer.scopeRules": plural({ one: "{count} rule", other: "{count} rules" }),
     "rules.checkDrawer.scopeTerms": plural({ one: "{count} term", other: "{count} terms" }),
@@ -931,6 +940,16 @@ export const rules = defineNamespace({
         description:
           "Footnote under the spelling section stating how many distinct word forms the project wordlist the check built holds.",
         placeholders: { count: "Number of distinct word forms." },
+      },
+      "rules.checkDrawer.cellNumber": {
+        description:
+          "Names a flagged cell that has no verse reference or cue time, by its place in the open file (Cell 12 is the twelfth cell).",
+        placeholders: { number: "The cell's 1-based position in the file." },
+      },
+      "rules.checkDrawer.showMoreCells": {
+        description:
+          "Link under a finding card that only shows its first few flagged cells; it reveals the rest.",
+        placeholders: { count: "How many more flagged cells the card is hiding." },
       },
       "rules.checkDrawer.otherTermsClean": {
         description:

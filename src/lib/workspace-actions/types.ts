@@ -21,6 +21,13 @@ export interface WorkspaceActionContext {
    */
   audioOnlyLane?: boolean
   fileProgress: Map<string, FileProgressEntry>
+  /**
+   * AQU-1397: what the Draft window would offer for the open file — its empty
+   * cells plus its untouched AI drafts to refresh (`draftableCount`, over the
+   * same cells). The two draft entries show only when this is above zero.
+   * Absent means not counted yet, and they stay hidden.
+   */
+  draftable?: number
   /** Org export-policy floor (AQU-253). When false, Export is hidden from the
    *  action menu — openExportFlow no-ops anyway, but don't show a dead item. */
   canExportByOrgPolicy?: boolean

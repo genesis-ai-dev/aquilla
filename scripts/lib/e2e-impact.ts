@@ -6,6 +6,7 @@ const CORE_SENTINELS = [
 ]
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
+  { source: /(?:account-security|AccountSecurity|LoginMethodsSection|0206_login_method_security|auth-worker\/src\/routes\/(?:auth|email-change|oauth-google)\.ts)/, sentinels: ["e2e/specs/auth/account-security.spec.ts"] },
   { source: /(?:oauth-google|desktop-google|DesktopGoogle|google-login|GoogleLogin|google-return|0194_google_login)/, sentinels: ["e2e/specs/auth/google-login.spec.ts", "e2e/specs/projects/onboarding.smoke.spec.ts"] },
   { source: /^src\/(?:pages\/Signup|lib\/navigation\/login-path)/, sentinels: ["e2e/specs/projects/onboarding.smoke.spec.ts"] },
   {
@@ -167,7 +168,7 @@ const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|pl
 // change, not a change to the sync journey.
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$|^src\/lib\/sync\/offline-gate\//i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
+const PRODUCT_RUNTIME = /^(?:db\/postgres\/migrations\/0206_login_method_security\.sql$|plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

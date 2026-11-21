@@ -1,6 +1,11 @@
 // Decides whether the Release cut workflow may cut a release slice from the
 // unreleased PRs on origin/dev, and what to cut. Deterministic by design: the
 // workflow acts on this JSON and judges nothing itself.
+//
+// A commit pushed straight to dev with no PR is planned too, in its dev
+// position (docs/decisions/0014-direct-dev-commits-on-the-release-line.md):
+// picked when it only touches generated locale catalogs, held as "not a PR"
+// otherwise. One that changes a file is never left out of the plan.
 // Usage: node scripts/release-plan.mjs [--now=<iso>]   (run after `git fetch origin --tags`)
 import { execFileSync } from "node:child_process"
 import { pathToFileURL } from "node:url"
@@ -59,14 +64,27 @@ export function walkHolds(walk, policy = DEFAULT_WALK_POLICY) {
 // or its walk holds under the policy above. The `release:approved` label is
 // a person's sign-off after the manual QA path, and clears both: once a
 // person has signed, the line picks the PR like any other.
+//
+// A direct commit (`direct: true`, no PR number) has no walk, no gate run
+// and no PR to carry the label, so none of that is read for it: it is ready
+// only when every file it touches is a generated locale catalog, and held
+// otherwise until a person picks it onto a release branch by hand.
 export function prHolds(pr, policy = DEFAULT_WALK_POLICY) {
+  if (pr.direct) return !isLocaleCatalogOnly(pr.files ?? [])
   if (pr.approved) return false
   return holdingAreas(pr.areas ?? [], pr.gates).length > 0 || walkHolds(pr.walk, policy)
 }
 
-// Why a held PR is held, for the release notes and the PR comment.
+// The reason a held direct commit carries. release-cut.mjs keys the notes'
+// "pick it by hand" sentence on it.
+export const NOT_A_PR = "not a PR"
+
+// Why a held PR is held, for the release notes and the PR comment. A direct
+// commit is held for not being a PR whatever it touches; its holding areas
+// ride along so the person picking it by hand sees them.
 export function holdReason(pr) {
   const areas = holdingAreas(pr.areas ?? [], pr.gates)
+  if (pr.direct) return areas.length ? `${NOT_A_PR}; touches ${areas.join(", ")}` : NOT_A_PR
   if (areas.length) return `touches ${areas.join(", ")}`
   return `walk ${pr.walk}`
 }
@@ -88,6 +106,36 @@ const DOCS_OR_TEST_FILE = /\.md$|^docs\/|\.test\.[jt]sx?$|^e2e\//
 
 export function isDocsOrTestOnly(files) {
   return files.length > 0 && files.every((file) => DOCS_OR_TEST_FILE.test(file) || NO_UI_SCRIPT.test(file))
+}
+
+// The generated locale catalogs: one module per non-English locale, written
+// by `scripts/i18n-catalog.ts import`, and the source-hash sidecar it keeps
+// beside them. A direct commit touching nothing else is the daily
+// localization push, which appends keys to every catalog; the release line
+// has to carry it in dev order, or the next PR that appends locale keys
+// conflicts in the sidecar (2026-11-20: #2075 and #2124, behind six such
+// commits). Same idea as isDocsOrTestOnly: a path check, no walk to wait for.
+//
+// en.ts (the English source barrel), index.ts and all.ts (the registries a
+// new locale edits) are code, not catalogs, and so are the tests beside them.
+const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
+
+export function isLocaleCatalogOnly(files) {
+  return files.length > 0 && files.every((file) => LOCALE_CATALOG_FILE.test(file))
+}
+
+// How a planned entry is named to a person: `#N` for a PR, the short dev sha
+// for a direct commit, which has no number.
+export function entryLabel(entry) {
+  return entry.direct ? String(entry.sha).slice(0, 9) : `#${entry.number}`
+}
+
+// "3 PR(s)", or "3 PR(s) and 1 direct commit(s)" once the list carries any.
+// `adjective` goes before "PR(s)": tally(ready, "ready") is "3 ready PR(s)".
+export function tally(entries, adjective = "") {
+  const direct = entries.filter((entry) => entry.direct).length
+  const prs = `${entries.length - direct} ${adjective ? `${adjective} ` : ""}PR(s)`
+  return direct ? `${prs} and ${direct} direct commit(s)` : prs
 }
 
 function branchName(now, usedSuffixes) {
@@ -116,25 +164,30 @@ function branchName(now, usedSuffixes) {
 // workflow builds and tests the picked set before anything deploys; a pick
 // that applies but breaks the build holds its PR as "pick failed verify" by
 // hand (RELEASE-CUT.md).
+//
+// `prs` is every unreleased entry in dev order, direct commits among them:
+// a ready one is picked in its dev position like a PR, a held one is listed
+// with the rest of `held`. prCount counts the PRs, directCount the rest.
 export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], base, policy = DEFAULT_WALK_POLICY }) {
+  const directCount = prs.filter((pr) => pr.direct).length
   const strip = ({ pathHolds, behindFloor, ...pr }) => pr
   // The held list is reported whether or not this run cuts: the hold nudge
   // (release-hold-nudge.mjs) reads it on every run, and a release in flight
   // is no reason to stop saying which PRs wait for a person.
   const held = prs.filter((pr) => prHolds(pr, policy)).map((pr) => ({ ...strip(pr), why: holdReason(pr) }))
   const ready = prs.filter((pr) => !prHolds(pr, policy)).map(strip)
-  const common = { openReleases, prCount: prs.length, base, walkPolicy: policy }
+  const common = { openReleases, prCount: prs.length - directCount, directCount, base, walkPolicy: policy }
   if (openReleases.length) {
     return { ...common, cut: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [], held }
   }
   if (!prs.length) return { ...common, cut: false, reason: "no unreleased PRs", prs: [], held }
   if (!ready.length) {
-    return { ...common, cut: false, reason: `${held.length} PR(s) waiting on a person, none ready`, prs: [], held }
+    return { ...common, cut: false, reason: `${tally(held)} waiting on a person, none ready`, prs: [], held }
   }
   return {
     ...common,
     cut: true,
-    reason: `${ready.length} ready PR(s), ${held.length} held, no release in flight`,
+    reason: `${tally(ready, "ready")}, ${held.length} held, no release in flight`,
     branch: branchName(now, usedSuffixesToday),
     areas: [...new Set(ready.flatMap((pr) => pr.areas))].sort(),
     prs: ready,
@@ -157,7 +210,9 @@ export function prNumberFromSubject(subject) {
 // a "(cherry picked from commit <sha>)" line to its body. That line is not a
 // `key: value` trailer, so `%(trailers)` never sees it: read %b. A pick made
 // without -x still carries the "Merge pull request #N" subject, so the PR
-// number is the second, weaker key.
+// number is the second, weaker key. A direct commit has no number: the -x
+// line is the only proof production carries it, so a hand pick of one
+// without -x leaves it in the plan.
 export function releasedMarks(tagEntries) {
   const shas = new Set()
   const numbers = new Set()
@@ -225,8 +280,19 @@ function logEntries(range, cwd) {
   })
 }
 
-// Every PR merged to dev that production does not run yet, oldest first, and
-// the floor no slice may cut below. cwd is for tests driving a scratch repo.
+// Every first-parent commit on dev that production does not run yet, oldest
+// first, and the floor no slice may cut below: the merged PRs, and between
+// them, in their dev position, the commits pushed straight to dev with no
+// PR (`direct: true`, no number, the subject carried in place of a title).
+// Until 2026-11-20 a direct commit was skipped here, so it was never
+// picked, never listed as held and in no release notes; the release line
+// then lacked its lines and every later PR built on them conflicted.
+//
+// The one commit left out is a direct commit that changes no file against
+// its first parent (a merge that brought nothing in): there is nothing to
+// pick, and a pick of it would come out empty.
+//
+// cwd is for tests driving a scratch repo.
 export function unreleasedPrs({ cwd } = {}) {
   const tags = lines(git(["tag", "--list", "20*", "--sort=-v:refname"], { cwd }))
   // Before the first calver tag, origin/main is what production runs.
@@ -244,7 +310,18 @@ export function unreleasedPrs({ cwd } = {}) {
   const prs = []
   for (const { sha, mergedAt, subject, behindFloor } of unreleased) {
     const number = prNumberFromSubject(subject)
-    if (number === undefined) continue
+    if (number === undefined) {
+      // Nobody reviewed a direct commit, so its rule reads every path it
+      // touches: --no-renames lists a rename's old path beside the new one.
+      const files = lines(git(["diff", "--name-only", "--no-renames", `${sha}^1`, sha], { cwd }))
+      if (!files.length) continue
+      // No PR, so no walk comment and no label will ever exist: `walk` is
+      // "none" for the catalog-only commit the line picks and "unknown" for
+      // the rest, and prHolds decides from the files alone.
+      const walk = isLocaleCatalogOnly(files) ? "none" : "unknown"
+      prs.push({ sha, subject, direct: true, mergedAt, walk, behindFloor, files, ...classifyFiles(files) })
+      continue
+    }
     const parent = subject.startsWith("Merge pull request") ? `${sha}^1` : `${sha}^`
     const files = lines(git(["diff", "--name-only", parent, sha], { cwd }))
     // Anything with a UI claim needs the GitHub-API walk lookup (see

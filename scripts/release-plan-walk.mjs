@@ -231,8 +231,16 @@ export async function lookupWalk(options) {
 // person can approve anything), so every PR gets the one lookup. One PR's
 // lookup failing never blocks the others; it just stays "unknown", which
 // holds.
+//
+// A direct commit (`direct: true`, pushed to dev with no PR) is passed
+// through with no lookup: it has no walk comment and no label to find.
+// GitHub answers the commit → PR question with an empty list for one today
+// (checked 2026-11-20), and should it ever name a PR that merely contains
+// the sha, that PR's walk and `release:approved` label are not the
+// commit's own. prHolds reads neither for a direct commit.
 export async function fillWalks(prs, opts) {
   return Promise.all(prs.map(async (pr) => {
+    if (pr.direct) return pr
     try {
       const { walk, approved, gates } = await lookupPr({ ...opts, mergeSha: pr.sha })
       return { ...pr, walk: pr.walk === "none" ? "none" : walk, approved, gates }

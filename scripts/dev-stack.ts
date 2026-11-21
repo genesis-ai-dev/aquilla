@@ -69,7 +69,7 @@ import {
   finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
-import { parsePgSchema } from "./dev-stack-schema-parser"
+import { columnsToAdd, parsePgSchema } from "./dev-stack-schema-parser"
 import { reconcilePgViews } from "./dev-stack-schema-views"
 import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import { finalizeDecisionSchema } from "./dev-stack-decision-schema"
@@ -441,10 +441,8 @@ async function reconcilePgSchema(
     if (!liveCols) {
       await run(table.createSql, `creating table ${name}`)
       patched.push(`created table ${name}`)
-      continue
     }
-    for (const col of table.columns) {
-      if (liveCols.has(col.name)) continue
+    for (const col of columnsToAdd(table, liveCols)) {
       await run(
         `ALTER TABLE ${name} ADD COLUMN IF NOT EXISTS ${col.def}`,
         `adding column ${name}.${col.name}`,

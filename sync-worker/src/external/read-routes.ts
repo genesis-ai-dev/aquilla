@@ -500,14 +500,14 @@ async function handleExternalCellHistory(
   // AQU-730 read wall: a PAT acts as its owner, so a member walled to some
   // target lanes reads only those lanes' events here too — the same rule the
   // in-app history route applies.
-  const { visible } = await visibleTagsForMember(
+  const { visible, lanes } = await visibleTagsForMember(
     env.AQUILLA_PG as AquillaDb,
     env.LANE_READ_WALL,
     projectId,
     Number(authed.ctx.credential.userId),
     authed.ctx.role,
   )
-  const page = paginate(eventRowsForVisibleLanes(result.results, visible).map(mapHistoryRow), offset, limit)
+  const page = paginate(eventRowsForVisibleLanes(result.results, visible, lanes).map(mapHistoryRow), offset, limit)
 
   // AQU-1180: history is the densest identity surface on the API — one author
   // per event, ordered in time. Scrub the page the caller actually receives

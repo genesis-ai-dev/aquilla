@@ -1,4 +1,4 @@
-# 0014 — A release hold is a gate to build, not a label to add
+# 0015 — A release hold is a gate to build, not a label to add
 
 *Decided and recorded 2026-11-19, from the release cut of that day. No Linear issue yet.*
 

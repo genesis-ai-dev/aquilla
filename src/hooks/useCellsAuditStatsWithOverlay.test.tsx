@@ -10,6 +10,7 @@ import {
   peekOutboxBatch,
   quarantineOutboxEvents,
   resetOutboxConnectionForTests,
+  type OutboxRecord,
 } from "@/lib/sync/outbox"
 import type { CqrsRawEvent } from "@/lib/sync/outbox-types"
 import { CQRS_SCHEMA_VERSION } from "@/lib/sync/outbox-types"
@@ -97,5 +98,39 @@ describe("useCellsAuditStatsWithOverlay — post-flush shadow", () => {
 
     await act(async () => { await quarantineOutboxEvents(["v1"], { status: 403, reason: "refused" }) })
     await waitFor(() => expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual([]))
+  })
+
+  // AQU-2655: the workspace already holds the outbox (useOutbox()). Reading it
+  // a second time here put the overlay one render behind that snapshot, so
+  // every commit and every ack rendered the whole workspace once more.
+  it("follows the caller's outbox records in the same render, without a read of its own", async () => {
+    const server = { current: [] as string[] }
+    installFetch(server)
+    const record = (event: CqrsRawEvent) =>
+      ({ id: event.id, enqueuedAt: 1, event, attempts: 0, lastAttemptAt: null, lastError: null, status: "pending" as const })
+    const { result, rerender } = renderHook(
+      (outboxRecords: OutboxRecord[]) =>
+        useCellsAuditStatsWithOverlay({ enabled: true, fileId: "file-x", getTokenForFile: TOKEN_FN, outboxRecords }),
+      { initialProps: [] as OutboxRecord[] },
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    // A record in the real outbox is NOT seen: the caller's list is the source.
+    await act(async () => { await enqueueOutboxEvent(validateEvent("ignored")) })
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual([])
+
+    // The caller's list changes → the overlay is there in that same render.
+    rerender([record(validateEvent("v1"))])
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["ann"])
+
+    // Another file's record changes the list but not this file's overlay.
+    const overlaid = result.current.byCellId
+    rerender([record(validateEvent("v1")), record({ ...validateEvent("other"), fileId: "file-y" })])
+    expect(result.current.byCellId).toBe(overlaid)
+
+    // Acked: gone from the list, and the shadow still holds the vote.
+    rerender([])
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["ann"])
   })
 })

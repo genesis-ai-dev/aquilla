@@ -28,6 +28,11 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 
+// A PR by number, a commit pushed straight to dev by short sha. Written out
+// here, not imported: this file runs from the base commit against both
+// sides' plans and must read either side's entries.
+const label = (entry) => (entry.direct ? String(entry.sha).slice(0, 9) : `#${entry.number}`)
+
 /** What of a plan decides a release: everything but the per-PR bookkeeping. */
 export function planShape(plan) {
   return {
@@ -35,8 +40,8 @@ export function planShape(plan) {
     reason: plan.reason,
     branch: plan.branch ?? null,
     base: plan.base ?? null,
-    ready: (plan.prs ?? []).map((pr) => `#${pr.number} walk=${pr.walk} areas=${(pr.areas ?? []).join(",")}`),
-    held: (plan.held ?? []).map((pr) => `#${pr.number} ${pr.why}`),
+    ready: (plan.prs ?? []).map((pr) => `${label(pr)} walk=${pr.walk} areas=${(pr.areas ?? []).join(",")}`),
+    held: (plan.held ?? []).map((pr) => `${label(pr)} ${pr.why}`),
   }
 }
 
@@ -69,9 +74,9 @@ async function cutShape(dir, plan, label) {
   const { buildReleaseBranch } = await import(pathToFileURL(path.join(path.resolve(dir), "scripts", "release-cut.mjs")).href)
   const built = buildReleaseBranch({ branch: `gate/plan-diff-${label}`, base: plan.base, prs: plan.prs, held: plan.held ?? [], cwd: scratch })
   return {
-    picked: built.picked.map((pr) => `#${pr.number}`),
-    unpicked: built.unpicked.map((pr) => `#${pr.number} ${pr.why}`),
-    recorded: (built.recorded ?? []).map((pr) => `#${pr.number}`),
+    picked: built.picked.map(label),
+    unpicked: built.unpicked.map((pr) => `${label(pr)} ${pr.why}`),
+    recorded: (built.recorded ?? []).map(label),
     tree: execFileSync("git", ["rev-parse", `${built.sha}^{tree}`], { cwd: scratch, encoding: "utf8" }).trim(),
   }
 }

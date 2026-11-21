@@ -10,7 +10,7 @@
 // needs (a voice), made by clicking a chip. Then one button. Nothing is
 // generated until that button is pressed.
 //
-// The lines come from the timeline: a click on a line's ghost clip picks it,
+// The lines come from the timeline: a click on a line's sparkle (beside its mic) picks it,
 // and Shift-click adds more. Opened from the roster instead, with nothing
 // picked, the panel offers the selected line or every line with no speech.
 //
@@ -64,7 +64,7 @@ export interface MakeSpeechPanelProps {
   /** The line selected in the editor, if any. */
   selectedCellId: string | null
   /**
-   * The lines picked on the timeline (their ghost clips). When there are any,
+   * The lines picked on the timeline (their sparkles). When there are any,
    * the panel is about exactly these lines and offers no other choice of lines.
    */
   picked?: readonly string[]
@@ -76,7 +76,7 @@ export interface MakeSpeechPanelProps {
    * clip inspector shows it afterwards. Absent: delivery is not offered.
    */
   onSaveDelivery?: (cellIds: readonly string[], delivery: LineDelivery) => Promise<void> | void
-  /** Each line's state as the run goes, for whoever draws the lines (the timeline's ghosts). */
+  /** Each line's state as the run goes, for whoever draws the lines (the timeline's sparkles). */
   onLineState?: (cellId: string, state: MakeSpeechLineState) => void
   onBack: () => void
 }

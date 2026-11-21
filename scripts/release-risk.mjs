@@ -48,9 +48,13 @@ const WORKFLOW = /^\.github\/workflows\//
 // The order is the order areas print in. A file can land in several.
 const AREA_PATTERNS = [
   ["migration", /^db\/postgres\/(migrations\/|schema\.sql$)/],
+  // The desktop line is infra too: desktop-release-cut merges and tags by
+  // itself, desktop-release-verify is the only check between a signed build
+  // and every installed app, and desktop-bundle-publish holds the hot
+  // bundle's signing key. A change to any of them ships signed code.
   [
     "infra",
-    /(^|\/)wrangler\.toml$|^config\/cloudflare-deployments\.json$|^scripts\/(cloudflare-|verify-|resolve-deployment|tag-release|tag-metadata|record-github-deployment|assert-workers-build-env|ci-build|release-risk)/,
+    /(^|\/)wrangler\.toml$|^config\/cloudflare-deployments\.json$|^scripts\/(cloudflare-|verify-|resolve-deployment|tag-release|tag-metadata|record-github-deployment|assert-workers-build-env|ci-build|release-risk|desktop-release|desktop-bundle|lib\/desktop-(release|bundle))/,
   ],
   // What ships and when: the planner, the cut, the deploy check, the stall
   // and hold reports. release-risk* stays infra above: it is the file map

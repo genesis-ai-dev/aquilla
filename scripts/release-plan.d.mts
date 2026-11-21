@@ -10,13 +10,26 @@ export type { FileClassification }
 /** Re-exported from release-risk.mjs, where the file map lives. */
 export function classifyFiles(files: Iterable<string>): FileClassification
 
-/** One merged-but-unreleased PR on origin/dev, as listed in the release plan. */
+/**
+ * One unreleased first-parent commit on origin/dev, as listed in the release
+ * plan: a merged PR, or a direct commit (pushed to dev with no PR), which
+ * carries `direct` and `subject` and no `number`.
+ */
 export interface UnreleasedPr extends FileClassification {
-  number: number
+  /** The PR number. Absent on a direct commit. */
+  number?: number
+  /** True for a commit pushed straight to dev with no PR. */
+  direct?: boolean
+  /** The commit subject. Carried for a direct commit, which has no PR title to fetch. */
+  subject?: string
   sha: string
   /** ISO-8601 commit date of the merge. */
   mergedAt: string
-  /** PASS | FAIL | FLAKY | BLOCKED | "none" (no UI claim) | "unknown" (not yet looked up). */
+  /**
+   * PASS | FAIL | FLAKY | BLOCKED | "none" (no UI claim) | "unknown" (not yet looked up).
+   * A direct commit is never walked: "none" when it only touches locale
+   * catalogs, "unknown" otherwise.
+   */
   walk: string
   /**
    * True when production already runs a dev commit newer than this PR (a
@@ -47,11 +60,22 @@ export function walkPolicy(env?: Record<string, string | undefined>): WalkPolicy
 /** Whether this walk verdict keeps a PR off the line under `policy`. */
 export function walkHolds(walk: string, policy?: WalkPolicy): boolean
 
-/** Off the automatic line: an ungated holding area or a walk that holds under `policy`, unless a person approved it. */
-export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates">, policy?: WalkPolicy): boolean
+/**
+ * Off the automatic line: an ungated holding area or a walk that holds under
+ * `policy`, unless a person approved it. A direct commit holds unless every
+ * file it touches is a generated locale catalog; no walk, gate or label is
+ * read for it.
+ */
+export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates" | "direct" | "files">, policy?: WalkPolicy): boolean
 
-/** Why a held PR is held, for the notes: "touches <areas>" or "walk <verdict>". */
-export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates">): string
+/** The hold reason of a direct commit the line does not pick by itself. */
+export const NOT_A_PR: string
+
+/**
+ * Why a held PR is held, for the notes: "touches <areas>" or "walk <verdict>".
+ * A direct commit: "not a PR", with "; touches <areas>" when it has holding areas.
+ */
+export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates" | "direct">): string
 
 // A PR whose diff touches only docs, only test/journey files, or only
 // allowlisted tooling scripts (release-plan*, qa/, smart-test*, e2e-*) has no
@@ -59,6 +83,20 @@ export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates">): 
 // look up, and there never will be one. An infra-area script still holds via
 // pathHolds regardless.
 export function isDocsOrTestOnly(files: string[]): boolean
+
+/**
+ * True when every file is a generated locale catalog
+ * (`src/lib/i18n/messages/<locale>.ts`, never `en.ts`, `index.ts` or `all.ts`)
+ * or the source-hash sidecar beside them. The one kind of direct commit the
+ * release line picks without a person.
+ */
+export function isLocaleCatalogOnly(files: string[]): boolean
+
+/** How an entry is named to a person: `#N` for a PR, the short dev sha for a direct commit. */
+export function entryLabel(entry: Pick<UnreleasedPr, "number" | "direct"> & { sha?: string }): string
+
+/** "3 PR(s)", or "3 PR(s) and 1 direct commit(s)"; `adjective` goes before "PR(s)". */
+export function tally(entries: Pick<UnreleasedPr, "direct">[], adjective?: string): string
 
 /** One first-parent commit as the planner reads it out of `git log`. */
 export interface LogEntry {
@@ -97,9 +135,11 @@ export function splitReleased<T extends Pick<LogEntry, "sha" | "subject">>(input
 }): { unreleased: (T & { behindFloor: boolean })[]; floor: string }
 
 /**
- * Every PR merged to dev that production does not run yet, oldest first,
- * measured from the newest calver tag (origin/main before the first one).
- * Runs git in `cwd` (the process cwd by default).
+ * Every first-parent commit on dev that production does not run yet, oldest
+ * first, measured from the newest calver tag (origin/main before the first
+ * one): the merged PRs and, in their dev position, the direct commits. Only
+ * a direct commit that changes no file is left out. Runs git in `cwd` (the
+ * process cwd by default).
  */
 export function unreleasedPrs(opts?: { cwd?: string }): { prs: UnreleasedPr[]; floor: string; base: string }
 
@@ -108,7 +148,10 @@ export type HeldPr = Omit<UnreleasedPr, "pathHolds" | "behindFloor"> & { why: st
 
 export interface ReleasePlan {
   openReleases: string[]
+  /** Unreleased PRs on dev at plan time, ready and held. */
   prCount: number
+  /** Unreleased direct commits on dev at plan time, ready and held. */
+  directCount: number
   /** The tagged tip production runs; the cut branch starts here and picks `prs` onto it. */
   base?: string
   cut: boolean
@@ -118,9 +161,13 @@ export interface ReleasePlan {
   /** Set by release-cut.mjs once the picks are built; absent in the plan itself. */
   sha?: string
   areas?: string[]
-  /** Ready PRs, oldest first: the ones the cut picks. */
+  /** Ready PRs and ready direct commits, in dev order, oldest first: what the cut picks. */
   prs: Omit<UnreleasedPr, "pathHolds" | "behindFloor">[]
-  /** PRs off the line, with why, on every plan (cut or not); they wait for a gate or `release:approved`. */
+  /**
+   * Entries off the line, with why, on every plan (cut or not). A PR waits
+   * for a gate or `release:approved`; a direct commit waits for a person to
+   * pick it onto a release branch.
+   */
   held: HeldPr[]
   /** The walk policy the plan was made under. */
   walkPolicy?: WalkPolicy

@@ -134,17 +134,31 @@ jobs:
             echo "- [ ] Dev Approved"
           } > "$RUNNER_TEMP/body.md"
           gh pr create --base dev --head "$branch" --title "Desktop $TO: release the shell changes since v$FROM" --body-file "$RUNNER_TEMP/body.md"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          {
+            echo "branch=$branch"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       # AGENTS.md says Actions does not click merge, because auto-merge cannot
       # read `on hold` or a stacked parent. Neither can apply to this pull
       # request: the workflow made it a minute ago, on dev, and the step below
       # refuses to merge unless it changes the four version files and nothing
       # else. Its checks are the same ones every pull request must pass.
+      #
+      # "The four version files" is a list of paths, and those four files are
+      # also where the scripts, the Rust dependencies and the updater's
+      # endpoint and public key live. The branch name is predictable and the
+      # checks take most of an hour, so anyone who can push to this repository
+      # could add a commit that touches only those files and have it merged
+      # unreviewed, tagged and signed. So the merge is also pinned to the one
+      # commit this run made: a pull request whose head has moved is not
+      # merged, and `--match-head-commit` closes the gap between the check
+      # and the merge.
       - name: Merge the version bump once its checks pass
         if: steps.bump.outputs.branch != ''
         env:
           BRANCH: ${{ steps.bump.outputs.branch }}
+          BUMP_SHA: ${{ steps.bump.outputs.sha }}
         run: |
           # Checks register a few seconds after the pull request opens.
           sleep 60
@@ -155,7 +169,12 @@ jobs:
             echo "::error::The bump pull request changes '$files', not the four version files. Not merging."
             exit 1
           fi
-          gh pr merge "$BRANCH" --merge --delete-branch
+          head="$(gh pr view "$BRANCH" --json headRefOid -q .headRefOid)"
+          if [ -z "$BUMP_SHA" ] || [ "$head" != "$BUMP_SHA" ]; then
+            echo "::error::The bump pull request's head is '$head', not the commit this run pushed ('$BUMP_SHA'). Someone else pushed to $BRANCH. Not merging; review that branch by hand."
+            exit 1
+          fi
+          gh pr merge "$BRANCH" --merge --delete-branch --match-head-commit "$BUMP_SHA"
           git checkout dev
           git pull --ff-only origin dev
           pnpm exec tsx scripts/desktop-release-cut.ts plan > "$RUNNER_TEMP/plan.json"

@@ -6,7 +6,7 @@ import type { HeldPr } from "./release-plan.mjs"
  * [limitHours, limitHours + windowHours).
  */
 export function holdNudge(
-  plan: { held?: Pick<HeldPr, "number" | "mergedAt" | "why">[] },
+  plan: { held?: (Pick<HeldPr, "mergedAt" | "why"> & Partial<Pick<HeldPr, "number" | "direct" | "sha">>)[] },
   now: string,
   options?: { limitHours?: number; windowHours?: number },
 ): string | null

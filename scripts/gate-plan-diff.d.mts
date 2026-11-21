@@ -1,5 +1,3 @@
-import type { ReleasePlan } from "./release-plan.mjs"
-
 /** The part of a plan that decides a release, as comparable strings. */
 export interface PlanShape {
   cut: boolean
@@ -10,7 +8,24 @@ export interface PlanShape {
   held: string[]
 }
 
-export function planShape(plan: ReleasePlan): PlanShape
+/** One entry of a plan as either side prints it: a PR by number, a direct commit by sha. */
+export interface PlanEntry {
+  number?: number
+  direct?: boolean
+  sha?: string
+  walk?: string
+  areas?: string[]
+  why?: string
+}
+
+export function planShape(plan: {
+  cut: boolean
+  reason: string
+  branch?: string
+  base?: string
+  prs?: PlanEntry[]
+  held?: PlanEntry[]
+}): PlanShape
 
 /** One line per differing field of two shapes; lists are compared entry by entry. */
 export function shapeDiff(label: string, base: Record<string, unknown>, head: Record<string, unknown>): string[]

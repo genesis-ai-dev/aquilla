@@ -17,7 +17,7 @@
 // Prints the message, or nothing when no PR crossed the limit this hour.
 import { readFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
-import { HOLD_NUDGE_HOURS } from "./release-plan.mjs"
+import { HOLD_NUDGE_HOURS, entryLabel } from "./release-plan.mjs"
 
 const HOUR = 3_600_000
 
@@ -39,9 +39,9 @@ export function holdNudge(plan, now, { limitHours = HOLD_NUDGE_HOURS, windowHour
   if (!crossed.length) return null
   const over = waits.filter((pr) => pr.hours >= limitHours)
   const oldest = over.reduce((a, b) => (b.hours > a.hours ? b : a))
-  const named = crossed.map((pr) => `#${pr.number} (${pr.why})`).join(", ")
-  const total = over.length > crossed.length ? ` ${over.length} merged PRs have now waited that long; the oldest is #${oldest.number}, ${age(oldest.hours)}.` : ""
-  return `⏳ Held ${limitHours} h, not in production: ${named}.${total} A green gate or the \`release:approved\` label puts a PR on the next cut.`
+  const named = crossed.map((pr) => `${entryLabel(pr)} (${pr.why})`).join(", ")
+  const total = over.length > crossed.length ? ` ${over.length} merged changes have now waited that long; the oldest is ${entryLabel(oldest)}, ${age(oldest.hours)}.` : ""
+  return `⏳ Held ${limitHours} h, not in production: ${named}.${total} A green gate or the \`release:approved\` label puts a PR on the next cut; a direct commit waits for a person to pick it.`
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

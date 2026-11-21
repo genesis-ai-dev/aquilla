@@ -172,18 +172,25 @@ export async function getKnowledgeDocumentContent(
   return body.text
 }
 
+/** An uploaded document, and whether only the first part of its text was
+ *  kept (the server keeps at most 2 M characters; AQU-2594). */
+export interface KnowledgeUpload {
+  doc: KnowledgeDocument
+  textTruncated: boolean
+}
+
 export async function uploadKnowledgeDocument(
   scope: KnowledgeScope,
   jwt: string,
   file: File,
-): Promise<KnowledgeDocument> {
+): Promise<KnowledgeUpload> {
   const response = await request(scope, jwt, "", {
     method: "POST",
     headers: { "x-doc-name": encodeURIComponent(file.name) },
     body: file,
   })
-  const body = (await response.json()) as { doc: KnowledgeDocument }
-  return body.doc
+  const body = (await response.json()) as { doc: KnowledgeDocument; textTruncated?: boolean }
+  return { doc: body.doc, textTruncated: body.textTruncated === true }
 }
 
 export async function deleteKnowledgeDocument(

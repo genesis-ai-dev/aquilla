@@ -492,7 +492,6 @@ export const audio = defineNamespace({
     "audio.batchVoice.title": "Generate voice",
     "audio.batchVoice.tooltip": "Generate a take for each of {count} selected lines, in one voice",
     "audio.batchVoice.needTranslated": "Select at least one translated line",
-    "audio.batchVoice.rowName": "row {number}",
     "audio.batchVoice.voiceLabel": "Voice to use",
     "audio.batchVoice.existingLabel": "Lines that already have generated audio",
     "audio.batchVoice.existingSkip": "Leave them as they are",
@@ -734,12 +733,13 @@ export const audio = defineNamespace({
     "audio.addVoice.consentNote": "Cloning or training a real person asks your organization to confirm their consent first.",
     "audio.makeSpeech.title": "Make speech",
     "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
-    "audio.makeSpeech.ghostHint": "Or click an empty clip on the timeline to pick lines there.",
+    "audio.makeSpeech.makingLine": "Making this line's speech…",
+    "audio.makeSpeech.ghostHint": "Or hover an empty line on the timeline and click the sparkle beside the record button.",
     "audio.makeSpeech.pickedCount": plural({
       one: "{count} line picked",
       other: "{count} lines picked",
     }),
-    "audio.makeSpeech.shiftHint": "Shift-click another empty clip to add it, or to take it out.",
+    "audio.makeSpeech.shiftHint": "Shift-click the sparkle on another empty line to add it, or to take it out.",
     "audio.makeSpeech.translateNone": "These lines already have their text. Nothing to translate.",
     "audio.makeSpeech.translateSome": plural({
       one: "{count} line has no text yet and will be translated first.",
@@ -2895,14 +2895,6 @@ export const audio = defineNamespace({
           "selected lines has a translation to speak. Imperative: tells the reader " +
           "what to do.",
       },
-      "audio.batchVoice.rowName": {
-        description:
-          "How a line with no scripture reference is named in the generate-voice " +
-          "plan and summary: by the number in the editor table's # column. Appears " +
-          "inside a list of such names, so keep it short and lowercase.",
-        maxLength: 12,
-        placeholders: { number: "The line's number in the editor table's # column." },
-      },
       "audio.batchVoice.voiceLabel": {
         description:
           "Small heading over the searchable voice list in the generate-voice " +
@@ -3297,15 +3289,18 @@ export const audio = defineNamespace({
       "audio.addVoice.consentNote": {
         description: "Note at the bottom of the Add a voice panel.",
       },
+      "audio.makeSpeech.makingLine": {
+        description: "Tooltip and accessible label of the sparkle button beside the record button on an empty line of the timeline, while that line's speech is being made. It shows a spinner and cannot be clicked until it is done.",
+      },
       "audio.makeSpeech.ghost": {
-        description: "Tooltip and accessible label of a ghost clip on the timeline: the dashed outline where a line's speech will go. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
+        description: "Tooltip and accessible label of the grey sparkle-icon button beside the record button on an empty line of the timeline. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
       },
       "audio.makeSpeech.pickedCount": {
         description: "Heading in the Make speech panel above the list of lines the user picked on the timeline.",
         placeholders: { count: "How many lines are picked." },
       },
       "audio.makeSpeech.shiftHint": {
-        description: "Hint under the list of picked lines in the Make speech panel. 'Empty clip' is the dashed outline on the timeline where a line's speech will go. Shift is the keyboard key.",
+        description: "Hint under the list of picked lines in the Make speech panel. 'The sparkle' is the grey sparkle-icon button beside the record button on an empty line of the timeline. Shift is the keyboard key.",
       },
       "audio.makeSpeech.translateNone": {
         description: "Note in step 1 (Translate the text) of the Make speech panel when every chosen line already has its translation.",
@@ -3319,7 +3314,7 @@ export const audio = defineNamespace({
         placeholders: { count: "How many lines have no translation yet." },
       },
       "audio.makeSpeech.ghostHint": {
-        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked by clicking their empty (ghost) clips on the timeline.",
+        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked on the timeline. The sparkle is the grey sparkle-icon button that appears beside the record button when the pointer is on an empty line.",
       },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",

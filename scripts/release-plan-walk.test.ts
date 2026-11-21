@@ -442,6 +442,19 @@ describe("fillWalks", () => {
     expect(filled[1].walk).toBe("PASS")
     expect(call).toBeGreaterThan(1)
   })
+
+  // A commit pushed straight to dev has no PR. Whatever GitHub would say
+  // about its sha (here: an approved PR with a PASS walk) is another change's
+  // sign-off, so the commit is never looked up at all.
+  it("passes a direct commit through without asking GitHub about it", async () => {
+    const { fetchImpl, calls } = fakeGitHub({
+      associatedPrs: [{ number: 811, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "release:approved" }] }],
+      comments: [{ body: walkComment(811, HEAD_SHA, "PASS") }],
+    })
+    const commit = { sha: MERGE_SHA, subject: "chore(desktop): bump shell", direct: true, walk: "unknown" }
+    expect(await fillWalks([commit], { token: "t", fetchImpl })).toEqual([commit])
+    expect(calls).toEqual([])
+  })
 })
 
 // The `qa-walk` status a PR shows before it merges is the planner's own

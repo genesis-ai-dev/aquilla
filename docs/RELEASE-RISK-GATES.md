@@ -119,7 +119,9 @@ file can be in several areas.
 or behind a required check (every `.github/workflows/*.yml` not listed under
 `ci` below), the deploy scripts (`cloudflare-*`, `verify-*`,
 `resolve-deployment-target`, `tag-release`, `tag-metadata`,
-`record-github-deployment`, `assert-workers-build-env`, `ci-build`), the
+`record-github-deployment`, `assert-workers-build-env`, `ci-build`, and the
+desktop line's `desktop-release*` and `desktop-bundle*`, including
+`scripts/lib/desktop-release.ts` and `scripts/lib/desktop-bundle.ts`), the
 file map itself (`release-risk*`), and every gate's own machinery: the
 harnesses, corpora and goldens of §3, `src/lib/sync/offline-gate/**`, and
 `scripts/gate-*`.
@@ -194,6 +196,23 @@ PR's head sha, which is how a dev re-walk (`e2e/journeys/PR-BOT.md`,
 migration blocked) replaces the BLOCKED comment before it. Held PRs are
 skipped, not a wall: the plan is the ready PRs in dev order plus the held
 list with a reason each.
+
+**Direct commits.** A commit pushed straight to `dev` with no PR sits on
+dev's first-parent line like a PR merge, and the plan lists it in its dev
+position (`direct: true`, with its sha and subject where a PR has a number
+and a title). It has no walk, no gate run and no PR to carry
+`release:approved`, so its files decide. A commit that touches only the
+generated locale catalogs (`src/lib/i18n/messages/<locale>.ts`, never
+`en.ts`, `index.ts` or `all.ts`, and `src/lib/i18n/source-hashes.json`) is
+ready and is picked like a PR. Any other direct commit is held as `not a
+PR` until a person picks it by hand (Cut, below). Only a direct commit
+that changes no file (a merge that brought nothing in) is left out.
+Until 2026-11-20 the planner skipped every commit without a PR number and
+said nothing: six localization commits pushed between 2026-11-14 and
+2026-11-20 never reached the release line, and #2075 and #2124, which
+appended locale keys after them, were listed as `pick conflict in
+src/lib/i18n/source-hashes.json` on every hourly cut. The record is
+`docs/decisions/0014-direct-dev-commits-on-the-release-line.md`.
 
 **Gates: how a high-risk area becomes low-risk by test.** A gate is a
 required check on the PR's head sha, named in `release-risk.mjs`
@@ -313,17 +332,20 @@ the PR as a worktree, and all of their own files are `infra`: the same
 honesty rule as the first two gates.
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
-`git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
-This is what Matthew did by hand, mechanised. A pick that does not land
-is reported as held with a reason a person can act on, and the cut
-continues with the rest:
+`git cherry-pick -x` each ready entry onto it, in dev order: `-m 1` for a
+merge commit; a squash merge and a direct commit have one parent and are
+picked as they are. This is what Matthew did by hand, mechanised. A pick
+that does not land is reported as held with a reason a person can act on,
+and the cut continues with the rest:
 
 - `pick conflict in <paths>; needs #N`: git stopped on unmerged paths and
   the pick is aborted. `needs #N` is the newest held PR merged before it
   whose diff touches one of those paths, read off the `files` the plan
   carries per PR (no GitHub call), which is almost always the PR it was
   built on; approving that PR is the fix. With no such PR the entry stops
-  at the paths.
+  at the paths. When what it was built on is a held direct commit, the
+  reason reads `needs direct commit <short sha>`, and picking that commit
+  by hand (below) is the fix.
 - `empty pick: already in base, or needs #N`: git stopped with nothing to
   commit ("The previous cherry-pick is now empty"). Either production
   already carries the change, or the change only exists relative to a
@@ -337,6 +359,31 @@ continues with the rest:
   held PR it needs ships. (Before 2026-11-19 every empty pick was skipped,
   and #1968, #2046, #2047 and #2051 sat on every cut for days waiting for
   a person to "record it by hand" with no stated way to do so.)
+
+**Releasing a held direct commit.** A direct commit held as `not a PR`
+is listed on every cut, in the held line, as `<short sha> "<subject>" (not
+a PR)`. A run that cuts nothing because no entry is ready lists it in its
+run summary too. (A run that stops on a release in flight plans nothing;
+that release's own notes carry the list.) It stays listed until a person
+acts, because the pick is the sign-off:
+
+1. Decide that it should ship. Read the commit: nobody reviewed it. A
+   shell version bump, for one, raises the minimum shell version
+   production asks for, so that shell has to be published first.
+2. On the release branch in flight (or one cut by hand), run
+   `git cherry-pick -x <sha>` and push. Add `-m 1` only when the commit is
+   a merge. `release-verify` and smart Jev run again on the new HEAD.
+3. Once that branch is tagged, the planner reads the `(cherry picked from
+   commit <sha>)` line and the commit leaves the list. `-x` is not
+   optional here: a PR picked without it is still known by the number in
+   its subject, and a direct commit has no number.
+
+When the pick comes out empty because production already has the change,
+record it instead with an empty commit on the release branch whose body
+carries the same line, the remedy an empty pick of a PR already has:
+`git commit --allow-empty -m "Record <short sha> as released" -m "(cherry
+picked from commit <full sha>)"`, the last part on one line with all 40
+characters of the sha.
 
 Each reason appears in the run summary as a `- #N: <reason>` line, in the
 held line of the release notes, and in the commit comment. When nothing
@@ -422,6 +469,11 @@ self-heal through `chunk-reload.ts` as before.
    person adds `release:approved` to the PR.
 6. The next cut picks it. If the manual QA finds a problem, the fix is a
    new PR; the held PR just stays held.
+
+A direct commit has no PR, so steps 1, 2 and 4 do not exist for it: it is
+either a catalog-only commit the cut picks, or it is listed as `not a PR`
+until a person picks it onto a release branch (section 3, *Releasing a
+held direct commit*).
 
 Holding is by merged diff, not by label: removing a `risk:*` label changes
 nothing, and `release:approved` is the one label the planner reads.

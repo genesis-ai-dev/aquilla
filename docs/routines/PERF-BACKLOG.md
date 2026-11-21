@@ -76,8 +76,6 @@ render is about 98.
 
 Measured after the pass (664 terms, 12 occurring): open 6.9 s blocked against 5.5 s plain.
 
-15. **Extra renders per highlighted term**: highlight spans, `HighlightedText` pieces, and an
-    `AppTooltip` per rendering chip on the target side. This is the remaining 1.2–1.6× over plain.
 16. **No visible "checking…" state** for the health pass that now finishes in idle slices
     (`HealthStats.infractionsPending` exists; nothing reads it).
 

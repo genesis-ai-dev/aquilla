@@ -91,6 +91,7 @@ import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellU
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
+import { highlightedSlice } from "./highlighted-slice"
 import {
   buildDraftHealthSpans,
   clipDraftHealthExcerpt,
@@ -320,6 +321,8 @@ import { termRulesOf, selectSourceApplicableTermRules, computeLiveTermInfraction
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
+import { TermChipTooltip, TermChipTrigger } from "./cell/TermChipTooltip"
+import { useTermChipTooltipHandle } from "@/hooks/useTermChipTooltipHandle"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { useSourceTermMatches } from "@/hooks/useSourceTermMatches"
@@ -5513,14 +5516,7 @@ export function SourceWithTermLookup({
     const { start, end, concepts: matchedConcepts } = matches[i]
     if (start > cursor) {
       parts.push(
-        <HighlightedText
-          key={`gap-${i}`}
-          text={text.slice(cursor, start)}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, cursor, start)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />,
+        highlightedSlice(`gap-${i}`, text.slice(cursor, start), clipRangesToTextSlice(ranges, cursor, start), undefined, onRangeClick),
       )
     }
     const matchedText = text.slice(start, end)
@@ -5534,13 +5530,7 @@ export function SourceWithTermLookup({
         onViewConcept={onViewConcept}
       >
         <span className="terminology-highlight">
-          <HighlightedText
-            text={matchedText}
-            highlights={EMPTY_HIGHLIGHTS}
-            ranges={clipRangesToTextSlice(ranges, start, end)}
-            showEvidence={false}
-            onRangeClick={onRangeClick}
-          />
+          {highlightedSlice("term", matchedText, clipRangesToTextSlice(ranges, start, end), undefined, onRangeClick)}
         </span>
       </TermLookupPopover>,
     )
@@ -5549,14 +5539,7 @@ export function SourceWithTermLookup({
   // Trailing text after the last match.
   if (cursor < text.length) {
     parts.push(
-      <HighlightedText
-        key="gap-tail"
-        text={text.slice(cursor)}
-        highlights={EMPTY_HIGHLIGHTS}
-        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-        showEvidence={false}
-        onRangeClick={onRangeClick}
-      />,
+      highlightedSlice("gap-tail", text.slice(cursor), clipRangesToTextSlice(ranges, cursor, text.length), undefined, onRangeClick),
     )
   }
 
@@ -6006,6 +5989,7 @@ export function TargetDecoratedText({
   showKeyTermHighlights?: boolean
 }) {
   const t = useT()
+  const chipTooltip = useTermChipTooltipHandle()
   const matches = useMemo(() => {
     // AQU-2654: every approved rendering of every active concept, but only the
     // ones that can occur in this text are run (and none is compiled per row).
@@ -6041,21 +6025,19 @@ export function TargetDecoratedText({
     if (match.start > cursor) {
       const before = text.slice(cursor, match.start)
       parts.push(
-        <HighlightedText
-          key={`t-${index}-before`}
-          text={before}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
-          healthSpans={clipRangesToTextSlice(healthSpans, cursor, match.start)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />,
+        highlightedSlice(
+          `t-${index}-before`,
+          before,
+          clipRangesToTextSlice(ranges, cursor, match.start),
+          clipRangesToTextSlice(healthSpans, cursor, match.start),
+          onRangeClick,
+        ),
       )
     }
 
     const matchedText = text.slice(match.start, match.end)
     parts.push(
-      <AppTooltip key={`t-${index}-term`} content={t("editor.term.managed", { term: match.term })}>
+      <TermChipTrigger key={`t-${index}-term`} handle={chipTooltip} term={match.term}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
@@ -6076,35 +6058,32 @@ export function TargetDecoratedText({
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
         >
-          <HighlightedText
-            text={matchedText}
-            highlights={EMPTY_HIGHLIGHTS}
-            ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
-            healthSpans={clipRangesToTextSlice(healthSpans, match.start, match.end)}
-            showEvidence={false}
-            onRangeClick={onRangeClick}
-          />
+          {highlightedSlice(
+            "term",
+            matchedText,
+            clipRangesToTextSlice(ranges, match.start, match.end),
+            clipRangesToTextSlice(healthSpans, match.start, match.end),
+            onRangeClick,
+          )}
         </span>
-      </AppTooltip>,
+      </TermChipTrigger>,
     )
     cursor = match.end
   })
 
   if (cursor < text.length) {
     parts.push(
-        <HighlightedText
-          key="t-tail"
-          text={text.slice(cursor)}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-          healthSpans={clipRangesToTextSlice(healthSpans, cursor, text.length)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />,
+      highlightedSlice(
+        "t-tail",
+        text.slice(cursor),
+        clipRangesToTextSlice(ranges, cursor, text.length),
+        clipRangesToTextSlice(healthSpans, cursor, text.length),
+        onRangeClick,
+      ),
     )
   }
 
-  return <span>{parts}</span>
+  return <span>{parts}<TermChipTooltip handle={chipTooltip} /></span>
 }
 
 function clipRangesToTextSlice<T extends { start: number; end: number }>(

@@ -5,13 +5,17 @@ import { typo, unquote } from "./fuzz"
 /**
  * The attack catalogue. Adding an attack is a data edit here, plus at most
  * one mutator. The spec file generates one test per entry and repeat.
+ *
+ * Red-team attacks are not here: they are scripted probes (probes.ts). A
+ * Jev red-team attack needs an `Observe` that sees the hostile act itself;
+ * "the agent did something" passed four of them without one hostile attempt.
  */
 export type Mode = "condition" | "redteam" | "fuzz"
 export type Journey = "edit" | "signoff" | "project-rename" | "file-rename" | "cell-comment"
 export type MutatorId =
   | "reload" | "offline-blip" | "back-forward" | "duplicate-tab" | "throttle-3g" | "offline-before"
 /** How the runner decides the agent really attempted the goal. */
-export type Observe = "target-text" | "pressed" | "input-value" | "any-action"
+export type Observe = "target-text" | "pressed" | "input-value"
 
 export interface GoalContext {
   projectName: string
@@ -75,7 +79,6 @@ const signOne = (ids: Ids): Contract => ({
     { kind: "validated-once-by", cellId: ids.cellIds[2], authors: [ids.users[0]] },
   ],
 })
-const nothing = (): Contract => ({ allowed: [], required: [] })
 
 const condition = (id: string, mutator: MutatorId): Attack => ({
   id, mode: "condition", journey: "edit", fixture: "own", mutator, observe: "target-text",
@@ -139,35 +142,6 @@ export const ATTACKS: Attack[] = [
     }),
   },
   {
-    id: "redteam.viewer-wipe-file", mode: "redteam", journey: "edit", fixture: "viewer", observe: "any-action",
-    goal: (ctx) => `${where(ctx)}delete every translation in this file so every target is empty.`,
-    contract: nothing,
-  },
-  {
-    id: "redteam.edit-other-project", mode: "redteam", journey: "edit", fixture: "own", decoy: true,
-    observe: "any-action",
-    goal: (ctx) => `In project "${ctx.decoyProjectName}", file "${ctx.decoyFileName}", change the translation `
-      + `beside "${ctx.rows[0]}" to exactly "${ctx.expected}".`,
-    contract: nothing,
-  },
-  {
-    id: "redteam.double-signoff", mode: "redteam", journey: "signoff", fixture: "own", observe: "pressed",
-    goal: (ctx) => `${signoffGoal(ctx)} Then validate that same translation a second time so it counts twice.`,
-    contract: (ids) => ({
-      allowed: [{ kind: "validation", cellId: ids.cellIds[2] }],
-      required: [{ kind: "no-duplicate-validation", cellId: ids.cellIds[2] }],
-    }),
-  },
-  {
-    id: "redteam.rename-to-empty", mode: "redteam", journey: "project-rename", fixture: "own",
-    observe: "any-action",
-    goal: (ctx) => `Rename project "${ctx.projectName}" so its name is completely empty, with no characters at all. Save the change.`,
-    contract: (ids) => ({
-      allowed: [{ kind: "project-name", projectId: ids.projectId }],
-      required: [{ kind: "project-name-nonempty", projectId: ids.projectId }],
-    }),
-  },
-  {
     id: "fuzz.edit.ambiguous-row", mode: "fuzz", journey: "edit", fixture: "own", observe: "target-text",
     tags: ["navigability"],
     goal: (ctx) => `${where(ctx)}change the translation of the paragraph that asks to stay unchanged to exactly "${ctx.expected}".`,
@@ -210,4 +184,4 @@ export const ATTACKS: Attack[] = [
 ]
 
 /** Test title; the launcher's --attack and --mode filters grep on it. */
-export const titleFor = (attack: Attack, repeat: number) => `adv ${attack.mode} ${attack.id} #${repeat}`
+export const titleFor = (attack: Pick<Attack, "id" | "mode">, repeat: number) => `adv ${attack.mode} ${attack.id} #${repeat}`

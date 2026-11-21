@@ -495,9 +495,10 @@ broken gate, not a week of risky changes.
   and regenerate the golden in a PR of its own so the diff is the review.
 - **Automatic rollback: built, in observe mode.** §3, *Rollback watch*.
   Open: flip `AUTO_ROLLBACK` to `on` after the watch has reported
-  correctly on real releases (its thresholds are a first guess); give
-  the deploy token Account Analytics read, without which every watch
-  reads `no-signal`; and add a signal for handled 5xx answers (the zone's
+  correctly on real releases (its thresholds are a first guess); add the
+  `CLOUDFLARE_ANALYTICS_TOKEN` secret (a Cloudflare token with Account
+  Analytics read and nothing else), without which every watch reads
+  `no-signal`; and add a signal for handled 5xx answers (the zone's
   HTTP analytics for the API host, or PostHog error tracking), which the
   invocation count cannot see. The desktop hot bundle a release publishes
   is not rolled back.

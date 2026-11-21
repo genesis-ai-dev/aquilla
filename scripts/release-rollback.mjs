@@ -37,9 +37,13 @@
 // change is not rolled back: only additive migrations apply themselves
 // (gate-migration.ts), and the previous code runs on those by construction.
 //
-// Environment: CLOUDFLARE_API_TOKEN (Workers deploy, and Account Analytics
-// read for `watch`), CLOUDFLARE_ACCOUNT_ID, AUTO_ROLLBACK, WATCH_MINUTES
-// (default 10), DEPLOYED_AT (ISO; default: when `watch` starts).
+// Environment: CLOUDFLARE_API_TOKEN (the deploy token: wrangler reads and
+// promotes versions with it), CLOUDFLARE_ANALYTICS_TOKEN (Account Analytics
+// read, nothing else; `watch` reads the counts with it, and falls back to
+// the deploy token when it is unset), CLOUDFLARE_ACCOUNT_ID, AUTO_ROLLBACK,
+// WATCH_MINUTES (default 10), DEPLOYED_AT (ISO; default: when `watch`
+// starts). The analytics token is its own secret so that reading error
+// counts never needs the token that can deploy to be widened or reissued.
 import { execFile } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
@@ -137,7 +141,7 @@ async function invocations(worker, since, until) {
     const response = await fetch("https://api.cloudflare.com/client/v4/graphql", {
       method: "POST",
       signal: AbortSignal.timeout(30_000),
-      headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_ANALYTICS_TOKEN || process.env.CLOUDFLARE_API_TOKEN}`, "Content-Type": "application/json" },
       body: JSON.stringify({ query: ANALYTICS_QUERY, variables: { account: process.env.CLOUDFLARE_ACCOUNT_ID, script: worker, since, until } }),
     })
     const body = await response.json()

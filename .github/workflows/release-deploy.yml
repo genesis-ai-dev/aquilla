@@ -309,6 +309,9 @@ jobs:
         env:
           AUTO_ROLLBACK: ${{ vars.AUTO_ROLLBACK }}
           WATCH_MINUTES: ${{ vars.ROLLBACK_WATCH_MINUTES }}
+          # Account Analytics read only. Unset, the watch asks with the deploy
+          # token, and reads `no-signal` if that token cannot read analytics.
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
         run: |
           node "$RUNNER_TEMP/tools/scripts/release-rollback.mjs" watch "$RUNNER_TEMP/rollback-snapshot.json" > "$RUNNER_TEMP/watch.json" \
             || { echo "::warning::the rollback watch could not run"; echo '{"action":"no-signal","reason":"the watch itself failed; see the run log","mode":"observe","rolledBack":[]}' > "$RUNNER_TEMP/watch.json"; }

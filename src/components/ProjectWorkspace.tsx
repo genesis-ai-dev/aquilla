@@ -236,8 +236,9 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
-  timelineChaptersOf, type TimelineChapter,
+  timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
+import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
@@ -811,6 +812,7 @@ const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_BT_QUEUE_STATE: { waiting: ReadonlySet<string>; pending: number } = { waiting: new Set<string>(), pending: 0 }
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
+const EMPTY_MILESTONE_PAGES: readonly { key: string; cellIds: readonly string[] }[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 /** AQU-2507: the "no cell carries a check flag" answer, allocated once. */
@@ -15504,19 +15506,23 @@ export function ProjectWorkspace() {
     freeTiming: timingMode === "audioFirst",
   }
 
-  // ── A book or document on the timeline, the whole file ──
+  // ── A book or document on the timeline ──
   //
-  // A book's timeline lays out EVERY chapter, end to end, on one clock. The
-  // chapter the table is on (`chosenScopeKey`) only names where the reader
-  // is; scrolling the table does not swap the timeline for that chapter. A
-  // file with no chapters is the same list (Sam, Oct 28: the long-file parts
-  // are dropped — the timeline draws the clips in view, so length costs
-  // nothing). The timeline, the bottom strip's Play all and every timeline
-  // seek share ONE list of lines (`timelineCells`), so the programme they
-  // each lay out is the same one. On a book, headings follow "Count headings
-  // as translatable content" and hidden lines stay off unless recorded
+  // Split into milestones off: a book's timeline lays out EVERY chapter, end
+  // to end, on one clock. The chapter the table is on (`chosenScopeKey`) only
+  // names where the reader is; scrolling the table does not swap the timeline
+  // for that chapter. A file with no chapters is the same list (Sam, Oct 28:
+  // the long-file parts are dropped — the timeline draws the clips in view, so
+  // length costs nothing).
+  // Split into milestones on: the timeline draws only the milestone the table
+  // is on, including a part or a time range the continuous timeline ignores.
+  // The timeline, the bottom strip's Play all and every timeline seek share
+  // ONE list of lines (`timelineCells`), so the programme they each lay out
+  // is the same one. On a book, headings follow "Count headings as translatable
+  // content" and hidden lines stay off unless recorded
   // (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
+  const splitByMilestone = useMilestoneSplit()
   const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
   // The lines a book's timeline may draw at all, before any chapter.
   const timelineLines = useMemo(
@@ -15535,8 +15541,9 @@ export function ProjectWorkspace() {
     const queue = selectQueueStateForFile(state, fileCellIds)
     return queue.active ? (chapterOfCell(timelineScopes, queue.cellId)?.key ?? null) : null
   })
-  // Remembered so a scroll of the table still has a chapter to name. The
-  // timeline itself is `timelineLines`: every chapter, in the file's order.
+  // Remembered so a scroll of the table still has a chapter to name. With the
+  // split off, the timeline itself is `timelineLines`: every chapter, in the
+  // file's order. With the split on, it is the milestone the table is on.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
       ? (timelineScopes.find((chapter) => chapter.key === queueChapterKey)
@@ -15544,7 +15551,20 @@ export function ProjectWorkspace() {
       : null,
     [timelineScopes, chosenScopeKey, queueChapterKey],
   )
-  const timelineCells = timelineLines
+  const milestonePages = useMemo(
+    () => (splitByMilestone
+      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
+      : EMPTY_MILESTONE_PAGES),
+    [splitByMilestone, cellStore, cellStoreVersion],
+  )
+  const timelineCells = useMemo(
+    () => timelineCellsForMilestoneSplit(timelineLines, {
+      split: splitByMilestone,
+      milestones: milestonePages,
+      milestoneKey: chosenScopeKey,
+    }),
+    [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
+  )
   // The bottom strip reads its own audio and merges it in; it gets the same
   // lines by id.
   const timelineBarCells = useMemo(() => {
@@ -15554,16 +15574,18 @@ export function ProjectWorkspace() {
   }, [audioMergedCells, legacyCells, timelineCells])
   // The table reports the chapter on screen as it scrolls. Scrolling is
   // reading, never a pick, so it leaves playback alone — a paused Play all
-  // resumes where it was. The timeline keeps every chapter either way
-  // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
+  // resumes where it was. With the split off, the timeline keeps every
+  // chapter (lib/timeline/chapter-pick). With it on, the same report is which
+  // milestone the timeline draws. A pick in the chapter picker and a row of
   // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
-  // it and keeps playing, from its first line, on the whole book's clock.
-  // Picking one while playback is paused ends that playback, as before
-  // (lib/timeline/chapter-pick).
+  // it and keeps playing, from its first line. With the split off, that run
+  // stays on the whole book's clock. With the split on, the run is the
+  // milestone picked. Picking one while playback is paused ends that
+  // playback, as before (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
@@ -15575,6 +15597,8 @@ export function ProjectWorkspace() {
     chapters: readonly TimelineChapter[]
     cells: readonly CellData[]
     onScreen: TimelineChapter | null
+    /** Split into milestones: a pick plays that milestone, and the run stops there. */
+    oneMilestone: boolean
   } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
@@ -15586,7 +15610,10 @@ export function ProjectWorkspace() {
       playingKey: queueChapterKeyRef.current,
       queueKind: getQueueState().kind,
     })
-    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
+    const lines = run?.oneMilestone && plan.kind === "play"
+      ? scopeCells(run.cells, plan.chapter)
+      : run?.cells ?? []
+    return applyChapterPick(plan, { lines, ...chapterPickRunRef.current })
   }, [])
   // The chapter navigator eases the text so the chapter's first row is at the
   // top. When the Media timeline is open, the same pick eases the timeline so
@@ -15609,9 +15636,14 @@ export function ProjectWorkspace() {
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
-    chapterRunRef.current = timelineScopes.length > 0
-      ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter }
+    const milestoneChapters = splitByMilestone && milestonePages.length > 0
+      ? milestonePages.map((page) => ({ key: page.key, cellIds: page.cellIds }))
       : null
+    chapterRunRef.current = milestoneChapters
+      ? { chapters: milestoneChapters, cells: timelineLines, onScreen: timelineChapter, oneMilestone: true }
+      : timelineScopes.length > 0
+        ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter, oneMilestone: false }
+        : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
       if (!chapter) return
@@ -15622,7 +15654,10 @@ export function ProjectWorkspace() {
   })
   useEffect(() => onQueueRanOut((ctx) => {
     const run = chapterRunRef.current
-    if (!run || ctx.snapshot) return
+    // Split into milestones plays the page on screen and stops. The arrows
+    // turn the page; starting the next milestone here would play lines the
+    // timeline is no longer drawing.
+    if (!run || ctx.snapshot || run.oneMilestone) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     // A run that already holds the later chapters plays them itself. Starting
@@ -17312,24 +17347,28 @@ export function ProjectWorkspace() {
   useSkipSilentLinesOnVirtualClock(dubDriverCells, targetSlots, virtualIsTransport)
 
   // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
-  // is offered only where it can change something. Over the whole file — a
-  // book's every chapter, since Play all carries on into the next — laid out
-  // as the queue plays it, or as the built-in clock does while it drives.
-  // Handed over as a question, which the timeline asks when its ⋯ opens: the
-  // answer lays out every chapter, too much to redo on every edit.
+  // is offered only where it can change something. Over the programme Play
+  // all will run — the whole file when the split is off (a book's every
+  // chapter, since Play all carries on into the next), and the milestone on
+  // screen when the split is on — laid out as the queue plays it, or as the
+  // built-in clock does while it drives. Handed over as a question, which
+  // the timeline asks when its ⋯ opens: the answer lays out that programme,
+  // too much to redo on every edit.
   const skipSilentLinesApplies = useCallback(
     () =>
       skipSilentLinesCanChange({
         timing: timingMode,
-        runs: timelineScopes.length > 0
-          ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
-          : [timelineLines],
+        runs: splitByMilestone
+          ? [timelineCells]
+          : timelineScopes.length > 0
+            ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
+            : [timelineLines],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
         // AQU-2252: laid out with the tracks the queue plays them with.
         tracks: programmeTracks,
       }),
-    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
+    [timingMode, splitByMilestone, timelineCells, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -20289,8 +20328,11 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked || !fileChapterToolbar ? undefined : CHAPTER_NAV_TRAILING_OUTLET}
             // AQU-2310: gated on role and live link inside the table.
             milestoneEditing={milestoneEditing}
-            // AQU-1758: a book's timeline shows the chapter the table is on.
-            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            // The table names the milestone on screen. A book always reports it.
+            // A timed file reports it while Split into milestones is on, so
+            // the timeline follows that page and does not re-render the shell
+            // on every scroll while the split is off.
+            onActiveChapterChange={sequenceTimeline || splitByMilestone ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               </ChapterNavTrailingContext.Provider>

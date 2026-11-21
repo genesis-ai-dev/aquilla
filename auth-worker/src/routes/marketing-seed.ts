@@ -131,22 +131,30 @@ async function seedMarketing(db: AquillaDb): Promise<{
     ],
   })
 
-  // Idempotent content reseed: drop any prior demo file/cells/events first.
-  // Order matters: cells.event_id FKs events(id), so cells before events.
-  await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").bind(M_FILE_ID, M_PROJECT_ID).run()
-
-  const now = Date.now()
-
   // server_seq is NOT NULL + UNIQUE(project_id, server_seq) — assign a
-  // monotonic per-project sequence. Start past any existing max so re-seeds
-  // never collide.
+  // monotonic per-project sequence, past the highest one the project has had.
+  // Read BEFORE the old events are dropped below: read after, a re-seed starts
+  // again at 1 and the file ends on the same MAX(server_seq) as last time, with
+  // new cell ids. The sync-worker keys a file's cell ordering on that number
+  // (cells-read-route.ts, chainCacheKey), so the second sign-in in one worker's
+  // life was served the first one's ordering and the editor showed an empty
+  // file. Recording several takes in one run is exactly that.
   const seqRow = await db
     .prepare("SELECT COALESCE(MAX(server_seq), 0) AS m FROM events WHERE project_id = ?")
     .bind(M_PROJECT_ID)
     .first<{ m: number }>()
   let seq = Number(seqRow?.m ?? 0)
+
+  // Idempotent content reseed: drop any prior demo file/cells/events first.
+  // Order matters: cells.event_id FKs events(id), so cells before events.
+  // The file's comments go with it: they name cell ids that are about to be
+  // replaced, and one left behind shows as a count in the next sign-in's sidebar.
+  await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
+  await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
+  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
+  await db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").bind(M_FILE_ID, M_PROJECT_ID).run()
+
+  const now = Date.now()
 
   async function insertEvent(opts: { id: string; cellId: string | null; kind: string; payload: unknown }): Promise<void> {
     seq += 1

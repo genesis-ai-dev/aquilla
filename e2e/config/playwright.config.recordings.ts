@@ -52,7 +52,10 @@ export default defineConfig({
     },
   },
 
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // The device comes first and the frame after it: "Desktop Chrome" carries its
+  // own 1280×720 viewport, which otherwise wins over `use.viewport` above and
+  // leaves a grey band under the app in the 1280×800 recording.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: FRAME } }],
 
   // No webServer — scripts/e2e-up.ts owns backend boot (same as the e2e config).
 })

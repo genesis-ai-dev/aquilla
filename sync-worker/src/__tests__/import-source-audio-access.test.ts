@@ -110,6 +110,18 @@ describe('POST /import: source audio needs every language', () => {
     expect(r.audioRows).toBe(0)
   })
 
+  it('refuses a token limited to other files, as the events route refuses its attach', async () => {
+    const r = await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: 'file-other' }] }, true)
+    expect(r.status).toBe(403)
+    expect(r.text).toMatch(/not in scope/)
+    expect(r.audioRows).toBe(0)
+    expect(r.staged).toBe(true)
+    // A dub attachment is held to the file limit too, as on the events route.
+    expect((await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: 'file-other' }] }, true, 'dub')).status).toBe(403)
+    // Limited to this file: accepted.
+    expect((await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: F }] }, true)).status).toBe(200)
+  })
+
   it('leaves a text-only finish alone for a lead limited to Arabic', async () => {
     const h = await makeTestDb()
     await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES

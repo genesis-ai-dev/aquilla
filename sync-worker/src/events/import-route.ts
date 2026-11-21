@@ -31,6 +31,7 @@ import { ROLE, requiredRoleFor } from './role-policy'
 import { coversEveryLanguage } from './source-audio-access'
 import { loadTargetLanes } from './lane-read-wall'
 import { laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { fileScopeRefusal } from '../audio-write-guard'
 import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { withCors } from '../cors'
@@ -651,7 +652,13 @@ export async function handleBulkImportRequest(
       // the import is held to the events route's rule for a source attach
       // (source-audio-access.ts): the caller's access must cover every
       // language. Checked before anything below is written, so a refusal
-      // leaves the staged file hidden and no attach row behind.
+      // leaves the staged file hidden and no attach row behind. The events
+      // route checks the token's file limits first, for every audio attach
+      // (AQU-2685), so this does too.
+      if (finalizeEvents.length > 0) {
+        const fileRefusal = await fileScopeRefusal(db, auth.claims, body.projectId, body.fileId)
+        if (fileRefusal) return withCors(new Response(fileRefusal, { status: 403 }), request)
+      }
       if (finalizeEvents.some((event) => (event.payload as { role?: unknown }).role === 'source')) {
         const covers = await coversEveryLanguage({
           wallOn: laneReadWallEnabled(env.LANE_READ_WALL),

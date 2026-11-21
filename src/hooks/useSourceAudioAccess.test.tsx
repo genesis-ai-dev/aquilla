@@ -132,4 +132,36 @@ describe("useSourceAudioAccess", () => {
     await act(async () => { vi.advanceTimersByTime(SOURCE_AUDIO_ACCESS_RETRY_MS[0]!) })
     await waitFor(() => expect(result.current).toBe(false))
   })
+
+  it("asks again at once with the new file's token when the open file changes", async () => {
+    getToken.mockImplementation(async (fileId: string) => `tok-${fileId}`)
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: true }))
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: false }))
+    const { result, rerender } = renderHook((props: { fileId: string }) =>
+      useSourceAudioAccess({ projectId: "p1", fileId: props.fileId, getToken, enabled: true }),
+    { initialProps: { fileId: "f1" } })
+    await waitFor(() => expect(result.current).toBe(true))
+    // A lead limited to f1: on f2 the server says no.
+    rerender({ fileId: "f2" })
+    expect(result.current).toBe(true)
+    await waitFor(() => expect(result.current).toBe(false))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-f2" })
+  })
+
+  it("asks for the open file when it changed while a read was out", async () => {
+    getToken.mockImplementation(async (fileId: string) => `tok-${fileId}`)
+    let release!: (r: Response) => void
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { release = r }))
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: false }))
+    const { result, rerender } = renderHook((props: { fileId: string }) =>
+      useSourceAudioAccess({ projectId: "p1", fileId: props.fileId, getToken, enabled: true }),
+    { initialProps: { fileId: "f1" } })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    rerender({ fileId: "f2" })
+    await act(async () => { release(new Response(JSON.stringify({ coversEveryLanguage: true }), { status: 200 })) })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current).toBe(false))
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-f2" })
+  })
 })

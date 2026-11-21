@@ -17,6 +17,11 @@
 // stands: it is the one the server is still applying until the new token is
 // used, and a weak network should not make the actions flicker.
 //
+// The answer is for the open file: the server also applies the token's file
+// limits, so a lead limited to some files hears no on the others. Switching
+// files asks again at once (with that file's token); the previous answer
+// stands until the new one arrives.
+//
 // Plain `useState` + a race-guarded `useEffect`, per AD-3 — never `useQuery`.
 
 import { useEffect, useRef, useState } from "react"
@@ -29,7 +34,7 @@ export const SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS = 30_000
 
 export function useSourceAudioAccess(args: {
   projectId: string | null | undefined
-  /** Any file of the project: its sync token carries the project's grants. */
+  /** The open file: its sync token is used, and its file limits count. */
   fileId: string | null | undefined
   getToken: (fileId: string) => Promise<string | null>
   /** False when the answer cannot matter (below Project Lead). */
@@ -37,10 +42,14 @@ export function useSourceAudioAccess(args: {
 }): boolean | null {
   const { projectId, getToken, enabled } = args
   const [answer, setAnswer] = useState<{ projectId: string; covers: boolean } | null>(null)
-  // The file only picks the token; switching files does not restart the
-  // effect (the next token check re-reads with that file's token).
+  // Switching files does not restart the effect (the answer stands until the
+  // new one arrives); it asks again with that file's token.
   const fileIdRef = useRef(args.fileId)
-  useEffect(() => { fileIdRef.current = args.fileId })
+  const askRef = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    fileIdRef.current = args.fileId
+    askRef.current?.()
+  }, [args.fileId])
   const hasFile = Boolean(args.fileId)
 
   useEffect(() => {
@@ -72,7 +81,11 @@ export function useSourceAudioAccess(args: {
           attempt += 1
           timer = setTimeout(ask, pause)
         })
-        .finally(() => { inFlight = false })
+        .finally(() => {
+          inFlight = false
+          // The file changed while this read was out: ask for the open one.
+          if (live && fileIdRef.current && fileIdRef.current !== fileId) ask()
+        })
     }
 
     // A re-minted token may carry other grants: ask again. Skipped while a
@@ -85,11 +98,13 @@ export function useSourceAudioAccess(args: {
         .catch(() => {})
     }
 
+    askRef.current = ask
     ask()
     window.addEventListener("online", ask)
     const tokenCheck = setInterval(checkToken, SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS)
     return () => {
       live = false
+      askRef.current = null
       if (timer) clearTimeout(timer)
       clearInterval(tokenCheck)
       window.removeEventListener("online", ask)

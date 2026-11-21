@@ -36,8 +36,13 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
    that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
    components and were left alone.
-5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
-   focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
+5. **Activation is 8 React commits (target 6).** The table's part no longer reproduces: since
+   `EditorTable` compiles (item 8), clicking from one cell into another renders the table 3
+   times — the old editor deactivates on `focusout`, the rail pin moves on `focusin`, the new
+   editor activates on `click` — and the chapter label does not change (traced 2026-11-20).
+   Those three are separate browser events, so React cannot batch them; joining them means
+   keeping the old cell active until the new one claims it, which changes what a mousedown
+   that never becomes a click leaves behind. The other five commits are not traced.
 6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
    in 7.5 s with a file open and no cell active.
 7. **Two cell GETs per `cell.audio.*` write** (apparently one for the POST's applied frames and

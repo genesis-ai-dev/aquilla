@@ -357,7 +357,7 @@ function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCh
   }
 }
 
-interface ImportDialogProps {
+export interface ImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string

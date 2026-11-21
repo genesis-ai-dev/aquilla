@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ExportDialog } from "./ExportDialog"
+import { exportDialogUnchangedWhileClosed } from "./closedDialogInputs"
+import { memoWhileClosed } from "./memoWhileClosed"
 import type { CellData } from "@/hooks/useCells"
 
 vi.mock("@/lib/export/export-service", () => ({
@@ -113,5 +115,48 @@ describe("ExportDialog — format follows the active file", () => {
     fireEvent.click(screen.getByText("Export to another format"))
     expect(screen.getByRole("radio", { name: /PowerPoint \(.pptx\)/i })).toBeChecked()
     expect(screen.queryByText("USFM")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2655: the workspace skips the closed dialog's renders
+// (`memoWhileClosed`). A file switch while closed must still reach the
+// format-reset effect while closed: deferred to the opening commit, it would
+// run after the restore-on-open effect and overwrite the remembered format.
+describe("ExportDialog — skipped while closed (AQU-2655)", () => {
+  const WhileOpen = memoWhileClosed(ExportDialog, undefined, exportDialogUnchangedWhileClosed)
+
+  it.each([
+    ["the dialog itself", ExportDialog],
+    ["the dialog skipped while closed", WhileOpen],
+  ] as const)("%s reopens on the remembered format after a file switch while closed", (_label, Dialog) => {
+    localStorage.clear()
+    const { rerender } = render(<Dialog {...TXT_FILE_PROPS} currentUsername="u1" />)
+    fireEvent.click(screen.getByText("Export to another format"))
+    fireEvent.click(screen.getByText("Markdown"))
+
+    rerender(<Dialog {...TXT_FILE_PROPS} currentUsername="u1" open={false} />)
+    rerender(<Dialog {...PPTX_FILE_PROPS} currentUsername="u1" open={false} />)
+    rerender(<Dialog {...PPTX_FILE_PROPS} currentUsername="u1" open />)
+
+    fireEvent.click(screen.getByText("Export to another format"))
+    expect(screen.getByRole("radio", { name: /Markdown/i })).toBeChecked()
+  })
+
+  it("renders while closed only for the inputs its closed-state effects read", () => {
+    const base = { ...TXT_FILE_PROPS, open: false }
+    // Rebuilt every workspace render with the same content: not a change.
+    expect(exportDialogUnchangedWhileClosed(base, {
+      ...base,
+      onOpenChange: vi.fn(),
+      cells: [cell("c1")],
+      projectFiles: PROJECT_FILES.map((f) => ({ ...f })),
+    })).toBe(true)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, activeFileId: "f-pptx" })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, activeFileName: "renamed.txt" })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, projectFiles: PROJECT_FILES.slice(1) })).toBe(false)
+    expect(exportDialogUnchangedWhileClosed(base, { ...base, targetLang: "fr" })).toBe(false)
+    // A codex file offers the Web page only when its lines carry verses.
+    const codex = { ...base, activeFileType: "codex", cells: [{ ...cell("c1"), group: "" } as CellData] }
+    expect(exportDialogUnchangedWhileClosed(codex, { ...codex, cells: [cell("c1")] })).toBe(false)
   })
 })

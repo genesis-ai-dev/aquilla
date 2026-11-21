@@ -99,6 +99,8 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { toast } from "@/components/ui/toast"
 import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
+import { formatScopePath } from "@/lib/access/scope-path"
+import type { ScopePath } from "@/lib/access/types"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -114,6 +116,8 @@ export interface StaffLanePopoverProps {
   laneLabel: string
   /** Project display name for the grant sentence. Omitted → "this project". */
   projectName?: string | null
+  /** Org display name for the scope title. Omitted → the title starts at the project. */
+  orgName?: string | null
   orgId: number | null
   trigger?: ReactNode
   onDone?: () => void
@@ -166,6 +170,7 @@ export function StaffLanePopover({
   laneId,
   laneLabel,
   projectName,
+  orgName,
   orgId,
   trigger,
   onDone,
@@ -511,6 +516,11 @@ export function StaffLanePopover({
     }
   }
 
+  const laneScopePath: ScopePath = [
+    ...(orgName?.trim() ? [{ type: "org" as const, id: String(orgId ?? "org"), name: orgName.trim() }] : []),
+    ...(projectName?.trim() ? [{ type: "project" as const, id: projectId, name: projectName.trim() }] : []),
+    { type: "lane" as const, id: laneId ?? lane, name: laneLabel },
+  ]
   const busy = phase === "submitting"
 
   return (
@@ -551,8 +561,8 @@ export function StaffLanePopover({
         onClick={(event) => event.stopPropagation()}
       >
         <div>
-          <p className="text-xs font-medium">
-            {t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
+          <p className="text-xs font-medium" data-testid="staff-lane-scope-title">
+            {t("org.access.addPeopleTo", { path: formatScopePath(laneScopePath) })}
           </p>
           <p className="text-[11px] text-muted-foreground">
             <RichMessage
@@ -576,6 +586,7 @@ export function StaffLanePopover({
             <StaffedLaneMembers
               projectId={projectId}
               laneLabel={laneLabel}
+              scopePath={laneScopePath}
               // No jwt means no scope read ever fires, so the list is empty
               // rather than loading forever.
               people={jwt ? staffed : []}

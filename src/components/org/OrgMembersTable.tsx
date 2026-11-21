@@ -8,6 +8,8 @@ import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { ScopeGrantChip } from "@/components/access/ScopeBreadcrumb"
+import { formatScopePath } from "@/lib/access/scope-path"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -150,17 +152,26 @@ export function OrgMembersTable({
                   <ChevronRight className="size-3.5" />
                 )}
               </button>
-              <MemberInspectorTrigger
-                userId={m.userId}
-                username={m.username}
-                from={{ type: "org", id: String(orgId) }}
-                herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
-                onManageAccess={() => {
-                  if (!expanded.has(m.userId)) toggleExpand(m.userId)
-                }}
-              >
-                <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="font-normal" />
-              </MemberInspectorTrigger>
+              <div className="flex min-w-0 flex-col">
+                <MemberInspectorTrigger
+                  userId={m.userId}
+                  username={m.username}
+                  from={{ type: "org", id: String(orgId) }}
+                  herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
+                  onManageAccess={() => {
+                    if (!expanded.has(m.userId)) toggleExpand(m.userId)
+                  }}
+                >
+                  <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="font-normal" />
+                </MemberInspectorTrigger>
+                {orgName ? (
+                  <ScopeGrantChip
+                    path={[{ type: "org", id: String(orgId), name: orgName }]}
+                    viaTeam={null}
+                    className="truncate text-xs font-normal text-muted-foreground"
+                  />
+                ) : null}
+              </div>
             </div>
           )
         },
@@ -217,7 +228,7 @@ export function OrgMembersTable({
         ),
       },
     ],
-    [expanded, isOwner, t, toggleExpand],
+    [expanded, isOwner, orgId, orgName, t, toggleExpand],
   )
 
   return (
@@ -250,7 +261,11 @@ export function OrgMembersTable({
           mode="add"
           level="org"
           callerLevel={callerOrgRoleLevel}
-          title={t("org.membersPage.orgTable.addMemberTitle")}
+          title={orgName
+            ? t("org.access.addPeopleTo", {
+                path: formatScopePath([{ type: "org", id: String(orgId), name: orgName }]),
+              })
+            : t("org.membersPage.orgTable.addMemberTitle")}
           summary={t("org.roleDialog.orgAddSummary")}
           details={t("org.roleDialog.orgRoleDetails")}
           people={{

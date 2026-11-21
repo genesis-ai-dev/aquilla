@@ -9,9 +9,10 @@
  * These tests verify intent, not just wiring.
  */
 
+import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { ParallelPassagesPanel, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { ParallelPassagesPanel, type ParallelPanelMode, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import { expectDisabledNote } from "@/test-utils/tooltip"
 import { toast } from "@/components/ui/toast"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -557,9 +558,9 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
       target: { value: "prova" },
     })
 
-    const option = screen.getByRole("option", { name: /genesis . target/i })
-    const targetLabel = within(option).getByText("Target")
-    const sourceLabel = within(option).getByText("Source")
+    const option = screen.getByRole("option", { name: /genesis . translation/i })
+    const targetLabel = within(option).getByText("Translation")
+    const sourceLabel = within(option).getByText("Source text")
     expect(targetLabel.compareDocumentPosition(within(option).getByText("teste")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(sourceLabel.compareDocumentPosition(within(option).getByText("test of content")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(targetLabel.compareDocumentPosition(sourceLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -605,16 +606,16 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
 
     const sideTabs = screen.getByRole("tablist", { name: /content side/i })
     expect(within(sideTabs).getByRole("tab", { name: "Both" })).toHaveAttribute("aria-disabled", "true")
-    expect(within(sideTabs).getByRole("tab", { name: "Source" })).toHaveAttribute("aria-disabled", "true")
-    expect(within(sideTabs).getByRole("tab", { name: "Target" })).toHaveAttribute("aria-selected", "true")
-    const option = screen.getByRole("option", { name: /genesis \(1 of 2\).*source/i })
+    expect(within(sideTabs).getByRole("tab", { name: "Source text" })).toHaveAttribute("aria-disabled", "true")
+    expect(within(sideTabs).getByRole("tab", { name: "Translation" })).toHaveAttribute("aria-selected", "true")
+    const option = screen.getByRole("option", { name: /genesis \(1 of 2\).*source text/i })
     expect(option.className).toContain("hover:bg-accent/40")
     expect(option.className).toContain("data-selected:bg-transparent")
     expect(option.className).not.toMatch(/data-selected:bg-accent/)
-    expect(screen.getByText(/source match — not replaced/i)).toBeInTheDocument()
-    expect(screen.getByRole("option", { name: /genesis \(1 of 2\).*source/i })).toBeInTheDocument()
+    expect(screen.getByText(/source text match — not replaced/i)).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /genesis \(1 of 2\).*source text/i })).toBeInTheDocument()
     expect(
-      screen.getByText(/replace changes target text only/i),
+      screen.getByText(/replace changes the translation only/i),
     ).toBeInTheDocument()
   })
 
@@ -623,7 +624,7 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
     render(<ParallelPassagesPanel {...baseProps({ mode: "search", onSearch })} />)
 
     fireEvent.change(screen.getByPlaceholderText(/search project/i), { target: { value: "content" } })
-    fireEvent.click(screen.getByRole("tab", { name: "Source" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Source text" }))
 
     expect(onSearch).toHaveBeenCalledWith(
       "content",
@@ -754,4 +755,73 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
       ),
     )
   })
+
+  it("shows match case, whole word, and regexp only in Replace, and Search ignores them", async () => {
+    const onSearch = vi.fn()
+    const seeded = render(
+      <ParallelPassagesPanel
+        {...baseProps({
+          mode: "search",
+          onSearch,
+          initialQuery: "hello",
+          initialFind: { caseSensitive: true, matchWord: true, useRegexp: true },
+        })}
+      />,
+    )
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Match whole word" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Use regular expression" })).not.toBeInTheDocument()
+    await waitFor(() => expect(onSearch).toHaveBeenCalled())
+    const seededOpts = onSearch.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(seededOpts).not.toHaveProperty("caseSensitive")
+    expect(seededOpts).not.toHaveProperty("matchWord")
+    expect(seededOpts).not.toHaveProperty("useRegexp")
+    seeded.unmount()
+
+    onSearch.mockClear()
+    render(<ReplaceThenSearch onSearch={onSearch} />)
+    fireEvent.change(getFindInput(), { target: { value: "hello" } })
+    fireEvent.click(screen.getByRole("button", { name: "Match case" }))
+    fireEvent.click(screen.getByRole("button", { name: "Match whole word" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use regular expression" }))
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        "hello",
+        expect.objectContaining({ caseSensitive: true, matchWord: true, useRegexp: true }),
+      ),
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Search" }))
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+    await waitFor(() => expect(onSearch).toHaveBeenLastCalledWith("hello", expect.any(Object)))
+    const searchOpts = onSearch.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(searchOpts).not.toHaveProperty("caseSensitive")
+    expect(searchOpts).not.toHaveProperty("matchWord")
+    expect(searchOpts).not.toHaveProperty("useRegexp")
+
+    fireEvent.click(screen.getByRole("tab", { name: "Passages" }))
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Replace" }))
+    expect(screen.getByRole("button", { name: "Match case" })).toHaveAttribute("aria-pressed", "true")
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        "hello",
+        expect.objectContaining({ caseSensitive: true, matchWord: true, useRegexp: true }),
+      ),
+    )
+  })
 })
+
+function ReplaceThenSearch({
+  onSearch,
+}: {
+  onSearch: NonNullable<Parameters<typeof ParallelPassagesPanel>[0]["onSearch"]>
+}) {
+  const [mode, setMode] = useState<ParallelPanelMode>("replace")
+  return (
+    <ParallelPassagesPanel
+      {...baseProps({ mode, onModeChange: setMode, onSearch })}
+    />
+  )
+}

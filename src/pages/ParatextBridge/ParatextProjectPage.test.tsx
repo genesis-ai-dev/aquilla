@@ -147,6 +147,29 @@ describe("ParatextProjectPage", () => {
     expect(screen.queryByTestId("paratext-mirror-card")).toBeNull()
   })
 
+  // Paratext 9 and Paratext 10 each keep a copy with the same GUID. Opening the
+  // copy Aquilla does not write to must reach the one Aquilla project, never
+  // import a second one, and say which copy Aquilla writes to.
+  it("treats a Paratext 10 copy of a mirrored project as the same project", async () => {
+    const P10 = "/Users/u/.paratext-10-studio/projects/Paratext 9 Projects/TPP1"
+    discover.mockResolvedValue({ ...FOUND, projects: [...FOUND.projects, { ...FOUND.projects[0], path: P10 }] })
+    const mirror = { projectGuid: "abc", projectPath: P10, projectId: "p-1", books: { MAT: { fileId: "f-9", fileName: "41MATTPP1.SFM" } }, targetLang: "", createdAt: 0 }
+    link.mockImplementation(async (id: string) => (id === `abc@${P10}` ? mirror : null))
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId("paratext-link-badge")).toHaveTextContent("Other copy"))
+    const card = screen.getByTestId("paratext-copies-card")
+    expect(within(card).getAllByTestId("paratext-copy")).toHaveLength(2)
+    expect(within(card).getByTestId("paratext-copy-not-live")).toHaveTextContent("Aquilla writes to this project's Paratext 10 copy")
+    screen.getByTestId("paratext-open-in-aquilla").click()
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/project/p-1/editor/file/f-9"))
+  })
+
+  it("shows no copies card when the project is in one folder only", async () => {
+    renderPage()
+    await screen.findByTestId("paratext-team-card")
+    expect(screen.queryByTestId("paratext-copies-card")).toBeNull()
+  })
+
   it("says so when the project is no longer on this computer", async () => {
     discover.mockResolvedValue({ ...FOUND, projects: [] })
     renderPage()

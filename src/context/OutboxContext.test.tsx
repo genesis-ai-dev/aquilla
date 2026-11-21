@@ -44,8 +44,8 @@ vi.mock("@/hooks/useOutboxFlusher", () => ({
     }
   },
 }))
-vi.mock("@/hooks/usePendingOutboxRecords", () => ({
-  usePendingOutboxRecords: () => [],
+vi.mock("@/hooks/useOutboxSnapshot", () => ({
+  useOutboxSnapshot: () => ({ pendingCount: 0, failedCount: 0, records: [], inspectorRecords: [] }),
 }))
 
 beforeEach(async () => {

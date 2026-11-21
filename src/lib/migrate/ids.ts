@@ -223,7 +223,8 @@ export const audioValidateEventId = (
 
 /** event id for a `cell.audio.select`, keyed by (cell, audioId). The all-takes
  *  import emits one of these to pin the legacy active take after attaching every
- *  take in the cell (each attach auto-selects, so an explicit final select wins).
+ *  take in the cell. Keyed on the take and nothing else, so it lands once and a
+ *  re-run's copy is a replay: it cannot put a selection back a second time.
  *  Distinct seed prefix from audio-attach so the two never collide. */
 export const audioSelectEventId = (
   projectId: string,

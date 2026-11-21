@@ -135,6 +135,47 @@ describe("migrateProjectAudio", () => {
     expect(finalizes[0].fileIds[0]).toBeTruthy()
   })
 
+  // An ordinary attach selects its own row, and the select that pins Codex's
+  // choice only lands once: a re-run's copy is an id replay. So every take but
+  // the chosen one has to arrive unable to select, or a recording whose bytes
+  // turn up on a later run takes the verse over from the validated one.
+  it("attaches every take but the chosen one as history", async () => {
+    const dir = repoWithAudio()
+    for (const [name, byte] of [["old.webm", "cd"], ["newer.webm", "ef"]]) {
+      fs.writeFileSync(path.join(dir, `.project/attachments/pointers/${name}`),
+        `version https://git-lfs.github.com/spec/v1\noid sha256:${byte.repeat(32)}\nsize 12\n`)
+    }
+    const file = path.join(dir, "files/target/GEN 1.codex")
+    const notebook = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      cells: Array<{ metadata: { attachments: Record<string, unknown> } }>
+    }
+    notebook.cells[0].metadata.attachments = {
+      old: { url: ".project/attachments/files/old.webm", type: "audio", createdAt: 50 },
+      clip: { url: ".project/attachments/files/clip.webm", type: "audio", createdAt: 100 },
+      newer: { url: ".project/attachments/files/newer.webm", type: "audio", createdAt: 150 },
+    }
+    fs.writeFileSync(file, JSON.stringify(notebook))
+
+    const events: Array<{ kind: string; payload: { audioId: string; historyOnly?: boolean } }> = []
+    await migrateProjectAudio(deps({
+      sync: {
+        ingest: async (_projectId: string, batch: typeof events) => {
+          events.push(...batch)
+          return { status: 200, ms: 1, accepted: batch.length }
+        },
+        finalize: async () => {},
+      } as never,
+    }), { project: PROJECT, dir })
+
+    const attached = events
+      .filter((event) => event.kind === "cell.audio.attach")
+      .map((event) => `${event.payload.audioId} ${event.payload.historyOnly === true ? "history" : "selects"}`)
+    // Copies finish in no fixed order, so the attaches are compared as a set.
+    expect(attached.sort()).toEqual(["clip.webm selects", "newer.webm history", "old.webm history"])
+    expect(events.filter((event) => event.kind === "cell.audio.select").map((event) => event.payload.audioId))
+      .toEqual(["clip.webm"])
+  })
+
   it("dry-run reads the manifest but does not copy, ingest or finalize audio", async () => {
     let copies = 0
     let ingests = 0

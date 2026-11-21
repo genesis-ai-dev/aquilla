@@ -16,6 +16,7 @@ import {
   type LaneIdentity,
   type VisibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+import { laneTagForArchiveCheck } from "../../../src/lib/lanes/archived-lane"
 import { laneScopeIds, laneScopeTags } from "../../../src/lib/lanes/scope-ids"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
@@ -136,22 +137,64 @@ export function targetVisibilityClause(args: {
 }
 
 /**
+ * The target lanes {@link eventRowsForVisibleLanes} resolves a lane tag
+ * against. Empty when the caller is unrestricted or holds no grant: neither
+ * needs a tag resolved, so neither pays for the read.
+ */
+export async function lanesForEventWall(
+  db: AquillaDb,
+  projectId: string,
+  visible: VisibleLaneTags,
+): Promise<LaneIdentity[]> {
+  if (visible === null || visible.size === 0) return []
+  return loadTargetLanes(db, projectId)
+}
+
+/**
+ * The id of the lane an event addresses, or null when it addresses none.
+ *
+ * A string `laneId` is the answer. Lane writes only began to carry one in
+ * October 2026 (AQU-1612 / AQU-1902); every older event names its lane by the
+ * lane's frozen tag, `targetLang`, and a text or validation write with no tag
+ * addressed the default lane, whose tag is `''`. `laneTagForArchiveCheck` is
+ * that rule, and the tag resolves the way the projection resolves it
+ * (`laneIdResolveSql` in lane-id-sql.ts): the one target lane whose
+ * `legacy_tag` is exactly the tag. A project with no such lane, or a kind that
+ * names no lane (shared audio, comments), resolves nothing.
+ */
+function eventLaneId(kind: string, payload: unknown, lanes: readonly LaneIdentity[]): string | null {
+  const laneId = (payload as { laneId?: unknown } | null)?.laneId
+  if (typeof laneId === "string") return laneId
+  if (laneId != null) return null
+  const tag = laneTagForArchiveCheck(kind, payload)
+  if (tag === null) return null
+  const matches = lanes.filter((lane) => lane.legacyTag === tag)
+  return matches.length === 1 ? matches[0]!.id : null
+}
+
+/**
  * Event-log rows a caller may read. The log holds every lane's text, so any
  * route that returns raw events applies this one rule: source events are never
- * hidden, and any other event is kept only when its payload names a granted
- * lane by id. An event with no `laneId`, or an unparseable payload, fails
- * closed. `visible === null` (wall off, maintainer, platform) keeps every row.
+ * hidden, and any other event is kept only when the lane it addresses
+ * ({@link eventLaneId}) is granted. An event that addresses no lane, or whose
+ * payload is unparseable, fails closed. `visible === null` (wall off,
+ * maintainer, platform) keeps every row.
+ *
+ * `lanes` is the project's target lanes ({@link lanesForEventWall}). Without
+ * them an event from before lane ids cannot be placed and stays hidden, which
+ * is how a member lost the whole edit history of text they are granted.
  */
 export function eventRowsForVisibleLanes<T extends { kind: string; payload: string }>(
   rows: readonly T[],
   visible: VisibleLaneTags,
+  lanes: readonly LaneIdentity[],
 ): T[] {
   if (visible === null) return [...rows]
   return rows.filter((row) => {
     if (row.kind.startsWith("source.")) return true
     try {
-      const laneId = (JSON.parse(row.payload) as { laneId?: unknown } | null)?.laneId
-      return typeof laneId === "string" && visible.has(laneId)
+      const laneId = eventLaneId(row.kind, JSON.parse(row.payload), lanes)
+      return laneId !== null && visible.has(laneId)
     } catch {
       return false
     }

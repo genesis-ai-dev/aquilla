@@ -81,6 +81,20 @@ describe("expectedMediaKeys", () => {
     ])
   })
 
+  it("does not expect an AI voice's .wav sibling, but copies it when it exists (AQU-2671)", () => {
+    const withSibling = refs({ audio: new Set(["f1/take-a.webm", "f1/take-a#lossless-sibling"]) })
+    expect(expectedMediaKeys(PROJECT, withSibling)).toEqual([
+      "projects/p1/files/f1/audio/take-a.webm",
+      "projects/p1/voices/clip-1.webm",
+    ])
+    const selected = selectReferencedObjects(
+      PROJECT,
+      [{ key: "projects/p1/files/f1/audio/take-a.wav", size: 1 }],
+      withSibling,
+    )
+    expect(selected.referenced.map((o) => o.key)).toEqual(["projects/p1/files/f1/audio/take-a.wav"])
+  })
+
   it("expects a referenced original under either of the project's prefixes, and not one under another's", () => {
     const keys = expectedMediaKeys(
       PROJECT,

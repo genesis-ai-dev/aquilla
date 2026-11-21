@@ -46,13 +46,27 @@ export const MIN_SLOT_PX = 5
  */
 export function useHotSlot(viewStartSec: number, pxPerSec: number) {
   const [hotKey, setHotKey] = useState<string | null>(null)
+  // AQU-2663: the slot whose menu is open (a narrow empty line's one button).
+  // Forgotten on the same scroll or zoom as hover: a menu whose button moved
+  // or changed must not leave the slot lit, or reopen when it comes back.
+  const [menuKey, setMenuKey] = useState<string | null>(null)
+  // AQU-2663: the slot holding keyboard focus. Forgotten the same way: a
+  // focused button scrolled away unmounts without a blur.
+  const [focusKey, setFocusKey] = useState<string | null>(null)
   const [window, setWindow] = useState({ viewStartSec, pxPerSec })
   if (window.viewStartSec !== viewStartSec || window.pxPerSec !== pxPerSec) {
     setWindow({ viewStartSec, pxPerSec })
     setHotKey(null)
+    setMenuKey(null)
+    setFocusKey(null)
   }
   return {
     hotKey,
+    menuKey,
+    focusKey,
+    setFocusKey,
+    /** Hand to the slot's menu as its `onOpenChange`. */
+    setMenuOpen: (key: string, open: boolean) => setMenuKey((cur) => (open ? key : cur === key ? null : cur)),
     /** Spread onto the slot wrapper; `key` identifies the slot within the lane. */
     slotHoverProps: (key: string) => ({
       onPointerEnter: () => setHotKey(key),

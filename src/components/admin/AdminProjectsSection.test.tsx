@@ -3,7 +3,7 @@
  * Verifies the Status column surfaces attention reasons and the lens filters
  * down to projects that need attention.
  */
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { pickSelectOption } from "@/test-utils/select"
 import { MemoryRouter } from "react-router-dom"
@@ -229,5 +229,108 @@ describe("AdminProjectsSection", () => {
     fireEvent.change(screen.getByLabelText("Search projects…"), { target: { value: "shared" } })
     expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
     expect(screen.queryByText("In Org")).not.toBeInTheDocument()
+  })
+  // AQU-2708: the admin project list has no page cap, so its body is windowed
+  // with TanStack Virtual. Everything an operator does with the table reads
+  // the whole list, not the mounted window.
+  describe("a long list in a scrolling pane", () => {
+    const SCROLLPORT_PX = 400
+    const ROW_PX = 40
+    const many = Array.from({ length: 200 }, (_, i) =>
+      proj({
+        id: `p${i}`,
+        name: `Project ${String(i + 1).padStart(3, "0")}`,
+        deadlineAt: i === 150 ? "2020-01-01" : null,
+      }),
+    )
+
+    /** happy-dom has no layout: size the scrollport and the rows. */
+    const stubLayout = () => {
+      const isScrollport = (el: HTMLElement) => el.dataset.scrollport != null
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+        function (this: HTMLElement) {
+          return isScrollport(this) ? SCROLLPORT_PX : 0
+        },
+      )
+      // A pane only counts as a scrollport once its content overflows it.
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+        function (this: HTMLElement) {
+          return isScrollport(this) ? SCROLLPORT_PX * 20 : 0
+        },
+      )
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: HTMLElement) {
+          const height = isScrollport(this)
+            ? SCROLLPORT_PX
+            : this.tagName === "TR"
+              ? ROW_PX
+              : 0
+          return {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            right: 600,
+            bottom: height,
+            width: 600,
+            height,
+            toJSON: () => ({}),
+          } as DOMRect
+        },
+      )
+    }
+
+    const renderLong = () => {
+      stubLayout()
+      return render(
+        <MemoryRouter>
+          <div data-scrollport="" style={{ overflowY: "auto", height: SCROLLPORT_PX }}>
+            <AdminProjectsSection projects={many} />
+          </div>
+        </MemoryRouter>,
+      )
+    }
+
+    const rowNames = () =>
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((tr) => within(tr).getAllByRole("cell")[0]?.textContent)
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it("mounts a window of rows whose names are still readable", () => {
+      renderLong()
+      const names = rowNames()
+      expect(names.length).toBeLessThan(many.length / 2)
+      expect(names[0]).toBe("Project 001")
+      expect(screen.getByText("Project 001")).toBeInTheDocument()
+    })
+
+    it("searches the whole list, not the mounted window", () => {
+      renderLong()
+      expect(screen.queryByText("Project 151")).not.toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText("Search projects…"), {
+        target: { value: "Project 151" },
+      })
+      expect(screen.getByText("Project 151")).toBeInTheDocument()
+      expect(rowNames()).toEqual(["Project 151"])
+    })
+
+    it("filters the whole list through the lens", async () => {
+      renderLong()
+      await pickLens(/needs attention/i)
+      // Only the one overdue project needs attention, 150 rows down the list.
+      expect(rowNames()).toEqual(["Project 151"])
+    })
+
+    it("opens a project from a windowed row", () => {
+      navigate.mockClear()
+      renderLong()
+      fireEvent.click(screen.getByText("Project 002").closest("tr")!)
+      expect(navigate).toHaveBeenCalledWith("/projects/p1")
+    })
   })
 })

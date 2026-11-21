@@ -18,7 +18,7 @@ import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { grantsVersionFromSyncToken, readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
-import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -1214,7 +1214,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
     let cancelled = false
     async function refresh() {
-      const all = await peekOutboxBatch(2000)
+      const all = await peekOutboxShared(2000)
       if (cancelled) return
       const fid = fileRef.current
       const next = new Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>()

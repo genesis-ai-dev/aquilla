@@ -164,11 +164,21 @@ fixture it therefore runs the scenario once without measuring ("settling pass" i
 is why the first run on a new machine takes about twice as long. Deleting `.perf/interaction-*.json`
 by hand gets the same treatment on the next run.
 
+What the scenario types is added to what the cell already holds, so the cells it edits used to grow
+with every run (after a dozen runs one cell held 729 characters). Taller rows leave fewer rows in
+the virtualized window, and every count that scales with the rows on screen drifted down on an
+unchanged tree. Each pass therefore first puts the cells a previous run typed into back to one
+fixed, non-empty, validated text (`lib/scenario-reset.ts`), so every pass starts from the same
+fixture. Validated, because the editor validates a human edit: a reset cell left unvalidated turns
+the scenario's commit into a change of the validated set, which refetches cell confidence and
+renders more (commit `rowRenders` 11 → 19).
+
 ## What is measured
 
 | Phase | The user… | Headline metrics |
 | --- | --- | --- |
-| `open` | opens a file | `readyMs`, `longTaskTotalMs`, `reactCommits`, `requests` |
+| `openSerial` | opens the file, with responses handed over one at a time (below) | `reactCommits`, `componentRenders` |
+| `open` | opens a file | `readyMs`, `longTaskTotalMs`, `requests` |
 | `activate` | clicks into another cell | `ms` to an editable caret, `reactCommits`, `componentRenders` |
 | `typing` | types 40 characters | `inputToPaintP95Ms`, `componentRendersPerKey` |
 | `commit` | stops typing; the cell commits | `reactCommits`, `workspaceRenders`, `rowRenders`, `requests` |
@@ -176,8 +186,22 @@ by hand gets the same treatment on the next run.
 | `tabReturn` | leaves the tab for 30 s and comes back | `blankFrames`, `longTaskTotalMs`, `requests` |
 
 Every metric is `<fixture>.<phase>.<name>`. The report (`perf-report/interaction-latest.json`)
-also carries, per phase, `topRenders` (the 25 components that rendered most) and
-`repeatedRoutes` (requests sent more than once for that one action).
+also carries, per phase, `topRenders` (the 25 components that rendered most),
+`repeatedRoutes` (requests sent more than once for that one action) and `commitLog` (every commit
+in order: ms after the phase's first commit, components rendered, and the topmost component that
+rendered — diff two runs' logs to see which commits a count gained or lost).
+
+**Why the open is counted twice.** Opening a file sends about 39 reads. Each response that sets
+state renders the workspace (100–900 components), unless it lands in the same task as another
+response and React batches the two into one commit. Which responses share a batch depends on
+server and CPU timing, so on one tree the timed `open` measured 7,033 to 9,581 renders (backlog item
+37), and 43 to 79 commits across the 2026-11-20 runs. Those two counts are still reported but not budgeted. The `openSerial`
+phase opens the same file in its own browser context with every API response held and released in
+request order, one at a time, each once the page is idle and has not committed for 400 ms
+(`lib/serial-responses.ts`). Each response then pays its own render every run, so the count is the
+open's cost with no batching, and it moves only when what a response renders changes. It carries
+the open's count budgets. The requests still reach the server at once; WebSocket frames are not
+held.
 
 **The 1× count pass.** Under the 4× throttle, state updates that land close together fall into one
 React batch, so removing one of them can leave a 4× count unchanged (backlog item 39: 9 workspace

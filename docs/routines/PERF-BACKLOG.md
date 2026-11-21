@@ -130,10 +130,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 
 ## The harness itself
 
-37. **`plain.open.componentRenders` is not stable enough for its budget.** Five runs of one tree
-    on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
-    and 9,077 was the budget commit itself. Find what makes the open's render count depend on
-    timing before trusting a breach of it.
 38. **A first translation of an empty cell is not measured, and may cost more than it should.**
     The scenario edits the same cells every run. On a newly seeded fixture they are
     untranslated, and `plain.commit` measured 28 row renders, 10 workspace renders and one or

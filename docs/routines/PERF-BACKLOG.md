@@ -146,9 +146,17 @@ Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
 
 From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless noted).
 
-22. **Voice studio open:** 2.4 s blocked, 25 commits, 10,800 renders — a tooltip root per slot
-    button (`TimelineSlotButton` ×208).
-23. **Timeline lens open:** 1.5–1.9 s blocked, 19–23 commits, about 6,000 renders.
+23. **Timeline lens and voice studio open** (re-measured 2026-11-20 after the slot buttons
+    share one tooltip root per lane): lens 18 commits, 4,268 renders; voice studio 27 commits,
+    8,558 renders. What is left is the same pattern as item 10, on the timeline: an overlay root
+    per chip and per track — a `ContextMenu` per take and per track row
+    (`TargetAudioLane.tsx`, `TimelineEditor.tsx`'s track rows), `AppTooltip`s on each take's
+    toolbar, a `DropdownMenu` root per narrow line's slot menu (`TimelineSlotButton` `menu`,
+    49 on open), and 77 `Popover` roots not yet attributed (not in `src/components/timeline/`).
+    The lanes are inline elements of the 6k-line `TimelineEditor` with inline callbacks, so every
+    editor render re-renders every lane. The CPU profile of the lens open is led by
+    `getBoundingClientRect` (88 ms self time at 4×, caller not traced) and
+    `scrollIntoViewIfNeeded` (19 ms) — forced layout, not rendering.
 24. **Rules surface:** every built-in check row (a Select and a Switch each) re-renders on each
     of the 10 renders per open (`src/components/RulesSurface.tsx`, `BuiltinChecksList.tsx`); on 20
     files the quality section is 59 commits and 46 requests and keeps committing for 7.5 s.
@@ -169,8 +177,6 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 ## Transcribe view
 
 34. A save still renders the workspace about 5 times (about 1,600 components) — items 1–4 above.
-35. `TypedText` ticks every 30 ms during a pass: most of the 407 commits left in "transcribe all".
-36. The quantise loop runs on the main thread (73 ms at 4× for a 60 s window).
 
 ## The harness itself
 

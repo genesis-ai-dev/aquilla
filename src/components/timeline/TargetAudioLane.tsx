@@ -29,7 +29,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE, useQueueStateValue } from "@/lib/audio/play-queue"
-import { TimelineSlotButton } from "./TimelineSlotButton"
+import { SlotTooltipScope, TimelineSlotButton } from "./TimelineSlotButton"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { emptySlotFit } from "@/lib/timeline/empty-slot-fit"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
@@ -2378,6 +2378,7 @@ export function TargetAudioLane({
     // paint order right. At rest nothing changes at all, which is what keeps
     // the playhead over the chips everywhere except mid-gesture — where the
     // thing under the pointer is what you need to see.
+    <SlotTooltipScope>
     <div
       data-testid={laneTestId}
       // AQU-646 stage 7: THE HUE IS SET ONCE, HERE, and inherited by everything
@@ -2714,5 +2715,6 @@ export function TargetAudioLane({
         />
       ))}
     </div>
+    </SlotTooltipScope>
   )
 }

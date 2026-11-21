@@ -33,7 +33,10 @@ vi.mock("@/lib/paratext-bridge/tauri", () => ({
 }))
 vi.mock("@/lib/paratext-bridge/store", () => ({ bridgeStore: { link: (id: string) => link(id), putLink: (l: unknown) => putLink(l) } }))
 vi.mock("@/lib/paratext-bridge/book-sync", () => ({ setMirrorBase: async () => {} }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ createCloudProject: (...a: unknown[]) => createCloudProject(...a) }))
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  createCloudProject: (...a: unknown[]) => createCloudProject(...a),
+}))
 vi.mock("@/lib/sync/project-settings", () => ({
   createProjectLane: async () => ({ kind: "ok", lane: { legacyTag: "en" } }),
   fetchProjectSettings: async () => null,

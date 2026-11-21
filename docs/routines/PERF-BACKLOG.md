@@ -174,7 +174,7 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 40. **`plain.commit.requests` counts a one-time corpus load.** One of the commit phase's two
     requests is `GET …/files/<the other file>/cells?limit=500&lane=…`: the forecast corpus
     loading every other file the first time the editor asks for a suggestion
-    (`src/hooks/useForecastCorpus.ts::loadOtherFiles`, by design). The typing phase ends before
+    (`loadOtherFiles` in `src/hooks/useForecastCorpus.ts`, by design). The typing phase ends before
     the load starts, so the load lands in the commit window. A commit itself costs one request
     (the `POST /events`). Either load the corpus in a phase of its own, or exclude it from the
     commit's count, before the commit request budget is next lowered (traced 2026-11-21).

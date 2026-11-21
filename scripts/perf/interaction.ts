@@ -215,12 +215,20 @@ function buildApp(target: PerfTarget): void {
 }
 
 async function servePreview(): Promise<{ base: string; stop: () => void }> {
+  const base = `http://127.0.0.1:${PREVIEW_PORT}`
+  // Without this, the readiness poll below finds the other server, the run
+  // measures another worktree's build, and nothing says so.
+  if (await fetch(base).then(() => true, () => false)) {
+    throw new Error(
+      `port ${PREVIEW_PORT} is already serving something (another worktree's vite preview?). `
+        + "Stop it, or serve this build on another port and pass --app-base.",
+    )
+  }
   const child: ChildProcess = spawn(
     "pnpm",
     ["exec", "vite", "preview", "--outDir", DIST_DIR, "--port", String(PREVIEW_PORT), "--strictPort", "--host", "127.0.0.1"],
     { cwd: REPO_ROOT, stdio: "ignore", detached: true },
   )
-  const base = `http://127.0.0.1:${PREVIEW_PORT}`
   const stop = () => {
     try {
       if (child.pid) process.kill(-child.pid)

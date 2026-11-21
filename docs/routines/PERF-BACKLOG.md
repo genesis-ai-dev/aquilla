@@ -97,7 +97,6 @@ Measured after the pass: open 39 requests (33 distinct routes), tab return 11.
 20. **`useCellValidators`, `useCellHistory`** still flip `isLoading` on a focus revalidation, but
     nothing mounts either hook (only their own tests import them), so no screen pays for it.
     Delete them, or fix them when a caller comes back. (`useTimelineTextCells`: fixed, AQU-2655.)
-21. **`useOrgSettings`**: `GET /orgs/:id/settings` ×2 on every org route, ×4 on the projects list.
 
 ## Other surfaces
 

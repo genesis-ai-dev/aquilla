@@ -814,9 +814,10 @@ describe("useOrgSettings — cross-instance sync of confirmed writes", () => {
     // The sibling now evaluates against the promoted rule …
     expect(sibling.result.current.orgRules.map((r) => r.id)).toEqual(["r1", "promoted"])
     expect(sibling.result.current.version).toBe(4)
-    // … without any network of its own: two initial loads + patch()'s own
+    // … without any network of its own: one initial load (the two instances
+    // mount in the same turn and share it, AQU-2655) + patch()'s own
     // pre-write re-read of truth, nothing else.
-    expect(vi.mocked(restClient.fetchOrgSettings)).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(restClient.fetchOrgSettings)).toHaveBeenCalledTimes(2)
     // … and at the cost of exactly one extra render (setServer; hasFetched was
     // already true so that setter bails out).
     expect(renders()).toBe(rendersBefore + 1)
@@ -959,5 +960,29 @@ describe("useOrgSettings — re-reads when the tab comes back", () => {
     expect(result.current.settings).toBe(settingsBefore)
     expect(renders).toBe(rendersBefore)
     now.mockRestore()
+  })
+})
+
+// AQU-2655: every org route mounts this hook twice for one org (the sidebar
+// and the page), and each instance used to GET the row on its own.
+describe("useOrgSettings — one read per mount, not one per instance", () => {
+  it("two instances mounted together share one GET and both get the row", async () => {
+    mockFetchResponse = makeResponse(700)
+    vi.mocked(restClient.fetchOrgSettings).mockImplementation(async () => mockFetchResponse)
+    const { result } = renderHook(() => [useOrgSettings(1, 600), useOrgSettings(1, 600)] as const)
+    await waitFor(() => expect(result.current[0].hasFetched && result.current[1].hasFetched).toBe(true))
+    expect(restClient.fetchOrgSettings).toHaveBeenCalledTimes(1)
+    expect(result.current[0].exportMinRole).toBe(700)
+    expect(result.current[1].exportMinRole).toBe(700)
+  })
+
+  it("a re-read after a reset gets its own GET, so it sees what the reset cleared", async () => {
+    mockFetchResponse = makeResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    vi.mocked(restClient.fetchOrgSettings).mockClear()
+    await act(async () => { await result.current.refresh() })
+    await act(async () => { await result.current.refresh() })
+    expect(restClient.fetchOrgSettings).toHaveBeenCalledTimes(2)
   })
 })

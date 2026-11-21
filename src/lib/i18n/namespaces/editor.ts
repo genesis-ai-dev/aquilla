@@ -850,6 +850,12 @@ export const editor = defineNamespace({
       "You need project lead role to run a harmonization sweep",
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
+    "editor.selection.copySource": "Copy source",
+    "editor.selection.copyTarget": "Copy target",
+    "editor.selection.copiedSource": "Source copied",
+    "editor.selection.copiedTarget": "Target copied",
+    "editor.selection.copyEmpty": "Nothing to copy",
+    "editor.selection.copyFailed": "Couldn't copy to the clipboard",
     "editor.selection.validatedToast": plural({
       one: "Validated {count} cell",
       other: "Validated {count} cells",
@@ -2464,6 +2470,7 @@ export const editor = defineNamespace({
     // and the hover corner. `editor.source.editText` and the row's insert /
     // remove / reason strings are reused verbatim as its entries.
     "editor.cellMenu.trigger": "Cell actions",
+    "editor.cellMenu.copySource": "Copy source text",
     "editor.cellMenu.editTimestamps": "Edit timestamps",
     "editor.cellMenu.timingLocked": "Timing is locked for this project.",
     // AQU-2204: the source's times aren't shown while a file follows its recordings.
@@ -7492,6 +7499,40 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of that same X. It only deselects; nothing is deleted.",
       },
+      "editor.selection.copySource": {
+        description:
+          "Button on the selection toolbar. Copies the source text of every selected "
+          + "line, in the order the table shows them, one line per paragraph, with "
+          + "the line number from the # column. For pasting a whole chapter into a "
+          + "document. Pairs with editor.selection.copyTarget. 'Source' is "
+          + "editor.column.source.",
+        maxLength: 24,
+      },
+      "editor.selection.copyTarget": {
+        description:
+          "Button on the selection toolbar. Copies the target text of every selected "
+          + "line, in the order the table shows them, one line per paragraph, with "
+          + "the line number from the # column. Pairs with editor.selection.copySource. "
+          + "'Target' is editor.column.target.",
+        maxLength: 24,
+      },
+      "editor.selection.copiedSource": {
+        description:
+          "Success toast after Copy source wrote the selected source lines to the clipboard.",
+      },
+      "editor.selection.copiedTarget": {
+        description:
+          "Success toast after Copy target wrote the selected target lines to the clipboard.",
+      },
+      "editor.selection.copyEmpty": {
+        description:
+          "Shown when Copy source or Copy target is unavailable because none of the "
+          + "selected lines has text on that side.",
+      },
+      "editor.selection.copyFailed": {
+        description:
+          "Error toast when the browser refused the clipboard write. The selection is unchanged.",
+      },
       "editor.selection.validatedToast": {
         description:
           "Success toast after a bulk validate. Past tense — it reports what happened.",
@@ -9658,9 +9699,17 @@ export const editor = defineNamespace({
       "editor.cellMenu.trigger": {
         description:
           "Screen-reader name of the three-dot button at the top-right of a source " +
-          "cell. It opens the one menu holding every action on that cell: edit its " +
-          "source text, edit its timestamps, insert a cell above or below, remove it.",
+          "cell. It opens the one menu holding every action on that cell: copy its " +
+          "source text, edit its source text, edit its timestamps, insert a cell " +
+          "above or below, remove it.",
         maxLength: 20,
+      },
+      "editor.cellMenu.copySource": {
+        description:
+          "Right-click entry on a source cell. Copies that cell's source text to " +
+          "the clipboard. Shown to anyone who can see the cell, including someone " +
+          "who cannot edit it. Imperative.",
+        maxLength: 24,
       },
       "editor.cellMenu.editTimestamps": {
         description:

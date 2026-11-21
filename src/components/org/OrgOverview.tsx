@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, Navigate, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -14,7 +14,7 @@ import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { OrgAiMeter } from "@/components/billing/AiMeter"
-import { orgSettingsPath } from "@/lib/navigation/org-paths"
+import { orgProjectsPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -81,6 +81,14 @@ function OverviewLoadingTemplate() {
  * credits. The full searchable directory also lives on `/orgs/:id/projects`.
  */
 export function OrgOverview() {
+  const { offline, activeOrgId } = useActiveOrg()
+  // Desktop, offline: stats and rollups are server-only; the projects page
+  // lists what's downloaded.
+  if (offline && activeOrgId != null) return <Navigate to={orgProjectsPath(activeOrgId)} replace />
+  return <OrgOverviewOnline />
+}
+
+function OrgOverviewOnline() {
   const { t } = useI18n()
   const { activeOrg, activeOrgId, accessibleProjects, isLoading: orgLoading } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()

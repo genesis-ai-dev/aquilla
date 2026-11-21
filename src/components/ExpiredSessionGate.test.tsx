@@ -23,6 +23,12 @@ vi.mock("@/lib/offline/launch-resume", () => ({
   pendingOfflineLaunchResume: () => offlineResume,
 }))
 
+// Desktop connectivity: null outside the app / before the first probe.
+let connectivity: boolean | null = null
+vi.mock("@/lib/offline/connectivity", () => ({
+  useConnectivity: () => connectivity,
+}))
+
 /** Fake JWT with an `exp` claim `secondsFromNow` out. */
 function fakeJwt(secondsFromNow: number): string {
   const exp = Math.floor(Date.now() / 1000) + secondsFromNow
@@ -54,6 +60,7 @@ function renderAt(path: string) {
 beforeEach(() => {
   accountsValue = { active: null, loading: false }
   offlineResume = null
+  connectivity = null
 })
 
 describe("ExpiredSessionGate (AQU-885)", () => {
@@ -119,6 +126,22 @@ describe("ExpiredSessionGate (AQU-885)", () => {
     offlineResume = new Promise((resolve) => { settle = resolve })
     renderAt("/")
     settle(false)
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
+  })
+
+  it("holds sign-in on the org pages while the desktop app is offline", async () => {
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    connectivity = false
+    renderAt("/orgs/3/projects")
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText("app shell")).toBeInTheDocument()
+    expect(screen.queryByText(/^login page/)).not.toBeInTheDocument()
+  })
+
+  it("sends the desktop app to sign-in once it is back online", async () => {
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    connectivity = true
+    renderAt("/orgs/3/projects")
     expect(await screen.findByText(/^login page/)).toBeInTheDocument()
   })
 

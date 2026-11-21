@@ -24,6 +24,9 @@
  *  - Desktop: a launch waits for OfflineLaunchResume first. Sign-in can't work
  *    offline, so a user whose session lapsed in the field is taken to their
  *    downloaded project instead; their edits queue until they sign in again.
+ *  - Desktop, offline: no redirect at all. The org pages list the downloaded
+ *    projects from cached org lists (OrgContext `offline`); sign-in follows
+ *    once the connection is back.
  */
 
 import { useEffect, useState } from "react"
@@ -34,6 +37,7 @@ import { loadActiveSession } from "@/lib/frontier/session-store"
 import { loginPath } from "@/lib/navigation/login-path"
 import { isLaunchLandingPath } from "@/lib/offline/last-workspace"
 import { pendingOfflineLaunchResume } from "@/lib/offline/launch-resume"
+import { useConnectivity } from "@/lib/offline/connectivity"
 
 /**
  * How long a desktop launch holds the redirect for OfflineLaunchResume. Past
@@ -72,6 +76,8 @@ export function ExpiredSessionGate() {
 
 function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathname: string; next: string }) {
   const [confirmed, setConfirmed] = useState(false)
+  // Null outside the desktop app and before its first probe.
+  const offline = useConnectivity() === false
 
   useEffect(() => {
     let cancelled = false
@@ -89,7 +95,7 @@ function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathna
     return () => { cancelled = true }
   }, [jwt, pathname])
 
-  if (!confirmed) return null
+  if (!confirmed || offline) return null
   // A locally expired JWT does not need an explicit reauth override: Login
   // already shows the form for it. Omitting the flag lets a token refreshed by
   // another tab between confirmation and navigation recover automatically.

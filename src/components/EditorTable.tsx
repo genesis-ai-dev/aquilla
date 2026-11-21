@@ -851,6 +851,7 @@ const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
 const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+const EMPTY_INFRACTION_MAP: Map<string, RuleInfraction[]> = new Map()
 // AQU-2654: the table's column-heading row. The table function is not compiled
 // by the React Compiler, so each of its renders (one per cell activation, one
 // per store emit) re-ran these although their props had not changed.
@@ -1403,7 +1404,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
   onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, onAlignStyles, healthMap,
-  infractions = new Map(), rules = [],
+  infractions = EMPTY_INFRACTION_MAP, rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
   linkedTakesByCell,
@@ -1631,7 +1632,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   // values without widening its dependency array — same pattern as
   // displayCellsRef below.
   const viewableIndexesRef = useRef(viewableIndexes)
-  viewableIndexesRef.current = viewableIndexes
+  useLayoutEffect(() => {
+    viewableIndexesRef.current = viewableIndexes
+  }, [viewableIndexes])
   // Last cell whose editor was activated (jump target or clicked-into cell).
   // Deliberately NOT cleared on blur/deactivate: clicking the "Next
   // unfinished" menu item blurs the editor before the click lands, and the
@@ -1643,7 +1646,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const dragCells = useRef<Set<string>>(new Set())
   const fileCellIds = useCellIds(cellStore, orderedBy)
   const cellStoreVersion = useCellStoreVersion(cellStore)
-  const audioFileId = cellStore.getFileId()
+  const audioFileId = readAtVersion(cellStoreVersion, () => cellStore.getFileId())
   // AQU-1687, AQU-1689: Bible data. Voices (chips, rails), Who's Who (mention
   // tints, the Context tab) and the cell filter ("Show every line by …",
   // "Show cells that mention …"). Nothing unless the project's enrichments
@@ -1756,7 +1759,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const selectionPointerYRef = useRef<number | null>(null)
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
-  displayCellIdsRef.current = displayCellIds
+  useLayoutEffect(() => {
+    displayCellIdsRef.current = displayCellIds
+  }, [displayCellIds])
 
   // 2026-08-07 (wire c): follow-driver plumbing. The driver itself mounts
   // only while the timeline is stacked above (media-sync active).
@@ -1787,7 +1792,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
    *  list's own layout scroll must not overwrite it with row 0. */
   const userScrolledRef = useRef(false)
   const onPlaceChangeRef = useRef(onPlaceChange)
-  onPlaceChangeRef.current = onPlaceChange
+  useLayoutEffect(() => {
+    onPlaceChangeRef.current = onPlaceChange
+  }, [onPlaceChange])
   /** EVERY code-driven list scroll goes through here. Stamping only inside
    *  one caller left the rest (navigator picks, focus scrolls, jumps) reading
    *  as user scrolls — which silently killed following (2026-08-08 forensics). */
@@ -2291,7 +2298,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   // `displayCellIds` — which the row cannot see.
   const [detailCellId, setDetailCellId] = useState<string | null>(null)
   const detailCellIdRef = useRef<string | null>(null)
-  detailCellIdRef.current = detailCellId
+  useLayoutEffect(() => {
+    detailCellIdRef.current = detailCellId
+  }, [detailCellId])
 
   const openCellDetail = useCallback((cellId: string) => {
     setDetailCellId(cellId)
@@ -2542,7 +2551,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       }
     }
     return clampIndex(nearestIndex, list.length)
-  }, [getListQueryRoot])
+  }, [getListQueryRoot, clampCellIndex])
 
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
@@ -3016,6 +3025,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     clearVoiceFilter,
     fileCellIds,
     milestoneKeyByCellId,
+    onNavigateToCell,
     programmaticListScroll,
     splitByMilestone,
     voiceFilterActive,
@@ -3622,6 +3632,17 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     targetTextDirection,
     username,
     t,
+    activeLaneId,
+    audioOnlyLane,
+    sourceReadOnlyReason,
+    presenceStore,
+    onTargetPresenceSelection,
+    exampleOriginFor,
+    getFootnoteDetails,
+    cellLabelsEnabled,
+    addConceptBlockedReason,
+    canApproveConcept,
+    revealRowForPlayback,
   ])
   const listExtraData = useMemo(
     () => ({ cellStoreVersion, renderListItem }),
@@ -4942,6 +4963,43 @@ const RowAddFootnoteDialog = mountOnFirstOpen(AddFootnoteDialog)
 // validation control (and its popover and tooltip).
 const RowHealthRibbon = React.memo(HealthRibbon)
 const RowTargetValidationControl = React.memo(TargetValidationControl)
+
+/**
+ * `try { return await run() } catch (error) { … }` as a value, for EditorRow's
+ * write paths: the React Compiler cannot compile a conditional, `??` or `?.`
+ * inside a try statement, and every one of those paths has some.
+ */
+async function attemptAsync<T>(
+  run: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, value: await run() }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
+/**
+ * Runs `step` on the next animation frame, and again on each following frame
+ * while it returns false, at most `retries` more times. Returns a cancel.
+ * Used to focus an editor that mounts a frame or two after the state that
+ * asked for it. Module-level: a function that re-schedules itself cannot be
+ * compiled by the React Compiler inside a component.
+ */
+function onAnimationFrameUntil(step: () => boolean, retries: number): () => void {
+  let attempts = 0
+  let frame = 0
+  const run = () => {
+    frame = 0
+    if (step() || attempts >= retries) return
+    attempts += 1
+    frame = window.requestAnimationFrame(run)
+  }
+  frame = window.requestAnimationFrame(run)
+  return () => {
+    if (frame) window.cancelAnimationFrame(frame)
+  }
+}
 
 const NO_ROW_UI_STATE: RowUiState = { activeEditorCellId: null, focusedRailCellId: null, detailCellId: null }
 const RowUiStateContext = React.createContext<RowUiState>(NO_ROW_UI_STATE)
@@ -6465,6 +6523,13 @@ function EditorRow({
   // state (the mousedown-before-click race that collapses the browser selection
   // before the click callback fires).
   const capturedSelectionRef = useRef<string | null>(null)
+  // The same text for render: the add-term toolbar keeps showing it while its
+  // popover is open and `sourceSelection` has been cleared.
+  const [capturedSelection, setCapturedSelection] = useState<string | null>(null)
+  const captureSelection = useCallback((text: string | null) => {
+    capturedSelectionRef.current = text
+    setCapturedSelection(text)
+  }, [])
   // FRO-260: set to true while the user is pressing down on a SelectionTermActions
   // toolbar button, so the FRO-248 selectionchange guard doesn't clear
   // sourceSelection before onClick fires.
@@ -6495,7 +6560,9 @@ function EditorRow({
   }
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
   const sourceDraftRef = useRef(sourceDraft)
-  sourceDraftRef.current = sourceDraft
+  useLayoutEffect(() => {
+    sourceDraftRef.current = sourceDraft
+  }, [sourceDraft])
   /** Decision 11: the open source-editing session, for its Undo step. */
   const sourceStepRef = useRef<SourceSession | null>(null)
   // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
@@ -6546,7 +6613,8 @@ function EditorRow({
   const storedTargetHtmlRef = useRef<string | undefined>(undefined)
   const latestTargetRef = useRef({ value: "", valueHtml: "" })
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
-  const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
+  // Read by the editor once, when it mounts for this activation.
+  const [pendingIdmlPointerSelection, setPendingIdmlPointerSelection] = useState<IdmlPointerSelection | null>(null)
   // AQU-746: activation is async (read view → TipTap mount → rAF focus), so a
   // printable keydown typed in that window has no focused editor to land in and
   // is silently dropped. Buffer those keys on the (synchronously refocused) row
@@ -6651,10 +6719,16 @@ function EditorRow({
     && !lockHolderLabel
   )
   const styleSegmentDragRef = useRef(false)
-  styleSegmentDragRef.current = styleSegmentDrag
+  useLayoutEffect(() => {
+    styleSegmentDragRef.current = styleSegmentDrag
+  }, [styleSegmentDrag])
   const segmentEdgeDirtyRef = useRef(false)
   const segmentHtmlRef = useRef(visibleTranslatedHtml)
-  if (!segmentEdgeDirtyRef.current) segmentHtmlRef.current = visibleTranslatedHtml
+  // No dependency list: a drag that ends clean picks the stored value up again
+  // on the next commit even when that value did not change.
+  useLayoutEffect(() => {
+    if (!segmentEdgeDirtyRef.current) segmentHtmlRef.current = visibleTranslatedHtml
+  })
   const applySegmentEdgeRef = useRef<(slotIndex: number, edge: SegmentEdge, boundary: number) => void>(() => {})
   const commitSegmentEdgeRef = useRef<() => void>(() => {})
   useStyleSegmentEdgeDrag({
@@ -6671,8 +6745,12 @@ function EditorRow({
     onEdge: (slotIndex, edge, boundary) => applySegmentEdgeRef.current(slotIndex, edge, boundary),
     onGestureEnd: () => commitSegmentEdgeRef.current(),
   })
-  storedTargetHtmlRef.current = visibleTranslatedHtml
-  latestTargetRef.current = { value: visibleTranslated ?? "", valueHtml: visibleTranslatedHtml ?? "" }
+  // Every commit, as the render-time assignment this replaces did: a value
+  // `handleEditorCommit` wrote in between is overwritten by the stored one.
+  useLayoutEffect(() => {
+    storedTargetHtmlRef.current = visibleTranslatedHtml
+    latestTargetRef.current = { value: visibleTranslated ?? "", valueHtml: visibleTranslatedHtml ?? "" }
+  })
   const canEditSourceForCell = canEditSource && !idmlConfiguration
 
   /**
@@ -6968,10 +7046,13 @@ function EditorRow({
   // Deliberately keyed on the source fields `effectiveSourceText` reads rather
   // than on `cell`: the cell object gets a fresh identity on every commit and
   // overlay update, and depending on it would re-run the whole sweep each time.
+  const { original: gateOriginal, medium: gateMedium, transcription: gateTranscription } = cell
   const liveTermCandidates = useMemo(
-    () => selectSourceApplicableTermRules(cell, enabledTermRules),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [enabledTermRules, cell.original, cell.medium, cell.transcription],
+    () => selectSourceApplicableTermRules(
+      { original: gateOriginal, medium: gateMedium, transcription: gateTranscription },
+      enabledTermRules,
+    ),
+    [enabledTermRules, gateOriginal, gateMedium, gateTranscription],
   )
 
   // Live terminology infractions computed from the un-committed buffer. Only
@@ -7248,7 +7329,7 @@ function EditorRow({
       scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
     })
     const releaseOutboxNotify = autoValidate ? holdOutboxNotifications() : null
-    try {
+    const attempted = await attemptAsync(async () => {
       const eventId = await emitTargetCellCommit({
         id: reservedEventId,
         projectId: project.id,
@@ -7318,7 +7399,10 @@ function EditorRow({
       // so the BT describes THIS commit, not the lagging projection head.
       void onCellCommitted?.(cell.id, eventId)
       return true
-    } catch (err) {
+    })
+    if (attempted.ok) return attempted.value
+    {
+      const err = attempted.error
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
       // "saved" styling for an event that exists nowhere durable.
@@ -7347,8 +7431,10 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions, settleTextStep])
+  }, [editable, canValidate, project, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions, settleTextStep])
 
+  // The drag hook holds these two through refs; set them after each commit.
+  useLayoutEffect(() => {
   applySegmentEdgeRef.current = (slotIndex, edge, boundary) => {
     const html = segmentHtmlRef.current
     if (!html || idmlConfiguration?.kind !== "ready") return
@@ -7380,6 +7466,7 @@ function EditorRow({
       valueHtml: html,
     })
   }
+  })
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -7463,14 +7550,17 @@ function EditorRow({
       return
     }
     if (readIdmlMetadataV2(snapshot.metadata)?.editableSlotIndexes.length !== 1) return
-    try {
+    const attempted = await attemptAsync(async () => {
       const placed = placeIdmlPreviewInOnlySlot(snapshot, snapshot.translated)
       const saved = await handleEditorCommit({
         value: placed.value,
         valueHtml: placed.valueHtml ?? "",
       })
       if (saved) noteSaved()
-    } catch (err) {
+    })
+    if (attempted.ok) return attempted.value
+    {
+      const err = attempted.error
       setWriteError(err instanceof Error ? err.message : t("editor.idml.alignStylesFailed"))
     }
   }, [alignStylesAndReturn, cell, handleEditorCommit, noteSaved, t])
@@ -7501,12 +7591,15 @@ function EditorRow({
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
     const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
-    const session = (sourceStepRef.current ??= {
-      before: { value: shown.value, ...(shown.valueHtml !== undefined ? { valueHtml: shown.valueHtml } : {}) },
-      after: { value, valueHtml },
-      heads: parentId ? [parentId] : [],
-      writes: [],
-    })
+    if (!sourceStepRef.current) {
+      sourceStepRef.current = {
+        before: { value: shown.value, ...(shown.valueHtml !== undefined ? { valueHtml: shown.valueHtml } : {}) },
+        after: { value, valueHtml },
+        heads: parentId ? [parentId] : [],
+        writes: [],
+      }
+    }
+    const session = sourceStepRef.current
     session.after = { value, valueHtml }
     const write = emitSourceCellCommit({
       projectId: project.id,
@@ -7544,7 +7637,9 @@ function EditorRow({
   // …and when the row leaves the screen with the editor still open (the list
   // is virtualized): the saves it made are still that one step (review, Oct 29).
   const sourceStepWhereRef = useRef({ cellId: cell.id, fileId: cell.fileId })
-  sourceStepWhereRef.current = { cellId: cell.id, fileId: cell.fileId }
+  useLayoutEffect(() => {
+    sourceStepWhereRef.current = { cellId: cell.id, fileId: cell.fileId }
+  }, [cell.id, cell.fileId])
   useEffect(() => () => {
     const session = sourceStepRef.current
     sourceStepRef.current = null
@@ -7594,19 +7689,12 @@ function EditorRow({
   // target ProseMirror).
   useEffect(() => {
     if (!sourceEditing) return
-    let attempts = 0
-    let frame = window.requestAnimationFrame(function focusEditor() {
+    return onAnimationFrameUntil(() => {
       const pm = sourceColRef.current?.querySelector<HTMLElement>(".ProseMirror")
-      if (!pm) {
-        if (attempts < 8) {
-          attempts += 1
-          frame = window.requestAnimationFrame(focusEditor)
-        }
-        return
-      }
+      if (!pm) return false
       if (document.activeElement !== pm) pm.focus()
-    })
-    return () => window.cancelAnimationFrame(frame)
+      return true
+    }, 8)
   }, [sourceEditing])
 
   const captureFootnoteAnchor = useCallback(() => {
@@ -7686,9 +7774,9 @@ function EditorRow({
     const anchor = sel?.anchorNode
     const anchorEl = anchor instanceof Element ? anchor : anchor?.parentElement
     if (anchorEl?.closest("[data-selection-ignore]")) return
-    capturedSelectionRef.current = text
+    captureSelection(text)
     setSourceSelection(text)
-  }, [onAddConceptFromSelection, onAskAiFromSelection])
+  }, [onAddConceptFromSelection, onAskAiFromSelection, captureSelection])
 
   const handleAddTermOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -7699,12 +7787,12 @@ function EditorRow({
   }, [])
 
   const handleCreateTerm = useCallback((draft: ConceptDraft) => {
-    capturedSelectionRef.current = null
+    captureSelection(null)
     setSourceSelection(null)
     setAddTermOpen(false)
     window.getSelection()?.removeAllRanges()
     void onAddConceptFromSelection?.(draft)
-  }, [onAddConceptFromSelection])
+  }, [onAddConceptFromSelection, captureSelection])
 
   // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
@@ -7732,10 +7820,10 @@ function EditorRow({
       }),
     )
     // Dismiss the toolbar, like the terminology path.
-    capturedSelectionRef.current = null
+    captureSelection(null)
     setSourceSelection(null)
     window.getSelection()?.removeAllRanges()
-  }, [onAskAiFromSelection, cell.fileId, cell.id, cell.context, cell.group])
+  }, [onAskAiFromSelection, cell.fileId, cell.id, cell.context, cell.group, captureSelection])
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
@@ -7801,7 +7889,7 @@ function EditorRow({
     // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
     // byte-identical.
     const emit = validated ? emitCellValidate : emitCellUnvalidate
-    try {
+    const attempted = await attemptAsync(async () => {
       await emit({
         projectId: project.id,
         fileId: cell.fileId,
@@ -7824,7 +7912,10 @@ function EditorRow({
       // so it reads this cell's settled head.
       if (validated) await onValidated?.(cell.id, "click")
       return true
-    } catch (err) {
+    })
+    if (attempted.ok) return attempted.value
+    {
+      const err = attempted.error
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
@@ -7842,7 +7933,7 @@ function EditorRow({
 
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel || styleSegmentDragRef.current) return
-    pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
+    setPendingIdmlPointerSelection(pointerSelection ?? null)
     // AQU-746: open the keystroke-buffer window and move focus to the persistent
     // row wrapper *synchronously*, before React swaps the read view out. Without
     // this the read view unmounts, focus falls to <body>, and any keydown before
@@ -7963,21 +8054,13 @@ function EditorRow({
 
   useEffect(() => {
     if (!isEditorActive) return
-    let attempts = 0
-    let frame = 0
-    const focusEditor = () => {
+    const cancelFocus = onAnimationFrameUntil(() => {
       const pm = rowRef.current?.querySelector<HTMLElement>(".ProseMirror")
-      if (!pm) {
-        if (attempts < 8) {
-          attempts += 1
-          frame = window.requestAnimationFrame(focusEditor)
-        }
-        return
-      }
+      if (!pm) return false
       if (document.activeElement !== pm) {
         pm.focus()
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
-        if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
+        if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return true
         const sel = window.getSelection()
         if (sel) {
           const range = document.createRange()
@@ -7987,10 +8070,10 @@ function EditorRow({
           sel.addRange(range)
         }
       }
-    }
-    frame = window.requestAnimationFrame(focusEditor)
+      return true
+    }, 8)
     return () => {
-      if (frame) window.cancelAnimationFrame(frame)
+      cancelFocus()
       if (editorFocusedRef.current) {
         editorFocusedRef.current = false
         onReleaseCell?.(cell.id)
@@ -8224,7 +8307,7 @@ function EditorRow({
   // separate authoritative stage and automatic rule issues stay visible.
   const decayConfig = useMemo(
     () => resolveDecayConfig(project.decaySettings, readValidationCount(project)),
-    [project.decaySettings, project.validationCount],
+    [project],
   )
   const cellNeedsAttention = hasContent
     && healthRibbonPoint.stage === "automatic"
@@ -8344,7 +8427,7 @@ function EditorRow({
   // closes itself on Enter, blur or Escape. It opens whatever "Show cell
   // labels" says, and whatever else holds the slot — the button was pressed.
   const [labelEditing, setLabelEditing] = useState(false)
-  const closeLabelEditing = useCallback(() => setLabelEditing(false), [])
+  const closeLabelEditing = useCallback(() => setLabelEditing(false), [setLabelEditing])
   // The corner shows a ladder (voice, cast name, label). Only when what it
   // shows IS this cell's own label does a click on it open the field.
   const cornerLabelIsOwn = showCellLabel && labelText === ownLabel
@@ -8609,7 +8692,7 @@ function EditorRow({
     onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to terminology" toolbar never floats over a different row's content.
-    capturedSelectionRef.current = null
+    captureSelection(null)
     setSourceSelection(null)
   }
   const handleRowClick = (e: React.MouseEvent) => {
@@ -8829,7 +8912,7 @@ function EditorRow({
       undefined,
       { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
     )
-    try {
+    const attempted = await attemptAsync(async () => {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
         projectId: project.id,
@@ -8848,7 +8931,10 @@ function EditorRow({
       await commitAudioValidation([owner.fileId])
       settle(true)
       return true
-    } catch (error) {
+    })
+    if (attempted.ok) return attempted.value
+    {
+      const error = attempted.error
       console.error("[audio-validate] emit failed", error)
       settle(false)
       return false
@@ -9324,7 +9410,7 @@ function EditorRow({
               "View term" button appears when the selection matches an active concept. */}
           {(sourceSelection || addTermOpen) && (
             <SourceSelectionToolbar
-              sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
+              sourceSelection={sourceSelection ?? capturedSelection ?? ""}
               concepts={terminologyConcepts}
               onAskAi={handleAskAiFromSelection}
               onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
@@ -9699,9 +9785,9 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
-                    initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
+                    initialIdmlSelection={pendingIdmlPointerSelection}
                     onInitialIdmlSelectionApplied={() => {
-                      pendingIdmlPointerSelectionRef.current = null
+                      setPendingIdmlPointerSelection(null)
                     }}
                     onIdmlValidationError={setWriteError}
                     // AQU-667: only authoritative when we're not masking it with a

@@ -50,11 +50,16 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
 Measured after the pass: a workspace render is about 110–270 components (was about 1,000); a row
 render is about 98.
 
-8. **`ProjectWorkspace`, `EditorTable`, `EditorRow` and `TranslatedEditor` are not compiled by the
-   React Compiler** (eight `exhaustive-deps` suppressions and about 27 unsupported constructs in
-   the first; ref reads in render, a `??=`, one suppression in the others). Nothing in them is
-   memoized unless by hand. Making even one compile is a large, permanent gain — and Vitest runs
-   with the compiler off, so verify in a build with the benchmark.
+8. **`ProjectWorkspace` is not compiled by the React Compiler** (eight `exhaustive-deps`
+   suppressions and about 27 unsupported constructs). Nothing in it is memoized unless by hand.
+   *`EditorTable`, `EditorRow` and `TranslatedEditor` compile since 2026-11-20 (AQU-2655)* —
+   keep them compiling: a bailout is silent, so after touching one, check that the function
+   starts with `compiler_runtime.c(` in an unminified build (`.perf/interaction-dist`). What
+   bailed them out, so it does not come back: a ref read or written in render (use a layout
+   effect, state, or a reader hook), `??=`, an `eslint-disable` of a hooks rule, a function
+   that re-schedules itself, a `?.`/`??`/ternary inside `try` (see `attemptAsync`), and a
+   `useCallback`/`useMemo` whose deps miss a value its body reads. Vitest runs with the
+   compiler off; `E2E_REACT_COMPILER=1 pnpm vitest run …` runs it on.
 9. **`AppShell` re-renders with every workspace render**: all eight slot props (`logoAccessory`,
    `leftDock`, `header`, `aboveCard`, `beforeMain`, `main`, `asideEdge`, `statusBar`) are
    elements built in the workspace's render.

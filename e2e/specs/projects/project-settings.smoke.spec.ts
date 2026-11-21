@@ -56,8 +56,8 @@ test("project settings renames the project and edits a lane language", async ({ 
   // touch the settings blob (and must not depend on the settings-save race).
   // AQU-2262: no Save bar; the name saves when you leave the field.
   const renamed = alice.waitForResponse(
-    (r) => r.url().includes(`/api/v2/projects/${projectId}`)
-      && (r.request().method() === "PATCH" || r.request().method() === "PUT"),
+    (r) => new URL(r.url()).pathname === `/api/v2/projects/${projectId}`
+      && r.request().method() === "PATCH",
     { timeout: 15_000 },
   )
   await nameInput.press("Tab")

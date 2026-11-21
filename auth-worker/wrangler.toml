@@ -211,6 +211,11 @@ DEPLOYMENT_WORKER_NAME = "aquilla-identity-local"
 # AQU-713 legacy identity bridge. Production enables JIT migration by default;
 # all three migration secrets above must be provisioned before deployment.
 LEGACY_USER_MIGRATION_ENABLED = "true"
+# AQU-2686: PIN access links (AQU-626, /link/…) are switched off until we
+# know whether anyone still needs them. Fail-closed: only the exact string
+# "true" turns them on, and that should wait for AQU-2592's fix. Community
+# checking links (/check/…) are a separate feature and are not affected.
+ACCESS_LINKS_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
@@ -367,6 +372,8 @@ ENVIRONMENT = "production"
 LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
+# AQU-2686: PIN access links off — see the top-level [vars] note.
+ACCESS_LINKS_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
@@ -550,6 +557,8 @@ ENVIRONMENT = "development"
 LANE_READ_WALL = "1"
 DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
+# AQU-2686: PIN access links off — see the top-level [vars] note.
+ACCESS_LINKS_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — intentionally unset until the development sandbox has a
@@ -625,6 +634,8 @@ BASE_URL = "http://127.0.0.1:5173"
 SYNC_WORKER_URL = "http://127.0.0.1:8789"
 ENVIRONMENT = "development"
 LEGACY_USER_MIGRATION_ENABLED = "false"
+# AQU-2686: PIN access links off — see the top-level [vars] note.
+ACCESS_LINKS_ENABLED = "false"
 ADMIN_EMAILS = "alice@example.test"
 STRIPE_PUBLISHABLE_KEY = "pk_test_51U47kG7SR91OrWMSCDdwkoCVTexlfzvqLy7ftUUbeM0CDTlH61PsnxEkocohJZNt1cRFGrzOKtP3CUfesJSabn5H00D9YwLoPi"
 STRIPE_PRICE_FIELD = "price_1U487L7SR91OrWMSAwgtPRxU"

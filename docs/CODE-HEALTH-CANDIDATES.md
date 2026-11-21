@@ -4471,3 +4471,210 @@ Playwright browsers one revision off (`ln -sfn /opt/pw-browsers/chromium-1243
 /opt/pw-browsers/chromium-1254`, same for `ffmpeg-1011`→`1013` and
 `chromium_headless_shell-1243`→`1254`); and `bash scripts/e2e-pg-native.sh` for Postgres,
 exporting the single `E2E_PG_ADMIN_URL` line it prints.
+
+## 2026-11-20 — oversized-file split: `renderLaneBatchReport` leaves the planner
+
+First run of **theme 5** (oversized-file split). It takes the seam the 2026-10-12 entry
+above identified and declined, on that entry's own terms: *"the report renderer (`cell`,
+`countLines`, `renderLaneBatchReport`, ~105 lines at the end of the file) shares no closure
+state with the planner and would move cleanly to a `lane-batch-report.ts` re-exported from
+the original path."*
+
+- **Done this run** (2 files, 128 insertions / 107 deletions, no test file touched):
+  `src/lib/lanes/lane-batch-backfill.ts` 1,218 → 1,116 lines; the three renderer functions
+  now live in **`src/lib/lanes/lane-batch-report.ts`** (123 lines), which the planner's
+  module re-exports beside its imports:
+  `export { renderLaneBatchReport } from "./lane-batch-report"`.
+- **Zero importer churn.** The only two importers — `scripts/neon-backfill-lane-batch.ts:27`
+  and `src/lib/lanes/lane-batch-backfill.test.ts:9` — both import
+  `renderLaneBatchReport` from `./lane-batch-backfill`, and the re-export keeps that path
+  resolving. Neither file is in the diff.
+- **No runtime import cycle.** The new module needs `LaneBatchCounts`, `LaneBatchReport` and
+  `ScopeTagMatch`, which stay declared in the planner's module and are read with
+  `import type`. `tsconfig.app.json` sets `verbatimModuleSyntax: true`, so that import is
+  erased; the only runtime edge is planner → report, one direction.
+- **The seam was verified, not assumed.** `cell` and `countLines` are module-private and
+  `grep -n "\bcell(\|countLines("` over the pre-split file returns their declarations plus
+  seven call sites, **all inside `renderLaneBatchReport`** — the planner never touched
+  either. `countLines` has no reference anywhere else in the repo.
+
+### Proof of preservation
+
+The 2026-10-12 entry asked for *"the existing `lane-batch-backfill.test.ts` (15 tests) plus
+a byte-diff of `renderLaneBatchReport(planLaneBatch(snapshot))` over a real snapshot before
+and after, since the markdown report and the JSON sidecar are both consumed by the ops
+script."* Both were produced:
+
+1. **The moved block is byte-identical.** `git show HEAD:…/lane-batch-backfill.ts | sed -n
+   '1113,1218p'` diffed against the new file minus its 17-line header is **empty**. Nothing
+   inside the renderer was reworded, reordered or reformatted.
+2. **The rendered output is byte-identical.** A throwaway `tsx` script (scratchpad only,
+   never committed) built a two-project snapshot chosen to exercise what `cell()` does —
+   a project name containing `|`, another containing a newline, a guessed lane language, a
+   scope tag matching zero lanes, duplicate lane names, and a name/code disagreement — then
+   printed `renderLaneBatchReport(planned.report)`, `JSON.stringify(planned.report)` and
+   `JSON.stringify(planned.writes)`. Run in a `git worktree` at pristine `origin/dev` and in
+   the working tree, the two outputs diff **empty at 5,919 bytes**. That covers every report
+   section and both artifacts the ops script writes.
+3. **The test file's own 15 tests pass**, and were baselined *in the pristine worktree*
+   (15/15, 920 ms) because this run's edits were already on disk while the full baseline
+   `pnpm test` was still walking the tree — a read race the 2026-09-07 entry warned about.
+   Treat that isolation step as standard, not optional.
+
+### Deferred — two more seams in the same file, both over this run's budget
+
+`lane-batch-backfill.ts` is still 1,116 lines, more than twice the ~500-line target. Two
+further seams exist and each is clean; neither fits alongside the split above, because a
+pure move costs double its line count in `git diff --stat` and the budget is ~300.
+
+- **The report shapes** — `GuessedLaneLanguage` (`:242`), `UnresolvableRow` (`:252`),
+  `NameCodeDisagreement` (`:268`), `DuplicateLaneNames` (`:277`), `ScopeTagMatch` (`:284`),
+  `LaneBatchCounts` (`:293`) and `LaneBatchReport` (`:371`), ~143 lines. Moving them into
+  `lane-batch-report.ts` would make that module own the shapes it renders and let the
+  `import type` above point the other way (report → planner becomes planner → report for
+  types too). *Why deferred*: ~143 moved lines is ~290 changed lines on its own, and the
+  planner builds every one of these, so the planner would then import them back — worth
+  doing, but as its own slice. *Proof it would need*: the same two byte-diffs as above, plus
+  a check that each type is still exported from `lane-batch-backfill.ts` (the ops script
+  imports `LaneBatchPlan`/`LaneBatchSnapshot` from there).
+- **The apply preconditions** — `LANE_BATCH_MIGRATIONS` (`:37`), `LANE_BATCH_READ_ONLY_OPTIONS`,
+  `laneBatchClientConfig`, `LaneBatchColumnPresence`, `laneBatchApplyRefusal` and
+  `LANE_BATCH_SQL` (through `:127`), ~91 lines. These are about connecting and refusing, not
+  planning: each one's only in-file occurrences are its own declaration (and, for two of
+  them, one internal use), so the planner does not read them either. *Why deferred*: ~180
+  changed lines on top of this run's 235. *Proof it would need*: the existing
+  `describe("lane batch apply gate")` block (already covers `laneBatchApplyRefusal` and
+  `laneBatchClientConfig`) plus `pnpm build`.
+
+Taking both would put the file near ~880 lines. Doing all three at once was never in budget;
+doing them one per run is the point.
+
+### Themes surveyed and rejected this run, with the reason
+
+Recorded so a later run does not re-derive them. The rotation pushed away from dead code
+(2026-11-06/11/13/16) and doc drift (2026-11-18), which is how theme 5 came up at all.
+
+- **Whole-module dead code in `src/`: there is none left.** A fresh orphan scan over every
+  non-test `src` module returned 21 files, and **every one** is either already-known-excluded
+  (`src/components/ui/{item,attachment,bar-spinner}.tsx` vendored, the 11
+  `src/components/import/*` panels still blocked on issue
+  [#410](https://github.com/genesis-ai-dev/aquilla/issues/410), `src/partner-integrations/*`)
+  or **a false positive from the scan's own search roots**. The five that looked fresh —
+  `src/lib/export/exporters/xliff20.ts`, `src/lib/import/xliff-reimport.ts`,
+  `src/lib/qa/glossary.ts`, `src/lib/batch/pipeline.ts`,
+  `src/lib/entitlements/entitlements.ts` — are **all live, consumed by `parity/`**
+  (`parity/roundtrip/adapters.ts:31`, `parity/acceptance/workflow-tm.test.ts:13,15,18`,
+  `parity/batch/stub-server.ts:5`, `parity/acceptance/formats-xliff.test.ts:12`,
+  `parity/acceptance/tm-governance.test.ts:11`). A sixth, `src/lib/idml/idml.worker.ts`, is
+  loaded as `await import("./idml.worker?worker")` (`idml-worker-client.ts:85`).
+  **Methodology note for future runs: a usage scan that omits `parity/`, `shared/`,
+  `smart-tests/`, `tools/`, `packages/`, `monitor-worker/` and `db/`, or that does not allow
+  Vite's `?worker`/`?url` import suffixes, will hand you five live modules labelled dead.**
+- **ESLint `no-useless-assignment` (32 sites) — rejected as taste, not a smell.** Every
+  non-test site is the same deliberate idiom: `let x = <fail-closed default>; try { x = … }
+  catch { x = default }`. `auth-worker/src/routes/access-links.ts:405` is the clearest reason
+  to leave them: `let pinOk = false` is a security-relevant fail-closed default that reads
+  better written out than inferred from TS definite-assignment. `verseNum` in
+  `src/lib/parsers/usfm-tokenize.ts:142,200` is the same shape (reset beside `verseRef`,
+  always reassigned at `:263` before the read at `:264`). Removing these would be churn.
+- **`@typescript-eslint/no-explicit-any` — nothing to do.** All 47 mentions in the lint
+  output are `Unused eslint-disable directive` warnings **inside frozen test files**, exactly
+  as the 2026-10-21 entry predicted. Non-test source is still `any`-free: one `PersonPref<any>`
+  at `src/lib/prefs/person-prefs.ts:92` is a generic default, not a disable site.
+- **75 array-index `!` assertions remain, and this run declined them.** A fresh
+  `grep -rEn '\w+\[[a-zA-Z0-9_+. ]+\]!' src` (non-test, non-partner) finds 75 across 25
+  files, denser than
+  the ~29 the 2026-08-24 entry queued and 31-of-which were cleared across 2026-08-26/09-07/09-11.
+  They are still compile-time no-ops (`tsconfig.app.json` has `strict` but not
+  `noUncheckedIndexedAccess`). **But two counter-arguments landed that the earlier entries did
+  not weigh**: most of the survivors sit immediately after a proven invariant
+  (`matches.length === 1 ? matches[0]! : null` in `src/lib/lanes/*`, 9 non-test sites) where the `!`
+  *documents* the proof, and the whole set is what would let someone turn
+  `noUncheckedIndexedAccess` on. A human should rule on whether that flag is wanted before a
+  run strips them; until then this is not obviously a cleanup. The genuinely load-bearing
+  one stays flagged: `src/lib/audio/whisper-worker.ts:218` (`c.timestamp[0]!` on an explicit
+  `[number | null, number | null]`), per 2026-09-11.
+- **`categorizeAiError` (`src/lib/audio/ai-error.ts`, 365 lines, 30+ branches) — do not
+  "lookup-table" it.** It looks like the archetypal if/else ladder and is the opposite: the
+  **branch order is the behavior**, and eight of its comments exist only to pin an ordering
+  constraint (spend-ceiling before daily-quota because both carry "resets at midnight";
+  ElevenLabs before every platform branch; allowance before hosted-TTS because the 429 body
+  also carries "voice/tts"). A dispatch table loses the order and the reasons with it.
+- **Shallow-module collapse (theme 4) found no candidate worth a run.** Four pure
+  pass-throughs exist in `src/lib`, and all four pass the deletion test:
+  `src/lib/language-normalize.ts` and `src/lib/file-display-name.ts` exist to give the SPA a
+  `@/lib/…` path for a `db/shared` / `shared/tools` module, so collapsing them spreads deep
+  relative paths across 18 and 6 importers; `src/branding/assets/*/Wordmark.tsx` is frozen;
+  and `src/lib/project-status.ts` (8 lines, a bare named re-export of
+  `@/lib/frontier/portfolio-metrics` with no comment) looked like the one real candidate
+  until its callers were counted — **7 non-test importers plus its own
+  `src/lib/project-status.test.ts`**, so collapsing it would mean editing a test file, which
+  this routine may not do. Not a candidate; treat theme 4 as exhausted for `src/lib` unless
+  someone retires that test first.
+
+### Gate results — 2026-11-20
+
+All gates run **serially** (never lint alongside vitest — the 2026-11-16 sandbox note still
+holds), with `rm -rf packages/*/dist` before both lints so the two are comparable.
+
+| Gate | Baseline (clean `origin/dev` `34b38961c`) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1071 problems (0 errors, 1071 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2518 files passed / **1 failed**; 29762 tests passed / **1 failed** | exit 1 — **identical counts, identical single failure** |
+| `pnpm test:e2e:smoke` | the documented set below | exit 1 — s1 42 passed / 3 failed, s2 33 passed, s3 37 passed / 1 failed |
+
+Worker suites were **not** run and are not required: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+**The one root-suite failure is pre-existing and environmental**, and is the same one the
+2026-11-18 entry recorded: `scripts/release-cut.test.ts` → *"fails loud when the pick cannot
+commit, and leaves nothing in progress"* (`:321`). The test sets `commit.gpgsign=true` with a
+deliberately bogus `gpg.program` and expects `buildReleaseBranch` to throw; in this container
+git does not fail on that, so nothing is thrown. Identical before and after, and `scripts/` is
+nowhere near this run's files. Out of scope — **frozen for this run, not fixed.**
+
+**The four smoke failures are the two documented pre-existing sets, and the per-shard counts
+match the 2026-11-18 entry exactly** (s1 42/3, s2 33/0, s3 37/1 — the same three numbers):
+- **s1, 3 failures**, all `editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a
+  15 s `locator.click` timeout on `Play all`. That is now **six consecutive runs** failing this
+  way on clean `dev`.
+- **s3, 1 failure**, `projects/admin-console-billing.smoke.spec.ts:51` — the same
+  `ENOENT: no such file or directory, scandir 'auth-worker/.wrangler/tmp/email'` harness
+  artifact at line 77 the last three entries recorded. Not an assertion failure.
+
+Neither set is reachable from this diff, and the mechanical proof is stronger than the suites
+anyway: the moved block is byte-identical, the rendered markdown + JSON sidecar + writes list
+are byte-identical at 5,919 bytes against a pristine worktree, and a `grep` of all built
+`dist/assets/*.js` chunks after a green `pnpm build` finds **no** `planLaneBatch` or
+`renderLaneBatchReport` — the module's only non-test importer is the
+`scripts/neon-backfill-lane-batch.ts` ops script, so it never reaches the SPA at all (the same
+check the 2026-10-12 entry ran).
+
+### Sandbox notes — 2026-11-20
+
+The 2026-11-16/18 notes all still hold and were all needed again, plus one new one:
+
+- Serialize lint and vitest; `rm -rf packages/*/dist` before the baseline lint too.
+- Worker `node_modules` absent in a fresh container (`npm install` in `auth-worker/`,
+  `sync-worker/`, `agent-worker/` — **then `git checkout -- */package-lock.json`**). Needed for
+  the smoke stack even when the diff touches no worker.
+- Playwright browsers one revision off. `playwright-core@1.65.0` wants chromium **1254** /
+  chromium-headless-shell **1254** / ffmpeg **1013**; the image carries 1243/1243/1011, so:
+  `ln -sfn /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1254` and the same for
+  `chromium_headless_shell` and `ffmpeg-1011`→`1013`. Read the wanted revisions out of
+  `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json` rather than
+  trusting a previous entry's numbers.
+- `bash scripts/e2e-pg-native.sh` for Postgres, exporting the single `E2E_PG_ADMIN_URL` line it
+  prints.
+- **NEW — a full `pnpm test` can finish long after it looks dead.** This run's baseline wrote
+  its last line, dropped every `vitest` process from `ps`, and sat with no summary for minutes
+  before printing `Test Files 2518 passed`. Do not conclude a suite was killed from `ps` plus a
+  quiet log; wait for the summary line. Running the suite as three `--shard=N/3` passes (what
+  CI's `unit (shard N/3)` matrix does) gives legible intermediate results and the same totals:
+  840 + 839 + 839 = 2518 files, 10535 + 9721 + 9506 = 29762 tests.
+- **Also NEW — take the per-file baseline in a `git worktree`, before editing.** This run's
+  edits were on disk while the baseline suite was still walking the tree, so the full-suite
+  baseline is contaminated for the touched file. A `git worktree add … origin/dev` with
+  `node_modules` symlinked from the main checkout runs a single test file in ~1 s and settles it
+  (15/15, 920 ms here). The 2026-09-07 entry already recommended this; treat it as mandatory.

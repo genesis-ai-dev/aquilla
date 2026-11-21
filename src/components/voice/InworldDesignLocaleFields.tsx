@@ -87,6 +87,7 @@ function DesignLanguageCombobox({
       inputValue={query}
       onInputValueChange={(next: string) => setQuery(next)}
       autoHighlight
+      highlightItemOnHover={false}
       onValueChange={(row: LocaleOption | null) => {
         if (row) onValueChange(row.value)
       }}

@@ -1101,6 +1101,12 @@ export const editor = defineNamespace({
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
     "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
+    "editor.timeline.cueBladeOn": "Blade on — click a take to cut it",
+    "editor.timeline.cueBladeOffKeys": "B or Esc",
+    "editor.timeline.cueBladeOff": "Blade off",
+    "editor.timeline.cueBladeTurnOff": "Turn the Blade off",
+    "editor.timeline.cueSplit": "Take split at the playhead",
+    "editor.timeline.cueUndoHint": "{keys} to undo",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
@@ -8183,6 +8189,34 @@ export const editor = defineNamespace({
           "Tooltip of the snapping toggle while snapping is off — dragged edges land " +
           "wherever they are dropped. Two words, no sentence.",
         maxLength: 20,
+      },
+      "editor.timeline.cueBladeOn": {
+        description:
+          "Chip shown over the timeline while the Blade tool is on (turned on with the B key " +
+          "or the scissors button): every click on a take now cuts it in two. Keep it short; " +
+          "it sits in a small pill beside the keys that turn it off.",
+        maxLength: 48,
+      },
+      "editor.timeline.cueBladeOffKeys": {
+        description:
+          "Keys shown in a small key box in the Blade chip: pressing B again or Escape turns " +
+          "the Blade off. Translate only 'or'; B and Esc are the key names on the keyboard.",
+        maxLength: 16,
+      },
+      "editor.timeline.cueBladeOff": {
+        description: "Shown for a moment in the same chip right after the Blade is turned off.",
+        maxLength: 24,
+      },
+      "editor.timeline.cueSplit": {
+        description:
+          "Notification after the S key split the selected take (a recording on the timeline) " +
+          "into two pieces at the playhead.",
+      },
+      "editor.timeline.cueUndoHint": {
+        description: "Second line of that notification: which keys undo the split.",
+        placeholders: {
+          keys: "The undo keys as shown on the keyboard: '⌘Z' on a Mac, 'Ctrl+Z' elsewhere.",
+        },
       },
       "editor.timeline.bladeToggleAria": {
         description:

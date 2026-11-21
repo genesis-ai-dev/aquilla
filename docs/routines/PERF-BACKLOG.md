@@ -31,8 +31,11 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
 3. **Commit and self-validation are two outbox transactions.** The notification is held across
    both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
    enqueue path journals differently — read that first.
-4. **`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
-   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.
+4. ~~**`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
+   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.~~
+   *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
+   that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
+   components and were left alone.
 5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
    focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
 6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
@@ -131,11 +134,15 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
     and 9,077 was the budget commit itself. Find what makes the open's render count depend on
     timing before trusting a breach of it.
-38. **The first run after seeding is not representative.** With fixtures seeded in the same
-    run, `plain.commit` measured 28 row renders and 3 requests (a whole-file
-    `GET …/files/:id/cells` after one cell commit); every later run of the same tree measured
-    10–11 and 2. Either the benchmark should discard a warm-up commit, or a first commit on a
-    new project really does re-read the file and that is a defect — not traced.
+38. **A first translation of an empty cell is not measured, and may cost more than it should.**
+    The scenario edits the same cells every run. On a newly seeded fixture they are
+    untranslated, and `plain.commit` measured 28 row renders, 10 workspace renders and one or
+    two extra reads (`cell-confidence`, `branching-search`; one run also saw a whole-file
+    `GET …/files/:id/cells`); on a fixture that has been run against, the same tree measures
+    10–11, 7–8 and none. The harness now runs one unmeasured settling pass after it seeds
+    (2026-11-20), so the budgets describe an edit and a new machine no longer sees a false
+    breach. What is left: whether 28 row renders for a first translation is the price of the
+    cell changing state or a defect — not traced. Trace it, then give it its own phase.
 39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
     separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
     under the benchmark's 4× throttle some of them fall into one React batch (7). So removing

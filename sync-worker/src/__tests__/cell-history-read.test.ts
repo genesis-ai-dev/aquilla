@@ -111,14 +111,29 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   describe("lane read wall (AQU-730)", () => {
+    // lane-a is the default lane (tag ''); lane-b is the lane tagged "fr".
+    const defaultAndFr = [
+      { id: "lane-a", project_id: "proj-a", role: "target", legacy_tag: "" },
+      { id: "lane-b", project_id: "proj-a", role: "target", legacy_tag: "fr" },
+    ]
     const events = [
       makeEvent({ id: "s1", kind: "source.cell.create", parent_id: null, server_seq: 1, payload: '{"value":"src"}' }),
       makeEvent({ id: "a1", kind: "target.cell.commit", parent_id: "s1", server_seq: 2, payload: '{"value":"mine","laneId":"lane-a"}' }),
       makeEvent({ id: "b1", kind: "target.cell.commit", parent_id: "s1", server_seq: 3, payload: '{"value":"theirs","laneId":"lane-b"}' }),
+      // Written before lane ids: the lane is named by its tag, or by no tag at
+      // all for the default lane. This is the shape of all migrated history.
       makeEvent({ id: "u1", kind: "target.cell.commit", parent_id: "s1", server_seq: 4, payload: '{"value":"unstamped"}' }),
+      makeEvent({ id: "t1", kind: "target.cell.commit", parent_id: "s1", server_seq: 5, payload: '{"value":"tagged","targetLang":"fr"}' }),
+      makeEvent({ id: "v1", kind: "cell.validate", parent_id: null, server_seq: 6, payload: '{"editEventId":"u1"}' }),
+      // Shared audio names no lane, so the wall cannot place it on one.
+      makeEvent({ id: "x1", kind: "cell.audio.attach", parent_id: null, server_seq: 7, payload: '{"audioId":"take-1"}' }),
     ]
-    const get = async (claims: Parameters<typeof makeTestToken>[1], wall: string | undefined) => {
-      const { db } = await makeTestDb({ events })
+    const get = async (
+      claims: Parameters<typeof makeTestToken>[1],
+      wall: string | undefined,
+      lanes = defaultAndFr,
+    ) => {
+      const { db } = await makeTestDb({ events, lanes })
       const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", ...claims })
       const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells/cell-1/history", {
         headers: { Authorization: `Bearer ${token}` },
@@ -127,8 +142,14 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
       return ((await res.json()) as { events: Array<{ id: string }> }).events.map((e) => e.id)
     }
 
-    it("hides other lanes' and unstamped target events from a walled member", async () => {
-      expect(await get({ role: 400, laneGrants: [{ lane: "lane-a", level: 400 }] }, "1")).toEqual(["a1", "s1"])
+    it("shows a walled member their own lane's events, including those from before lane ids", async () => {
+      expect(await get({ role: 400, laneGrants: [{ lane: "lane-a", level: 400 }] }, "1")).toEqual(["v1", "u1", "a1", "s1"])
+      expect(await get({ role: 400, laneGrants: [{ lane: "lane-b", level: 400 }] }, "1")).toEqual(["t1", "b1", "s1"])
+    })
+
+    it("keeps an event that names no lane hidden when the project has no default lane", async () => {
+      const bothTagged = [{ ...defaultAndFr[0]!, legacy_tag: "es" }, defaultAndFr[1]!]
+      expect(await get({ role: 400, laneGrants: [{ lane: "lane-a", level: 400 }] }, "1", bothTagged)).toEqual(["a1", "s1"])
     })
 
     it("a walled member with no grants sees source events only", async () => {
@@ -136,8 +157,8 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
     })
 
     it("leaves maintainers and a wall-off deploy unrestricted", async () => {
-      expect(await get({ role: 600 }, "1")).toHaveLength(4)
-      expect(await get({ role: 400 }, undefined)).toHaveLength(4)
+      expect(await get({ role: 600 }, "1")).toHaveLength(7)
+      expect(await get({ role: 400 }, undefined)).toHaveLength(7)
     })
   })
 })

@@ -25,7 +25,7 @@ import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
 import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
+import { forwardRef, useCallback, useEffect, useEffectEvent, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject, type RefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import {
@@ -125,6 +125,59 @@ const EMPTY_HEALTH_SPANS: readonly HealthScoreDecorationSpan[] = []
 function captureGhostTextEvent(event: GhostTextEvent): void {
   if (event.type === "shown") posthog.capture("next word suggestion shown", { source: event.source })
   else posthog.capture("next word suggestion accepted", { source: event.source, how: event.how })
+}
+
+/**
+ * After an IDML composition ends, wait until the DOM and the document agree on
+ * their text (bounded retries), then drop the composition sentinels.
+ * ProseMirror absorbs the final composition text through deferred reads (a
+ * microtask flush plus a 20ms compose-end pass); deleting the sentinel
+ * redraws the slot from state, so doing it while a read is still pending
+ * would wipe the tail of the composition. Module-level because it retries
+ * itself, which the React Compiler cannot compile inside a component.
+ */
+function scheduleIdmlCompositionCleanup(
+  view: EditorView,
+  resetTimerRef: MutableRefObject<number | undefined>,
+  composingRef: MutableRefObject<boolean>,
+  attempt: number,
+): void {
+  const settled = () => {
+    const domText = (view.dom.textContent ?? "").replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
+    const docText = view.state.doc
+      .textBetween(0, view.state.doc.content.size)
+      .replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
+    return domText === docText
+  }
+  resetTimerRef.current = window.setTimeout(() => {
+    // The editor may have been torn down (blur commits swap the
+    // cell back to its read view) since compositionend fired.
+    if (!view.dom.isConnected) return
+    if (attempt < 5 && (view.composing || !settled())) {
+      scheduleIdmlCompositionCleanup(view, resetTimerRef, composingRef, attempt + 1)
+      return
+    }
+    composingRef.current = false
+    const sentinels = idmlCompositionSentinelRanges(view.state.doc)
+    if (sentinels.length === 0) return
+    const transaction = view.state.tr.setMeta("addToHistory", false)
+    for (let index = sentinels.length - 1; index >= 0; index -= 1) {
+      const range = sentinels[index]
+      if (range) transaction.delete(range.from, range.to)
+    }
+    view.dispatch(transaction)
+  }, 32)
+}
+
+/**
+ * A stable reader for a ref, for an editor plugin to call when it draws or
+ * handles a key — never during render. The decoration and input-rule
+ * factories below only store the getter they are given, but the React
+ * Compiler cannot see into them, and a getter built inline would bail the
+ * whole editor out of compilation.
+ */
+function useRefReader<T>(ref: RefObject<T>): () => T {
+  return useCallback(() => ref.current, [ref])
 }
 
 function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
@@ -773,10 +826,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onLiveTextChangeRef.current = onLiveTextChange }, [onLiveTextChange])
   const onRuleHoverRef = useRef(onRuleHover)
   useEffect(() => { onRuleHoverRef.current = onRuleHover }, [onRuleHover])
+  // Through a reader: the IDML extensions hold this callback (useRefReader).
+  const readOnIdmlValidationError = useRefReader(onIdmlValidationErrorRef)
   const reportIdmlError = useCallback((message: string) => {
     setIdmlError(message)
-    onIdmlValidationErrorRef.current?.(message)
-  }, [])
+    readOnIdmlValidationError()?.(message)
+  }, [readOnIdmlValidationError])
 
   /**
    * AQU-1962: write typed or pasted text into a slot, and say so when there is
@@ -909,6 +964,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     presenceDraftIdleTimerRef.current = setTimeout(onIdle, PRESENCE_DRAFT_IDLE_MS)
   }, [publishSelection])
 
+  // The plugins read these live values when they draw (see useRefReader).
+  const readFootnoteNumberOffset = useRefReader(footnoteNumberOffsetRef)
+  const readShowFootnoteTooltips = useRefReader(showFootnoteTooltipsRef)
+  const readViolationState = useRefReader(latestViolationStateRef)
+  const readHealthSpans = useRefReader(latestHealthSpansRef)
+  const readSmartEdits = useRefReader(latestSmartEditsRef)
+  const readKaraokeState = useRefReader(latestKaraokeStateRef)
+  const readGhostClient = useRefReader(ghostClientRef)
+  const readGhostCellId = useRefReader(ghostCellIdRef)
+  const readSmartQuoteMarks = useRefReader(smartQuoteMarksRef)
+  const readTerminologyConcepts = useRefReader(latestTerminologyConceptsRef)
+  const readTermMatching = useRefReader(latestTermMatchingRef)
+
   const editor = useEditor({
     editable: !isReadOnly && !segmentEdgeMode,
     content: initialContent,
@@ -930,27 +998,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       UsfmFootnote,
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
-      createFootnoteDecorationExtension(
-        () => footnoteNumberOffsetRef.current,
-        () => showFootnoteTooltipsRef.current,
-      ),
-      createViolationDecorationExtension(() => latestViolationStateRef.current),
-      createHealthScoreDecorationExtension(() => latestHealthSpansRef.current),
-      createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
-      createKaraokeExtension(() => latestKaraokeStateRef.current),
+      createFootnoteDecorationExtension(readFootnoteNumberOffset, readShowFootnoteTooltips),
+      createViolationDecorationExtension(readViolationState),
+      createHealthScoreDecorationExtension(readHealthSpans),
+      createSmartEditDecorationExtension(readSmartEdits),
+      createKaraokeExtension(readKaraokeState),
       ...(idmlContext
         ? []
         : [createGhostTextExtension({
-            getClient: () => ghostClientRef.current,
-            getCellId: () => ghostCellIdRef.current,
+            getClient: readGhostClient,
+            getCellId: readGhostCellId,
             onEvent: captureGhostTextEvent,
           })]),
-      createSmartQuotesExtension(() => smartQuoteMarksRef.current),
+      createSmartQuotesExtension(readSmartQuoteMarks),
       ...(terminologyConcepts !== undefined
-        ? [createTerminologyChipExtension(
-            () => latestTerminologyConceptsRef.current,
-            () => latestTermMatchingRef.current,
-          )]
+        ? [createTerminologyChipExtension(readTerminologyConcepts, readTermMatching)]
         : []),
       ...(idmlContext
         ? [
@@ -1214,34 +1276,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // state, so doing it while a read is still pending would wipe the
           // tail of the composition. Wait until the DOM and the document
           // agree on their text (bounded retries), then clean up.
-          const settled = () => {
-            const domText = (view.dom.textContent ?? "").replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
-            const docText = view.state.doc
-              .textBetween(0, view.state.doc.content.size)
-              .replace(new RegExp(IDML_COMPOSITION_SENTINEL, "g"), "")
-            return domText === docText
-          }
-          const cleanup = (attempt: number) => {
-            idmlCompositionResetRef.current = window.setTimeout(() => {
-              // The editor may have been torn down (blur commits swap the
-              // cell back to its read view) since compositionend fired.
-              if (!view.dom.isConnected) return
-              if (attempt < 5 && (view.composing || !settled())) {
-                cleanup(attempt + 1)
-                return
-              }
-              idmlComposingRef.current = false
-              const sentinels = idmlCompositionSentinelRanges(view.state.doc)
-              if (sentinels.length === 0) return
-              const transaction = view.state.tr.setMeta("addToHistory", false)
-              for (let index = sentinels.length - 1; index >= 0; index -= 1) {
-                const range = sentinels[index]
-                if (range) transaction.delete(range.from, range.to)
-              }
-              view.dispatch(transaction)
-            }, 32)
-          }
-          cleanup(0)
+          scheduleIdmlCompositionCleanup(view, idmlCompositionResetRef, idmlComposingRef, 0)
           return false
         },
         mouseover(view, event) {
@@ -1669,28 +1704,33 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     }
   }, [])
 
-  commitEditorSnapshot.current = (reason) => {
-    if (!editor) return
-    if (idleTimerRef.current !== null) {
-      clearTimeout(idleTimerRef.current)
-      idleTimerRef.current = null
+  // The editor's own handlers are created before `editor` exists, so they
+  // reach the current commit through this ref. Set before any event or
+  // passive effect can call it.
+  useLayoutEffect(() => {
+    commitEditorSnapshot.current = (reason?: string) => {
+      if (!editor) return
+      if (idleTimerRef.current !== null) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+      const snapshot = snapshotEditor(editor)
+      pendingCommitRef.current = null
+      if (!snapshot) return
+      const { value: text, valueHtml: html } = snapshot
+      if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
+        lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
+        // AQU-1393: the host tells an Insert apart from typing by this flag alone
+        // — both arrive through this one commit path.
+        onCommitRef.current(
+          reason === "tm-insert"
+            ? { value: text, valueHtml: html, tmInsert: true }
+            : { value: text, valueHtml: html },
+        )
+      }
     }
-    const snapshot = snapshotEditor(editor)
-    pendingCommitRef.current = null
-    if (!snapshot) return
-    const { value: text, valueHtml: html } = snapshot
-    if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
-      lastCommittedRef.current = text
-      lastCommittedHtmlRef.current = html
-      // AQU-1393: the host tells an Insert apart from typing by this flag alone
-      // — both arrive through this one commit path.
-      onCommitRef.current(
-        reason === "tm-insert"
-          ? { value: text, valueHtml: html, tmInsert: true }
-          : { value: text, valueHtml: html },
-      )
-    }
-  }
+  }, [editor, snapshotEditor])
 
   const confirmPendingFootnoteDelete = useCallback(() => {
     if (!editor || isReadOnly) return
@@ -1801,13 +1841,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // phantom revision on the next blur, corrupting files just by opening them.
   // Seed once per editor instance (one editor per cellId). (AQU-216)
   // (`lastHydratedPlainRef` is declared above so the blur handler can read it.)
-  useEffect(() => {
-    if (!editor) return
-    lastCommittedRef.current = editor.getText()
-    lastCommittedHtmlRef.current = canonicalHtml(editor)
+  // The seed reads the hydration inputs current at that moment without making
+  // them dependencies: a later value change is the re-hydrate effect's job.
+  const seedCommittedBaseline = useEffectEvent((seeded: TiptapEditor) => {
+    lastCommittedRef.current = seeded.getText()
+    lastCommittedHtmlRef.current = canonicalHtml(seeded)
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
+  useEffect(() => {
+    if (!editor) return
+    seedCommittedBaseline(editor)
   }, [editor])
 
   // Re-hydrate only when the stored value genuinely changes — keyed on the raw
@@ -1858,7 +1902,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [editor, isReadOnly, segmentEdgeMode])
 
   const segmentEditorRef = useRef(editor)
-  segmentEditorRef.current = editor
+  useLayoutEffect(() => {
+    segmentEditorRef.current = editor
+  }, [editor])
   useStyleSegmentEdgeDrag({
     enabled: segmentEdgeMode && editor != null && !editor.isDestroyed,
     getContainer: () => {
@@ -2030,7 +2076,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       onCommitRef.current(pending)
     }
   }, [])
-  flushPendingCommitRef.current = flushPendingCommit
+  useLayoutEffect(() => {
+    flushPendingCommitRef.current = flushPendingCommit
+  }, [flushPendingCommit])
   useEffect(() => flushPendingCommit, [flushPendingCommit])
   useEffect(() => {
     const onVisibilityChange = () => {

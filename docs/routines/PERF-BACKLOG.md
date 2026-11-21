@@ -63,8 +63,13 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
    that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
    components and were left alone.
-5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
-   focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
+5. **Activation is 8 React commits (target 6).** The table's part no longer reproduces: since
+   `EditorTable` compiles (item 8), clicking from one cell into another renders the table 3
+   times — the old editor deactivates on `focusout`, the rail pin moves on `focusin`, the new
+   editor activates on `click` — and the chapter label does not change (traced 2026-11-20).
+   Those three are separate browser events, so React cannot batch them; joining them means
+   keeping the old cell active until the new one claims it, which changes what a mousedown
+   that never becomes a click leaves behind. The other five commits are not traced.
 7. **The socket echo of the client's own `cell.audio.*` write asks for a whole-file audio read**
    (the own-echo branch in `src/components/ProjectWorkspace.tsx`): one `audio-attachments` GET
    per transcribe save. It is not a pure duplicate today: `saveTranscript`
@@ -79,11 +84,16 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
 Measured after the pass: a workspace render is about 110–270 components (was about 1,000); a row
 render is about 98.
 
-8. **`ProjectWorkspace`, `EditorTable`, `EditorRow` and `TranslatedEditor` are not compiled by the
-   React Compiler** (eight `exhaustive-deps` suppressions and about 27 unsupported constructs in
-   the first; ref reads in render, a `??=`, one suppression in the others). Nothing in them is
-   memoized unless by hand. Making even one compile is a large, permanent gain — and Vitest runs
-   with the compiler off, so verify in a build with the benchmark.
+8. **`ProjectWorkspace` is not compiled by the React Compiler** (eight `exhaustive-deps`
+   suppressions and about 27 unsupported constructs). Nothing in it is memoized unless by hand.
+   *`EditorTable`, `EditorRow` and `TranslatedEditor` compile since 2026-11-20 (AQU-2655)* —
+   keep them compiling: a bailout is silent, so after touching one, check that the function
+   starts with `compiler_runtime.c(` in an unminified build (`.perf/interaction-dist`). What
+   bailed them out, so it does not come back: a ref read or written in render (use a layout
+   effect, state, or a reader hook), `??=`, an `eslint-disable` of a hooks rule, a function
+   that re-schedules itself, a `?.`/`??`/ternary inside `try` (see `attemptAsync`), and a
+   `useCallback`/`useMemo` whose deps miss a value its body reads. Vitest runs with the
+   compiler off; `E2E_REACT_COMPILER=1 pnpm vitest run …` runs it on.
 9. **`AppShell` re-renders with every workspace render**: all eight slot props (`logoAccessory`,
    `leftDock`, `header`, `aboveCard`, `beforeMain`, `main`, `asideEdge`, `statusBar`) are
    elements built in the workspace's render. *Traced 2026-11-20* (`surfaces-probe --why
@@ -97,8 +107,18 @@ render is about 98.
     One instance per table, or mount on hover. `AppTooltip` documents that remounting its trigger
     flashes popovers, and a delegated tooltip changes the accessibility wiring — decide the
     design first.
-12. **List wrappers:** every store emit runs five wrapper components for each mounted row, because
-    `extraData` carries the store version by design — about 400 renders per commit.
+12. **List wrappers:** every whole-file store version re-runs `renderListItem` in each mounted
+    row's LegendList container, which renders five wrappers (`Container`, `PositionView`,
+    `CellStoreRow`, `PlayingCueRow`, `RowWithUiState`) before `MemoizedRow`'s compare stops it —
+    about 200 wrapper renders per cell commit (2026-11-20, compiled table: `Container2` 36,
+    `CellStoreRow` 40 in `plain.commit`). Why the version is in `extraData` by design: the item
+    body reads the store across rows at call time (`getFootnoteOffsets`, the previous row's
+    `fileId`, `timestampNeighbours`), and those answers change without the row's own cell
+    changing. Dropping it alone would save nothing, by reading: `renderListItem` itself depends
+    on `healthRibbonByCellId`, whose cache hands out fresh readers on every version, so its
+    identity changes per version anyway. A fix needs both: the row subscribes to its own
+    cross-row answers (a `useSyncExternalStore` over `subscribeAll` returning a primitive key),
+    and per-version maps leave `renderListItem`'s deps (the row reads its ribbon point itself).
 13. **Left dock, file-options menu, header, resizable panels, side rail** re-render with every
     workspace render (inline callbacks; menu items rebuilt from `actionCtx`). *Traced
     2026-11-20*: `FileChapterToolbar` gets new `historyControl`, `layoutSwitch`,

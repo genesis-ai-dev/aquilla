@@ -20692,6 +20692,7 @@ export function ProjectWorkspace() {
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
+                checksPending={health.infractionsPending}
               />
             ) : null
 

@@ -76,9 +76,6 @@ render is about 98.
 
 Measured after the pass (664 terms, 12 occurring): open 6.9 s blocked against 5.5 s plain.
 
-16. **No visible "checking…" state** for the health pass that now finishes in idle slices
-    (`HealthStats.infractionsPending` exists; nothing reads it).
-
 ## File open and tab return
 
 Measured after the pass: open 39 requests (33 distinct routes), tab return 11.

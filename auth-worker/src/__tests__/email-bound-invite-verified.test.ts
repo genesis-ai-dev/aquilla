@@ -34,7 +34,7 @@ beforeEach(async () => {
 async function seedOrgInvite(token: string, email: string | null): Promise<void> {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO org_invites (token, org_id, role_level, created_by, email)
-     VALUES (?, 1, 400, 1, ?)`,
+     VALUES (?, 1, 600, 1, ?)`,
   )
     .bind(token, email)
     .run()
@@ -118,13 +118,13 @@ describe("AQU-1579 email-bound org invite", () => {
     const res = await acceptOrg("org-verified-token-0000000000001")
     expect(res.status).toBe(200)
     const body = (await res.json()) as { role: { level: number } }
-    expect(body.role.level).toBe(400)
+    expect(body.role.level).toBe(600)
     const member = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM org_members WHERE org_id = 1 AND user_id = ?",
     )
       .bind(INVITEE_ID)
       .first<{ role_level: number }>()
-    expect(member?.role_level).toBe(400)
+    expect(member?.role_level).toBe(600)
   })
 
   it("still lets an unverified account redeem an invite with no bound email", async () => {
@@ -132,7 +132,7 @@ describe("AQU-1579 email-bound org invite", () => {
     const res = await acceptOrg("org-open-token-0000000000000001")
     expect(res.status).toBe(200)
     const body = (await res.json()) as { role: { level: number } }
-    expect(body.role.level).toBe(400)
+    expect(body.role.level).toBe(600)
   })
 })
 

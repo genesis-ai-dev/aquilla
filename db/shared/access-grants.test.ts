@@ -71,17 +71,17 @@ const scenarios: Scenario[] = [
     expected: { level: 700, source: "group" },
   },
   {
-    // AQU-1274 (Biblica ETT Pattani Malay): the org role must not be demoted by
-    // a Contributor team attachment.
-    name: "Naladda: org 500 + team 400 -> org 500",
+    // AQU-2352: the AQU-1274 lift is gone. A sub-Maintainer org role raises no
+    // team path (Biblica ETT Pattani Malay: migration 0210 gives such people a
+    // direct grant at the level the lift gave instead).
+    name: "Naladda: org 500 + team 400 -> team 400 (no lift)",
     grants: [g("org", "direct", 500), g("project", "team", 400, "7")],
-    expected: { level: 500, source: "org" },
+    expected: { level: 400, source: "group" },
   },
   {
-    // AQU-1274 rule 2: an explicit per-project row can restrict below org.
-    name: "direct row restricts sub-floor org role",
-    grants: [g("org", "direct", 500), g("project", "team", 400, "7"), g("project", "direct", 200)],
-    expected: { level: 400, source: "group" },
+    name: "after 0210: org Member + team 400 + direct 500 -> direct 500",
+    grants: [g("org", "direct", 100), g("project", "team", 400, "7"), g("project", "direct", 500)],
+    expected: { level: 500, source: "override" },
   },
   {
     name: "direct row alone",
@@ -159,11 +159,11 @@ describe("AQU-1352 resolveFromGrants equals resolveProjectRoleShared", () => {
 
   it("chain lists every contributing path, winner first (member inspector)", () => {
     const r = resolveFromGrants(
-      [g("org", "direct", 500), g("project", "team", 400, "7"), g("project", "creator", 700)],
+      [g("org", "direct", 600), g("project", "team", 400, "7"), g("project", "creator", 700)],
       { projectId: P, orgId: ORG, archivedAt: null, isPlatformAdmin: false },
     )
     expect(r?.chain.map((c) => [c.source, c.level])).toEqual([
-      ["org", 500],
+      ["org", 600],
       ["group", 400],
     ])
     expect(r?.chain[1].grant?.viaTeamId).toBe("7")
@@ -231,10 +231,9 @@ describe("AQU-1352 P2 team-scope grants", () => {
     expect(resolveFromGrants(grants, ctx(P, ["7"]))?.level).toBe(500)
   })
 
-  it("a team-scope grant opens the project for the AQU-1274 org path", () => {
-    // Same as a team path: org 500 lifts a team Viewer (100) to 500.
+  it("a team-scope grant is not lifted by a sub-Maintainer org role (AQU-2352)", () => {
     const grants = [g("org", "direct", 500), teamRole("7", 100)]
     const r = resolveFromGrants(grants, ctx(P, ["7"]))
-    expect(r && { level: r.level, source: r.source }).toEqual({ level: 500, source: "org" })
+    expect(r && { level: r.level, source: r.source }).toEqual({ level: 100, source: "group" })
   })
 })

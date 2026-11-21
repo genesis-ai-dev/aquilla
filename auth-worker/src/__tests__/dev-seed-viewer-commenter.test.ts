@@ -22,7 +22,8 @@ async function roleOn(table: "org_members" | "project_members", username: string
 }
 
 describe("dev seed: a Viewer and a Commenter (AQU-2259)", () => {
-  it("signs in vera, a Viewer on Dev Org and Dev Project", async () => {
+  // AQU-2352: both are org Members (100); the working role is on the project.
+  it("signs in vera, an org Member and a Viewer on Dev Project", async () => {
     const res = await devLogin("vera")
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ username: "vera" })
@@ -30,10 +31,10 @@ describe("dev seed: a Viewer and a Commenter (AQU-2259)", () => {
     expect(await roleOn("project_members", "vera")).toBe(100)
   })
 
-  it("signs in cora, a Commenter on Dev Org and Dev Project", async () => {
+  it("signs in cora, an org Member and a Commenter on Dev Project", async () => {
     const res = await devLogin("cora")
     expect(res.status).toBe(200)
-    expect(await roleOn("org_members", "cora")).toBe(200)
+    expect(await roleOn("org_members", "cora")).toBe(100)
     expect(await roleOn("project_members", "cora")).toBe(200)
   })
 })

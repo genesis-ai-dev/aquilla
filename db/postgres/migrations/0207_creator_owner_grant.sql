@@ -7,6 +7,14 @@
 -- Idempotent. A creator who already has role_level >= 700 is left alone. A
 -- lower row on the same (project, user) is raised to 700, because the unique
 -- key is one row per person and the old path forced Owner via max-wins.
+--
+-- Do not run this INSERT again after deploy. A creator who has since been
+-- demoted would be raised back to Owner. Projects created by the previous
+-- workers in the window between this migration and that deploy have no Owner
+-- row, and the new workers no longer grant access from created_by. Fill those
+-- with the repair, which inserts a missing row and does not raise one:
+--   pnpm neon:repair-creator-owner-grants:dev
+--   pnpm neon:repair-creator-owner-grants:prod -- --apply
 
 INSERT INTO project_members (project_id, user_id, role_level, granted_by)
 SELECT p.id, p.created_by, 700, p.created_by

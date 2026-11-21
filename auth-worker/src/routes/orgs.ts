@@ -10,6 +10,10 @@ import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform
 import { ROLE, type AuthUser, type Env } from "../types"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 import {
+  LAST_PROJECT_OWNER_MESSAGE,
+  soleDirectOwnerProjectsInOrg,
+} from "../services/last-project-owner"
+import {
   addGroupMember,
   attachGroupProject,
   bumpOrgActivity,
@@ -1657,6 +1661,23 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
   const targetUser = await c.env.AQUILLA_PG.prepare("SELECT username FROM users WHERE id = ?")
     .bind(targetUserId)
     .first<{ username: string }>()
+  // A direct Owner row is the project's owner. An org Owner does not substitute
+  // for one, so this removal stops while the person is the only one left.
+  const soleOwnerProjects = await soleDirectOwnerProjectsInOrg(
+    c.env.AQUILLA_PG,
+    orgId,
+    targetUserId,
+  )
+  if (soleOwnerProjects.length > 0) {
+    return c.json(
+      {
+        error: "last_owner",
+        message: LAST_PROJECT_OWNER_MESSAGE,
+        projects: soleOwnerProjects,
+      },
+      409,
+    )
+  }
   // AQU-2357: a direct project grant is not a way back in after the org
   // removes someone. Lane and scope rows go with it (AQU-1818).
   await c.env.AQUILLA_PG.batch([

@@ -327,7 +327,8 @@ export async function gateOne(
     }
   }
 
-  // AQU-2357: an Owner may remove or demote another Owner only while one remains.
+  // AQU-2357: an Owner may remove or demote another direct Owner only while
+  // another direct Owner remains. An org Owner does not count.
   const dropsOwner =
     directLevel != null &&
     directLevel >= ROLE.OWNER &&

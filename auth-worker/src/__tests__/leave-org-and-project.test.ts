@@ -300,4 +300,76 @@ describe("AQU-2357 ordinary Owner grant", () => {
     ).toBeNull()
     expect((await sync("ada", "guild-book")).status).toBe(403)
   })
+
+  it("keeps a direct Owner on the project when the org already has an Owner", async () => {
+    await seedUser(1, "olive")
+    await seedUser(2, "ada")
+    await seedUser(3, "bea")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (1, 'Guild', 1, 'team')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('book', 'Book', 1, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('book', 2, 700, 1)",
+    ).run()
+
+    const olive = authHeader(await jwtFor("olive"))
+    const demote = await app.request(
+      "/api/v2/projects/book/members",
+      { method: "POST", headers: olive, body: JSON.stringify({ username: "ada", role: 400 }) },
+      env,
+    )
+    expect(demote.status).toBe(409)
+    expect(((await demote.json()) as { error: string }).error).toBe("last_owner")
+
+    const removed = await app.request(
+      "/api/v2/projects/book/members/2",
+      { method: "DELETE", headers: olive },
+      env,
+    )
+    expect(removed.status).toBe(409)
+
+    const fromOrg = await app.request(
+      "/api/v2/orgs/1/members/2",
+      { method: "DELETE", headers: olive },
+      env,
+    )
+    expect(fromOrg.status).toBe(409)
+    expect(((await fromOrg.json()) as { projects: { id: string }[] }).projects.map((p) => p.id)).toEqual(["book"])
+    expect(
+      await env.AQUILLA_PG.prepare(
+        "SELECT role_level FROM project_members WHERE project_id = 'book' AND user_id = 2",
+      ).first<{ role_level: number }>(),
+    ).toMatchObject({ role_level: 700 })
+    expect(
+      await env.AQUILLA_PG.prepare(
+        "SELECT user_id FROM org_members WHERE org_id = 1 AND user_id = 2",
+      ).first(),
+    ).not.toBeNull()
+
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('book', 3, 700, 1)",
+    ).run()
+    const dropped = await app.request(
+      "/api/v2/orgs/1/members/2",
+      { method: "DELETE", headers: olive },
+      env,
+    )
+    expect(dropped.status).toBe(200)
+    expect(
+      await env.AQUILLA_PG.prepare(
+        "SELECT user_id FROM project_members WHERE project_id = 'book' AND user_id = 2",
+      ).first(),
+    ).toBeNull()
+    expect(
+      await env.AQUILLA_PG.prepare(
+        "SELECT role_level FROM project_members WHERE project_id = 'book' AND user_id = 3",
+      ).first<{ role_level: number }>(),
+    ).toMatchObject({ role_level: 700 })
+  })
 })

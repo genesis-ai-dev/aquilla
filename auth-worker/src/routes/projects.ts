@@ -1798,7 +1798,7 @@ async function grantProjectMemberOne(
     }
   }
 
-  // AQU-2357: demoting the last Owner (direct, or an org Owner) is refused.
+  // AQU-2357: demoting the last direct Owner is refused. An org Owner does not count.
   if (existing && Number(existing.role_level) >= 700 && role < 700) {
     if (await removingDirectOwnerLeavesNone(env.AQUILLA_PG, projectId, target.id)) {
       return {

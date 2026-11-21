@@ -38,8 +38,6 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    components and were left alone.
 5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
    focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
-6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
-   in 7.5 s with a file open and no cell active.
 7. **The socket echo of the client's own `cell.audio.*` write asks for a whole-file audio read**
    (the own-echo branch in `src/components/ProjectWorkspace.tsx`): one `audio-attachments` GET
    per transcribe save. It is not a pure duplicate today: `saveTranscript`

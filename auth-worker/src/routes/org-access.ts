@@ -3,7 +3,8 @@
  * "People & access" page. Two projections of the same access_grants rows:
  *   tree   — places the viewer can see, each with direct grants and the
  *            ancestor grants that resolve there (AQU-2318);
- *   people — one row per person with every grant the viewer may see.
+ *   people — one row per member, guest, or pending invite the viewer may
+ *            see, with every grant inside those places (AQU-2319).
  * Viewer filtering reuses services/access-payload.ts (ViewerScope/visibleTo,
  * spec §3.8 rule 4) so this page and the member inspector cannot disagree.
  */
@@ -13,10 +14,8 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   ViewerScope,
   nameGranters,
-  toEntry,
   toNamedGrant,
   visibleTo,
-  type AccessChainEntry,
   type NamedGrant,
   type NamedGrantRow,
 } from "../services/access-payload"
@@ -28,10 +27,10 @@ import {
   type DirectGrantee,
   type PlaceGrant,
 } from "../services/org-access-places"
+import { assembleOrgPeople, type OrgAccessPerson } from "../services/org-access-people"
 import type { Env } from "../types"
 
-export type { AccessTreeNode, DirectGrantee }
-export interface OrgAccessPerson { userId: string; displayName: string; isGuest: boolean; grants: AccessChainEntry[] }
+export type { AccessTreeNode, DirectGrantee, OrgAccessPerson }
 export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
 
 type Row = NamedGrantRow & { user_id: number | string; user_name: string; user_email: string | null }
@@ -83,8 +82,8 @@ export async function buildOrgAccess(
     env.AQUILLA_PG.prepare("SELECT id, name FROM projects WHERE org_id = ? AND archived_at IS NULL ORDER BY name")
       .bind(orgId).all<{ id: string; name: string }>(),
     loadOrgGrants(env, orgId),
-    env.AQUILLA_PG.prepare("SELECT user_id FROM org_members WHERE org_id = ?")
-      .bind(orgId).all<{ user_id: number | string }>(),
+    env.AQUILLA_PG.prepare("SELECT user_id, last_active_at FROM org_members WHERE org_id = ?")
+      .bind(orgId).all<{ user_id: number | string; last_active_at: string | Date | null }>(),
   ])
 
   const seesOrg = await vs.canSeeOrg(orgId)
@@ -108,7 +107,13 @@ export async function buildOrgAccess(
 
   const viewerProjectRole = new Map<string, number | null>()
   for (const id of visibleProjects) viewerProjectRole.set(id, await vs.projectRole(id))
-  const memberIds = new Set((membersRes.results ?? []).map((m) => String(m.user_id)))
+  const memberIds = new Set<string>()
+  const lastActiveAt = new Map<string, string | null>()
+  for (const row of membersRes.results ?? []) {
+    const id = String(row.user_id)
+    memberIds.add(id)
+    lastActiveAt.set(id, isoTimestamp(row.last_active_at))
+  }
   const { tree, visibleTeamIds } = assembleAccessTree({
     org: { type: "org", id: String(org.id), name: org.name },
     seesOrg,
@@ -123,16 +128,16 @@ export async function buildOrgAccess(
     extras,
   })
 
-  const people = new Map<string, OrgAccessPerson>()
-  for (const g of visible) {
-    const person = people.get(g.userId) ?? { userId: g.userId, displayName: g.userName, isGuest: true, grants: [] }
-    person.grants.push(toEntry(g))
-    people.set(g.userId, person)
-  }
-  // isGuest (rule 5) needs the org row even when the viewer cannot see it.
-  for (const p of people.values()) p.isGuest = !memberIds.has(p.userId)
-
-  const list = [...people.values()].sort((a, b) => a.displayName.localeCompare(b.displayName))
+  // treeGrants is `visible` plus team-scope rows on a team this viewer can see.
+  // People outside those places are not added.
+  const list = assembleOrgPeople({
+    grants: treeGrants,
+    memberIds,
+    lastActiveAt,
+    org: { type: "org", id: String(org.id), name: org.name },
+    tree,
+    extras,
+  })
   // The org, and any team this viewer is not on, lose their names. A team they
   // can see keeps its name — hiding that too would contradict the tree.
   for (const entry of list.flatMap((p) => p.grants)) {
@@ -152,5 +157,11 @@ orgAccess.get("/:orgId/access", authMiddleware, async (c) => {
   if (!result.ok) return c.json({ error: result.error }, result.status)
   return c.json(result.payload)
 })
+
+function isoTimestamp(value: string | Date | null | undefined): string | null {
+  if (value == null) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
 
 export default orgAccess

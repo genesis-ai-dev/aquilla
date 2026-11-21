@@ -22,10 +22,13 @@ merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
 merges. (One exception: `desktop-release-cut.yml` merges the version-bump pull
 request it opened itself, and only when the diff is the four version files;
 `docs/DESKTOP-RELEASES.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
-again. `scripts/release-plan.mjs` reads the same comment later and keeps the
-PR off the hourly release line unless the walk is `PASS` or `none` — as it
-does for a PR whose files touch a holding risk area (`risk:*` labels,
-`docs/RELEASE-RISK-GATES.md`) until a person adds `release:approved`.
+again. `walk-status.yml` reports the walk on the PR's head as the `qa-walk`
+status (pending until a browser walk is posted at that head).
+`scripts/release-plan.mjs` reads the same comment later and keeps the PR off
+the release line when the walk failed (`WALK_POLICY=strict`: unless it is
+`PASS` or `none`) — as it does for a PR whose files touch a holding risk area
+(`risk:*` labels, `docs/RELEASE-RISK-GATES.md`) until that area's gate check is
+green on the PR's head or a person adds `release:approved`.
 
 | Surface | Trigger | What it proves |
 | --- | --- | --- |

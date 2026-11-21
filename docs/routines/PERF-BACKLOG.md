@@ -116,7 +116,11 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
     for about 23 projects). Needs an org-level endpoint — escalate, do not fix client-side.
 30. **Comments pages** render every thread card, no virtualization (unmeasured: the fixture has
     no comments).
-31. **Glossary page:** 664 row mounts remain on open; `GlossaryEditor` is not compiled.
+31. **Glossary page:** 664 row mounts on open (664 terms: 15 commits, about 10,600 renders).
+    Every row is drawn on purpose — find-in-page is how a glossary is searched
+    (`src/hooks/useProgressiveCount.ts`) — so windowing the list is a product decision, not a perf
+    fix. `GlossaryEditor` compiles since 2026-11-20, which stopped the first 80 rows rendering a
+    second time when the rest arrive (`GlossaryRow` 744 → 664 renders).
 32. **Members matrix:** a Popover root and a lane-scope editor per populated cell; not virtualized.
 33. Minor: `src/hooks/useFileSync.ts` polls the socket state every second;
     `ProjectSettings.tsx::withStyledTerms` builds a RegExp per call.

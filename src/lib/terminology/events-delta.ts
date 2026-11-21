@@ -10,6 +10,7 @@
 // from `prev` to `next`. Every write lands in the outbox like any other event.
 import type { Concept, TermMatchOptions, TermRendering } from "./types"
 import { sameExternalIds } from "./external-ids"
+import { noteTermWriteQueued } from "./unsent-term-writes"
 import {
   emitTermApprove,
   emitTermCreate,
@@ -64,13 +65,19 @@ function sameMatch(a: TermMatchOptions | undefined, b: TermMatchOptions | undefi
  */
 export async function emitConceptDelta({ projectId, author, prev, next }: ConceptDeltaInput): Promise<string[]> {
   const ids: string[] = []
+  // Each id is noted as unsent the moment it is queued, so the glossary keeps
+  // showing this change over any list read before the server has taken it.
+  const queued = (id: string) => {
+    ids.push(id)
+    noteTermWriteQueued(projectId, id)
+  }
   const before = new Map(prev.map((c) => [c.id, c]))
   const after = new Map(next.map((c) => [c.id, c]))
 
   for (const c of next) {
     const was = before.get(c.id)
     if (!was) {
-      ids.push(
+      queued(
         await emitTermCreate({
           projectId,
           conceptId: c.id,
@@ -118,7 +125,7 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
       update.externalIds = c.externalIds?.acai ? c.externalIds : {}
       changed = true
     }
-    if (changed) ids.push(await emitTermUpdate(update))
+    if (changed) queued(await emitTermUpdate(update))
 
     if (c.status !== was.status) {
       // Status is a lifecycle verb, not an updatable column: draft → active is
@@ -126,15 +133,15 @@ export async function emitConceptDelta({ projectId, author, prev, next }: Concep
       // deprecated an archive. active → draft has no verb; the projection
       // keeps the term active, which is the safe direction.
       if (c.status === "active") {
-        ids.push(await emitTermApprove({ projectId, conceptId: c.id, author }))
+        queued(await emitTermApprove({ projectId, conceptId: c.id, author }))
       } else if (c.status === "deprecated") {
-        ids.push(await emitTermReject({ projectId, conceptId: c.id, author, mode: "deprecate" }))
+        queued(await emitTermReject({ projectId, conceptId: c.id, author, mode: "deprecate" }))
       }
     }
   }
 
   for (const c of prev) {
-    if (!after.has(c.id)) ids.push(await emitTermDelete({ projectId, conceptId: c.id, author }))
+    if (!after.has(c.id)) queued(await emitTermDelete({ projectId, conceptId: c.id, author }))
   }
   return ids
 }

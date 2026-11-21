@@ -11,9 +11,20 @@ import {
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon, SearchIcon } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { PlainUntilKeyboard } from "@/components/ui/plain-until-keyboard"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-const Combobox = ComboboxPrimitive.Root
+function Combobox<Value, Multiple extends boolean | undefined = false>({
+  highlightItemOnHover = false,
+  ...props
+}: ComboboxPrimitive.Root.Props<Value, Multiple>) {
+  return (
+    <ComboboxPrimitive.Root
+      {...props}
+      highlightItemOnHover={highlightItemOnHover}
+    />
+  )
+}
 
 function ComboboxValue({ ...props }: ComboboxPrimitive.Value.Props) {
   return <ComboboxPrimitive.Value data-slot="combobox-value" {...props} />
@@ -114,6 +125,7 @@ function ComboboxContent({
   align = "start",
   alignOffset = 0,
   anchor,
+  children,
   ...props
 }: ComboboxPrimitive.Popup.Props &
   Pick<
@@ -143,7 +155,10 @@ function ComboboxContent({
           data-chips={!!anchor}
           className={cn("group/combobox-content relative max-h-(--available-height) w-max min-w-0 max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 *:data-[slot=input-group]:m-1 *:data-[slot=input-group]:mb-0 *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:border-input/30 *:data-[slot=input-group]:bg-input/30 *:data-[slot=input-group]:shadow-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
-        />
+        >
+          {children}
+          <PlainUntilKeyboard />
+        </ComboboxPrimitive.Popup>
       </ComboboxPrimitive.Positioner>
     </ComboboxPrimitive.Portal>
   )
@@ -177,7 +192,7 @@ function ComboboxItem({
     <ComboboxPrimitive.Item
       data-slot="combobox-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-md py-1 ps-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent/40 data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex w-full cursor-default items-center gap-2 rounded-md py-1 ps-1.5 text-sm outline-hidden select-none hover:bg-accent/40 data-highlighted:bg-accent/40 data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         showIndicator ? "pe-8" : "pe-1.5",
         className
       )}

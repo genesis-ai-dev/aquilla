@@ -4,6 +4,7 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { PlainUntilKeyboard } from "@/components/ui/plain-until-keyboard"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
@@ -28,10 +29,10 @@ const createMenuHandle = MenuPrimitive.createHandle
 
 /** One group name for every item, so `MenuShortcut` can key off item focus. */
 const ITEM_BASE =
-  "group/menu-item relative flex cursor-default items-center gap-1.5 rounded-md text-sm outline-hidden select-none focus:bg-accent/40 focus:text-accent-foreground data-inset:ps-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "group/menu-item relative flex cursor-default items-center gap-1.5 rounded-md text-sm outline-hidden select-none hover:bg-accent/40 focus:bg-accent/40 focus:text-accent-foreground data-inset:ps-7 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 const ITEM_DESTRUCTIVE =
-  "not-data-[variant=destructive]:focus:**:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:*:[svg]:text-destructive"
+  "not-data-[variant=destructive]:focus:**:text-accent-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:hover:bg-destructive/10 data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:hover:bg-destructive/20 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:*:[svg]:text-destructive"
 
 /** Indicator items reserve room on the end side for the check mark. */
 const INDICATOR_ITEM_BASE = "py-1 pe-8 ps-1.5 focus:**:text-accent-foreground"
@@ -271,7 +272,7 @@ function MenuSubTrigger({
       data-slot="menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none focus:bg-accent/40 focus:text-accent-foreground focus:**:text-accent-foreground data-inset:ps-7 data-popup-open:bg-accent data-popup-open:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent/40 focus:bg-accent/40 focus:text-accent-foreground focus:**:text-accent-foreground data-inset:ps-7 data-open:bg-accent data-open:text-accent-foreground data-open:hover:bg-accent data-popup-open:bg-accent data-popup-open:text-accent-foreground data-popup-open:hover:bg-accent [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -303,7 +304,10 @@ const POPUP_BASE = cn(
   "origin-(--transform-origin) transition-[opacity,scale,translate] duration-100 ease-out data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0 data-[side=bottom]:data-starting-style:-translate-y-2 data-[side=inline-end]:data-starting-style:-translate-x-2 data-[side=inline-start]:data-starting-style:translate-x-2 data-[side=left]:data-starting-style:translate-x-2 data-[side=right]:data-starting-style:-translate-x-2 data-[side=top]:data-starting-style:translate-y-2",
 )
 
-function MenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
+function MenuSub({
+  highlightItemOnHover = false,
+  ...props
+}: MenuPrimitive.SubmenuRoot.Props) {
   const triggerRef = React.useRef<HTMLElement | null>(null)
   const anchor = React.useMemo(
     () => ({
@@ -316,7 +320,11 @@ function MenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
   )
   return (
     <SubmenuAnchorContext.Provider value={anchor}>
-      <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />
+      <MenuPrimitive.SubmenuRoot
+        data-slot="menu-sub"
+        {...props}
+        highlightItemOnHover={highlightItemOnHover}
+      />
     </SubmenuAnchorContext.Provider>
   )
 }
@@ -333,6 +341,7 @@ function MenuSubContent({
   side = "right",
   sideOffset = 0,
   className,
+  children,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<
@@ -354,7 +363,10 @@ function MenuSubContent({
           data-slot="menu-sub-content"
           className={cn(POPUP_SURFACE, "w-auto min-w-[96px] shadow-lg", className)}
           {...props}
-        />
+        >
+          {children}
+          <PlainUntilKeyboard />
+        </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   )

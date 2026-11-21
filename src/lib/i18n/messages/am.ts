@@ -4543,6 +4543,8 @@ export const am: Catalog = {
   "importExport.upload.zipOrFolder": ".zip ወይም አቃፊ",
   "importExport.upload.categoryOtherFormats": "ሌሎች ቅርጸቶች",
   "importExport.upload.otherFormatsHint": "ሲዋቀር በAI የተረዳ፣ ከማስመጣት በፊት ሁልጊዜ ይገመገማል",
+  "importExport.upload.mediaNeedsEveryLanguage": "ድምጽ ወይም ቪዲዮ ማስመጣት ሁሉም ቋንቋዎች የሚጋሩትን ቅጂ ያክላል፣ ስለዚህ በዚህ ፕሮጀክት ውስጥ ያሉትን ሁሉንም ቋንቋዎች መድረስ ያስፈልጋል። ጠባቂ ሊያስመጣው ይችላል።",
+  "importExport.upload.mediaAccessChecking": "ድምጽ ወይም ቪዲዮ ማስመጣት እንደሚችሉ እየተረጋገጠ ነው። ትንሽ ቆይተው እንደገና ይሞክሩ።",
   "importExport.dialog.titleDirection": "የትርጉም አቅጣጫ ያዘጋጁ",
   "importExport.dialog.titleResult": "ማስመጣት ተጠናቋል — አንዳንድ ንጥሎች ተዘለዋል",
   "importExport.dialog.titleCollision": "እንደገና ማስመጣት ተገኝቷል",

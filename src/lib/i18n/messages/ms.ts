@@ -3866,6 +3866,8 @@ export const ms: Catalog = {
   "importExport.upload.zipOrFolder": ".zip atau folder",
   "importExport.upload.categoryOtherFormats": "Format lain",
   "importExport.upload.otherFormatsHint": "Dibantu AI apabila dikonfigurasikan, sentiasa disemak sebelum import",
+  "importExport.upload.mediaNeedsEveryLanguage": "Mengimport audio atau video menambah rakaman yang dikongsi oleh semua bahasa, jadi akses kepada semua bahasa dalam projek ini diperlukan. Penyelenggara boleh mengimportnya.",
+  "importExport.upload.mediaAccessChecking": "Menyemak sama ada anda boleh mengimport audio atau video. Cuba lagi sebentar lagi.",
   "importExport.dialog.titleDirection": "Tetapkan arah terjemahan",
   "importExport.dialog.titleResult": "Import selesai — sebahagian item dilangkau",
   "importExport.dialog.titleCollision": "Import semula dikesan",

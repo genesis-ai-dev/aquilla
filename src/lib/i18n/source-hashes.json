@@ -4982,7 +4982,9 @@
     "editor.health.evidence": "98db0c8848d2376c",
     "editor.health.evidenceTrend": "72ecd6b55b71eed8",
     "editor.empty.mediaNeedsEveryLanguage": "6d2fc08dbef4bf4a",
-    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75"
+    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9949,7 +9951,9 @@
     "editor.health.evidence": "98db0c8848d2376c",
     "editor.health.evidenceTrend": "72ecd6b55b71eed8",
     "editor.empty.mediaNeedsEveryLanguage": "6d2fc08dbef4bf4a",
-    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75"
+    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14903,7 +14907,9 @@
     "editor.health.evidence": "98db0c8848d2376c",
     "editor.health.evidenceTrend": "72ecd6b55b71eed8",
     "editor.empty.mediaNeedsEveryLanguage": "6d2fc08dbef4bf4a",
-    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75"
+    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19883,7 +19889,9 @@
     "editor.health.evidence": "98db0c8848d2376c",
     "editor.health.evidenceTrend": "72ecd6b55b71eed8",
     "editor.empty.mediaNeedsEveryLanguage": "6d2fc08dbef4bf4a",
-    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75"
+    "editor.empty.mediaAccessChecking": "520f9e7ebae33b75",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26138,7 +26146,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32395,7 +32405,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38724,7 +38736,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45100,7 +45114,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51391,7 +51407,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59628,7 +59646,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67870,7 +67890,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76521,7 +76543,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84817,7 +84841,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93488,7 +93514,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102152,7 +102180,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110852,7 +110882,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119538,7 +119570,9 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128216,6 +128250,8 @@
     "editor.health.estimateTrend": "27ba754b63382bf2",
     "editor.health.evidenceUnavailable": "e9f83334a95527a2",
     "editor.health.evidence": "98db0c8848d2376c",
-    "editor.health.evidenceTrend": "72ecd6b55b71eed8"
+    "editor.health.evidenceTrend": "72ecd6b55b71eed8",
+    "importExport.upload.mediaNeedsEveryLanguage": "27a827923bcaffaf",
+    "importExport.upload.mediaAccessChecking": "bd78f7ba1d2c93e2"
   }
 }

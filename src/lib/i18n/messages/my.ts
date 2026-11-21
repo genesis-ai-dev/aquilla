@@ -3881,6 +3881,8 @@ export const my: Catalog = {
   "importExport.upload.zipOrFolder": ".zip သို့မဟုတ် ဖိုလ်ဒါ",
   "importExport.upload.categoryOtherFormats": "အခြားဖော်မတ်များ",
   "importExport.upload.otherFormatsHint": "စီစဉ်ထားပါက AI အကူအညီဖြင့်၊ တင်သွင်းမီ အမြဲစစ်ဆေးပါသည်",
+  "importExport.upload.mediaNeedsEveryLanguage": "အသံ သို့မဟုတ် ဗီဒီယို တင်သွင်းခြင်းသည် ဘာသာစကားအားလုံး မျှဝေသုံးသော အသံဖမ်းချက်ကို ထည့်သွင်းသည်၊ ထို့ကြောင့် ဤပရောဂျက်ရှိ ဘာသာစကားအားလုံးကို ဝင်ရောက်ခွင့် လိုအပ်သည်။ ထိန်းသိမ်းသူတစ်ဦးက တင်သွင်းနိုင်သည်။",
+  "importExport.upload.mediaAccessChecking": "အသံ သို့မဟုတ် ဗီဒီယို တင်သွင်းနိုင်မနိုင် စစ်ဆေးနေသည်။ ခဏနေမှ ထပ်ကြိုးစားပါ။",
   "importExport.dialog.titleDirection": "ဘာသာပြန်ဦးတည်ချက် သတ်မှတ်ရန်",
   "importExport.dialog.titleResult": "တင်သွင်းမှု ပြီးစီးပါပြီ — အချို့အရာများ ကျော်သွားသည်",
   "importExport.dialog.titleCollision": "ပြန်လည်တင်သွင်းမှု တွေ့ရှိသည်",

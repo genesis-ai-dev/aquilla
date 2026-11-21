@@ -4535,6 +4535,8 @@ export const sw: Catalog = {
   "importExport.upload.zipOrFolder": ".zip au folda",
   "importExport.upload.categoryOtherFormats": "Maumbizo mengine",
   "importExport.upload.otherFormatsHint": "Kwa msaada wa AI ikiwa imesanidiwa, hukaguliwa kila wakati kabla ya uingizaji",
+  "importExport.upload.mediaNeedsEveryLanguage": "Kuingiza sauti au video kunaongeza rekodi ambayo lugha zote zinashiriki, kwa hivyo kunahitaji ufikiaji wa lugha zote katika mradi huu. Mtunzaji anaweza kuiingiza.",
+  "importExport.upload.mediaAccessChecking": "Inakagua kama unaweza kuingiza sauti au video. Jaribu tena baada ya muda mfupi.",
   "importExport.dialog.titleDirection": "Weka mwelekeo wa tafsiri",
   "importExport.dialog.titleResult": "Uingizaji umekamilika — baadhi ya vitu vimerukwa",
   "importExport.dialog.titleCollision": "Uingizaji upya umegunduliwa",

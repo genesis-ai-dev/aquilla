@@ -3893,6 +3893,8 @@ export const zh_Hant: Catalog = {
   "importExport.upload.zipOrFolder": ".zip 或資料夾",
   "importExport.upload.categoryOtherFormats": "其他格式",
   "importExport.upload.otherFormatsHint": "設定完成後可由 AI 協助處理，匯入前一律會先經過檢視",
+  "importExport.upload.mediaNeedsEveryLanguage": "匯入音訊或影片會新增所有語言共用的錄音，因此需要能存取本專案的所有語言。維護者可以匯入。",
+  "importExport.upload.mediaAccessChecking": "正在檢查你是否可以匯入音訊或影片。請稍後再試。",
   "importExport.dialog.titleDirection": "設定翻譯方向",
   "importExport.dialog.titleResult": "匯入完成 — 部分項目已略過",
   "importExport.dialog.titleCollision": "偵測到重複匯入",

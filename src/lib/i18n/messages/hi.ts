@@ -4441,6 +4441,8 @@ export const hi: Catalog = {
   "importExport.upload.zipOrFolder": ".zip या फ़ोल्डर",
   "importExport.upload.categoryOtherFormats": "अन्य प्रारूप",
   "importExport.upload.otherFormatsHint": "कॉन्फ़िगर होने पर एआई-सहायता, आयात से पहले हमेशा समीक्षा",
+  "importExport.upload.mediaNeedsEveryLanguage": "ऑडियो या वीडियो आयात करने से वह रिकॉर्डिंग जुड़ती है जिसे सभी भाषाएँ साझा करती हैं, इसलिए इस परियोजना की सभी भाषाओं तक पहुँच चाहिए। कोई मेंटेनर इसे आयात कर सकता है।",
+  "importExport.upload.mediaAccessChecking": "जाँच हो रही है कि क्या आप ऑडियो या वीडियो आयात कर सकते हैं। थोड़ी देर में फिर से कोशिश करें।",
   "importExport.dialog.titleDirection": "अनुवाद दिशा सेट करें",
   "importExport.dialog.titleResult": "आयात पूरा — कुछ आइटम छोड़े गए",
   "importExport.dialog.titleCollision": "फिर-आयात मिला",

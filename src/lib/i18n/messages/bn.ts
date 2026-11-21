@@ -4549,6 +4549,8 @@ export const bn: Catalog = {
   "importExport.upload.zipOrFolder": ".zip বা ফোল্ডার",
   "importExport.upload.categoryOtherFormats": "অন্য ফরম্যাট",
   "importExport.upload.otherFormatsHint": "কনফিগার থাকলে এআই-সহায়তা, আমদানির আগে সবসময় পর্যালোচনা",
+  "importExport.upload.mediaNeedsEveryLanguage": "অডিও বা ভিডিও আমদানি করলে সব ভাষার ভাগ করা রেকর্ডিং যোগ হয়, তাই এই প্রকল্পের সব ভাষায় অ্যাক্সেস দরকার। একজন মেইনটেইনার এটি আমদানি করতে পারেন।",
+  "importExport.upload.mediaAccessChecking": "আপনি অডিও বা ভিডিও আমদানি করতে পারেন কি না যাচাই করা হচ্ছে। একটু পরে আবার চেষ্টা করুন।",
   "importExport.dialog.titleDirection": "অনুবাদের দিক সেট করুন",
   "importExport.dialog.titleResult": "আমদানি সম্পূর্ণ — কিছু আইটেম বাদ",
   "importExport.dialog.titleCollision": "আবার আমদানি ধরা পড়েছে",

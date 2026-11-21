@@ -3930,6 +3930,8 @@ export const ru: Catalog = {
   "importExport.upload.zipOrFolder": ".zip или папка",
   "importExport.upload.categoryOtherFormats": "Другие форматы",
   "importExport.upload.otherFormatsHint": "С помощью ИИ, если он настроен, и всегда с проверкой перед импортом",
+  "importExport.upload.mediaNeedsEveryLanguage": "Импорт аудио или видео добавляет запись, общую для всех языков, поэтому нужен доступ ко всем языкам этого проекта. Её может импортировать сопровождающий.",
+  "importExport.upload.mediaAccessChecking": "Проверяем, можете ли вы импортировать аудио или видео. Попробуйте ещё раз через минуту.",
   "importExport.dialog.titleDirection": "Задать направление перевода",
   "importExport.dialog.titleResult": "Импорт завершён — часть элементов пропущена",
   "importExport.dialog.titleCollision": "Обнаружен повторный импорт",

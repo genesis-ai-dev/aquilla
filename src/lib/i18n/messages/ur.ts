@@ -4534,6 +4534,8 @@ export const ur: Catalog = {
   "importExport.upload.zipOrFolder": ".zip یا فولڈر",
   "importExport.upload.categoryOtherFormats": "دیگر فارمیٹ",
   "importExport.upload.otherFormatsHint": "سیٹ ہو تو اے آئی مدد، درآمد سے پہلے ہمیشہ جائزہ",
+  "importExport.upload.mediaNeedsEveryLanguage": "آڈیو یا ویڈیو درآمد کرنے سے وہ ریکارڈنگ شامل ہوتی ہے جو تمام زبانیں بانٹتی ہیں، اس لیے اس پروجیکٹ کی تمام زبانوں تک رسائی درکار ہے۔ کوئی مینٹینر اسے درآمد کر سکتا ہے۔",
+  "importExport.upload.mediaAccessChecking": "جانچ ہو رہی ہے کہ کیا آپ آڈیو یا ویڈیو درآمد کر سکتے ہیں۔ تھوڑی دیر بعد دوبارہ کوشش کریں۔",
   "importExport.dialog.titleDirection": "ترجمے کی سمت سیٹ کریں",
   "importExport.dialog.titleResult": "درآمد مکمل — کچھ چیزیں چھوڑی گئیں",
   "importExport.dialog.titleCollision": "دوبارہ درآمد ملا",

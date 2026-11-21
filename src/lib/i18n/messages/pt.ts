@@ -4421,6 +4421,8 @@ export const pt: Catalog = {
   "importExport.upload.zipOrFolder": ".zip ou pasta",
   "importExport.upload.categoryOtherFormats": "Outros formatos",
   "importExport.upload.otherFormatsHint": "Assistido por IA quando configurada, sempre revisado antes da importação",
+  "importExport.upload.mediaNeedsEveryLanguage": "Importar áudio ou vídeo adiciona a gravação que todos os idiomas compartilham, por isso é preciso ter acesso a todos os idiomas deste projeto. Um mantenedor pode importá-la.",
+  "importExport.upload.mediaAccessChecking": "Verificando se você pode importar áudio ou vídeo. Tente novamente em um instante.",
   "importExport.dialog.titleDirection": "Definir a direção da tradução",
   "importExport.dialog.titleResult": "Importação concluída — alguns itens omitidos",
   "importExport.dialog.titleCollision": "Reimportação detectada",

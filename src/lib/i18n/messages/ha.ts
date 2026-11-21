@@ -4541,6 +4541,8 @@ export const ha: Catalog = {
   "importExport.upload.zipOrFolder": ".zip ko folda",
   "importExport.upload.categoryOtherFormats": "Sauran tsaruka",
   "importExport.upload.otherFormatsHint": "Taimakon AI idan an saita, koyaushe ana bita kafin shigowa",
+  "importExport.upload.mediaNeedsEveryLanguage": "Shigo da sauti ko bidiyo yana ƙara rikodin da dukkan harsuna ke rabawa, don haka yana buƙatar samun dama ga dukkan harsunan wannan aikin. Mai kulawa zai iya shigo da shi.",
+  "importExport.upload.mediaAccessChecking": "Ana duba ko za ka iya shigo da sauti ko bidiyo. Sake gwadawa nan da ɗan lokaci.",
   "importExport.dialog.titleDirection": "Ku saita alkiblar fassara",
   "importExport.dialog.titleResult": "An gama shigowa — an tsallake wasu abubuwa",
   "importExport.dialog.titleCollision": "An gano sake shigowa",

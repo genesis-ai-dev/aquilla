@@ -3892,6 +3892,8 @@ export const zh_Hans: Catalog = {
   "importExport.upload.zipOrFolder": ".zip 或文件夹",
   "importExport.upload.categoryOtherFormats": "其他格式",
   "importExport.upload.otherFormatsHint": "设置完成后可由 AI 协助处理，导入前一律会先经过查看",
+  "importExport.upload.mediaNeedsEveryLanguage": "导入音频或视频会添加所有语言共用的录音，因此需要能访问本项目的所有语言。维护者可以导入。",
+  "importExport.upload.mediaAccessChecking": "正在检查你是否可以导入音频或视频。请稍后再试。",
   "importExport.dialog.titleDirection": "设置翻译方向",
   "importExport.dialog.titleResult": "导入完成 — 部分项目已略过",
   "importExport.dialog.titleCollision": "检测到重复导入",

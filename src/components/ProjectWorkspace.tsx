@@ -20868,6 +20868,11 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
+          // AQU-2682: an audio or video import stores the file's source audio,
+          // held to the same "every language" answer as the empty file's upload.
+          mediaDisabledReason={sourceMediaNoteKind === "needsEveryLanguage"
+            ? t("importExport.upload.mediaNeedsEveryLanguage")
+            : sourceMediaNoteKind === "checking" ? t("importExport.upload.mediaAccessChecking") : null}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an
             // upload, through the same review the three-dot entry used to open.

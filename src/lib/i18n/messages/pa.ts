@@ -4534,6 +4534,8 @@ export const pa: Catalog = {
   "importExport.upload.zipOrFolder": ".zip ਜਾਂ ਫ਼ੋਲਡਰ",
   "importExport.upload.categoryOtherFormats": "ਹੋਰ ਫਾਰਮੈਟ",
   "importExport.upload.otherFormatsHint": "ਤਹਿ ਹੋਣ ਉੱਤੇ AI ਦੀ ਮਦਦ, ਇੰਪੋਰਟ ਤੋਂ ਪਹਿਲਾਂ ਹਮੇਸ਼ਾ ਸਮੀਖਿਆ",
+  "importExport.upload.mediaNeedsEveryLanguage": "ਆਡੀਓ ਜਾਂ ਵੀਡੀਓ ਆਯਾਤ ਕਰਨ ਨਾਲ ਉਹ ਰਿਕਾਰਡਿੰਗ ਜੁੜਦੀ ਹੈ ਜੋ ਸਾਰੀਆਂ ਭਾਸ਼ਾਵਾਂ ਸਾਂਝੀ ਕਰਦੀਆਂ ਹਨ, ਇਸ ਲਈ ਇਸ ਪ੍ਰੋਜੈਕਟ ਦੀਆਂ ਸਾਰੀਆਂ ਭਾਸ਼ਾਵਾਂ ਤੱਕ ਪਹੁੰਚ ਚਾਹੀਦੀ ਹੈ। ਕੋਈ ਮੇਂਟੇਨਰ ਇਸਨੂੰ ਆਯਾਤ ਕਰ ਸਕਦਾ ਹੈ।",
+  "importExport.upload.mediaAccessChecking": "ਜਾਂਚ ਹੋ ਰਹੀ ਹੈ ਕਿ ਕੀ ਤੁਸੀਂ ਆਡੀਓ ਜਾਂ ਵੀਡੀਓ ਆਯਾਤ ਕਰ ਸਕਦੇ ਹੋ। ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਫਿਰ ਕੋਸ਼ਿਸ਼ ਕਰੋ।",
   "importExport.dialog.titleDirection": "ਅਨੁਵਾਦ ਦਿਸ਼ਾ ਸੈੱਟ ਕਰੋ",
   "importExport.dialog.titleResult": "ਇੰਪੋਰਟ ਪੂਰਾ — ਕੁਝ ਚੀਜ਼ਾਂ ਛੱਡੀਆਂ",
   "importExport.dialog.titleCollision": "ਮੁੜ-ਇੰਪੋਰਟ ਮਿਲਿਆ",

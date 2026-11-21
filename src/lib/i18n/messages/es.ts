@@ -4418,6 +4418,8 @@ export const es: Catalog = {
   "importExport.upload.zipOrFolder": ".zip o carpeta",
   "importExport.upload.categoryOtherFormats": "Otros formatos",
   "importExport.upload.otherFormatsHint": "Asistido por IA cuando está configurada, siempre revisado antes de importar",
+  "importExport.upload.mediaNeedsEveryLanguage": "Importar audio o video agrega la grabación que comparten todos los idiomas, así que se necesita acceso a todos los idiomas de este proyecto. Un mantenedor puede importarla.",
+  "importExport.upload.mediaAccessChecking": "Comprobando si puedes importar audio o video. Inténtalo de nuevo en un momento.",
   "importExport.dialog.titleDirection": "Establecer la dirección de traducción",
   "importExport.dialog.titleResult": "Importación completa — algunos elementos omitidos",
   "importExport.dialog.titleCollision": "Reimportación detectada",

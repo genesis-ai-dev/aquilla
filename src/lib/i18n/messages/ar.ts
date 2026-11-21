@@ -3891,6 +3891,8 @@ export const ar: Catalog = {
   "importExport.upload.zipOrFolder": ".zip أو مجلد",
   "importExport.upload.categoryOtherFormats": "تنسيقات أخرى",
   "importExport.upload.otherFormatsHint": "بمساعدة الذكاء الاصطناعي عند التهيئة، وتُراجَع دائمًا قبل الاستيراد",
+  "importExport.upload.mediaNeedsEveryLanguage": "استيراد صوت أو فيديو يضيف التسجيل الذي تشترك فيه كل اللغات، لذا يتطلب صلاحية الوصول إلى كل لغات هذا المشروع. يمكن لمشرف استيراده.",
+  "importExport.upload.mediaAccessChecking": "جارٍ التحقق مما إذا كان يمكنك استيراد صوت أو فيديو. حاول مرة أخرى بعد قليل.",
   "importExport.dialog.titleDirection": "تحديد اتجاه الترجمة",
   "importExport.dialog.titleResult": "اكتمل الاستيراد — تم تجاوز بعض العناصر",
   "importExport.dialog.titleCollision": "تم اكتشاف إعادة استيراد",

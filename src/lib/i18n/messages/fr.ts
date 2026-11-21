@@ -3867,6 +3867,8 @@ export const fr: Catalog = {
   "importExport.upload.zipOrFolder": ".zip ou dossier",
   "importExport.upload.categoryOtherFormats": "Autres formats",
   "importExport.upload.otherFormatsHint": "Assisté par IA lorsque configuré, toujours vérifié avant importation",
+  "importExport.upload.mediaNeedsEveryLanguage": "Importer de l’audio ou de la vidéo ajoute l’enregistrement que partagent toutes les langues : il faut donc avoir accès à toutes les langues de ce projet. Un mainteneur peut l’importer.",
+  "importExport.upload.mediaAccessChecking": "Vérification en cours : pouvez-vous importer de l’audio ou de la vidéo ? Réessayez dans un instant.",
   "importExport.dialog.titleDirection": "Définir le sens de traduction",
   "importExport.dialog.titleResult": "Importation terminée — certains éléments ignorés",
   "importExport.dialog.titleCollision": "Réimportation détectée",

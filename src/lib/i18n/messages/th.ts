@@ -3882,6 +3882,8 @@ export const th: Catalog = {
   "importExport.upload.zipOrFolder": ".zip หรือโฟลเดอร์",
   "importExport.upload.categoryOtherFormats": "รูปแบบอื่นๆ",
   "importExport.upload.otherFormatsHint": "ใช้ AI ช่วยเมื่อตั้งค่าไว้ และตรวจทานทุกครั้งก่อนนำเข้า",
+  "importExport.upload.mediaNeedsEveryLanguage": "การนำเข้าเสียงหรือวิดีโอจะเพิ่มไฟล์บันทึกที่ทุกภาษาใช้ร่วมกัน จึงต้องมีสิทธิ์เข้าถึงทุกภาษาในโปรเจกต์นี้ ผู้ดูแลสามารถนำเข้าได้",
+  "importExport.upload.mediaAccessChecking": "กำลังตรวจสอบว่าคุณนำเข้าเสียงหรือวิดีโอได้หรือไม่ ลองอีกครั้งในอีกสักครู่",
   "importExport.dialog.titleDirection": "ตั้งค่าทิศทางการแปล",
   "importExport.dialog.titleResult": "นำเข้าเสร็จสิ้น — มีบางรายการถูกข้าม",
   "importExport.dialog.titleCollision": "ตรวจพบการนำเข้าซ้ำ",

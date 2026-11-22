@@ -59798,7 +59798,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68057,7 +68058,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76725,7 +76727,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -85038,7 +85041,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -102407,7 +102411,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -119827,7 +119832,8 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128522,6 +128528,7 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   }
 }

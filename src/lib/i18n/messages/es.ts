@@ -30,6 +30,7 @@ export const es: Catalog = {
   "common.name": "Nombre",
   "common.email": "Correo electrónico",
   "common.selectDate": "Seleccionar fecha",
+  "common.breadcrumbNav": "Ruta de navegación",
   "common.moreBreadcrumbs": "Más",
   "common.loadingSpinner": "Cargando",
   "common.showMore": "Mostrar más",

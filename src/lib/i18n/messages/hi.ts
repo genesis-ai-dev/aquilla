@@ -30,6 +30,7 @@ export const hi: Catalog = {
   "common.name": "नाम",
   "common.email": "ईमेल",
   "common.selectDate": "तारीख चुनें",
+  "common.breadcrumbNav": "नेविगेशन पथ",
   "common.moreBreadcrumbs": "और",
   "common.loadingSpinner": "लोड हो रहा है",
   "common.showMore": "और दिखाएँ",

@@ -30,6 +30,7 @@ export const ur: Catalog = {
   "common.name": "نام",
   "common.email": "ای میل",
   "common.selectDate": "تاریخ منتخب کریں",
+  "common.breadcrumbNav": "نیویگیشن کا راستہ",
   "common.moreBreadcrumbs": "مزید",
   "common.loadingSpinner": "لوڈ ہو رہا ہے",
   "common.showMore": "مزید دکھائیں",

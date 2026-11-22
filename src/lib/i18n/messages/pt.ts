@@ -30,6 +30,7 @@ export const pt: Catalog = {
   "common.name": "Nome",
   "common.email": "E-mail",
   "common.selectDate": "Selecionar data",
+  "common.breadcrumbNav": "Caminho de navegação",
   "common.moreBreadcrumbs": "Mais",
   "common.loadingSpinner": "Carregando",
   "common.showMore": "Mostrar mais",

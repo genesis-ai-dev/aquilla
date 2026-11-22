@@ -30,6 +30,7 @@ export const am: Catalog = {
   "common.name": "ስም",
   "common.email": "ኢሜይል",
   "common.selectDate": "ቀን ይምረጡ",
+  "common.breadcrumbNav": "የአሰሳ መንገድ",
   "common.moreBreadcrumbs": "ተጨማሪ",
   "common.loadingSpinner": "በመጫን ላይ",
   "common.showMore": "ተጨማሪ አሳዩ",

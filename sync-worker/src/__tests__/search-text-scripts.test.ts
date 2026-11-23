@@ -461,9 +461,13 @@ describe("search scoped to one file", () => {
       (await handleSearchReadRequest(new Request(input, init), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!) as typeof fetch
     try {
       const inFile = await fetchProjectSearch(PROJECT, "器皿", { fileId: "zz-2ki" }, token)
-      expect(inFile.map((h) => h.cellId).sort()).toEqual(["zz-v2", "zz-v3"])
+      expect(inFile.results.map((h) => h.cellId).sort()).toEqual(["zz-v2", "zz-v3"])
+      expect(inFile.total).toBe(2)
+      // AQU-2732: the page is cut at 50, and the count beside it is all 62
+      // (60 books and the two verses of 2 Kings), read off the same response.
       const inProject = await fetchProjectSearch(PROJECT, "器皿", {}, token)
-      expect(inProject).toHaveLength(50)
+      expect(inProject.results).toHaveLength(50)
+      expect(inProject).toMatchObject({ total: 62, totalIsLowerBound: false })
     } finally {
       globalThis.fetch = realFetch
     }

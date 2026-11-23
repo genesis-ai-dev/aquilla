@@ -825,3 +825,58 @@ function ReplaceThenSearch({
     />
   )
 }
+
+// AQU-2732: the dialog is where the side panel sends people "for all results"
+// and the list Replace works from. It drew 50 and said nothing of the rest, so
+// Replace all changed the first 50 cells of a term and looked finished.
+describe("ParallelPassagesPanel — a cut list says so (AQU-2732)", () => {
+  const listed = [
+    makeResult({ cellId: "c1", translated: "the temple gate" }),
+    makeResult({ cellId: "c2", translated: "the temple court" }),
+  ]
+
+  it("asks for the most one search returns, in every mode", () => {
+    const onSearch = vi.fn()
+    const onSearchPassages = vi.fn()
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", onSearch, onSearchPassages })} />)
+    fireEvent.change(screen.getByPlaceholderText(/search project/i), { target: { value: "temple" } })
+    fireEvent.keyDown(screen.getByPlaceholderText(/search project/i), { key: "Enter" })
+    expect(onSearch).toHaveBeenLastCalledWith("temple", expect.objectContaining({ limit: 500 }))
+
+    fireEvent.click(screen.getByRole("tab", { name: "Replace" }))
+    expect(onSearch).toHaveBeenLastCalledWith("temple", expect.objectContaining({ limit: 500, side: "target" }))
+
+    fireEvent.click(screen.getByRole("tab", { name: "Passages" }))
+    expect(onSearchPassages).toHaveBeenLastCalledWith("temple", { limit: 500 })
+  })
+
+  it.each(["search", "passages"] as const)("says the %s list is the first of more", (mode) => {
+    render(<ParallelPassagesPanel {...baseProps({ mode, results: listed, total: 596 })} />)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Showing first 2 of 596 matches — narrow the search to see more",
+    )
+    expect(screen.getByText("2 of 596")).toBeInTheDocument()
+  })
+
+  it("says before Replace is pressed how many cells it changes and how many it cannot reach", () => {
+    render(<ParallelPassagesPanel {...baseProps({ results: listed, total: 596 })} />)
+    fireEvent.change(getFindInput(), { target: { value: "temple" } })
+    fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), { target: { value: "house" } })
+
+    expect(getApplyButton()).toHaveTextContent("Replace 2 cells")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Only the first 2 of 596 matching cells are in this list. Replace changes cells in this list only; the other 594 will not change.",
+    )
+  })
+
+  it("leaves the count unsaid when the total is only a floor", () => {
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", results: listed, total: 2, totalIsLowerBound: true })} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Showing first 2 matches — narrow the search to see more")
+  })
+
+  it("says nothing when the list is all of them", () => {
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", results: listed, total: 2 })} />)
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.getByText("2 results")).toBeInTheDocument()
+  })
+})

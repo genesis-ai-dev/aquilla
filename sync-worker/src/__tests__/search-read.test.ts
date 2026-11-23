@@ -337,3 +337,163 @@ describe("GET /api/v1/projects/:projectId/search", () => {
     expect(res).toBeNull()
   })
 })
+
+// AQU-2732: a page is cut at `limit`, and nothing said so. A full page of 50
+// read the same for 50 matches and for 5,000, the side panel's "N more" line
+// could never show, and Replace all changed the first page in silence. The
+// response now carries `total`, counted by the query that made the page.
+describe("search totals (AQU-2732)", () => {
+  interface Page {
+    results: Array<{ cellId: string }>
+    total: number
+    totalIsLowerBound: boolean
+  }
+
+  type Seed = Parameters<typeof makeCell>[0] & { lane_id?: string | null; hidden_at?: number | null }
+  const cellRow = (over: Seed) => makeCell(over) as ReturnType<typeof makeCell>
+
+  async function page(
+    db: AquillaDb,
+    pathAndQuery: string,
+    opts: { walledTo?: string } = {},
+  ): Promise<Page> {
+    const token = await makeTestToken(SECRET, {
+      projectId: "proj-a",
+      fileId: "any",
+      ...(opts.walledTo ? { role: 400, laneGrants: [{ lane: opts.walledTo, level: 400 }] } : {}),
+    })
+    const handle = pathAndQuery.startsWith("search/passages") ? handleSearchPassagesRequest : handleSearchReadRequest
+    const res = (await handle(
+      new Request(`https://w/api/v1/projects/proj-a/${pathAndQuery}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { ...envWith(db), ...(opts.walledTo ? { LANE_READ_WALL: "1" } : {}) },
+    ))!
+    expect(res.status).toBe(200)
+    return (await res.json()) as Page
+  }
+
+  // One project, two books. As a word, "temple" is in 6 target cells and 1
+  // source cell of 2 Kings and 2 target cells of Ezra: 9. One of the nine is
+  // capitalised, and "temples" is a tenth cell to a substring test and to no
+  // other. Never counted: a parked cell, a cell of a deleted file, and
+  // another project's cell.
+  async function seedTemple() {
+    return makeTestDb({
+      files: [
+        { id: "kings", project_id: "proj-a", name: "2 Kings", event_id: "fe1" },
+        { id: "ezra", project_id: "proj-a", name: "Ezra", event_id: "fe2" },
+        { id: "gone", project_id: "proj-a", name: "Deleted", event_id: "fe3", deleted_at: 5 },
+      ],
+      cells: [
+        ...[1, 2, 3, 4, 5].map((n) =>
+          cellRow({ cell_id: `k${n}`, side: "target", value: `he went up to the temple ${n}`, file_id: "kings" }),
+        ),
+        cellRow({ cell_id: "k6", side: "target", value: "The Temple was shut", file_id: "kings" }),
+        cellRow({ cell_id: "k1", side: "source", value: "the temple gate", file_id: "kings" }),
+        cellRow({ cell_id: "k7", side: "target", value: "temples of the nations", file_id: "kings" }),
+        cellRow({ cell_id: "e1", side: "target", value: "build the temple again", file_id: "ezra" }),
+        cellRow({ cell_id: "e2", side: "target", value: "the temple stood", file_id: "ezra" }),
+        cellRow({ cell_id: "p1", side: "source", value: "parked", file_id: "kings", hidden_at: 9 }),
+        cellRow({ cell_id: "p1", side: "target", value: "the temple, parked", file_id: "kings" }),
+        cellRow({ cell_id: "g1", side: "target", value: "the temple, deleted", file_id: "gone" }),
+        cellRow({ cell_id: "x1", side: "target", value: "the temple elsewhere", project_id: "other" }),
+      ],
+    })
+  }
+
+  it.each([
+    // [what, path and query, total]
+    ["the word index", "search?q=temple", 9],
+    ["one side", "search?q=temple&side=target", 8],
+    ["one file", "search?q=temple&fileId=kings", 7],
+    ["one file, one side", "search?q=temple&fileId=kings&side=target", 6],
+    // Loses "The Temple", gains "temples": a case-sensitive substring.
+    ["match case", "search?q=temple&case=1", 9],
+    ["whole word", "search?q=temple&word=1", 9],
+    ["a regexp Postgres runs", "search?q=temples%3F&regexp=1", 10],
+    ["a regexp only the worker runs", "search?q=%5Cbtemple%5Cb&regexp=1", 9],
+    ["passages", "search/passages?q=the%20temple", 9],
+  ])("counts every match past the page: %s", async (_what, pathAndQuery, total) => {
+    const { db } = await seedTemple()
+    const cut = await page(db, `${pathAndQuery}&limit=2`)
+    expect(cut.results).toHaveLength(2)
+    expect(cut).toMatchObject({ total, totalIsLowerBound: false })
+    // The whole list, when asked for, is that many rows.
+    expect((await page(db, `${pathAndQuery}&limit=500`)).results).toHaveLength(total)
+  })
+
+  it("counts text matches in a script with no spaces between words", async () => {
+    const { db } = await makeTestDb({
+      cells: [1, 2, 3].map((n) => cellRow({ cell_id: `v${n}`, side: "target", value: `並所用的一切銅器皿${n}` })),
+    })
+    expect(await page(db, `search?q=${encodeURIComponent("器皿")}&limit=1`)).toMatchObject({
+      results: [{ cellId: "v1" }],
+      total: 3,
+      totalIsLowerBound: false,
+    })
+    expect(await page(db, `search/passages?q=${encodeURIComponent("器皿")}&limit=1`)).toMatchObject({ total: 3 })
+  })
+
+  it("says nothing matched as a total of zero", async () => {
+    const { db } = await seedTemple()
+    for (const query of ["search?q=quokka", "search?q=quokka&case=1", "search/passages?q=quokka", "search?q=%22*()%22"]) {
+      expect(await page(db, query)).toEqual({ results: [], total: 0, totalIsLowerBound: false })
+    }
+  })
+
+  // The wall is part of the WHERE, so it is part of the count: a member
+  // limited to lane A must not learn from a number how much lane B holds.
+  it("counts only what a lane-limited member can see", async () => {
+    const lane = (id: string, tag: string) =>
+      ({ id, project_id: "proj-a", role: "target", name: id, lang_code: tag || "sw", legacy_tag: tag })
+    const { db } = await makeTestDb({
+      lanes: [lane("lane-a", ""), lane("lane-b", "fr")],
+      cells: [
+        ...[1, 2, 3].map((n) =>
+          cellRow({ cell_id: `c${n}`, side: "target", value: `the temple 器皿 a${n}`, lane_id: "lane-a", event_id: `ea${n}` }),
+        ),
+        ...[1, 2, 3, 4, 5].map((n) =>
+          cellRow({ cell_id: `c${n}`, side: "target", value: `the temple 器皿 b${n}`, lane_id: "lane-b", event_id: `eb${n}` }),
+        ),
+      ],
+    })
+    for (const query of [
+      "search?q=temple",
+      `search?q=${encodeURIComponent("器皿")}`,
+      "search?q=temple&case=1",
+      "search?q=temple&word=1",
+      "search?q=%5Cbtemple%5Cb&regexp=1",
+      "search/passages?q=the%20temple",
+    ]) {
+      const walled = await page(db, `${query}&limit=2`, { walledTo: "lane-a" })
+      expect(walled, query).toMatchObject({ total: 3, totalIsLowerBound: false })
+      expect(walled.results, query).toHaveLength(2)
+      expect((await page(db, `${query}&limit=2`)).total, query).toBe(8)
+    }
+  })
+
+  // Whole word is decided in the worker over at most 500 of the rows SQL let
+  // through. Past that read the rest is not known, and the response says so
+  // rather than passing a partial count off as the count.
+  it("reports a floor when whole word has more candidates than it reads", async () => {
+    const pad = (n: number) => String(n).padStart(4, "0")
+    const { db } = await makeTestDb({
+      cells: [
+        // Sorts first, so all of these are inside the read.
+        ...[1, 2, 3].map((n) => cellRow({ cell_id: `a${pad(n)}`, side: "target", value: `the temple ${n}` })),
+        // 600 substring hits that are not the word.
+        ...Array.from({ length: 600 }, (_, n) =>
+          cellRow({ cell_id: `b${pad(n)}`, side: "target", value: `temples ${n}` }),
+        ),
+        // A real match the read never reaches.
+        cellRow({ cell_id: "z0001", side: "target", value: "the temple at last" }),
+      ],
+    })
+    const words = await page(db, "search?q=temple&word=1&limit=2")
+    expect(words.results.map((row) => row.cellId)).toEqual(["a0001", "a0002"])
+    expect(words).toMatchObject({ total: 3, totalIsLowerBound: true })
+    // The same cells with match case alone are counted in SQL, exactly.
+    expect(await page(db, "search?q=temple&case=1&limit=2")).toMatchObject({ total: 604, totalIsLowerBound: false })
+  })
+})

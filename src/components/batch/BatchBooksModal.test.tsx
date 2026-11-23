@@ -51,8 +51,9 @@ describe("BatchBooksModal", () => {
     expect(screen.getByRole("checkbox", { name: "Exodus" })).not.toBeChecked()
     await user.click(screen.getByText("Exodus"))
     expect(screen.getByRole("checkbox", { name: "Exodus" })).toBeChecked()
-    await user.click(screen.getByText("Cells ready for your check"))
-    expect(screen.getByRole("checkbox", { name: "Cells ready for your check" })).not.toBeChecked()
+    expect(screen.queryByText("What this run includes")).toBeNull()
+    await user.click(screen.getByText("Include unvalidated cells"))
+    expect(screen.getByRole("checkbox", { name: "Include unvalidated cells" })).not.toBeChecked()
     await user.click(screen.getByRole("button", { name: "Validate books" }))
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       fileIds: ["gen", "exo"],

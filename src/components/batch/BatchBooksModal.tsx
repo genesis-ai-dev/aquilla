@@ -150,12 +150,11 @@ export function BatchBooksModal({
         </FieldSet>
         {request === "validate" ? (
           <FieldSet>
-            <FieldLegend variant="label">{t("editor.batchFile.legend")}</FieldLegend>
             <OptionRow
               id="batch-books-ready"
               checked={includeReady}
               onCheckedChange={setIncludeReady}
-              label={t("editor.batchBooks.ready")}
+              label={t("editor.batchFile.includeUnvalidated")}
               help={t("editor.batchFile.readyHelp")}
             />
             <OptionRow
@@ -172,13 +171,12 @@ export function BatchBooksModal({
               id="batch-books-flagged"
               checked={includeFlagged}
               onCheckedChange={setIncludeFlagged}
-              label={t("editor.batchBooks.flagged")}
+              label={t("editor.batchFile.includeUnresolved")}
               help={t("editor.batchBooks.flaggedHelp")}
             />
           </FieldSet>
         ) : (
           <FieldSet>
-            <FieldLegend variant="label">{t("editor.batchFile.legend")}</FieldLegend>
             <OptionRow
               id="batch-books-empty"
               checked={includeEmpty}
@@ -191,7 +189,7 @@ export function BatchBooksModal({
               checked={refreshAi}
               onCheckedChange={setRefreshAi}
               label={t("editor.batchBooks.refresh")}
-              help={t("editor.batchFile.refreshHelp")}
+              help={t("editor.batchBooks.refreshHelp")}
             />
           </FieldSet>
         )}

@@ -138,6 +138,29 @@ function personRow(name: string) {
   return row
 }
 
+describe("OrgAccessPage Give access (AQU-2320)", () => {
+  it("is disabled where the viewer may grant nowhere", async () => {
+    renderPage()
+    await screen.findByTestId("access-tree")
+    // No grantable map (or nothing grantable): the server would refuse every grant.
+    expect(screen.getByTestId("give-access-open")).toBeDisabled()
+  })
+
+  it("opens pre-filled with the place selected in the lens", async () => {
+    payload.grantable = { "org:1": { ok: true, cap: 700 }, "project:p1": { ok: true, cap: 700 } }
+    try {
+      renderPage()
+      await screen.findByTestId("access-tree")
+      fireEvent.click(placeButton("Pattani"))
+      fireEvent.click(screen.getByTestId("give-access-open"))
+      const dialog = await screen.findByTestId("give-access-dialog")
+      expect(within(dialog).getByTestId("give-place")).toHaveTextContent("Pattani")
+    } finally {
+      delete payload.grantable
+    }
+  })
+})
+
 describe("OrgAccessPage", () => {
   it("lists members, guests, and invites, and a Guests CSV repeats the breadcrumbs on screen", async () => {
     renderPage()
@@ -283,10 +306,11 @@ describe("OrgAccessPage", () => {
     expect(lens.className).toContain("md:flex-row")
     expect(lens.className).toContain("overflow-x-hidden")
 
+    // AQU-2320: this payload grants the viewer nowhere, so Give access stays
+    // shut (the "Coming next" placeholder is gone; the dialog is real now).
     const give = screen.getByRole("button", { name: /give access/i })
     expect(give).toBeDisabled()
-    fireEvent.click(give.closest("[data-slot=tooltip-disabled-trigger]")!)
-    expect(screen.getByText("Coming next")).toBeTruthy()
+    fireEvent.click(give)
     expect(screen.queryByRole("dialog", { name: /give access/i })).toBeNull()
   })
 

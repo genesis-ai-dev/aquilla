@@ -11,7 +11,7 @@
  * losing the session or the org reads as loading rather than leaving stale
  * rows on screen.
  */
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { fetchOrgAccess, type OrgAccessPayload } from "@/components/org/access/org-access-data"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -43,6 +43,11 @@ export type OrgAccessState =
       /** The org at the root of the tree, when the viewer can see it. */
       org: ScopeRef | undefined
       grants: OrgAccessGrantRow[]
+      /**
+       * AQU-2320: re-read after a write. The current payload stays on screen
+       * until the new one lands, so the lens refreshes in place.
+       */
+      reload: () => void
     }
 
 type LoadState =
@@ -58,6 +63,8 @@ export function useOrgAccess(): OrgAccessState {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [loaded, setLoaded] = useState<KeyedState>({ orgId: null, state: LOADING })
+  const [version, setVersion] = useState(0)
+  const reload = useCallback(() => setVersion((v) => v + 1), [])
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
@@ -67,7 +74,7 @@ export function useOrgAccess(): OrgAccessState {
       () => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "error" } }) },
     )
     return () => { cancelled = true }
-  }, [jwt, activeOrgId])
+  }, [jwt, activeOrgId, version])
 
   // On org switch (or signed-out / no org) the previous org's payload must not
   // render or export: anything not loaded for the current org reads as loading.
@@ -93,5 +100,5 @@ export function useOrgAccess(): OrgAccessState {
   // A walled viewer's tree has no organization node (AQU-2318). The people
   // tab still needs a place to open the inspector from, so it uses the root.
   const org = data.tree.find((node) => node.scope.type === "org")?.scope ?? data.tree[0]?.scope
-  return { status: "ready", data, asOf: state.asOf, org, grants }
+  return { status: "ready", data, asOf: state.asOf, org, grants, reload }
 }

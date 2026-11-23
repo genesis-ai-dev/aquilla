@@ -11,6 +11,8 @@ import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PeopleLens, PeoplePrintReport } from "@/components/org/access/PeopleLens"
 import { PlacesLens } from "@/components/org/access/PlacesLens"
+import { GiveAccessDialog } from "@/components/org/access/GiveAccessDialog"
+import type { ScopeRef } from "@/lib/access/types"
 import { orgAccessCsv } from "@/components/org/access/org-access-data"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -60,6 +62,9 @@ export function OrgAccessPage() {
   const state = useOrgAccess()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState("")
+  // AQU-2320: the Give access dialog, with the place it was opened from.
+  const [giveAt, setGiveAt] = useState<ScopeRef | null>(null)
+  const canGive = state.status === "ready" && Object.values(state.data.grantable ?? {}).some((g) => g.ok)
   const lens = parseAccessLens(params.get("lens"))
   const filter = parsePeopleFilter(params.get("people"))
   const now = state.status === "ready" ? state.asOf : 0
@@ -140,7 +145,9 @@ export function OrgAccessPage() {
                     <TabsTrigger value="people">{t("org.overviewLaneTable.peopleColumn")}</TabsTrigger>
                   </TabsList>
                   <TabsContent value="places" className="mt-3">
-                    {lens === "places" && <PlacesLens tree={state.data.tree} query={query} />}
+                    {lens === "places" && (
+                      <PlacesLens tree={state.data.tree} query={query} onGiveAccess={canGive ? setGiveAt : undefined} />
+                    )}
                   </TabsContent>
                   <TabsContent value="people" className="mt-3">
                     {lens === "people" && (
@@ -156,6 +163,16 @@ export function OrgAccessPage() {
                   </TabsContent>
                 </Tabs>
               </div>
+              {activeOrg && (
+                <GiveAccessDialog
+                  open={giveAt != null}
+                  onOpenChange={(open) => { if (!open) setGiveAt(null) }}
+                  orgId={activeOrg.id}
+                  payload={state.data}
+                  initialPlace={giveAt ?? undefined}
+                  onGranted={state.reload}
+                />
+              )}
               {lens === "people" && (
                 <PeoplePrintReport
                   people={roster}

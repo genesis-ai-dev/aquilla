@@ -8,7 +8,6 @@ import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { UserChip } from "@/components/UserChip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { filterPlaceTree, placeParam, placeRowCounts } from "@/lib/access/place-lens"
 import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
 import type { AccessFromScope } from "@/lib/sync/access-read"
@@ -28,9 +27,19 @@ const PLACE_KIND = {
 /**
  * AQU-2318: the Places lens. The tree is every place the server says this
  * person can see; the detail is the grants at the selected place and the
- * ancestor grants that resolve to it. Nothing here edits a grant.
+ * ancestor grants that resolve to it. Nothing here edits a grant; "Give
+ * access" hands the selected place to `onGiveAccess` (AQU-2320), and is
+ * disabled when that is absent (the viewer may grant nowhere).
  */
-export function PlacesLens({ tree, query }: { tree: AccessTreeNode[]; query: string }) {
+export function PlacesLens({
+  tree,
+  query,
+  onGiveAccess,
+}: {
+  tree: AccessTreeNode[]
+  query: string
+  onGiveAccess?: (place: ScopeRef) => void
+}) {
   const t = useT()
   const [params, setParams] = useSearchParams()
   const filtered = filterPlaceTree(tree, query)
@@ -67,7 +76,9 @@ export function PlacesLens({ tree, query }: { tree: AccessTreeNode[]; query: str
         )}
       </div>
       <div className="min-w-0 flex-1">
-        {selected && <PlaceDetail node={selected.node} path={selected.path} onSelect={select} tree={tree} />}
+        {selected && (
+          <PlaceDetail node={selected.node} path={selected.path} onSelect={select} tree={tree} onGiveAccess={onGiveAccess} />
+        )}
       </div>
     </div>
   )
@@ -130,11 +141,13 @@ function PlaceDetail({
   path,
   tree,
   onSelect,
+  onGiveAccess,
 }: {
   node: AccessTreeNode
   path: ScopeRef[]
   tree: AccessTreeNode[]
   onSelect: (scope: ScopeRef) => void
+  onGiveAccess?: (place: ScopeRef) => void
 }) {
   const t = useT()
   const counts = placeRowCounts(node)
@@ -150,12 +163,11 @@ function PlaceDetail({
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <ScopeBreadcrumb path={headerPath} icons className="min-w-0" />
-        <AppTooltip content={t("org.access.places.giveAccessSoon")}>
-          <Button type="button" size="sm" disabled>
-            <UserPlus aria-hidden />
-            {t("org.access.places.giveAccess")}
-          </Button>
-        </AppTooltip>
+        {/* AQU-2320: opens the Give access dialog with this place filled in. */}
+        <Button type="button" size="sm" disabled={!onGiveAccess} onClick={() => onGiveAccess?.(node.scope)} data-testid="give-access-open">
+          <UserPlus aria-hidden />
+          {t("org.access.places.giveAccess")}
+        </Button>
       </div>
       <p data-testid="place-summary" className="text-sm">
         {t("org.access.places.openPeople", { count: counts.total, place: t(PLACE_KIND[node.scope.type]) })}{" "}

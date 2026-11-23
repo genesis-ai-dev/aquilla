@@ -33,8 +33,8 @@ export interface UseWorkspaceSearchOptions {
 }
 
 interface SearchOptionsApi {
-  /** Restrict to one file. Server-side filter is not implemented yet —
-   *  Phase 2c. For now we filter client-side after the fetch. */
+  /** Restrict to one file. The server does the narrowing, so `limit` is
+   *  taken within the file rather than across the project. */
   fileId?: string
   /** Server clamps to 500; default 50. */
   limit?: number
@@ -244,6 +244,7 @@ export function useWorkspaceSearchController(
         cleaned,
         {
           side: sideParam,
+          fileId: opts.fileId,
           limit: opts.limit,
           matchCase: opts.caseSensitive,
           wholeWord: opts.matchWord,
@@ -256,6 +257,8 @@ export function useWorkspaceSearchController(
       const mapped = rows
         .filter((r) => !hidden.has(r.fileId))
         .map((r) => makeResult(r, filesRef.current))
+      // The server narrows to the file. This stays for a sync-worker that
+      // predates `fileId` and ignores it: the SPA and the worker deploy apart.
       const filtered = opts.fileId
         ? mapped.filter((r) => r.fileId === opts.fileId)
         : mapped

@@ -23,6 +23,20 @@ describe("fetchProjectSearch", () => {
     expect(url.startsWith("https://sync.example.com/api/v1/projects/proj-a/search?")).toBe(true)
   })
 
+  it("sends the file to search within, and leaves it off for a project search", async () => {
+    global.fetch = vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    ) as unknown as typeof fetch
+    await fetchProjectSearch("proj-a", "器皿", { fileId: "file-2ki" }, "jwt")
+    await fetchProjectSearch("proj-a", "器皿", {}, "jwt")
+    const [scoped, project] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => new URL(call[0] as string).searchParams,
+    )
+    expect(scoped.get("fileId")).toBe("file-2ki")
+    expect(scoped.get("q")).toBe("器皿")
+    expect(project.has("fileId")).toBe(false)
+  })
+
   it("sends match case, whole word, and regexp only when they are on", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({ results: [] }), { status: 200 }),

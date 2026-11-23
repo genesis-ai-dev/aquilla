@@ -145,7 +145,8 @@ function PlaceBranch({
   const Icon = PLACE_ICON[node.scope.type]
   const key = placeParam(node.scope)
   const selected = key === selectedKey
-  const count = placeRowCounts(node).total
+  // AQU-2322: a lane counts its lane-level grants; other places count everyone who can open them.
+  const count = node.scope.type === "lane" ? placeRowCounts(node).granted : placeRowCounts(node).total
   return (
     <li
       id={accessNodeId(node.scope)}
@@ -273,7 +274,9 @@ function GrantedRow({ person, path, editing }: { person: DirectGrantee; path: Sc
       {secondary && <span className="min-w-0 truncate text-sm text-muted-foreground">{secondary}</span>}
       {person.isGuest && <Badge variant="outline" data-testid="guest-badge">{t("org.access.inspector.guest")}</Badge>}
       <span className="ms-auto inline-flex items-center gap-1">
-        {editing ? <GrantedRowEdit person={person} path={path} origin={origin} editing={editing} /> : <RoleBadge roleLevel={person.roleLevel} origin={origin} />}
+        {editing
+          ? <GrantedRowEdit person={person} path={path} origin={origin} editing={editing} />
+          : <RoleBadge roleLevel={person.roleLevel} origin={origin} lanes={person.lanes?.map((l) => l.name)} />}
       </span>
     </li>
   )
@@ -290,6 +293,7 @@ function GrantedRowEdit({ person, path, origin, editing }: { person: DirectGrant
   const inviteId = person.source === "invite" ? inviteRowId(place, path, person.userId) : null
   const grant = person.source === "invite" ? null : rowGrant(place)
   const canRemove = removal.ok && (inviteId != null || grant != null)
+  const denied = removal.ok ? null : editDeniedText(t, removal.reason, removal.cap)
   const label = person.source === "invite"
     ? t("org.access.edit.cancelInvite", { email: person.email ?? person.displayName })
     : t("org.access.edit.remove", { name: person.displayName })
@@ -311,14 +315,11 @@ function GrantedRowEdit({ person, path, origin, editing }: { person: DirectGrant
         person={{ userId: person.userId, displayName: person.displayName, username }}
         roleLevel={person.roleLevel}
         origin={origin}
+        lanes={person.lanes?.map((l) => l.name)}
         edit={edit}
         onChanged={editing.onChanged}
       />
-      {canRemove ? button : (
-        <AppTooltip content={removal.ok ? editDeniedText(t, "lane_needs_staffing", null) : editDeniedText(t, removal.reason, removal.cap)}>
-          {button}
-        </AppTooltip>
-      )}
+      {canRemove || !denied ? button : <AppTooltip content={denied}>{button}</AppTooltip>}
     </>
   )
 }

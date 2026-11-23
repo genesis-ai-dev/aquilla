@@ -19,6 +19,8 @@ export interface DirectGrantee {
   isGuest?: boolean
   source?: "direct" | "creator" | "invite"
   pendingInvite?: { expiresAt: string | null }
+  /** AQU-2322, project nodes: their way in is these lane grants (the lanes this viewer can see). */
+  lanes?: { id: string; name: string; roleLevel: number }[]
 }
 
 /** An ancestor grant that resolves to this place. One person, or one team. */

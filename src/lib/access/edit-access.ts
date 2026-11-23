@@ -6,9 +6,9 @@
 import { removalCheck, roleChangeOptions, type EditCheck, type EditDenial, type PlaceGrantability } from "./grant-rules"
 import type { ScopeRef } from "./types"
 
-/** A grant the Places lens can write: org, team or project rows. Lane rows belong to lane staffing (AQU-2322). */
+/** A grant the Places lens can write: org, team, project or lane rows (lanes since AQU-2322). */
 export interface GrantRef {
-  type: "org" | "team" | "project"
+  type: "org" | "team" | "project" | "lane"
   id: string
 }
 
@@ -17,20 +17,22 @@ export interface DirectRow {
   userId: string
   roleLevel: number
   source?: "direct" | "creator" | "invite"
+  /** AQU-2322: a project row drawn as the lane grants it carries. Those are changed on each lane. */
+  lanes?: readonly unknown[]
 }
 
 /** `cap` is the viewer's own role there, when the reason names it. */
 export type RowEdit =
   | { ok: true; roles: number[] }
-  | { ok: false; reason: EditDenial | "creator" | "invite"; cap: number | null }
+  | { ok: false; reason: EditDenial | "creator" | "invite" | "lanes"; cap: number | null }
 
 export type RowRemoval = { ok: true } | { ok: false; reason: EditDenial | "creator"; cap: number | null }
 
 const NOT_LOADED: PlaceGrantability = { ok: false, denial: "owner_only" }
 
-/** The grant behind a direct row on this place. A lane row has none this slice can write. */
-export function rowGrant(scope: ScopeRef): GrantRef | null {
-  return scope.type === "lane" ? null : { type: scope.type, id: scope.id }
+/** The grant behind a direct row on this place. */
+export function rowGrant(scope: ScopeRef): GrantRef {
+  return { type: scope.type, id: scope.id }
 }
 
 /** The People-lens id of an invite drawn on a node as `invite:<token>`. */
@@ -49,6 +51,7 @@ const grantability = (grantable: Readonly<Record<string, PlaceGrantability>> | u
 export function rowEdit(scope: ScopeRef, row: DirectRow, grantable: Readonly<Record<string, PlaceGrantability>> | undefined, isSelf: boolean): RowEdit {
   if (row.source === "creator") return { ok: false, reason: "creator", cap: null }
   if (row.source === "invite") return { ok: false, reason: "invite", cap: null }
+  if (scope.type === "project" && row.lanes && row.lanes.length > 0) return { ok: false, reason: "lanes", cap: null }
   const result = roleChangeOptions(scope.type, grantability(grantable, scope), { roleLevel: row.roleLevel, isSelf })
   return result.ok ? result : { ok: false, reason: result.denial, cap: result.cap }
 }

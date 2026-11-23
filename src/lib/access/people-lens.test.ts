@@ -166,3 +166,16 @@ describe("People lens roster", () => {
     expect(places.extra).toBe(1)
   })
 })
+
+describe("AQU-2322: a lane grant on the roster", () => {
+  // The payload draws a project row that only carries lane grants as those
+  // lanes (auth-worker lane-shape.ts), so the Reaches cell reads them as lanes.
+  it("someone whose only access is one lane grant reaches 1 lane, not a project", () => {
+    const lucia = person({ userId: "12", displayName: "Lucía", isGuest: true, grants: [grant([org, project, french], 400)] })
+    expect(personReach(lucia, counts)).toEqual({ kind: "lanes", count: 1 })
+    expect(formatReach(t, personReach(lucia, counts))).toBe("1 language lane")
+    // An organization role that opens nothing does not change that.
+    const member = person({ userId: "4", displayName: "Ana", grants: [grant([org], 400), grant([org, project, french], 400)] })
+    expect(personReach(member, counts)).toEqual({ kind: "lanes", count: 1 })
+  })
+})

@@ -50,6 +50,13 @@ import { isStructuralCell } from "@/lib/cells/structural"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
 import { blockClass, cellLines, escapeHtml, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
 import { parseScriptureReference } from "@/lib/scripture-reference"
+import {
+  USFM_LEAD_HEADING_MARKERS,
+  isNoBreakLead,
+  splitUsfmLead,
+  type UsfmLead,
+  type UsfmLeadBlock,
+} from "../../../../db/shared/usfm-layout"
 
 export { escapeHtml }
 
@@ -70,6 +77,10 @@ export interface HtmlExportOptions {
    *  whole-project zip (AQU-2183) — a single-book export is one file with no
    *  index to return to, so it must not grow a dead link. */
   backLink?: HtmlBackLink | null
+  /** Tag each verse number with its reference (`data-ref="GEN 1:3"`), so the
+   *  Bible document's reading preview can follow the verse being edited.
+   *  Off for downloads: the exported file stays as it was. */
+  verseAnchors?: boolean
 }
 
 /** The "back to the index" link a zip's book page carries (AQU-2183). */
@@ -84,20 +95,7 @@ export interface HtmlBackLink {
 export type HtmlExportCell = Pick<CellData, "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker"> &
   Parameters<typeof effectiveSourceText>[0]
 
-/**
- * Does this file read as a Bible book — does any line carry a Bible verse
- * reference (a known book code with a chapter and verse, `RUT 1:1`)?
- *
- * AQU-2210: a `codex` file is not always Scripture. Migrated projects hold
- * dubbing episodes (`TheChosen-101-en-5-2 1:cue-…`), Pilgrim's Progress
- * (`PilgrimsProgress 1:13`) and commentaries under the same type, and the file
- * row cannot tell them apart (no book code; Codex's corpus marker is not
- * migrated). The lines can, by the same reference test that numbers a verse
- * on the page — so a file offered the page gets numbered verses.
- */
-export function hasBibleVerses(cells: readonly Pick<CellData, "group">[]): boolean {
-  return cells.some((cell) => parseScriptureReference(cell.group)?.verse != null)
-}
+export { hasBibleVerses, isBibleBookFile } from "@/lib/export/bible-book"
 
 export function exportHtml(cells: readonly HtmlExportCell[], opts: HtmlExportOptions = {}): Blob {
   return new Blob([buildHtmlPage(cells, opts)], { type: "text/html;charset=utf-8" })
@@ -107,6 +105,8 @@ interface Entry {
   kind: "verse" | "heading" | "text"
   /** Verse number, or range ("1-2"), when the cell is a verse with a readable ref. */
   verse: string | null
+  /** A verse's reference ("GEN 1:3"); the reading preview scrolls to it. */
+  ref: string | null
   /** The heading's own USFM marker ("s1", "d", "r", "mt1"), read back from its
    *  synthetic reference; null for anything that is not a marked heading. */
   headingMarker: string | null
@@ -143,14 +143,15 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
   let untranslated = 0
   // The page only lays out paragraphs it actually imported (see the header).
   const flow = cells.some((cell) => cell.paragraphStart === true)
+  const anchors = opts.verseAnchors === true
 
   for (const cell of cells) {
-    const entry = entryFor(cell)
-    if (!entry) continue
-    if (entry.untranslated) untranslated++
+    const entries = entriesFor(cell)
+    if (entries.length === 0) continue
+    if (entries[entries.length - 1].untranslated) untranslated++
     const label = chapterLabelForCell(cell)
     if (!label) {
-      pending.push(entry)
+      pending.push(...entries)
       continue
     }
     let chapter = byLabel.get(label)
@@ -167,7 +168,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
     // Entries that waited ahead of this cell belong with it: inside the
     // chapter when it continues one, at the top of the chapter when it opens
     // one.
-    chapter.entries.push(...pending, entry)
+    chapter.entries.push(...pending, ...entries)
     pending = []
   }
   if (chapters.length === 0) leading.push(...pending)
@@ -179,7 +180,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
   parts.push(`<h1 class="book-title">${escapeHtml(title)}</h1>`)
   if (chapters.length === 0) {
     // No chapters at all: the entries ARE the document, not front matter.
-    parts.push(`<section class="chapter">\n${bodyHtml(leading, "doc", flow)}\n</section>`)
+    parts.push(`<section class="chapter">\n${bodyHtml(leading, "doc", flow, anchors)}\n</section>`)
   } else {
     if (leading.length > 0) {
       parts.push(`<section class="front-matter">\n${leading.map(frontMatterHtml).join("\n")}\n</section>`)
@@ -192,7 +193,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
     for (const c of chapters) {
       parts.push(
         `<section class="chapter" id="${c.id}">\n<h2 class="chapter-title">${escapeHtml(c.title)}</h2>\n` +
-          bodyHtml(c.entries, c.id, flow) +
+          bodyHtml(c.entries, c.id, flow, anchors) +
           `\n</section>`,
       )
     }
@@ -242,8 +243,51 @@ export function summarizeHtmlCells(cells: readonly HtmlExportCell[]): { lines: n
   return { lines, untranslated }
 }
 
-function entryFor(cell: HtmlExportCell): Entry | null {
-  const translated = cell.translated.trim()
+/**
+ * A cell's entries: the section headings the translation added ahead of it,
+ * then the cell itself.
+ *
+ * AQU-2559 (docs/decisions/0010-usfm-target-layout.md): layout a translator
+ * adds in the Bible document is a lead on the verse it precedes — `\s1 Title`
+ * lines, or a bare `\p` / `\q1` / `\nb`. The USFM export writes it into the
+ * file; the page reads it the same way, so the reading preview and the
+ * exported page show the headings and breaks the translator typed instead of
+ * the raw markers.
+ */
+function entriesFor(cell: HtmlExportCell): Entry[] {
+  const lead = splitUsfmLead(cell.translated.trim())
+  const headings: Entry[] = []
+  for (const block of lead.blocks) {
+    if (block.text === "" || !USFM_LEAD_HEADING_MARKERS.has(block.marker)) continue
+    headings.push({
+      kind: "heading",
+      verse: null,
+      ref: null,
+      headingMarker: block.marker,
+      lines: cellLines(block.text).lines,
+      trailingBlank: false,
+      untranslated: false,
+      paragraphStart: true,
+      paragraphMarker: undefined,
+    })
+  }
+  const entry = entryFor(cell, lead)
+  return entry ? [...headings, entry] : headings
+}
+
+/** The paragraph marker a lead names (its last bare marker); null when none. */
+function leadParagraphMarker(blocks: readonly UsfmLeadBlock[]): string | null {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const { marker, text } = blocks[i]
+    if (text === "" && marker !== "nb" && marker !== "b") return marker
+  }
+  return null
+}
+
+function entryFor(cell: HtmlExportCell, lead: UsfmLead = splitUsfmLead(cell.translated.trim())): Entry | null {
+  // A value that is only a lead keeps the source's words, as the USFM export
+  // does (decision 0010) — the break or heading still applies.
+  const translated = lead.body.trim()
   const untranslated = translated === ""
   const raw = untranslated ? effectiveSourceText(cell).trim() : translated
   if (!raw) return null
@@ -260,17 +304,21 @@ function entryFor(cell: HtmlExportCell): Entry | null {
     : cell.type === "verse" || (ref?.verse && !isStructuralCell(cell.type)) ? "verse"
     : "text"
   const verse = kind === "verse" ? (ref?.verse ?? null) : null
+  // Paragraph structure is the source's, and it rides the SOURCE row, so it
+  // is read the same way whichever side's text is on the page — unless the
+  // translation's lead overrides it: a marker opens a paragraph in that
+  // style, a heading closes the one above, `\nb` joins the paragraph above.
+  const hasLead = lead.blocks.length > 0
   return {
     kind,
     verse,
+    ref: kind === "verse" && cell.group ? cell.group : null,
     headingMarker: headingMarkerFromRef(cell.group),
     lines,
     trailingBlank: text.trailingBlank,
     untranslated,
-    // Paragraph structure is the source's, and it rides the SOURCE row, so it
-    // is read the same way whichever side's text is on the page.
-    paragraphStart: cell.paragraphStart === true,
-    paragraphMarker: cell.paragraphMarker,
+    paragraphStart: hasLead ? !isNoBreakLead(lead.blocks) : cell.paragraphStart === true,
+    paragraphMarker: (hasLead ? leadParagraphMarker(lead.blocks) : null) ?? cell.paragraphMarker,
   }
 }
 
@@ -303,7 +351,7 @@ interface Block {
 }
 
 /** The body of one section — its blocks, then the notes its verses carried. */
-function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean): string {
+function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean, anchors: boolean): string {
   const notes = createNoteCollector(sectionId)
   const out: string[] = []
   let current: Block | null = null
@@ -322,7 +370,7 @@ function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean): 
       pendingBlank = false
       continue
     }
-    const blocks = cellBlocks(entry, notes, flow)
+    const blocks = cellBlocks(entry, notes, flow, anchors)
     if (pendingBlank && blocks.length > 0) {
       blocks[0] = { ...blocks[0], blankBefore: true }
       pendingBlank = false
@@ -362,10 +410,10 @@ function renderBlock(block: Block): string {
 
 /** One cell's blocks: its first line carries the verse number, each poetry
  *  line stands on its own, and consecutive prose lines stay one block. */
-function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean): Block[] {
+function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean, anchors: boolean): Block[] {
   const blocks: Block[] = []
   entry.lines.forEach((line, index) => {
-    const html = (index === 0 ? verseNumberHtml(entry) : "") + lineInlineHtml(line, notes)
+    const html = (index === 0 ? verseNumberHtml(entry, anchors) : "") + lineInlineHtml(line, notes)
     const cls = lineClass(entry, line, flow)
     const last = blocks[blocks.length - 1]
     // Prose lines inside one cell stay one block, broken by <br> — the
@@ -403,8 +451,10 @@ function lineClass(entry: Entry, line: CellLine, flow: boolean): string {
   return "para"
 }
 
-function verseNumberHtml(entry: Entry): string {
-  return entry.verse ? `<sup class="verse-number">${escapeHtml(entry.verse)}</sup> ` : ""
+function verseNumberHtml(entry: Entry, anchors: boolean): string {
+  if (!entry.verse) return ""
+  const ref = anchors && entry.ref ? ` data-ref="${escapeHtml(entry.ref)}"` : ""
+  return `<sup class="verse-number"${ref}>${escapeHtml(entry.verse)}</sup> `
 }
 
 /** Marker → element + class, so section headings, parallel-passage references

@@ -2,12 +2,29 @@ import type { IdmlStyleCatalog, IdmlStyleEmphasis } from "./types.js"
 import { elementDescendants, getAttribute, parseXml } from "./xml.js"
 import type { XmlDocument, XmlElement } from "./xml.js"
 
-function emphasisFromFontStyle(fontStyle: string | undefined): IdmlStyleEmphasis {
-  const normalized = fontStyle?.toLowerCase() ?? ""
+function emphasisFromFontStyle(fontStyle: string): Pick<IdmlStyleEmphasis, "bold" | "italic"> {
+  const normalized = fontStyle.toLowerCase()
   return {
     bold: /(?:^|[^a-z])(?:semi|demi)?-?bold(?:[^a-z]|$)/.test(normalized),
     italic: /(?:^|[^a-z])italic(?:[^a-z]|$)/.test(normalized),
   }
+}
+
+/** InDesign writes these on `Capitalization`. Normal and an absent value do not. */
+function capitalizationIsSmallCaps(value: string): boolean {
+  return /^(?:SmallCaps|AllSmallcaps|CapToSmallCap)$/i.test(value)
+}
+
+function face(
+  bold: boolean,
+  italic: boolean,
+  smallCaps: boolean,
+): IdmlStyleEmphasis {
+  return smallCaps ? { bold, italic, smallCaps: true } : { bold, italic }
+}
+
+function faceMatters(emphasis: IdmlStyleEmphasis): boolean {
+  return emphasis.bold || emphasis.italic || emphasis.smallCaps === true
 }
 
 function elementText(element: XmlElement): string {
@@ -45,7 +62,12 @@ function basedOnOf(element: XmlElement, prefix: StylePrefix): string | undefined
 }
 
 function catalogFromDocument(document: XmlDocument): IdmlStyleCatalog {
-  const styles = new Map<string, { basedOn?: string; fontStyle?: string }>()
+  const styles = new Map<string, {
+    basedOn?: string
+    fontStyle?: string
+    /** Undefined inherits. False is an explicit Normal (or other non-small-caps) value. */
+    smallCaps?: boolean
+  }>()
   for (const element of elementDescendants(
     document.root,
     (candidate) => candidate.localName === "CharacterStyle" || candidate.localName === "ParagraphStyle",
@@ -53,9 +75,11 @@ function catalogFromDocument(document: XmlDocument): IdmlStyleCatalog {
     const self = getAttribute(element, "Self")
     if (!self) continue
     const prefix = stylePrefix(self)
+    const capitalization = getAttribute(element, "Capitalization")
     styles.set(self, {
       basedOn: basedOnOf(element, prefix),
       fontStyle: getAttribute(element, "FontStyle"),
+      smallCaps: capitalization === undefined ? undefined : capitalizationIsSmallCaps(capitalization),
     })
   }
 
@@ -69,11 +93,18 @@ function catalogFromDocument(document: XmlDocument): IdmlStyleCatalog {
     if (!style) return { bold: false, italic: false }
     visiting.add(styleId)
     const inherited = style.basedOn ? resolve(style.basedOn) : { bold: false, italic: false }
-    // An explicit FontStyle replaces the inherited face (Regular on a Bold
+    // An explicit FontStyle replaces the inherited weight (Regular on a Bold
     // parent is roman, not Bold+Regular). Missing FontStyle inherits.
-    const emphasis = style.fontStyle !== undefined
+    // Capitalization is independent: a Regular face can still be small caps,
+    // and an explicit Normal clears small caps inherited from BasedOn.
+    const weight = style.fontStyle !== undefined
       ? emphasisFromFontStyle(style.fontStyle)
       : inherited
+    const emphasis = face(
+      weight.bold,
+      weight.italic,
+      style.smallCaps !== undefined ? style.smallCaps : inherited.smallCaps === true,
+    )
     visiting.delete(styleId)
     resolved.set(styleId, emphasis)
     return emphasis
@@ -82,15 +113,15 @@ function catalogFromDocument(document: XmlDocument): IdmlStyleCatalog {
   const catalog: Record<string, IdmlStyleEmphasis> = {}
   for (const styleId of styles.keys()) {
     const emphasis = resolve(styleId)
-    if (emphasis.bold || emphasis.italic) catalog[styleId] = emphasis
+    if (faceMatters(emphasis)) catalog[styleId] = emphasis
   }
   return catalog
 }
 
 /**
- * Bold/Italic faces from an IDML `Resources/Styles.xml` character- and
- * paragraph-style table. `BasedOn` is resolved; underline, color, and other
- * faces are ignored.
+ * Bold, italic, and small-caps faces from an IDML `Resources/Styles.xml`
+ * character- and paragraph-style table. `BasedOn` is resolved; underline,
+ * color, and other faces are ignored.
  */
 export function extractIdmlStyleCatalog(stylesXml: string): IdmlStyleCatalog {
   return catalogFromDocument(parseXml(stylesXml, "Resources/Styles.xml"))
@@ -109,7 +140,7 @@ export function styleCatalogForSlots(
   const used: Record<string, IdmlStyleEmphasis> = {}
   for (const styleId of characterStyleIds) {
     const emphasis = catalog[styleId]
-    if (emphasis && (emphasis.bold || emphasis.italic)) used[styleId] = emphasis
+    if (emphasis && faceMatters(emphasis)) used[styleId] = emphasis
   }
   return Object.keys(used).length > 0 ? used : undefined
 }

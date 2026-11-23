@@ -73,4 +73,30 @@ describe("IDML style catalog", () => {
       "ParagraphStyle/!meta_hunt_head": { bold: true, italic: false },
     })
   })
+
+  it("inherits small caps from BasedOn the way Biblica nd is based on #base.sc", () => {
+    const catalog = extractIdmlStyleCatalog(`<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Styles xmlns:idPkg="urn:test">
+  <CharacterStyle Self="CharacterStyle/#base.sc" Name="#base.sc" Capitalization="SmallCaps">
+    <Properties><BasedOn type="string">$ID/[No character style]</BasedOn></Properties>
+  </CharacterStyle>
+  <CharacterStyle Self="CharacterStyle/nd" Name="nd">
+    <Properties><BasedOn type="object">CharacterStyle/#base.sc</BasedOn></Properties>
+  </CharacterStyle>
+  <CharacterStyle Self="CharacterStyle/add_nd" Name="add_nd" Capitalization="SmallCaps">
+    <Properties><BasedOn type="object">CharacterStyle/#base.it</BasedOn></Properties>
+  </CharacterStyle>
+  <CharacterStyle Self="CharacterStyle/#base.it" FontStyle="Italic"/>
+  <CharacterStyle Self="CharacterStyle/plain_nd" Name="plain_nd" Capitalization="Normal">
+    <Properties><BasedOn type="object">CharacterStyle/#base.sc</BasedOn></Properties>
+  </CharacterStyle>
+</idPkg:Styles>`)
+    expect(catalog["CharacterStyle/#base.sc"]).toEqual({ bold: false, italic: false, smallCaps: true })
+    expect(catalog["CharacterStyle/nd"]).toEqual({ bold: false, italic: false, smallCaps: true })
+    expect(catalog["CharacterStyle/add_nd"]).toEqual({ bold: false, italic: true, smallCaps: true })
+    expect(catalog["CharacterStyle/plain_nd"]).toBeUndefined()
+    expect(styleCatalogForSlots(catalog, ["CharacterStyle/nd", "CharacterStyle/Body"])).toEqual({
+      "CharacterStyle/nd": { bold: false, italic: false, smallCaps: true },
+    })
+  })
 })

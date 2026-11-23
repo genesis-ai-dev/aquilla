@@ -62,7 +62,7 @@ export function alignStylesWordingTooLong(text: string): boolean {
 export const IDML_ALIGN_STYLES_INSTRUCTION = [
   "You place an existing translation into the source document's style runs.",
   "Do not translate, paraphrase, add, delete, or reorder words.",
-  "Each run is one character style. Put the target words that translate a bold source phrase into the bold run, and do the same for italic and plain.",
+  "Each run is one character style. Put the target words that translate a bold source phrase into the bold run, and do the same for italic, small caps, and plain.",
   "Read the editable runs in index order as one sentence. Joining them and collapsing whitespace must reproduce the current translation exactly.",
   "You may move a space from the end of one run to the start of the next so the sentence still reads correctly.",
   "Locked runs are fixed. Do not return text for them.",
@@ -252,7 +252,15 @@ interface StyleRunDescription {
   readonly index: number
   readonly editable: boolean
   readonly styleId: string
-  readonly emphasis: "plain" | "bold" | "italic" | "bold italic"
+  readonly emphasis:
+    | "plain"
+    | "bold"
+    | "italic"
+    | "bold italic"
+    | "small caps"
+    | "bold small caps"
+    | "italic small caps"
+    | "bold italic small caps"
   readonly text: string
 }
 
@@ -462,13 +470,18 @@ function emphasisLabel(
   paragraphStyleId: string | undefined,
 ): StyleRunDescription["emphasis"] {
   const inheritParagraph = Boolean(paragraphStyleId) && isDefaultCharacterStyle(styleId)
-  const { bold, italic } = idmlCharacterStyleEmphasis(
+  const { bold, italic, smallCaps } = idmlCharacterStyleEmphasis(
     inheritParagraph ? paragraphStyleId! : styleId,
     catalog,
   )
+  const caps = smallCaps === true
+  if (bold && italic && caps) return "bold italic small caps"
   if (bold && italic) return "bold italic"
+  if (bold && caps) return "bold small caps"
+  if (italic && caps) return "italic small caps"
   if (bold) return "bold"
   if (italic) return "italic"
+  if (caps) return "small caps"
   return "plain"
 }
 

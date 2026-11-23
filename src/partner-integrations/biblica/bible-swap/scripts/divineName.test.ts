@@ -8,6 +8,7 @@ import {
     buildBibleVerseIndex,
     isDivineNameCharacterStyle,
     mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml,
+    rewriteAllCapsSenhor,
     verseKey,
 } from "../index";
 
@@ -85,6 +86,19 @@ describe("isDivineNameCharacterStyle", () => {
         ]) {
             expect(isDivineNameCharacterStyle(style)).toBe(false);
         }
+    });
+});
+
+describe("small-caps SENHOR", () => {
+    it.each([
+        ["CharacterStyle/nd", "Senhor"],
+        ["CharacterStyle/k_xt_nd", "Senhor"],
+        ["CharacterStyle/k_nd", "Senhor"],
+        ["CharacterStyle/cv%3and", "SENHOR"],
+    ])("rewrites an all-caps run in %s to %s", (style, expected) => {
+        const xml =
+            `<CharacterStyleRange AppliedCharacterStyle="${style}"><Content>SENHOR </Content></CharacterStyleRange>`;
+        expect(rewriteAllCapsSenhor(xml)).toContain(`<Content>${expected} </Content>`);
     });
 });
 

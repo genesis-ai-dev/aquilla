@@ -510,8 +510,10 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // 11-16: OPS-56 promotes member-scopes.ts — the lane grant rows the read
     // wall enforces are written here, and the PUT's two downstream level
     // guards now read the de-escalated role; 20 of 52.
+    // 11-23: AQU-2322 adds org-access-lanes.ts, deciding on arrival
+    // (projectElevationDenial after the visibility gate); 21 of 53.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 17, delegates: 3, undecided: 32 })
+      .toEqual({ decides: 18, delegates: 3, undecided: 32 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

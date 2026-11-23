@@ -226,7 +226,10 @@ The Dev access list is the exception: it is KV, outside the restore.
 - `qa-bot-2` — the same moves as any walker account. Register it on
   production, add its email to the Dev access list, and add it to `qa-bot`'s
   org as a plain member in production, so the membership comes back with
-  each restore. Its password goes to the walk runner with the others.
+  each restore. Its password goes to the walk runner as
+  `AQUILLA_QA_BOT_2_PASSWORD`. No replay reads it: the two-user replays sign
+  in as the local stack's `alice` and `bob`, so on a preview it is for the
+  claims a walker drives by hand.
 - `QA Smoke Project`, `QA Org Search B`, and
   `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
   — create empty. No import. Spell the long one exactly: a shorter name

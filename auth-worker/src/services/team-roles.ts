@@ -6,10 +6,11 @@
  * attached project (db/shared/access-grants.ts) and, at >= Project Lead,
  * lets the member create projects into the team.
  */
+import { SCOPE_ROLES } from "../../../src/lib/access/grant-rules"
 import { ROLE, type Env } from "../types"
 
-/** Spec §3.4: the only roles a team scope carries. */
-export const TEAM_SCOPE_ROLES: readonly number[] = [ROLE.MAINTAINER, ROLE.PROJECT_LEAD, ROLE.VIEWER]
+/** Spec §3.4: the only roles a team scope carries. One list with the Give access picker (AQU-2320). */
+export const TEAM_SCOPE_ROLES: readonly number[] = SCOPE_ROLES.team
 
 /** Team role that may create projects into the team (spec D4). */
 export const TEAM_CREATE_MIN_ROLE = ROLE.PROJECT_LEAD

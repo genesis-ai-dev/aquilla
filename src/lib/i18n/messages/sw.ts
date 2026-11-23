@@ -30,6 +30,7 @@ export const sw: Catalog = {
   "common.name": "Jina",
   "common.email": "Barua pepe",
   "common.selectDate": "Chagua tarehe",
+  "common.breadcrumbNav": "Njia ya urambazaji",
   "common.moreBreadcrumbs": "Zaidi",
   "common.loadingSpinner": "Inapakia",
   "common.showMore": "Onyesha zaidi",

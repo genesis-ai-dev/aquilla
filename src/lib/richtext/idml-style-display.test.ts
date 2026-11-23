@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   IDML_STYLE_BOLD_CLASS,
   IDML_STYLE_ITALIC_CLASS,
+  IDML_STYLE_SMALL_CAPS_CLASS,
   IDML_PLAIN_GROUP_ATTR,
   IDML_STYLE_SEGMENT_EMPTY_ATTR,
   decorateIdmlStyleElement,
@@ -42,6 +43,25 @@ describe("idmlCharacterStyleEmphasis", () => {
       bold: false,
       italic: false,
     })
+  })
+
+  it("treats the divine-name style as small caps, from the name or the catalog", () => {
+    expect(idmlCharacterStyleEmphasis("CharacterStyle/nd")).toEqual({
+      bold: false,
+      italic: false,
+      smallCaps: true,
+    })
+    expect(idmlCharacterStyleEmphasis("CharacterStyle/cv%3and")).toEqual({
+      bold: false,
+      italic: false,
+      smallCaps: true,
+    })
+    expect(idmlCharacterStyleEmphasis("CharacterStyle/Divine", {
+      "CharacterStyle/Divine": { bold: false, italic: false, smallCaps: true },
+    })).toEqual({ bold: false, italic: false, smallCaps: true })
+    expect(idmlCharacterStyleEmphasis("CharacterStyle/add_nd", {
+      "CharacterStyle/add_nd": { bold: false, italic: true },
+    })).toEqual({ bold: false, italic: true, smallCaps: true })
   })
 
   it("does not treat weight aliases or underline as emphasis", () => {
@@ -167,5 +187,29 @@ describe("prepareIdmlDisplayHtml", () => {
     expect(group(4)).toBe("join")
     expect(group(5)).toBeNull()
     expect(group(6)).toBe("label")
+  })
+
+  it("draws a small-caps divine-name run as its own segment, including an all-caps SENHOR", () => {
+    const decorated = prepareIdmlDisplayHtml(
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/$ID/[No character style]" data-idml-protected="slot">Quando o </span>`
+      + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/nd" data-idml-protected="slot">SENHOR</span>`
+      + `<span data-idml-slot="2" data-idml-character-style="CharacterStyle/$ID/[No character style]" data-idml-protected="slot"> Deus</span>`
+      + `<span data-idml-slot="3" data-idml-character-style="CharacterStyle/nd" data-idml-protected="slot"></span>`
+      + `</p>`,
+    )
+    const root = document.createElement("div")
+    root.innerHTML = decorated
+    const senhor = root.querySelector<HTMLElement>('[data-idml-slot="1"]')
+    const plain = root.querySelector<HTMLElement>('[data-idml-slot="0"]')
+    const empty = root.querySelector<HTMLElement>('[data-idml-slot="3"]')
+    expect(senhor?.classList.contains(IDML_STYLE_SMALL_CAPS_CLASS)).toBe(true)
+    expect(senhor?.style.fontVariantCaps).toBe("all-small-caps")
+    expect(senhor?.textContent).toBe("SENHOR")
+    expect(senhor?.getAttribute("data-idml-character-style")).toBe("CharacterStyle/nd")
+    expect(plain?.classList.contains(IDML_STYLE_SMALL_CAPS_CLASS)).toBe(false)
+    expect(plain?.getAttribute(IDML_PLAIN_GROUP_ATTR)).toBeNull()
+    expect(empty?.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR)).toBe(true)
+    expect(empty?.getAttribute(IDML_PLAIN_GROUP_ATTR)).toBeNull()
   })
 })

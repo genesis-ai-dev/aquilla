@@ -374,6 +374,8 @@ export const fr: Catalog = {
   "error.monday.removeLink": "Impossible de supprimer le lien vers le tableau Monday.",
   "error.monday.analyze": "Impossible de générer une suggestion de correspondance de tableau.",
   "error.monday.sync": "Impossible de pousser ce projet vers Monday.",
+  "error.airtable.connect": "Impossible de connecter Airtable. Réessayez.",
+  "error.airtable.disconnect": "Impossible de déconnecter Airtable.",
   "error.termbase.publish": "Impossible de partager cette base terminologique avec l'organisation.",
   "error.termbase.unpublish": "Impossible d'arrêter le partage de cette base terminologique.",
   "error.termbase.listPublished": "Impossible de charger les bases terminologiques partagées dans cette organisation.",

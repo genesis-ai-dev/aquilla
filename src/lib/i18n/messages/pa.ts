@@ -30,6 +30,7 @@ export const pa: Catalog = {
   "common.name": "ਨਾਮ",
   "common.email": "ਈਮੇਲ",
   "common.selectDate": "ਤਾਰੀਖ ਚੁਣੋ",
+  "common.breadcrumbNav": "ਨੈਵੀਗੇਸ਼ਨ ਮਾਰਗ",
   "common.moreBreadcrumbs": "ਹੋਰ",
   "common.loadingSpinner": "ਲੋਡ ਹੋ ਰਿਹਾ ਹੈ",
   "common.showMore": "ਹੋਰ ਵਿਖਾਓ",

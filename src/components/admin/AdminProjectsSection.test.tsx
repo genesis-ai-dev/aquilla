@@ -230,9 +230,42 @@ describe("AdminProjectsSection", () => {
     expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
     expect(screen.queryByText("In Org")).not.toBeInTheDocument()
   })
-  // AQU-2708: the admin project list has no page cap, so its body is windowed
-  // with TanStack Virtual. Everything an operator does with the table reads
-  // the whole list, not the mounted window.
+
+  it("reports search and lens changes without hiding rows the server returned", async () => {
+    const onSearchChange = vi.fn()
+    const onLensChange = vi.fn()
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[proj({ id: "a", name: "Alpha" }), proj({ id: "b", name: "Beta" })]}
+          server={{
+            total: 80,
+            hasMore: true,
+            onLoadMore: vi.fn(),
+            search: "",
+            onSearchChange,
+            lens: "all",
+            onLensChange,
+          }}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toBeInTheDocument()
+    expect(screen.getByText("80")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("admin-projects-load-more")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Search projects…"), { target: { value: "zzz" } })
+    expect(onSearchChange).toHaveBeenCalledWith("zzz")
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toBeInTheDocument()
+    await pickLens(/needs attention/i)
+    expect(onLensChange).toHaveBeenCalledWith("needs-attention")
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+  })
+  // AQU-2708: client mode still windows a long array. Production grows the
+  // list as it scrolls (AQU-2722); this mode keeps search, lens, and row open
+  // working across the whole array the caller passed in.
   describe("a long list in a scrolling pane", () => {
     const SCROLLPORT_PX = 400
     const ROW_PX = 40

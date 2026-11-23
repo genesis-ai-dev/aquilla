@@ -382,6 +382,8 @@ export const ar: Catalog = {
   "error.monday.removeLink": "تعذّر إزالة رابط لوحة Monday.",
   "error.monday.analyze": "تعذّر إنشاء اقتراح لتخطيط اللوحة.",
   "error.monday.sync": "تعذّر رفع هذا المشروع إلى Monday.",
+  "error.airtable.connect": "تعذّر ربط Airtable. حاول مرة أخرى.",
+  "error.airtable.disconnect": "تعذّر إلغاء ربط Airtable.",
   "error.termbase.publish": "تعذّر مشاركة قاعدة المصطلحات هذه مع المؤسسة.",
   "error.termbase.unpublish": "تعذّر إيقاف مشاركة قاعدة المصطلحات هذه.",
   "error.termbase.listPublished": "تعذّر تحميل قواعد المصطلحات المشتركة في هذه المؤسسة.",

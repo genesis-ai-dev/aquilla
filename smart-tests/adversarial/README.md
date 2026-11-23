@@ -1,7 +1,8 @@
 # Adversarial Jev suite
 
-Jev attacks the deployed dev build under hostile conditions, hostile goals,
-and reworded goals. Independent server reads decide every verdict. Each
+Jev attacks the deployed dev build under hostile conditions and reworded
+goals, and scripted red-team probes send hostile requests straight to the
+API. Independent server reads decide every verdict. Each
 verified product failure becomes a Linear Triage ticket under AQU-1330.
 The suite is advisory. It never gates a merge or a release.
 
@@ -123,6 +124,16 @@ validation flags, comments, and per-cell event history.
 | `product_failure` | Something broke **after** the product was exercised: the UI showed the agent's attempt, the driver did enter it, and the condition fired |
 | `inconclusive` | The agent never showed the attempt, the driver never entered it, the condition never fired, or the run did not complete |
 
+The run as a whole reads **HARNESS UNAVAILABLE** when more than half of
+the agent-driven attacks are inconclusive (`harnessHealth` in `health.ts`).
+For ten days in 2026-11 a text model with no provider left 15 of 18 attacks
+inconclusive, and three click-only passes kept every PR check green. The
+scripted probes are not counted: they run no model, so they cannot vouch
+for an agent that could not act.
+
+One malformed reply from the text helper no longer ends a journey: the
+bridge asks once more (`post_valid_text` in `../text_fallback.py`).
+
 Inconclusive is never a pass and never a ticket. Inconclusive fuzz attacks
 are listed as navigability misses in the rollup.
 
@@ -137,6 +148,25 @@ PRs whose diff could not reach the attacked surface (AQU-1513).
 A product failure can still be an agent mistake that left the same state as
 a product fault, for example an edit on the wrong row. Tickets land in
 Triage, and their body says to rule this out before promoting.
+
+## Red-team probes
+
+Red-team is scripted (`probes.ts`), with no browser and no model. Each
+probe sends the hostile request itself: a viewer emptying a file, a user
+writing to a project they have no role on, one reviewer signing off four
+times, an empty project name. The oracle then checks that stored state did
+not move and that no request got a 5xx.
+
+Every probe also sends a **control**: the same request from a user who may
+make it. If the control does not land, the probe is `inconclusive`, because
+an unchanged file then proves nothing about the refusal.
+
+These replaced four Jev red-team attacks whose passes were empty. The agent
+told to wipe a file as a viewer typed the file's name into the sidebar
+filter and stopped, and any click or fill counted as an attempt. A Jev
+red-team attack is only worth adding with an `Observe` that sees the
+hostile act itself, such as input reaching the target cell. The `viewer`
+fixture and `decoy` option in `run.ts` remain for that.
 
 ## Adding an attack
 

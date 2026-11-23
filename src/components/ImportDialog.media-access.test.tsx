@@ -57,4 +57,10 @@ describe("Upload files: audio and video need every language", () => {
     fireEvent.change(input, { target: { files: [new File(["audio"], "sermon.mp3", { type: "audio/mpeg" })] } })
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
   })
+
+  it("imports a video with no reason (a Maintainer once the answer is in)", async () => {
+    const input = open(null)
+    fireEvent.change(input, { target: { files: [new File(["video"], "clip.mp4", { type: "video/mp4" })] } })
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
+  })
 })

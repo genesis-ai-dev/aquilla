@@ -186,6 +186,16 @@ describe('GET /api/v1/projects/:id/source-audio-access', () => {
     const res = await ask(here, { wall: true, query: '?fileId=file-other' })
     expect(((await res.json()) as { coversEveryLanguage: boolean }).coversEveryLanguage).toBe(false)
   })
+
+  it('answers on the project token (no file open): yes when unscoped, no when limited to some files', async () => {
+    const projectToken = (who: Who) => makeTestToken(SECRET, { projectId: P, ...who, fileId: '__project__' } as never)
+    const read = async (who: Who) =>
+      ((await (await ask(who, { wall: true, token: await projectToken(who) })).json()) as { coversEveryLanguage: boolean }).coversEveryLanguage
+    expect(await read(LEAD_ALL)).toBe(true)
+    expect(await read({ username: 'max', userId: 4, role: 600 })).toBe(true)
+    // A new file (what Import makes) is outside a file-limited lead's scopes.
+    expect(await read({ ...LEAD_ALL, scopes: [{ kind: 'file', value: F }] })).toBe(false)
+  })
 })
 
 describe('worker routing', () => {

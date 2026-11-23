@@ -20,7 +20,11 @@
 // The answer is for the open file: the server also applies the token's file
 // limits, so a lead limited to some files hears no on the others. Switching
 // files asks again at once (with that file's token); the previous answer
-// stands until the new one arrives.
+// stands until the new one arrives. With no file open (the Library view, or a
+// project with no files yet) it asks with the project token
+// (PROJECT_TOKEN_FILE_ID): the answer for a NEW file, which is what Import
+// makes. A lead limited to some files hears no there, as the server refuses
+// their import into a new file.
 //
 // Plain `useState` + a race-guarded `useEffect`, per AD-3 — never `useQuery`.
 
@@ -31,6 +35,8 @@ import { fetchSourceAudioAccess } from "@/lib/sync/source-audio-access"
 export const SOURCE_AUDIO_ACCESS_RETRY_MS: readonly number[] = [3_000, 10_000, 30_000, 60_000]
 /** How often the hook looks for a re-minted token (no request when unchanged). */
 export const SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS = 30_000
+/** The token asked for when no file is open (the project-level sentinel). */
+export const PROJECT_TOKEN_FILE_ID = "__project__"
 
 export function useSourceAudioAccess(args: {
   projectId: string | null | undefined
@@ -44,16 +50,16 @@ export function useSourceAudioAccess(args: {
   const [answer, setAnswer] = useState<{ projectId: string; covers: boolean } | null>(null)
   // Switching files does not restart the effect (the answer stands until the
   // new one arrives); it asks again with that file's token.
-  const fileIdRef = useRef(args.fileId)
+  const tokenFileId = args.fileId || PROJECT_TOKEN_FILE_ID
+  const fileIdRef = useRef(tokenFileId)
   const askRef = useRef<(() => void) | null>(null)
   useEffect(() => {
-    fileIdRef.current = args.fileId
+    fileIdRef.current = tokenFileId
     askRef.current?.()
-  }, [args.fileId])
-  const hasFile = Boolean(args.fileId)
+  }, [tokenFileId])
 
   useEffect(() => {
-    if (!enabled || !projectId || !hasFile) return
+    if (!enabled || !projectId) return
     let live = true
     let attempt = 0
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -63,7 +69,7 @@ export function useSourceAudioAccess(args: {
 
     const ask = () => {
       const fileId = fileIdRef.current
-      if (!live || inFlight || !fileId) return
+      if (!live || inFlight) return
       if (timer) { clearTimeout(timer); timer = null }
       inFlight = true
       let usedToken: string | null = null
@@ -84,7 +90,7 @@ export function useSourceAudioAccess(args: {
         .finally(() => {
           inFlight = false
           // The file changed while this read was out: ask for the open one.
-          if (live && fileIdRef.current && fileIdRef.current !== fileId) ask()
+          if (live && fileIdRef.current !== fileId) ask()
         })
     }
 
@@ -92,7 +98,7 @@ export function useSourceAudioAccess(args: {
     // read or a retry is pending (that read uses the newest token anyway).
     const checkToken = () => {
       const fileId = fileIdRef.current
-      if (!live || inFlight || timer || !fileId || answeredToken === null) return
+      if (!live || inFlight || timer || answeredToken === null) return
       getToken(fileId)
         .then((token) => { if (live && token && token !== answeredToken) ask() })
         .catch(() => {})
@@ -109,7 +115,7 @@ export function useSourceAudioAccess(args: {
       clearInterval(tokenCheck)
       window.removeEventListener("online", ask)
     }
-  }, [enabled, projectId, hasFile, getToken])
+  }, [enabled, projectId, getToken])
 
   // Another project's answer, or one given while the question did not apply,
   // is never this project's.

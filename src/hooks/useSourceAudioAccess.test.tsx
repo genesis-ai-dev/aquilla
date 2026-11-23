@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { SOURCE_AUDIO_ACCESS_RETRY_MS, SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS, useSourceAudioAccess } from "./useSourceAudioAccess"
+import { PROJECT_TOKEN_FILE_ID, SOURCE_AUDIO_ACCESS_RETRY_MS, SOURCE_AUDIO_ACCESS_TOKEN_CHECK_MS, useSourceAudioAccess } from "./useSourceAudioAccess"
+import { mediaEmptyGates } from "@/lib/editor/linked-video-empty-state"
 
 // AQU-2682: the app offers "Upload a recording to make lines" and attaching
 // media only once the server has said this person's access covers every
@@ -163,5 +164,27 @@ describe("useSourceAudioAccess", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(result.current).toBe(false))
     expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-f2" })
+  })
+
+  // Review (Nov 21): with no file open the read was never sent, the answer
+  // stayed null, and the Upload panel said "checking" for every media file.
+  it("answers with no file open, using the project token, so a Maintainer can import media", async () => {
+    getToken.mockImplementation(async (fileId: string) => `tok-${fileId}`)
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: true }))
+    const { result, rerender } = renderHook((props: { fileId: string | null }) =>
+      useSourceAudioAccess({ projectId: "p1", fileId: props.fileId, getToken, enabled: true }),
+    { initialProps: { fileId: null as string | null } })
+    await waitFor(() => expect(result.current).toBe(true))
+    expect(getToken).toHaveBeenCalledWith(PROJECT_TOKEN_FILE_ID)
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: `Bearer tok-${PROJECT_TOKEN_FILE_ID}` })
+    // What the workspace derives the Upload panel's media gate from.
+    const gates = mediaEmptyGates({ roleLevel: 600, captionRowsMode: false, canEditTracks: true, coversEveryLanguage: result.current })
+    expect(gates.sourceMediaNote).toBeNull()
+    expect(gates.canUploadSourceMedia).toBe(true)
+    // Opening a file then asks with that file's token.
+    fetchMock.mockReturnValueOnce(reply({ coversEveryLanguage: true }))
+    rerender({ fileId: "f1" })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-f1" })
   })
 })

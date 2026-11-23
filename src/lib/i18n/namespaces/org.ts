@@ -2097,6 +2097,97 @@ export const org = defineNamespace({
           from: "Already-translated phrase naming the organization or the word above.",
         },
       },
+      "org.access.give.inviteEmail": {
+        description: "AQU-2320: Give access person list item that turns a typed email address into an invitation.",
+        placeholders: { email: "The typed email address; never translated." },
+      },
+      "org.access.give.theirPlaces": {
+        description: "AQU-2320: heading of the place list group showing places the chosen person already has access to.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.give.reset.not_offered": {
+        description: "AQU-2320: notice when choosing a place clears a role that kind of place does not have.",
+        placeholders: {
+          role: "Localized role label that was cleared, e.g. \"Project Lead\".",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.give.reset.above_cap": {
+        description: "AQU-2320: notice when choosing a place clears a role above the granter's own role there.",
+        placeholders: {
+          role: "Localized role label that was cleared.",
+          cap: "Localized label of the granter's own role at that place.",
+        },
+      },
+      "org.access.give.reset.above_invite_cap": {
+        description: "AQU-2320: notice when an invitation clears a role above what an invitation may carry.",
+        placeholders: { cap: "Localized label of the highest role an invitation carries there." },
+      },
+      "org.access.give.redundant": {
+        description: "AQU-2320: What changes line when the person already holds this role or more at the place.",
+        placeholders: {
+          role: "Localized role label they already hold.",
+          via: "Name of the place that already gives it (organization, team or project); never translated.",
+        },
+      },
+      "org.access.give.gainsHere": {
+        description: "AQU-2320: What changes line naming the role the person gets at the chosen place.",
+        placeholders: {
+          role: "Localized role label being given.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani › Spanish\"; never translated.",
+        },
+      },
+      "org.access.give.replaces": {
+        description: "AQU-2320: What changes line when the grant overwrites a row the person already holds at this place.",
+        placeholders: { role: "Localized role label of the row being replaced." },
+      },
+      "org.access.give.raises": {
+        description: "AQU-2320: What changes line grouping projects whose role goes up from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.lowers": {
+        description: "AQU-2320: What changes line grouping projects whose role goes down from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.opens": {
+        description: "AQU-2320: What changes line grouping projects the person could not open before and now opens.",
+        placeholders: {
+          count: "How many projects; also selects the plural form.",
+          role: "Localized role label they open them with.",
+        },
+      },
+      "org.access.give.futureProjects": {
+        description: "AQU-2320: What changes line for a team grant: projects attached to the team later are opened too.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.give.inviteNote": {
+        description: "AQU-2320: What changes line for an invitation to an email address.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.give.done": {
+        description: "AQU-2320: toast after access is given to an existing account.",
+        placeholders: {
+          name: "The person's name or username.",
+          role: "Localized role label given.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.give.invited": {
+        description: "AQU-2320: toast after an invitation is sent from Give access.",
+        placeholders: {
+          email: "The invited email address; never translated.",
+          role: "Localized role label the invitation carries.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
       "org.access.edit.changeRole": {
         description: "AQU-2321: accessible name of the role pill on a direct grant, which opens the role dropdown.",
         placeholders: { name: "The person's name or username." },

@@ -17,7 +17,7 @@ import { VoiceLibraryPanel } from "../VoiceLibraryPanel"
 import { Button } from "@/components/ui/button"
 import { AddVoicePanel, type MakeVoiceMode } from "./inspector/AddVoicePanel"
 import { ClipInspector } from "./inspector/ClipInspector"
-import { MakeSpeechPanel, type MakeSpeechLine } from "./inspector/MakeSpeechPanel"
+import { MakeSpeechPanel, type MakeSpeechLine, type MakeSpeechTextActions } from "./inspector/MakeSpeechPanel"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { upsertVoice } from "@/lib/audio/voices"
@@ -63,8 +63,9 @@ interface VoiceSidebarProps {
   /** AQU-2577: what Make speech runs on and with. Absent: the button is not offered. */
   makeSpeech?: {
     lines: MakeSpeechLine[]
-    selectedCellId: string | null
-    actions: MakeSpeechActions
+    /** The lines selected on the timeline, in file order. */
+    selectedCellIds: readonly string[]
+    actions: MakeSpeechActions & Partial<MakeSpeechTextActions>
     /** The lines picked on the timeline (their sparkles). */
     picked: readonly string[]
     onClearPicked: () => void
@@ -155,9 +156,8 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellId={makeSpeech.selectedCellId}
+        selectedCellIds={makeSpeech.selectedCellIds}
         picked={pickedLines}
-        targetLanguage={languageLabel}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
@@ -196,8 +196,8 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellId={makeSpeech.selectedCellId}
-        targetLanguage={languageLabel}
+        selectedCellIds={makeSpeech.selectedCellIds}
+        picked={pickedLines}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}

@@ -634,6 +634,9 @@ export interface TimelineEditorProps {
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
+  /** Every selected line, in file order (the highlighted one plus any added
+   *  with Shift/⌘-click). Make speech runs on exactly these. */
+  onSelectionChange?(cellIds: readonly string[]): void
   /** AQU-928: run transcription over exactly these sections. Present = the
    *  media view shows its section-scoped transcribe row; absent (read-only
    *  users, focused unit tests) = no row at all, since the run would emit
@@ -1390,6 +1393,7 @@ export function TimelineEditor({
   layoutControls,
   project,
   onSelectCell,
+  onSelectionChange,
   onTranscribeSections,
   session,
   audioByCellId,
@@ -4312,6 +4316,9 @@ export function TimelineEditor({
     () => selectedIdsInOrder({ primaryId: selectedId, extraIds }, orderedIds),
     [selectedId, extraIds, orderedIds],
   )
+  useEffect(() => {
+    onSelectionChange?.(selectedIds)
+  }, [selectedIds, onSelectionChange])
   const multiSelectedIds = useMemo(
     () => new Set(selectedIds.filter((id) => id !== selectedId)),
     [selectedIds, selectedId],

@@ -285,7 +285,8 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLinesOf, recordingSharedBy } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { plainTextHtml, runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import type { MakeSpeechTextActions } from "@/components/voice/inspector/MakeSpeechPanel"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
@@ -1862,6 +1863,8 @@ export function ProjectWorkspace() {
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
+  /** Every line selected on the timeline (Shift/⌘-click adds more): what Make speech runs on. */
+  const [timelineSelectedCellIds, setTimelineSelectedCellIds] = useState<readonly string[]>([])
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
@@ -14384,8 +14387,20 @@ export function ProjectWorkspace() {
    * change the take into another voice. Run quietly — the panel shows each
    * line's progress itself.
    */
-  const makeSpeechActions = useMemo<MakeSpeechActions>(() => ({
+  // Read after an await, so through refs: the closure's copies are a render old.
+  const completionErrorsRef = useRef(errors)
+  completionErrorsRef.current = errors
+  const translateReadyRef = useRef(false)
+  translateReadyRef.current = isConfigured && isCompletionAvailable
+  /** Save a line's text as the person typed it (the Make speech review). Set below, once the commit path exists. */
+  const saveLineTextRef = useRef<((cellId: string, text: string) => Promise<void>) | null>(null)
+  const makeSpeechActions = useMemo<MakeSpeechActions & MakeSpeechTextActions>(() => ({
     hasText: (cellId) => Boolean(resolveTakeCellRef.current(cellId)?.cell.translated?.trim()),
+    textOf: (cellId) => resolveTakeCellRef.current(cellId)?.cell.translated?.trim() ?? "",
+    saveText: async (cellId, text) => {
+      if (!saveLineTextRef.current) throw new Error(t("audio.makeSpeech.saveUnavailable"))
+      await saveLineTextRef.current(cellId, text)
+    },
     translate: async (cellId) => {
       const owner = resolveTakeCellRef.current(cellId)
       return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
@@ -14398,9 +14413,33 @@ export function ProjectWorkspace() {
       }),
     revoice: async (cellId, characterVoiceId) => {
       const voice = findVoice(tts.laneSettings, characterVoiceId)
-      return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
+      if (!voice) throw new Error(t("audio.makeSpeech.cloneVoiceGone"))
+      // The take just spoken reaches the line on the next read of its takes,
+      // not at once: wait for it, or the clone finds no take (or the old one).
+      const deadline = Date.now() + 15_000
+      for (;;) {
+        const cell = resolveTakeCellRef.current(cellId)?.cell
+        const take = cell ? changeVoiceSourceTake(cell) : null
+        if (take && take.attachment.voiceId !== characterVoiceId) break
+        if (Date.now() > deadline) throw new Error(t("audio.makeSpeech.cloneNoTake"))
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      const blocker = cell ? changeVoiceBlocker(cell, voice) : "no-take"
+      if (blocker === "not-trained") throw new Error(t("audio.makeSpeech.cloneNotCloneable", { name: voice.name }))
+      if (blocker === "no-take") throw new Error(t("audio.makeSpeech.cloneNoTake"))
+      return handleChangeTimelineVoice(cellId, { voice, quiet: true })
     },
-  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings])
+    failureReason: (cellId, step) => {
+      if (step === "translate") {
+        return completionErrorsRef.current.get(cellId)
+          ?? (translateReadyRef.current ? undefined : t("audio.makeSpeech.translateUnavailable"))
+      }
+      // Speaking and cloning both write their failure to the line's voice status.
+      const status = getTtsStatus(ttsStatusKey(cellId))
+      return status.kind === "error" && status.message ? status.message : undefined
+    },
+  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings, t])
   const loadInspectedTake = useCallback(async (att: CodexCellAttachment): Promise<Blob> => {
     const ref = parseFrontierAudioUrl(att.url)
     if (!project || !inspectedTake || !ref || !frontierSession) throw new Error("audio fetch: this clip has no stored audio")
@@ -14419,7 +14458,7 @@ export function ProjectWorkspace() {
     toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
     void runMakeSpeech(
       [inspectedTake.cellId],
-      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+      { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
       makeSpeechActions,
       () => {},
     ).then((result) => {
@@ -14490,6 +14529,7 @@ export function ProjectWorkspace() {
       .map((c) => ({
         cellId: c.id,
         label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        source: effectiveSourceText(c).trim(),
         hasText: Boolean(c.translated?.trim()),
         hasSpeech: lineTake(c).audioId != null,
         voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
@@ -14500,14 +14540,16 @@ export function ProjectWorkspace() {
     () => (lens === "audio" && activeLaneDelivers !== "audio"
       ? {
           lines: makeSpeechLines,
-          selectedCellId: timelineSelectedCellId,
+          selectedCellIds: timelineSelectedCellIds.length > 0
+            ? timelineSelectedCellIds
+            : timelineSelectedCellId ? [timelineSelectedCellId] : [],
           actions: makeSpeechActions,
           picked: pickedGhostIds,
           onClearPicked: clearPickedGhosts,
           onLineState: handleMakeSpeechLineState,
         }
       : undefined),
-    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
+    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, timelineSelectedCellIds, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
   )
 
   const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
@@ -17851,6 +17893,9 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit,
     resolveTargetCommitParentId,
   ])
+  saveLineTextRef.current = async (cellId, text) => {
+    await handleAgentTargetCommit(cellId, { value: text, valueHtml: plainTextHtml(text) })
+  }
 
   const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean, toolOrigin?: ToolOrigin) => {
     const action = validated ? "cell.validate" : "cell.unvalidate"
@@ -19979,6 +20024,7 @@ export function ProjectWorkspace() {
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
+                    onSelectionChange={setTimelineSelectedCellIds}
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.

@@ -133,79 +133,122 @@ describe("AddVoicePanel", () => {
 
 describe("MakeSpeechPanel", () => {
   const lines = [
-    { cellId: "a", label: "First line", hasText: true, hasSpeech: false },
-    { cellId: "b", label: "Second line", hasText: false, hasSpeech: false },
-    { cellId: "done", label: "Already spoken", hasText: true, hasSpeech: true },
+    { cellId: "a", label: "First line", source: "First source", hasText: true, hasSpeech: false },
+    { cellId: "b", label: "Second line", source: "Second source", hasText: false, hasSpeech: false },
+    { cellId: "done", label: "Already spoken", source: "Third source", hasText: true, hasSpeech: true },
   ]
   function harness() {
     const calls: string[] = []
-    const text = new Set(["a"])
+    const text = new Map([["a", "First line"]])
     const actions = {
       hasText: (id: string) => text.has(id),
-      translate: vi.fn(async (id: string) => { calls.push(`translate ${id}`); text.add(id); return true }),
+      textOf: (id: string) => text.get(id) ?? "",
+      saveText: vi.fn(async (id: string, value: string) => { calls.push(`save ${id} ${value}`); text.set(id, value) }),
+      translate: vi.fn(async (id: string) => { calls.push(`translate ${id}`); text.set(id, "Drafted"); return true }),
       speak: vi.fn(async (id: string, voice: string | null, _delivery?: unknown) => { calls.push(`speak ${id} ${voice}`); return id !== "b" }),
       revoice: vi.fn(async (id: string, voice: string) => { calls.push(`revoice ${id} ${voice}`); return true }),
+      failureReason: () => "Inworld returned 400: unknown voice",
     }
     return { calls, actions }
   }
   beforeEach(() => localStorage.clear())
 
-  it("opened from the roster, runs on the lines with no speech and says what happened to each", async () => {
-    const { calls, actions } = harness()
+  it("with nothing selected, says so and offers no run", () => {
+    const { actions } = harness()
     render(
-      <MakeSpeechPanel
-        projectId="p1" voices={[elevenVoice("layla", "Layla")]} targetLanguage="Arabic" selectedCellId={null} onBack={vi.fn()}
-        actions={actions} lines={lines}
-      />,
+      <MakeSpeechPanel projectId="p1" voices={[elevenVoice("layla", "Layla")]} selectedCellIds={[]} onBack={vi.fn()} actions={actions} lines={lines} />,
     )
-    // Nothing is selected or picked, so the run starts on the lines that have no speech.
-    fireEvent.click(screen.getByRole("button", { name: "Make speech for 2 lines" }))
-    const progress = within(await screen.findByTestId("make-speech-progress"))
-    await waitFor(() => expect(progress.getByText("2 of 2 done")).toBeInTheDocument())
-    expect(calls).toEqual(["speak a null", "translate b", "speak b null"])
-    expect(progress.getByText("First line").parentElement).toHaveTextContent("Done")
-    expect(progress.getByText("Second line").parentElement).toHaveTextContent("Did not finish")
-    expect(progress.queryByText("Already spoken")).toBeNull()
+    expect(screen.getByTestId("make-speech-none")).toBeInTheDocument()
+    expect(screen.getByTestId("make-speech-run")).toBeDisabled()
   })
 
-  // Lines picked on the timeline: the panel is about exactly those, shows what
-  // each step will do to them, and generates nothing until the button is pressed.
-  it("for picked lines, shows the pipeline and runs it on those lines with the voices clicked", async () => {
+  // Every selected line, in one voice. A line with no text is translated and
+  // shown for checking before any speech is made; a failure says why.
+  it("translates, waits for the check, then speaks every selected line and says why one failed", async () => {
     const { calls, actions } = harness()
     const onLineState = vi.fn()
     render(
       <MakeSpeechPanel
-        projectId="p1" voices={[elevenVoice("layla", "Layla"), elevenVoice("chip", "Chip")]} targetLanguage="Arabic"
-        selectedCellId="a" picked={["b"]} onBack={vi.fn()} actions={actions} lines={lines} onLineState={onLineState}
+        projectId="p1" voices={[elevenVoice("layla", "Layla"), elevenVoice("chip", "Chip")]}
+        selectedCellIds={["a", "b"]} onBack={vi.fn()} actions={actions} lines={lines} onLineState={onLineState}
       />,
     )
-    expect(within(screen.getByTestId("make-speech-picked")).getByText("Second line")).toBeInTheDocument()
-    expect(screen.getByTestId("make-speech-translate-note")).toHaveTextContent("1 line has no text yet and will be translated first.")
-    // The picked line is the target, not the line selected in the editor.
-    expect(screen.queryByRole("button", { name: "The selected line" })).toBeNull()
-    expect(calls).toEqual([])
+    const picked = within(screen.getByTestId("make-speech-picked"))
+    expect(picked.getByText("First line")).toBeInTheDocument()
+    expect(picked.getByText("Second line")).toBeInTheDocument()
+    expect(screen.getByTestId("make-speech-translate-note")).toHaveTextContent("1 line isn't translated yet.")
+    // No "each line's own voice": one voice reads them all.
+    fireEvent.click(within(screen.getByRole("group", { name: "The voice that reads the selected lines" })).getByRole("button", { name: "Chip" }))
+    fireEvent.click(screen.getByRole("button", { name: "Make speech for 2 lines" }))
 
-    fireEvent.click(within(screen.getByRole("group", { name: "The voice that reads the text" })).getByRole("button", { name: "Layla" }))
-    fireEvent.click(within(screen.getByRole("group", { name: "The voice it is changed into" })).getByRole("button", { name: "Chip" }))
+    // The draft is shown, and nothing is spoken until it is confirmed.
+    const review = within(await screen.findByTestId("make-speech-review"))
+    expect(calls).toEqual(["translate b"])
+    fireEvent.change(review.getByRole("textbox", { name: "Second source" }), { target: { value: "Fixed draft" } })
+    fireEvent.click(review.getByTestId("make-speech-review-confirm"))
+
+    const progress = within(await screen.findByTestId("make-speech-progress"))
+    await waitFor(() => expect(progress.getByText("2 of 2 done")).toBeInTheDocument())
+    expect(calls).toEqual(["translate b", "save b Fixed draft", "speak a chip", "speak b chip"])
+    expect(onLineState).toHaveBeenCalledWith("b", { kind: "failed", step: "speak", reason: "Inworld returned 400: unknown voice" })
+    expect(progress.getByTestId("make-speech-failure")).toHaveTextContent("Inworld returned 400: unknown voice")
+  })
+
+  it("stops after translating when the check is dismissed", async () => {
+    const { calls, actions } = harness()
+    render(
+      <MakeSpeechPanel projectId="p1" voices={[elevenVoice("layla", "Layla")]} selectedCellIds={["b"]} onBack={vi.fn()} actions={actions} lines={lines} />,
+    )
     fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
-    await waitFor(() => expect(onLineState).toHaveBeenCalledWith("b", { kind: "failed", step: "speak" }))
-    expect(calls).toEqual(["translate b", "speak b layla"])
+    fireEvent.click(within(await screen.findByTestId("make-speech-review")).getByRole("button", { name: "Stop here" }))
+    await waitFor(() => expect(screen.getByTestId("make-speech-run")).toBeEnabled())
+    expect(calls).toEqual(["translate b"])
+  })
+
+  // Clone is one toggle, and offers only the voices a take can be cloned into.
+  it("clones into the voice picked once the toggle is on, and never offers a voice that can't be cloned into", async () => {
+    const { calls, actions } = harness()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[elevenVoice("layla", "Layla"), elevenVoice("chip", "Chip"), { id: "plain", name: "Plain", provider: "inworld" }]}
+        selectedCellIds={["a"]} onBack={vi.fn()} actions={actions} lines={lines.map((l) => ({ ...l, voiceId: "layla" }))}
+      />,
+    )
+    expect(screen.queryByRole("group", { name: "The voice to clone into" })).toBeNull()
+    fireEvent.click(screen.getByTestId("make-speech-clone-toggle"))
+    const targets = within(screen.getByRole("group", { name: "The voice to clone into" }))
+    expect(targets.queryByRole("button", { name: "Plain" })).toBeNull()
+    expect(targets.queryByRole("button", { name: "Layla" })).toBeNull() // the reader itself
+    fireEvent.click(targets.getByRole("button", { name: "Chip" }))
+    fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
+    await waitFor(() => expect(calls).toEqual(["speak a layla", "revoice a chip"]))
+  })
+
+  it("can't switch cloning on when no voice can be cloned into", () => {
+    const { actions } = harness()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[{ id: "plain", name: "Plain", provider: "inworld" }]}
+        selectedCellIds={["a"]} onBack={vi.fn()} actions={actions} lines={lines}
+      />,
+    )
+    expect(screen.getByTestId("make-speech-clone-toggle")).toHaveAttribute("data-disabled")
   })
 
   // Speed and tags are set before a line has any take: they go with the run,
   // and are kept on the lines so the clip inspector shows them afterwards.
-  it("speaks the picked lines with the tags chosen in step 2, and keeps them on those lines", async () => {
+  it("speaks the selected lines with the tags chosen in step 2, and keeps them on those lines", async () => {
     const { actions } = harness()
     const onSaveDelivery = vi.fn()
     render(
       <MakeSpeechPanel
-        projectId="p1" voices={[elevenVoice("layla", "Layla")]} selectedCellId={null} picked={["a"]} onBack={vi.fn()}
+        projectId="p1" voices={[elevenVoice("layla", "Layla")]} selectedCellIds={[]} picked={["a"]} onBack={vi.fn()}
         actions={actions} lines={lines.map((l) => ({ ...l, voiceId: "layla" }))} onSaveDelivery={onSaveDelivery}
       />,
     )
     fireEvent.click(within(screen.getByTestId("make-speech-tags")).getByRole("button", { name: "whispers" }))
     fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
-    await waitFor(() => expect(actions.speak).toHaveBeenCalledWith("a", null, { settings: {}, tags: ["whispers"] }))
+    await waitFor(() => expect(actions.speak).toHaveBeenCalledWith("a", "layla", { settings: {}, tags: ["whispers"] }))
     expect(onSaveDelivery).toHaveBeenCalledWith(["a"], { settings: {}, tags: ["whispers"] })
   })
 
@@ -213,11 +256,10 @@ describe("MakeSpeechPanel", () => {
     const { actions } = harness()
     render(
       <MakeSpeechPanel
-        projectId="p1" voices={[{ id: "plain", name: "Plain", provider: "inworld" }]} selectedCellId={null} picked={["a"]} onBack={vi.fn()}
+        projectId="p1" voices={[{ id: "plain", name: "Plain", provider: "inworld" }]} selectedCellIds={["a"]} onBack={vi.fn()}
         actions={actions} lines={lines.map((l) => ({ ...l, voiceId: "plain" }))} onSaveDelivery={vi.fn()}
       />,
     )
     expect(screen.queryByTestId("make-speech-delivery")).toBeNull()
-    expect(screen.getByText("Speed and tags can be set when an ElevenLabs voice reads the lines.")).toBeInTheDocument()
   })
 })

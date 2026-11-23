@@ -271,7 +271,22 @@ correctness depends on.
    docs are org-wide by design) but it is a floor written as a number that
    can never bite, which is the shape that survives a later refactor by
    accident. Worth an explicit constant. **[JUDGMENT]**
-4. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
+4. **This change IS walkable on a branch preview, and the route to walk it is
+   short.** [FACT] `scripts/cloudflare-stack-preview.mjs` still sets
+   `ADMIN_EMAILS = "qa-admin@local.test"` (AQU-1353) and
+   `ADMIN_REQUIRE_ELEVATION: "true"` on `aquilla-auth-preview`, and
+   `isPlatformAdminEmail` is an OR over the allowlist and the `platform_admins`
+   table, so no table row is needed — the correction 11-16 made to the
+   series' long-stale "not QA-walkable" claim still holds at this commit. As
+   `qa-admin@local.test`, on a project that account holds no grant on:
+   `POST /api/v2/projects/:id/knowledge` should answer **403 "elevation
+   required to upload a knowledge document to a project with platform-admin
+   access"**; redeem the step-up code and the same upload should succeed. The
+   org router is the same walk against `/api/v2/orgs/:id/knowledge` with the
+   org wording. Nothing here crosses the sync->auth seam, so the preview
+   limitation in `docs/DEPLOYMENT-ENVIRONMENTS.md` does not apply to this
+   change.
+5. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
    `integration_connections` / `integration_links` for rows written on platform
    authority; the `desktop-release-signing` Environment's required reviewers
    (OPS-40); and 11-16's adversarial-gate finding — the health gate's `every`
@@ -338,6 +353,14 @@ the fix was applied — the series' standard decisive check.
   the real test of widening `updatedBy`.
 * Root: `npx vitest run --project app src/lib/sync/inherited-settings.test.ts`
   — **5 passing.**
+* `sync-worker`: `external-patch-settings`, `commands-patch-settings-validate`
+  and `external-project-setup` — **111 passing, 0 failures** (243 s). This
+  package is the *other* consumer of the two `db/shared` files OPS-59 touches,
+  and `updateProjectSettingsShared` is on its external-command write path, so
+  widening `updatedBy` had to be shown safe here and not only in `auth-worker`.
+  `npm install` in `sync-worker` succeeds in this container (80 packages); note
+  that it rewrites `package-lock.json`, which is an environment artefact and
+  should not be committed.
 * `npx tsc --noEmit` in `auth-worker`: no error in any changed file (the only
   remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28 through 11-16).

@@ -383,6 +383,8 @@ export const ru: Catalog = {
   "error.monday.removeLink": "Не удалось удалить связь с доской Monday.",
   "error.monday.analyze": "Не удалось построить предложение по сопоставлению доски.",
   "error.monday.sync": "Не удалось отправить этот проект в Monday.",
+  "error.airtable.connect": "Не удалось подключить Airtable. Попробуйте ещё раз.",
+  "error.airtable.disconnect": "Не удалось отключить Airtable.",
   "error.termbase.publish": "Не удалось поделиться этой базой терминов с организацией.",
   "error.termbase.unpublish": "Не удалось прекратить общий доступ к этой базе терминов.",
   "error.termbase.listPublished": "Не удалось загрузить базы терминов, доступные в этой организации.",

@@ -382,6 +382,8 @@ export const zh_Hans: Catalog = {
   "error.monday.removeLink": "无法移除 Monday 看板链接。",
   "error.monday.analyze": "无法创建看板对应建议。",
   "error.monday.sync": "无法将此项目推送至 Monday。",
+  "error.airtable.connect": "无法连接 Airtable。请重试。",
+  "error.airtable.disconnect": "无法断开 Airtable 连接。",
   "error.termbase.publish": "无法将此术语库分享给组织。",
   "error.termbase.unpublish": "无法停止分享此术语库。",
   "error.termbase.listPublished": "无法加载此组织中分享的术语库。",

@@ -3074,7 +3074,9 @@ export const org = defineNamespace({
       "org.memberLaneScopeEditor.mainLanguageFallback": {
         description:
           "Name shown for a project's main target language in that checkbox list " +
-          "when the project has not named its main language.",
+          "when the project has not named its main language. The same wording " +
+          "labels that language in the lane pickers of the add-people and " +
+          "invite-link forms.",
       },
       "org.memberLaneScopeEditor.unknownLane": {
         description:

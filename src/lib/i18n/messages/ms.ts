@@ -380,6 +380,8 @@ export const ms: Catalog = {
   "error.monday.removeLink": "Tidak dapat mengeluarkan pautan papan Monday.",
   "error.monday.analyze": "Tidak dapat membina cadangan pemetaan papan.",
   "error.monday.sync": "Tidak dapat menghantar projek ini ke Monday.",
+  "error.airtable.connect": "Tidak dapat menyambungkan Airtable. Cuba lagi.",
+  "error.airtable.disconnect": "Tidak dapat memutuskan sambungan Airtable.",
   "error.termbase.publish": "Tidak dapat berkongsi pangkalan istilah ini dengan organisasi.",
   "error.termbase.unpublish": "Tidak dapat menghentikan perkongsian pangkalan istilah ini.",
   "error.termbase.listPublished": "Tidak dapat memuatkan pangkalan istilah yang dikongsi dalam organisasi ini.",

@@ -58,6 +58,16 @@ describe("Upload files: audio and video need every language", () => {
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
   })
 
+  it("passes the reason to the YouTube panel's original-media option", () => {
+    render(<ImportDialog open onOpenChange={() => {}}
+      projectId="p1" username="dev" sourceLanguage="en" targetLanguage="es"
+      getToken={async () => "token"} onImported={() => {}}
+      mediaDisabledReason={REASON} />)
+    fireEvent.click(screen.getByRole("button", { name: /^YouTube video/ }))
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    expect(screen.getByTestId("youtube-media-disabled")).toHaveTextContent(REASON)
+  })
+
   it("imports a video with no reason (a Maintainer once the answer is in)", async () => {
     const input = open(null)
     fireEvent.change(input, { target: { files: [new File(["video"], "clip.mp4", { type: "video/mp4" })] } })

@@ -1468,6 +1468,7 @@ export function ImportDialog({
             ctx={{ projectId, author: username, sourceLanguage,
               targetLanguage, targetLang, getToken }}
             onImported={handleChildImported}
+            mediaDisabledReason={mediaDisabledReason}
           />
         )}
 

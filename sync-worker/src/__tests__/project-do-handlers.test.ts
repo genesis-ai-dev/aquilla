@@ -543,6 +543,66 @@ describe("PresenceTier2Batcher (AQU-1831 — batched per tick)", () => {
     vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 2)
     expect(applied.map((m) => m.viewingCell)).toEqual(["c1"])
   })
+
+  it("a claim never lets an earlier held patch clear the focus it grants (peer stays shown as editing across cells)", () => {
+    // The frames one socket sends when its user clicks from one cell into the
+    // next, in wire order, dispatched the way the DO does: presence patches
+    // through the tick, focus frames on arrival — after flush(). Before flush
+    // existed the held `focusedCell: null` from LEAVING c1 was applied a tick
+    // after the claim on c2 and erased it: the user kept the lease, but every
+    // peer's "X is editing" label disappeared after the first cell.
+    const who = { connId: "tab-a", userId: "alice" }
+    let locks = emptyLocks()
+    let presence = emptyPresence()
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier2Batcher((_connId, msg) => {
+      const r = applyPresenceUpdate(presence, who, msg, Date.now())
+      presence = r.presence
+      sent.push(...r.emit)
+    })
+    const focus = (frame: { t: "focus.claim" | "focus.release"; cellId: string }) => {
+      batcher.flush(who.connId)
+      const r = frame.t === "focus.claim"
+        ? applyFocusClaim(locks, presence, who, { t: "focus.claim", cellId: frame.cellId }, Date.now())
+        : applyFocusRelease(locks, presence, who, { t: "focus.release", cellId: frame.cellId }, Date.now())
+      locks = r.locks
+      presence = r.presence
+      sent.push(...r.emit)
+    }
+    const enter = (cellId: string) => {
+      batcher.push(who.connId, { t: "presence.update", currentFileId: "f1", selection: null })
+      focus({ t: "focus.claim", cellId })
+      batcher.push(who.connId, {
+        t: "presence.update",
+        currentFileId: "f1",
+        selection: { side: "target", anchor: 0, head: 0 },
+      })
+    }
+    const leave = (cellId: string) => {
+      batcher.push(who.connId, { t: "presence.update", currentFileId: "f1", selection: null })
+      focus({ t: "focus.release", cellId })
+      batcher.push(who.connId, {
+        t: "presence.update",
+        currentFileId: "f1",
+        focusedCell: null,
+        selection: null,
+      })
+    }
+
+    enter("c1")
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 5)
+    for (const [from, to] of [["c1", "c2"], ["c2", "c3"]] as const) {
+      leave(from)
+      enter(to)
+      // Every tick that could still be holding a patch has fired.
+      vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 5)
+      expect(locks.get(to)?.userId).toBe("alice")
+      expect(presence.get("tab-a")?.focusedCell).toBe(to)
+      // What peers are told last is what they draw: it must name the new cell.
+      const lastDiff = sent.filter((m) => m.t === "presence.diff").at(-1)
+      expect(lastDiff?.t === "presence.diff" && lastDiff.user.focusedCell).toBe(to)
+    }
+  })
 })
 
 describe("mergePresenceUpdate (AQU-1831)", () => {

@@ -5009,7 +5009,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -10003,7 +10006,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14984,7 +14990,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19991,7 +20000,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26273,7 +26285,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32557,7 +32572,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38913,7 +38931,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45316,7 +45337,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51634,7 +51658,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59899,7 +59926,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68169,7 +68199,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76846,7 +76879,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -85170,7 +85206,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93866,7 +93905,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102556,7 +102598,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -111281,7 +111326,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119993,7 +120041,10 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128697,6 +128748,9 @@
     "settings.orgSettingsIndex.hintProviders": "7672f41e1b80a8cc",
     "settings.orgSettingsIndex.hintMonday": "a4aaffb34d078d2a",
     "settings.orgSettingsIndex.hintTeams": "2f1436e210a822fe",
-    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904"
+    "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
+    "agent.run.failedFallback": "c158c615648cb740",
+    "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
   }
 }

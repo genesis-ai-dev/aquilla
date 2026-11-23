@@ -20224,7 +20224,7 @@ export function ProjectWorkspace() {
             archivedLaneLabel={activeLaneLock?.label ?? null}
             languagesLoading={lanesPending}
             onLaneChange={setActiveLane}
-            defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
+            defaultLaneLabel={laneLabels[""] || activeTargetLanguage || t("editor.column.target")}
             laneLabels={laneLabels}
             laneCodes={laneCodes}
             // AQU-583: the TARGET tag is the discoverable entry point to change

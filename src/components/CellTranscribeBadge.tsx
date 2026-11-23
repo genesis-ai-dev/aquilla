@@ -92,7 +92,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
   if (status.kind === "loading") {
     const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
     return (
-      <NoteOnClick note={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}>
+      <NoteOnClick note={pct != null ? t("workspace.transcribeBadge.downloadingModelNote", { percent: pct }) : t("workspace.transcribeBadge.loadingModelNote")}>
         <Badge
           variant="secondary"
           className={cn(PILL, "text-amber-700 dark:text-amber-300")}

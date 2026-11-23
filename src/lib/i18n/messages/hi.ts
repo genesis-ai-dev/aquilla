@@ -401,6 +401,8 @@ export const hi: Catalog = {
   "error.monday.sync": "यह परियोजना Monday पर भेजी नहीं जा सकी।",
   "error.monday.addColumns": "Monday बोर्ड पर कॉलम जोड़े नहीं जा सके।",
   "error.monday.newBoard": "Monday में नया बोर्ड नहीं बन सका।",
+  "error.airtable.connect": "Airtable से कनेक्ट नहीं हो सका। फिर से कोशिश करें।",
+  "error.airtable.disconnect": "Airtable से कनेक्शन नहीं हटाया जा सका।",
   "error.termbase.publish": "यह शब्दावली आधार संगठन के साथ साझा नहीं हो सका।",
   "error.termbase.unpublish": "इस शब्दावली आधार का साझा करना बंद नहीं हो सका।",
   "error.termbase.listPublished": "इस संगठन में साझा शब्दावली आधार लोड नहीं हो सके।",

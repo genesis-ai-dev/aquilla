@@ -382,6 +382,8 @@ export const my: Catalog = {
   "error.monday.removeLink": "Monday ဘုတ်လင့်ခ်ကို မဖယ်ရှားနိုင်ပါ။",
   "error.monday.analyze": "ဘုတ်နှိုင်းယှဉ်မှု အကြံပြုချက်ကို မဖန်တီးနိုင်ပါ။",
   "error.monday.sync": "ဤပရောဂျက်ကို Monday သို့ မပို့နိုင်ပါ။",
+  "error.airtable.connect": "Airtable ကို ချိတ်ဆက်၍ မရပါ။ ထပ်မံကြိုးစားပါ။",
+  "error.airtable.disconnect": "Airtable ချိတ်ဆက်မှုကို ဖြုတ်၍ မရပါ။",
   "error.termbase.publish": "ဤဝေါဟာရဘဏ်ကို အဖွဲ့အစည်းနှင့် မမျှဝေနိုင်ပါ။",
   "error.termbase.unpublish": "ဤဝေါဟာရဘဏ် မျှဝေမှုကို မရပ်တန့်နိုင်ပါ။",
   "error.termbase.listPublished": "ဤအဖွဲ့အစည်းတွင် မျှဝေထားသော ဝေါဟာရဘဏ်များကို မဖွင့်နိုင်ပါ။",

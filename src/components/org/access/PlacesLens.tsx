@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { UserMinus, UserPlus } from "lucide-react"
-import { useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { PLACE_ICON } from "@/components/access/place-icons"
@@ -14,6 +14,7 @@ import { inviteRowId, rowEdit, rowGrant, rowRemoval } from "@/lib/access/edit-ac
 import type { PlaceGrantability } from "@/lib/access/grant-rules"
 import { filterPlaceTree, placeParam, placeRowCounts } from "@/lib/access/place-lens"
 import { formatScopePath } from "@/lib/access/scope-path"
+import { accessPersonPath } from "@/lib/navigation/org-paths"
 import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
 import type { AccessFromScope } from "@/lib/sync/access-read"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -251,6 +252,7 @@ function PlaceDetail({
                 path={path}
                 canOpen={locate(tree, placeParam(source.from)) != null}
                 onSelect={onSelect}
+                orgId={editing?.orgId}
               />
             ))}
           </ul>
@@ -270,7 +272,7 @@ function GrantedRow({ person, path, editing }: { person: DirectGrantee; path: Sc
       : null
   return (
     <li data-testid="granted-here-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-card px-3 py-2">
-      <PersonName person={person} path={path} />
+      <PersonName person={person} path={path} orgId={editing?.orgId} />
       {secondary && <span className="min-w-0 truncate text-sm text-muted-foreground">{secondary}</span>}
       {person.isGuest && <Badge variant="outline" data-testid="guest-badge">{t("org.access.inspector.guest")}</Badge>}
       <span className="ms-auto inline-flex items-center gap-1">
@@ -329,11 +331,13 @@ function ReachesRow({
   path,
   canOpen,
   onSelect,
+  orgId,
 }: {
   source: InheritedSource
   path: ScopeRef[]
   canOpen: boolean
   onSelect: (scope: ScopeRef) => void
+  orgId?: number
 }) {
   const t = useT()
   return (
@@ -353,6 +357,7 @@ function ReachesRow({
             isGuest: source.isGuest,
           }}
           path={path}
+          orgId={orgId}
         />
       )}
       <span data-testid="reaches-reason" className="min-w-0 text-sm text-muted-foreground">{reasonFor(t, source.from)}</span>
@@ -395,11 +400,24 @@ function TeamMark({ name, memberCount }: { name: string; memberCount: number }) 
   )
 }
 
-function PersonName({ person, path }: { person: DirectGrantee; path: ScopeRef[] }) {
+/** AQU-2323: a name opens that person's inspector; without an org to link under, the member popover. */
+function PersonName({ person, path, orgId }: { person: DirectGrantee; path: ScopeRef[]; orgId?: number }) {
+  const t = useT()
   const chip = (
     <UserChip userId={person.userId} username={person.displayName} size="xs" nameClassName="text-sm font-normal" />
   )
   if (person.source === "invite" || person.userId.startsWith("invite:")) return chip
+  if (orgId != null) {
+    return (
+      <Link
+        to={accessPersonPath(orgId, person.userId)}
+        aria-label={t("org.access.people.openPersonAriaLabel", { name: person.displayName })}
+        className="inline-flex min-w-0 rounded hover:underline"
+      >
+        {chip}
+      </Link>
+    )
+  }
   return (
     <MemberInspectorTrigger userId={person.userId} username={person.displayName} from={inspectorFrom(path)} herePath={path}>
       {chip}

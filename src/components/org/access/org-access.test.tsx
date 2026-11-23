@@ -162,6 +162,14 @@ describe("OrgAccessPage Give access (AQU-2320)", () => {
 })
 
 describe("OrgAccessPage", () => {
+  it("AQU-2323: a name on the Places lens, granted here or reaching here, opens that person's inspector", async () => {
+    renderPage()
+    await screen.findByTestId("access-tree")
+    fireEvent.click(placeButton("Pattani"))
+    expect(await screen.findByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
+    expect(screen.getByRole("link", { name: "Open Ruth" })).toHaveAttribute("href", "/orgs/1/access/people/1")
+  })
+
   it("lists members, guests, and invites, and a Guests CSV repeats the breadcrumbs on screen", async () => {
     renderPage()
     await screen.findByTestId("access-tree")
@@ -183,7 +191,7 @@ describe("OrgAccessPage", () => {
     expect(within(guest).getByTestId("role-badge")).toHaveTextContent("Reviewer")
     expect(within(guest).getByTestId("role-badge").className).not.toContain("border-dashed")
     expect(within(guest).getByTestId("people-reaches")).toHaveTextContent("2 projects")
-    expect(within(guest).getByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/members#member-9")
+    expect(within(guest).getByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
     const shown = within(guest).getAllByTestId("scope-breadcrumb").map((crumb) => crumb.getAttribute("aria-label"))
     expect(shown).toEqual([formatScopePath([org, other]), formatScopePath([org, project])])
 

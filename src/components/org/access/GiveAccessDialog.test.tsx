@@ -216,3 +216,18 @@ describe("AQU-2322: narrowing to one lane", () => {
     expect(previewLines(t, lanePreview({ wallOn: true, siblingsClosed: false }), null).join(" ")).not.toMatch(/other languages/)
   })
 })
+
+describe("AQU-2323: opened with person and place filled in", () => {
+  it("starts on the role blank, the one thing left to choose; otherwise the dialog keeps its own first field", async () => {
+    renderDialog({ initialPerson: { userId: "9" }, initialPlace: { type: "project", id: "p1" } })
+    const role = screen.getByTestId("give-role")
+    expect(screen.getByTestId("give-place")).toHaveTextContent("Pattani")
+    await waitFor(() => expect(document.activeElement).toBe(role))
+  })
+
+  it("does not jump to the role when the place is still blank", async () => {
+    renderDialog({ initialPerson: { userId: "9" } })
+    await waitFor(() => expect(screen.getByTestId("give-access-dialog")).toContainElement(document.activeElement as HTMLElement))
+    expect(document.activeElement).not.toBe(screen.getByTestId("give-role"))
+  })
+})

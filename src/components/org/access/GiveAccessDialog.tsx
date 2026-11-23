@@ -52,16 +52,28 @@ export interface GiveAccessDialogProps {
 }
 
 export function GiveAccessDialog({ open, onOpenChange, ...rest }: GiveAccessDialogProps) {
+  // AQU-2323: opened with the person and place already chosen (the person
+  // inspector's No access list), the role is the one blank left: start there.
+  const roleFirst = rest.initialPerson != null && rest.initialPlace != null && rest.initialRoleLevel == null
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Closed is unmounted: every open starts from the pre-filled props. */}
       {open && (
-        <DialogContent data-testid="give-access-dialog" className="sm:max-w-xl">
+        <DialogContent
+          data-testid="give-access-dialog"
+          className="sm:max-w-xl"
+          initialFocus={roleFirst ? roleBlankIn : undefined}
+        >
           <GiveAccessBody {...rest} onClose={() => onOpenChange(false)} />
         </DialogContent>
       )}
     </Dialog>
   )
+}
+
+/** The role blank of the open dialog. Falls back to the dialog's own first field when it is absent. */
+function roleBlankIn(): HTMLElement | true {
+  return document.querySelector<HTMLElement>('[data-testid="give-access-dialog"] [data-testid="give-role"]') ?? true
 }
 
 function resolvePerson(payload: OrgAccessPayload, ref: GiveAccessPersonRef | undefined): PersonChoice | null {

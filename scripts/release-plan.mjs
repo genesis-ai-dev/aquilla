@@ -118,7 +118,10 @@ export function isDocsOrTestOnly(files) {
 //
 // en.ts (the English source barrel), index.ts and all.ts (the registries a
 // new locale edits) are code, not catalogs, and so are the tests beside them.
-const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
+//
+// The import also prunes translation-baseline.json (AQU-2740: the keys each
+// locale may still show in English), so that file is part of the same push.
+const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|translation-baseline\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
 
 export function isLocaleCatalogOnly(files) {
   return files.length > 0 && files.every((file) => LOCALE_CATALOG_FILE.test(file))

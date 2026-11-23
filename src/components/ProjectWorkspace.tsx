@@ -676,6 +676,12 @@ import {
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BatchBooksDialog, type BatchBooksChoices, type BatchBooksDialogHandle, type BatchBooksRequest } from "@/components/batch/BatchBooksModal"
 import { listBatchBooks } from "@/lib/review/batch-books"
+import {
+  bookBatchCountsEqual,
+  bookCountsFromProgress,
+  withLiveUntouchedAi,
+  type BookBatchCounts,
+} from "@/lib/review/batch-book-counts"
 import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
 import { listChapterLabels } from "@/lib/export/chapter-scope"
 import { loadBookCells } from "@/lib/review/load-book-cells"
@@ -13542,6 +13548,28 @@ export function ProjectWorkspace() {
     [cellSummaries, activeFileId],
   )
   const batchBooks = useMemo(() => listBatchBooks(project?.files ?? []), [project?.files])
+  // Rollup totals for the books dialog. The open book's drafts are counted
+  // from the cells on screen; every other book uses the file list's figures.
+  // Identity stays put while the numbers do, so an edit that changes neither
+  // does not redraw the dialog.
+  const batchBookCounts = useStableValue(useMemo(() => {
+    const map = new Map<string, BookBatchCounts>()
+    for (const book of batchBooks) {
+      const row = bookCountsFromProgress(fileProgress.get(book.id))
+      if (row) map.set(book.id, row)
+    }
+    if (activeFileId) {
+      const open = cellSummaries.filter((cell) => cell.fileId === activeFileId)
+      const current = map.get(activeFileId)
+      if (current && open.length > 0) {
+        map.set(
+          activeFileId,
+          withLiveUntouchedAi(current, classifyBatchDraft(open).refreshable.length),
+        )
+      }
+    }
+    return map
+  }, [activeFileId, batchBooks, cellSummaries, fileProgress]), (prev, next) => mapsEqual(prev, next, bookBatchCountsEqual))
   const runAcrossBooks = useCallback((request: BatchBooksRequest, choices: BatchBooksChoices) => {
     if (!project) return
     const names = new Map(batchBooks.map((book) => [book.id, book.name]))
@@ -21367,6 +21395,7 @@ export function ProjectWorkspace() {
           ref={booksDialogRef}
           books={batchBooks}
           initialFileId={activeFileId}
+          counts={batchBookCounts}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           onConfirm={runAcrossBooks}
         />

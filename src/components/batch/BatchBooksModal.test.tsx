@@ -3,6 +3,7 @@ import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import type { BookBatchCounts } from "@/lib/review/batch-book-counts"
 import { BatchBooksDialog, BatchBooksModal, type BatchBooksDialogHandle } from "./BatchBooksModal"
 
 const books = [
@@ -87,5 +88,49 @@ describe("BatchBooksModal", () => {
       refreshAiDrafts: false,
     }))
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("states the checked books' cell totals under each choice, and grows them as books are added", async () => {
+    const user = userEvent.setup()
+    const counts = new Map<string, BookBatchCounts>([
+      ["gen", { empty: 10000, untouchedAi: 5000, unsigned: 80 }],
+      ["exo", { empty: 20, untouchedAi: 4, unsigned: 15 }],
+    ])
+    const { rerender } = render(
+      <I18nProvider>
+        <BatchBooksModal
+          open
+          onOpenChange={vi.fn()}
+          request="draft"
+          books={books}
+          initialFileId="gen"
+          counts={counts}
+          canIncludeUntouchedAi
+          onConfirm={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    expect(screen.getByText("10000 empty cells")).toBeInTheDocument()
+    expect(screen.getByText("5000 untouched AI drafts to refresh")).toBeInTheDocument()
+    await user.click(screen.getByText("Exodus"))
+    expect(screen.getByText("10020 empty cells")).toBeInTheDocument()
+    expect(screen.getByText("5004 untouched AI drafts to refresh")).toBeInTheDocument()
+
+    rerender(
+      <I18nProvider>
+        <BatchBooksModal
+          open
+          onOpenChange={vi.fn()}
+          request="validate"
+          books={books}
+          initialFileId="gen"
+          counts={counts}
+          canIncludeUntouchedAi
+          onConfirm={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    expect(screen.getByText("95 saved cells you have not signed off.")).toBeInTheDocument()
+    expect(screen.getByText("5004 AI drafts nobody has checked")).toBeInTheDocument()
   })
 })

@@ -7811,8 +7811,9 @@ export const editor = defineNamespace({
       "editor.batchBooks.aiDrafts": {
         description:
           "Checkbox in the books batch-validate dialog for AI drafts nobody has "
-          + "checked. Off unless a reviewer or project lead turns it on. No count: "
-          + "the books are not loaded yet.",
+          + "checked. Off unless a reviewer or project lead turns it on. The line "
+          + "under it counts those drafts across the books that are checked, when "
+          + "every checked book knows the number.",
       },
       "editor.batchBooks.flaggedHelp": {
         description:
@@ -7822,7 +7823,7 @@ export const editor = defineNamespace({
       },
       "editor.batchBooks.empty": {
         description:
-          "Checkbox in the draft-books dialog for cells with source text and no translation. Checked by default.",
+          "Checkbox in the draft-books dialog for cells with source text and no translation. Checked by default. The line under it counts empty cells in the books that are checked.",
       },
       "editor.batchBooks.refresh": {
         description:
@@ -7830,8 +7831,10 @@ export const editor = defineNamespace({
       },
       "editor.batchBooks.refreshHelp": {
         description:
-          "Help under that checkbox in the draft-books dialog. Says the run "
-          + "replaces only AI drafts nobody has edited, and leaves a person's translation alone.",
+          "Help under that checkbox in the draft-books dialog when the draft "
+          + "count is not known yet. When it is, the line instead counts untouched "
+          + "AI drafts in the books that are checked. The run replaces only drafts "
+          + "nobody has edited, and leaves a person's translation alone.",
       },
       "editor.batchBooks.confirmValidate": {
         description: "Confirm button that starts validation of the checked books.",

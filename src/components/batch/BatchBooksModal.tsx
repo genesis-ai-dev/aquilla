@@ -5,7 +5,7 @@
  * Each checked book is taken whole; a chapter belongs to the open book's own
  * dialog.
  */
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { totalsForCheckedBooks, type BookBatchCounts } from "@/lib/review/batch-book-counts"
 import type { BatchBook } from "@/lib/review/batch-books"
 
 /** Measured book row (checkbox + name). A larger estimate makes LegendList build extra rows. */
@@ -38,6 +39,12 @@ interface BatchBooksModalProps {
   books: readonly BatchBook[]
   /** The open file, checked when the dialog opens. */
   initialFileId: string | null
+  /**
+   * Per-book rollup counts. The lines under the choices add up the books
+   * that are checked. Absent, or missing a checked book, keeps the
+   * explanation in place of a number.
+   */
+  counts?: ReadonlyMap<string, BookBatchCounts>
   canIncludeUntouchedAi: boolean
   onConfirm: (choices: BatchBooksChoices) => void
 }
@@ -48,6 +55,7 @@ export function BatchBooksModal({
   request,
   books,
   initialFileId,
+  counts,
   canIncludeUntouchedAi,
   onConfirm,
 }: BatchBooksModalProps) {
@@ -76,6 +84,10 @@ export function BatchBooksModal({
   }, [open, initialFileId, books, request])
 
   const allChecked = books.length > 0 && books.every((book) => checked.has(book.id))
+  const totals = useMemo(
+    () => counts ? totalsForCheckedBooks(books, checked, counts) : null,
+    [books, checked, counts],
+  )
 
   const toggle = useCallback((id: string, on: boolean) => {
     setChecked((prev) => {
@@ -155,7 +167,9 @@ export function BatchBooksModal({
               checked={includeReady}
               onCheckedChange={setIncludeReady}
               label={t("editor.batchFile.includeUnvalidated")}
-              help={t("editor.batchFile.readyHelp")}
+              help={totals
+                ? t("editor.batchFile.includeUnvalidatedHelp", { count: totals.unsigned })
+                : t("editor.batchFile.readyHelp")}
             />
             <OptionRow
               id="batch-books-ai"
@@ -163,9 +177,7 @@ export function BatchBooksModal({
               disabled={!canIncludeUntouchedAi}
               onCheckedChange={setIncludeAi}
               label={t("editor.batchBooks.aiDrafts")}
-              help={canIncludeUntouchedAi
-                ? t("editor.batchFile.aiDraftsHelp")
-                : t("editor.batchFile.aiDraftsLocked")}
+              help={aiDraftHelp(canIncludeUntouchedAi, totals?.untouchedAi, t)}
             />
             <OptionRow
               id="batch-books-flagged"
@@ -182,14 +194,18 @@ export function BatchBooksModal({
               checked={includeEmpty}
               onCheckedChange={setIncludeEmpty}
               label={t("editor.batchBooks.empty")}
-              help={t("editor.batchFile.emptyHelp")}
+              help={totals
+                ? t("editor.batchFile.empty", { count: totals.empty })
+                : t("editor.batchFile.emptyHelp")}
             />
             <OptionRow
               id="batch-books-refresh"
               checked={refreshAi}
               onCheckedChange={setRefreshAi}
               label={t("editor.batchBooks.refresh")}
-              help={t("editor.batchBooks.refreshHelp")}
+              help={totals?.untouchedAi != null
+                ? t("editor.batchFile.refresh", { count: totals.untouchedAi })
+                : t("editor.batchBooks.refreshHelp")}
             />
           </FieldSet>
         )}
@@ -260,9 +276,10 @@ export interface BatchBooksDialogHandle {
 export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
   books: readonly BatchBook[]
   initialFileId: string | null
+  counts?: ReadonlyMap<string, BookBatchCounts>
   canIncludeUntouchedAi: boolean
   onConfirm: (request: BatchBooksRequest, choices: BatchBooksChoices) => void
-}>(function BatchBooksDialog({ books, initialFileId, canIncludeUntouchedAi, onConfirm }, ref) {
+}>(function BatchBooksDialog({ books, initialFileId, counts, canIncludeUntouchedAi, onConfirm }, ref) {
   const [request, setRequest] = useState<BatchBooksRequest | null>(null)
   useImperativeHandle(ref, () => ({ open: setRequest }), [])
   if (!request) return null
@@ -273,6 +290,7 @@ export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
       request={request}
       books={books}
       initialFileId={initialFileId}
+      counts={counts}
       canIncludeUntouchedAi={canIncludeUntouchedAi}
       onConfirm={(choices) => {
         const kind = request
@@ -282,6 +300,16 @@ export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
     />
   )
 })
+
+function aiDraftHelp(
+  canInclude: boolean,
+  count: number | null | undefined,
+  t: ReturnType<typeof useT>,
+): string {
+  if (!canInclude) return t("editor.batchFile.aiDraftsLocked")
+  if (count == null) return t("editor.batchFile.aiDraftsHelp")
+  return t("editor.batchFile.aiDrafts", { count })
+}
 
 function OptionRow({
   id, checked, disabled, onCheckedChange, label, help,

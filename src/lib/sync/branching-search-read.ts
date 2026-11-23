@@ -4,7 +4,7 @@
 //     ?q=<text>[&topK=N][&validatedOnly=true][&excludeCellId=<uuid>][&targetLang=<lane>]
 //
 // Returns the deterministic top-K cells the spec algorithm picked, plus a
-// provenance map of which contiguous sub-query each result satisfied. Used
+// provenance map of which pieces of the query each result covered. Used
 // by the AI copilot's few-shot retrieval (replaces the client-side
 // `@/lib/search/dual-index` search). AD-14 decay endorsement will use the
 // same primitive when it lands.

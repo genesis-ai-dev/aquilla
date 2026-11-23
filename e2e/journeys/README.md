@@ -115,10 +115,12 @@ everyone. Name them in stories; never paste an id.
   keep the operator list in `auth-worker/wrangler.toml` and are not affected
   by it. Set `AQUILLA_QA_ADMIN_USER` / `AQUILLA_QA_ADMIN_PASSWORD` for the
   bot; on the local stack the seeded `dev` user is the admin instead and
-  `login_admin` uses it with no configuration. Previews keep step-up
-  elevation **on**, and because they have no mail binding the code comes back
-  in the request response and the gate prints it — so the bot walks the real
-  flow. The console's Platform tab writes **platform-wide** settings: walk it,
+  `login_admin` uses it with no configuration. The allowlist admits nobody
+  on its own: the account also has to exist and its email has to be on the
+  Dev access list (the recipe is under "Rebuilding the standing fixtures").
+  Previews keep step-up elevation **on**, and because they have no mail
+  binding the code comes back in the request response and the gate prints
+  it — so the bot walks the real flow. The console's Platform tab writes **platform-wide** settings: walk it,
   change nothing.
 - **Projects:** `english to burmese` (Bible in Basic English from eBible)
   for Scripture stories; `QA Scripture Verse Resources` for Verse
@@ -177,13 +179,54 @@ recipe is here. Rebuild them as `qa-bot` in `QA Bot Workspace`, and keep
 every project and file name exactly as spelled above — the stories quote
 them.
 
-- `qa-admin` — register through the normal signup form with the email
-  **`qa-admin@local.test`** exactly as spelled (the preview allowlist matches
-  on the email, so a different address silently has no admin rights). It needs
-  no org and no project: a platform admin resolves owner-level on every org
-  server-side. Hand its password to the bot runner as
-  `AQUILLA_QA_ADMIN_PASSWORD`. To check it took, sign in on any branch preview
-  and open `/admin`: a non-admin is redirected to `/orgs/all`.
+Dev is restored from production every night
+(`.github/workflows/dev-neon-refresh.yml`), and the restore replaces the
+whole database. An account, org membership or project made only on dev is
+gone the next morning; what also exists in production comes back. `qa-bot`,
+its org and the adversarial bots persist because they are production rows.
+The Dev access list is the exception: it is KV, outside the restore.
+
+- `qa-admin` — three steps, in this order:
+  1. **List the email.** On dev → Admin → Platform → Dev access, add
+     **`qa-admin@local.test`**. Sign-up and sign-in on dev and on every
+     preview check that list, and a preview's admin allowlist does not stand
+     in for it (`auth-worker/src/services/dev-access.ts`,
+     `docs/security/preview-access.md`). Done once: the list survives the
+     restore.
+  2. **Register on production, at `https://aquilla.app/signup`**, with the
+     username `qa-admin` and the email exactly as spelled (the preview
+     allowlist matches on the email, so a different address silently has no
+     admin rights). In production the address is on no admin list, so the
+     account is an ordinary one there. It reaches dev and every preview at
+     the next restore; to use it the same day, register it on
+     dev.aquilla.app as well, with the same password. Never on a preview: a
+     preview answers "User already exists" to a signup for any address on
+     its own admin allowlist, whether or not the account exists
+     (`auth-worker/src/routes/auth.ts`). Nothing delivers mail to
+     `local.test`, and sign-in does not wait for the address to be verified.
+     It needs no org and no project: a platform admin resolves owner-level
+     on every org server-side.
+  3. **Hand its password to every walk runner** as
+     `AQUILLA_QA_ADMIN_PASSWORD`, beside the `qa-bot` password the runner
+     already holds. No workflow, repository secret, or file in this repo
+     carries it; `docs/routines/WALK-PRS.md` lists it among the secrets the
+     scheduled walker needs. `AQUILLA_QA_ADMIN_USER` is needed only when the
+     username is not `qa-admin` (`replays/_lib.sh`).
+
+  To check it took, sign in on any branch preview and open `/admin`: a
+  non-admin is redirected to `/orgs/all`.
+
+  When an `/admin` walk cannot sign in, the refusal names the missing step.
+  "Incorrect username/email or password" is the account or the password
+  (step 2 or 3); it is checked first, so a missing account reads this way
+  whether or not the email is listed. "Access to CI previews is restricted"
+  is the list (step 1). A runner with no `AQUILLA_QA_ADMIN_PASSWORD` reaches
+  neither, so it can report the unset variable and nothing about whether the
+  account exists.
+- `qa-bot-2` — the same moves as any walker account. Register it on
+  production, add its email to the Dev access list, and add it to `qa-bot`'s
+  org as a plain member in production, so the membership comes back with
+  each restore. Its password goes to the walk runner with the others.
 - `QA Smoke Project`, `QA Org Search B`, and
   `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
   — create empty. No import. Spell the long one exactly: a shorter name

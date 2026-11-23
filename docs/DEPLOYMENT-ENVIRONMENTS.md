@@ -96,7 +96,16 @@ are ungated — they are refreshable by design (`pnpm neon:refresh:dev`). The
 refresh first reads `dev` and `production` with its credentials and stops with
 the rotation steps if the Neon API rejects them; `NEON_REFRESH_PREFLIGHT_ONLY=1`
 (the workflow's `preflight_only` input) runs only that check, which is how a
-rotated `NEON_API_KEY` is verified without restoring anything. The
+rotated `NEON_API_KEY` is verified without restoring anything. **A Neon branch
+forked from `dev` does not stop the refresh, and is not reset by it.** Neon
+refuses to restore a branch that has children ("Branch has children,
+preserve_under_name is required" — no refresh from 2026-11-13 to 11-23, behind
+two PR-preview QA branches), so the refresh keeps the old `dev` as
+`dev-pre-refresh-<timestamp>`, Neon moves the forks onto that backup, and the
+first refresh after the last fork is deleted or expires deletes the backup.
+Give such a branch an expiry, or delete it when the PR merges: its backup costs
+storage for as long as it lives. The preflight-only run prints what a restore
+would keep and delete. The
 refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them

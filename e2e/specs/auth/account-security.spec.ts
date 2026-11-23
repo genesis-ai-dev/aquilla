@@ -118,6 +118,9 @@ test("authenticator enrollment protects settings, recovery unlocks them, and nor
     .getByLabel("New Aquilla password", { exact: true })
     .fill("replacement-test-password-2631")
   await page
+    .getByLabel("Confirm new password", { exact: true })
+    .fill("replacement-test-password-2631")
+  await page
     .getByRole("button", { name: "Change password", exact: true })
     .click()
   await expect(

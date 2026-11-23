@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { peekOutboxBatch, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
 
 /**
  * AQU-633: reactive view of outbox records the server refused with a 403 and
@@ -24,7 +24,7 @@ export function useForbiddenOutboxRecords(enabled: boolean): OutboxRecord[] {
     let cancelled = false
 
     async function refresh() {
-      const all = await peekOutboxBatch(1000)
+      const all = await peekOutboxShared(1000)
       if (cancelled) return
       const forbidden = all.filter(
         (r) =>

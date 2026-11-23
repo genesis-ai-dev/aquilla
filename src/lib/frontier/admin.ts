@@ -20,6 +20,8 @@ export interface AdminOverview {
   activeProjects: number
   archivedProjects: number
   activeUsers7d: number
+  /** Users created in the last 7 days. Absent on a server that predates the field. */
+  newUsers7d?: number
 }
 
 export interface AdminTeam {
@@ -43,6 +45,8 @@ export interface AdminOrg {
   ownerUsername: string | null
   memberCount: number
   projectCount: number
+  /** Teams in the org. Absent on a server that predates the field. */
+  teamCount?: number
   /**
    * AQU-1071: active target lanes in the org — the enterprise billing band.
    * Optional so a server that predates the field renders "—" rather than a wrong 0.
@@ -335,10 +339,72 @@ export async function getAdminOrgs(jwt: string): Promise<AdminOrg[]> {
   return ((await res.json()) as { orgs: AdminOrg[] }).orgs
 }
 
+export type AdminLens = "all" | "active" | "archived" | "needs-attention"
+
+/** One page of an admin directory. `q` and filters apply before the page is cut. */
+export interface AdminListQuery {
+  q?: string
+  limit: number
+  offset: number
+  sort?: string
+  dir?: "asc" | "desc"
+  lens?: AdminLens
+  orgId?: number
+}
+
+export interface AdminListPage<T> {
+  rows: T[]
+  total: number
+  limit: number
+  offset: number
+  overdue: number | null
+}
+
+function adminListUrl(path: string, query: AdminListQuery): string {
+  const params = new URLSearchParams()
+  params.set("limit", String(query.limit))
+  params.set("offset", String(query.offset))
+  if (query.q) params.set("q", query.q)
+  if (query.sort) params.set("sort", query.sort)
+  if (query.dir) params.set("dir", query.dir)
+  if (query.lens && query.lens !== "all") params.set("lens", query.lens)
+  if (query.orgId != null) params.set("orgId", String(query.orgId))
+  return `${FRONTIER_BASE}${path}?${params.toString()}`
+}
+
+async function readAdminPage<T>(res: Response, key: string): Promise<AdminListPage<T>> {
+  if (!res.ok) throw new UserError(res.status, "")
+  const body = (await res.json()) as Record<string, unknown>
+  return {
+    rows: (body[key] as T[]) ?? [],
+    total: Number(body.total ?? 0),
+    limit: Number(body.limit ?? 0),
+    offset: Number(body.offset ?? 0),
+    overdue: body.overdue == null ? null : Number(body.overdue),
+  }
+}
+
+export async function getAdminOrgsPage(jwt: string, query: AdminListQuery): Promise<AdminListPage<AdminOrg>> {
+  const res = await fetchWithTimeout(adminListUrl("/api/v2/admin/orgs", query), { headers: authHeaders(jwt) })
+  return readAdminPage<AdminOrg>(res, "orgs")
+}
+
+export async function getAdminOrg(jwt: string, orgId: number): Promise<AdminOrg> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/orgs/${orgId}`, { headers: authHeaders(jwt) })
+  if (res.status === 404) throw new UserError(404, "Organization not found")
+  if (!res.ok) throw new UserError(res.status, "")
+  return ((await res.json()) as { org: AdminOrg }).org
+}
+
 export async function getAdminTeams(jwt: string): Promise<AdminTeam[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/teams`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { teams: AdminTeam[] }).teams
+}
+
+export async function getAdminTeamsPage(jwt: string, query: AdminListQuery): Promise<AdminListPage<AdminTeam>> {
+  const res = await fetchWithTimeout(adminListUrl("/api/v2/admin/teams", query), { headers: authHeaders(jwt) })
+  return readAdminPage<AdminTeam>(res, "teams")
 }
 
 export async function getAdminUsers(jwt: string): Promise<AdminUser[]> {
@@ -347,10 +413,23 @@ export async function getAdminUsers(jwt: string): Promise<AdminUser[]> {
   return ((await res.json()) as { users: AdminUser[] }).users
 }
 
+export async function getAdminUsersPage(jwt: string, query: AdminListQuery): Promise<AdminListPage<AdminUser>> {
+  const res = await fetchWithTimeout(adminListUrl("/api/v2/admin/users", query), { headers: authHeaders(jwt) })
+  return readAdminPage<AdminUser>(res, "users")
+}
+
 export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/projects`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { projects: AdminProject[] }).projects
+}
+
+export async function getAdminProjectsPage(
+  jwt: string,
+  query: AdminListQuery,
+): Promise<AdminListPage<AdminProject>> {
+  const res = await fetchWithTimeout(adminListUrl("/api/v2/admin/projects", query), { headers: authHeaders(jwt) })
+  return readAdminPage<AdminProject>(res, "projects")
 }
 
 export interface AdminOrgMember {

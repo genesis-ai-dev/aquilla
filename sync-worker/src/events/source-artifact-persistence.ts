@@ -1,4 +1,6 @@
 import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
+import { ensureBlankTargetBridgeStmt } from "../../../db/shared/lanes"
+import { grantNewLaneStmt } from "../../../db/shared/lane-grants"
 
 export interface SourceArtifactPersistenceInput {
   projectId: string
@@ -23,6 +25,27 @@ export interface SourceArtifactPersistenceInput {
   origin: 'browser-import' | 'codex-local-migration' | 'codex-gitlab-lfs-migration'
   updateSourceSidecar: boolean
   createdAt: number
+}
+
+/**
+ * AQU-2554: a target original with no tag is for the default translation, the
+ * `''` lane. On a project with no target lane yet that lane does not exist, so
+ * it is created here, with its grant, in the same batch, before the binding
+ * resolves lane_id: the same rule a translation write follows
+ * (handlers/cell-events.ts, AQU-1594 / AQU-1781). A project that already has
+ * any target lane inserts nothing.
+ */
+export function blankTargetBridgeStmts(
+  db: AquillaDb,
+  projectId: string,
+  bindingRole: string,
+  targetLang: string,
+): AquillaStatement[] {
+  if (bindingRole !== 'target' || targetLang !== '') return []
+  return [
+    ensureBlankTargetBridgeStmt(db, projectId),
+    grantNewLaneStmt(db, projectId, { legacyTag: '' }, null),
+  ]
 }
 
 /**
@@ -55,6 +78,7 @@ export async function buildSourceArtifactPersistenceStatements(
       input.createdAt,
     ))
   }
+  statements.push(...blankTargetBridgeStmts(db, input.projectId, input.bindingRole, input.targetLang))
   const conflictColumn = await artifactBindingConflictColumn(db)
   statements.push(
     db.prepare(
@@ -100,7 +124,7 @@ export async function buildSourceArtifactPersistenceStatements(
       input.fidelity,
       JSON.stringify(input.manifest),
       input.recipe ? JSON.stringify(input.recipe) : null,
-      // AQU-1240 slice 8: source role -> source lane; else target lane by tag.
+      // AQU-2554: a target binding -> its target lane by tag; source and support -> the source lane.
       ...laneIdResolveBindingBinds(input.projectId, input.bindingRole, input.targetLang),
     ),
   )

@@ -20,8 +20,14 @@ export function jevTrustedLogins(env?: Record<string, string | undefined>): stri
 /** Decision from a trusted author's marker comments: a FAIL holds; otherwise the newest wins. */
 export function jevDecision(comments: Array<{ body?: unknown; login?: string }>, trustedLogins?: string[]): JevDecision | null
 
-/** Whether the HEAD may deploy: release-verify must be `success` and Jev must have reported anything but FAIL. */
-export function decide(input: { verify: string | undefined; jev: JevDecision | null }): { deploy: boolean; reason: string }
+/** The issue label that stops every deploy while an issue carrying it is open. */
+export const HALT_LABEL: string
+
+/**
+ * Whether the HEAD may deploy: no open halt issue (`halt` is its number),
+ * release-verify `success`, and Jev reporting anything but FAIL.
+ */
+export function decide(input: { verify: string | undefined; jev: JevDecision | null; halt?: number }): { deploy: boolean; reason: string }
 
 /** release/* branches on origin whose HEAD carries no calver tag. */
 export function openReleaseBranches(): string[]

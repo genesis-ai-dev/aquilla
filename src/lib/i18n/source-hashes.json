@@ -4995,7 +4995,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9975,7 +9979,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14942,7 +14950,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19935,7 +19947,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26203,7 +26219,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32473,7 +32493,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38815,7 +38839,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45204,7 +45232,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51508,7 +51540,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59758,7 +59794,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68013,7 +68054,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76677,7 +76723,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84986,7 +85037,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93670,7 +93726,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102347,7 +102407,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -111060,7 +111125,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119759,7 +119828,12 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128450,6 +128524,11 @@
     "editor.completion.retryRemaining": "ab30b9ffde017285",
     "editor.completion.resumeRemaining": "2ee01be70eda3bd1",
     "editor.completion.openFileToRetry": "f7fcdd7d781f0df7",
-    "editor.completion.openFile": "4190c0c7ec727064"
+    "editor.completion.openFile": "4190c0c7ec727064",
+    "editor.completion.done": "6dcb3812586c6645",
+    "editor.completion.stopped": "47a7a877f39148de",
+    "editor.completion.interrupted": "c23606cb7b632b32",
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
   }
 }

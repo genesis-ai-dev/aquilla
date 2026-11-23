@@ -163,9 +163,10 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/outbox")>()
   return {
     ...actual,
-    peekOutboxBatch: async (...args: Parameters<typeof actual.peekOutboxBatch>) => {
+    // useCells reads through peekOutboxShared; the counter counts its reads.
+    peekOutboxShared: async (...args: Parameters<typeof actual.peekOutboxShared>) => {
       peekOutboxBatchCallCount++
-      return actual.peekOutboxBatch(...args)
+      return actual.peekOutboxShared(...args)
     },
   }
 })

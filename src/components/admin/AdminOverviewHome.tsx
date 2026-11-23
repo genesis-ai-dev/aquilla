@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Building2, ShieldAlert } from "lucide-react"
 import { Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { EmptyState } from "@/components/ui/empty"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -38,8 +39,8 @@ export type OverviewTile =
 /**
  * The Overview tab, rebuilt as an operator home. Stat tiles carry context via
  * `hint`; below them, three Sections answer "what needs me": at-risk projects,
- * the busiest tenants, and the latest activity. Every insight is derived
- * client-side from data the console already fetched — no new API calls.
+ * the busiest tenants, and the latest activity. Counts come from the rows
+ * passed in, unless the caller already knows the full-directory totals.
  */
 export function AdminOverviewHome({
   overview,
@@ -51,6 +52,14 @@ export function AdminOverviewHome({
   onViewProjects,
   onViewActivity,
   onOpenTile,
+  attentionTotal,
+  overdueTotal,
+  attentionLoading = false,
+  orgsLoading = false,
+  activityLoading = false,
+  attentionError = null,
+  orgsError = null,
+  activityError = null,
 }: {
   overview: AdminOverview
   orgs: AdminOrg[]
@@ -62,17 +71,26 @@ export function AdminOverviewHome({
   onViewActivity: () => void
   /** Makes each stat tile a button that opens the list behind it. */
   onOpenTile?: (tile: OverviewTile) => void
+  /** Full count of projects that need attention, when the rows are only a page. */
+  attentionTotal?: number
+  /** Full overdue count, when the rows are only a page. */
+  overdueTotal?: number
+  attentionLoading?: boolean
+  orgsLoading?: boolean
+  activityLoading?: boolean
+  attentionError?: string | null
+  orgsError?: string | null
+  activityError?: string | null
 }) {
   const navigate = useNavigate()
   const tile = (name: OverviewTile) => (onOpenTile ? () => onOpenTile(name) : undefined)
   const [now] = useState(() => Date.now())
-  const atRisk = useMemo(() => projectsNeedingAttention(projects, now, 6), [projects, now])
-  const atRiskTotal = useMemo(() => projectsNeedingAttention(projects, now).length, [projects, now])
-  const overdueCount = useMemo(
-    () => projectsNeedingAttention(projects, now).filter((r) => r.reasons.some((x) => x.kind === "overdue")).length,
-    [projects, now],
-  )
-  const newSignups = useMemo(() => recentSignupCount(users, now), [users, now])
+  const ranked = useMemo(() => projectsNeedingAttention(projects, now), [projects, now])
+  const atRisk = attentionTotal == null ? ranked.slice(0, 6) : ranked
+  const atRiskTotal = attentionTotal ?? ranked.length
+  const overdueCount =
+    overdueTotal ?? ranked.filter((r) => r.reasons.some((x) => x.kind === "overdue")).length
+  const newSignups = overview.newUsers7d ?? recentSignupCount(users, now)
   const topOrgs = useMemo(() => mostActiveOrgs(orgs, 5), [orgs])
 
   const atRiskColumns = useMemo<ColumnDef<RankedProject>[]>(
@@ -180,7 +198,7 @@ export function AdminOverviewHome({
         />
         <StatTile
           label="Need attention"
-          value={atRiskTotal}
+          value={attentionLoading && attentionTotal == null ? "…" : atRiskTotal}
           onClick={tile("needAttention")}
           hint={overdueCount > 0 ? `${overdueCount} overdue` : "projects at risk"}
           className={atRiskTotal > 0 ? "border-amber-500/40" : undefined}
@@ -204,6 +222,9 @@ export function AdminOverviewHome({
           ) : null
         }
       >
+        {attentionError ? (
+          <p className="text-sm text-destructive">{attentionError}</p>
+        ) : (
         <DataTable
           columns={atRiskColumns}
           data={atRisk}
@@ -213,6 +234,7 @@ export function AdminOverviewHome({
           testId="admin-overview-attention-table"
           className={ADMIN_TABLE_CLASS}
           dense
+          loading={attentionLoading}
           emptyState={
             <EmptyState
               variant="inline"
@@ -223,6 +245,7 @@ export function AdminOverviewHome({
             />
           }
         />
+        )}
       </Section>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -232,6 +255,9 @@ export function AdminOverviewHome({
           headerClassName={ADMIN_TABLE_SECTION_HEADER}
           contentClassName={ADMIN_TABLE_SECTION_CONTENT}
         >
+          {orgsError ? (
+            <p className="text-sm text-destructive">{orgsError}</p>
+          ) : (
           <DataTable
             columns={orgColumns}
             data={topOrgs}
@@ -241,6 +267,7 @@ export function AdminOverviewHome({
             testId="admin-overview-orgs-table"
             className={ADMIN_TABLE_CLASS}
             dense
+            loading={orgsLoading}
             emptyState={
               <EmptyState
                 variant="inline"
@@ -250,6 +277,7 @@ export function AdminOverviewHome({
               />
             }
           />
+          )}
         </Section>
 
         <Section
@@ -265,7 +293,16 @@ export function AdminOverviewHome({
             </button>
           }
         >
-          <AdminActivityTimeline activity={activity} limit={6} now={now} />
+          {activityError ? (
+            <p className="text-sm text-destructive">{activityError}</p>
+          ) : activityLoading && activity.length === 0 ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              Loading activity
+              <LoadingCursor />
+            </p>
+          ) : (
+            <AdminActivityTimeline activity={activity} limit={6} now={now} />
+          )}
         </Section>
       </div>
     </div>

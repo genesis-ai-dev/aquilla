@@ -80,6 +80,25 @@ describe("GlossaryRow", () => {
     expect(screen.queryByDisplayValue("favor")).toBeNull()
   })
 
+  it("follows a rendering changed elsewhere, but never over text being typed", () => {
+    // A re-read of the glossary landing mid-word used to replace what the
+    // person was typing with the saved rendering.
+    const h = noopHandlers()
+    const withRendering = (rendering: string) => (
+      <GlossaryRow concept={c({ renderings: [{ rendering, status: "preferred" }] })} canManage {...h} />
+    )
+    const { rerender } = render(withRendering("favor"))
+    fireEvent.click(screen.getByLabelText("Expand renderings"))
+    const input = screen.getByLabelText("Rendering 1 text")
+
+    rerender(withRendering("kindness"))
+    expect(input).toHaveValue("kindness")
+
+    fireEvent.change(input, { target: { value: "merc" } })
+    rerender(withRendering("favor"))
+    expect(input).toHaveValue("merc")
+  })
+
   it("commits notes from the row expander", () => {
     const h = noopHandlers()
     render(<GlossaryRow concept={c({})} canManage {...h} />)

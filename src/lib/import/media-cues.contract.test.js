@@ -32,6 +32,10 @@ describe("media wording import across browser and worker", () => {
           return { key, size: bytes.byteLength }
         },
         async delete(key) { objects.delete(key) },
+        async head(key) {
+          const bytes = objects.get(key)
+          return bytes ? { key, size: bytes.byteLength, etag: "" } : null
+        },
         async get(key) {
           const bytes = objects.get(key)
           return bytes ? { arrayBuffer: async () => bytes } : null

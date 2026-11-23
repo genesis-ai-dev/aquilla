@@ -1,4 +1,4 @@
--- 0207_cell_audio_stored_url_lookup.sql — AQU-2682: the same question by the
+-- 0209_cell_audio_stored_url_lookup.sql — AQU-2682: the same question by the
 -- url a take plays. Only `frontier-audio://` urls name a stored recording, so
 -- only those are indexed: an outside link (a signed media url can run to
 -- several KB) is never in this index and can never exceed its row size, on

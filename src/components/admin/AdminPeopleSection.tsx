@@ -8,6 +8,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { TableEmptyState } from "@/components/ui/empty"
 import { UserChip } from "@/components/UserChip"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminUserHref } from "@/lib/admin/drilldown-paths"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -39,6 +40,7 @@ export function AdminPeopleSection({
   admins,
   onSelectUser,
   initialSort = "name",
+  server,
 }: {
   users: AdminUser[]
   admins: AdminAdmin[]
@@ -46,6 +48,8 @@ export function AdminPeopleSection({
   onSelectUser?: (userId: number) => void
   /** Starting sort: A to Z by name, or most recently active first. */
   initialSort?: "name" | "lastActive"
+  /** When set, search, sort, and pages are the server's. Rows are shown as returned. */
+  server?: AdminTableServer
 }) {
   const adminEmails = useMemo(
     () => new Set(admins.map((a) => a.email.trim().toLowerCase())),
@@ -144,29 +148,47 @@ export function AdminPeopleSection({
             : [{ id: "user", desc: false }]
         }
         searchPlaceholder="Search people…"
-        globalFilterFn={(row, _columnId, filterValue) => {
-          const q = String(filterValue).trim().toLowerCase()
-          if (!q) return true
-          const u = row.original
-          const role = adminEmails.has(u.email.trim().toLowerCase()) ? "platform admin" : ""
-          return `${u.username} ${u.displayName ?? ""} ${u.email} ${role}`.toLowerCase().includes(q)
-        }}
-        toolbar={(table) => (
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {table.getFilteredRowModel().rows.length === users.length
-              ? `${users.length}`
-              : `${table.getFilteredRowModel().rows.length} of ${users.length}`}
-          </span>
-        )}
+        searchValue={server?.search}
+        onSearchChange={server?.onSearchChange}
+        searching={server?.searching}
+        loading={server?.loading}
+        onSortingChange={server?.onSortingChange}
+        globalFilterFn={
+          server
+            ? undefined
+            : (row, _columnId, filterValue) => {
+                const q = String(filterValue).trim().toLowerCase()
+                if (!q) return true
+                const u = row.original
+                const role = adminEmails.has(u.email.trim().toLowerCase()) ? "platform admin" : ""
+                return `${u.username} ${u.displayName ?? ""} ${u.email} ${role}`.toLowerCase().includes(q)
+              }
+        }
+        toolbar={(table) =>
+          server ? (
+            <AdminDirectoryPager
+              page={server.page}
+              pageSize={server.pageSize}
+              total={server.total}
+              onPageChange={server.onPageChange}
+            />
+          ) : (
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {table.getFilteredRowModel().rows.length === users.length
+                ? `${users.length}`
+                : `${table.getFilteredRowModel().rows.length} of ${users.length}`}
+            </span>
+          )
+        }
         emptyState={
-        users.length === 0 ? (
-          <TableEmptyState
-            icon={Users}
-            title="No users yet"
-            description="People appear here once they register."
-          />
-        ) : undefined
-      }
+          (server ? !server.loading && server.total === 0 && !server.search.trim() : users.length === 0) ? (
+            <TableEmptyState
+              icon={Users}
+              title="No users yet"
+              description="People appear here once they register."
+            />
+          ) : undefined
+        }
         testId="admin-people-table"
         className={ADMIN_TABLE_PANEL_CLASS}
         dense

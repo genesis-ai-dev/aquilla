@@ -1,46 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useState } from "react"
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader, Section } from "@/components/ui/page"
+import { Page, PageHeader } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
 import { orgHomePath, orgPath } from "@/lib/navigation/org-paths"
-import {
-  getAdminOverview,
-  getAdminOrgs,
-  getAdminTeams,
-  getAdminUsers,
-  getAdminProjects,
-  getAdminActivity,
-  getAdminAdmins,
-  type AdminOverview,
-  type AdminOrg,
-  type AdminTeam,
-  type AdminUser,
-  type AdminProject,
-  type AdminActivity,
-  type AdminAdmin,
-} from "@/lib/frontier/admin"
-import { projectsNeedingAttention } from "@/lib/admin/insights"
-import { AdminOverviewHome, type OverviewTile } from "@/components/admin/AdminOverviewHome"
-import { AdminTenantsSection } from "@/components/admin/AdminTenantsSection"
-import { AdminTeamsSection } from "@/components/admin/AdminTeamsSection"
-import { AdminPeopleSection } from "@/components/admin/AdminPeopleSection"
-import { AdminProjectsSection, type Lens } from "@/components/admin/AdminProjectsSection"
-import { AdminOrgView } from "@/components/admin/AdminOrgView"
+import type { AdminTeam } from "@/lib/frontier/admin"
+import type { OverviewTile } from "@/components/admin/AdminOverviewHome"
+import type { Lens } from "@/components/admin/AdminProjectsSection"
 import { AdminPersonView } from "@/components/admin/AdminPersonView"
-import { AdminActivityTimeline } from "@/components/admin/AdminActivityTimeline"
 import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
 import { AdminRetentionSection } from "@/components/admin/AdminRetentionSection"
 import { AdminMigrationSection } from "@/components/admin/AdminMigrationSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
-import { AdminInvitesSection } from "@/components/admin/AdminInvitesSection"
+import {
+  AdminActivityTab,
+  AdminInvitesTab,
+  AdminOverviewTab,
+  AdminPeopleTable,
+  AdminProjectsTable,
+  AdminTeamsTable,
+  AdminTenantDetail,
+  AdminTenantsTable,
+} from "@/components/admin/AdminDirectoryTabs"
 
 type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform" | "invites"
 const TABS: Array<{ key: Tab; label: string }> = [
@@ -125,17 +111,10 @@ export function AdminConsole() {
     [setParams],
   )
   const [selectedInvitesOrgId, setSelectedInvitesOrgId] = useState<number | null>(null)
-
-  const [overview, setOverview] = useState<AdminOverview | null>(null)
-  const [orgs, setOrgs] = useState<AdminOrg[]>([])
-  const [teams, setTeams] = useState<AdminTeam[]>([])
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [projects, setProjects] = useState<AdminProject[]>([])
-  const [activity, setActivity] = useState<AdminActivity[]>([])
-  const [admins, setAdmins] = useState<AdminAdmin[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const aliveRef = useRef(true)
+  // Set once Overview has counted projects that need attention. Other tabs do
+  // not prefetch that query.
+  const [attentionTotal, setAttentionTotal] = useState<number | null>(null)
+  const onAttentionTotal = useCallback((total: number) => setAttentionTotal(total), [])
 
   // Platform admins resolve owner-level on every org/project server-side, and
   // GET /orgs returns every org for them — so switching into a foreign org here
@@ -164,74 +143,19 @@ export function AdminConsole() {
     [setActiveOrg, navigate],
   )
 
-  // See useOrg.ts for the StrictMode aliveRef rationale.
-  useEffect(() => {
-    aliveRef.current = true
-    return () => {
-      aliveRef.current = false
-    }
-  }, [])
-
-  const refresh = useCallback(async () => {
-    // Don't fetch console data until elevated — every admin call would 403.
-    if (!jwt || !isAdmin || !isElevated) return
-    if (aliveRef.current) {
-      setLoading(true)
-      setError(null)
-    }
-    try {
-      const [ov, og, tm, us, pr, ac, ad] = await Promise.all([
-        getAdminOverview(jwt),
-        getAdminOrgs(jwt),
-        getAdminTeams(jwt),
-        getAdminUsers(jwt),
-        getAdminProjects(jwt),
-        getAdminActivity(jwt, 200),
-        getAdminAdmins(jwt),
-      ])
-      if (aliveRef.current) {
-        setOverview(ov)
-        setOrgs(og)
-        setTeams(tm)
-        setUsers(us)
-        setProjects(pr)
-        setActivity(ac)
-        setAdmins(ad)
-      }
-    } catch (err) {
-      if (aliveRef.current) setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (aliveRef.current) setLoading(false)
-    }
-  }, [jwt, isAdmin, isElevated])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  const selectedOrg = useMemo(
-    () => (orgIdParam > 0 ? (orgs.find((o) => o.id === orgIdParam) ?? null) : null),
-    [orgs, orgIdParam],
-  )
-  const atRiskCount = useMemo(() => projectsNeedingAttention(projects, Date.now()).length, [projects])
-
   // Non-admins have no business here — send them back to their overview.
   // (Server still enforces the ADMIN_EMAILS allowlist on every fetch.)
   if (!adminLoading && !isAdmin) {
     return <Navigate to="/" replace />
   }
 
-  let body: React.ReactNode
+  let body: React.ReactNode = null
   if (adminLoading) {
     body = <p className="text-sm text-muted-foreground">Checking access…</p>
   } else if (!isElevated && jwt) {
     // Hardened console: require a fresh email step-up code before anything loads.
     body = <AdminElevationGate jwt={jwt} email={adminEmail} onElevated={refreshElevation} />
-  } else if (loading && overview == null) {
-    body = <ConsoleSkeleton />
-  } else if (error) {
-    body = <p className="text-sm text-destructive">{error}</p>
-  } else {
+  } else if (jwt) {
     body = (
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList className="flex-wrap">
@@ -239,7 +163,7 @@ export function AdminConsole() {
             <TabsTrigger
               key={t.key}
               value={t.key}
-              attentionDot={t.key === "projects" && atRiskCount > 0 ? "amber" : undefined}
+              attentionDot={t.key === "projects" && (attentionTotal ?? 0) > 0 ? "amber" : undefined}
             >
               {t.label}
             </TabsTrigger>
@@ -248,40 +172,36 @@ export function AdminConsole() {
 
         <div className="mt-6">
           <TabsContent value="overview">
-            {overview && (
-              <AdminOverviewHome
-                overview={overview}
-                orgs={orgs}
-                users={users}
-                projects={projects}
-                activity={activity}
-                onOpenOrg={selectOrg}
-                onOpenTile={openTile}
-                onViewProjects={() => setTab("projects")}
-                onViewActivity={() => setTab("activity")}
-              />
-            )}
+            <AdminOverviewTab
+              jwt={jwt}
+              onOpenOrg={selectOrg}
+              onOpenTile={openTile}
+              onViewProjects={() => setTab("projects")}
+              onViewActivity={() => setTab("activity")}
+              onAttentionTotal={onAttentionTotal}
+            />
           </TabsContent>
 
-          <TabsContent value="retention">{jwt && <AdminRetentionSection jwt={jwt} />}</TabsContent>
-          <TabsContent value="migration">{jwt && <AdminMigrationSection jwt={jwt} />}</TabsContent>
+          <TabsContent value="retention">
+            <AdminRetentionSection jwt={jwt} />
+          </TabsContent>
+          <TabsContent value="migration">
+            <AdminMigrationSection jwt={jwt} />
+          </TabsContent>
 
           <TabsContent value="tenants">
-            {selectedOrg && jwt ? (
-              <AdminOrgView
-                key={selectedOrg.id}
+            {orgIdParam > 0 ? (
+              <AdminTenantDetail
+                key={orgIdParam}
                 jwt={jwt}
-                org={selectedOrg}
-                projects={projects}
-                teams={teams}
+                orgId={orgIdParam}
                 tenantsHref="/admin?tab=tenants"
                 onOpenInApp={openOrg}
                 onSelectUser={selectUser}
               />
             ) : (
-              <AdminTenantsSection
-                orgs={orgs}
-                teams={teams}
+              <AdminTenantsTable
+                jwt={jwt}
                 onSelectOrg={selectOrg}
                 onOpenOrgPath={openOrgPath}
                 onOpenInvites={(orgId) => {
@@ -293,11 +213,11 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="teams">
-            <AdminTeamsSection teams={teams} onOpenTeam={openTeam} />
+            <AdminTeamsTable jwt={jwt} onOpenTeam={openTeam} />
           </TabsContent>
 
           <TabsContent value="people">
-            {Number.isInteger(userIdParam) && userIdParam > 0 && jwt ? (
+            {Number.isInteger(userIdParam) && userIdParam > 0 ? (
               <AdminPersonView
                 key={userIdParam}
                 jwt={jwt}
@@ -306,9 +226,9 @@ export function AdminConsole() {
                 onSelectOrg={selectOrg}
               />
             ) : (
-              <AdminPeopleSection
-                users={users}
-                admins={admins}
+              <AdminPeopleTable
+                key={startPeopleSort}
+                jwt={jwt}
                 onSelectUser={selectUser}
                 initialSort={startPeopleSort}
               />
@@ -316,33 +236,24 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="projects">
-            <AdminProjectsSection
-              // Remount so a tile's starting filter applies.
+            <AdminProjectsTable
               key={startLens}
-              projects={projects}
+              jwt={jwt}
               initialLens={startLens}
               onSelectOrg={selectOrg}
             />
           </TabsContent>
 
           <TabsContent value="activity">
-            <Section title="Activity" description="Cross-tenant events, most recent first.">
-              <AdminActivityTimeline activity={activity} />
-            </Section>
+            <AdminActivityTab jwt={jwt} />
           </TabsContent>
 
-          <TabsContent value="platform">{jwt && <AdminPlatformSection jwt={jwt} />}</TabsContent>
+          <TabsContent value="platform">
+            <AdminPlatformSection jwt={jwt} />
+          </TabsContent>
 
           <TabsContent value="invites">
-            {jwt && (
-              <AdminInvitesSection
-                jwt={jwt}
-                orgs={orgs}
-                projects={projects}
-                users={users}
-                initialOrgId={selectedInvitesOrgId ?? undefined}
-              />
-            )}
+            <AdminInvitesTab jwt={jwt} initialOrgId={selectedInvitesOrgId ?? undefined} />
           </TabsContent>
         </div>
       </Tabs>
@@ -365,18 +276,5 @@ export function AdminConsole() {
         </Page>
       }
     />
-  )
-}
-
-/** Skeleton mirroring the Overview home while the first fetch is in flight. */
-function ConsoleSkeleton() {
-  return (
-    <LoadingTemplate
-      label="Loading admin console"
-      className="min-h-[34rem]"
-      templateClassName="min-h-[34rem]"
-    >
-      <LoadingCursor className="text-xl" />
-    </LoadingTemplate>
   )
 }

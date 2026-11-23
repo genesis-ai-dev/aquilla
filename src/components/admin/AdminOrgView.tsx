@@ -138,13 +138,13 @@ export function AdminOrgView({
           hideOrg
           server={{
             total: projects.total,
-            page: projects.page,
-            pageSize: projects.pageSize,
-            onPageChange: projects.setPage,
             search: projects.search,
             onSearchChange: projects.setSearch,
             searching: projects.searching,
             loading: projects.loading,
+            loadingMore: projects.loadingMore,
+            hasMore: projects.hasMore,
+            onLoadMore: projects.loadMore,
             onSortingChange: projects.setSorting,
             lens,
             onLensChange: setLens,

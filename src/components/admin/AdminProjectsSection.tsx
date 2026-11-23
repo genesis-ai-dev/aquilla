@@ -22,7 +22,7 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Badge } from "@/components/ui/badge"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
+import { AdminDirectoryCount, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -46,6 +46,7 @@ export function AdminProjectsSection({
   hideOrg = false,
   onSelectOrg,
   server,
+  fill = false,
 }: {
   projects: AdminProject[]
   /** Starting filter, e.g. "needs-attention" when a stat tile opened this tab. */
@@ -55,13 +56,16 @@ export function AdminProjectsSection({
   /** Makes the Org cell a link to that org's admin page. */
   onSelectOrg?: (orgId: number) => void
   /**
-   * When set, the lens, search, sort, and pages are the server's. The rows
-   * are shown as returned — a query is not applied again on this page.
+   * When set, the lens, search, and sort are the server's. The rows are shown
+   * as returned — a query is not applied again on this page. Scrolling asks
+   * for the next rows.
    */
   server?: AdminTableServer & {
     lens: Lens
     onLensChange: (lens: Lens) => void
   }
+  /** The table fills the page and loads the next rows when its end scrolls into view. */
+  fill?: boolean
 }) {
   const t = useT()
   const navigate = useNavigate()
@@ -261,7 +265,12 @@ export function AdminProjectsSection({
       onSearchChange={server?.onSearchChange}
       searching={server?.searching}
       loading={server?.loading}
+      loadingMore={server?.loadingMore}
+      hasMore={server?.hasMore}
+      onLoadMore={server?.onLoadMore}
+      loadMoreTestId="admin-projects-load-more"
       onSortingChange={server?.onSortingChange}
+      fillHeight={fill}
       globalFilterFn={
         server
           ? undefined
@@ -295,12 +304,7 @@ export function AdminProjectsSection({
             </SelectContent>
           </Select>
           {server ? (
-            <AdminDirectoryPager
-              page={server.page}
-              pageSize={server.pageSize}
-              total={server.total}
-              onPageChange={server.onPageChange}
-            />
+            <AdminDirectoryCount total={server.total} />
           ) : (
             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {table.getFilteredRowModel().rows.length === data.length

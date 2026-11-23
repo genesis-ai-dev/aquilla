@@ -8,7 +8,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { TableEmptyState } from "@/components/ui/empty"
 import { UserChip } from "@/components/UserChip"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
+import { AdminDirectoryCount, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminUserHref } from "@/lib/admin/drilldown-paths"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -41,6 +41,7 @@ export function AdminPeopleSection({
   onSelectUser,
   initialSort = "name",
   server,
+  fill = false,
 }: {
   users: AdminUser[]
   admins: AdminAdmin[]
@@ -48,8 +49,10 @@ export function AdminPeopleSection({
   onSelectUser?: (userId: number) => void
   /** Starting sort: A to Z by name, or most recently active first. */
   initialSort?: "name" | "lastActive"
-  /** When set, search, sort, and pages are the server's. Rows are shown as returned. */
+  /** When set, search and sort are the server's. Rows are shown as returned. */
   server?: AdminTableServer
+  /** The table fills the page and loads the next rows when its end scrolls into view. */
+  fill?: boolean
 }) {
   const adminEmails = useMemo(
     () => new Set(admins.map((a) => a.email.trim().toLowerCase())),
@@ -120,7 +123,7 @@ export function AdminPeopleSection({
   )
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={fill ? "flex min-h-0 flex-1 flex-col gap-3" : "flex flex-col gap-3"}>
       {orphanAdmins.length > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-50/60 px-4 py-3 text-sm dark:bg-amber-950/20">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -152,7 +155,12 @@ export function AdminPeopleSection({
         onSearchChange={server?.onSearchChange}
         searching={server?.searching}
         loading={server?.loading}
+        loadingMore={server?.loadingMore}
+        hasMore={server?.hasMore}
+        onLoadMore={server?.onLoadMore}
+        loadMoreTestId="admin-people-load-more"
         onSortingChange={server?.onSortingChange}
+        fillHeight={fill}
         globalFilterFn={
           server
             ? undefined
@@ -166,12 +174,7 @@ export function AdminPeopleSection({
         }
         toolbar={(table) =>
           server ? (
-            <AdminDirectoryPager
-              page={server.page}
-              pageSize={server.pageSize}
-              total={server.total}
-              onPageChange={server.onPageChange}
-            />
+            <AdminDirectoryCount total={server.total} />
           ) : (
             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {table.getFilteredRowModel().rows.length === users.length

@@ -231,19 +231,17 @@ describe("AdminProjectsSection", () => {
     expect(screen.queryByText("In Org")).not.toBeInTheDocument()
   })
 
-  it("reports search and lens changes without hiding a server page", async () => {
+  it("reports search and lens changes without hiding rows the server returned", async () => {
     const onSearchChange = vi.fn()
     const onLensChange = vi.fn()
-    const onPageChange = vi.fn()
     render(
       <MemoryRouter>
         <AdminProjectsSection
           projects={[proj({ id: "a", name: "Alpha" }), proj({ id: "b", name: "Beta" })]}
           server={{
             total: 80,
-            page: 0,
-            pageSize: 50,
-            onPageChange,
+            hasMore: true,
+            onLoadMore: vi.fn(),
             search: "",
             onSearchChange,
             lens: "all",
@@ -254,20 +252,20 @@ describe("AdminProjectsSection", () => {
     )
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
+    expect(screen.getByText("80")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("admin-projects-load-more")).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("Search projects…"), { target: { value: "zzz" } })
     expect(onSearchChange).toHaveBeenCalledWith("zzz")
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("Beta")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled()
-    fireEvent.click(screen.getByRole("button", { name: "Next" }))
-    expect(onPageChange).toHaveBeenCalledWith(1)
     await pickLens(/needs attention/i)
     expect(onLensChange).toHaveBeenCalledWith("needs-attention")
     expect(screen.getByText("Alpha")).toBeInTheDocument()
   })
-  // AQU-2708: client mode still windows a long array. Production pages on the
-  // server (AQU-2722); this mode keeps search, lens, and row open working
-  // across the whole array the caller passed in.
+  // AQU-2708: client mode still windows a long array. Production grows the
+  // list as it scrolls (AQU-2722); this mode keeps search, lens, and row open
+  // working across the whole array the caller passed in.
   describe("a long list in a scrolling pane", () => {
     const SCROLLPORT_PX = 400
     const ROW_PX = 40

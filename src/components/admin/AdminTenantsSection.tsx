@@ -9,6 +9,7 @@ import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 
 /**
@@ -27,6 +28,7 @@ export function AdminTenantsSection({
   onSelectOrg,
   onOpenOrgPath,
   onOpenInvites,
+  server,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
@@ -36,6 +38,8 @@ export function AdminTenantsSection({
   onOpenOrgPath: (orgId: number, subpath: string) => void
   /** Open the admin invites tab with this org pre-selected. */
   onOpenInvites?: (orgId: number) => void
+  /** When set, search, sort, and pages are the server's. Rows are shown as returned. */
+  server?: AdminTableServer
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -74,13 +78,13 @@ export function AdminTenantsSection({
       },
       {
         id: "teams",
-        accessorFn: (o) => teamCountByOrg.get(o.id) ?? 0,
+        accessorFn: (o) => o.teamCount ?? teamCountByOrg.get(o.id) ?? 0,
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Teams" className="justify-end" />
         ),
         cell: ({ row }) => (
           <div className="text-right tabular-nums">
-            {teamCountByOrg.get(row.original.id) ?? 0}
+            {row.original.teamCount ?? teamCountByOrg.get(row.original.id) ?? 0}
           </div>
         ),
       },
@@ -175,17 +179,26 @@ export function AdminTenantsSection({
       rowLink={{ columnId: "organization", to: (o) => adminOrgHref(o.id) }}
       initialSorting={[{ id: "organization", desc: false }]}
       searchPlaceholder="Search organizations…"
-      globalFilterFn={(row, _columnId, filterValue) => {
-        const q = String(filterValue).trim().toLowerCase()
-        if (!q) return true
-        const o = row.original
-        return (
-          (o.name ?? `#${o.id}`).toLowerCase().includes(q) ||
-          (o.ownerUsername ?? "").toLowerCase().includes(q)
-        )
-      }}
+      searchValue={server?.search}
+      onSearchChange={server?.onSearchChange}
+      searching={server?.searching}
+      loading={server?.loading}
+      onSortingChange={server?.onSortingChange}
+      globalFilterFn={
+        server
+          ? undefined
+          : (row, _columnId, filterValue) => {
+              const q = String(filterValue).trim().toLowerCase()
+              if (!q) return true
+              const o = row.original
+              return (
+                (o.name ?? `#${o.id}`).toLowerCase().includes(q) ||
+                (o.ownerUsername ?? "").toLowerCase().includes(q)
+              )
+            }
+      }
       emptyState={
-        orgs.length === 0 ? (
+        (server ? !server.loading && server.total === 0 && !server.search.trim() : orgs.length === 0) ? (
           <TableEmptyState
             icon={Building2}
             title="No organizations yet"
@@ -193,13 +206,23 @@ export function AdminTenantsSection({
           />
         ) : undefined
       }
-      toolbar={(table) => (
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {table.getFilteredRowModel().rows.length === orgs.length
-            ? `${orgs.length} orgs`
-            : `${table.getFilteredRowModel().rows.length} of ${orgs.length} orgs`}
-        </span>
-      )}
+      toolbar={(table) =>
+        server ? (
+          <AdminDirectoryPager
+            page={server.page}
+            pageSize={server.pageSize}
+            total={server.total}
+            onPageChange={server.onPageChange}
+            noun="orgs"
+          />
+        ) : (
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {table.getFilteredRowModel().rows.length === orgs.length
+              ? `${orgs.length} orgs`
+              : `${table.getFilteredRowModel().rows.length} of ${orgs.length} orgs`}
+          </span>
+        )
+      }
       testId="admin-tenants-table"
       className={ADMIN_TABLE_PANEL_CLASS}
       dense

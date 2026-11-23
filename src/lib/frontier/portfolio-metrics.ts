@@ -18,7 +18,8 @@ import {
   type LaneMeasure,
 } from "../lanes/lane-delivers"
 
-const STALE_MS = 14 * 24 * 60 * 60 * 1000
+/** No work for this long is stalled. The admin directory's SQL uses the same window. */
+export const STALE_MS = 14 * 24 * 60 * 60 * 1000
 
 /**
  * A lane contributes its activity timestamp, and (media redesign slice 1) what

@@ -308,19 +308,35 @@ correctness depends on.
    commit on this same branch — `d6e2199a`, a **documentation-only** change
    with no code in it at all — came back **HARNESS UNAVAILABLE, canary health
    check failed (2 of 2)**, and took the `pr` check red with it (run
-   45216519763). Two runs of the same suite against the same branch, one
-   commit apart, with nothing executable between them: **14 passed**, then
-   nothing at all. The provider is intermittent, not recovered, and a single
-   green run is not evidence that it recovered — which is the same error in
+   45216519763). The next commit after *that* — `13120da4`, documentation
+   only again — came back **16 passed, 2 inconclusive, nothing dark** (run
+   45218649841), and the `pr` check went green with it.
+
+   So the three runs this PR happened to trigger, all within 55 minutes, on a
+   branch whose only changes between them were prose:
+
+   | Head | Time (UTC) | Result |
+   |---|---|---|
+   | `4bb78e8e` | 15:56 | 14 passed · 3 inconclusive · 1 no-evidence |
+   | `d6e2199a` | 16:36 | **HARNESS UNAVAILABLE** (canary 2 of 2) |
+   | `13120da4` | 16:49 | 16 passed · 2 inconclusive |
+
+   The provider is **flapping**, not recovered and not down — and a single
+   green run is not evidence that it recovered, which is the same error in
    miniature that OPS-55 is about, made here by this pass and caught only
-   because the docs commit happened to re-trigger the suite.
+   because a docs commit happened to re-trigger the suite. Three runs are a
+   small sample and they are only the ones this PR caused; the point is the
+   variance, not the ratio.
 
    **What that costs the recommendation.** "Tighten the threshold now" was
-   wrong for exactly the reason 11-09 and 11-16 gave: with an intermittent
+   wrong for exactly the reason 11-09 and 11-16 gave: with a flapping
    provider, a stricter gate turns PRs red unpredictably, on infrastructure
    rather than on their diffs. The order they set stands unchanged — **restore
    the provider, then tighten** — and "restored" has to mean a run of runs,
-   not one.
+   not one. Flapping also reframes the remediation: the question is not
+   *"is the provider back up"* but *"why does it fail two runs in three
+   minutes apart"*, which is a reliability question for whoever owns that
+   integration, not a threshold question.
 
    **What does survive, and it is worth having.** Those 14 passes were real
    and they were against *this* change: `redteam.edit-other-project` and

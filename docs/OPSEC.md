@@ -599,9 +599,11 @@
 > itself. But the provider is **intermittent, not restored**, and this pass
 > nearly claimed otherwise: forty minutes later the next commit on the same
 > branch, a documentation-only one, came back **HARNESS UNAVAILABLE (canary
-> 2 of 2)** and took the `pr` check red. Two runs of the same suite one
-> commit apart with nothing executable between them, 14 passed then nothing,
-> so 11-09's and 11-16's order stands unchanged — restore the provider, then
+> 2 of 2)** and took the `pr` check red — and the one after that went back to
+> **16 passed**. Three runs in 55 minutes on a branch whose only changes
+> between them were prose: 14 passed, dark, 16 passed. The provider is
+> **flapping**, not recovered and not down, so 11-09's and 11-16's order
+> stands unchanged — restore the provider, then
 > tighten — and "restored" must mean a run of runs. The pass also **narrows
 > OPS-55**: a *total* outage is caught correctly by the canary check, so the
 > `attacks.every(…)` flaw is about **partial** outages, where one returning

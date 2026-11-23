@@ -137,24 +137,54 @@ interface LocationRowRaw {
   cell_type: string | null
   place_label: string | null
   position: number | string | null
-  /** `TOTAL_SELECT`. A bigint, so the driver may hand it over as a string. */
+  /** `HIT_TOTAL_SELECT`. A bigint, so the driver may hand it over as a string. */
   total_count?: number | string | null
 }
 
 /**
- * How many rows the WHERE admits, counted before ORDER BY and LIMIT cut the
- * page. A window over the page's own query: there is then one WHERE, and a
- * filter added to it later is counted too.
+ * How a page is read now that its total comes with it (AQU-2732).
  *
- * What it costs follows the matches, not the page. With the window above
- * them the joins run for every matching row, where a bare LIMIT ran them for
- * the page only: about 5 µs a match on a local Bible. That is nothing for a
- * term with hundreds of hits (11 → 14 ms) and about 100 ms for "the" (23,210
- * hits, 40 → 150 ms). A second, uncorrelated `COUNT(*)` over the same WHERE
- * was measured against it: no better on "the" (110 ms), and worse for text
- * matching, where it reads the whole project a second time.
+ * Every search here is two queries in one statement. The inner one, `hit`, is
+ * the search itself: the WHERE, its ORDER BY and LIMIT, and `COUNT(*) OVER()`
+ * beside them, so one WHERE makes both the page and the total and a filter
+ * added to it later is counted too. It hands out nothing wider than where
+ * each matched row is. The outer one fetches the rows of the page and does
+ * the per-row work for those alone: the snippet, the opposite side, where the
+ * cell sits in its file.
+ *
+ * The split is what keeps the count cheap. Measured on a Bible, limit 50,
+ * before the total / counted in one flat query / counted in `hit`:
+ *   "the", word index, 23,210 matches     39 / 127 / 46 ms
+ *   Burmese text matching, 10,452 matches 92 / 133 / 96 ms
+ *   "temple", 596 matches                 13 /  12 / 12 ms
+ * Flat, the window sat above the joins, so the location lookup ran for every
+ * match where a bare LIMIT had run it for the page. Carrying the whole row
+ * through `hit` was also tried: the window then buffers every match's text,
+ * and Burmese went to 152 ms.
+ *
+ * What no shape avoids is reading every match once. A search ordered by rank
+ * already did. A match-case search, which could stop at its first 50 in index
+ * order, now reads the project to the end: 13 → 36 ms on that Bible.
+ *
+ * `row_id` is the row's `ctid`, its physical address. Inside one statement
+ * that is exact: both reads share a snapshot, and a row version the snapshot
+ * can see is neither moved nor removed while the statement runs. It is used
+ * over the primary key because it needs no index: given the four key columns
+ * the planner chose `idx_cells_lane_id`, at 35 µs a row. Were `cells` ever
+ * partitioned, `tableoid` would have to travel with it.
  */
-const TOTAL_SELECT = "  COUNT(*) OVER() AS total_count,"
+const HIT_SELECT = [
+  "  cells.ctid AS row_id,",
+  "  cells.file_id AS file_id,",
+  "  cells.cell_id AS cell_id,",
+  "  cells.side AS side,",
+].join(" ")
+
+/** How many rows the WHERE of `hit` admits, counted before its LIMIT cuts the page. */
+const HIT_TOTAL_SELECT = "  COUNT(*) OVER() AS total_count"
+
+/** The rows of the page. Aliased `cells`, as every fragment written against the table expects. */
+const HIT_ROW_FROM = "JOIN cells ON cells.ctid = hit.row_id"
 
 /** The count rides on every row. An empty page has no row, and matched nothing. */
 function totalOf(rows: ReadonlyArray<Pick<LocationRowRaw, "total_count">>): number {
@@ -420,15 +450,19 @@ export async function queryScopedSearchPage(
     "  cells.side AS side,",
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
-    "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank,",
-    TOTAL_SELECT,
+    "  hit.rank AS rank,",
+    "  hit.total_count AS total_count,",
     // One opposite-side value, never a row multiplier. A target hit has a
     // single source lane; a source hit may have several target lanes, and
     // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
     paired.sql,
     LOCATION_SELECT,
+    "FROM (",
+    "SELECT",
+    HIT_SELECT,
+    "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank,",
+    HIT_TOTAL_SELECT,
     "FROM cells",
-    LOCATION_FROM,
     "WHERE cells.value_tsv @@ plainto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
     // AQU-1424: a parked cell is not searchable. The anti-join is required
@@ -443,7 +477,9 @@ export async function queryScopedSearchPage(
     // script the person was actually looking for.
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [q, q, ...paired.binds, q, verifiedProjectId]
+  // Binds in the order their placeholders appear: the outer SELECT list, then
+  // `hit`.
+  const binds: unknown[] = [q, ...paired.binds, q, q, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
@@ -462,6 +498,7 @@ export async function queryScopedSearchPage(
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
+  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM, "ORDER BY hit.rank DESC")
 
   const sql = parts.join(" ")
 
@@ -557,11 +594,14 @@ export async function queryScopedPatternPage(
     "  cells.file_id AS file_id,",
     "  cells.side AS side,",
     "  cells.value AS value,",
-    TOTAL_SELECT,
+    "  hit.total_count AS total_count,",
     paired.sql,
     LOCATION_SELECT,
+    "FROM (",
+    "SELECT",
+    HIT_SELECT,
+    HIT_TOTAL_SELECT,
     "FROM cells",
-    LOCATION_FROM,
     "WHERE cells.project_id = ?",
     `AND ${notHiddenSql("cells")}`,
     `AND ${inCountedFileSql("cells")}`,
@@ -596,7 +636,10 @@ export async function queryScopedPatternPage(
   }
   parts.push("ORDER BY cells.cell_id, cells.side")
   parts.push("LIMIT ?")
+  // The last bind, and the fallback below relies on that: nothing after `hit`
+  // takes one.
   binds.push(fetchLimit)
+  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM, "ORDER BY hit.cell_id, hit.side")
 
   let result: { results: PatternRowRaw[] }
   try {
@@ -745,6 +788,7 @@ export async function queryScopedTextPage(
   const limit = clampLimit(opts.limit)
   const paired = pairedSubselect(opts.laneIds)
   const cellWall = wallFor("cells", opts.laneIds)
+  const wholeFirst = terms.length > 1
 
   // Occurrences of one piece: how much shorter the text gets with the piece
   // cut out, over the piece's length. Two binds per piece.
@@ -757,19 +801,33 @@ export async function queryScopedTextPage(
     "  cells.file_id AS file_id,",
     "  cells.side AS side,",
     "  cells.value AS value,",
-    `  (${terms.map(() => occurrences).join(" + ")}) AS rank,`,
-    TOTAL_SELECT,
+    "  hit.rank AS rank,",
+    "  hit.total_count AS total_count,",
     paired.sql,
     LOCATION_SELECT,
+    "FROM (",
+    "SELECT",
+    HIT_SELECT,
+    `  (${terms.map(() => occurrences).join(" + ")}) AS rank,`,
+    // Several words: does the cell hold the whole query as typed? The first
+    // key of the order.
+    ...(wholeFirst ? ["  (position(lower(?) in lower(cells.value)) > 0) AS whole,"] : []),
+    HIT_TOTAL_SELECT,
     "FROM cells",
-    LOCATION_FROM,
     "WHERE cells.project_id = ?",
     // AQU-1424 / AQU-1626, as in queryScopedSearch: parked cells, deleted
     // files and hidden companions are not searchable.
     `AND ${notHiddenSql("cells")}`,
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [...terms.flatMap((term) => [term, term]), ...paired.binds, verifiedProjectId]
+  // Binds in the order their placeholders appear: the outer SELECT list,
+  // `hit`, then the outer LIMIT.
+  const binds: unknown[] = [
+    ...paired.binds,
+    ...terms.flatMap((term) => [term, term]),
+    ...(wholeFirst ? [q.trim()] : []),
+    verifiedProjectId,
+  ]
 
   for (const term of terms) {
     parts.push("AND position(lower(?) in lower(cells.value)) > 0")
@@ -788,20 +846,27 @@ export async function queryScopedTextPage(
     binds.push(...cellWall.binds)
   }
 
-  const order: string[] = []
-  if (terms.length > 1) {
-    order.push("(position(lower(?) in lower(cells.value)) > 0) DESC")
-    binds.push(q.trim())
-  }
-  order.push(
-    "rank DESC",
-    "cells.file_id",
+  // The order ends in where each hit sits in its file, and only the outer
+  // query knows that. So `hit` cuts on the keys it does have and keeps every
+  // row that ties with the last one it takes: whatever the full order then
+  // puts on the page is among them. A tie is the hits of one file that
+  // mention the term equally often, so it is one book's worth at most.
+  const hitOrder = [...(wholeFirst ? ["whole DESC"] : []), "rank DESC", "cells.file_id"]
+  parts.push(`ORDER BY ${hitOrder.join(", ")}`)
+  parts.push("FETCH FIRST (?) ROWS WITH TIES")
+  binds.push(limit)
+  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM)
+
+  const order = [
+    ...(wholeFirst ? ["hit.whole DESC"] : []),
+    "hit.rank DESC",
+    "hit.file_id",
     "COALESCE(loc.source_sequence, 1e300)",
     `${REF_CHAPTER_SQL} NULLS LAST`,
     `${REF_VERSE_SQL} NULLS LAST`,
-    "cells.cell_id",
-    "cells.side",
-  )
+    "hit.cell_id",
+    "hit.side",
+  ]
   parts.push(`ORDER BY ${order.join(", ")}`)
   parts.push("LIMIT ?")
   binds.push(limit)
@@ -891,12 +956,20 @@ export async function queryScopedExactPage(
     "  cells.side AS side,",
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
-    "  ts_rank(cells.value_tsv, phraseto_tsquery('simple', ?)) AS rank,",
-    TOTAL_SELECT,
+    "  hit.rank AS rank,",
+    "  hit.total_count AS total_count,",
     "  paired.value AS paired_value,",
     LOCATION_SELECT,
+    "FROM (",
+    "SELECT",
+    HIT_SELECT,
+    // The pairing stays inside `hit`: it decides how many rows there are, so
+    // the count and the LIMIT both have to see it. Only where the paired row
+    // is leaves; null when there is none.
+    "  paired.ctid AS paired_row_id,",
+    "  ts_rank(cells.value_tsv, phraseto_tsquery('simple', ?)) AS rank,",
+    HIT_TOTAL_SELECT,
     "FROM cells",
-    LOCATION_FROM,
     "LEFT JOIN cells AS paired",
     "  ON  paired.project_id = cells.project_id",
     "  AND paired.file_id    = cells.file_id",
@@ -926,6 +999,13 @@ export async function queryScopedExactPage(
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
+  parts.push(
+    ") AS hit",
+    HIT_ROW_FROM,
+    "LEFT JOIN cells AS paired ON paired.ctid = hit.paired_row_id",
+    LOCATION_FROM,
+    "ORDER BY hit.rank DESC",
+  )
 
   const sql = parts.join(" ")
 

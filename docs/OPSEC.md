@@ -590,7 +590,16 @@
 > and reported, not patched, per the OPS-24 precedent; `_contextual-helpers.ts`
 > carries the same un-de-escalated `requireRole` shape and is the queue item
 > with real leverage; and the org knowledge **read** floor is written as the
-> literal `0`, a bound that can never bite.
+> literal `0`, a bound that can never bite. The pass also records **OPS-55
+> reversing**: the Adversarial Jev run on this change's own head reports
+> **1 no-evidence / 3 inconclusive / 14 passed**, against 11-16's **17 dark /
+> 1 passed**, and both cross-project authorization attacks
+> (`redteam.edit-other-project`, `redteam.viewer-wipe-file`) ran and passed
+> for the first time since 11-07. The provider outage is over, so the standing
+> *"restore the provider, then tighten"* has had its precondition met — but
+> `harnessHealth`'s `every` predicate is untouched, so one passing attack
+> would certify a green run again the moment the provider lapses. Tightening
+> it is now cheap and is the recommended next non-slot task.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

@@ -289,11 +289,29 @@ correctness depends on.
 5. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
    `integration_connections` / `integration_links` for rows written on platform
    authority; the `desktop-release-signing` Environment's required reviewers
-   (OPS-40); and 11-16's adversarial-gate finding — the health gate's `every`
-   predicate still certifies a run healthy on one passing attack, and
-   `redteam.edit-other-project` / `redteam.viewer-wipe-file`, the suite's only
-   cross-project authorization attacks, have still not run on any commit since
-   11-07. Order remains: restore the provider, then tighten.
+   (OPS-40).
+
+6. **OPS-55 has reversed, and this PR's own run is the evidence.** [FACT] Every
+   pass since 11-07 has carried some form of *"the adversarial gate is green
+   while its attacks are dark"*, worsening from **3 inconclusive / 15 passed**
+   (11-07) to **14 / 4** (11-09) to **17 dark / 1 passed** (11-16). The
+   Adversarial Jev run on this change's own head (`4bb78e8e`, run
+   45208146214) reports **no evidence: 1 · inconclusive: 3 · passed: 14** —
+   and, directly to the point of this series, **both cross-project
+   authorization attacks ran and passed**: `redteam.edit-other-project` and
+   `redteam.viewer-wipe-file`, which 11-09 and 11-16 recorded as not having
+   run on any commit since 11-07. The provider outage those passes were
+   waiting on is evidently over, so the standing instruction they left —
+   *"restore the provider, then tighten"* — has had its precondition met.
+
+   **What this does NOT close.** The structural finding is untouched: because
+   `harnessHealth`'s predicate is `attacks.every(…)`, one passing attack still
+   certifies a whole run healthy, so the gate would go green again the moment
+   the provider lapses. The symptom is gone; the mechanism that hid it is not.
+   Tightening the threshold is now cheap — it would not turn every open PR red,
+   which was 11-09's and 11-16's reason for deferring — so this is the right
+   moment, and it remains out of scope for an auth/session pass only because
+   it is not auth/session code. **Recommended as the next non-slot task.**
 
 ---
 
@@ -369,8 +387,22 @@ the fix was applied — the series' standard decisive check.
   compiles and `auth-worker`'s own `tsc` does not fully cover, so this check is
   load-bearing here rather than a formality.
 * `npx eslint` on all five changed/new files: **0 errors, 0 warnings.**
-* `pnpm run check:doc-pins`: see the run log below.
-* Full `auth-worker` suite (`npx vitest run`): see the run log below.
+* `pnpm run check:doc-pins`: **190 pins resolve across 417 docs.**
+* Full `auth-worker` suite (`npx vitest run`): **420 files, 5105 passing, 2
+  expected-fail, 0 failures** (1551 s). Nothing red remains in this package to
+  distinguish from the change under review — the condition that makes a suite
+  run worth anything as evidence — and it is clean for the sixth pass running.
+  11-16 measured 414 files / 4960 passing; the 6 new files and 145 new tests
+  since include this pass's own 22, and the two expected-fails are the same
+  two.
+* **CI on the PR head** (`4bb78e8e`, PR #2173): **all 15 checks green**, PR
+  `mergeable_state: clean`. That includes `auth-worker-tests`, `lint`,
+  `sync-worker-tests`, `agent-worker-tests` and all three `unit` shards, run
+  in a clean container rather than this one — which is the stronger form of
+  the two suite runs above. Note for whoever repeats this: a docs-only push
+  while CI is mid-run **cancels** the in-flight jobs (it cancelled eight on
+  the previous head here), so batch documentation fixes rather than pushing
+  them one at a time against a running gate.
 
 Environment note, for whoever re-runs this: dependencies are **not** installed
 in this container at session start. Use **`pnpm install --ignore-scripts`** at

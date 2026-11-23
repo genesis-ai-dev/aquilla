@@ -70,6 +70,7 @@ import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
 import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
+import { orgReachProjectIds, revokeLiveSessionsWhereLost, teamProjectIds } from "../services/live-revocation"
 import {
   applyTeamMemberLaneGrants,
   applyTeamProjectLaneGrants,
@@ -1011,6 +1012,9 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
     roleBefore: null,
     roleAfter: null,
   })
+  // AQU-2321 (AQU-346): leaving a team can close every project it opened.
+  // Eject live sessions on each one nothing else still admits them to.
+  await revokeLiveSessionsWhereLost(c.env, targetUserId, await teamProjectIds(c.env, groupId), (work) => deferBestEffort(c, work))
   return c.json({ removed: true })
 })
 
@@ -1157,6 +1161,15 @@ async function resolveOrgWriteRole(
 
 const TEAM_ELEVATION_ERROR = "elevation required to manage teams with platform-admin access"
 const INVITE_ELEVATION_ERROR = "elevation required to manage invites with platform-admin access"
+
+/** waitUntil only exists with a real ExecutionContext (prod); the test harness has none and the getter throws. */
+function deferBestEffort(c: Context<AuthHonoEnv>, work: Promise<unknown>): void {
+  try {
+    c.executionCtx.waitUntil(work)
+  } catch {
+    void work
+  }
+}
 
 const resolveTeamWriteRole = (c: Context<AuthHonoEnv>, orgId: number) =>
   resolveOrgWriteRole(c, orgId, ROLE.MAINTAINER, "org role >= maintainer required", TEAM_ELEVATION_ERROR)
@@ -1644,6 +1657,8 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
   }
 
   const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
+  // AQU-2321: read what this membership opens before the delete takes it away.
+  const reached = await orgReachProjectIds(c.env, orgId, targetUserId)
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
@@ -1657,6 +1672,9 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     roleBefore,
     roleAfter: null,
   })
+  // AQU-2321 (AQU-346): an org removal (and the team rows it takes with it)
+  // can close many projects at once; eject live sessions on each lost one.
+  await revokeLiveSessionsWhereLost(c.env, targetUserId, reached, (work) => deferBestEffort(c, work))
 
   return c.json({ removed: true })
 })

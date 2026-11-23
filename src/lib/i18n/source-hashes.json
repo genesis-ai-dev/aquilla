@@ -4996,7 +4996,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9977,7 +9980,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14945,7 +14951,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19939,7 +19948,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26207,7 +26219,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32477,7 +32492,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38819,7 +38837,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45208,7 +45229,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51512,7 +51536,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59762,7 +59789,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68017,7 +68047,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76677,7 +76710,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84986,7 +85022,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93665,7 +93704,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102338,7 +102380,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -111046,7 +111091,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119741,7 +119789,10 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128428,6 +128479,9 @@
     "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
     "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
     "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
-    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d",
+    "common.role.member": "14aaa815717ef414",
+    "common.role.memberDescription": "85e5978e8a088b71",
+    "org.role.descriptionMember": "162c3e8723071d2b"
   }
 }

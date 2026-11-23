@@ -300,18 +300,45 @@ correctness depends on.
    and, directly to the point of this series, **both cross-project
    authorization attacks ran and passed**: `redteam.edit-other-project` and
    `redteam.viewer-wipe-file`, which 11-09 and 11-16 recorded as not having
-   run on any commit since 11-07. The provider outage those passes were
-   waiting on is evidently over, so the standing instruction they left —
-   *"restore the provider, then tighten"* — has had its precondition met.
+   run on any commit since 11-07.
 
-   **What this does NOT close.** The structural finding is untouched: because
-   `harnessHealth`'s predicate is `attacks.every(…)`, one passing attack still
-   certifies a whole run healthy, so the gate would go green again the moment
-   the provider lapses. The symptom is gone; the mechanism that hid it is not.
-   Tightening the threshold is now cheap — it would not turn every open PR red,
-   which was 11-09's and 11-16's reason for deferring — so this is the right
-   moment, and it remains out of scope for an auth/session pass only because
-   it is not auth/session code. **Recommended as the next non-slot task.**
+   **The provider is NOT restored, and this pass nearly said it was.** The
+   first draft of this section read *"the provider outage is evidently over,
+   so tightening the threshold is now cheap."* Forty minutes later the **next**
+   commit on this same branch — `d6e2199a`, a **documentation-only** change
+   with no code in it at all — came back **HARNESS UNAVAILABLE, canary health
+   check failed (2 of 2)**, and took the `pr` check red with it (run
+   45216519763). Two runs of the same suite against the same branch, one
+   commit apart, with nothing executable between them: **14 passed**, then
+   nothing at all. The provider is intermittent, not recovered, and a single
+   green run is not evidence that it recovered — which is the same error in
+   miniature that OPS-55 is about, made here by this pass and caught only
+   because the docs commit happened to re-trigger the suite.
+
+   **What that costs the recommendation.** "Tighten the threshold now" was
+   wrong for exactly the reason 11-09 and 11-16 gave: with an intermittent
+   provider, a stricter gate turns PRs red unpredictably, on infrastructure
+   rather than on their diffs. The order they set stands unchanged — **restore
+   the provider, then tighten** — and "restored" has to mean a run of runs,
+   not one.
+
+   **What does survive, and it is worth having.** Those 14 passes were real
+   and they were against *this* change: `redteam.edit-other-project` and
+   `redteam.viewer-wipe-file`, the suite's only cross-project authorization
+   attacks and the two most relevant to every finding in this series, ran
+   green on `4bb78e8e`. That is positive adversarial evidence for OPS-58
+   specifically, and the first such evidence any pass in this series has had
+   since 11-07.
+
+   **And one refinement to OPS-55 itself.** [FACT] The `d6e2199a` run reported
+   **HARNESS UNAVAILABLE** rather than going green — so a *total* outage is
+   caught correctly, by the canary check, on a different code path from the
+   `attacks.every(…)` predicate. OPS-55's flaw is therefore narrower than the
+   series has been stating it: it is about **partial** outages, where some
+   attacks return and the `every` predicate lets one passing attack certify
+   the rest, not about the harness being wholly down. That makes the finding
+   more precise, not less serious — a partial outage is the harder case to
+   notice, and it is the one the gate still mishandles.
 
 ---
 

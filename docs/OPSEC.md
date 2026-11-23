@@ -595,11 +595,17 @@
 > **1 no-evidence / 3 inconclusive / 14 passed**, against 11-16's **17 dark /
 > 1 passed**, and both cross-project authorization attacks
 > (`redteam.edit-other-project`, `redteam.viewer-wipe-file`) ran and passed
-> for the first time since 11-07. The provider outage is over, so the standing
-> *"restore the provider, then tighten"* has had its precondition met — but
-> `harnessHealth`'s `every` predicate is untouched, so one passing attack
-> would certify a green run again the moment the provider lapses. Tightening
-> it is now cheap and is the recommended next non-slot task.
+> for the first time since 11-07 — positive adversarial evidence for OPS-58
+> itself. But the provider is **intermittent, not restored**, and this pass
+> nearly claimed otherwise: forty minutes later the next commit on the same
+> branch, a documentation-only one, came back **HARNESS UNAVAILABLE (canary
+> 2 of 2)** and took the `pr` check red. Two runs of the same suite one
+> commit apart with nothing executable between them, 14 passed then nothing,
+> so 11-09's and 11-16's order stands unchanged — restore the provider, then
+> tighten — and "restored" must mean a run of runs. The pass also **narrows
+> OPS-55**: a *total* outage is caught correctly by the canary check, so the
+> `attacks.every(…)` flaw is about **partial** outages, where one returning
+> attack certifies the rest. Harder to notice, and still unhandled.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

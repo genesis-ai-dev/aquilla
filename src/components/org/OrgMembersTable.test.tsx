@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { OrgMembersTable } from "./OrgMembersTable"
+import { UserError } from "@/lib/errors/user-error"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import { expectClickNote } from "@/test-utils/tooltip"
@@ -145,14 +146,27 @@ describe("OrgMembersTable — the one role dialog (AQU-2289)", () => {
     expect(within(dialog).getByRole("tab", { name: "Invite by email" })).toBeInTheDocument()
   })
 
-  it("says why a save was refused in plain words", async () => {
-    const add = vi.fn(async () => { throw Object.assign(new Error("forbidden"), { status: 403 }) })
+  // AQU-2728: both refusals are a 403. Only the first is a denial; a platform
+  // admin who still has to enter their admin code is told that, not "owners only".
+  it.each([
+    {
+      refusal: "the caller lacks the role",
+      body: '{"error":"only org owners can manage membership"}',
+      shown: "Only organization owners can change member roles.",
+    },
+    {
+      refusal: "the admin code is needed first",
+      body: '{"error":"elevation required to manage membership on an org you do not belong to"}',
+      shown: "Verify with your admin code, then try again.",
+    },
+  ])("says why a save was refused when $refusal", async ({ body, shown }) => {
+    const add = vi.fn(async () => { throw new UserError(403, body, "org") })
     renderTable({ add })
     await openChangeRole("esther")
     fireEvent.click(await screen.findByRole("combobox", { name: /role for esther/i }))
     await pickRoleOption(ROLE.MAINTAINER)
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(await screen.findByRole("alert")).toHaveTextContent(shown)
   })
 })
 

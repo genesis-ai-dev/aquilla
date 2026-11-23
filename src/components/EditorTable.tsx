@@ -1493,12 +1493,14 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const styleSegmentBold = t("editor.format.bold")
   const styleSegmentItalic = t("editor.format.italic")
   const styleSegmentBoldItalic = t("editor.idml.segmentBoldItalic")
+  const styleSegmentSmallCaps = t("editor.idml.segmentSmallCaps")
   useEffect(() => {
     applyVisibleStyleSegmentChrome(visibleStyleSegments, {
       regular: styleSegmentRegular,
       bold: styleSegmentBold,
       italic: styleSegmentItalic,
       boldItalic: styleSegmentBoldItalic,
+      smallCaps: styleSegmentSmallCaps,
     })
   }, [
     visibleStyleSegments,
@@ -1506,6 +1508,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     styleSegmentBold,
     styleSegmentItalic,
     styleSegmentBoldItalic,
+    styleSegmentSmallCaps,
   ])
   useEffect(() => () => {
     applyVisibleStyleSegmentChrome(false, {
@@ -1513,6 +1516,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       bold: "",
       italic: "",
       boldItalic: "",
+      smallCaps: "",
     })
   }, [])
   // The switcher trigger and the closed pill name the lane the same way.

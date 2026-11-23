@@ -204,6 +204,12 @@ export interface IdmlSourceManifest {
 export interface IdmlStyleEmphasis {
   readonly bold: boolean
   readonly italic: boolean
+  /**
+   * InDesign `Capitalization` of SmallCaps, AllSmallcaps, or CapToSmallCap,
+   * including a face inherited through BasedOn. Absent means not small caps,
+   * so a bold-only entry stored before this face existed still reads correctly.
+   */
+  readonly smallCaps?: boolean
 }
 
 export type IdmlStyleCatalog = Readonly<Record<string, IdmlStyleEmphasis>>
@@ -212,7 +218,7 @@ export interface IdmlParseResult {
   readonly units: readonly IdmlTranslationUnit[]
   readonly manifest: IdmlSourceManifest
   readonly diagnostics: readonly IdmlDiagnostic[]
-  /** Character styles whose FontStyle is Bold and/or Italic. Display-only. */
+  /** Character styles whose face is Bold, Italic, and/or small caps. Display-only. */
   readonly styleCatalog?: IdmlStyleCatalog
 }
 

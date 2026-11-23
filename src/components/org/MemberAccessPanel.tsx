@@ -75,11 +75,19 @@ export function MemberAccessRow({
 export function MemberAccessSubRow({
   orgId,
   userId,
+  orgRoleLevel,
   callerOrgRoleLevel,
   colSpan,
 }: {
   orgId: number
   userId: number
+  /**
+   * AQU-2729: the member's org role as the roster row shows it. The panel
+   * loads its own copy of the member's access once, so it is keyed on this:
+   * a role change on the row loads the panel again instead of leaving the old
+   * role beside the new one.
+   */
+  orgRoleLevel: number | null
   callerOrgRoleLevel?: number | null
   colSpan: number
 }) {
@@ -87,6 +95,7 @@ export function MemberAccessSubRow({
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={colSpan} className="bg-muted/20 px-4 py-3">
         <MemberAccessDetails
+          key={orgRoleLevel ?? "none"}
           orgId={orgId}
           userId={userId}
           callerOrgRoleLevel={callerOrgRoleLevel}

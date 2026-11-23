@@ -67,6 +67,8 @@
     "offline:replay-check": "tsx scripts/offline-replay-check.ts",
     "i18n:export": "tsx scripts/i18n-catalog.ts export",
     "i18n:import": "tsx scripts/i18n-catalog.ts import",
+    "i18n:import-todo": "tsx scripts/i18n-catalog.ts import-todo",
+    "i18n:baseline": "tsx scripts/i18n-catalog.ts baseline",
     "i18n:shots": "tsx scripts/i18n-shots.ts",
     "i18n:todo": "tsx scripts/i18n-todo.ts",
     "test:e2e:guard": "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts scripts/lib/e2e-lock.test.ts scripts/lib/worktree-install-guard.test.ts scripts/lib/spawn-command.test.ts scripts/lib/playwright-loader-env.test.ts scripts/lib/listening-pids.test.ts",

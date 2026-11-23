@@ -38,10 +38,28 @@
  *     as stale instead of shipping it — and being reported as translated —
  *     undetectably out of date.
  *
+ *     The import also prunes the translation baseline (AQU-2740) for that
+ *     locale: every key it filled stops being an allowed gap.
+ *
+ *   pnpm i18n:import-todo [dir]            (default: i18n-todo/)
+ *     Import every `<locale>.todo.json` packet in `dir` — the second half of
+ *     `pnpm i18n:todo --new`. Same merge as `import`, once per locale.
+ *
+ *   pnpm i18n:baseline [--rebuild | --allow <key>… [--locale <code>…]]
+ *     Maintain `src/lib/i18n/translation-baseline.json`, the keys each locale is
+ *     still allowed to show in English (AQU-2740, src/lib/i18n/coverage.ts).
+ *     With no flag it only prunes entries that are no longer gaps. `--allow`
+ *     adds keys that should read the same in every language (a product name,
+ *     a format). `--rebuild` allows every current gap — the one way to grow the
+ *     baseline wholesale, so it belongs in a commit of its own that says why.
+ *
+ * `check` fails on a gap the baseline does not allow, and on a baseline entry
+ * that is no longer a gap, so the baseline only shrinks.
+ *
  * See docs/I18N-CONTEXT-CATALOG.md.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -55,6 +73,18 @@ import {
   type SourceHashes,
 } from "../src/lib/i18n/catalog-export"
 import { MESSAGE_KEYS, catalogContextIssues } from "../src/lib/i18n/context"
+import {
+  allLocaleGaps,
+  allowInBaseline,
+  baselineCounts,
+  baselineFromGaps,
+  coverageViolations,
+  localeGaps,
+  pruneBaseline,
+  renderBaseline,
+  unprunedEntries,
+  type TranslationBaseline,
+} from "../src/lib/i18n/coverage"
 import { DEFAULT_LOCALE, LOCALES, isSupportedLocale } from "../src/lib/i18n/locales"
 import { CATALOGS, unknownCatalogKeys } from "../src/lib/i18n/messages/all"
 import { retiredTermIssues } from "../src/lib/i18n/retired-terms"
@@ -64,6 +94,10 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_OUT_DIR = "i18n-export"
 const MESSAGES_DIR = join(REPO_ROOT, "src/lib/i18n/messages")
 const SOURCE_HASHES_PATH = join(REPO_ROOT, "src/lib/i18n/source-hashes.json")
+const BASELINE_PATH = join(REPO_ROOT, "src/lib/i18n/translation-baseline.json")
+const DEFAULT_TODO_DIR = "i18n-todo"
+/** How many violations `check` lists before summarizing the rest. */
+const LIST_LIMIT = 40
 
 function fail(message: string): never {
   console.error(`i18n-catalog: ${message}`)
@@ -89,11 +123,61 @@ function runCheck(): void {
     )
     for (const issue of retired) console.error(`  • ${issue}`)
   }
-  if (issues.length > 0 || retired.length > 0) process.exit(1)
+  const coverage = coverageIssues()
+  if (coverage.length > 0) {
+    if (issues.length > 0 || retired.length > 0) console.error("")
+    for (const line of coverage) console.error(line)
+  }
+  if (issues.length > 0 || retired.length > 0 || coverage.length > 0) process.exit(1)
   console.log(
     `i18n-catalog: context complete — ${MESSAGE_KEYS.length} message key(s) covered, ` +
-      `no retired words.`,
+      `no retired words, every locale translated outside the baseline.`,
   )
+}
+
+/**
+ * AQU-2740: the translation ratchet. Returns the lines to print, empty when the
+ * catalogs and the baseline agree.
+ */
+function coverageIssues(): string[] {
+  const gaps = allLocaleGaps(CATALOGS, loadSourceHashes())
+  const baseline = loadBaseline()
+  const lines: string[] = []
+
+  const violations = coverageViolations(gaps, baseline)
+  if (violations.length > 0) {
+    const keys = new Set(violations.map((v) => v.key))
+    lines.push(
+      `i18n-catalog: ${keys.size} English message(s) are not translated in every locale ` +
+        `(${violations.length} locale gap(s)). New or reworded English ships with its ` +
+        `translations (docs/I18N-CONTEXT-CATALOG.md → "Translating a branch's new strings"):\n`,
+    )
+    const byKey = new Map<string, string[]>()
+    for (const v of violations) {
+      byKey.set(v.key, [...(byKey.get(v.key) ?? []), v.kind === "stale" ? `${v.locale} (stale)` : v.locale])
+    }
+    for (const [key, locales] of [...byKey].slice(0, LIST_LIMIT)) {
+      lines.push(`  • ${key}: ${locales.join(", ")}`)
+    }
+    if (byKey.size > LIST_LIMIT) lines.push(`  … and ${byKey.size - LIST_LIMIT} more key(s)`)
+    lines.push(
+      `\n  Fix: pnpm i18n:todo --new, translate the values in i18n-todo/<locale>.todo.json, ` +
+        `then pnpm i18n:import-todo.` +
+        `\n  A string that must read the same in every language: pnpm i18n:baseline --allow <key>.`,
+    )
+  }
+
+  const unpruned = unprunedEntries(gaps, baseline)
+  if (unpruned.length > 0) {
+    if (lines.length > 0) lines.push("")
+    lines.push(
+      `i18n-catalog: ${unpruned.length} translation-baseline entr(ies) are no longer gaps ` +
+        `(translated since, or the key is gone). Run pnpm i18n:baseline to prune them:`,
+    )
+    for (const { key, locale } of unpruned.slice(0, LIST_LIMIT)) lines.push(`  • ${key}: ${locale}`)
+    if (unpruned.length > LIST_LIMIT) lines.push(`  … and ${unpruned.length - LIST_LIMIT} more`)
+  }
+  return lines
 }
 
 function runExport(outDirArg?: string): void {
@@ -132,7 +216,21 @@ function saveSourceHashes(all: Record<string, SourceHashes>): void {
   writeFileSync(SOURCE_HASHES_PATH, JSON.stringify(all, null, 2) + "\n", "utf8")
 }
 
-function runImport(locale?: string, file?: string, opts: { replace?: boolean } = {}): void {
+/** The committed translation baseline. A missing file allows no gaps at all. */
+function loadBaseline(): TranslationBaseline {
+  if (!existsSync(BASELINE_PATH)) return {}
+  return JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as TranslationBaseline
+}
+
+function saveBaseline(baseline: TranslationBaseline): void {
+  writeFileSync(BASELINE_PATH, renderBaseline(baseline), "utf8")
+}
+
+function runImport(
+  locale?: string,
+  file?: string,
+  opts: { replace?: boolean; quiet?: boolean } = {},
+): void {
   if (!locale || !file) fail("usage: i18n:import <locale> <translated.json> [--replace]")
   if (!isSupportedLocale(locale)) {
     fail(`unknown locale "${locale}" — add it to src/lib/i18n/locales.ts first`)
@@ -155,20 +253,35 @@ function runImport(locale?: string, file?: string, opts: { replace?: boolean } =
   allHashes[locale] = outcome.hashes
   saveSourceHashes(allHashes)
 
+  // AQU-2740: what this import filled is no longer an allowed gap for this
+  // locale. Pruning here keeps the baseline current with no extra step, and
+  // keeps an import commit to the generated files the release plan expects.
+  const before = loadBaseline()
+  const pruned = pruneBaseline(
+    before,
+    new Map([[locale, localeGaps(outcome.catalog, outcome.hashes)]]),
+    locale,
+  )
+  const prunedCount = (baselineCounts(before)[locale] ?? 0) - (baselineCounts(pruned)[locale] ?? 0)
+  if (prunedCount > 0) saveBaseline(pruned)
+
   const translated = MESSAGE_KEYS.length - outcome.untranslatedKeys.length
   console.log(
     `i18n-catalog: wrote src/lib/i18n/messages/${locale}.ts ` +
       `(${opts.replace ? "replace" : "merge"}) — ` +
-      `${translated}/${MESSAGE_KEYS.length} key(s) translated.`,
+      `${translated}/${MESSAGE_KEYS.length} key(s) translated` +
+      (prunedCount > 0 ? `, ${prunedCount} pruned from the translation baseline.` : "."),
   )
-  if (outcome.untranslatedKeys.length > 0) {
+  if (outcome.untranslatedKeys.length > 0 && !opts.quiet) {
     console.log(
       `\n  Untranslated (never translated for this locale, falls back to English, ` +
         `safe to ship):\n` +
         outcome.untranslatedKeys.map((k) => `    • ${k}`).join("\n"),
     )
   }
-  if (outcome.staleKeys.length > 0) {
+  if (outcome.staleKeys.length > 0 && opts.quiet) {
+    console.warn(`  ${outcome.staleKeys.length} carried-over translation(s) are stale; pnpm i18n:todo lists them.`)
+  } else if (outcome.staleKeys.length > 0) {
     console.warn(
       `\n  Stale — English source changed since these were translated (still shipping ` +
         `the existing translation; re-translate to refresh):\n` +
@@ -180,6 +293,59 @@ function runImport(locale?: string, file?: string, opts: { replace?: boolean } =
       `\n  Ignored — no longer in the base catalog (renamed or removed since export):\n` +
         outcome.unknownKeys.map((k) => `    • ${k}`).join("\n"),
     )
+  }
+}
+
+/**
+ * Import every `<locale>.todo.json` in `dirArg`. A packet still holding only its
+ * English seed imports as a no-op (`parseTranslatedCatalog` skips a leaf equal
+ * to its English), so an untouched locale is harmless; the check afterwards is
+ * what says whether anything is left.
+ */
+function runImportTodo(dirArg?: string): void {
+  const dir = resolve(process.cwd(), dirArg ?? DEFAULT_TODO_DIR)
+  if (!existsSync(dir)) fail(`no packet directory at ${dir} — run pnpm i18n:todo --new first`)
+  const packets = readdirSync(dir)
+    .filter((name) => name.endsWith(".todo.json"))
+    .map((name) => name.slice(0, -".todo.json".length))
+    .filter((locale) => isSupportedLocale(locale) && locale !== DEFAULT_LOCALE)
+    .sort()
+  if (packets.length === 0) fail(`no <locale>.todo.json packets in ${dir}`)
+  for (const locale of packets) runImport(locale, join(dir, `${locale}.todo.json`), { quiet: true })
+}
+
+function runBaseline(args: string[]): void {
+  const gaps = allLocaleGaps(CATALOGS, loadSourceHashes())
+  const before = loadBaseline()
+  let after: TranslationBaseline
+  if (args.includes("--rebuild")) {
+    after = baselineFromGaps(gaps)
+  } else if (args.includes("--allow")) {
+    const keys: string[] = []
+    const locales: string[] = []
+    let into = keys
+    for (const arg of args) {
+      if (arg === "--allow") into = keys
+      else if (arg === "--locale") into = locales
+      else into.push(arg)
+    }
+    const known = new Set<string>(MESSAGE_KEYS)
+    const unknown = keys.filter((key) => !known.has(key))
+    if (keys.length === 0) fail("usage: i18n:baseline --allow <key>… [--locale <code>…]")
+    if (unknown.length > 0) fail(`not an English message key: ${unknown.join(", ")}`)
+    after = allowInBaseline(pruneBaseline(before, gaps), gaps, keys, locales.length > 0 ? locales : undefined)
+  } else {
+    after = pruneBaseline(before, gaps)
+  }
+  saveBaseline(after)
+
+  const was = baselineCounts(before)
+  const now = baselineCounts(after)
+  const locales = [...new Set([...Object.keys(was), ...Object.keys(now)])].sort()
+  console.log("i18n-catalog: wrote src/lib/i18n/translation-baseline.json — allowed English fallbacks per locale:")
+  for (const locale of locales) {
+    const delta = (now[locale] ?? 0) - (was[locale] ?? 0)
+    console.log(`  ${locale.padEnd(8)} ${String(now[locale] ?? 0).padStart(6)}${delta === 0 ? "" : `  (${delta > 0 ? "+" : ""}${delta})`}`)
   }
 }
 
@@ -197,6 +363,12 @@ switch (command) {
     runImport(positional[0], positional[1], { replace: flags.includes("--replace") })
     break
   }
+  case "import-todo":
+    runImportTodo(rest[0])
+    break
+  case "baseline":
+    runBaseline(rest)
+    break
   default:
-    fail(`unknown command "${command ?? ""}" — expected check | export | import`)
+    fail(`unknown command "${command ?? ""}" — expected check | export | import | import-todo | baseline`)
 }

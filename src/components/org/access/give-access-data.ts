@@ -85,24 +85,42 @@ export async function submitGrant(
     if (!created) throw new UserError(500, "", "project")
     return
   }
+  // The dry run named this person by userId. These routes take a username, so
+  // the write names them by the account's own username — never the display
+  // name — and refuses when the payload carried none.
+  const username = writableUsername(person)
   if (type === "org") {
-    await addOrgMember(jwt, orgId, person.displayName, roleLevel)
+    sameAccount(person, await addOrgMember(jwt, orgId, username, roleLevel), "org")
     return
   }
   if (type === "team") {
     const teamId = Number(id)
     // A guest joins the team without an org row (AQU-2238); a member joins as themselves.
-    const [added] = await addTeamMembers(jwt, orgId, teamId, [person.displayName], { external: person.isGuest })
+    const [added] = await addTeamMembers(jwt, orgId, teamId, [username], { external: person.isGuest })
     if (!added?.ok) throw new UserError(409, added?.error?.message ?? "", "team")
     await setTeamMemberRole(jwt, orgId, teamId, Number(person.userId), roleLevel)
     return
   }
   const projectId = place.projectId ?? id
-  await addProjectMember(
+  const written = await addProjectMember(
     jwt,
     projectId,
-    person.displayName,
+    username,
     roleLevel,
     type === "lane" ? { scopeLanes: [id] } : { allCurrentLanes: true },
   )
+  sameAccount(person, written, "project")
+}
+
+/** The lookup key for a write by name. Missing means the payload cannot say who this is. */
+export function writableUsername(person: { username: string | null }): string {
+  if (!person.username) throw new UserError(409, "this person has no username to write by", "org")
+  return person.username
+}
+
+/** The route reports the account it wrote. One the dry run did not name is a loud failure, not a success. */
+function sameAccount(person: { userId: string }, written: { userId: number | string } | undefined, kind: "org" | "project"): void {
+  if (written && String(written.userId) !== person.userId) {
+    throw new UserError(409, `wrote account ${written.userId}, expected ${person.userId}`, kind)
+  }
 }

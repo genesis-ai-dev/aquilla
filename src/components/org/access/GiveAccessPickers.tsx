@@ -90,7 +90,7 @@ export function PersonBlank({
               key={p.userId}
               value={`person:${p.userId}`}
               onSelect={() => {
-                onChange({ kind: "account", userId: p.userId, displayName: p.displayName, email: p.email ?? null, isGuest: p.isGuest })
+                onChange({ kind: "account", userId: p.userId, displayName: p.displayName, username: p.username ?? null, email: p.email ?? null, isGuest: p.isGuest })
                 close()
               }}
             >

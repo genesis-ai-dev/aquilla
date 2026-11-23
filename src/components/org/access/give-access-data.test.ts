@@ -12,10 +12,14 @@ import type { ScopeRef } from "@/lib/access/types"
 import { submitGrant } from "./give-access-data"
 
 const mocks = vi.hoisted(() => {
-  const state = { calls: [] as unknown[][], inviteResult: { token: "t" } as unknown }
+  const state = { calls: [] as unknown[][], inviteResult: { token: "t" } as unknown, writtenUserId: null as number | null }
   const record = (name: string) => (...args: unknown[]) => {
     state.calls.push([name, ...args])
-    return Promise.resolve(name === "createServerInvite" ? state.inviteResult : [{ ok: true }])
+    if (name === "createServerInvite") return Promise.resolve(state.inviteResult)
+    if (name === "addOrgMember" || name === "addProjectMember") {
+      return Promise.resolve(state.writtenUserId == null ? undefined : { userId: state.writtenUserId })
+    }
+    return Promise.resolve([{ ok: true }])
   }
   return { state, record }
 })
@@ -32,12 +36,13 @@ const lane: ScopeRef = { type: "lane", id: "fr01", name: "French" }
 const row = (scope: ScopeRef, path: ScopeRef[]): PlaceRow => ({
   key: `${scope.type}:${scope.id}`, scope, path, depth: path.length - 1, projectId: scope.type === "lane" ? "p1" : scope.type === "project" ? "p1" : undefined, grantable: { ok: true, cap: 700 },
 })
-const guest: PersonChoice = { kind: "account", userId: "9", displayName: "naladda", email: null, isGuest: true }
+const guest: PersonChoice = { kind: "account", userId: "9", displayName: "naladda", username: "naladda", email: null, isGuest: true }
 const invite: PersonChoice = { kind: "invite", email: "new@example.com" }
 
 beforeEach(() => {
   state.calls.length = 0
   state.inviteResult = { token: "t" }
+  state.writtenUserId = null
 })
 
 describe("submitGrant", () => {
@@ -55,6 +60,28 @@ describe("submitGrant", () => {
   ])("%s", async (_why, person, place, roleLevel, expected) => {
     await submitGrant("jwt", 1, { person, roleLevel, place })
     expect(state.calls).toEqual(expected)
+  })
+
+  it("writes the account the dry run named: by its username, never by a display name two people can share", async () => {
+    // Two people can both be shown as "Sam". The dry run named userId 21; the
+    // routes look an account up by username, so the write must carry sam-two's.
+    const samTwo: PersonChoice = { kind: "account", userId: "21", displayName: "Sam", username: "sam-two", email: null, isGuest: false }
+    for (const place of [row(org, [org]), row(team, [org, team]), row(project, [org, project])]) {
+      state.calls.length = 0
+      await submitGrant("jwt", 1, { person: samTwo, roleLevel: 600, place })
+      const names = state.calls.flatMap((call) => call.slice(1)).flat()
+      expect(names).toContain("sam-two")
+      expect(names).not.toContain("Sam")
+    }
+  })
+
+  it("refuses to write when the payload carried no username, and fails loudly when the route wrote someone else", async () => {
+    const nameless: PersonChoice = { ...guest, username: null }
+    await expect(submitGrant("jwt", 1, { person: nameless, roleLevel: 300, place: row(project, [org, project]) })).rejects.toThrow()
+    expect(state.calls).toEqual([])
+
+    state.writtenUserId = 99
+    await expect(submitGrant("jwt", 1, { person: guest, roleLevel: 300, place: row(project, [org, project]) })).rejects.toThrow()
   })
 
   it("a project invite the server did not create is a failure, not a silent success", async () => {

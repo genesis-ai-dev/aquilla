@@ -12,6 +12,12 @@ import type { AccessTreeNode, PlaceExtras, PlaceGrant } from "./org-access-place
 export interface OrgAccessPerson {
   userId: string
   displayName: string
+  /**
+   * The key the write routes look an account up by (users.username, unique
+   * case-insensitively). Null for invites and for an account whose users row
+   * could not be read: nothing may be written for them by name.
+   */
+  username: string | null
   email: string | null
   isGuest: boolean
   lastActiveAt: string | null
@@ -47,7 +53,7 @@ export function assembleOrgPeople(input: {
 }): OrgAccessPerson[] {
   const people = new Map<string, OrgAccessPerson>()
 
-  const addAccount = (userId: string, displayName: string, email: string | null): OrgAccessPerson => {
+  const addAccount = (userId: string, username: string | null, email: string | null): OrgAccessPerson => {
     const existing = people.get(userId)
     if (existing) {
       if (!existing.email && email) existing.email = email
@@ -55,7 +61,8 @@ export function assembleOrgPeople(input: {
     }
     const person: OrgAccessPerson = {
       userId,
-      displayName,
+      displayName: username ?? userId,
+      username,
       email,
       isGuest: !input.memberIds.has(userId),
       lastActiveAt: input.lastActiveAt.get(userId) ?? null,
@@ -77,7 +84,7 @@ export function assembleOrgPeople(input: {
     const projectName = places.projects.get(row.projectId)
     if (!lane || !projectName) continue
     const known = input.extras.laneUsers.get(row.userId)
-    const person = addAccount(row.userId, known?.name ?? row.userId, known?.email ?? null)
+    const person = addAccount(row.userId, known?.name ?? null, known?.email ?? null)
     person.grants.push({
       scopePath: [
         input.org,
@@ -100,6 +107,7 @@ export function assembleOrgPeople(input: {
     people.set(userId, {
       userId,
       displayName: email ?? userId,
+      username: null,
       email,
       isGuest: false,
       lastActiveAt: null,

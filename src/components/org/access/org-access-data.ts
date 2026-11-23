@@ -43,6 +43,11 @@ export interface AccessTreeNode {
 export interface OrgAccessPerson {
   userId: string
   displayName: string
+  /**
+   * The name the write routes look this account up by. Null (or absent, on a
+   * payload from before it was sent) means no write may name them.
+   */
+  username?: string | null
   isGuest: boolean
   email?: string | null
   lastActiveAt?: string | null

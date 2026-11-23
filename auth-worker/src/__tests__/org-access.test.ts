@@ -40,6 +40,7 @@ interface Payload {
   people: {
     userId: string
     displayName: string
+    username: string | null
     email: string | null
     isGuest: boolean
     lastActiveAt: string | null
@@ -225,6 +226,11 @@ describe("AQU-1352 §3.6 org People & access", () => {
     expect(invite?.pendingInvite?.expiresAt).toEqual(expect.any(String))
     const person = body.people.find((p) => p.email === "soon@example.com")
     expect(person?.pendingInvite?.roleLevel).toBe(300)
+    // AQU-2320: an invite has no account, so nothing may be written for it by name.
+    expect(person?.username).toBeNull()
+    // Every account row carries its own username: the key the write routes look it up by.
+    const external = body.people.find((p) => p.userId === "9")
+    expect(external?.username).toBe("external")
     expect(person?.grants.some((g) => g.scopePath.some((scope) => scope.id === "p1"))).toBe(true)
   })
 

@@ -36,7 +36,15 @@ export interface PlaceRow {
 export type PlaceBlock = GrantDenial | "no_team_invite"
 
 export type PersonChoice =
-  | { kind: "account"; userId: string; displayName: string; email: string | null; isGuest: boolean }
+  | {
+      kind: "account"
+      userId: string
+      displayName: string
+      /** What the write routes look the account up by; the dry run names `userId`. Null: cannot be written. */
+      username: string | null
+      email: string | null
+      isGuest: boolean
+    }
   | { kind: "invite"; email: string }
 
 const NOT_LOADED: PlaceGrantability = { ok: false, denial: "owner_only" }

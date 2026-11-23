@@ -68,7 +68,7 @@ function resolvePerson(payload: OrgAccessPayload, ref: GiveAccessPersonRef | und
   if (!ref) return null
   if ("email" in ref) return { kind: "invite", email: ref.email.trim().toLowerCase() }
   const p = payload.people.find((person) => person.userId === ref.userId && !person.pendingInvite)
-  return p ? { kind: "account", userId: p.userId, displayName: p.displayName, email: p.email ?? null, isGuest: p.isGuest } : null
+  return p ? { kind: "account", userId: p.userId, displayName: p.displayName, username: p.username ?? null, email: p.email ?? null, isGuest: p.isGuest } : null
 }
 
 function resetText(t: TFunction, reset: RoleReset): string {

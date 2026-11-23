@@ -351,7 +351,7 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (17) ───────────────────────────────────────────────────────
+  // ── decides (18) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
@@ -362,6 +362,7 @@ const LEDGER: Record<string, LedgerState> = {
   "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
   "member-scopes.ts": "decides", // OPS-56 (the lane grant rows the read wall enforces, written by one PUT)
   "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
+  "org-access-lanes.ts": "decides", // AQU-2322 (one lane grant row at a time; projectElevationDenial after the visibility gate)
   "org-settings.ts": "decides", // D7 (the org's live vendor keys)
   "orgs.ts": "decides",
   "project-members.ts": "decides", // AQU-1322's original eleven

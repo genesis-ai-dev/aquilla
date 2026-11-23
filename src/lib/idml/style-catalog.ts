@@ -15,16 +15,24 @@ export {
 const DISPLAY_KEY = "idmlStyleDisplay"
 
 function isEmphasis(value: unknown): value is IdmlStyleEmphasis {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && typeof (value as { bold?: unknown }).bold === "boolean"
-    && typeof (value as { italic?: unknown }).italic === "boolean",
-  )
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const record = value as { bold?: unknown; italic?: unknown; smallCaps?: unknown }
+  return typeof record.bold === "boolean"
+    && typeof record.italic === "boolean"
+    && (record.smallCaps === undefined || typeof record.smallCaps === "boolean")
 }
 
-/** Persist only the Bold/Italic styles a cell actually uses. */
+function emphasisMatters(emphasis: IdmlStyleEmphasis): boolean {
+  return emphasis.bold || emphasis.italic || emphasis.smallCaps === true
+}
+
+function storedEmphasis(emphasis: IdmlStyleEmphasis): IdmlStyleEmphasis {
+  return emphasis.smallCaps
+    ? { bold: emphasis.bold, italic: emphasis.italic, smallCaps: true }
+    : { bold: emphasis.bold, italic: emphasis.italic }
+}
+
+/** Persist only the bold, italic, and small-caps styles a cell actually uses. */
 export function idmlStyleDisplayMetadata(
   catalog: IdmlStyleCatalog | undefined,
   styleIds: readonly string[],
@@ -41,8 +49,8 @@ export function idmlStyleCatalogFromMetadata(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
   const catalog: Record<string, IdmlStyleEmphasis> = {}
   for (const [styleId, emphasis] of Object.entries(raw)) {
-    if (typeof styleId === "string" && isEmphasis(emphasis) && (emphasis.bold || emphasis.italic)) {
-      catalog[styleId] = { bold: emphasis.bold, italic: emphasis.italic }
+    if (typeof styleId === "string" && isEmphasis(emphasis) && emphasisMatters(emphasis)) {
+      catalog[styleId] = storedEmphasis(emphasis)
     }
   }
   return Object.keys(catalog).length > 0 ? catalog : undefined

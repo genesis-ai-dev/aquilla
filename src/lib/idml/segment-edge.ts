@@ -1,14 +1,14 @@
 /**
- * Dragging the edge of a bold or italic run moves whole words between that
- * run and the plain runs beside it. Punctuation is its own stop, so the edge
- * can sit between a word and the mark attached to it. The words stay in the
- * cell; only which run owns them changes. A locked run, a token, another
- * emphasis run, or a line break stops the edge.
+ * Dragging the edge of a bold, italic, or small-caps run moves whole words
+ * between that run and the plain runs beside it. Punctuation is its own stop,
+ * so the edge can sit between a word and the mark attached to it. The words
+ * stay in the cell; only which run owns them changes. A locked run, a token,
+ * another emphasis run, or a line break stops the edge.
  */
 
 import type { IdmlStyleCatalog } from "@aquilla/idml-roundtrip"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { idmlCharacterStyleEmphasis } from "@/lib/richtext/idml-style-display"
+import { idmlCharacterStyleEmphasis, idmlStyleIsEmphasis } from "@/lib/richtext/idml-style-display"
 
 export type SegmentEdge = "start" | "end"
 
@@ -46,11 +46,10 @@ export function slotEmphasis(
 ): boolean {
   const paragraphStyleId = context?.paragraphStyleId
   const inherit = Boolean(paragraphStyleId) && isDefaultCharacterStyle(styleId)
-  const face = idmlCharacterStyleEmphasis(
+  return idmlStyleIsEmphasis(idmlCharacterStyleEmphasis(
     inherit ? paragraphStyleId! : styleId,
     context?.catalog,
-  )
-  return face.bold || face.italic
+  ))
 }
 
 function isTravelSlot(piece: SegmentPiece): piece is Extract<SegmentPiece, { kind: "slot" }> {

@@ -8,17 +8,18 @@
  * AQU-2507: cells with an open check flag get the same treatment — counted,
  * named, left out by default, and taken only when the reader ticks the box.
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { useFormat } from "@/lib/i18n/format"
 import {
   classifyBatchDraft,
   isUntouchedAiDraft,
@@ -28,13 +29,17 @@ import {
   type ValidateRunChoices,
 } from "@/lib/review/batch-file-options"
 import {
-  batchValidateConfirmDescription,
+  BATCH_VALIDATE_SKIP_REASONS,
+  batchValidateChunkSize,
+  batchValidateSkipClauses,
   noPermissionMessage,
   summarizeBatchValidate,
   type BatchValidateCandidate,
+  type BatchValidateSummary,
   type SummarizeOptions,
 } from "@/lib/review/batch-validate-summary"
 import { WHOLE_BOOK, applyChapterScope } from "@/lib/review/batch-scope"
+import { cn } from "@/lib/utils"
 
 export type BatchFileModalRequest =
   | { kind: "validate" }
@@ -58,6 +63,8 @@ interface BatchFileModalProps {
   /** The chapter the editor is on. `WHOLE_BOOK` when the file has none. */
   initialChapter?: string
   draftCells: readonly DraftChoiceCell[]
+  /** Short check description for a flagged cell, when the project has one. */
+  flagIssue?: (cellId: string) => string | undefined
   onConfirmValidate: (choices: ValidateRunChoices) => void
   onConfirmDraft: (choices: DraftRunChoices) => void
 }
@@ -75,11 +82,11 @@ export function BatchFileModal({
   validateCandidates,
   validateOptions,
   draftCells,
+  flagIssue,
   onConfirmValidate,
   onConfirmDraft,
 }: BatchFileModalProps) {
   const t = useT()
-  const { list } = useFormat()
   const [includeReady, setIncludeReady] = useState(true)
   const [includeAi, setIncludeAi] = useState(false)
   const [includeFlagged, setIncludeFlagged] = useState(false)
@@ -129,10 +136,16 @@ export function BatchFileModal({
       includeFlaggedCells: true,
     })
     const isFlagged = validateOptions.hasOpenFlags
+    const flaggedCell = (cell: BatchValidateCandidate) => Boolean(isFlagged?.(cell.id))
+    // A flagged line is its own box, named by its reference. Counting it again
+    // under the unvalidated box made "21" validate 20. An untouched AI draft
+    // stays on the AI line, where that choice already lives.
     return {
-      ready: openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell)),
+      ready: openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell) && !flaggedCell(cell)),
       untouched: openSet.validatable.filter((cell) => isUntouchedAiDraft(cell)),
-      flagged: isFlagged ? openSet.validatable.filter((cell) => isFlagged(cell.id)) : [],
+      flagged: isFlagged
+        ? openSet.validatable.filter((cell) => flaggedCell(cell) && !isUntouchedAiDraft(cell))
+        : [],
       blocked: openSet.outcome === "no-permission" || openSet.outcome === "no-target",
       blockedSummary: openSet,
     }
@@ -160,24 +173,47 @@ export function BatchFileModal({
   const draftIncludedCount = (includeEmpty ? draftGroups.empty.length : 0)
     + (refreshAi ? draftGroups.refreshable.length : 0)
 
-  const title = request.kind === "validate"
-    ? t("editor.batchFile.validateTitle")
-    : t("editor.batchFile.draftTitle")
+  // The chapter (or the whole file) offered no box at all. The status below
+  // says why.
+  const nothingOffered = request.kind === "validate"
+    && !validateGroups.blocked
+    && validateGroups.ready.length === 0
+    && validateGroups.untouched.length === 0
+    && validateGroups.flagged.length === 0
+  const emptyValidate = nothingOffered ? emptyValidateCopy(validatePreview, chapter, t) : null
+  const validateCount = request.kind === "validate" && !validateGroups.blocked
+    ? validatePreview.validatable.length
+    : 0
+  // The title names the cells this click will sign off. An empty selection
+  // keeps the plain title: the boxes already say what was left out.
+  const title = request.kind === "draft"
+    ? t("editor.batchFile.draftTitle")
+    : validateCount > 0
+      ? t("editor.batchFile.validateCountTitle", { count: validateCount })
+      : t("editor.batchFile.validateTitle")
+  // AQU-2507: only when one click has to write more than one batch. The note
+  // is the whole description; skipped cells stay on the checkboxes.
+  const chunk = batchValidateChunkSize(chunkSize)
+  const chunkNote = validateCount > chunk
+    ? t(
+      chapter === WHOLE_BOOK
+        ? "nav.workspaceActions.batchValidate.runsToCompletion"
+        : "nav.workspaceActions.batchValidate.runsToChapter",
+      { cap: chunk },
+    ).trim()
+    : ""
 
-  let description: string
+  let description: string | null = null
   let canConfirm = false
-  if (request.kind === "validate" && validateGroups.blocked) {
+  if (emptyValidate) {
+    description = emptyValidate.announcement
+  } else if (request.kind === "validate" && validateGroups.blocked) {
     description = validateGroups.blockedSummary.outcome === "no-permission"
       ? noPermissionMessage(validateGroups.blockedSummary, t)
       : t("editor.batchValidate.noTarget")
   } else if (request.kind === "validate") {
-    // AQU-2507: the fourth argument is the run's CHUNK size, not a ceiling —
-    // the note it drives says the run finishes the file.
-    description = batchValidateConfirmDescription(
-      validatePreview, t, list, chunkSize,
-      chapter === WHOLE_BOOK ? "file" : "chapter",
-    )
-    canConfirm = validatePreview.validatable.length > 0
+    description = chunkNote || null
+    canConfirm = validateCount > 0
   } else if (draftSelected.length === 0) {
     description = t("editor.batchFile.nothingToDraft")
   } else {
@@ -186,13 +222,26 @@ export function BatchFileModal({
   }
 
   const showDraftScope = request.kind === "draft" && draftIncludedCount > batchSize
+  // A whole Bible is a thousand chapters. SearchSelect mounts only the rows
+  // in view; a plain Select mounted every one and the menu stalled on open.
+  const chapterOptions = useMemo(
+    () => [
+      ...chapters.map((label) => ({ value: label, label })),
+      { value: WHOLE_BOOK, label: t("editor.batchFile.wholeBook") },
+    ],
+    [chapters, t],
+  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          {description && (
+            <DialogDescription className={emptyValidate ? "sr-only" : undefined}>
+              {description}
+            </DialogDescription>
+          )}
         </DialogHeader>
         {(bookName || chapters.length > 0) && (
           <div className="flex flex-col gap-2">
@@ -200,35 +249,25 @@ export function BatchFileModal({
               <p className="text-sm font-medium text-foreground">{bookName}</p>
             )}
             {chapters.length > 0 && (
-              <Select
+              <SearchSelect
+                aria-label={t("editor.batchFile.chapterLabel")}
+                options={chapterOptions}
                 value={chapter}
-                onValueChange={(value) => { if (value) setChapter(value) }}
-              >
-                <SelectTrigger aria-label={t("editor.batchFile.chapterLabel")} className="w-full">
-                  <SelectValue>
-                    {chapter === WHOLE_BOOK ? t("editor.batchFile.wholeBook") : chapter}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {chapters.map((label) => (
-                    <SelectItem key={label} value={label}>{label}</SelectItem>
-                  ))}
-                  <SelectItem value={WHOLE_BOOK}>{t("editor.batchFile.wholeBook")}</SelectItem>
-                </SelectContent>
-              </Select>
+                onValueChange={setChapter}
+              />
             )}
           </div>
         )}
-        {request.kind === "validate" && !validateGroups.blocked && (
+        {emptyValidate && <EmptyValidateStatus copy={emptyValidate} />}
+        {request.kind === "validate" && !validateGroups.blocked && !emptyValidate && (
           <FieldSet>
-            <FieldLegend variant="label">{t("editor.batchFile.legend")}</FieldLegend>
             {validateGroups.ready.length > 0 && (
               <OptionRow
                 id="batch-file-ready"
                 checked={includeReady}
                 onCheckedChange={setIncludeReady}
-                label={t("editor.batchFile.ready", { count: validateGroups.ready.length })}
-                help={t("editor.batchFile.readyHelp")}
+                label={t("editor.batchFile.includeUnvalidated")}
+                help={t("editor.batchFile.includeUnvalidatedHelp", { count: validateGroups.ready.length })}
               />
             )}
             {validateGroups.untouched.length > 0 && (
@@ -248,15 +287,16 @@ export function BatchFileModal({
                 id="batch-file-flagged"
                 checked={includeFlagged}
                 onCheckedChange={setIncludeFlagged}
-                label={t("editor.batchFile.flagged", { count: validateGroups.flagged.length })}
-                help={t("editor.batchFile.flaggedHelp")}
-              />
+                label={t("editor.batchFile.includeUnresolved")}
+                help={t("editor.batchFile.includeUnresolvedHelp")}
+              >
+                <FlaggedCells cells={validateGroups.flagged} flagIssue={flagIssue} />
+              </OptionRow>
             )}
           </FieldSet>
         )}
         {request.kind === "draft" && (
           <FieldSet>
-            <FieldLegend variant="label">{t("editor.batchFile.legend")}</FieldLegend>
             {draftGroups.empty.length > 0 && (
               <OptionRow
                 id="batch-file-empty"
@@ -339,8 +379,77 @@ export function BatchFileModal({
   )
 }
 
+function FlaggedCells({
+  cells,
+  flagIssue,
+}: {
+  cells: readonly BatchValidateCandidate[]
+  flagIssue?: (cellId: string) => string | undefined
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mt-1.5">
+      <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+        {t("editor.batchFile.unresolvedList", { count: cells.length })}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {/* Five cells: a verse line plus its check line, then the rest scrolls. */}
+        <ul className="mt-1.5 max-h-[calc(5*2.75rem)] space-y-1.5 overflow-y-auto rounded-md border border-border px-2.5 py-1.5">
+          {cells.map((cell) => {
+            const note = flagIssue?.(cell.id)
+            return (
+              <li key={cell.id} className="text-sm">
+                <span className="font-medium text-foreground">{cell.group?.trim() || cell.id}</span>
+                {note ? <span className="block text-xs text-muted-foreground">{note}</span> : null}
+              </li>
+            )
+          })}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function emptyValidateCopy(
+  summary: BatchValidateSummary,
+  chapter: string,
+  t: ReturnType<typeof useT>,
+): { headline: string; lines: string[]; announcement: string } {
+  const headline = chapter === WHOLE_BOOK
+    ? t("editor.batchFile.nothingInFile")
+    : t("editor.batchFile.nothingInChapterNamed", { chapter })
+  const onlyAlreadyValidated = summary.skips.alreadyMine > 0
+    && summary.skippedTotal === summary.skips.alreadyMine
+  const lines = onlyAlreadyValidated
+    ? [t("editor.batchFile.allAlreadyValidated", { count: summary.skips.alreadyMine })]
+    : batchValidateSkipClauses(summary, t, BATCH_VALIDATE_SKIP_REASONS, false)
+  const shown = lines.length > 0 ? lines : [t("editor.batchValidate.nothingEligibleNoReason")]
+  return { headline, lines: shown, announcement: [headline, ...shown].join(". ") }
+}
+
+function EmptyValidateStatus({
+  copy,
+}: {
+  copy: { headline: string; lines: string[] }
+}) {
+  return (
+    <div role="status" className="text-sm font-medium text-foreground">
+      <p>{copy.headline}</p>
+      {copy.lines.length === 1 ? (
+        <p className="mt-1">{copy.lines[0]}</p>
+      ) : (
+        <ul className="mt-1.5 list-disc space-y-0.5 ps-4">
+          {copy.lines.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function OptionRow({
-  id, checked, disabled, onCheckedChange, label, help,
+  id, checked, disabled, onCheckedChange, label, help, children,
 }: {
   id: string
   checked: boolean
@@ -348,6 +457,7 @@ function OptionRow({
   onCheckedChange: (checked: boolean) => void
   label: string
   help: string
+  children?: ReactNode
 }) {
   return (
     <Field orientation="horizontal" data-disabled={disabled ? true : undefined}>
@@ -360,6 +470,7 @@ function OptionRow({
       <FieldContent>
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         <FieldDescription>{help}</FieldDescription>
+        {children}
       </FieldContent>
     </Field>
   )

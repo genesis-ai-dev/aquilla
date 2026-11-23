@@ -100,6 +100,7 @@ import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-
 import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
 import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -13671,6 +13672,22 @@ export function ProjectWorkspace() {
     const flagged = flaggedCellIds()
     return (cellId: string) => flagged.has(cellId)
   }, [batchFileModal, flaggedCellIds])
+  // The verse list under "unresolved checks" names the first open check on
+  // each cell. Built only while the dialog is open.
+  const batchModalFlagIssue = useMemo(() => {
+    if (!batchFileModal) return undefined
+    const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
+    const issues = new Map<string, string>()
+    for (const cell of readAtVersion(cellStoreVersion, getActiveCells)) {
+      if (activeFileId && cell.fileId !== activeFileId) continue
+      const found = infractions.get(cell.id)
+      if (!found || found.length === 0) continue
+      const active = partitionInfractions(found, cell.waivers).active
+      const line = summarizeCellIssues(active.slice(0, 1), ruleById, t)[0]
+      if (line) issues.set(cell.id, formatCellIssueLine(line))
+    }
+    return (cellId: string) => issues.get(cellId)
+  }, [batchFileModal, rules, cellStoreVersion, getActiveCells, activeFileId, infractions, t])
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
     // AQU-983: drafting and text validation open the file modal. The plain
@@ -21327,6 +21344,7 @@ export function ProjectWorkspace() {
             // same predicate the run then applies.
             hasOpenFlags: batchModalOpenFlags,
           }}
+          flagIssue={batchModalFlagIssue}
           draftCells={batchFileModal.kind === "draft" && activeFileId
             ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
             : []}

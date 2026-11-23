@@ -287,7 +287,7 @@ describe("SelectionBar — viewer suppression (AQU-365)", () => {
  */
 describe("SelectionBar — bulk Validate eligibility messaging", () => {
   function validateButton() {
-    return screen.getByRole("button", { name: /^Validate text/i })
+    return screen.getByRole("button", { name: /^Validate text cells/i })
   }
 
   it("enables Validate for a translated, human-touched, not-yet-validated cell", async () => {
@@ -366,7 +366,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     renderBar(makeProject(ROLE.CONTRIBUTOR), drafts)
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    expect(btn).toHaveTextContent(/Validate text\s*5/)
+    expect(btn).toHaveTextContent(/Validate text cells\s*5/)
     await expectNoHover(btn)
     fireEvent.click(btn)
     expect(emitCellValidate).toHaveBeenCalledTimes(5)
@@ -427,7 +427,7 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
     const onValidationCommitted = vi.fn()
     renderWithCommitted(onValidationCommitted, [makeCell({ id: "cell-1", translated: "bonjour" })])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(1)
     expect(onValidationCommitted).toHaveBeenCalledTimes(1)
@@ -463,7 +463,7 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
       makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
     ])
 
-    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    const btn = screen.getByRole("button", { name: /^Validate text cells/i })
     expect(btn).toBeDisabled()
     fireEvent.click(btn)
 
@@ -500,7 +500,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     const description = String(added.mock.calls.at(-1)?.[0].description ?? "")
@@ -524,9 +524,9 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
       makeCell({ id: "empty", context: "B8", translated: "" }),
     ])
-    const btn = screen.getByRole("button", { name: /^Validate text/i })
+    const btn = screen.getByRole("button", { name: /^Validate text cells/i })
     await expectNoHover(btn)
-    const note = await noteBeside("Validate text", "Validate 2 of 4 selected cells: B4 and B5")
+    const note = await noteBeside("Validate text cells", "Validate 2 of 4 selected cells: B4 and B5")
     expect(note).toMatch(/2 will be skipped — .*still needs? a translation.*already validated/i)
     vi.restoreAllMocks()
   })
@@ -538,7 +538,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
       makeCell({ id: "mine", context: "D1", translated: "deja", activeValidators: ["alice"] }),
     ])
-    await noteBeside("Validate text", "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more")
+    await noteBeside("Validate text cells", "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more")
     vi.restoreAllMocks()
   })
 
@@ -550,7 +550,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
     ])
     // …so they go by the table's # column instead: their place in the file.
-    const note = await noteBeside("Validate text", "Validate 2 of 3 selected cells: rows 1 and 2")
+    const note = await noteBeside("Validate text cells", "Validate 2 of 3 selected cells: rows 1 and 2")
     expect(note).not.toContain("B4")
     vi.restoreAllMocks()
   })
@@ -561,7 +561,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["ok-1"]))
     renderFor([makeCell({ id: "ok-1", translated: "bonjour" })])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     const call = added.mock.calls.at(-1)?.[0]
     expect(call?.type).toBe("success")
@@ -580,7 +580,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     // The surface used to emit NOTHING of its own, which is why the original
     // repro could only be argued from an absence of events.
@@ -615,7 +615,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
       makeCell({ id: "mine", translated: "deja", activeValidators: ["alice"] }),
     ], [], "fr", { onValidationCommitted: vi.fn() })
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     expect(emitCellValidate).toHaveBeenCalledTimes(2)
     expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => [input.cellId, input.surface, input.auto]))
@@ -832,7 +832,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
   it("leaves the reviewer's own validate actions alone", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.REVIEWER), [makeCell({ id: "cell-1", translated: "bonjour" })])
-    expect(screen.getByRole("button", { name: /^Validate text/i })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /^Validate text cells/i })).toBeEnabled()
     expect(screen.getByRole("button", { name: /remove my text validations/i })).toBeDisabled()
     vi.restoreAllMocks()
   })
@@ -880,7 +880,7 @@ describe("SelectionBar — a write that never queued", () => {
       makeCell({ id: "ok-2", translated: "salut" }),
     ], [], "", { onValidationCommitted: vi.fn() })
 
-    fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Validate text cells/i }))
 
     await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)), { timeout: STALL_WATCHDOG_MS })
     warn.mockRestore()
@@ -898,7 +898,7 @@ describe("SelectionBar — a write that never queued", () => {
 describe("SelectionBar — the project's text validation rules (AQU-1571)", () => {
   const strict = (level: number = ROLE.CONTRIBUTOR, over: Partial<ProjectRecord> = {}) =>
     ({ ...makeProject(level), allowSelfValidation: false, ...over })
-  const validateButton = () => screen.getByRole("button", { name: /^Validate text/i })
+  const validateButton = () => screen.getByRole("button", { name: /^Validate text cells/i })
 
   it("counts and validates only the lines somebody else changed last", () => {
     vi.mocked(emitCellValidate).mockClear()
@@ -1006,7 +1006,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     ])
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    await noteBeside("Validate text", "Validate 1 of 2 selected cells")
+    await noteBeside("Validate text cells", "Validate 1 of 2 selected cells")
     fireEvent.click(btn)
     expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["their-draft"])
     vi.restoreAllMocks()

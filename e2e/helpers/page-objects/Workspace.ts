@@ -1279,10 +1279,10 @@ export class Workspace {
     await expect(this.cellRow(index).getByRole("checkbox", { name: /^Selected cell/ })).toBeVisible()
   }
 
-  /** The selection bar's "Validate text" — bulk-validates the selected rows.
-   *  Its name carries the eligible count ("Validate text 2"). */
+  /** The selection bar's "Validate text cells" — bulk-validates the selected rows.
+   *  Its name carries the eligible count ("Validate text cells 2"). */
   async validateSelection(): Promise<void> {
-    await this.page.getByRole("button", { name: /^Validate text \d+$/ }).click()
+    await this.page.getByRole("button", { name: /^Validate text cells \d+$/ }).click()
   }
 
   /** Remove the current user's validation and wait for the row state to settle. */

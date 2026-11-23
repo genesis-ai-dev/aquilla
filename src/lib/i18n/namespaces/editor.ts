@@ -799,7 +799,7 @@ export const editor = defineNamespace({
       "You need contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.validate": "Validate",
-    "editor.selection.validateText": "Validate text",
+    "editor.selection.validateText": "Validate text cells",
     "editor.selection.validatePartial": plural({
       one: "Validate {count} of {total} selected cells",
       other: "Validate {count} of {total} selected cells",
@@ -864,7 +864,7 @@ export const editor = defineNamespace({
     }),
 
     // -- AQU-1503: batch text validation, shared by the selection toolbar's
-    // "Validate text" button and the "Batch validate text…" workspace action.
+    // "Validate text cells" button and the "Batch validate text…" workspace action.
     // Every one of these exists because that surface used to say NOTHING: it
     // bailed on four branches with a bare `return`, so a confirmed dialog that
     // found nothing eligible was an entirely dead click. --
@@ -885,14 +885,29 @@ export const editor = defineNamespace({
       other: "{count} you left unchecked",
     }),
     "editor.batchFile.validateTitle": "Batch validate this file",
+    "editor.batchFile.validateCountTitle": plural({
+      one: "Validate {count} cell?",
+      other: "Validate {count} cells?",
+    }),
     "editor.batchFile.draftTitle": "Draft this file",
     "editor.batchFile.legend": "What this run includes",
     "editor.batchFile.ready": plural({
-      one: "{count} cell ready for your check",
-      other: "{count} cells ready for your check",
+      one: "{count} unvalidated cell",
+      other: "{count} unvalidated cells",
     }),
-    "editor.batchFile.readyHelp":
-      "Committed text you have not signed off, including lines someone else already checked.",
+    "editor.batchFile.readyHelp": "Saved text you have not signed off.",
+    "editor.batchFile.includeUnvalidated": "Include unvalidated cells",
+    "editor.batchFile.includeUnvalidatedHelp": plural({
+      one: "{count} saved cell you have not signed off.",
+      other: "{count} saved cells you have not signed off.",
+    }),
+    "editor.batchFile.includeUnresolved": "Include cells with unresolved checks",
+    "editor.batchFile.includeUnresolvedHelp":
+      "These cells are flagged based on your project checks and rules.",
+    "editor.batchFile.unresolvedList": plural({
+      one: "Show {count} flagged cell",
+      other: "Show {count} flagged cells",
+    }),
     "editor.batchFile.aiDrafts": plural({
       one: "{count} AI draft nobody has checked",
       other: "{count} AI drafts nobody has checked",
@@ -942,6 +957,12 @@ export const editor = defineNamespace({
       other: "This drafts {count} cells. Every draft still needs a person to review it.",
     }),
     "editor.batchFile.nothingToDraft": "Nothing in this file can be drafted with these choices.",
+    "editor.batchFile.nothingInChapterNamed": "Nothing to validate in {chapter}",
+    "editor.batchFile.nothingInFile": "Nothing to validate in this file",
+    "editor.batchFile.allAlreadyValidated": plural({
+      one: "The cell here is already validated.",
+      other: "All {count} cells here are already validated.",
+    }),
     "editor.batchFile.confirmDraft": "Draft",
     "editor.batchBooks.section": "Books",
     "editor.batchBooks.validateTitle": "Validate books",
@@ -7427,9 +7448,9 @@ export const editor = defineNamespace({
       },
       "editor.selection.validateText": {
         description:
-          "Label of the selection toolbar's bulk TEXT validation button. Says "
-          + "\"text\" out loud because an audio twin sits beside it and the two "
-          + "are never the same act. A count badge follows.",
+          "Label of the selection toolbar's bulk text validation button, and of "
+          + "the batch-validate confirm button. Says \"text cells\" because "
+          + "Validate audio sits beside it on the selection bar. A count badge follows.",
         maxLength: 20,
       },
       "editor.selection.validateAudioNoTakes": {
@@ -7585,6 +7606,16 @@ export const editor = defineNamespace({
         description: "Title of the batch-validate modal for the open file.",
         maxLength: 40,
       },
+      "editor.batchFile.validateCountTitle": {
+        description:
+          "Title of the batch-validate modal when the current ticks will sign "
+          + "off at least one cell. The count is the cells this click validates, "
+          + "not the cells the chapter contains.",
+        maxLength: 40,
+        placeholders: {
+          count: "How many cells this click will validate. Selects the plural form.",
+        },
+      },
       "editor.batchFile.draftTitle": {
         description: "Title of the batch-draft modal for the open file.",
         maxLength: 32,
@@ -7595,14 +7626,44 @@ export const editor = defineNamespace({
       },
       "editor.batchFile.ready": {
         description:
-          "Checkbox label for committed text this reader has not signed off, "
-          + "including a second pass on lines someone else already checked.",
+          "Checkbox label for saved text this reader has not signed off. "
+          + "Does not include cells that have an open check flag; those are named on their own line.",
         placeholders: {
-          count: "How many such cells are in the open file. Selects the plural form.",
+          count: "How many such cells this box will sign off. Selects the plural form.",
         },
       },
       "editor.batchFile.readyHelp": {
         description: "Help under that checkbox.",
+      },
+      "editor.batchFile.includeUnvalidated": {
+        description:
+          "Checkbox label in the file batch-validate dialog. Checked by default. "
+          + "Signs off saved text that has no open check flag.",
+        maxLength: 40,
+      },
+      "editor.batchFile.includeUnvalidatedHelp": {
+        description: "Help under that checkbox. Names how many cells the box covers.",
+        placeholders: {
+          count: "How many unvalidated cells this box will sign off. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.includeUnresolved": {
+        description:
+          "Checkbox label for cells a project check or rule has flagged. Off by "
+          + "default. The verses themselves are listed under the help.",
+        maxLength: 48,
+      },
+      "editor.batchFile.includeUnresolvedHelp": {
+        description:
+          "Help under that checkbox. Says the flags come from the project's checks and rules.",
+      },
+      "editor.batchFile.unresolvedList": {
+        description:
+          "Collapsed control under the unresolved-checks checkbox. Opening it "
+          + "shows each flagged cell and a short description of its check.",
+        placeholders: {
+          count: "How many flagged cells the list contains. Selects the plural form.",
+        },
       },
       "editor.batchFile.aiDrafts": {
         description:
@@ -7622,9 +7683,8 @@ export const editor = defineNamespace({
       },
       "editor.batchFile.flagged": {
         description:
-          "Checkbox label for cells a check or rule has flagged. Off by "
-          + "default: including them is the reader deliberately overruling the "
-          + "flags with their own sign-off.",
+          "Count label kept for the books batch dialog's older wording. The "
+          + "file dialog uses includeUnresolved and lists the verses under it.",
         placeholders: {
           count: "How many flagged cells are in the open file. Selects the plural form.",
         },
@@ -7688,6 +7748,28 @@ export const editor = defineNamespace({
       },
       "editor.batchFile.nothingToDraft": {
         description: "Shown when the current ticks would draft nothing.",
+      },
+      "editor.batchFile.nothingInChapterNamed": {
+        description:
+          "Headline in the batch-validate dialog when the chosen chapter has "
+          + "no cells this run can sign off. {chapter} is the chapter label "
+          + "from the dropdown, such as \"GEN 1\".",
+        placeholders: {
+          chapter: "The chapter the reader has selected, e.g. \"GEN 1\".",
+        },
+      },
+      "editor.batchFile.nothingInFile": {
+        description:
+          "Headline in the batch-validate dialog when the whole open file has "
+          + "no cells this run can sign off.",
+      },
+      "editor.batchFile.allAlreadyValidated": {
+        description:
+          "The line under that headline when every skipped cell was already "
+          + "signed off by this reader.",
+        placeholders: {
+          count: "How many cells are already validated. Selects the plural form.",
+        },
       },
       "editor.batchFile.confirmDraft": {
         description:

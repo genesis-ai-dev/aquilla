@@ -10,6 +10,8 @@
  */
 
 import { Hono } from "hono"
+import { zValidator } from "@hono/zod-validator"
+import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   ViewerScope,
@@ -28,10 +30,18 @@ import {
   type PlaceGrant,
 } from "../services/org-access-places"
 import { assembleOrgPeople, type OrgAccessPerson } from "../services/org-access-people"
+import { grantableMap, previewGrant, type GrantTarget } from "../services/grant-preview"
+import { loadGrantTarget, loadGrantWorld } from "../services/grant-preview-load"
+import type { PlaceGrantability } from "../../../src/lib/access/grant-rules"
 import type { Env } from "../types"
 
 export type { AccessTreeNode, DirectGrantee, OrgAccessPerson }
-export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
+export interface OrgAccessPayload {
+  tree: AccessTreeNode[]
+  people: OrgAccessPerson[]
+  /** AQU-2320: per place (`type:id`), may this viewer give access there, and up to which role. */
+  grantable: Record<string, PlaceGrantability>
+}
 
 type Row = NamedGrantRow & { user_id: number | string; user_name: string; user_email: string | null }
 
@@ -145,10 +155,53 @@ export async function buildOrgAccess(
     if (entry.origin.from) entry.origin = { ...entry.origin, from: redactUnseenPlaces(entry.origin.from, seesOrg, visibleTeamIds) }
   }
   await nameGranters(env, list.flatMap((p) => p.grants))
-  return { ok: true, payload: { tree, people: list } }
+  const grantable = grantableMap(
+    tree,
+    { userId: String(vs.viewer.id), orgRole: await vs.orgRole(orgId), projectRoles: viewerProjectRole },
+    extras.attachments,
+  )
+  return { ok: true, payload: { tree, people: list, grantable } }
 }
 
 const orgAccess = new Hono<AuthHonoEnv>()
+
+/**
+ * AQU-2320: POST /api/v2/orgs/:orgId/access/preview — the Give access dry
+ * run. Writes nothing. 200 `{ preview }`; a grant this viewer could not make
+ * is refused with `{ error, code, place, roleLevel, cap }` (the message names
+ * the place, the role and the cap); a place or person outside what the
+ * Places / People lenses show this viewer is 404.
+ */
+const previewBody = z.object({
+  place: z.object({ type: z.enum(["org", "team", "project", "lane"]), id: z.string().min(1).max(256) }),
+  roleLevel: z.number().int(),
+  person: z.union([
+    z.object({ userId: z.string().regex(/^\d{1,18}$/) }),
+    z.object({ email: z.string().trim().toLowerCase().email().max(320) }),
+  ]),
+})
+
+orgAccess.post("/:orgId/access/preview", authMiddleware, zValidator("json", previewBody), async (c) => {
+  const orgId = Number(c.req.param("orgId"))
+  if (!Number.isSafeInteger(orgId) || orgId <= 0) return c.json({ error: "bad org id" }, 400)
+  const vs = new ViewerScope(c.env, c.get("user"))
+  const loaded = await loadGrantWorld(c.env, vs, orgId)
+  if (!loaded) return c.json({ error: "no access to this roster" }, 403)
+  const body = c.req.valid("json")
+  let target: GrantTarget
+  if ("email" in body.person) {
+    target = { kind: "invite", email: body.person.email }
+  } else {
+    const account = await loadGrantTarget(c.env, orgId, Number(body.person.userId))
+    if (!account) return c.json({ error: "person not found in this organization" }, 404)
+    target = account
+  }
+  const result = previewGrant(loaded.world, loaded.granter, target, { place: body.place, roleLevel: body.roleLevel })
+  if (result.ok) return c.json({ preview: result.preview })
+  if ("notFound" in result) return c.json({ error: "place not found" }, 404)
+  const { status, message, ...rest } = result.refusal
+  return c.json({ error: message, ...rest }, status)
+})
 
 orgAccess.get("/:orgId/access", authMiddleware, async (c) => {
   const orgId = Number(c.req.param("orgId"))

@@ -228,6 +228,19 @@ describe("AQU-1352 §3.6 org People & access", () => {
     expect(person?.grants.some((g) => g.scopePath.some((scope) => scope.id === "p1"))).toBe(true)
   })
 
+  it("AQU-2320: each place says whether this viewer may give access there, by the rule the dry run applies", async () => {
+    type G = Record<string, { ok: true; cap: number } | { ok: false; denial: string }>
+    const owner = ((await (await orgAccess("owner")).json()) as { grantable: G }).grantable
+    expect(owner["org:1"]).toEqual({ ok: true, cap: 700 })
+    expect(owner["project:p1"]).toEqual({ ok: true, cap: 700 })
+    const maintainer = ((await (await orgAccess("maintainer")).json()) as { grantable: G }).grantable
+    // The dialog greys the org with "Only an Owner can grant here" from this.
+    expect(maintainer["org:1"]).toEqual({ ok: false, denial: "owner_only" })
+    expect(maintainer["team:1"]).toEqual({ ok: true, cap: 600 })
+    // fixture/leads holds Owner on p3: joining it would hand a Maintainer's grantee more than they hold.
+    expect(maintainer["team:2"]).toEqual({ ok: false, denial: "team_above_you" })
+  })
+
   it("a missing org and an invisible org return the identical 403 (no id enumeration)", async () => {
     const hidden = await orgAccess("personal")
     const missing = await orgAccess("personal", 999999)

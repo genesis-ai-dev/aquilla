@@ -699,7 +699,7 @@ export function OrgProjectsDataTable({
         rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[{ id: startSort.column, desc: startSort.desc }]}
         onSortingChange={rememberSort ? rememberProjectSort : undefined}
-        searchPlaceholder="Search projects…"
+        searchPlaceholder={t("org.multiProjectInviteDialog.searchPlaceholder")}
         searchValue={searchValue}
         onSearchChange={onSearchChange}
         searching={searching}

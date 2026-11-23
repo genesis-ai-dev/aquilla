@@ -217,7 +217,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
             data={tableData}
             getRowId={(m) => String(m.userId)}
             initialSorting={[{ id: "name", desc: false }]}
-            searchPlaceholder="Search by name or email"
+            searchPlaceholder={t("org.membersTable.searchPlaceholder")}
             globalFilterFn={(row, _columnId, filterValue) => {
               const q = String(filterValue).trim().toLowerCase()
               if (!q) return true

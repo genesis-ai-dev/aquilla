@@ -374,6 +374,13 @@ export const org = defineNamespace({
     "org.teamsList.pageDescription": "Group members and grant project access together.",
     "org.teamsList.newTeamButton": "New team",
     "org.teamsList.searchPlaceholder": "Search teams…",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "org.membersTable.searchPlaceholder": "Search by name or email",
+    "org.teamDetail.projectsSearchPlaceholder": "Search by name",
+    "org.archivedProjects.searchPlaceholder": "Search archived projects…",
+    "org.archivedProjects.deletedFilesSearchPlaceholder": "Search deleted files…",
+    "org.assignedToMe.searchPlaceholder": "Search assignments…",
+    "org.projectOverview.archiveConfirmCheckbox": "I understand this project will be hidden from the active list.",
     "org.teamsList.sortByAriaLabel": "Sort teams by",
     "org.teamsList.sortNameLabel": "Name (A–Z)",
     "org.teamsList.sortMembersLabel": "Members (most first)",
@@ -1817,6 +1824,30 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.membersTable.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above a list of people (org members, project members, a team's members). Typing filters the list by display name or email address.",
+      },
+      "org.teamDetail.projectsSearchPlaceholder": {
+        description:
+          "Placeholder in the search box above a team's list of projects. Typing filters the projects by project name.",
+      },
+      "org.archivedProjects.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above the list of archived projects on the Archived projects page.",
+      },
+      "org.archivedProjects.deletedFilesSearchPlaceholder": {
+        description:
+          "Placeholder in the search box above the list of deleted files on the Archived projects page.",
+      },
+      "org.assignedToMe.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above the 'Assigned to me' table, which lists the chapters and files assigned to the signed-in user.",
+      },
+      "org.projectOverview.archiveConfirmCheckbox": {
+        description:
+          "Checkbox the user must tick before the Archive button in the 'Archive project' confirmation enables. First person, the user's own acknowledgement.",
+      },
       "org.roleDialog.addPersonTitle": {
         description:
           "AQU-2289: title of the role dialog when it adds one known person, e.g. from an empty cell of the members matrix.",

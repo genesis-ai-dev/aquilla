@@ -72,8 +72,16 @@
 // pre-filled with the person, the role and this lane, and the grant goes
 // through the additive lane-grant route behind that dialog's dry run (one
 // lane row, beside the lanes they hold; never the scopes table). The Remove
-// half below still rewrites scopes; the popover itself is retired in slice 8
-// of the access UI.
+// half below still rewrites scopes for people staffed through them.
+//
+// AQU-2324 — the popover stays (it is where a lane is staffed mid-task), but
+// its list no longer omits anyone. A person is on this lane through a scope
+// row OR a lane grant (`project_member_lane_roles`, what the read wall
+// enforces and what Give access writes); the list reads both. A grant-only
+// row is removed through RemoveAccessDialog and the lane-grant route's dry
+// run, never a scopes PUT: such a person holds no scope row, and an empty
+// scope set reads as every lane. "Manage access" opens the lane on the Places
+// lens for everything else.
 
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
@@ -93,6 +101,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   fetchMemberLaneAssignments,
   fetchMemberScopes,
+  fetchMemberScopeView,
   putMemberScopes,
   type MemberLaneAssignment,
   type MemberScope,
@@ -103,6 +112,8 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
+import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
+import { RemoveAccessDialog } from "@/components/org/access/RemoveAccessDialog"
 import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { ScopePath } from "@/lib/access/types"
@@ -203,6 +214,8 @@ export function StaffLanePopover({
   const [role, setRole] = useState<number>(ROLE.REVIEWER)
   /** AQU-2322: the Give access the Add opened, pre-filled; null when none is open. */
   const [giving, setGiving] = useState<GiveAccessRequest | null>(null)
+  /** AQU-2324: a grant-only row whose removal is open in RemoveAccessDialog. */
+  const [removingGrant, setRemovingGrant] = useState<StaffedLanePerson | null>(null)
   /**
    * AQU-1998: who is already staffed on this lane. `null` until the first
    * scope read for an open popover has come back, so "nobody yet" and "not
@@ -276,12 +289,19 @@ export function StaffLanePopover({
     void (async () => {
       const rows = await Promise.all(
         scopableMembers.map(async (m) => {
-          const scopes = (await fetchMemberScopes(jwt, projectId, m.userId)) ?? []
-          const laneScopes = scopes.filter((s) => s.kind === "lane")
-          return {
-            person: { userId: m.userId, username: m.username, laneCount: laneScopes.length },
-            onThisLane: laneScopes.some((s) => scopeNamesLane(s, laneValue, lane)),
-          }
+          const view = await fetchMemberScopeView(jwt, projectId, m.userId)
+          const laneScopes = (view?.scopes ?? []).filter((s) => s.kind === "lane")
+          const byScope = laneScopes.some((s) => scopeNamesLane(s, laneValue, lane))
+          // AQU-2324: a lane grant with no scope row (Give access writes
+          // these). `laneAccess` reaches a Project lead only — the same floor
+          // as this list's Remove — and its absence says nothing either way.
+          const grant = byScope
+            ? undefined
+            : (view?.laneAccess?.grants ?? []).find((g) => g.laneId === laneValue || g.laneId === lane)
+          const person: StaffedLanePerson = grant
+            ? { userId: m.userId, username: m.username, laneCount: laneScopes.length, via: "grant", grantLaneId: grant.laneId }
+            : { userId: m.userId, username: m.username, laneCount: laneScopes.length, via: "scope" }
+          return { person, onThisLane: byScope || grant != null }
         }),
       )
       // An empty roster lands here too, as an empty list rather than a
@@ -409,6 +429,15 @@ export function StaffLanePopover({
    */
   async function handleRemove(person: StaffedLanePerson) {
     if (!jwt) return
+    // AQU-2324: a grant-only row has no scope to take off. Its removal is the
+    // lane-grant route's, behind the dry run that says what they lose and
+    // keep. The popover closes so the dialog is on top.
+    if (person.via === "grant") {
+      if (orgId == null || !person.grantLaneId) return
+      setRemovingGrant(person)
+      handleOpenChange(false)
+      return
+    }
     setRemovingUserId(person.userId)
     setRemoveError(null)
     try {
@@ -552,7 +581,18 @@ export function StaffLanePopover({
               onConfirmRemove={handleConfirmRemove}
               onCancelRemove={() => setPendingRemoval(null)}
               onNavigate={() => handleOpenChange(false)}
+              grantRemovable={orgId != null}
             />
+            {laneId ? (
+              <p className="text-[11px]">
+                <ManageAccessLink
+                  orgId={orgId}
+                  open={{ place: { type: "lane", id: laneId } }}
+                  variant="link"
+                  onNavigate={() => handleOpenChange(false)}
+                />
+              </p>
+            ) : null}
             <div className="relative">
               <Search
                 className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -695,6 +735,16 @@ export function StaffLanePopover({
     </Popover>
     {orgId != null && (
       <GiveAccessLauncher orgId={orgId} request={giving} onClose={() => setGiving(null)} onGranted={handleGranted} />
+    )}
+    {orgId != null && removingGrant?.grantLaneId && (
+      <RemoveAccessDialog
+        open
+        onOpenChange={(next) => { if (!next) setRemovingGrant(null) }}
+        orgId={orgId}
+        person={{ userId: String(removingGrant.userId), displayName: removingGrant.username }}
+        grants={[{ type: "lane", id: removingGrant.grantLaneId }]}
+        onRemoved={handleGranted}
+      />
     )}
     </>
   )

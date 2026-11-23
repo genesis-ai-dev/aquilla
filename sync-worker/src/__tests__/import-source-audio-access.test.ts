@@ -10,6 +10,8 @@ import { describe, it, expect } from 'vitest'
 import { handleBulkImportRequest } from '../events/import-route'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
+import { sign } from 'hono/jwt'
+import { TOOL_SESSION_AUDIENCE } from '../../../shared/tools/tool-session'
 
 const SECRET = 'import-source-access-secret'
 const P = 'proj-imp-access'
@@ -129,5 +131,118 @@ describe('POST /import: source audio needs every language', () => {
     const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...LEAD_AR, laneGrants: [] } as never)
     const res = await handleBulkImportRequest(post(token, { cells: [], complete: true }), env(h.db, true))
     expect(res?.status).toBe(200)
+  })
+})
+
+// Review (Nov 21): every attachment is held to the events route's audio rules
+// (audio-event-rules.ts), whatever role it names. An attachment naming role
+// 'dub' with the source clip's audio id upserts that row (it keeps role
+// 'source' and takes the new trims), so it is the same change of the source
+// clip the events route allows only a Maintainer.
+describe('POST /import: attachments meet the events route audio rules', () => {
+  const LEAD_ES: Who = { ...LEAD, laneGrants: [{ lane: ES, level: 500 }] }
+  const MAINTAINER: Who = { username: 'max', userId: 4, role: 600 }
+
+  async function finish(h: Awaited<ReturnType<typeof makeTestDb>>, who: Who, id: string, extra: Record<string, unknown>) {
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...who } as never)
+    const res = await handleBulkImportRequest(post(token, {
+      cells: [], complete: true,
+      attachments: [{
+        id, cellId: 'cell-1', audioId: 'sermon-1.wav', url: 'frontier-audio://sermon-1.wav',
+        slot: 'recording', mimeType: 'audio/wav', durationMs: 1000, ...extra,
+      }],
+    }), env(h.db, true))
+    return { status: res!.status, text: await res!.text() }
+  }
+
+  /** A published media import whose source clip has a trim window. */
+  async function importedSource() {
+    const h = await makeTestDb()
+    await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
+      ('${AR}', '${P}', 'target', 'Arabic', 'ar', ''),
+      ('${ES}', '${P}', 'target', 'Spanish', 'es', 'es')`)
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...MAINTAINER } as never)
+    expect((await handleBulkImportRequest(post(token, {
+      file: { id: 'file-evt-1', name: 'sermon.wav', fileType: 'audio' },
+      cells: [{ id: 'src-evt-1', cellId: 'cell-1', value: 'sermon.wav', medium: 'media' }],
+    }), env(h.db, true)))?.status).toBe(200)
+    await h.db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '3', NULL, 'sermon.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'sermon-1.wav', '{}'::jsonb)`,
+    ).bind('01900000-0000-7000-8000-000000000201', P, 'b'.repeat(64), `projects/${P}/files/${F}/audio/sermon-1.wav`, F).run()
+    expect((await finish(h, MAINTAINER, 'attach-0', { role: 'source', trimStartMs: 0, trimEndMs: 1000 })).status).toBe(200)
+    const trims = async () => (await h.rows<{ role: string; trim_start_ms: number; trim_end_ms: number }>('cell_audio'))
+      .map((r) => [r.role, Number(r.trim_start_ms), Number(r.trim_end_ms)])
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    return { h, trims }
+  }
+
+  it("refuses a role 'dub' re-trim of the source clip by a Project Lead granted only Arabic", async () => {
+    const { h, trims } = await importedSource()
+    const r = await finish(h, LEAD_AR, 'attach-dub', { role: 'dub', trimStartMs: 200, trimEndMs: 800 })
+    expect(r.status).toBe(403)
+    expect(r.text).toMatch(/requires maintainer/)
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    expect((await h.rows<{ id: string }>('events')).some((e) => e.id === 'attach-dub')).toBe(false)
+  })
+
+  it('refuses a source re-trim by a Project Lead with every language (Maintainer only), and lets a Maintainer do it', async () => {
+    const { h, trims } = await importedSource()
+    for (const role of ['source', 'dub', undefined] as const) {
+      const r = await finish(h, LEAD_ALL, `attach-${role}`, { ...(role ? { role } : {}), trimStartMs: 200, trimEndMs: 800 })
+      expect(r.status, String(role)).toBe(403)
+    }
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    expect((await finish(h, MAINTAINER, 'attach-m', { role: 'dub', trimStartMs: 200, trimEndMs: 800 })).status).toBe(200)
+    expect(await trims()).toEqual([['source', 200, 800]])
+  })
+
+  it("checks a dub attachment's language: refused outside the Lead's grants, accepted in them", async () => {
+    // The dub names no language, so it lands in the lane tagged '' (Arabic here).
+    const spanishOnly = await importMedia(LEAD_ES, true, 'dub')
+    expect(spanishOnly.status).toBe(403)
+    expect(spanishOnly.audioRows).toBe(0)
+    expect(spanishOnly.staged).toBe(true)
+    const own = await importMedia(LEAD_AR, true, 'dub')
+    expect(own.status).toBe(200)
+    expect(own.audioRows).toBe(1)
+    expect(own.staged).toBe(false)
+  })
+})
+
+// Review (Nov 21): a Contributor may finish an import into an extension data
+// file through a verified extension, but a source attachment needs Project
+// Lead, as `role: 'source'` does on the events route.
+describe('POST /import: a source attachment needs Project Lead', () => {
+  it('refuses a Contributor with a verified tool session, and lets their dub through to the next check', async () => {
+    const h = await makeTestDb({ files: [{ id: F, project_id: P, role: 'extension-data' }] })
+    const now = Math.floor(Date.now() / 1000)
+    const session = await sign(
+      { aud: TOOL_SESSION_AUDIENCE, projectId: P, toolId: 'tool-1', version: 2, codeHash: 'c'.repeat(64), userId: 7, username: 'cora', iat: now, exp: now + 600 },
+      SECRET, 'HS256',
+    )
+    const toolOrigin = { origin: 'tool', toolId: 'tool-1', version: 2, codeHash: 'c'.repeat(64), session }
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, username: 'cora', userId: 7, role: 400 } as never)
+    const send = (role?: 'source' | 'dub') => handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Aquilla-Extension-Data': '1' },
+      body: JSON.stringify({
+        projectId: P, fileId: F, cells: [], complete: true, toolOrigin,
+        attachments: [{
+          id: `attach-${role}`, cellId: 'cell-1', audioId: 'clip.wav', url: 'frontier-audio://clip.wav',
+          slot: 'recording', ...(role ? { role } : {}),
+        }],
+      }),
+    }), env(h.db, false))
+    for (const role of ['source', undefined] as const) {
+      const res = await send(role)
+      expect(res?.status, String(role)).toBe(403)
+      expect(await res!.text()).toMatch(/project lead/)
+    }
+    // A dub is not refused on role; it meets the cell and artifact checks.
+    expect((await send('dub'))?.status).toBe(409)
+    expect(await h.rows('cell_audio')).toHaveLength(0)
   })
 })

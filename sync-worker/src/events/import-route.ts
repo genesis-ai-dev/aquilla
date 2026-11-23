@@ -25,10 +25,11 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyDocScope, verifySyncToken } from '../auth'
+import { verifyDocScope, verifySyncToken, type SyncTokenClaims } from '../auth'
+import type { EventKind, RawEvent } from './types'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE, requiredRoleFor } from './role-policy'
-import { coversEveryLanguage } from './source-audio-access'
+import { audioEventRefusal, STORED_TAKE_COLUMNS, type StoredTake } from './audio-event-rules'
 import { loadTargetLanes } from './lane-read-wall'
 import { laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 import { fileScopeRefusal } from '../audio-write-guard'
@@ -293,6 +294,58 @@ function isImportBody(x: unknown): x is ImportBody {
     (b.video === undefined || (b.video !== null && typeof b.video === 'object' && !Array.isArray(b.video))) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
+}
+
+/**
+ * The first refusal the audio rules give any of this finish's attachments
+ * (audio-event-rules.ts), or null. The caller's file answer, the project's
+ * lanes and the takes already stored under these audio ids are each read at
+ * most once, and only when a rule needs them, so a 20,000-cue import costs a
+ * few reads rather than one per attachment.
+ */
+async function importAttachmentRefusal(
+  db: AquillaDb,
+  env: ImportRouteEnv,
+  claims: SyncTokenClaims,
+  projectId: string,
+  fileId: string,
+  events: PersistedEvent[],
+): Promise<{ status: 403 | 422; reason: string } | null> {
+  const once = <T>(load: () => Promise<T>) => {
+    let pending: Promise<T> | undefined
+    return () => (pending ??= load())
+  }
+  const fileRefusal = once(() => fileScopeRefusal(db, claims, projectId, fileId))
+  const loadLanes = once(() => loadTargetLanes(db, projectId))
+  const storedTakes = once(async () => {
+    const audioIds = [...new Set(events.map((event) => (event.payload as { audioId: string }).audioId))]
+    const byKey = new Map<string, StoredTake>()
+    for (let i = 0; i < audioIds.length; i += BULK_ROWS) {
+      const page = audioIds.slice(i, i + BULK_ROWS)
+      const rows = await db
+        .prepare(
+          `SELECT a.cell_id, a.audio_id, ${STORED_TAKE_COLUMNS} FROM cell_audio a
+             LEFT JOIN lanes l ON l.id = a.lane_id
+            WHERE a.project_id = ? AND a.file_id = ? AND a.audio_id IN (${page.map(() => '?').join(', ')})`,
+        )
+        .bind(projectId, fileId, ...page)
+        .all<StoredTake & { cell_id: string; audio_id: string }>()
+      for (const { cell_id, audio_id, ...take } of rows.results) byKey.set(`${cell_id}\0${audio_id}`, take)
+    }
+    return byKey
+  })
+  const storedTake = async (cellId: string, audioId: string) =>
+    (await storedTakes()).get(`${cellId}\0${audioId}`) ?? null
+  const wallOn = laneReadWallEnabled(env.LANE_READ_WALL)
+  const requiredRole = requiredRoleFor('cell.audio.attach')
+  for (const event of events) {
+    const refused = await audioEventRefusal({
+      db, claims, raw: event as RawEvent<EventKind>, wallOn, laneReadWall: env.LANE_READ_WALL,
+      requiredRole, loadLanes, storedTake, fileRefusal,
+    })
+    if (refused) return refused
+  }
+  return null
 }
 
 /**
@@ -648,27 +701,17 @@ export async function handleBulkImportRequest(
           serverTs: eventTs++,
         } as PersistedEvent<'cell.audio.attach'>)
       }
-      // AQU-2682: a source attachment is the clip every language hears, so
-      // the import is held to the events route's rule for a source attach
-      // (source-audio-access.ts): the caller's access must cover every
-      // language. Checked before anything below is written, so a refusal
-      // leaves the staged file hidden and no attach row behind. The events
-      // route checks the token's file limits first, for every audio attach
-      // (AQU-2685), so this does too.
+      // AQU-2682 / AQU-2685: each attachment is a `cell.audio.attach`, held
+      // to the rules the events route applies to the same attach
+      // (audio-event-rules.ts), whatever role it names: source audio needs
+      // Project Lead and every language, an existing source clip may only be
+      // changed by a Maintainer, and every other attach meets the caller's
+      // file and language limits. Checked before anything below is written,
+      // so a refusal leaves the staged file hidden and no attach row behind.
+      // The file answer, the lanes and the stored takes are each read once.
       if (finalizeEvents.length > 0) {
-        const fileRefusal = await fileScopeRefusal(db, auth.claims, body.projectId, body.fileId)
-        if (fileRefusal) return withCors(new Response(fileRefusal, { status: 403 }), request)
-      }
-      if (finalizeEvents.some((event) => (event.payload as { role?: unknown }).role === 'source')) {
-        const covers = await coversEveryLanguage({
-          wallOn: laneReadWallEnabled(env.LANE_READ_WALL),
-          claims: auth.claims,
-          requiredRole: requiredRoleFor('cell.audio.attach'),
-          loadLanes: () => loadTargetLanes(db, body.projectId),
-        })
-        if (!covers) {
-          return withCors(new Response('importing source audio requires access to every language', { status: 403 }), request)
-        }
+        const refused = await importAttachmentRefusal(db, env, auth.claims, body.projectId, body.fileId, finalizeEvents)
+        if (refused) return withCors(new Response(refused.reason, { status: refused.status }), request)
       }
       if (finalizeEvents.length > 0) {
         const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]

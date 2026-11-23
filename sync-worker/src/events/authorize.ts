@@ -14,11 +14,11 @@ import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { resolveImportFloor } from './import-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
-import { laneOfAudioEvent, laneOfEvent } from './event-projection'
+import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
-import { audioLaneLimited, coversEveryLanguage } from './source-audio-access'
+import { audioEventRefusal } from './audio-event-rules'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import {
@@ -33,7 +33,6 @@ import { isEligibleLaneAssignee, isOwnLaneAssignment } from './lane-delegate-aut
 import { toolClaimVerified } from './tool-provenance'
 import { EXTENSION_DATA_ROLE } from '../../../shared/tools/file-extension'
 import { findRestorableRemoval } from './removed-cell-archive'
-import { fileScopeRefusal, laneRefusal, namesSidecar } from '../audio-write-guard'
 
 /** Smart Extensions apiRev 7: file-content writes an extension's identity must be verified for. */
 const EXTENSION_GATED_KINDS = new Set<string>([
@@ -112,22 +111,6 @@ function isTermKind(kind: string): boolean {
  * file-level lifecycle) is NEVER scope-gated: source rows are shared across
  * lanes, and the other surfaces aren't lane-addressable.
  */
-/** AQU-2685: the audio event kinds held to file and language limits. */
-const AUDIO_SCOPE_KINDS = new Set<string>([
-  'cell.audio.attach',
-  'cell.audio.select',
-  'cell.audio.remove',
-  'cell.audio.rename',
-  'cell.audio.trim',
-  'cell.audio.gain',
-  'cell.audio.place',
-  'cell.audio.cut',
-  'cell.audio.uncut',
-  'cell.audio.measure',
-  'cell.audio.validate',
-  'cell.audio.unvalidate',
-])
-
 const SCOPE_GATED_KINDS = new Set<string>([
   'target.cell.create',
   'target.cell.commit',
@@ -818,63 +801,20 @@ export async function authorize<K extends EventKind>(
     if (roomRefusal) return { ok: false, status: 422, reason: roomRefusal }
   }
 
-  // AQU-1565 follow-up: marking a clip as the file's SOURCE audio needs
-  // PROJECT_LEAD. `cell.audio.attach` sits at CONTRIBUTOR for takes, but a
-  // `role: 'source'` clip is the shared programme recording every media row
-  // plays: it is never counted as recorded and never waits on validation. A
-  // contributor able to stamp that on their own take would take it out of
-  // review. Project Lead is the floor the import route already holds for the
-  // same audio. Unconditional on `db`: it reads nothing but the payload.
-  if (
-    raw.kind === 'cell.audio.attach' &&
-    (raw.payload as { role?: unknown } | null)?.role === 'source' &&
-    tokenClaims.role < ROLE.PROJECT_LEAD
-  ) {
-    return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
-  }
-
-  // AQU-2682: the shared source clip is what every language hears. Below
-  // Maintainer, a re-attach of it may only add words or choose it: the same
-  // url, the same slot, and no new trim window (an attach's trims overwrite
-  // the stored ones; echoing them unchanged is fine). Transcription and
-  // transcript save send the stored url and slot back, so they still land.
-  // The choice itself is held to the language rules below.
-  if (db != null && raw.kind === 'cell.audio.attach' && raw.cellId && tokenClaims.role < ROLE.MAINTAINER) {
-    const ap = raw.payload as {
-      audioId?: unknown; url?: unknown; slot?: unknown; trimStartMs?: unknown; trimEndMs?: unknown
-    } | null
-    if (typeof ap?.audioId === 'string' && ap.audioId) {
-      const existing = await db
-        .prepare(
-          `SELECT url, slot, trim_start_ms, trim_end_ms FROM cell_audio
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ? AND role = 'source'`,
-        )
-        .bind(raw.projectId, raw.fileId, raw.cellId, ap.audioId)
-        .first<{ url: string | null; slot: string; trim_start_ms: number | null; trim_end_ms: number | null }>()
-      if (existing) {
-        const movesTrim = (sent: unknown, stored: number | null) =>
-          sent != null && Number(sent) !== (stored == null ? null : Number(stored))
-        if (
-          existing.url !== (typeof ap.url === 'string' ? ap.url : null) ||
-          existing.slot !== ap.slot ||
-          movesTrim(ap.trimStartMs, existing.trim_start_ms) ||
-          movesTrim(ap.trimEndMs, existing.trim_end_ms)
-        ) {
-          return { ok: false, status: 403, reason: 'changing the source audio requires maintainer; others may only add words to it or choose it' }
-        }
-      }
-    }
-  }
-
-  // AQU-2682: a take is never named as a `.peaks` sidecar. The audio route
-  // lets a sidecar be rewritten (it is drawn, never heard), so a take named
-  // like one would escape the write-once rule for recordings.
-  if (raw.kind === 'cell.audio.attach') {
-    const ap = raw.payload as { audioId?: unknown; url?: unknown } | null
-    if (namesSidecar(typeof ap?.audioId === 'string' ? ap.audioId : null, typeof ap?.url === 'string' ? ap.url : null)) {
-      return { ok: false, status: 422, reason: 'a take cannot be named as a waveform sidecar (.peaks)' }
-    }
-  }
+  // AQU-1565 / AQU-2682 / AQU-2685: the audio rules (source audio needs
+  // Project Lead and, below Maintainer, may not be changed; no take named as a
+  // sidecar; the caller's file and language limits). One module, also applied
+  // by POST /import's finish to every media attachment (audio-event-rules.ts).
+  const audioRefused = await audioEventRefusal({
+    db,
+    claims: tokenClaims,
+    raw: raw as RawEvent<EventKind>,
+    wallOn,
+    laneReadWall,
+    requiredRole,
+    loadLanes: () => (db != null ? targetLanesFor(db, raw.projectId, settings) : Promise.resolve([])),
+  })
+  if (audioRefused) return { ok: false, ...audioRefused }
 
   // AQU-1068: removing an IMPORTED cell needs MAINTAINER, unless the project's
   // own cell-editing tier admits the caller (AQU-2632, below). This is the one
@@ -1030,86 +970,6 @@ export async function authorize<K extends EventKind>(
             AND role = 'timeline-content' AND deleted_at IS NULL`,
       ).bind(contentFileId, raw.projectId, raw.fileId).first<{ id: string }>()
       if (!content) return { ok: false, status: 403, reason: 'track content does not belong to this timeline' }
-    }
-  }
-
-  // AQU-2685: audio events are held to the same file and language limits as
-  // text. The file: the caller's file scopes, a cue file counting as part of
-  // the file it belongs to (so a scoped performer still records heard
-  // lines). The language: an existing take's own (many re-attaches and trims
-  // name none, AQU-1978), else the one the event names; the shared source
-  // clip has none. Same lane rules as text: the wall's grants when it is on
-  // (Maintainer+ and platform pass), else the token's lane scopes.
-  if (db != null && AUDIO_SCOPE_KINDS.has(raw.kind) && raw.fileId) {
-    const fileRefusal = await fileScopeRefusal(db, tokenClaims, raw.projectId, raw.fileId)
-    if (fileRefusal) return { ok: false, status: 403, reason: fileRefusal }
-    // Only look anything up when a language limit can apply at all: below
-    // Maintainer under the wall, or a token with language scopes.
-    const laneLimited = audioLaneLimited(wallOn, tokenClaims)
-    const ap = raw.payload as { audioId?: unknown; role?: unknown; pieceOf?: unknown; wordsOnly?: unknown } | null
-    // Source audio acts in every language at once, so declaring it needs
-    // access to every language (source-audio-access.ts; the app asks the
-    // same question through GET .../source-audio-access before it offers
-    // "Upload a recording" or attaching media).
-    if (laneLimited && raw.kind === 'cell.audio.attach' && ap?.role === 'source') {
-      const coversEveryLane = await coversEveryLanguage({
-        wallOn,
-        claims: tokenClaims,
-        requiredRole,
-        loadLanes: () => targetLanesFor(db, raw.projectId, settings),
-      })
-      if (!coversEveryLane) {
-        return { ok: false, status: 403, reason: 'marking a clip as source audio requires access to every language' }
-      }
-    }
-    if (laneLimited) {
-      const takeLane = (audioId: string) =>
-        db
-          .prepare(
-            `SELECT COALESCE(l.legacy_tag, '') AS tag, a.role FROM cell_audio a
-               LEFT JOIN lanes l ON l.id = a.lane_id
-              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?`,
-          )
-          .bind(raw.projectId, raw.fileId, raw.cellId, audioId)
-          .first<{ tag: string; role: string }>()
-      const audioId = typeof ap?.audioId === 'string' ? ap.audioId : null
-      const take = audioId && raw.cellId ? await takeLane(audioId) : null
-      const eventLane = laneOfAudioEvent(raw.payload)
-      // Every language the event acts in:
-      //   - an existing take: its own language. The shared source clip has
-      //     none of its own; choosing it (a select, or an attach that is not
-      //     words-only) un-chooses the dubs of the language the event names,
-      //     so a choice of it is checked there, and other edits of it are no
-      //     language's.
-      //   - a NEW take or piece: the language its attach names, always (being
-      //     chosen there un-chooses that language's take), and, for a piece,
-      //     the language of the take it is a piece of too (the projection
-      //     gives it its root's lane). A piece of the source clip adds none.
-      //   - a source attach (role 'source') passed the every-language check
-      //     above, which covers any language its tag can name, so its tag is
-      //     not checked again. It names none in practice (the app sends no
-      //     targetLang), and '' resolves to no lane in a project whose
-      //     languages all carry their own tag, which refused every Project
-      //     Lead the check had just let through.
-      const coveredSource = raw.kind === 'cell.audio.attach' && ap?.role === 'source'
-      const lanes = new Set<string>()
-      if (take) {
-        if (take.role !== 'source') lanes.add(take.tag)
-        else if (raw.kind === 'cell.audio.select' || (raw.kind === 'cell.audio.attach' && ap?.wordsOnly !== true && !coveredSource)) lanes.add(eventLane)
-      } else {
-        if (!coveredSource) lanes.add(eventLane)
-        if (raw.kind === 'cell.audio.attach' && typeof ap?.pieceOf === 'string' && ap.pieceOf && raw.cellId) {
-          const root = await takeLane(ap.pieceOf)
-          if (root && root.role !== 'source') lanes.add(root.tag)
-        }
-      }
-      for (const laneTag of lanes) {
-        const laneRefused = await laneRefusal(
-          db, tokenClaims, raw.projectId, laneTag, laneReadWall, requiredRole,
-          () => targetLanesFor(db, raw.projectId, settings),
-        )
-        if (laneRefused) return { ok: false, status: 403, reason: laneRefused }
-      }
     }
   }
 

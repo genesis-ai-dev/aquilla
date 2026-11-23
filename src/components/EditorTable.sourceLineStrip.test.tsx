@@ -293,6 +293,30 @@ describe("EditorTable — the row's structural controls", () => {
     expect(onAddLineAt).toHaveBeenCalledWith(20, 25)
   })
 
+  it("opens the button menu downward, flush with the button's right edge", async () => {
+    // The three-dot sits in the source cell's right corner. Anchoring the
+    // popup on the click's left edge spills the list into the target column.
+    renderTable({ sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    const button = within(rowEl("added")).getByRole("button", { name: "Cell actions" })
+    const openPopup = () =>
+      document.querySelector('[data-slot="context-menu-content"][data-open]')
+
+    fireEvent.click(button)
+    await entry("insert-above")
+    expect(openPopup()).toHaveAttribute("data-side", "bottom")
+    expect(openPopup()).toHaveAttribute("data-align", "end")
+
+    closeMenu()
+    await waitFor(() => expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull())
+
+    // A right-click still hangs from the pointer, left edge on the click.
+    fireEvent.contextMenu(menuBtn("added"))
+    await entry("insert-above")
+    expect(openPopup()).toHaveAttribute("data-side", "bottom")
+    expect(openPopup()).toHaveAttribute("data-align", "start")
+  })
+
   it("does not re-open the menu when the button is pressed to close it", async () => {
     // Pressing the button while its menu is open dismisses the menu (an outside
     // press); the click that completes the same press must not open it again.

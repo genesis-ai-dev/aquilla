@@ -4994,7 +4994,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9973,7 +9979,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14939,7 +14951,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19931,7 +19949,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26198,7 +26222,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32467,7 +32497,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38808,7 +38844,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45196,7 +45238,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51499,7 +51547,13 @@
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59748,7 +59802,13 @@
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "common.breadcrumbNav": "d6dc6b5ebe192c2c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68002,7 +68062,13 @@
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "common.breadcrumbNav": "d6dc6b5ebe192c2c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76663,7 +76729,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84971,7 +85043,13 @@
     "editor.completion.failedCellsMore": "8cc346096a28278c",
     "common.breadcrumbNav": "d6dc6b5ebe192c2c",
     "error.airtable.connect": "69c73eddb65a80a7",
-    "error.airtable.disconnect": "533b260cb0e23bc1"
+    "error.airtable.disconnect": "533b260cb0e23bc1",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93651,7 +93729,13 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -102325,7 +102409,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -111034,7 +111124,13 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119730,7 +119826,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -128418,6 +128520,12 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   }
 }

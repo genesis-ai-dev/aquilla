@@ -10,7 +10,7 @@ import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { ROLE } from "@/lib/frontier/roles"
 import { MEMBER_GRANT_MIN_ROLE } from "@/lib/frontier/member-grants"
-import { toUserFacingError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { formatScopePath } from "@/lib/access/scope-path"
@@ -185,7 +185,7 @@ export function AddProjectMemberDialog({
           onAddStart: () => setAddForbidden(false),
           onBatchErrorMessage: (e) => {
             const uf = toUserFacingError(e, "project")
-            if (uf.category === "forbidden") {
+            if (isRoleDenial(uf)) {
               setAddForbidden(true)
               return null
             }

@@ -497,3 +497,115 @@ describe("search totals (AQU-2732)", () => {
     expect(await page(db, "search?q=temple&case=1&limit=2")).toMatchObject({ total: 604, totalIsLowerBound: false })
   })
 })
+
+// AQU-2732: a hit's place in its file is counted a hit at a time on a small
+// page, and a file at a time on a big page or a page out of one file
+// (`numbersPlacesByFile`). Whichever way a request takes, the number is the
+// same one.
+describe("a hit's place in its file, however it is counted (AQU-2732)", () => {
+  type Seed = Parameters<typeof makeCell>[0] & { lane_id?: string | null; hidden_at?: number | null }
+  const cellRow = (over: Seed) => makeCell(over) as ReturnType<typeof makeCell>
+
+  /** `file/cell → position` for every row returned, in a fixed order. A row listed twice shows twice. */
+  async function places(db: AquillaDb, pathAndQuery: string): Promise<Array<[string, number | null]>> {
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const handle = pathAndQuery.startsWith("search/passages") ? handleSearchPassagesRequest : handleSearchReadRequest
+    const res = (await handle(
+      new Request(`https://w/api/v1/projects/proj-a/${pathAndQuery}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status, pathAndQuery).toBe(200)
+    const body = (await res.json()) as {
+      results: Array<{ fileId: string; cellId: string; position: number | null }>
+    }
+    return body.results
+      .map((row): [string, number | null] => [`${row.fileId}/${row.cellId}`, row.position])
+      .sort((a, b) => a[0].localeCompare(b[0]))
+  }
+
+  // Every translation says "a lamp" and 燈, so one seed serves the word
+  // index, the flags, text matching and passages.
+  //   "ordered" reads zed, (a parked cell), mid, abe: against its ids, and
+  //     the parked cell is nobody's place. "orphan" is a translation with no
+  //     source row; it comes after every cell that has one.
+  //   "migrated" has no sequence index, as a project from Codex has none,
+  //     and reads in id order.
+  const seed = () =>
+    makeTestDb({
+      cells: [
+        cellRow({ file_id: "ordered", cell_id: "zed", side: "source", value: "one", sequence_index: 1 }),
+        cellRow({ file_id: "ordered", cell_id: "parked", side: "source", value: "two", sequence_index: 2, hidden_at: 1 }),
+        cellRow({ file_id: "ordered", cell_id: "mid", side: "source", value: "three", sequence_index: 3 }),
+        cellRow({ file_id: "ordered", cell_id: "abe", side: "source", value: "four", sequence_index: 4 }),
+        ...["zed", "parked", "mid", "abe"].map((id) =>
+          cellRow({ file_id: "ordered", cell_id: id, side: "target", value: `a lamp 燈 for ${id}` }),
+        ),
+        cellRow({ file_id: "ordered", cell_id: "orphan", side: "target", value: "a lamp 燈 with no source" }),
+        ...["k1", "k2", "k3"].flatMap((id) => [
+          cellRow({ file_id: "migrated", cell_id: id, side: "source", value: `verse ${id}` }),
+          cellRow({ file_id: "migrated", cell_id: id, side: "target", value: `a lamp 燈 in ${id}` }),
+        ]),
+      ],
+    })
+
+  const ORDERED: Array<[string, number]> = [
+    ["ordered/abe", 3],
+    ["ordered/mid", 2],
+    ["ordered/orphan", 4],
+    ["ordered/zed", 1],
+  ]
+  const MIGRATED: Array<[string, number]> = [
+    ["migrated/k1", 1],
+    ["migrated/k2", 2],
+    ["migrated/k3", 3],
+  ]
+  const cjk = encodeURIComponent("燈")
+  const jsOnlyRegexp = encodeURIComponent(String.raw`\blamp\b`)
+
+  it.each([
+    ["the word index, a page of 50", "search?q=lamp&side=target"],
+    ["the word index, a page of 500", "search?q=lamp&side=target&limit=500"],
+    ["match case, a page of 50", "search?q=lamp&side=target&case=1"],
+    ["match case, a page of 500", "search?q=lamp&side=target&case=1&limit=500"],
+    ["whole word, which reads 500 rows whatever the page", "search?q=lamp&side=target&word=1"],
+    ["a regexp only the worker can run, which reads the project", `search?q=${jsOnlyRegexp}&side=target&regexp=1`],
+    ["text matching, a page of 50", `search?q=${cjk}&side=target`],
+    ["text matching, a page of 500", `search?q=${cjk}&side=target&limit=500`],
+    ["passages, a page of 50", "search/passages?q=a%20lamp&side=target"],
+    ["passages, a page of 500", "search/passages?q=a%20lamp&side=target&limit=500"],
+  ])("%s", async (_name, query) => {
+    const { db } = await seed()
+    expect(await places(db, query)).toEqual([...MIGRATED, ...ORDERED])
+  })
+
+  it.each([
+    ["the word index", "search?q=lamp&side=target&fileId=ordered"],
+    ["match case", "search?q=lamp&side=target&case=1&fileId=ordered"],
+    ["text matching", `search?q=${cjk}&side=target&fileId=ordered`],
+  ])("one file, %s", async (_name, query) => {
+    const { db } = await seed()
+    expect(await places(db, query)).toEqual(ORDERED)
+  })
+
+  // A project has one source lane, but nothing ties a row's side to its
+  // lane's role, so the schema does not rule out a second source row for a
+  // cell. Numbering a file at a time joins hits to that numbering, and a
+  // cell numbered twice would come back as two hits.
+  it("lists a hit once when its cell has two source rows", async () => {
+    const { db } = await makeTestDb({
+      lanes: [{ id: "stray", project_id: "proj-a", role: "target", name: "stray", lang_code: "sw", legacy_tag: "stray" }],
+      cells: [
+        cellRow({ cell_id: "a", side: "source", value: "one", sequence_index: 1 }),
+        cellRow({ cell_id: "a", side: "source", value: "one again", sequence_index: 1, lane_id: "stray", event_id: "e-a-stray" }),
+        cellRow({ cell_id: "a", side: "target", value: "a lamp" }),
+        cellRow({ cell_id: "b", side: "source", value: "two", sequence_index: 2 }),
+        cellRow({ cell_id: "b", side: "target", value: "a lamp too" }),
+      ],
+    })
+    for (const query of ["search?q=lamp&side=target", "search?q=lamp&side=target&limit=500"]) {
+      expect((await places(db, query)).map(([key]) => key), query).toEqual(["file-x/a", "file-x/b"])
+    }
+  })
+})

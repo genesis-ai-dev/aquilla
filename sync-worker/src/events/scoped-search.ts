@@ -144,13 +144,13 @@ interface LocationRowRaw {
 /**
  * How a page is read now that its total comes with it (AQU-2732).
  *
- * Every search here is two queries in one statement. The inner one, `hit`, is
- * the search itself: the WHERE, its ORDER BY and LIMIT, and `COUNT(*) OVER()`
- * beside them, so one WHERE makes both the page and the total and a filter
- * added to it later is counted too. It hands out nothing wider than where
- * each matched row is. The outer one fetches the rows of the page and does
- * the per-row work for those alone: the snippet, the opposite side, where the
- * cell sits in its file.
+ * Every search here is two queries in one statement, put together by
+ * `pageStatement`. The first, `hit`, is the search itself: the WHERE, its
+ * ORDER BY and LIMIT, and `COUNT(*) OVER()` beside them, so one WHERE makes
+ * both the page and the total and a filter added to it later is counted too.
+ * It hands out nothing wider than where each matched row is. The second
+ * fetches the rows of the page and does the per-row work for those alone: the
+ * snippet, the opposite side, where the cell sits in its file.
  *
  * The split is what keeps the count cheap. Measured on a Bible, limit 50,
  * before the total / counted in one flat query / counted in `hit`:
@@ -209,8 +209,8 @@ interface SearchRowRaw extends LocationRowRaw {
 /**
  * Where a hit sits, so Find & Replace can name the verse instead of the
  * file and cell ids. The source row owns the address: a target hit often
- * has a null `canonical_ref` of its own. `position` counts visible source
- * cells in file order so a notes row can be "file name, line N".
+ * has a null `canonical_ref` of its own. `position` follows these columns;
+ * see POSITION_BY_ROW.
  */
 const LOCATION_SELECT = `
   COALESCE(loc.source_canonical_ref, NULLIF(BTRIM(cells.canonical_ref), '')) AS canonical_ref,
@@ -221,8 +221,19 @@ const LOCATION_SELECT = `
     NULLIF(BTRIM(cells.metadata #>> '{cellLabel}'), ''),
     NULLIF(BTRIM(cells.metadata #>> '{cast_name}'), ''),
     NULLIF(BTRIM(cells.metadata #>> '{aquillaImport,displayLabel}'), '')
-  ) AS place_label,
-  (
+  ) AS place_label,`
+
+/**
+ * `position`: the 1-based place of the hit's cell among the visible source
+ * cells of its file, in file order. It is what lets a notes row be "file
+ * name, line 12", and what numbers two halves of a split verse "(1 of 2)" and
+ * "(2 of 2)".
+ *
+ * Counted a hit at a time: for each hit, every cell of its file that comes
+ * before it. A book is some hundreds of cells, so this is about 0.15 ms a
+ * hit on a local Bible: 8 ms for a page of 50, 75 ms for a page of 500.
+ */
+const POSITION_BY_ROW = `(
     SELECT 1 + COUNT(*)::int
     FROM cells AS earlier
     WHERE earlier.project_id = cells.project_id
@@ -232,7 +243,56 @@ const LOCATION_SELECT = `
       AND earlier.cell_id <> cells.cell_id
       AND (COALESCE(earlier.sequence_index, 1e300), earlier.cell_id)
         < (COALESCE(loc.source_sequence, 1e300), cells.cell_id)
-  ) AS position`
+  )`
+
+/**
+ * The same number, worked out a file at a time (AQU-2732): the visible source
+ * cells of every file that has a hit on the page, numbered once in the same
+ * order. One row per cell (the GROUP BY), so joining to it cannot multiply
+ * hits even if a cell were to have two source rows.
+ *
+ * What this costs follows the files on the page, not the hits: about 0.6 ms a
+ * book. Measured on that Bible, a hit at a time / a file at a time:
+ *   "temple", project, 500 rows    81 / 30 ms
+ *   "the", project, 500 rows      203 / 116 ms
+ *   "temple", one file, 50 rows     7 /  2 ms
+ *   "the", project, 50 rows        48 / 52 ms
+ * The last line is the one case it loses: the 50 best hits of a common word
+ * sit in 50 different books. `numbersPlacesByFile` picks accordingly.
+ *
+ * MATERIALIZED is load-bearing. Without it Postgres folds the numbering into
+ * the join and redoes it for every hit (2 → 22 ms for one file).
+ *
+ * A hit whose cell has no visible source row, a target with no source, is in
+ * no file's numbering. `pageStatement` falls back to POSITION_BY_ROW for it.
+ */
+const PLACE_CTE = `place AS MATERIALIZED (
+  SELECT in_page.file_id AS file_id, numbered.cell_id AS cell_id, numbered.position AS position
+  FROM (SELECT DISTINCT hit.file_id FROM hit) AS in_page
+  CROSS JOIN LATERAL (
+    SELECT visible.cell_id AS cell_id,
+      ROW_NUMBER() OVER (ORDER BY visible.seq, visible.cell_id)::int AS position
+    FROM (
+      SELECT src.cell_id AS cell_id, MIN(COALESCE(src.sequence_index, 1e300)) AS seq
+      FROM cells AS src
+      WHERE src.project_id = ?
+        AND src.file_id = in_page.file_id
+        AND src.side = 'source'
+        AND src.hidden_at IS NULL
+      GROUP BY src.cell_id
+    ) AS visible
+  ) AS numbered
+)`
+
+const PLACE_FROM = "LEFT JOIN place ON place.file_id = cells.file_id AND place.cell_id = cells.cell_id"
+
+/** A page of more rows than this numbers places a file at a time. */
+const PLACE_BY_ROW_MAX = 100
+
+/** See PLACE_CTE: a big page, or any page out of a single file. */
+function numbersPlacesByFile(rows: number, fileId: string | undefined): boolean {
+  return fileId !== undefined || rows > PLACE_BY_ROW_MAX
+}
 
 const LOCATION_FROM = `LEFT JOIN LATERAL (
   SELECT
@@ -252,6 +312,53 @@ const LOCATION_FROM = `LEFT JOIN LATERAL (
     AND src.side = 'source'
   LIMIT 1
 ) AS loc ON TRUE`
+
+/** The parts of one search statement. See the note on HIT_SELECT. */
+interface PageStatement {
+  /** The search: SELECT … FROM cells WHERE … ORDER BY … LIMIT, as `hit` holds it. */
+  hit: string[]
+  hitBinds: unknown[]
+  /** The outer SELECT list before the location columns. Every item ends in a comma. */
+  select: string[]
+  selectBinds: unknown[]
+  /** Joins the outer query needs besides the row itself and its location. */
+  joins?: string[]
+  orderBy: string
+  /** Set when the outer query is the one that cuts the page; `hit` has cut it otherwise. */
+  limit?: number
+  /** `numbersPlacesByFile`, for the most rows `hit` can hold. */
+  placesByFile: boolean
+  projectId: VerifiedProjectId
+}
+
+function pageStatement(page: PageStatement): { sql: string; binds: unknown[] } {
+  const byFile = page.placesByFile
+  const sql = [
+    "WITH hit AS (",
+    ...page.hit,
+    ")",
+    ...(byFile ? [",", PLACE_CTE] : []),
+    "SELECT",
+    ...page.select,
+    LOCATION_SELECT,
+    byFile ? `COALESCE(place.position, ${POSITION_BY_ROW}) AS position` : `${POSITION_BY_ROW} AS position`,
+    "FROM hit",
+    HIT_ROW_FROM,
+    ...(page.joins ?? []),
+    LOCATION_FROM,
+    ...(byFile ? [PLACE_FROM] : []),
+    `ORDER BY ${page.orderBy}`,
+    ...(page.limit === undefined ? [] : ["LIMIT ?"]),
+  ].join(" ")
+  // In the order the placeholders appear in the statement.
+  const binds = [
+    ...page.hitBinds,
+    ...(byFile ? [page.projectId] : []),
+    ...page.selectBinds,
+    ...(page.limit === undefined ? [] : [page.limit]),
+  ]
+  return { sql, binds }
+}
 
 function locationFromRow(row: LocationRowRaw): Pick<
   SearchResultOut,
@@ -443,21 +550,7 @@ export async function queryScopedSearchPage(
   //   ts_headline → the <mark>…</mark> snippet; MaxWords=16 is plenty for
   //     "saw the match in context" UX, MaxFragments=1 keeps it to one line.
   //   ts_rank → relevance, HIGHER is better, hence ORDER BY rank DESC.
-  const parts: string[] = [
-    "SELECT",
-    "  cells.cell_id AS cell_id,",
-    "  cells.file_id AS file_id,",
-    "  cells.side AS side,",
-    "  cells.value AS value,",
-    "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
-    "  hit.rank AS rank,",
-    "  hit.total_count AS total_count,",
-    // One opposite-side value, never a row multiplier. A target hit has a
-    // single source lane; a source hit may have several target lanes, and
-    // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
-    paired.sql,
-    LOCATION_SELECT,
-    "FROM (",
+  const hit: string[] = [
     "SELECT",
     HIT_SELECT,
     "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank,",
@@ -477,30 +570,46 @@ export async function queryScopedSearchPage(
     // script the person was actually looking for.
     `AND ${inCountedFileSql("cells")}`,
   ]
-  // Binds in the order their placeholders appear: the outer SELECT list, then
-  // `hit`.
-  const binds: unknown[] = [q, ...paired.binds, q, q, verifiedProjectId]
+  const hitBinds: unknown[] = [q, q, verifiedProjectId]
 
   if (opts.side !== undefined) {
-    parts.push("AND cells.side = ?")
-    binds.push(opts.side)
+    hit.push("AND cells.side = ?")
+    hitBinds.push(opts.side)
   }
   // "Search this file" has to narrow the query, not the page it returns: the
   // LIMIT below is taken across whatever this WHERE admits.
   if (opts.fileId !== undefined) {
-    parts.push("AND cells.file_id = ?")
-    binds.push(opts.fileId)
+    hit.push("AND cells.file_id = ?")
+    hitBinds.push(opts.fileId)
   }
   if (cellWall.sql) {
-    parts.push(cellWall.sql)
-    binds.push(...cellWall.binds)
+    hit.push(cellWall.sql)
+    hitBinds.push(...cellWall.binds)
   }
-  parts.push("ORDER BY rank DESC")
-  parts.push("LIMIT ?")
-  binds.push(limit)
-  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM, "ORDER BY hit.rank DESC")
+  hit.push("ORDER BY rank DESC", "LIMIT ?")
+  hitBinds.push(limit)
 
-  const sql = parts.join(" ")
+  const { sql, binds } = pageStatement({
+    hit,
+    hitBinds,
+    select: [
+      "  cells.cell_id AS cell_id,",
+      "  cells.file_id AS file_id,",
+      "  cells.side AS side,",
+      "  cells.value AS value,",
+      "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
+      "  hit.rank AS rank,",
+      "  hit.total_count AS total_count,",
+      // One opposite-side value, never a row multiplier. A target hit has a
+      // single source lane; a source hit may have several target lanes, and
+      // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
+      paired.sql,
+    ],
+    selectBinds: [q, ...paired.binds],
+    orderBy: "hit.rank DESC",
+    placesByFile: numbersPlacesByFile(limit, opts.fileId),
+    projectId: verifiedProjectId,
+  })
 
   const result = await db.prepare(sql).bind(...binds).all<SearchRowRaw>()
   return {
@@ -588,71 +697,75 @@ export async function queryScopedPatternPage(
       ? MAX_LIMIT
       : limit
 
-  const parts: string[] = [
-    "SELECT",
-    "  cells.cell_id AS cell_id,",
-    "  cells.file_id AS file_id,",
-    "  cells.side AS side,",
-    "  cells.value AS value,",
-    "  hit.total_count AS total_count,",
-    paired.sql,
-    LOCATION_SELECT,
-    "FROM (",
-    "SELECT",
-    HIT_SELECT,
-    HIT_TOTAL_SELECT,
-    "FROM cells",
-    "WHERE cells.project_id = ?",
-    `AND ${notHiddenSql("cells")}`,
-    `AND ${inCountedFileSql("cells")}`,
-  ]
-  const binds: unknown[] = [...paired.binds, verifiedProjectId]
+  // One read of at most `rows` rows. `sqlFilter` says whether a regular
+  // expression is tested in SQL; when it is not, every row is handed over and
+  // tested below.
+  const read = (sqlFilter: boolean, rows: number) => {
+    const hit: string[] = [
+      "SELECT",
+      HIT_SELECT,
+      HIT_TOTAL_SELECT,
+      "FROM cells",
+      "WHERE cells.project_id = ?",
+      `AND ${notHiddenSql("cells")}`,
+      `AND ${inCountedFileSql("cells")}`,
+    ]
+    const hitBinds: unknown[] = [verifiedProjectId]
 
-  if (!find.useRegexp) {
-    parts.push(
-      find.matchCase
-        ? "AND position(? in cells.value) > 0"
-        : "AND position(lower(?) in lower(cells.value)) > 0",
-    )
-    binds.push(q)
-  } else if (pgRegexp) {
-    parts.push(find.matchCase ? "AND cells.value ~ ?" : "AND cells.value ~* ?")
-    binds.push(q)
-  }
+    if (!find.useRegexp) {
+      hit.push(
+        find.matchCase
+          ? "AND position(? in cells.value) > 0"
+          : "AND position(lower(?) in lower(cells.value)) > 0",
+      )
+      hitBinds.push(q)
+    } else if (sqlFilter) {
+      hit.push(find.matchCase ? "AND cells.value ~ ?" : "AND cells.value ~* ?")
+      hitBinds.push(q)
+    }
+    if (opts.side !== undefined) {
+      hit.push("AND cells.side = ?")
+      hitBinds.push(opts.side)
+    }
+    if (opts.fileId !== undefined) {
+      hit.push("AND cells.file_id = ?")
+      hitBinds.push(opts.fileId)
+    }
+    if (cellWall.sql) {
+      hit.push(cellWall.sql)
+      hitBinds.push(...cellWall.binds)
+    }
+    hit.push("ORDER BY cells.cell_id, cells.side", "LIMIT ?")
+    hitBinds.push(rows)
 
-  if (opts.side !== undefined) {
-    parts.push("AND cells.side = ?")
-    binds.push(opts.side)
+    const { sql, binds } = pageStatement({
+      hit,
+      hitBinds,
+      select: [
+        "  cells.cell_id AS cell_id,",
+        "  cells.file_id AS file_id,",
+        "  cells.side AS side,",
+        "  cells.value AS value,",
+        "  hit.total_count AS total_count,",
+        paired.sql,
+      ],
+      selectBinds: paired.binds,
+      orderBy: "hit.cell_id, hit.side",
+      placesByFile: numbersPlacesByFile(rows, opts.fileId),
+      projectId: verifiedProjectId,
+    })
+    return db.prepare(sql).bind(...binds).all<PatternRowRaw>()
   }
-  // After the value filter on purpose: the regexp fallback below drops that
-  // filter's bind by position.
-  if (opts.fileId !== undefined) {
-    parts.push("AND cells.file_id = ?")
-    binds.push(opts.fileId)
-  }
-  if (cellWall.sql) {
-    parts.push(cellWall.sql)
-    binds.push(...cellWall.binds)
-  }
-  parts.push("ORDER BY cells.cell_id, cells.side")
-  parts.push("LIMIT ?")
-  // The last bind, and the fallback below relies on that: nothing after `hit`
-  // takes one.
-  binds.push(fetchLimit)
-  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM, "ORDER BY hit.cell_id, hit.side")
 
   let result: { results: PatternRowRaw[] }
   try {
-    result = await db.prepare(parts.join(" ")).bind(...binds).all<PatternRowRaw>()
+    result = await read(pgRegexp, fetchLimit)
   } catch (err) {
     // JS accepted the pattern and Postgres did not. Match in the worker
     // instead of failing the search.
     const message = err instanceof Error ? err.message : String(err)
     if (!pgRegexp || !/invalid regular expression/i.test(message)) throw err
-    const scanParts = parts.filter((part) => !part.startsWith("AND cells.value ~"))
-    const scanBinds = binds.filter((_, i) => i !== paired.binds.length + 1)
-    scanBinds[scanBinds.length - 1] = PATTERN_SCAN_CAP
-    result = await db.prepare(scanParts.join(" ")).bind(...scanBinds).all<PatternRowRaw>()
+    result = await read(false, PATTERN_SCAN_CAP)
   }
   const out: SearchResultOut[] = []
   // Every row read is tested, not only the first `limit` that pass: the ones
@@ -795,17 +908,7 @@ export async function queryScopedTextPage(
   const occurrences =
     "(char_length(lower(cells.value)) - char_length(replace(lower(cells.value), lower(?), ''))) / char_length(lower(?))"
 
-  const parts: string[] = [
-    "SELECT",
-    "  cells.cell_id AS cell_id,",
-    "  cells.file_id AS file_id,",
-    "  cells.side AS side,",
-    "  cells.value AS value,",
-    "  hit.rank AS rank,",
-    "  hit.total_count AS total_count,",
-    paired.sql,
-    LOCATION_SELECT,
-    "FROM (",
+  const hit: string[] = [
     "SELECT",
     HIT_SELECT,
     `  (${terms.map(() => occurrences).join(" + ")}) AS rank,`,
@@ -820,30 +923,27 @@ export async function queryScopedTextPage(
     `AND ${notHiddenSql("cells")}`,
     `AND ${inCountedFileSql("cells")}`,
   ]
-  // Binds in the order their placeholders appear: the outer SELECT list,
-  // `hit`, then the outer LIMIT.
-  const binds: unknown[] = [
-    ...paired.binds,
+  const hitBinds: unknown[] = [
     ...terms.flatMap((term) => [term, term]),
     ...(wholeFirst ? [q.trim()] : []),
     verifiedProjectId,
   ]
 
   for (const term of terms) {
-    parts.push("AND position(lower(?) in lower(cells.value)) > 0")
-    binds.push(term)
+    hit.push("AND position(lower(?) in lower(cells.value)) > 0")
+    hitBinds.push(term)
   }
   if (opts.side !== undefined) {
-    parts.push("AND cells.side = ?")
-    binds.push(opts.side)
+    hit.push("AND cells.side = ?")
+    hitBinds.push(opts.side)
   }
   if (opts.fileId !== undefined) {
-    parts.push("AND cells.file_id = ?")
-    binds.push(opts.fileId)
+    hit.push("AND cells.file_id = ?")
+    hitBinds.push(opts.fileId)
   }
   if (cellWall.sql) {
-    parts.push(cellWall.sql)
-    binds.push(...cellWall.binds)
+    hit.push(cellWall.sql)
+    hitBinds.push(...cellWall.binds)
   }
 
   // The order ends in where each hit sits in its file, and only the outer
@@ -852,10 +952,8 @@ export async function queryScopedTextPage(
   // puts on the page is among them. A tie is the hits of one file that
   // mention the term equally often, so it is one book's worth at most.
   const hitOrder = [...(wholeFirst ? ["whole DESC"] : []), "rank DESC", "cells.file_id"]
-  parts.push(`ORDER BY ${hitOrder.join(", ")}`)
-  parts.push("FETCH FIRST (?) ROWS WITH TIES")
-  binds.push(limit)
-  parts.push(") AS hit", HIT_ROW_FROM, LOCATION_FROM)
+  hit.push(`ORDER BY ${hitOrder.join(", ")}`, "FETCH FIRST (?) ROWS WITH TIES")
+  hitBinds.push(limit)
 
   const order = [
     ...(wholeFirst ? ["hit.whole DESC"] : []),
@@ -867,11 +965,26 @@ export async function queryScopedTextPage(
     "hit.cell_id",
     "hit.side",
   ]
-  parts.push(`ORDER BY ${order.join(", ")}`)
-  parts.push("LIMIT ?")
-  binds.push(limit)
+  const { sql, binds } = pageStatement({
+    hit,
+    hitBinds,
+    select: [
+      "  cells.cell_id AS cell_id,",
+      "  cells.file_id AS file_id,",
+      "  cells.side AS side,",
+      "  cells.value AS value,",
+      "  hit.rank AS rank,",
+      "  hit.total_count AS total_count,",
+      paired.sql,
+    ],
+    selectBinds: paired.binds,
+    orderBy: order.join(", "),
+    limit,
+    placesByFile: numbersPlacesByFile(limit, opts.fileId),
+    projectId: verifiedProjectId,
+  })
 
-  const result = await db.prepare(parts.join(" ")).bind(...binds).all<TextRowRaw>()
+  const result = await db.prepare(sql).bind(...binds).all<TextRowRaw>()
   return {
     results: result.results.map((row) => {
       const hits: TextMatch[] = terms.flatMap((term) => findTextMatches(row.value, term))
@@ -949,18 +1062,7 @@ export async function queryScopedExactPage(
   // directions. `paired.value` is null when no paired row exists.
   // Postgres FTS: phraseto_tsquery requires the terms adjacent + in order
   // (matching the exact-phrase sanitizer's intent).
-  const parts: string[] = [
-    "SELECT",
-    "  cells.cell_id AS cell_id,",
-    "  cells.file_id AS file_id,",
-    "  cells.side AS side,",
-    "  cells.value AS value,",
-    "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
-    "  hit.rank AS rank,",
-    "  hit.total_count AS total_count,",
-    "  paired.value AS paired_value,",
-    LOCATION_SELECT,
-    "FROM (",
+  const hit: string[] = [
     "SELECT",
     HIT_SELECT,
     // The pairing stays inside `hit`: it decides how many rows there are, so
@@ -986,28 +1088,38 @@ export async function queryScopedExactPage(
     // cue sheet corrupts a timecode nobody was editing.
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [exactText, exactText, ...pairedWall.binds, exactText, verifiedProjectId]
+  const hitBinds: unknown[] = [exactText, ...pairedWall.binds, exactText, verifiedProjectId]
 
   if (opts.side !== undefined) {
-    parts.push("AND cells.side = ?")
-    binds.push(opts.side)
+    hit.push("AND cells.side = ?")
+    hitBinds.push(opts.side)
   }
   if (cellWall.sql) {
-    parts.push(cellWall.sql)
-    binds.push(...cellWall.binds)
+    hit.push(cellWall.sql)
+    hitBinds.push(...cellWall.binds)
   }
-  parts.push("ORDER BY rank DESC")
-  parts.push("LIMIT ?")
-  binds.push(limit)
-  parts.push(
-    ") AS hit",
-    HIT_ROW_FROM,
-    "LEFT JOIN cells AS paired ON paired.ctid = hit.paired_row_id",
-    LOCATION_FROM,
-    "ORDER BY hit.rank DESC",
-  )
+  hit.push("ORDER BY rank DESC", "LIMIT ?")
+  hitBinds.push(limit)
 
-  const sql = parts.join(" ")
+  const { sql, binds } = pageStatement({
+    hit,
+    hitBinds,
+    select: [
+      "  cells.cell_id AS cell_id,",
+      "  cells.file_id AS file_id,",
+      "  cells.side AS side,",
+      "  cells.value AS value,",
+      "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
+      "  hit.rank AS rank,",
+      "  hit.total_count AS total_count,",
+      "  paired.value AS paired_value,",
+    ],
+    selectBinds: [exactText],
+    joins: ["LEFT JOIN cells AS paired ON paired.ctid = hit.paired_row_id"],
+    orderBy: "hit.rank DESC",
+    placesByFile: numbersPlacesByFile(limit, undefined),
+    projectId: verifiedProjectId,
+  })
 
   const result = await db.prepare(sql).bind(...binds).all<ExactRowRaw>()
   return {

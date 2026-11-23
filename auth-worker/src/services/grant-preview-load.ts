@@ -86,6 +86,7 @@ interface GrantRow {
   role_level: number
   source: GrantSource
   via_team_id: number | string | null
+  granted_at: string | Date | null
 }
 
 /**
@@ -103,7 +104,7 @@ export async function loadGrantTarget(env: Env, orgId: number, userId: number): 
       .bind(orgId, userId).first<{ role_level: number }>(),
     // Same org predicate as GET /orgs/:id/access (routes/org-access.ts loadOrgGrants), for one person.
     env.AQUILLA_PG.prepare(
-      `SELECT g.scope_type, g.scope_id, g.role_level, g.source, g.via_team_id
+      `SELECT g.scope_type, g.scope_id, g.role_level, g.source, g.via_team_id, g.granted_at
          FROM access_grants g
          LEFT JOIN projects p ON g.scope_type = 'project' AND p.id = g.scope_id
          LEFT JOIN groups t ON g.scope_type = 'team' AND t.id::TEXT = g.scope_id
@@ -126,7 +127,8 @@ export async function loadGrantTarget(env: Env, orgId: number, userId: number): 
     source: r.source,
     viaTeamId: r.via_team_id == null ? null : String(r.via_team_id),
     grantedBy: null,
-    grantedAt: null,
+    // AQU-2321: the removal dialog names the date of each grant a person keeps.
+    grantedAt: r.granted_at == null ? null : new Date(r.granted_at).toISOString(),
   }))
   const laneGrants = (laneRes.results ?? []).map((r) => ({ projectId: r.project_id, laneId: r.lane, roleLevel: Number(r.role_level) }))
   const isOrgMember = memberRow != null

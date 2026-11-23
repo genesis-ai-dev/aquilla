@@ -299,6 +299,23 @@ describe("relevance order for text-matched results", () => {
     expect(ids(await search(db, { q: "器皿" }))).toEqual(["zeta", "alpha", "mid"])
   })
 
+  it("cuts a short page in reading order when more hits tie than fit", async () => {
+    // AQU-2732: the page is cut before each hit's place in its file is looked
+    // up, on the keys known by then (mentions, file). Every hit here ties on
+    // those, so the cut has to keep the whole tie and let reading order pick.
+    // Rows go in in id order, a to e; the file reads e, d, c, b, a. A cut
+    // that took the first rows it met would answer a, b.
+    const cells: SeedCell[] = ["a", "b", "c", "d", "e"].flatMap((id, i) => [
+      cell("f", id, "source", `verse ${5 - i}`, { sequence_index: 5 - i }),
+      cell("f", id, "target", `第${5 - i}節的器皿`),
+    ])
+    const { db } = await makeTestDb({ cells })
+    expect(ids(await search(db, { q: "器皿", limit: "2" }))).toEqual(["e", "d"])
+    expect(ids(await search(db, { q: "器皿", limit: "4" }))).toEqual(["e", "d", "c", "b"])
+    // Several words take the other branch of the same cut.
+    expect(ids(await search(db, { q: "節 器皿", limit: "2" }))).toEqual(["e", "d"])
+  })
+
   it("reads a migrated file in verse order: no sequence index, only references", async () => {
     // A project migrated from Codex has `sequence_index` NULL on every cell.
     // Found walking a real one: 2 Kings came back 4:3, 12:13, 4:4, which is

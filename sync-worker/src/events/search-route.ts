@@ -1,6 +1,6 @@
 // Project-wide cell search (Phase 2b). Postgres full-text backed.
 //
-//   GET /api/v1/projects/:projectId/search?q=&side=&limit=
+//   GET /api/v1/projects/:projectId/search?q=&side=&limit=&fileId=
 //   GET /api/v1/projects/:projectId/search/passages?q=&side=&limit=
 //
 // Query params (both routes):
@@ -8,6 +8,18 @@
 //   side  — optional. "source" | "target". Filters to one side of the
 //           paired cells. When omitted, both sides are returned.
 //   limit — optional. Default 50, max 500.
+//
+// /search only:
+//   fileId — optional. Restricts the search to one file. The limit is then
+//            taken within that file, which a client-side filter over a
+//            project-wide page cannot do.
+//
+// Words or text: `q` is matched against a word index, except when it is in a
+// script that index cannot search: one written without spaces between words
+// (Chinese, Japanese, Thai, Burmese, …) or Korean, whose words are written
+// joined to their endings. There each typed word is matched as text, and the
+// hits are ranked by how often they hold it. See `needsSubstringSearch` in
+// db/shared/find-pattern.ts and docs/decisions/0017.
 //
 // /search returns:
 //   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
@@ -72,6 +84,7 @@ function parseCommonParams(
   url: URL,
 ): { error: Response } | {
   sideFilter: "source" | "target" | undefined
+  fileId: string | undefined
   limit: number
   matchCase: boolean
   wholeWord: boolean
@@ -97,6 +110,8 @@ function parseCommonParams(
 
   return {
     sideFilter,
+    // An empty value is "no file", the same as leaving the param off.
+    fileId: url.searchParams.get("fileId") || undefined,
     limit,
     matchCase: flagOn(url, "case"),
     wholeWord: flagOn(url, "word"),
@@ -181,7 +196,7 @@ export async function handleSearchReadRequest(
 
   const parsed = parseCommonParams(url)
   if ("error" in parsed) return parsed.error
-  const { sideFilter, limit, matchCase, wholeWord, useRegexp } = parsed
+  const { sideFilter, fileId, limit, matchCase, wholeWord, useRegexp } = parsed
 
   try {
     const pattern = matchCase || wholeWord || useRegexp
@@ -193,11 +208,13 @@ export async function handleSearchReadRequest(
           wholeWord,
           useRegexp,
           laneIds,
+          fileId,
         })
       : await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
           side: sideFilter,
           limit,
           laneIds,
+          fileId,
         })
     return Response.json({ results })
   } catch (err) {

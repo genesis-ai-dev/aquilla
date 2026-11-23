@@ -2,8 +2,8 @@
 //
 // This module is the SINGLE choke-point for all full-text cell-search queries.
 // Every search surface MUST route through `queryScopedSearch`,
-// `queryScopedPattern`, or `queryScopedExact` — each accepts a
-// `VerifiedProjectId` rather than a raw
+// `queryScopedPattern`, `queryScopedText`, or `queryScopedExact` — each
+// accepts a `VerifiedProjectId` rather than a raw
 // string, so passing an un-verified projectId is a TypeScript compile error.
 //
 // The permission boundary is structural, not advisory:
@@ -24,8 +24,11 @@ import {
   findPatternError,
   findTextMatches,
   markedSnippet,
+  markedSnippetOfAll,
+  needsSubstringSearch,
   postgresCanRunRegexp,
   type TextFindOptions,
+  type TextMatch,
 } from "../../../db/shared/find-pattern"
 import { withLongOperationTimeout } from "../../../db/shim/postgres"
 
@@ -306,6 +309,11 @@ function pairedSubselect(laneIds: SearchLaneWall): { sql: string; binds: unknown
  * project. The project scope (`AND cells.project_id = ?`) is hardcoded — the
  * caller cannot bypass it.
  *
+ * A query in a script the word index cannot search (see
+ * `needsSubstringSearch`) is not answered from the index at all: it goes to
+ * `queryScopedText`, which matches each typed word as text and ranks the
+ * hits itself.
+ *
  * Throws on tsquery syntax errors so the route layer can decide 400 vs 500.
  * Returns [] when the sanitizer reduces `q` to nothing.
  */
@@ -313,10 +321,25 @@ export async function queryScopedSearch(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   q: string,
-  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall; fileId?: string },
 ): Promise<SearchResultOut[]> {
   const ftsQuery = sanitizeFtsQuery(q)
   if (!ftsQuery) return []
+
+  // `value_tsv` holds words, and a script written without spaces has none to
+  // hold: 一切銅器皿 is ONE lexeme, so 器皿 is not in the index. Worse than a
+  // plain miss, 、器皿、 does index it, and the index would then return that
+  // one cell as though it were the whole answer. Korean fails the same way
+  // from the other direction (하나님이 is indexed, 하나님 is not). Match these
+  // as text.
+  if (needsSubstringSearch(q)) {
+    return queryScopedText(db, verifiedProjectId, q, {
+      side: opts.side,
+      limit: opts.limit,
+      laneIds: opts.laneIds,
+      fileId: opts.fileId,
+    })
+  }
 
   const limit = clampLimit(opts.limit)
   const paired = pairedSubselect(opts.laneIds)
@@ -363,6 +386,12 @@ export async function queryScopedSearch(
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
+  // "Search this file" has to narrow the query, not the page it returns: the
+  // LIMIT below is taken across whatever this WHERE admits.
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
   if (cellWall.sql) {
     parts.push(cellWall.sql)
     binds.push(...cellWall.binds)
@@ -394,6 +423,8 @@ export interface PatternSearchOptions extends TextFindOptions {
   laneIds: SearchLaneWall
   side?: "source" | "target"
   limit?: number
+  /** Restrict to one file. Omitted searches the project. */
+  fileId?: string
 }
 
 /**
@@ -463,6 +494,12 @@ export async function queryScopedPattern(
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
+  // After the value filter on purpose: the regexp fallback below drops that
+  // filter's bind by position.
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
   if (cellWall.sql) {
     parts.push(cellWall.sql)
     binds.push(...cellWall.binds)
@@ -511,6 +548,166 @@ interface PatternRowRaw extends LocationRowRaw {
   paired_value: string | null
 }
 
+interface TextRowRaw extends PatternRowRaw {
+  /** Occurrences of the typed pieces. An integer, however the driver hands it over. */
+  rank: number | string
+}
+
+// ---------------------------------------------------------------------------
+// queryScopedText — default search for scripts the word index cannot serve
+// ---------------------------------------------------------------------------
+
+/**
+ * Words a text search ANDs. A pasted sentence is the long case; past this
+ * many words the rest add nothing the first sixteen have not already pinned.
+ */
+const MAX_TEXT_TERMS = 16
+
+export interface TextSearchOptions {
+  laneIds: SearchLaneWall
+  side?: "source" | "target"
+  limit?: number
+  /** Restrict to one file. Omitted searches the project. */
+  fileId?: string
+  /** Match the whole query as one piece of text instead of word by word. */
+  phrase?: boolean
+}
+
+/**
+ * Chapter and verse of the reference a hit is shown under (`2KI 12:13`), as
+ * numbers, so 4:10 sorts after 4:3 and 12:13 after both. The source row owns
+ * the reference, as in LOCATION_SELECT. Null for a bare book code or no
+ * reference at all.
+ */
+const HIT_REF_SQL = "COALESCE(loc.source_canonical_ref, NULLIF(BTRIM(cells.canonical_ref), ''))"
+const REF_CHAPTER_SQL = String.raw`substring(${HIT_REF_SQL} from '(\d{1,6}):\d')::int`
+const REF_VERSE_SQL = String.raw`substring(${HIT_REF_SQL} from '\d:(\d{1,6})')::int`
+
+/** The pieces of `q` that must each be present. Order kept, repeats dropped. */
+function textSearchTerms(q: string, phrase: boolean): string[] {
+  const trimmed = q.trim()
+  if (trimmed === "") return []
+  if (phrase) return [trimmed]
+  return [...new Set(trimmed.split(/\s+/))].slice(0, MAX_TEXT_TERMS)
+}
+
+/**
+ * The default (no flags) search for a query `needsSubstringSearch` accepts:
+ * Chinese, Japanese, Thai, Burmese, Korean and the rest of that list.
+ *
+ * It keeps the word search's contract, with "word" read as "what the person
+ * typed between spaces": every such piece must be in the cell, in any order,
+ * case-insensitively, but as text rather than as an indexed word, so 器皿
+ * matches inside 一切銅器皿 and 하나님 matches 하나님이.
+ *
+ * Order is relevance, best first:
+ *   1. cells holding the whole query exactly as typed (several words only);
+ *   2. more occurrences of the typed pieces, summed;
+ *   3. reading order: file, then place in the file. Most cells mention a
+ *      term once, so this is what the list mostly looks like, and it is also
+ *      what makes the order the same on every request.
+ * `rank` in the result is (2), HIGHER is better, as `ts_rank` is for
+ * `queryScopedSearch`.
+ *
+ * "Place in the file" is `sequence_index` where the importer wrote one, and
+ * the chapter and verse of the cell's reference where it did not: a project
+ * migrated from Codex has no `sequence_index` on any cell, and without the
+ * second key its hits came back in cell-id order (2 Kings 4:3, 12:13, 4:4).
+ * The editor's own order is the anchor chain, which SQL cannot sort by
+ * without walking the file; these two agree with it except after a manual
+ * move of a line.
+ *
+ * The project scope (`AND cells.project_id = ?`) is hardcoded, as in every
+ * query in this module.
+ */
+export async function queryScopedText(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: TextSearchOptions,
+): Promise<SearchResultOut[]> {
+  const terms = textSearchTerms(q, opts.phrase === true)
+  if (terms.length === 0) return []
+
+  const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
+
+  // Occurrences of one piece: how much shorter the text gets with the piece
+  // cut out, over the piece's length. Two binds per piece.
+  const occurrences =
+    "(char_length(lower(cells.value)) - char_length(replace(lower(cells.value), lower(?), ''))) / char_length(lower(?))"
+
+  const parts: string[] = [
+    "SELECT",
+    "  cells.cell_id AS cell_id,",
+    "  cells.file_id AS file_id,",
+    "  cells.side AS side,",
+    "  cells.value AS value,",
+    `  (${terms.map(() => occurrences).join(" + ")}) AS rank,`,
+    paired.sql,
+    LOCATION_SELECT,
+    "FROM cells",
+    LOCATION_FROM,
+    "WHERE cells.project_id = ?",
+    // AQU-1424 / AQU-1626, as in queryScopedSearch: parked cells, deleted
+    // files and hidden companions are not searchable.
+    `AND ${notHiddenSql("cells")}`,
+    `AND ${inCountedFileSql("cells")}`,
+  ]
+  const binds: unknown[] = [...terms.flatMap((term) => [term, term]), ...paired.binds, verifiedProjectId]
+
+  for (const term of terms) {
+    parts.push("AND position(lower(?) in lower(cells.value)) > 0")
+    binds.push(term)
+  }
+  if (opts.side !== undefined) {
+    parts.push("AND cells.side = ?")
+    binds.push(opts.side)
+  }
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
+  }
+
+  const order: string[] = []
+  if (terms.length > 1) {
+    order.push("(position(lower(?) in lower(cells.value)) > 0) DESC")
+    binds.push(q.trim())
+  }
+  order.push(
+    "rank DESC",
+    "cells.file_id",
+    "COALESCE(loc.source_sequence, 1e300)",
+    `${REF_CHAPTER_SQL} NULLS LAST`,
+    `${REF_VERSE_SQL} NULLS LAST`,
+    "cells.cell_id",
+    "cells.side",
+  )
+  parts.push(`ORDER BY ${order.join(", ")}`)
+  parts.push("LIMIT ?")
+  binds.push(limit)
+
+  const result = await db.prepare(parts.join(" ")).bind(...binds).all<TextRowRaw>()
+  return result.results.map((row) => {
+    const hits: TextMatch[] = terms.flatMap((term) => findTextMatches(row.value, term))
+    return {
+      cellId: row.cell_id,
+      fileId: row.file_id,
+      side: row.side,
+      value: row.value,
+      snippet: markedSnippetOfAll(row.value, hits),
+      rank: Number(row.rank),
+      pairedValue: row.paired_value ?? null,
+      ...locationFromRow(row),
+    }
+  })
+}
+
 // ---------------------------------------------------------------------------
 // queryScopedExact — ordered-phrase search with paired-side value
 // ---------------------------------------------------------------------------
@@ -534,6 +731,17 @@ export async function queryScopedExact(
 ): Promise<ParallelPassageRow[]> {
   const ftsQuery = sanitizeFtsExactPhrase(exactText)
   if (!ftsQuery) return []
+
+  // As in queryScopedSearch: the word index cannot answer these scripts. An
+  // exact phrase is a literal substring anyway, so nothing is lost.
+  if (needsSubstringSearch(exactText)) {
+    return queryScopedText(db, verifiedProjectId, exactText, {
+      side: opts.side,
+      limit: opts.limit,
+      laneIds: opts.laneIds,
+      phrase: true,
+    })
+  }
 
   const limit = clampLimit(opts.limit)
   const pairedWall = wallFor("paired", opts.laneIds)

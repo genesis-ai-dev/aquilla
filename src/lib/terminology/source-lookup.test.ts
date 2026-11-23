@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { conceptsForSourceSurface, hasSourceTermMatch } from "./source-lookup"
+import {
+  activeConceptsOf,
+  conceptAnswersSourceSurface,
+  conceptsForSourceSurface,
+  hasSourceTermMatch,
+} from "./source-lookup"
 import type { Concept, TermMatchingSettings } from "./types"
 
 /**
@@ -100,5 +105,64 @@ describe("hasSourceTermMatch", () => {
   it("is the boolean the selection toolbar asks for", () => {
     expect(hasSourceTermMatch(PREFIXED, [concept()], HEBREW_INVENTORY)).toBe(true)
     expect(hasSourceTermMatch("unrelated", [concept()], HEBREW_INVENTORY)).toBe(false)
+  })
+})
+
+describe("conceptsForSourceSurface memo (AQU-2654)", () => {
+  it("answers a repeated lookup from the cache, and keys the cache on what can change the answer", () => {
+    const concepts = [concept()]
+    const first = conceptsForSourceSurface(PREFIXED, concepts, HEBREW_INVENTORY)
+    // Same termbase array, settings equal by content but a new object — the
+    // shape of a caller that builds the settings in render.
+    expect(conceptsForSourceSurface(PREFIXED, concepts, { ...HEBREW_INVENTORY })).toBe(first)
+    // Different settings: the prefix is no longer in the inventory.
+    expect(conceptsForSourceSurface(PREFIXED, concepts, { prefixes: [], suffixes: [] })).toHaveLength(0)
+    // A replaced termbase array is a new cache: the term was excluded.
+    const edited = [concept({ match: { excludedForms: [PREFIXED] } })]
+    expect(conceptsForSourceSurface(PREFIXED, edited, HEBREW_INVENTORY)).toHaveLength(0)
+    expect(conceptsForSourceSurface(PREFIXED, concepts, HEBREW_INVENTORY)).toBe(first)
+  })
+})
+
+describe("conceptAnswersSourceSurface (AQU-2654)", () => {
+  // The source column decorates a highlight when a concept it already matched
+  // answers the lookup. That shortcut is only sound if this is the lookup's
+  // own predicate: a concept answers exactly when the lookup returns it.
+  const concepts = [
+    concept({ id: "pointed" }),
+    concept({ id: "excluded", match: { excludedForms: [PREFIXED] } }),
+    concept({ id: "phrase", sourceTerm: "Holy Spirit" }),
+    concept({ id: "wild", sourceTerm: "grac*" }),
+    concept({ id: "form", sourceTerm: "mercy", match: { forms: ["grace"] } }),
+    concept({ id: "draft", sourceTerm: "grace", status: "draft" }),
+  ]
+  const surfaces = [TERM, PREFIXED, "Spirit", "spirit,", "Holy", "grace", "graced", "disgrace", "mercy", "...", ""]
+
+  it.each(surfaces)("agrees with conceptsForSourceSurface on %j", (surface) => {
+    for (const project of [undefined, HEBREW_INVENTORY]) {
+      const looked = conceptsForSourceSurface(surface, concepts, project)
+      for (const c of concepts) {
+        expect(conceptAnswersSourceSurface(surface, c, project)).toBe(looked.includes(c))
+      }
+    }
+  })
+
+  it("the surfaces cover an answer on each ground and a refusal on each", () => {
+    const ids = (surface: string) => conceptsForSourceSurface(surface, concepts, HEBREW_INVENTORY).map((c) => c.id)
+    expect(ids(PREFIXED)).toEqual(["pointed"]) // matcher ground; the excluded twin is refused
+    expect(ids("Spirit")).toEqual(["phrase"]) // fragment ground
+    expect(ids("grace")).toEqual(["wild", "form"]) // wildcard, listed form; the draft is refused
+    expect(ids("disgrace")).toEqual([])
+  })
+})
+
+describe("activeConceptsOf (AQU-2654)", () => {
+  it("is the active concepts, as one array per termbase array", () => {
+    const concepts = [concept({ id: "a" }), concept({ id: "b", status: "draft" }), concept({ id: "c" })]
+    const active = activeConceptsOf(concepts)
+    expect(active.map((c) => c.id)).toEqual(["a", "c"])
+    // Every row holds the same array, so caches keyed on it are shared.
+    expect(activeConceptsOf(concepts)).toBe(active)
+    expect(activeConceptsOf([...concepts])).not.toBe(active)
   })
 })

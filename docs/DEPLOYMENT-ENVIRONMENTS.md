@@ -84,7 +84,11 @@ CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
 `lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
 for a window where blocking every write to `events`/`cells` is acceptable — so a
 migration queued behind a long transaction fails fast instead of holding the
-write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+write queue open. Every migration session also opts out of the statement and
+idle-in-transaction ceilings at startup, so a role-level default set for the
+workers cannot cancel a long statement part-way, and `apply` refuses to start
+if that did not take effect (`docs/POSTGRES-TIMEOUTS.md`).
+**`neon:apply:prod` refuses without a snapshot decision:**
 pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
 production first (instant and copy-on-write, and what you restore from if the
 apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
@@ -345,7 +349,11 @@ branches cut from `dev`; `main` is retired.
    the tag's cherry-picks to learn which `dev` PRs shipped) and the ready
    PRs to pick onto it, in `dev` order. A PR whose files touch a holding
    risk area, or whose walk is not proven, is skipped until a person adds
-   `release:approved` (`docs/RELEASE-RISK-GATES.md`). A release branch may
+   `release:approved` (`docs/RELEASE-RISK-GATES.md`). A commit pushed
+   straight to `dev` with no PR is planned in its `dev` position too:
+   picked when it touches only generated locale catalogs, otherwise held
+   as `not a PR` until a person picks it onto the release branch with
+   `git cherry-pick -x`. A release branch may
    carry the plain cut date, `release/YYYY/MM/DD`, or a same-day `-NN`
    suffix for the Nth slice cut that date; both are production branches.
    The **Release cut** workflow runs the plan, builds the branch by
@@ -354,8 +362,10 @@ branches cut from `dev`; `main` is retired.
    (`e2e/journeys/RELEASE-CUT.md`).
 2. The push runs `release-verify` (the full suite) and smart Jev on the
    branch; QA reads the branch's preview as needed.
-3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below at
-   `:45` once both reported on the branch HEAD with no FAIL. By hand: from
+3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below as
+   soon as both reported on the branch HEAD with no FAIL (it looks when
+   `release-verify` finishes and every ten minutes), then watches the
+   release for ten minutes (`scripts/release-rollback.mjs`). By hand: from
    a clean checkout of that branch, checked out by name (not a detached
    HEAD — the branch guard and the tag script both need it), run
    `pnpm run deploy:aquilla`. After the live checks pass,
@@ -398,7 +408,8 @@ The Tauri shell (`src-tauri/`) updates on two channels
 - **Native shell — rare, signed.** `tauri-release.yml` on a `v*` tag, gated by the
   `desktop-release-signing` environment; its `pnpm run build:hosted` step embeds a
   production-host fallback bundle. The existing Tauri updater (GitHub Releases
-  `latest.json`) ships it.
+  `latest.json`) ships it. The release is a draft until `desktop-release-verify.yml`
+  passes, and `desktop-release-cut.yml` tags it when the shell changed: `docs/DESKTOP-RELEASES.md`.
 
 Secrets:
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { APPROVED_LABEL, AREAS, AREA_GATES, HOLDING_AREAS, classifyFiles, holdingAreas, riskLabelsFor } from "./release-risk.mjs"
+import { APPROVED_LABEL, AREAS, AREA_GATES, GATE_SWITCHES, HOLDING_AREAS, classifyFiles, gateEnabled, holdingAreas, riskLabelsFor } from "./release-risk.mjs"
 
 // A misclassified file in one of these areas would put a change that can
 // corrupt the event log, drop an offline edit, or leak another org's data
@@ -17,8 +17,25 @@ describe("classifyFiles: holding areas", () => {
     ["scripts/tag-release.sh", ["infra"]],
     ["scripts/verify-live-environment.mjs", ["infra"]],
     ["scripts/cloudflare-version-deploy.mjs", ["infra"]],
-    ["scripts/release-plan.mjs", ["infra"]],
+    [".github/workflows/release-deploy.yml", ["infra"]],
+    [".github/workflows/risk-label.yml", ["infra"]],
+    [".github/workflows/ci.yml", ["infra"]],
+    // A workflow nobody has placed yet holds until someone does.
+    [".github/workflows/brand-new.yml", ["infra"]],
     ["scripts/release-risk.mjs", ["infra"]],
+    ["scripts/release-risk-label.mjs", ["infra"]],
+    ["scripts/release-plan.mjs", ["release-tooling"]],
+    ["scripts/release-cut.mjs", ["release-tooling"]],
+    ["scripts/release-deploy-check.mjs", ["release-tooling"]],
+    ["scripts/release-stall.mjs", ["release-tooling"]],
+    ["scripts/release-discord-notify.sh", ["release-tooling"]],
+    ["sync-worker/package.json", ["deps"]],
+    ["auth-worker/pnpm-lock.yaml", ["deps"]],
+    ["scripts/desktop-release-cut.ts", ["infra"]],
+    ["scripts/desktop-release-verify.ts", ["infra"]],
+    ["scripts/desktop-bundle-publish.ts", ["infra"]],
+    ["scripts/lib/desktop-release.ts", ["infra"]],
+    ["scripts/lib/desktop-bundle.ts", ["infra"]],
     ["sync-worker/src/events/route.ts", ["events", "sync"]],
     ["sync-worker/src/events/types.ts", ["events", "sync"]],
     ["sync-worker/src/events/event-projection.ts", ["events", "sync"]],
@@ -67,6 +84,12 @@ describe("classifyFiles: noted but not holding", () => {
     ["src/lib/sync/cells-read.ts", ["sync"]],
     ["auth-worker/src/routes/chat.ts", []],
     ["auth-worker/src/routes/feedback.ts", []],
+    // Off the web release line and not a gate: GitHub runs these from dev
+    // the moment they merge, so a hold on the slice protected nothing.
+    [".github/workflows/tauri-release.yml", ["ci"]],
+    [".github/workflows/desktop-release-cut.yml", ["ci"]],
+    [".github/workflows/dependency-audit.yml", ["ci"]],
+    [".github/workflows/adversarial-jev.yml", ["ci"]],
   ])("%s → %j", (file, areas) => {
     expect(classifyFiles([file])).toEqual({ areas, pathHolds: areas.some((a) => HOLDING_AREAS.has(a)) })
   })
@@ -103,8 +126,24 @@ describe("holdingAreas", () => {
     expect(holdingAreas(["sync"], ["events"])).toEqual([])
   })
 
-  it("gates events and auth, by the check names the workflow jobs carry", () => {
-    expect(AREA_GATES).toEqual({ events: "replay-gate", auth: "auth-matrix" })
+  it("names each gate by the check name its workflow job carries", () => {
+    expect(AREA_GATES).toEqual({
+      events: "replay-gate",
+      auth: "auth-matrix",
+      "offline-sync": "offline-gate",
+      migration: "migration-gate",
+      "release-tooling": "plan-diff",
+      deps: "deps-gate",
+    })
+  })
+
+  // A green migration gate ships the PR, so the deploy has to apply the
+  // migration itself: the gate counts only once that has been switched on.
+  it("counts the migration gate only while AUTO_MIGRATE is on, and the others always", () => {
+    expect(GATE_SWITCHES).toEqual({ migration: "AUTO_MIGRATE" })
+    expect(gateEnabled("migration", {})).toBe(false)
+    expect(gateEnabled("migration", { AUTO_MIGRATE: "on" })).toBe(true)
+    expect(gateEnabled("events", {})).toBe(true)
   })
 
   it("names a check for every gated area, and gates only holding areas", () => {
@@ -130,8 +169,6 @@ describe("gate machinery holds as infra", () => {
     // Everything the gate executes through, not only its own two files.
     "sync-worker/src/__tests__/helpers/pg-test-db.ts",
     "sync-worker/vitest.config.ts",
-    "sync-worker/package.json",
-    "sync-worker/pnpm-lock.yaml",
     // The auth matrix's own chain, on both workers.
     "auth-worker/permission-matrix/golden.json",
     "sync-worker/permission-matrix/golden.json",
@@ -141,9 +178,14 @@ describe("gate machinery holds as infra", () => {
     "auth-worker/src/__tests__/helpers/pg-test-env.ts",
     "auth-worker/src/__tests__/setup-migrations.ts",
     "auth-worker/vitest.config.ts",
-    "auth-worker/package.json",
-    "auth-worker/pnpm-lock.yaml",
     "db/shared/test-lane-fill.ts",
+    // The newer gates: the offline harness and golden, and the scripted gates.
+    "src/lib/sync/offline-gate/offline-gate.test.ts",
+    "src/lib/sync/offline-gate/golden.json",
+    "scripts/gate-migration.ts",
+    "scripts/gate-migration.test.ts",
+    "scripts/gate-deps.mjs",
+    "scripts/gate-plan-diff.mjs",
   ])("%s", (file) => {
     const { areas, pathHolds } = classifyFiles([file])
     expect(areas).toContain("infra")

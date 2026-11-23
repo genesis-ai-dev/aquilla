@@ -1474,6 +1474,12 @@ export const org = defineNamespace({
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
+    // AQU-2456: shown before any restore of an archived project. The confirm
+    // button stays the primary Restore action — restoring makes the project
+    // available again, so it is not a destructive (red) action.
+    "org.restoreProject.dialogTitle": "Restore project",
+    "org.restoreProject.dialogBody":
+      "Everyone who had access to this project before will have access again.",
     "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language lane",
     // ── AQU-1092…1098: the plan board ──────────────────────────────────
     // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
@@ -3068,7 +3074,9 @@ export const org = defineNamespace({
       "org.memberLaneScopeEditor.mainLanguageFallback": {
         description:
           "Name shown for a project's main target language in that checkbox list " +
-          "when the project has not named its main language.",
+          "when the project has not named its main language. The same wording " +
+          "labels that language in the lane pickers of the add-people and " +
+          "invite-link forms.",
       },
       "org.memberLaneScopeEditor.unknownLane": {
         description:
@@ -3441,6 +3449,14 @@ export const org = defineNamespace({
       "org.projectOverview.archived.bodyAskManager": {
         description:
           "Body of that panel for a reader who may NOT restore the project, so it names who can instead of pointing at a button they do not have.",
+      },
+      "org.restoreProject.dialogTitle": {
+        description:
+          "Title of the confirmation before an archived project is restored. Shown from the project overview, the archived-project screen, and the archived-projects list. Parallel to Archive project. The confirm button is the standard primary Restore, not red.",
+      },
+      "org.restoreProject.dialogBody": {
+        description:
+          "Body of that confirmation. States that restoring gives access back to everyone who had it before the project was archived. Cancel leaves the project archived. Keep this sentence; do not soften it into a generic 'are you sure'.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",

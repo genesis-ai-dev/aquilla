@@ -1,3 +1,5 @@
+import { accountMutation } from "../lib/account-mutation"
+import { requireSettingsProof, deployment, securityFactor, consumeFactor, securityAttempt } from "../lib/account-security"
 import { ANALYTICS_CONSENT_KEY, ANALYTICS_DISCLOSURE_VERSION, parseAnalyticsDecision } from "../../../shared/analytics-consent"
 // Auth routes ported from frontier-server/cloudflare/src/routes/auth.ts.
 //
@@ -16,7 +18,7 @@ import type {
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
 import { JWTService, SessionInvalidatedError, isPastHalfLife } from "../auth/jwt"
-import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
+import { sendPasswordResetEmail, sendVerificationEmail, sendWelcomeEmail } from "../services/email"
 import {
   absorbPasswordVerificationCost,
   hashPasswordWerkzeugScrypt,
@@ -38,6 +40,8 @@ import {
   recordAuthEvent,
   REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
+  userIdentifier,
+  VERIFY_RESEND_MAX_PER_USER,
 } from "../utils/rate-limit"
 import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
 import { parseAdminEmails } from "../middleware/platform-admin"
@@ -132,6 +136,8 @@ const passwordResetSchema = z.object({
   token: z.string(),
   username: z.string(),
   new_password: z.string().min(8).max(MAX_PASSWORD_LENGTH),
+  factor_code: z.string().max(64).optional(),
+  recovery: z.boolean().optional(),
 })
 
 const verifyResetTokenSchema = z.object({
@@ -170,7 +176,7 @@ export function legacyD1Config(
   }
 }
 
-function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+export function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
   const d1 = legacyD1Config(env)
   if (!d1) return null
 
@@ -353,24 +359,12 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         .bind(username)
         .first<{ id: number }>()
       if (created) {
-        const verifyToken = crypto.randomUUID().replace(/-/g, "")
-        const expiresAt = new Date(
-          Date.now() + 7 * 24 * 60 * 60 * 1000,
-        ).toISOString()
-        // [Pen test] Auth & session mgmt (2026-08-24): stored as a SHA-256
-        // digest, same as the reset token. This one is lower-value (it marks
-        // an address verified, it doesn't take over the account) but it lived
-        // in plaintext next to the reset token for the same reason, and the
-        // fix is identical. (2026-09-07, OPS-31: the plaintext `token` column
-        // is gone — migration 0081 — so there is no longer a NULL to write.)
-        await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
-           VALUES (?, ?, ?)`,
+        verifyUrl = await mintVerificationLink(
+          c.env.AQUILLA_PG,
+          created.id,
+          c.env.BASE_URL || "https://aquilla.app",
+          { replaceExisting: false },
         )
-          .bind(created.id, await sha256Hex(verifyToken), expiresAt)
-          .run()
-        const baseUrl = c.env.BASE_URL || "https://aquilla.app"
-        verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`
         await logActivity(c.env.AQUILLA_PG, created.id, "register", "Account created")
       }
     } catch (err) {
@@ -1094,6 +1088,51 @@ auth.put("/me/analytics-consent", authMiddleware, zValidator("json", analyticsCh
   return c.json({ error: "preferences changed; reload before confirming" }, 409)
 })
 
+/** How long a verification link stays usable. Registration and the
+ *  resend button in account settings both mint on this window (AQU-2636). */
+const VERIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Mint a fresh email-verification link for one account and return its URL.
+ *
+ * `replaceExisting` deletes any earlier unused link for the same user first,
+ * so the newest link is the only one that verifies — the same single-use
+ * discipline /verify-email already applies when it spends one. The resend
+ * route needs that; registration does not (a brand-new row has no tokens), and
+ * the signup path keeps doing exactly the one write it always did.
+ *
+ * [Pen test] Auth & session mgmt (2026-08-24): stored as a SHA-256 digest,
+ * same as the reset token. This one is lower-value (it marks an address
+ * verified, it doesn't take over the account) but it lived in plaintext next
+ * to the reset token for the same reason, and the fix is identical.
+ * (2026-09-07, OPS-31: the plaintext `token` column is gone — migration 0081 —
+ * so there is no longer a NULL to write.) The plaintext exists only inside
+ * the emailed link; nothing logs it and no response carries it.
+ */
+async function mintVerificationLink(
+  db: AquillaDb,
+  userId: number,
+  baseUrl: string,
+  { replaceExisting }: { replaceExisting: boolean },
+): Promise<string> {
+  const token = crypto.randomUUID().replace(/-/g, "")
+  const expiresAt = new Date(Date.now() + VERIFICATION_TTL_MS).toISOString()
+  if (replaceExisting) {
+    await db
+      .prepare("DELETE FROM email_verification_tokens WHERE user_id = ?")
+      .bind(userId)
+      .run()
+  }
+  await db
+    .prepare(
+      `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+       VALUES (?, ?, ?)`,
+    )
+    .bind(userId, await sha256Hex(token), expiresAt)
+    .run()
+  return `${baseUrl}/verify-email?token=${token}`
+}
+
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 
 // POST /api/v2/auth/verify-email — public; the token is the authorization.
@@ -1135,6 +1174,62 @@ auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
     .bind(row.user_id)
     .run()
   return c.json({ verified: true })
+})
+
+/**
+ * POST /api/v2/auth/me/resend-verification — AQU-2636.
+ *
+ * Mails the signed-in account a fresh verification link. Before this, the only
+ * verification link an account ever got was the one in its welcome mail, which
+ * expires in 7 days; since AQU-2634 an unverified address stops resolving in
+ * Add members (AQU-2576) and in email-bound invites (AQU-1579), so an older
+ * account had a requirement it could not satisfy.
+ *
+ * The link goes only to the address already stored on the account — the caller
+ * passes no body, so this cannot be pointed at a third party's mailbox, and a
+ * signed-out visitor cannot reach it at all (authMiddleware). Minting replaces
+ * any earlier unused link. Unlike the public password-reset request, which
+ * answers identically whatever happened so it can't be used to enumerate
+ * addresses, this route has nothing to hide from its own authenticated owner:
+ * it says plainly when the address is already verified or the limit is hit.
+ */
+auth.post("/me/resend-verification", authMiddleware, async (c) => {
+  c.header("Cache-Control", "no-store")
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, email, email_verified_at FROM users WHERE id = ?",
+  )
+    .bind(c.get("user").id)
+    .first<{ id: number; email: string; email_verified_at: string | null }>()
+  if (!row) return c.json({ error: "session_expired" }, 401)
+  if (row.email_verified_at) return c.json({ error: "already_verified" }, 409)
+
+  const key = userIdentifier(row.id)
+  const recent = await countRecentEvents(
+    c.env.AQUILLA_PG,
+    "email_verification_resend",
+    key,
+    { onlyFailures: false },
+  )
+  if (recent >= VERIFY_RESEND_MAX_PER_USER) {
+    return c.json({ error: "rate_limited" }, 429)
+  }
+  // Check the binding before spending a slot or invalidating the account's
+  // existing link: on a stack with no EMAIL binding (local/e2e) nothing could
+  // be delivered, and silently replacing a live link would be worse than
+  // refusing.
+  if (!c.env.EMAIL) return c.json({ error: "email_delivery_unavailable" }, 503)
+  await recordAuthEvent(c.env.AQUILLA_PG, "email_verification_resend", key, true)
+
+  const verifyUrl = await mintVerificationLink(
+    c.env.AQUILLA_PG,
+    row.id,
+    c.env.BASE_URL || "https://aquilla.app",
+    { replaceExisting: true },
+  )
+  if (!(await sendVerificationEmail(c.env, row.email, verifyUrl))) {
+    return c.json({ error: "email_delivery_unavailable" }, 503)
+  }
+  return c.json({ sent: true, email: row.email })
 })
 
 interface ActivityLogRow {
@@ -1188,6 +1283,7 @@ auth.post("/password-reset/request", zValidator("json", passwordResetRequestSche
 // Settings never accepts a destination email from the client. Resolve the
 // selected authenticated account afresh, rather than trusting a JWT email claim.
 auth.post("/me/password-reset/request", authMiddleware, async c => {
+  await requireSettingsProof(c)
   const user = await c.env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=?")
     .bind(c.get("user").id).first<{ email: string }>()
   if (!user) return c.json({ error: "Unauthorized" }, 401)
@@ -1227,7 +1323,7 @@ async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, retu
       // from the migration source), returning the generic 200 without ever
       // minting a token or sending the reset email.
       const found = await c.env.AQUILLA_PG.prepare(
-        "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?)",
+        "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?) AND NOT password_login_disabled",
       )
         .bind(email)
         .first<{ id: number; username: string; email: string }>()
@@ -1380,7 +1476,7 @@ auth.post(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
            AND token_hash = ? AND EXISTS (
-             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id AND NOT u.password_login_disabled
              AND (password_reset_tokens.email_at_issue=u.email OR
                (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
            )`,
@@ -1415,7 +1511,7 @@ auth.post(
   "/password-reset/reset",
   zValidator("json", passwordResetSchema),
   async (c) => {
-    const { token, username, new_password } = c.req.valid("json")
+    const { token, username, new_password, factor_code, recovery } = c.req.valid("json")
     try {
       // [Pen test] Auth & session mgmt (2026-08-10): same throttle as
       // /password-reset/verify — this is the endpoint that actually spends
@@ -1452,7 +1548,7 @@ auth.post(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
            AND token_hash = ? AND EXISTS (
-             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id
+             SELECT 1 FROM users u WHERE u.id=password_reset_tokens.user_id AND NOT u.password_login_disabled
              AND (password_reset_tokens.email_at_issue=u.email OR
                (password_reset_tokens.email_at_issue IS NULL AND u.email_changed_at IS NULL))
            )`,
@@ -1475,16 +1571,34 @@ auth.post(
       }
       await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
 
+      if ((await securityFactor(c.env.AQUILLA_PG,user.id,deployment(c)))?.enabled) {
+        const recoveryUser=await c.env.AQUILLA_PG.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first<import("../types").AuthUser>()
+        if(!recoveryUser) return c.json({error:"Invalid token"},400)
+        c.set("user",recoveryUser)
+        await securityAttempt(c)
+      }
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
       // AQU-2536: claim once and commit all recovery effects together. A
       // competing request waits on the same token rows, then claims nothing.
       // Failure in any CTE rolls back the password, generation and token claim.
-      const changed = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      const changed = await accountMutation(c.env.AQUILLA_PG,user.id,async db=>{
+        const valid=await db.prepare(`SELECT 1 FROM password_reset_tokens p JOIN users u ON u.id=p.user_id WHERE p.user_id=? AND p.token_hash=? AND p.expires_at>now() AND NOT u.password_login_disabled AND (p.email_at_issue=u.email OR (p.email_at_issue IS NULL AND u.email_changed_at IS NULL))`).bind(user.id,await sha256Hex(token)).first()
+        if(!valid) return null
+        const factor=await securityFactor(db,user.id,deployment(c))
+        if(factor?.enabled){
+          if(!factor_code) throw new Error("settings_verification_required")
+          // Token possession authorizes only this recovery identity, never a session.
+          const recoveryUser=await db.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first<import("../types").AuthUser>()
+          if(!recoveryUser) throw new Error("invalid_code")
+          c.set("user",recoveryUser)
+          await consumeFactor(c,db,factor_code,!!recovery,false)
+        }
+        return db.prepare(`WITH claimed AS (
         DELETE FROM password_reset_tokens
         WHERE user_id=? AND EXISTS (
           SELECT 1 FROM password_reset_tokens proof
           WHERE proof.user_id=? AND proof.token_hash=? AND proof.expires_at>now()
-          AND EXISTS(SELECT 1 FROM users u WHERE u.id=proof.user_id
+          AND EXISTS(SELECT 1 FROM users u WHERE u.id=proof.user_id AND NOT u.password_login_disabled
             AND (proof.email_at_issue=u.email OR (proof.email_at_issue IS NULL AND u.email_changed_at IS NULL)))
         ) RETURNING user_id
       ), changed AS (
@@ -1500,11 +1614,13 @@ auth.post(
       ) SELECT id FROM changed`)
         .bind(user.id, user.id, await sha256Hex(token), passwordHash)
         .first<{ id: number }>()
+      })
       if (!changed) return c.json({ error: "Invalid or expired token" }, 400)
       evictUserSessions(user.id)
 
       return c.json({ message: "Password reset successful" })
     } catch (error) {
+      if(error instanceof Error && ["settings_verification_required","invalid_code","rate_limited"].includes(error.message)) return c.json({error:error.message},403)
       console.error("Password reset error:", error)
       return c.json({ error: "Failed to reset password" }, 500)
     }

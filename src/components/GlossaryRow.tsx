@@ -9,7 +9,7 @@
  *   deprecated → Restore (rendered dimmed)
  * Presentational only; all mutations bubble through callbacks.
  */
-import { useEffect, useState } from "react"
+import { memo, useState } from "react"
 import { ChevronDown, ChevronRight, Archive, RotateCcw, Check, X, Plus, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -166,9 +166,14 @@ function ExpanderRenderingRow({
   const [draft, setDraft] = useState(rendering.rendering)
   const statusOptions = renderingStatusOptions(t)
 
-  useEffect(() => {
-    setDraft(rendering.rendering)
-  }, [rendering.rendering])
+  // Follow the saved rendering when it changes, but never over text the
+  // person has typed and not yet left: a re-read landing mid-word used to
+  // replace what they were typing.
+  const [seen, setSeen] = useState(rendering.rendering)
+  if (seen !== rendering.rendering) {
+    setSeen(rendering.rendering)
+    if (draft === seen) setDraft(rendering.rendering)
+  }
 
   return (
     <div className="flex items-center gap-2">
@@ -223,7 +228,14 @@ function ExpanderRenderingRow({
   )
 }
 
-export function GlossaryRow({
+/**
+ * Memoized (AQU-2654): the glossary is one row per term and is not
+ * virtualized, so a render of the editor above — a dialog opening, a save
+ * landing, the workspace re-rendering — must not re-run every row. Its props
+ * are the concept (replaced, never edited in place) and callbacks the editor
+ * keeps stable, so a row re-renders only for its own term.
+ */
+export const GlossaryRow = memo(function GlossaryRow({
   concept,
   canManage,
   onEditSource,
@@ -386,4 +398,4 @@ export function GlossaryRow({
       )}
     </div>
   )
-}
+})

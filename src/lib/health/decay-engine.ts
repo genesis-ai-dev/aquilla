@@ -28,6 +28,13 @@ export interface HealthStats {
   fileProgress: Map<string, { translated: number; validated: number; total: number }>
   /** Rule / built-in-check violations — separate sibling surface (AD-14). */
   infractions: Map<string, RuleInfraction[]>
+  /**
+   * Cells whose rule check is still running in the background (AQU-2654).
+   * Absent or 0 when `infractions` is complete; while it is positive,
+   * `infractions` holds the cells checked so far and is republished once the
+   * rest are done.
+   */
+  infractionsPending?: number
   openCommentCount: Map<string, number>
   projectOpenCommentCount: number
   cellOpenCommentCount: Map<string, number>

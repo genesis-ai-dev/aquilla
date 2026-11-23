@@ -792,7 +792,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
       fileId: args.fileId,
       artifactSha256: await sha256Hex(sourceBytes),
       revision,
-      origin: "import",
+      origin: revision.origin ?? "import",
       // The finalize below recomputes the counters once for the whole file.
       finalizeFollows: true,
       getToken: args.getToken,

@@ -1,4 +1,5 @@
 import type { NumberFormatConventions } from "../../../db/shared/number-format"
+import type { OrthographyProfile } from "../../../db/shared/orthography"
 import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 
 /**
@@ -45,4 +46,12 @@ export interface BuiltinCheckRunContext {
    * by some other language's format would report correct typography.
    */
   numberFormat?: NumberFormatConventions | null
+  /**
+   * AQU-2628: the lane's orthography — the spelling rules it writes in, its
+   * canonical apostrophe and the words those rules must leave alone, from
+   * `laneOrthography` (src/lib/lqa/lane-builtin-checks.ts). Absent or null
+   * leaves the old-orthography check silent, which is what every project
+   * without the Language profile slot gets.
+   */
+  orthography?: OrthographyProfile | null
 }

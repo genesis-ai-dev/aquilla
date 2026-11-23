@@ -282,16 +282,28 @@ describe('lane_id resolution — artifact_bindings resolver (slice 8)', () => {
     return row?.id ?? null
   }
 
-  it('source role -> source lane; support/target role -> target lane by tag', async () => {
+  it('target role -> target lane by tag; source and support roles -> source lane', async () => {
     await seedLanes(t)
     // A 'source' binding ignores target_lang and lands on the source lane.
     expect(await resolveBinding('source', '')).toBe(SOURCE_LANE)
     expect(await resolveBinding('source', 'es')).toBe(SOURCE_LANE)
-    // Non-source roles resolve the target lane whose legacy_tag matches.
+    // A 'target' binding resolves the target lane whose legacy_tag matches.
     expect(await resolveBinding('target', 'es')).toBe(ES_LANE)
-    expect(await resolveBinding('support', '')).toBe(DEFAULT_TARGET_LANE)
+    // AQU-2554: a 'support' binding (the SDBH edition, a multi-book container,
+    // a Paratext package) carries no target language: the source lane.
+    expect(await resolveBinding('support', '')).toBe(SOURCE_LANE)
     // No matching lane -> NULL (behavior-neutral until the lane exists).
     expect(await resolveBinding('target', 'zz')).toBeNull()
+  })
+
+  it('a support binding resolves on a project with no blank target lane (AQU-2554)', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
+         ($1, $2, 'source', 'Source', NULL, NULL),
+         ($3, $2, 'target', NULL, 'es', 'es')`,
+      [SOURCE_LANE, PROJECT, ES_LANE],
+    )
+    expect(await resolveBinding('support', '')).toBe(SOURCE_LANE)
   })
 })
 

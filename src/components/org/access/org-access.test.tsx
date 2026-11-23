@@ -69,7 +69,7 @@ describe("OrgAccessPage", () => {
     const pill = chips[0].querySelector("[data-origin]")
     expect(pill?.getAttribute("data-origin")).toBe("inherited")
     // Inherited, so the pill names where the grant is set and links to that node.
-    expect(pill?.textContent).toContain(`via ${formatScopePath([org, team])}`)
+    expect(pill?.textContent).toContain(`via team ${team.name}`)
     expect(pill?.getAttribute("href")).toBe(`#${accessNodeId(team)}`)
   })
 
@@ -89,9 +89,11 @@ describe("orgAccessCsv", () => {
     const { result } = renderHook(() => useT())
     const lines = orgAccessCsv(result.current, payload.people).trimEnd().split("\r\n")
     expect(lines).toHaveLength(3)
-    // Team name contains a comma and quotes → RFC 4180 quoting, content unchanged.
-    const quoted = `"${formatScopePath([org, team, project]).replace(/"/g, '""')}"`
-    expect(lines[1].startsWith(`Naladda,${quoted},`)).toBe(true)
+    // The team is a "via team" chip, so it leaves the scope column. A comma in
+    // that team name quotes the origin cell instead (csvCell).
+    const scope = formatScopePath([org, team, project])
+    expect(lines[1].startsWith(`Naladda,${scope},`)).toBe(true)
+    expect(lines[1]).toContain("via team")
     expect(lines[1]).toContain(",Ruth,2026-09-01T00:00:00.000Z")
     expect(lines[2].startsWith(`Ruth,${formatScopePath([org])},`)).toBe(true)
   })

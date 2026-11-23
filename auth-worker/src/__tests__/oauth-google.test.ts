@@ -1,3 +1,4 @@
+import { parseDesktopGoogleCallback } from "../../../shared/desktop-google"
 import { URL as NodeURL } from "node:url"
 import { readFileSync } from "node:fs"
 import { PGlite } from "@electric-sql/pglite"
@@ -8,6 +9,7 @@ import app from "../index"
 import { JWTService } from "../auth/jwt"
 import { pkceChallenge } from "../routes/oauth-google"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
+import { applyLegacyUserMigration } from "../services/legacy-user-migration"
 import * as legacy from "../services/frontier-d1"
 import { ipIdentifier } from "../utils/rate-limit"
 import * as postResponse from "../lib/post-response-db"
@@ -50,6 +52,31 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("returns native handoffs through the desktop parser, requiring PKCE and rejecting replay", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    const challenge = await pkceChallenge(verifier)
+    expect((await post("start", {challenge}, "app://localhost")).status).toBe(400)
+    expect((await post("start", {challenge,desktop:true}, "https://evil.example")).status).toBe(400)
+    const begin = await post("start", {challenge,desktop:true}, "app://localhost")
+    expect(begin.status).toBe(200)
+    const auth = new URL((await begin.json() as {authorization_url:string}).authorization_url)
+    const response = await callback(auth)
+    const result = parseDesktopGoogleCallback(response.headers.get("location")!)!
+    expect(result.state).toBe(challenge)
+    expect(result.code).toMatch(/^[a-f0-9]{64}$/)
+    expect((await post("exchange", {code:result.code,verifier:"b".repeat(64)}, "app://localhost")).status).toBe(400)
+    const exchange = await post("exchange", {code:result.code,verifier}, "app://localhost")
+    expect(exchange.status).toBe(200)
+    expect(await exchange.json()).toMatchObject({username:"alice",created:false})
+    expect((await post("exchange", {code:result.code,verifier}, "app://localhost")).status).toBe(400)
+    expect((await callback(auth)).status).toBe(400)
+    const cancelStart = await post("start", {challenge,desktop:true}, "http://app.localhost")
+    const cancelAuth = new URL((await cancelStart.json() as {authorization_url:string}).authorization_url)
+    const cancel = await app.request(`/api/v2/auth/oauth/google/callback?state=${cancelAuth.searchParams.get("state")}&error=access_denied`, {}, testEnv)
+    expect(parseDesktopGoogleCallback(cancel.headers.get("location")!)).toEqual({state:challenge,error:"cancelled"})
+  })
+
   it("refuses a legacy Google link whose email no longer matches the account", async () => {
     await seedUser(1,"alice")
     await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
@@ -95,7 +122,8 @@ describe("Google login boundary", () => {
       return transact(work)
     })
     const response=await app.request("/api/v2/auth/oauth/google/"+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${jwt}`},body:JSON.stringify({code,verifier,password})},testEnv)
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(path === "connect" ? 403 : 409)
+    if (path === "connect") expect(await response.json()).toEqual({error:"fresh_verification_required"})
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM provider_identities WHERE user_id=1").first()).toEqual({n:0})
   })
 
@@ -305,6 +333,53 @@ describe("Google login boundary", () => {
     expect(await env.AQUILLA_PG.prepare("SELECT email_verified_at FROM users WHERE username='alice'").first()).toEqual({ email_verified_at: null })
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM provider_identities").first()).toEqual({ n: 1 })
     expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM email_verification_tokens").first()).toEqual({ n: 1 })
+  })
+  it.each(["nightly first", "nightly during access lookup", "Google first", "provider conflict", "session failure"])("preserves one legacy identity and atomic grants: %s", async order => {
+    const code = await handoff()
+    const password = "legacy-password-example"
+    const source = { id: 701, gitlab_user_id: 77, username: "codex-alice", email: "alice@example.com",
+      password_hash: await hashPasswordWerkzeugScrypt(password), created_at: null, updated_at: null }
+    Object.assign(testEnv, { LEGACY_USER_MIGRATION_ENABLED: "true", FRONTIER_D1_ACCOUNT_ID: "test",
+      FRONTIER_D1_DATABASE_ID: "test", FRONTIER_D1_API_TOKEN: "test", GITLAB_URL: "https://gitlab.example", GITLAB_ADMIN_TOKEN: "test" })
+    vi.spyOn(legacy, "findLegacyUsersByIdentifier").mockResolvedValue([source])
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!String(url).startsWith("https://gitlab.example/")) throw Error("unexpected migration fetch")
+      if (order === "nightly during access lookup" && String(url).includes("/memberships")) expect((await nightly()).created).toBe(true)
+      return Response.json([])
+    }))
+    const pending = await (await post("exchange", { code, verifier })).json() as { step: string; continuation: string }
+    expect(pending.step).toBe("legacy")
+    const body = { code: pending.continuation, verifier, password }
+    expect((await post("finish", { ...body, password: "wrong" })).status).toBe(401)
+    const nightly = () => applyLegacyUserMigration(env.AQUILLA_PG, source, { confirmedMembershipCount: 0, orgMemberships: [], teamUuids: [], projectMemberships: [], conflicts: [] }, "scheduled")
+    if (order === "nightly first") expect((await nightly()).created).toBe(true)
+    if (order === "provider conflict") {
+      await env.AQUILLA_PG.exec("CREATE FUNCTION reject_google() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test failure'; END $$")
+      await env.AQUILLA_PG.exec("CREATE TRIGGER reject_google BEFORE INSERT ON provider_identities FOR EACH ROW EXECUTE FUNCTION reject_google()")
+      try {
+        expect((await post("finish", body)).status).toBeGreaterThanOrEqual(400)
+        for (const table of ["users", "legacy_identity_links", "provider_identities"])
+          expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 0 })
+      } finally { await env.AQUILLA_PG.exec("DROP TRIGGER reject_google ON provider_identities"); await env.AQUILLA_PG.exec("DROP FUNCTION reject_google()") }
+    }
+    if (order === "session failure") {
+      vi.spyOn(JWTService.prototype, "createAccessTokenWithPayload").mockRejectedValueOnce(new Error("signer unavailable"))
+    }
+    const response = await post("finish", body)
+    if (order === "session failure") {
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({ error: "session_failed" })
+      vi.stubGlobal("fetch", network)
+      const retry = await post("exchange", { code: await handoff(), verifier })
+      expect(await retry.json()).toMatchObject({ username: source.username, created: false })
+    } else {
+      expect(await response.json()).toMatchObject({ username: source.username })
+      expect(response.status).toBe(200)
+    }
+    expect((await nightly()).created).toBe(false)
+    for (const table of ["users", "legacy_identity_links", "provider_identities"])
+      expect(await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int n FROM " + table).first()).toEqual({ n: 1 })
+    expect((await post("finish", body)).status).toBe(400)
   })
   it("fails closed on legacy reservations and throttles social starts independently", async () => {
     const code = await handoff()

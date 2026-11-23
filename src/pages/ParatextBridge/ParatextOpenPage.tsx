@@ -21,13 +21,15 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { bridgeStore } from "@/lib/paratext-bridge/store"
+import { otherCopies } from "@/lib/paratext-bridge/copies"
+import { clearPendingImport, getPendingImport, setPendingImport } from "@/lib/paratext-bridge/pending-import"
 import { setMirrorBase } from "@/lib/paratext-bridge/book-sync"
 import { paratextTauri } from "@/lib/paratext-bridge/tauri"
 import { decodeUtf8Strict } from "@/lib/paratext-bridge/units"
 import type { ProjectEntry } from "@/lib/parsers/paratext-project"
 import type { FileReference } from "@/lib/parsers/types"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
-import { createProjectLane, fetchProjectSettings, renameProjectLane } from "@/lib/sync/project-settings"
+import { createProjectLane, fetchProjectSettings, fetchProjectSettingsResult, renameProjectLane } from "@/lib/sync/project-settings"
 import { createProject } from "@/lib/store/project-index"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 
@@ -53,16 +55,29 @@ export function ParatextOpenPage() {
   const org = useActiveOrgOptional()
   const [phase, setPhase] = useState<Phase>({ kind: "reading" })
   const started = useRef(false)
+  // Unmount only. The setup below runs once and must survive re-renders: a
+  // fresh session or org object used to cancel it after the cloud project was
+  // made, leaving the page on "Creating" and the project unlinked.
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
   /** The book bytes the import read, by file name: the mirror's base. */
   const importedBytes = useRef(new Map<string, Uint8Array>())
 
   useEffect(() => {
-    if (!project || !raw || !session || started.current) return
+    // Wait for the org: a project created before it is known lands outside it.
+    if (!project || !raw || !session || org?.isLoading || started.current) return
     started.current = true
-    let cancelled = false
+    const { jwt, username } = session
+    const orgId = org?.activeOrgId ?? null
     const run = async () => {
-      // Already mirrored: straight to its editor.
-      const existing = await bridgeStore.link(project.stateId)
+      // Already mirrored, from this folder or from another copy of the same
+      // project (Paratext 9 and 10 each keep one): straight to its editor.
+      // A second Aquilla project for the same Paratext project is never made.
+      let existing = await bridgeStore.link(project.stateId)
+      for (const other of otherCopies(project, d.projects)) existing ??= await bridgeStore.link(other.stateId)
       if (existing) {
         const first = project.books.map((b) => existing.books[b.code]?.fileId).find(Boolean)
         navigate(editorPathForLink(existing.projectId, first), { replace: true })
@@ -82,27 +97,33 @@ export function ParatextOpenPage() {
         importedBytes.current.set(b.fileName, bytes)
         entries.push({ name: b.fileName, text: async () => text })
       }
-      if (cancelled) return
+      if (!alive.current) return
+      // Left at the source step last time: carry on with that project.
+      const pending = getPendingImport(project.stateId)
+      if (pending && (await fetchProjectSettingsResult(jwt, pending.projectId)).ok) {
+        if (alive.current) setPhase({ kind: "import", projectId: pending.projectId, targetLang: pending.targetLang, entries, jwt })
+        return
+      }
       setPhase({ kind: "creating" })
       const projectId = uuidv7()
       const name = project.settings.fullName || project.settings.name
       const language = project.settings.language || project.settings.languageIsoCode || ""
-      await createCloudProject(session.jwt, { id: projectId, name, ...(org?.activeOrgId != null ? { orgId: org.activeOrgId } : {}) })
+      await createCloudProject(jwt, { id: projectId, name, ...(orgId != null ? { orgId } : {}) })
       // Languages are lane rows: the source lane is named once the import has
       // picked a source Bible; the Paratext project's language is the target.
       let targetLang = ""
-      const created = language ? await createProjectLane(session.jwt, projectId, { name: "", language }) : null
+      const created = language ? await createProjectLane(jwt, projectId, { name: "", language }) : null
       if (created?.kind === "ok") targetLang = created.lane.legacyTag ?? ""
+      setPendingImport(project.stateId, { projectId, targetLang })
       await createProject({
         id: projectId, name, sourceLanguage: "", targetLanguage: language,
-        createdAt: new Date().toISOString(), files: [], members: [{ userId: session.username, role: "owner" }],
+        createdAt: new Date().toISOString(), files: [], members: [{ userId: username, role: "owner" }],
       })
-      if (cancelled) return
-      setPhase({ kind: "import", projectId, targetLang, entries, jwt: session.jwt })
+      if (!alive.current) return
+      setPhase({ kind: "import", projectId, targetLang, entries, jwt })
     }
-    run().catch((e: unknown) => { if (!cancelled) setPhase({ kind: "error", message: e instanceof Error ? e.message : String(e) }) })
-    return () => { cancelled = true }
-  }, [project, raw, session, org?.activeOrgId, navigate])
+    run().catch((e: unknown) => { if (alive.current) setPhase({ kind: "error", message: e instanceof Error ? e.message : String(e) }) })
+  }, [project, raw, session, org?.isLoading, org?.activeOrgId, navigate, d.projects])
 
   const getToken = useMemo(
     () => (phase.kind === "import" ? buildFileScopedTokenFetcher(() => phase.jwt, phase.projectId) : async () => null),
@@ -128,6 +149,7 @@ export function ParatextOpenPage() {
       projectGuid: project.guid, projectPath: project.path, projectId: phase.projectId,
       books, targetLang: phase.targetLang, createdAt: Date.now(),
     })
+    clearPendingImport(project.stateId)
     const first = project.books.map((b) => books[b.code]?.fileId).find(Boolean)
     navigate(editorPathForLink(phase.projectId, first), { replace: true })
   }

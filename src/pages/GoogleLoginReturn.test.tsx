@@ -113,3 +113,14 @@ it("resumes a saved username step without replaying the exchanged handoff", asyn
   await waitFor(()=>expect(mocks.finalize).toHaveBeenCalledOnce())
   expect(mocks.request).toHaveBeenCalledExactlyOnceWith("finish",{code:"c".repeat(64),verifier:mocks.attempt.verifier,username:"alice"})
 })
+
+it("resumes Codex migration with a password and keeps the existing username", async () => {
+  mocks.attempt.pending = { continuation: "c".repeat(64), step: "legacy", email: "alice@example.com" }
+  mocks.request.mockResolvedValue({ access_token: "aquilla-token", username: "codex-alice", created: false })
+  render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(screen.queryByLabelText("auth.signup.usernameLabel")).toBeNull()
+  fireEvent.change(screen.getByLabelText("auth.google.codexPassword"), { target: { value: "test-password" } })
+  fireEvent.submit(screen.getByRole("button", { name: "auth.google.linkSubmit" }).closest("form")!)
+  await waitFor(() => expect(mocks.finalize).toHaveBeenCalledOnce())
+  expect(mocks.request).toHaveBeenCalledExactlyOnceWith("finish", { code: "c".repeat(64), verifier: mocks.attempt.verifier, password: "test-password" })
+})

@@ -298,6 +298,17 @@
   }
 }
 
+/* Banners pinned to the window's top edge: keep their content clear of the
+   macOS traffic lights. Left only — the lights sit at the physical top-left
+   whatever the text direction, and padding both sides cost a narrow window
+   152px of message. Centred text sits half that off-centre, which is fine.
+   Pair with useTopBannerDrag(): the banner covers the title-bar band. */
+@utility mac-titlebar-clear {
+  html[data-mac-titlebar] & {
+    padding-left: var(--mac-traffic-lights-w);
+  }
+}
+
 /* AQU-1764: an AI draft nobody has validated yet, on any progress surface —
    diagonal stripes of the translated colour and the stripe colour. One
    utility so the Progress card, the bars and the swatches all draw the same
@@ -639,6 +650,39 @@
     cursor: default;
   }
 }
+
+/* macOS desktop (TitlebarDragStrip sets `data-mac-titlebar` and the vars).
+   Deliberately outside @layer base: Tailwind's utilities layer beats every
+   base rule whatever its specificity, so `.min-h-screen` would win.
+
+   Pages outside AppShell: reserve a title-bar band so the traffic lights and
+   the drag strip sit above the page rather than over it. AppShell's header is
+   the drag handle while it is mounted, so the band and strip go away under
+   `data-app-frame` (src/hooks/useAppFrame.ts).
+
+   A viewport unit can't be redefined, so full-height pages shrink by the band
+   through the screen-height utilities they are built with — each keeping its
+   own unit. Only inside #root: dialogs and popovers portal to <body> and are
+   sized against the whole window, band or not. A page sized some other way
+   (inline 100vh, an arbitrary `h-[100dvh]`) should use these utilities. */
+html[data-mac-titlebar]:not([data-app-frame]) {
+  & body { padding-top: var(--mac-titlebar-h); }
+  & #root .min-h-screen { min-height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .min-h-svh { min-height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .min-h-dvh { min-height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .min-h-lvh { min-height: calc(100lvh - var(--mac-titlebar-h)); }
+  & #root .h-screen { height: calc(100vh - var(--mac-titlebar-h)); }
+  & #root .h-svh { height: calc(100svh - var(--mac-titlebar-h)); }
+  & #root .h-dvh { height: calc(100dvh - var(--mac-titlebar-h)); }
+  & #root .h-lvh { height: calc(100lvh - var(--mac-titlebar-h)); }
+}
+/* Hidden only while an AppShell header is actually on screen: under a "held"
+   frame (a lazy route's fallback between two AppShells) the strip is the
+   window's only drag handle. */
+html[data-app-frame="true"] [data-slot="titlebar-drag-strip"] {
+  display: none;
+}
+
 
 /* App-chrome: kill drag-select everywhere. Unlayered + * so it wins over
    @layer base/utilities and doesn't rely on user-select inheritance (which
@@ -1236,3 +1280,26 @@ textarea,
 @utility role-rung-5-edge { border-color: var(--role-rung-5); }
 @utility role-rung-6-edge { border-color: var(--role-rung-6); }
 @utility role-rung-7-edge { border-color: var(--role-rung-7); }
+
+/*
+ * Dropdown rows stay plain until the keyboard moves the highlight
+ * (data-plain-until-key, set by plain-until-keyboard.tsx). The pointer still
+ * gets the same wash the notification inbox uses. Unlayered so it wins over
+ * the focus / data-highlighted utilities while the popup is held plain.
+ * An open submenu row (data-open / data-popup-open) keeps its path highlight.
+ */
+[data-plain-until-key] :is(
+  [data-slot="menu-item"],
+  [data-slot="menu-checkbox-item"],
+  [data-slot="menu-radio-item"],
+  [data-slot="menu-sub-trigger"],
+  [data-slot="select-item"],
+  [data-slot="combobox-item"],
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"]
+):is(:focus, [data-highlighted]):not(:hover, [data-open], [data-popup-open]) {
+  background-color: transparent;
+  color: inherit;
+}

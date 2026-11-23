@@ -13,6 +13,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { pickFolder } from "@/lib/paratext-bridge/tauri"
 import { ParatextProjectRow, useLinkedProjects } from "@/components/paratext/ParatextProjectRow"
+import { groupCopies, liveCopy } from "@/lib/paratext-bridge/copies"
 
 const PARATEXT_DOCS_URL =
   `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
@@ -24,11 +25,17 @@ export function ParatextProjectsPage() {
   const d = useParatextDiscovery()
   const linked = useLinkedProjects(d.projects)
   const [query, setQuery] = useState("")
+  // One row per project, however many folders hold it: the copy Aquilla
+  // writes to stands for the project, else the first one found.
+  const groups = useMemo(() => groupCopies(d.projects).map(({ copies }) => {
+    const main = liveCopy(copies, linked) ?? copies[0]
+    return { main, others: copies.filter((c) => c !== main) }
+  }), [d.projects, linked])
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return d.projects
-    return d.projects.filter((p) => [p.settings.fullName, p.settings.name, p.settings.language].some((v) => v?.toLowerCase().includes(q)))
-  }, [d.projects, query])
+    if (!q) return groups
+    return groups.filter(({ main: p }) => [p.settings.fullName, p.settings.name, p.settings.language].some((v) => v?.toLowerCase().includes(q)))
+  }, [groups, query])
 
   const addFolder = async () => {
     const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
@@ -91,14 +98,16 @@ export function ParatextProjectsPage() {
                 <EmptyState icon={BookOpen} title={t("paratextBridge.noProjects")} description={t("paratextBridge.noProjectsHint")} />
               ) : (
                 <div className="space-y-3">
-                {d.projects.length > 5 ? (
+                {groups.length > 5 ? (
                   <div className="relative max-w-xs">
                     <Search className="pointer-events-none absolute start-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
                     <Input className="ps-8" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("paratextBridge.project.search")} aria-label={t("paratextBridge.project.search")} data-testid="paratext-project-search" />
                   </div>
                 ) : null}
                 <ul className="divide-y rounded-lg border bg-card" data-testid="paratext-project-list">
-                  {shown.map((p) => <ParatextProjectRow key={p.path} project={p} linked={linked.has(p.stateId)} />)}
+                  {shown.map(({ main, others }) => (
+                    <ParatextProjectRow key={main.path} project={main} linked={linked.has(main.stateId)} others={others} />
+                  ))}
                 </ul>
                 </div>
               )}

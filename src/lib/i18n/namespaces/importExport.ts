@@ -723,6 +723,29 @@ export const importExport = defineNamespace({
     "importExport.format.audioChapter.description":
       "One continuous WAV per chapter, with the verse recordings joined end to end in verse " +
       "order. For community check — play the chapter straight through outside the editor.",
+    "importExport.format.audioEpisode.label": "Full episode audio",
+    "importExport.dialog.audioEpisodeModeLabel": "Full episode",
+    "importExport.dialog.audioEpisodeModeHint":
+      "One mono file, as long as the episode, with every character's lines at their own place on " +
+      "the timeline and silence in between. Starts at 0:00, so it lines up with the film.",
+    "importExport.status.preparingEpisodeExport": "Preparing the full-episode file…",
+    "importExport.status.buildingEpisodeFile": "Building the episode file…",
+    "importExport.status.exportedEpisodeAudio": "Exported the full episode as one audio file.",
+    "importExport.dialog.episodeEstimate": plural({
+      one: "One file, about {count} minute long ({size}). {time}",
+      other: "One file, about {count} minutes long ({size}). {time}",
+    }),
+    "importExport.dialog.episodeEstimateTime": plural({
+      one: "Preparing it usually takes about {count} minute.",
+      other: "Preparing it usually takes about {count} minutes.",
+    }),
+    "importExport.dialog.episodeConfirmTitle": "Export the full episode?",
+    "importExport.dialog.episodeConfirmCloseNote":
+      "You can close this window and keep working while it is prepared. A notice in the corner " +
+      "shows progress, lets you cancel, and tells you when the download starts.",
+    "importExport.dialog.episodeConfirmStart": "Start export",
+    "importExport.status.exportKeepsRunning": "You can close this window. The export keeps going.",
+    "importExport.status.exportCancelled": "Export cancelled. Nothing was downloaded.",
     "importExport.dialog.audioChapterModeLabel": "By chapter",
     "importExport.dialog.audioChapterModeHint":
       "One file per chapter, verses joined end to end in order. For community check — play the " +
@@ -1008,6 +1031,12 @@ export const importExport = defineNamespace({
       other: "{count} segments lost inline formatting in this export",
     }),
     "importExport.dialog.andMore": "…and {count} more",
+    // AQU-2539: a Word export lists the paragraphs where words with their own
+    // look (bold, italic, a highlight…) were changed by the translation.
+    "importExport.dialog.lookLostHeader": plural({
+      one: "In {count} paragraph, some words lost their bold, italic or other look because the translation changed them.",
+      other: "In {count} paragraphs, some words lost their bold, italic or other look because the translation changed them.",
+    }),
     "importExport.dialog.exportAgain": "Export again",
 
     // — Export dialog: handleExport status messages —
@@ -2727,6 +2756,13 @@ export const importExport = defineNamespace({
         description: "Truncation notice at the end of the fidelity-warnings list.",
         placeholders: { count: "Number of additional warnings not shown." },
       },
+      "importExport.dialog.lookLostHeader": {
+        description:
+          "Heading of a note shown after a Word export. Below it, each paragraph is named by its first words, " +
+          "followed by the words that lost their look. Words that the translation kept unchanged keep their look, " +
+          "so only changed words are listed.",
+        placeholders: { count: "Number of paragraphs listed." },
+      },
       "importExport.status.downloadingCount": {
         description: "Busy-status message while downloading a project-scope USFM zip, file by file.",
         placeholders: { done: "Number of files downloaded so far.", total: "Total number of files to download." },
@@ -2824,6 +2860,22 @@ export const importExport = defineNamespace({
           clips: "Number of verse recordings that will be included.",
           chapters: "Number of chapter files the export will produce.",
         },
+      },
+      "importExport.dialog.episodeEstimate": {
+        description:
+          "Shown under the full-episode audio export option and in its confirm step: what the " +
+          "one exported audio file will be, before the person starts it.",
+        placeholders: {
+          count: "Length of the audio file in whole minutes.",
+          size: "The file's size, already formatted with its unit (for example 300 MB).",
+          time: "A full sentence saying how long the export usually takes.",
+        },
+      },
+      "importExport.dialog.episodeEstimateTime": {
+        description:
+          "A sentence placed after the full-episode export's size estimate, saying how long " +
+          "building the file usually takes.",
+        placeholders: { count: "Estimated preparation time in whole minutes." },
       },
       "importExport.status.exportedAudioChapters": {
         description:

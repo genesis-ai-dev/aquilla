@@ -280,6 +280,34 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "open'), matching the visual weight of its sibling comments.status.resolved. " +
     "Imperative verb vs. adjectival status take different forms in most " +
     "languages, so one shared string would be wrong for one of the two roles.",
+  "languageProfile.orthography.approve":
+    "Imperative button that accepts a word onto this project's spelling-" +
+    "exception list, so the orthography rules stop rewriting it (AQU-2628). " +
+    "It joins the split already made at agent.approve and " +
+    "rules.checkDrawer.approveSpelling: rules.surface.approveButton promotes a " +
+    "rule to org scope, agent.approve accepts a staged agent proposal, " +
+    "editor.station.approve casts an audio-validation vote, and this one " +
+    "settles one word's spelling. Five human-gate acts on five kinds of " +
+    "object, sharing only the English verb; a language that inflects the act " +
+    "by what is approved cannot borrow one translation for the rest.",
+  "languageProfile.orthography.pending":
+    "Badge on a word a contributor has SUGGESTED for the spelling-exception " +
+    "list and nobody has ruled on yet — it does not bind the converter or the " +
+    "check until someone does (AQU-2628). autopilot.evidence.status.proposed " +
+    "is one value of an AI proposal's review lifecycle and " +
+    "agent.memory.tabProposed is a tab heading over a queue of them; this is " +
+    "the state of a word in a dictionary a person is curating. A language with " +
+    "separate words for 'put forward for review' and 'not yet settled' must be " +
+    "free to use the second here.",
+  "languageProfile.orthography.approved":
+    "Badge on a word the project has accepted onto its spelling-exception list, " +
+    "next to 'Proposed' on a word a contributor has only suggested. It is the " +
+    "state of a LIST ENTRY — this word is settled, the rules leave it alone. " +
+    "autopilot.evidence.status.approved is one value of an AI proposal's review " +
+    "lifecycle (Proposed/Applied/Rejected/Superseded/Approved/Archived), a term " +
+    "of art a language may translate with its own review vocabulary; a language " +
+    "that distinguishes 'accepted onto a list' from 'passed review' must be free " +
+    "to use the first word here and the second there.",
   "org.projectOverview.columnApproved":
     "Plain column heading over a raw cell count in the per-file breakdown table " +
     "(sibling of 'Filled', 'Total', 'Words') — no review workflow implied, just " +
@@ -695,6 +723,28 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "source-column text region inside the cell editor. A mapping-field label " +
     "and an accessibility name for an existing pane serve different purposes " +
     "and different audiences (sighted vs. screen-reader users).",
+  // AQU-2710: Command-K's side tabs reuse two English phrases that already
+  // have a reviewed split. Each tab is its own grammatical role, so excusing
+  // the older keys must not drag the new labels onto them.
+  "search.side.sourceText":
+    "One-or-two-word tab in the Command-K dialog, and the label above each " +
+    "source hit, paired with the one-word 'Translation' tab. " +
+    "editor.source.textAria is the screen-reader name of the source column " +
+    "and can grow into a fuller phrase. importExport.paratext.sourceTextTitle " +
+    "is the choice-card heading for importing a file as source, and " +
+    "importExport.columnMapping.sourceColumnLabel is the spreadsheet mapping " +
+    "field. Thai and Myanmar already translate those two import labels " +
+    "differently, and a language that shortens a tab beside 'Translation' " +
+    "while spelling out a column name or an import choice needs this one apart.",
+  "search.side.translation":
+    "One-word tab in the Command-K dialog, and the label above each written " +
+    "hit, paired with 'Source text' — the side being written, not a file kind " +
+    "and not one stored rendering. importExport.upload.categoryTranslation is " +
+    "the upload picker's file category beside 'Source' and 'Audio' (Simplified " +
+    "Chinese '翻译'). terminology.livingMemory.translationAria names one stored " +
+    "translation in living memory and may take a deictic form (Simplified " +
+    "Chinese '译文'). Sharing either key would let an upload-category edit or " +
+    "an instance name rewrite this tab.",
 
   // -- AQU-832 (Monday.com integration wave) -----------------------------
   "projectSettings.monday.orgSettingsLinkText":

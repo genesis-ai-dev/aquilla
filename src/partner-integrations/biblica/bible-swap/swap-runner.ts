@@ -20,6 +20,9 @@ import {
   deserializeVersificationPlan,
   mergeBibleHeadingStylesIntoStudyStylesXml,
   mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml,
+  stampPortugueseHyphenationLanguage,
+  retargetFootnoteCharacterFonts,
+  rewriteAllCapsSenhor,
   normalizeBibleStoryXmlGlyphs,
   type BibleSwapMode,
   type SerializedVersificationPlan,
@@ -253,6 +256,20 @@ async function spliceBibleSwapIntoZip(
   }
 }
 
+/** Study notes keep SENHOR in small-caps styles. Title case lets the style draw it. */
+async function rewriteSenhorInStudyStories(studyZip: JSZip): Promise<void> {
+  const names = Object.keys(studyZip.files).filter(
+    (name) => name.startsWith("Stories/") && name.endsWith(".xml"),
+  )
+  for (const name of names) {
+    const file = studyZip.file(name)
+    if (!file) continue
+    const xml = await file.async("text")
+    const rewritten = rewriteAllCapsSenhor(xml)
+    if (rewritten !== xml) studyZip.file(name, rewritten)
+  }
+}
+
 /**
  * Replace the verse content of every `Stories/*.xml` in an already-exported
  * Study Bible IDML with the matching verses from a translated Bible IDML.
@@ -272,6 +289,7 @@ export async function applyBibleSwapToIdml(
 
   const studyZip = await JSZip.loadAsync(toTightZipBytes(studyIdmlData))
   const bibleZip = await JSZip.loadAsync(toTightZipBytes(bibleIdmlData))
+  const { swapMode = "surgical", serializedPlan, language, studyVolume } = options
 
   // Structure swap copies Bible `title:s1` headings into the Study stories.
   // Those styles live only in the Bible package; without them InDesign
@@ -284,10 +302,14 @@ export async function applyBibleSwapToIdml(
   if (studyStylesFile && bibleStylesFile) {
     const studyStylesXml = await studyStylesFile.async("text")
     const bibleStylesXml = await bibleStylesFile.async("text")
-    const mergedStylesXml = mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml(
+    let mergedStylesXml = mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml(
       mergeBibleHeadingStylesIntoStudyStylesXml(studyStylesXml, bibleStylesXml),
       bibleStylesXml,
     )
+    mergedStylesXml = retargetFootnoteCharacterFonts(mergedStylesXml)
+    if (language === "portuguese") {
+      mergedStylesXml = stampPortugueseHyphenationLanguage(mergedStylesXml)
+    }
     if (mergedStylesXml !== studyStylesXml) {
       studyZip.file("Resources/Styles.xml", mergedStylesXml)
     }
@@ -297,7 +319,6 @@ export async function applyBibleSwapToIdml(
   // Bible's own glyphs have to be reconciled with the study Bible's fonts.
   const bibleStoryXml = normalizeBibleStoryXmlGlyphs(await largestBibleStoryXml(bibleZip))
 
-  const { swapMode = "surgical", serializedPlan, language, studyVolume } = options
   console.log(
     `[Bible Swap] Using ${swapMode} mode with Bible story (${bibleStoryXml.length} chars)` +
       (serializedPlan ? " with a caller-supplied versification plan" : " (plan built from the selected Bible)") +
@@ -307,6 +328,7 @@ export async function applyBibleSwapToIdml(
   )
 
   const report = await spliceBibleSwapIntoZip(studyZip, bibleStoryXml, options)
+  await rewriteSenhorInStudyStories(studyZip)
 
   const idml = await studyZip.generateAsync({
     type: "uint8array",

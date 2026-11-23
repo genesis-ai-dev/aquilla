@@ -3,6 +3,7 @@ import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { throwIfElevationRequired } from "./elevation"
 import type { MemberGrantResult } from "./members"
+import { rememberTeamDetail, rememberTeamSummaries } from "./team-seed"
 
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
@@ -38,7 +39,9 @@ export interface TeamDirectoryPage {
 export async function listTeams(jwt: string, orgId: number): Promise<TeamSummary[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "", "team")
-  return ((await res.json()) as { groups: TeamSummary[] }).groups
+  const groups = ((await res.json()) as { groups: TeamSummary[] }).groups
+  rememberTeamSummaries(jwt, orgId, groups ?? [])
+  return groups
 }
 
 export async function listTeamsPage(
@@ -64,12 +67,15 @@ export async function listTeamsPage(
   )
   if (!res.ok) throw new UserError(res.status, "", "team")
   const body = (await res.json()) as { groups: TeamSummary[]; nextCursor?: string | null }
+  rememberTeamSummaries(jwt, orgId, body.groups ?? [])
   return { groups: body.groups ?? [], nextCursor: body.nextCursor ?? null }
 }
 export async function getTeam(jwt: string, orgId: number, groupId: number): Promise<TeamDetail> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "", "team")
-  return (await res.json()) as TeamDetail
+  const team = (await res.json()) as TeamDetail
+  rememberTeamDetail(jwt, orgId, team)
+  return team
 }
 
 export async function createTeam(jwt: string, orgId: number, name: string, description?: string): Promise<{ id: number; name: string; description: string | null }> {

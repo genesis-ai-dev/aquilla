@@ -125,23 +125,65 @@ function triggerLinkSync(projectId: string, jwt: string): Promise<boolean> {
 }
 
 /** `triggerLinkSync`, also saying whether the sync gave linked cells their
- *  import envelope (`envelopesRepaired` on the route's answer). */
+ *  import envelope (`envelopesRepaired` on the route's answer), and whether
+ *  the server says it did nothing at all (`idle`). */
 function runLinkSync(
   projectId: string,
   jwt: string,
-): Promise<{ ok: boolean; envelopesRepaired: boolean }> {
+): Promise<{ ok: boolean; envelopesRepaired: boolean; idle: boolean }> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
   return fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } })
     .then(async (res) => {
-      if (!res.ok) return { ok: false, envelopesRepaired: false }
-      const body = (await res.json().catch(() => null)) as { envelopesRepaired?: unknown } | null
+      if (!res.ok) return { ok: false, envelopesRepaired: false, idle: false }
+      const body = (await res.json().catch(() => null)) as LinkSyncAnswer | null
       const repaired = typeof body?.envelopesRepaired === "number" && body.envelopesRepaired > 0
-      return { ok: true, envelopesRepaired: repaired }
+      return { ok: true, envelopesRepaired: repaired, idle: linkSyncWasIdle(body) }
     })
     .catch(() => {
       /* best-effort; the next lazy-pull trigger or manual sync catches it */
-      return { ok: false, envelopesRepaired: false }
+      return { ok: false, envelopesRepaired: false, idle: false }
     })
+}
+
+/** The fields of the route's `MirrorSyncResult` this hook reads
+ *  (sync-worker/src/events/link-sync.ts). */
+interface LinkSyncAnswer {
+  ranSync?: unknown
+  cellsMirrored?: unknown
+  filesMirrored?: unknown
+  more?: unknown
+  envelopesRepaired?: unknown
+}
+
+/**
+ * AQU-2654: did the sync write nothing? Only an answer that says so outright
+ * counts: no sync ran (the project has no link, or the link is caught up),
+ * nothing was mirrored, nothing repaired, nothing left to do. The stale-source
+ * read that was sent beside such a sync cannot have raced a mirror commit, so
+ * it needs no second read to settle. Anything else, including an answer from a
+ * server that does not report these fields, keeps the settle read.
+ */
+function linkSyncWasIdle(body: LinkSyncAnswer | null): boolean {
+  return (
+    body !== null &&
+    body.ranSync === false &&
+    body.cellsMirrored === 0 &&
+    body.filesMirrored === 0 &&
+    body.more === false &&
+    !(typeof body.envelopesRepaired === "number" && body.envelopesRepaired > 0)
+  )
+}
+
+function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
+  if (a.size !== b.length) return false
+  for (const id of b) if (!a.has(id)) return false
+  return true
+}
+
+function sameBehindSeq(a: BehindSeq | null, b: BehindSeq | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /** QA-BUG-2/3: how long after firing the lazy-pull sync to schedule ONE
@@ -168,14 +210,35 @@ export function useStaleSourceCells(
   const [behindSeq, setBehindSeq] = useState<BehindSeq | null>(null)
   const [ancestorBehind, setAncestorBehind] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [isError, setIsError] = useState(false)
+  const [isError, setIsErrorState] = useState(false)
+  // Set only when it differs: setting what React already holds can still cost
+  // a render of the host component.
+  const isErrorRef = useRef(false)
+  const setIsError = useCallback((next: boolean) => {
+    if (isErrorRef.current === next) return
+    isErrorRef.current = next
+    setIsErrorState(next)
+  }, [])
   const [lastSuccessfulFetchKey, setLastSuccessfulFetchKey] = useState<string | null>(null)
 
   /** Reset every derived field to its empty/quiet steady state — used on
    *  disable, auth-retry exhaustion, and transient fetch errors (staleness
    *  is a soft signal; the fallback is always "nothing is stale," never an
    *  error state that freezes the editor). */
+  // AQU-2654: what the last successful read put on screen. A later read of the
+  // same file (the focus wave, the settle read) that says the same thing sets
+  // nothing: three new Sets with the old ids in them re-rendered the workspace
+  // and every row that takes one.
+  const shownRef = useRef<{
+    stale: ReadonlySet<string>
+    tombstoned: ReadonlySet<string>
+    upstream: ReadonlySet<string>
+    behindSeq: BehindSeq | null
+    ancestorBehind: boolean
+    key: string | null
+  }>({ stale: EMPTY, tombstoned: EMPTY, upstream: EMPTY, behindSeq: null, ancestorBehind: false, key: null })
   const resetToEmpty = useCallback(() => {
+    shownRef.current = { stale: EMPTY, tombstoned: EMPTY, upstream: EMPTY, behindSeq: null, ancestorBehind: false, key: null }
     setStaleCellIds(EMPTY)
     setTombstonedCellIds(EMPTY)
     setUpstreamStaleCellIds(EMPTY)
@@ -219,7 +282,11 @@ export function useStaleSourceCells(
       return
     }
     const gen = ++generationRef.current
-    setIsLoading(true)
+    const fetchKey = `${pid}\u0000${fid}`
+    // A read behind an answer already on screen for this file is a
+    // revalidation: it shows nothing until it has something different to say.
+    const revalidating = shownRef.current.key === fetchKey
+    if (!revalidating) setIsLoading(true)
     setIsError(false)
     try {
       const jwt = getToken ? await getToken(fid) : null
@@ -257,6 +324,8 @@ export function useStaleSourceCells(
           // Only for the project still open: the cells this would refresh are
           // the open file's.
           if (outcome.envelopesRepaired && projectRef.current === pid) envelopesRepairedRef.current?.()
+          // The sync wrote nothing, so the read below raced nothing.
+          if (outcome.idle) return
           postSyncRefetchRef.current = setTimeout(() => {
             postSyncRefetchRef.current = null
             if (generationRef.current === gen) void doFetchRef.current(false)
@@ -265,13 +334,28 @@ export function useStaleSourceCells(
       }
       const body = await fetchStaleSourceResponse(pid, fid, jwt)
       if (generationRef.current !== gen) return
-      setStaleCellIds(new Set(body.staleCellIds ?? []))
-      setTombstonedCellIds(new Set(body.tombstonedCellIds ?? []))
-      setUpstreamStaleCellIds(new Set(body.upstreamStaleCellIds ?? []))
-      setBehindSeq(body.behindSeq ?? null)
-      setAncestorBehind(body.ancestorBehind ?? false)
-      setLastSuccessfulFetchKey(`${pid}\u0000${fid}`)
-      setIsLoading(false)
+      const shown = shownRef.current
+      const staleIds = body.staleCellIds ?? []
+      const tombstonedIds = body.tombstonedCellIds ?? []
+      const upstreamIds = body.upstreamStaleCellIds ?? []
+      const nextBehindSeq = body.behindSeq ?? null
+      const nextAncestorBehind = body.ancestorBehind ?? false
+      const next = {
+        stale: sameIds(shown.stale, staleIds) ? shown.stale : new Set(staleIds),
+        tombstoned: sameIds(shown.tombstoned, tombstonedIds) ? shown.tombstoned : new Set(tombstonedIds),
+        upstream: sameIds(shown.upstream, upstreamIds) ? shown.upstream : new Set(upstreamIds),
+        behindSeq: sameBehindSeq(shown.behindSeq, nextBehindSeq) ? shown.behindSeq : nextBehindSeq,
+        ancestorBehind: nextAncestorBehind,
+        key: fetchKey,
+      }
+      shownRef.current = next
+      if (next.stale !== shown.stale) setStaleCellIds(next.stale)
+      if (next.tombstoned !== shown.tombstoned) setTombstonedCellIds(next.tombstoned)
+      if (next.upstream !== shown.upstream) setUpstreamStaleCellIds(next.upstream)
+      if (next.behindSeq !== shown.behindSeq) setBehindSeq(next.behindSeq)
+      if (next.ancestorBehind !== shown.ancestorBehind) setAncestorBehind(next.ancestorBehind)
+      if (next.key !== shown.key) setLastSuccessfulFetchKey(fetchKey)
+      if (!revalidating) setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
       // Staleness is a soft signal; on transient errors fall back to
@@ -285,7 +369,7 @@ export function useStaleSourceCells(
       setIsError(true)
       setIsLoading(false)
     }
-  }, [resetToEmpty])
+  }, [resetToEmpty, setIsError])
   doFetchRef.current = doFetch
 
   useEffect(() => {

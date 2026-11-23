@@ -453,3 +453,167 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     expect((await app.request("/api/v2/admin/users/abc", { headers }, env)).status).toBe(404)
   })
 })
+
+describe("admin directory pages (AQU-2722)", () => {
+  it("pages orgs, searches the whole list, and counts teams", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, '100% done', 1), (2, '1000 items', 1), (3, 'Beta', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (1, 1, '100% done/crew', 1)",
+    ).run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const page = await app.request("/api/v2/admin/orgs?limit=1&sort=organization&dir=asc", { headers }, env)
+    expect(page.status).toBe(200)
+    const body = (await page.json()) as {
+      orgs: Array<{ name: string; teamCount: number }>
+      total: number
+      limit: number
+      offset: number
+    }
+    expect(body.total).toBe(3)
+    expect(body.limit).toBe(1)
+    expect(body.offset).toBe(0)
+    expect(body.orgs).toHaveLength(1)
+    expect(body.orgs[0]).toMatchObject({ name: "100% done", teamCount: 1 })
+
+    const found = await app.request(
+      `/api/v2/admin/orgs?limit=10&q=${encodeURIComponent("100%")}`,
+      { headers },
+      env,
+    )
+    const matches = (await found.json()) as { orgs: Array<{ name: string }>; total: number }
+    expect(matches.total).toBe(1)
+    expect(matches.orgs.map((org) => org.name)).toEqual(["100% done"])
+
+    const one = await app.request("/api/v2/admin/orgs/2", { headers }, env)
+    expect(one.status).toBe(200)
+    expect(await one.json()).toMatchObject({ org: { id: 2, name: "1000 items", teamCount: 0 } })
+    expect((await app.request("/api/v2/admin/orgs/99", { headers }, env)).status).toBe(404)
+  })
+
+  it("pages projects before the file rollup and still searches every project", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'Other', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('a', 'Alpha', 1, 1), ('b', 'Beta', 1, 1), ('g', 'Gamma', 2, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'a', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'b', 'file.create', 'wendi', '{}', 1000, 1000, 2), ('e3', 1, 'g', 'file.create', 'wendi', '{}', 1000, 1000, 3)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, word_count)
+       VALUES ('fa', 'a', 'GEN', 'e1', 100, 10), ('fb', 'b', 'EXO', 'e2', 40, 10), ('fg', 'g', 'LEV', 'e3', 7, 10)`,
+    ).run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const first = await app.request("/api/v2/admin/projects?limit=1&sort=name&dir=asc", { headers }, env)
+    const firstBody = (await first.json()) as {
+      projects: Array<{ id: string; totalCells: number }>
+      total: number
+    }
+    expect(firstBody.total).toBe(3)
+    expect(firstBody.projects).toEqual([expect.objectContaining({ id: "a", totalCells: 100 })])
+
+    const second = await app.request("/api/v2/admin/projects?limit=1&offset=1&sort=name&dir=asc", { headers }, env)
+    const secondBody = (await second.json()) as { projects: Array<{ id: string; totalCells: number }> }
+    expect(secondBody.projects).toEqual([expect.objectContaining({ id: "b", totalCells: 40 })])
+
+    const search = await app.request("/api/v2/admin/projects?limit=10&q=beta", { headers }, env)
+    const searchBody = (await search.json()) as { projects: Array<{ id: string }>; total: number }
+    expect(searchBody.total).toBe(1)
+    expect(searchBody.projects.map((project) => project.id)).toEqual(["b"])
+
+    const scoped = await app.request("/api/v2/admin/projects?limit=10&orgId=2", { headers }, env)
+    const scopedBody = (await scoped.json()) as { projects: Array<{ id: string; totalCells: number }>; total: number }
+    expect(scopedBody.total).toBe(1)
+    expect(scopedBody.projects).toEqual([expect.objectContaining({ id: "g", totalCells: 7 })])
+  })
+
+  it("filters needs-attention across every project and ranks overdue first", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, deadline_at, archived_at) VALUES
+        ('late', 'Late', 1, 1, '2020-01-01', NULL),
+        ('quiet', 'Quiet', 1, 1, NULL, NULL),
+        ('fine', 'Fine', 1, 1, NULL, NULL),
+        ('old', 'Old', 1, 1, '2020-01-01', '2026-01-01')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('eq', 1, 'quiet', 'file.create', 'wendi', '{}', 1000, 1000, 1)",
+    ).run()
+    const stale = Date.now() - 20 * 24 * 60 * 60 * 1000
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, last_edit_at) VALUES ('fq', 'quiet', 'GEN', 'eq', 20, 10, ?)",
+    )
+      .bind(stale)
+      .run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const res = await app.request(
+      "/api/v2/admin/projects?limit=1&lens=needs-attention&sort=status&dir=desc",
+      { headers },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string }>
+      total: number
+      overdue: number
+    }
+    expect(body.total).toBe(2)
+    expect(body.overdue).toBe(1)
+    expect(body.projects.map((project) => project.id)).toEqual(["late"])
+  })
+
+  it("searches people by name and by the platform-admin role across the directory", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await seedUser(2, "amos")
+    const headers = authHeader(await jwtFor("root"))
+
+    const byName = await app.request("/api/v2/admin/users?limit=10&q=wendi", { headers }, env)
+    const named = (await byName.json()) as { users: Array<{ username: string }>; total: number }
+    expect(named.total).toBe(1)
+    expect(named.users.map((user) => user.username)).toEqual(["wendi"])
+
+    const byRole = await app.request(
+      `/api/v2/admin/users?limit=10&q=${encodeURIComponent("platform admin")}`,
+      { headers },
+      env,
+    )
+    const admins = (await byRole.json()) as { users: Array<{ username: string }>; total: number }
+    expect(admins.users.map((user) => user.username)).toEqual(["root"])
+    expect(admins.total).toBe(1)
+  })
+
+  it("pages teams and searches by the name after the org prefix", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Alpha', 1), (2, 'Beta', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (1, 1, 'Alpha/translators', 1), (2, 2, 'Beta/reviewers', 1)",
+    ).run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const page = await app.request("/api/v2/admin/teams?limit=1&sort=team&dir=asc", { headers }, env)
+    const body = (await page.json()) as { teams: Array<{ name: string }>; total: number }
+    expect(body.total).toBe(2)
+    expect(body.teams.map((team) => team.name)).toEqual(["Beta/reviewers"])
+
+    const found = await app.request("/api/v2/admin/teams?limit=10&q=trans", { headers }, env)
+    const matches = (await found.json()) as { teams: Array<{ name: string }>; total: number }
+    expect(matches.total).toBe(1)
+    expect(matches.teams.map((team) => team.name)).toEqual(["Alpha/translators"])
+  })
+})

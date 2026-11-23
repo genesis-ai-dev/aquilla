@@ -642,7 +642,7 @@ function VirtualizedMilestoneList({
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
                 className={cn(
-                  "relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+                  "relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none hover:bg-accent/40 data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
                   // Cell ranges read as children of the milestone above them.
                   subsection && "ps-6",
                 )}

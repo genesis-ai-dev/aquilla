@@ -75,6 +75,11 @@ describe('command catalog — invariants', () => {
       RenameProject: { kind: 'RenameProject', projectId: 'p', name: 'New name' },
       ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
       UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
+      PatchOrthographyExceptions: {
+        kind: 'PatchOrthographyExceptions',
+        projectId: 'p',
+        ops: [{ action: 'add', word: 'asʼhob' }],
+      },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
       RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
       ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', lanes: [{ role: 'target', language: 'fr' }] },

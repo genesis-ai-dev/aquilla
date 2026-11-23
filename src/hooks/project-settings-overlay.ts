@@ -104,6 +104,8 @@ export function overlaySettings(
   assign("cellEditingFloor", settings.cellEditingFloor ?? orgDefaults?.media?.cellEditingFloor)
   // AQU-2408: who may type a cell's label. No org default: absent = maintainer.
   assign("cellLabelFloor", settings.cellLabelFloor)
+  // AQU-2309: who may set milestones. No org default: absent = maintainer.
+  assign("milestoneFloor", settings.milestoneFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
@@ -116,6 +118,9 @@ export function overlaySettings(
   // see no Autopilot at all — the surfaces render only when this is on (or the
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
+  // Must reach the workspace: a stored false is the only thing that turns
+  // smart edits off, and the editor reads it from the record.
+  assign("smartEditsEnabled", settings.smartEditsEnabled)
   // AQU-2041: the voice-management switch. Absent stays off; a stored false
   // must still reach the workspace or a lead keeps the controls after a
   // maintainer turns them off.

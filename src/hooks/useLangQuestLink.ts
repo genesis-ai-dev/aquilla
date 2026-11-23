@@ -37,6 +37,14 @@ export type LangQuestSyncState =
 
 export function useLangQuestLink(projectId: string, roleLevel: number | null, onSynced?: () => void) {
   const analytics = useAccountAnalytics()
+  // AQU-2654: read through a ref. The scope changes identity when the tab is
+  // hidden and when it comes back; as a dependency of `syncLink` it re-ran the
+  // "read the link" effect below each time, so one return to the tab sent
+  // GET …/langquest/…/link three or four times (and once more while hidden).
+  const analyticsRef = useRef(analytics)
+  useEffect(() => {
+    analyticsRef.current = analytics
+  }, [analytics])
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const author = session?.username ?? "local"
@@ -69,6 +77,9 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
   const syncLink = useCallback(
     async (link: LangQuestLink | null, trigger: "open" | "focus" | "manual") => {
       if (!jwt || !link || !canSync || link.needsReauth || running.current) return
+      // Bound when the run starts, so a run that outlives an account switch
+      // cannot report under the next account.
+      const analytics = analyticsRef.current
       running.current = true
       lastRun.current = Date.now()
       // Built per run, not per render: an unlinked project never needs upload tokens.
@@ -113,7 +124,7 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
         await reload()
       }
     },
-    [jwt, canSync, projectId, author, reload, analytics],
+    [jwt, canSync, projectId, author, reload],
   )
 
   const runSync = useCallback((trigger: "focus" | "manual") => syncLink(link, trigger), [syncLink, link])

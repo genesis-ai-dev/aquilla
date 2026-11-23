@@ -41,6 +41,7 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:untranslated-fragment": "rules.infraction.builtin.untranslatedFragment",
   "builtin:length-ratio": "rules.infraction.builtin.lengthRatio",
   "builtin:scripture-reference": "rules.infraction.builtin.scriptureReference",
+  "builtin:old-orthography": "rules.infraction.builtin.oldOrthographyPlain",
 }
 
 /** Just the predicate — "This term is in the source…", "Placeholder {age} missing…". */
@@ -49,6 +50,15 @@ export function formatInfractionReason(infraction: RuleInfraction, t: TFunction)
     const tokens = infraction.reasonParams?.tokens ?? ""
     const count = infraction.reasonParams?.count ?? "0"
     return t("rules.infraction.builtin.placeholderIntegrity", { tokens, count })
+  }
+  // AQU-2628: the old-orthography finding names the word and the spelling the
+  // lane's rules give it, so the translator can act without opening the
+  // profile. Both are raw cell content, interpolated as vars.
+  if (infraction.reason === "builtin:old-orthography") {
+    const word = infraction.reasonParams?.word
+    const suggestion = infraction.reasonParams?.suggestion
+    if (word && suggestion) return t("rules.infraction.builtin.oldOrthography", { word, suggestion })
+    return t("rules.infraction.builtin.oldOrthographyPlain")
   }
   if (infraction.reason === "source-requires-target") {
     const sourceCount = infraction.reasonParams?.sourceCount ?? "1"

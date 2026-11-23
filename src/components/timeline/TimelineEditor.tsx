@@ -57,6 +57,7 @@ import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { stepLabel } from "@/lib/history/step-label"
 import { beforeHistoryMove, redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { announceShortcutAction, ModeCue, undoKeysLabel } from "@/components/ui/shortcut-cue"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -65,7 +66,6 @@ import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
-import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -396,14 +396,6 @@ export interface TimelineEditorProps {
    * authority is now the thing that keeps the surfaces agreeing.
    */
   canAddLine?: boolean
-  /**
-   * May they remove an IMPORTED cell, not just a line added here?
-   *
-   * The second gate, maintainer-only, whatever tier the project runs. An
-   * imported line is the client's own work; the confirmation dialog upstream
-   * is what makes taking one back safe.
-   */
-  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs project lead access,
@@ -570,6 +562,10 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
+  /** AQU-2577: pick a line for Make speech from its sparkle beside the mic on the dub row. */
+  onPickGhost?(cellId: string, opts: { additive: boolean }): void
+  pickedGhostIds?: ReadonlySet<string>
+  makingSpeechCellIds?: ReadonlySet<string>
   /** AQU-1684: the slot the recorder is recording into while it is open, else
    *  null — that track may not be hidden from under the take. */
   recordingSlot?: string | null
@@ -1135,9 +1131,11 @@ function LaneLabel({
       {/* The indent is on the CONTENT, not the row, so the row's background
           still spans the full gutter. A member steps in past the folder's
           own name, which is what makes the nest readable. It eases on the
-          rows' slide curve, so a track dragged over a folder steps in with
-          the gap opening for it. */}
+          rows' slide curve while this node stays mounted (a drag). A menu
+          move remounts the row in its new folder, so that transition never
+          runs; playTrackMove eases this element's padding instead. */}
       <div
+        data-tl-track-indent=""
         className={cn(
           "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
           indented && !collapsed && "pl-6",
@@ -1338,7 +1336,6 @@ export function TimelineEditor({
   film,
   onAddLine,
   canAddLine,
-  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -1375,6 +1372,9 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
+  onPickGhost,
+  pickedGhostIds,
+  makingSpeechCellIds,
   recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
@@ -2894,6 +2894,18 @@ export function TimelineEditor({
   }
   const splitAtPlayheadRef = useRef(selectedTakeCutAtPlayhead)
   splitAtPlayheadRef.current = selectedTakeCutAtPlayhead
+  // AQU-2703: S changes the file with one key, so it says so, with its Undo.
+  // (B's cue is the Blade chip below: it follows the mode, however it was
+  // turned on.)
+  const announceSplitRef = useRef<() => void>(() => {})
+  announceSplitRef.current = () =>
+    announceShortcutAction({
+      id: "timeline-split",
+      title: t("editor.timeline.cueSplit"),
+      undoHint: t("editor.timeline.cueUndoHint", { keys: undoKeysLabel() }),
+      undoLabel: t("editor.history.undoThis"),
+      onUndo: () => runHistory("undo"),
+    })
   useEffect(() => {
     if (!canCut) return
     function onKeyDown(event: KeyboardEvent) {
@@ -2907,6 +2919,7 @@ export function TimelineEditor({
         if (!cut || !onCutTargets) return
         event.preventDefault()
         onCutTargets([cut])
+        announceSplitRef.current()
       } else if (event.key === "Escape") {
         setBladeOn(false)
       }
@@ -4567,19 +4580,11 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here.
-            // AQU-1068 widened this: a MAINTAINER may take back any cell,
-            // imported ones included, and the confirmation dialog upstream is
-            // what makes that safe. Below that rank only a line added here can
-            // go — but a line added here can ALWAYS go, however full it is.
-            // The same shared predicate the text table asks, so the two
-            // surfaces can never disagree about what is removable; see
-            // `isImportedRow` for the emptiness clause that used to live here.
-            canRemove={
-              canAddLine
-                ? (c) => canRemoveImportedCells || !isImportedRow(c)
-                : undefined
-            }
+            // Anyone who may restructure the project may take back any line,
+            // imported ones included: the project's "who can add and remove
+            // cells" setting decides who that is (AQU-2632), and the
+            // confirmation dialog upstream is what makes it safe.
+            canRemove={canAddLine ? () => true : undefined}
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would
@@ -4700,6 +4705,9 @@ export function TimelineEditor({
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
+            onPickGhost={onPickGhost}
+            pickedGhostIds={pickedGhostIds}
+            makingSpeechCellIds={makingSpeechCellIds}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"
@@ -5451,7 +5459,7 @@ export function TimelineEditor({
       ref={editorRef}
       data-testid="tl-editor"
       data-tl-lane-epoch={laneEpoch.current}
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden"
       style={
         {
           "--tl-row-h": `${rowMetrics.rowH}px`,
@@ -5540,6 +5548,21 @@ export function TimelineEditor({
           </button>
         </div>
       )}
+
+      {/* AQU-2703: while the Blade is on, a chip over the tracks says so —
+          the toolbar button alone was missed, and is folded into ⋯ on a
+          narrow timeline. It turns off from here too. */}
+      <ModeCue
+        active={bladeActive}
+        testId="tl-blade-cue"
+        onLabel={t("editor.timeline.cueBladeOn")}
+        offKeys={t("editor.timeline.cueBladeOffKeys")}
+        offLabel={t("editor.timeline.cueBladeOff")}
+        turnOffLabel={t("editor.timeline.cueBladeTurnOff")}
+        onTurnOff={() => setBladeOn(false)}
+        // Clear of the status line under the tracks ("Target: 3.9s").
+        className="bottom-12"
+      />
 
       {/* timeline */}
       {/* Stage 3, and the layout the whole round turns on: the TRACK COLUMN

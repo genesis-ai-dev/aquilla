@@ -12,6 +12,7 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   smartQuotes: "projectSettings.info.smartQuotesLabel",
   cellEditingFloor: "projectSettings.cellEditing.label",
   cellLabelFloor: "projectSettings.cellLabel.label",
+  milestoneFloor: "projectSettings.milestones.label",
   bibleResourcesEnabled: "bibleData.card.title",
   bibleEnrichments: "bibleData.card.title",
   importExcludeFrontMatter: "projectSettings.import.excludeFrontMatterLabel",
@@ -38,6 +39,7 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   memberProgressViewMinRole: "projectSettings.visibility.progressLabel",
   autopilotEnabled: "autopilot.settings.autopilotLabel",
   smartExtensionsEnabled: "extensions.flag.label",
+  smartEditsEnabled: "smartEdits.flagLabel",
   languageProfile: "bibleData.profile.title",
   projectFacts: "projectDecisions.title",
   translationInstructions: "terminology.livingMemory.instructionsTitle",
@@ -61,6 +63,8 @@ export const DRAFTING_FIELD_LABELS = {
   fewShotExampleFormat: "projectSettings.ai.referenceExampleFormatLabel",
   completionBatchSize: "projectSettings.ai.completionBatchSizeLabel",
   validationBatchSize: "projectSettings.ai.validationBatchSizeLabel",
+  liveBacktranslation: "projectSettings.ai.liveBacktranslationLabel",
+  backtranslationModel: "projectSettings.ai.backtranslationModelLabel",
 } as const satisfies Record<string, MessageKey>
 export type DraftingField = keyof typeof DRAFTING_FIELD_LABELS
 

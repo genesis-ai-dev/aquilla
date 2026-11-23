@@ -116,6 +116,7 @@ export function LaneCombobox({
       inputValue={query}
       onInputValueChange={(next: string) => setQuery(next)}
       autoHighlight
+      highlightItemOnHover={false}
       onValueChange={(row: Row | null, eventDetails: { cancel: () => void }) => {
         if (!row) return
         if (isReveal(row)) {

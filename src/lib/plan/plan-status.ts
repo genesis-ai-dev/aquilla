@@ -529,6 +529,49 @@ export function planUnitShowsWayToWork(
   return planUnitShortfall(u, hasAudio, hasText).worst > 0
 }
 
+/** What "Mark done" pauses to say. See `planDoneCheck`. */
+export interface PlanDoneCheck {
+  /** Work is left (or the unit is empty), so the button asks before it marks. */
+  short: boolean
+  /** The validated share of the medium holding the unit back, 0–100. */
+  validatedPct: number
+}
+
+/**
+ * Should "Mark done" pause to say the unit is short, and by what figure?
+ *
+ * ONE JUDGE WITH THE REST OF THE PANEL: `planUnitShortfall`, asked with the
+ * same per-file `hasAudio` / `hasText` the row, the bars and "Nothing left"
+ * are. The pause used to read the TEXT counts on every unit, so an audio-only
+ * book recorded and validated to its last take was told "Validated is at 0%"
+ * directly under a line saying "Nothing left" (partner report, 2026-11-19):
+ * no text cell validated, in a language that delivers no text. An Audio
+ * language is judged on its recordings, a Text one on its text, and a Text
+ * and audio one on both.
+ *
+ * `validatedPct` is the WORSE medium's share, the same medium `worst` counts.
+ * A unit owing both, with its text finished and its takes at 40%, pauses on
+ * 40 and not on the 100 that is not the reason for the pause.
+ *
+ * On the COUNTS, never a rounded percentage (AQU-1493): 1,194 of 1,200 once
+ * rounded to 100 and went through without a word. An empty unit still pauses.
+ */
+export function planDoneCheck(u: PlanUnit, hasAudio: boolean, hasText = true): PlanDoneCheck {
+  const { worst } = planUnitShortfall(u, hasAudio, hasText)
+  const shares: number[] = []
+  if (hasText) shares.push(planPct(u.validatedCount, u.totalCount))
+  if (hasAudio) {
+    // The count `planUnitShortfall` judges audio on, out of the cue sheet
+    // where there is one.
+    const audioDone = AUDIO_JUDGED_ON_RECORDED ? u.audioCount : u.audioValidatedCount
+    shares.push(planPct(audioDone, planAudioTotal(u)))
+  }
+  return {
+    short: u.totalCount === 0 || worst > 0,
+    validatedPct: shares.length > 0 ? Math.min(...shares) : 0,
+  }
+}
+
 /**
  * Within a group the soonest deadline is the most urgent, so target date
  * ascending; undated units sort last (they carry no claim about when), then

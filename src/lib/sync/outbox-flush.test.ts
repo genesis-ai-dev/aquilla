@@ -33,6 +33,7 @@ import {
   outboxPendingCount,
   peekOutboxBatch,
   peekPendingOutboxBatch,
+  removeOutboxEvents,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
   OUTBOX_MAX_ATTEMPTS,
@@ -203,6 +204,9 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "alice" }))
     const fetchMock = vi.fn(async () => {
       setActiveOutboxOwner("bob")
+      // An enqueue never overwrites a queued id, so the replacement lands
+      // only after alice's row has gone (here, removed under her scope).
+      await removeOutboxEvents(["shared-id"], { ownerKey: "alice" })
       await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "bob" }))
       return jsonResponse({ accepted: [{ id: "shared-id" }], rejected: [] })
     })
@@ -1841,6 +1845,28 @@ describe("OPS-44 elevation-required mint", () => {
 
     expect(result).toMatchObject({ accepted: 1, quarantined: 0 })
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: "Bearer tok-owner" })
+  })
+
+  it("AQU-2455: a mint 403 keeps the server denial so removal is not an archive", async () => {
+    await enqueueOutboxEvent(makeEvent("gone", "f1", { projectId: "gone" }))
+    await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: null, status: 403, error: "No access to project" }),
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    })
+    expect((await peekOutboxBatch(10)).find((r) => r.id === "gone")?.lastError).toMatchObject({
+      status: 403,
+      reason: "No access to project",
+    })
+
+    await resetIdb()
+    await enqueueOutboxEvent(makeEvent("archived", "f1", { projectId: "archived" }))
+    await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: null, status: 403, error: "Project is archived" }),
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    })
+    expect((await peekOutboxBatch(10)).find((r) => r.id === "archived")?.lastError?.reason).toBe(
+      "Project is archived",
+    )
   })
 
   it("contrast: a generic mint 403 (no access, archived) still quarantines", async () => {

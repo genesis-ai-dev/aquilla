@@ -12,6 +12,13 @@
 // (no cells) skips adoption and the incoming units become revision 1.
 //
 // Idempotent: the same artifact + stamp + options as the head is a no-op.
+//
+// Providers with their own stable identity (Door43, an extension's
+// files.upsert) add three things: `cellKeys` tells alignment which key each
+// cell they wrote before goes by, so an adopted file pairs by that key;
+// `dryRun` answers with the counts and writes nothing; `realign` re-parses the
+// SAME artifact with today's parser (Door43 "Re-sync content"), which the
+// no-op rule would otherwise refuse.
 // Auth mirrors source-upload-route.ts — sync JWT scoped to the file, role >=
 // PROJECT_LEAD. Returns null when the path/method does not match.
 
@@ -26,6 +33,7 @@ import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcas
 import {
   alignRevision,
   optionsHash as hashOptions,
+  rekeyUnits,
   uuidV5,
   type RevisionDelta,
   type RevisionUnitInput,
@@ -45,6 +53,7 @@ import {
 } from './file-revision-apply'
 import type { EventPayloads } from './types'
 import { mergeFileMeta, type ReconcileFileMeta } from './import-reconcile-route'
+import { stampToolProvenance, toolClaimVerified } from './tool-provenance'
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/revisions$/
 const SHA256_RE = /^[0-9a-f]{64}$/
@@ -80,6 +89,19 @@ interface RevisionRequestBody {
    *  its own copy of that full-file scan, which doubled a 10k-cell import's
    *  database time. Re-imports send no finalize and leave this unset. */
   finalizeFollows?: boolean
+  /** `cellId → unitKey` for cells the provider wrote before this file had
+   *  revisions (`db/shared/file-revision.ts::rekeyUnits`). */
+  cellKeys?: Record<string, string>
+  /** Align and answer with the counts; write nothing, adoption included. */
+  dryRun?: boolean
+  /** Align even when the head already names this artifact + stamp + options;
+   *  a parse that changes nothing writes no revision. */
+  realign?: boolean
+  /** Answer with `cellIds` (`unitKey → cellId`) for every unit. */
+  returnCellIds?: boolean
+  /** Smart Extensions: the extension this write is attributed to. Verified
+   *  like `/import`'s, and refused when it does not verify. */
+  toolOrigin?: unknown
 }
 
 interface FileRow {
@@ -132,6 +154,12 @@ export async function handleRevisionsRequest(
   const parsed = parseBody(read.text)
   if (!parsed.ok) return withCors(new Response(parsed.reason, { status: 400 }), request)
   const body = parsed.body
+  if (body.toolOrigin !== undefined) {
+    const claim = await toolClaimVerified({ tool_origin: body.toolOrigin }, { projectId, author }, env.SYNC_SECRET_KEY)
+    if (!claim?.ok) {
+      return withCors(new Response('the extension identity on this revision could not be verified (missing or invalid tool session)', { status: 403 }), request)
+    }
+  }
 
   const db = env.AQUILLA_PG
   const file = await db
@@ -177,7 +205,8 @@ export async function handleRevisionsRequest(
       .bind(projectId, fileId, file.head_revision_n)
       .first<RevisionRow>()
     if (!row) return withCors(new Response('head revision row missing', { status: 500 }), request)
-    if (row.artifact_sha256 === body.artifactSha256 && row.filter_stamp === body.stamp && row.options_hash === body.optionsHash) {
+    const sameAsHead = row.artifact_sha256 === body.artifactSha256 && row.filter_stamp === body.stamp && row.options_hash === body.optionsHash
+    if (sameAsHead && !body.realign) {
       return withCors(Response.json({ noop: true, revisionN: row.revision_n }), request)
     }
     const obj = await env.SNAPSHOTS.get(row.manifest_r2_key)
@@ -188,7 +217,10 @@ export async function handleRevisionsRequest(
     // next revision so alignment, and a later rebuild, start from what the
     // file actually holds.
     const drifted = liveUnitsIfDrifted(head, await loadAdoptableUnits(db, projectId, fileId))
-    if (drifted) {
+    if (drifted && body.dryRun) {
+      head = { ...head, revisionN: head.revisionN + 1, parentRevisionN: head.revisionN, adopted: true, units: drifted }
+      adopted = true
+    } else if (drifted) {
       const readopted = await writeAdoptedRevision(db, env, {
         projectId,
         fileId,
@@ -209,7 +241,19 @@ export async function handleRevisionsRequest(
   } else {
     // Adopt: a materialized file joins the chain with its ids untouched.
     const adoptable = await loadAdoptableUnits(db, projectId, fileId)
-    if (adoptable) {
+    if (adoptable && body.dryRun) {
+      head = {
+        fileId,
+        revisionN: 1,
+        parentRevisionN: null,
+        stamp: parserVersionFromMeta(file.meta) ?? ADOPTED_STAMP,
+        optionsHash: hashOptions({}),
+        artifactSha256: body.artifactSha256,
+        adopted: true,
+        units: adoptable,
+      }
+      adopted = true
+    } else if (adoptable) {
       const applied = await writeAdoptedRevision(db, env, {
         projectId,
         fileId,
@@ -230,11 +274,27 @@ export async function handleRevisionsRequest(
   }
 
   const revisionN = head ? head.revisionN + 1 : 1
+  // The stored manifest keeps the keys it was written with; the provider's
+  // keys only steer this alignment, and the next manifest carries them.
+  const alignHead = head && body.cellKeys ? { ...head, units: rekeyUnits(head.units, body.cellKeys) } : head
   let delta: RevisionDelta
   try {
-    delta = alignRevision(head, body.units, { fileId, revisionN })
+    delta = alignRevision(alignHead, body.units, { fileId, revisionN })
   } catch (err) {
     return withCors(new Response(err instanceof Error ? err.message : 'alignment failed', { status: 400 }), request)
+  }
+  const cellIds = body.returnCellIds
+    ? { cellIds: Object.fromEntries(delta.units.map((u) => [u.unit.unitKey, u.unit.cellId])) }
+    : {}
+  if (body.dryRun) {
+    return withCors(
+      Response.json({ noop: false, dryRun: true, revisionN, adopted, counts: delta.counts, unitCount: delta.units.length, ...cellIds }),
+      request,
+    )
+  }
+  // A re-parse that moves nothing writes no revision.
+  if (body.realign && alignHead && isUnchanged(delta, alignHead)) {
+    return withCors(Response.json({ noop: true, revisionN: alignHead.revisionN, adopted, counts: delta.counts, ...cellIds }), request)
   }
   const eventId = revisionEventId(fileId, revisionN, body.artifactSha256, body.stamp)
   const manifest = buildStoredManifest(
@@ -297,6 +357,14 @@ export async function handleRevisionsRequest(
   })
   if (!applied.ok) return withCors(new Response(applied.reason, { status: 500 }), request)
 
+  if (body.toolOrigin !== undefined) {
+    try {
+      await stampToolProvenance(db, [{ id: eventId, projectId, author, payload: { tool_origin: body.toolOrigin } }], env.SYNC_SECRET_KEY)
+    } catch (err) {
+      console.warn('[revisions] tool provenance stamp failed:', err)
+    }
+  }
+
   if (env.ProjectSync) {
     const notify = notifyProjectDoFileProgressChanged(env, projectId, fileId, false).catch((err) => {
       console.warn(`[revisions] ProjectSync notify failed for ${projectId}/${fileId}:`, err)
@@ -306,8 +374,17 @@ export async function handleRevisionsRequest(
   }
 
   return withCors(
-    Response.json({ noop: false, revisionN, eventId, adopted, counts: delta.counts, unitCount: delta.units.length }),
+    Response.json({ noop: false, revisionN, eventId, adopted, counts: delta.counts, unitCount: delta.units.length, ...cellIds }),
     request,
+  )
+}
+
+/** Every unit continues its parent unchanged, in the parent's order. */
+function isUnchanged(delta: RevisionDelta, head: StoredRevisionManifest): boolean {
+  return (
+    delta.deleted.length === 0 &&
+    delta.units.length === head.units.length &&
+    delta.units.every((u, i) => u.outcome === 'equal' && u.unit.cellId === head.units[i].cellId)
   )
 }
 
@@ -487,6 +564,15 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
   if ((r.artifactId === undefined) !== (r.rawSourceFormat === undefined)) {
     return { ok: false, reason: 'artifactId and rawSourceFormat must be provided together' }
   }
+  for (const flag of ['dryRun', 'realign', 'returnCellIds'] as const) {
+    if (r[flag] !== undefined && typeof r[flag] !== 'boolean') return { ok: false, reason: `${flag} must be a boolean` }
+  }
+  if (r.cellKeys !== undefined) {
+    const keys = r.cellKeys as Record<string, unknown> | null
+    if (!keys || typeof keys !== 'object' || Array.isArray(keys) || Object.values(keys).some((v) => typeof v !== 'string' || !v)) {
+      return { ok: false, reason: 'cellKeys must map cell ids to non-empty unit keys' }
+    }
+  }
   return {
     ok: true,
     body: {
@@ -499,6 +585,11 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
       ...(typeof r.artifactId === 'string' ? { artifactId: r.artifactId } : {}),
       ...(typeof r.rawSourceFormat === 'string' ? { rawSourceFormat: r.rawSourceFormat } : {}),
       ...(r.finalizeFollows === true ? { finalizeFollows: true } : {}),
+      ...(r.cellKeys !== undefined ? { cellKeys: r.cellKeys as Record<string, string> } : {}),
+      ...(r.dryRun === true ? { dryRun: true } : {}),
+      ...(r.realign === true ? { realign: true } : {}),
+      ...(r.returnCellIds === true ? { returnCellIds: true } : {}),
+      ...(r.toolOrigin !== undefined ? { toolOrigin: r.toolOrigin } : {}),
     },
   }
 }

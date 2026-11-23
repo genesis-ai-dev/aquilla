@@ -12,6 +12,9 @@ export const TRACK_MOVE_MAX_WAIT_MS = 1200
 export type TrackMoveSnapshot = {
   at: number
   tops: ReadonlyMap<string, number>
+  /** Padding-left of each row's indent, before the move. A menu move remounts
+   *  the row, so the CSS padding transition on it never runs. */
+  indents: ReadonlyMap<string, number>
   /** The tracks being moved, each with the folder it was in. */
   moving: ReadonlyMap<string, string | null>
 }
@@ -33,13 +36,35 @@ function trackNodes(root: ParentNode): Map<string, HTMLElement> {
   return nodes
 }
 
+/** The content that steps in under a folder. The row's own box stays full width. */
+function indentNode(row: HTMLElement): HTMLElement | null {
+  const node = row.querySelector(":scope > [data-tl-track-indent]")
+  return node instanceof HTMLElement ? node : null
+}
+
+function indentPx(row: HTMLElement): number {
+  const node = indentNode(row)
+  if (!node) return 0
+  // Drop a transition that is about to run, so this is the padding the class
+  // resolves to and not the value it is easing away from.
+  const previous = node.style.transition
+  node.style.transition = "none"
+  const value = parseFloat(getComputedStyle(node).paddingLeft) || 0
+  node.style.transition = previous
+  return value
+}
+
 export function snapshotTrackMove(
   root: ParentNode,
   moving: ReadonlyArray<{ id: string; groupId: string | null }>,
 ): TrackMoveSnapshot {
   const tops = new Map<string, number>()
-  for (const [key, node] of trackNodes(root)) tops.set(key, node.getBoundingClientRect().top)
-  return { at: performance.now(), tops, moving: new Map(moving.map((tr) => [tr.id, tr.groupId])) }
+  const indents = new Map<string, number>()
+  for (const [key, node] of trackNodes(root)) {
+    tops.set(key, node.getBoundingClientRect().top)
+    if (key.startsWith("row:")) indents.set(key, indentPx(node))
+  }
+  return { at: performance.now(), tops, indents, moving: new Map(moving.map((tr) => [tr.id, tr.groupId])) }
 }
 
 /** Has any moved track changed folder in this list yet? */
@@ -83,11 +108,15 @@ export function playTrackMove(root: ParentNode, snapshot: TrackMoveSnapshot): vo
       }
       const dy = was - node.getBoundingClientRect().top
       if (Math.abs(dy) >= 0.5) plans.push({ node, key, dy })
-      else if (key.startsWith("row:")) handled.add(key)
+      else if (key.startsWith("row:")) {
+        handled.add(key)
+        easeIndent(node, key, snapshot, 0)
+      }
     }
     for (const { node, key, dy } of plans) {
       handled.add(key)
       const isRow = key.startsWith("row:")
+      if (isRow) easeIndent(node, key, snapshot, dy == null ? 0 : Math.abs(dy))
       const animation = slideTrackNode(node, key, dy, snapshot)
       if (!animation) continue
       if (isRow) names.set(trackIdOf(key), animation)
@@ -105,6 +134,25 @@ export function playTrackMove(root: ParentNode, snapshot: TrackMoveSnapshot): vo
   const observer = new MutationObserver(pass)
   observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["style"] })
   window.setTimeout(() => observer.disconnect(), LANE_SETTLE_MS)
+}
+
+/** Ease the indent across the same trip as the row. The node is new — the
+ *  track just mounted inside its folder — so there is no CSS transition to
+ *  carry the padding from where it was. */
+function easeIndent(row: HTMLElement, key: string, snapshot: TrackMoveSnapshot, travelPx: number): void {
+  const from = snapshot.indents.get(key)
+  const content = indentNode(row)
+  if (from == null || !content || typeof content.animate !== "function") return
+  const to = indentPx(row)
+  if (Math.abs(to - from) < 0.5) return
+  content.style.transition = "none"
+  const animation = content.animate(
+    [{ paddingLeft: `${from}px` }, { paddingLeft: `${to}px` }],
+    trackSlideMotion(Math.max(travelPx, Math.abs(to - from))),
+  )
+  const restore = () => { content.style.transition = "" }
+  animation.addEventListener("finish", restore)
+  animation.addEventListener("cancel", restore)
 }
 
 function slideTrackNode(node: HTMLElement, key: string, dy: number | null, snapshot: TrackMoveSnapshot): Animation | null {

@@ -33,6 +33,22 @@ function makeCell(id: string, cellLabel: string, translated: string): CellData {
   } as unknown as CellData
 }
 
+/** One "No double bang" rule group flagging each of `cellIds`. */
+function ruleGroup(cellIds: string[]): CheckRunResult["ruleFindings"][number] {
+  return {
+    rule: {
+      id: "r1", name: "No double bang", description: "", severity: "minor",
+      source: "user", scope: "project", enabled: true, createdAt: "2026-01-01",
+      check: { type: "target-forbids", targetPattern: "!!" },
+    },
+    infractions: cellIds.map((cellId) => ({
+      ruleId: "r1", cellId, fileId: "f1",
+      reason: "target-forbids",
+      spans: [{ side: "target" as const, start: 0, end: 2, matchedText: "!!" }],
+    })),
+  }
+}
+
 const baseResult: CheckRunResult = {
   ranAt: "2026-06-11T20:00:00.000Z",
   fileId: "f1",
@@ -251,28 +267,55 @@ describe("CheckFindingsDrawer", () => {
   })
 })
 
-// ── SUB-5: human titles for finding cards (never a raw UUID when avoidable) ──
+// ── SUB-5: human titles for finding cards — never a raw id ──
+// A reviewer can do nothing with a UUID; a card they cannot place in the
+// text is a card they skip. So the label falls back to the cell's place in
+// the file, never to its id.
+
+const UUID = "0190a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b"
 
 describe("findingCellLabel", () => {
   const mk = (o: Partial<CellData>): CellData => ({ id: "x", context: "", ...o }) as unknown as CellData
 
   it("prefers the cell's label when present", () => {
-    expect(findingCellLabel(mk({ cellLabel: "MAT 1:1" }), "uuid-1")).toBe("MAT 1:1")
+    expect(findingCellLabel(mk({ cellLabel: "MAT 1:1" }), "Cell 4")).toBe("MAT 1:1")
   })
 
   it("falls back to the cue timestamp range for subtitle cells", () => {
     const cell = mk({ context: "00:36:01.995 --> 00:36:05.374" })
-    expect(findingCellLabel(cell, "uuid-1")).toBe("36:02.0–36:05.4")
+    expect(findingCellLabel(cell, "Cell 4")).toBe("36:02.0–36:05.4")
   })
 
   it("keeps hours when nonzero", () => {
     const cell = mk({ context: "01:02:03.000 --> 01:02:04.500" })
-    expect(findingCellLabel(cell, "uuid-1")).toBe("1:02:03.0–1:02:04.5")
+    expect(findingCellLabel(cell, "Cell 4")).toBe("1:02:03.0–1:02:04.5")
   })
 
-  it("falls back to the id only when the cell is unknown or untimed", () => {
-    expect(findingCellLabel(undefined, "uuid-1")).toBe("uuid-1")
-    expect(findingCellLabel(mk({ context: "GEN 1:1" }), "uuid-2")).toBe("uuid-2")
+  it("uses the fallback, never the id, when the cell is unknown or untimed", () => {
+    expect(findingCellLabel(undefined, "Cell 4")).toBe("Cell 4")
+    expect(findingCellLabel(mk({ context: "GEN 1:1" }), "Cell 4")).toBe("Cell 4")
+  })
+
+  it("ignores a label that is itself an id", () => {
+    expect(findingCellLabel(mk({ cellLabel: UUID }), "Cell 4")).toBe("Cell 4")
+    expect(findingCellLabel(mk({}), "Cell 4", UUID)).toBe("Cell 4")
+  })
+})
+
+describe("CheckFindingsDrawer — cells without a reference", () => {
+  it("names an unlabelled cell by its place in the file, not its id", () => {
+    const cells = [makeCell("a", "", "one"), makeCell(UUID, "", "two")]
+    const result: CheckRunResult = {
+      ...baseResult,
+      ruleFindings: [ruleGroup([UUID])],
+      totalFindingCount: 1,
+    }
+    render(
+      <CheckFindingsDrawer result={result} running={false} cells={cells}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}} />,
+    )
+    expect(screen.getByText("Cell 2")).toBeInTheDocument()
+    expect(screen.queryByText(UUID)).toBeNull()
   })
 })
 
@@ -417,5 +460,108 @@ describe("CheckFindingsDrawer — spelling (AQU-1737)", () => {
     )
     fireEvent.click(screen.getByText("MRK 1:1"))
     expect(onNavigateToCell).toHaveBeenCalledWith("c1")
+  })
+})
+
+// The comment button leaves a note in place: a reviewer working down the
+// findings must not lose the list to the comments drawer for every note.
+describe("CheckFindingsDrawer — commenting from a finding", () => {
+  const result: CheckRunResult = {
+    ...baseResult,
+    termFindings: [{
+      conceptId: "k1", sourceTerm: "Χριστός", approvedRenderings: ["Kristo"],
+      totalOccurrences: 1, consistentCount: 0, renderingUsage: [],
+      flaggedCells: [{ cellId: "c2", cellLabel: "MAT 1:16" }],
+    }],
+    totalFindingCount: 1,
+  }
+
+  it("posts a comment on the cell without opening the comments drawer", async () => {
+    const user = userEvent.setup()
+    const onAddComment = vi.fn(async () => {})
+    const onOpenComments = vi.fn()
+    render(
+      <CheckFindingsDrawer
+        result={result} running={false} cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        onOpenComments={onOpenComments} onAddComment={onAddComment}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Comment on MAT 1:16" }))
+    await user.type(await screen.findByRole("textbox", { name: "New thread" }), "Should this be Kristo?{Enter}")
+    expect(onAddComment).toHaveBeenCalledWith("c2", "Should this be Kristo?")
+    expect(onOpenComments).not.toHaveBeenCalled()
+    // The findings are still there to carry on with.
+    expect(screen.getByText("Χριστός")).toBeInTheDocument()
+  })
+
+  it("keeps the way to the full thread", async () => {
+    const user = userEvent.setup()
+    const onOpenComments = vi.fn()
+    render(
+      <CheckFindingsDrawer
+        result={result} running={false} cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        onOpenComments={onOpenComments} onAddComment={async () => {}}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Comment on MAT 1:16" }))
+    await user.click(await screen.findByRole("button", { name: "Open this cell's comments" }))
+    expect(onOpenComments).toHaveBeenCalledWith("c2")
+  })
+
+  it("says so when the comment did not post, and keeps the text", async () => {
+    const user = userEvent.setup()
+    render(
+      <CheckFindingsDrawer
+        result={result} running={false} cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+        onAddComment={async () => { throw new Error("offline") }}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Comment on MAT 1:16" }))
+    const box = await screen.findByRole("textbox", { name: "New thread" })
+    await user.type(box, "note{Enter}")
+    expect(await screen.findByRole("alert")).toHaveTextContent(/did not post/)
+    expect(box).toHaveValue("note")
+  })
+})
+
+// One noisy rule must not push every other finding off the panel.
+describe("CheckFindingsDrawer — folding", () => {
+  const cells = ["a", "b", "c", "d", "e"].map((id, i) => makeCell(id, `MAT 1:${i + 1}`, "x!!"))
+  const render5 = () =>
+    render(
+      <CheckFindingsDrawer
+        result={{ ...baseResult, ruleFindings: [ruleGroup(["a", "b", "c", "d", "e"])], totalFindingCount: 5 }}
+        running={false} cells={cells}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+
+  it("shows the first few cells of a card and the rest on request", async () => {
+    const user = userEvent.setup()
+    render5()
+    expect(screen.getByText("MAT 1:3")).toBeInTheDocument()
+    expect(screen.queryByText("MAT 1:4")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Show 2 more cells" }))
+    expect(screen.getByText("MAT 1:5")).toBeInTheDocument()
+  })
+
+  it("folds a card and a whole section from their headers", async () => {
+    const user = userEvent.setup()
+    render5()
+    await user.click(screen.getByRole("button", { name: /No double bang/ }))
+    expect(screen.queryByText("MAT 1:1")).toBeNull()
+    await user.click(screen.getByRole("button", { name: /No double bang/ }))
+    expect(screen.getByText("MAT 1:1")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Rule violations (5)" }))
+    expect(screen.queryByText("No double bang")).toBeNull()
+  })
+
+  it("opens on the sections that have findings, with the empty ones folded", () => {
+    render5()
+    expect(screen.getByRole("button", { name: "Rule violations (5)" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Spelling (0)" })).toHaveAttribute("aria-expanded", "false")
   })
 })

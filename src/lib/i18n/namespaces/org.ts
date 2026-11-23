@@ -87,7 +87,9 @@ export const org = defineNamespace({
     "org.access.places.noReaches": "No one reaches this place from above",
     "org.access.places.noMatches": "No people or places match",
     "org.access.places.invitePending": "Invite pending",
-    "org.access.places.kindOrg": "organization",
+    // Organization kind in the place summary → onboarding.apiTokens.orgLabel
+    // (identical text). org.breadcrumb.organizationFallback already holds the
+    // exception against that key, so a third key for the same word reopens it.
     "org.access.places.viaProject": "Via project {name}",
     "org.access.places.fromOrg": "From {name}",
     "org.access.places.fromTeam": "From the {name} team",

@@ -21,7 +21,9 @@ import { accessNodeId } from "./access-anchors"
 import type { AccessTreeNode, DirectGrantee, InheritedSource } from "./org-access-data"
 
 const PLACE_KIND = {
-  org: "org.access.places.kindOrg",
+  // "Organization" is onboarding.apiTokens.orgLabel. A new key for that word
+  // joins the collision org.breadcrumb.organizationFallback is already excepted for.
+  org: "onboarding.apiTokens.orgLabel",
   team: "org.access.scope.team",
   project: "org.access.scope.project",
   lane: "org.access.scope.lane",

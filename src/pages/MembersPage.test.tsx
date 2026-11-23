@@ -511,10 +511,10 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByTestId("scope-grant-scope").textContent).toBe(title)
     expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
-    // AQU-1107: default org-add is Contributor, and the dialog states that
+    // AQU-1107 / AQU-2352: default org-add is Member, and the dialog states that
     // that role does not open projects until a project/team grant exists.
     // AQU-2289: that is the longer text, so it opens from the (i) in place.
-    expect(screen.getByRole("combobox", { name: /^role$/i })).toHaveTextContent(/contributor/i)
+    expect(screen.getByRole("combobox", { name: /^role$/i })).toHaveTextContent(/member/i)
     const details = screen.getByTestId("role-dialog-details")
     expect(details).toHaveAttribute("data-open", "false")
     fireEvent.click(screen.getByTestId("role-dialog-info"))

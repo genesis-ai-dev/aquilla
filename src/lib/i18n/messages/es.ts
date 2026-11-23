@@ -395,6 +395,8 @@ export const es: Catalog = {
   "error.monday.sync": "No se pudo enviar este proyecto a Monday.",
   "error.monday.addColumns": "No se pudieron agregar las columnas al tablero de Monday.",
   "error.monday.newBoard": "No se pudo crear el tablero nuevo en Monday.",
+  "error.airtable.connect": "No se pudo conectar Airtable. Inténtalo de nuevo.",
+  "error.airtable.disconnect": "No se pudo desconectar Airtable.",
   "error.termbase.publish": "No se pudo compartir esta base terminológica con la organización.",
   "error.termbase.unpublish": "No se pudo dejar de compartir esta base terminológica.",
   "error.termbase.listPublished": "No se pudieron cargar las bases terminológicas compartidas en esta organización.",

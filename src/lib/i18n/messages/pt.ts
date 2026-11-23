@@ -398,6 +398,8 @@ export const pt: Catalog = {
   "error.monday.sync": "Não foi possível enviar este projeto para o Monday.",
   "error.monday.addColumns": "Não foi possível adicionar as colunas ao quadro do Monday.",
   "error.monday.newBoard": "Não foi possível criar o novo quadro no Monday.",
+  "error.airtable.connect": "Não foi possível conectar o Airtable. Tente novamente.",
+  "error.airtable.disconnect": "Não foi possível desconectar o Airtable.",
   "error.termbase.publish": "Não foi possível compartilhar esta base terminológica com a organização.",
   "error.termbase.unpublish": "Não foi possível parar de compartilhar esta base terminológica.",
   "error.termbase.listPublished": "Não foi possível carregar as bases terminológicas compartilhadas nesta organização.",

@@ -8,7 +8,7 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS, relativeTeamPath } from "@/components/admin/shared"
-import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
+import { AdminDirectoryCount, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import type { AdminTeam } from "@/lib/frontier/admin"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 
@@ -21,11 +21,14 @@ export function AdminTeamsSection({
   teams,
   onOpenTeam,
   server,
+  fill = false,
 }: {
   teams: AdminTeam[]
   onOpenTeam: (team: AdminTeam) => void
-  /** When set, search, sort, and pages are the server's. Rows are shown as returned. */
+  /** When set, search and sort are the server's. Rows are shown as returned. */
   server?: AdminTableServer
+  /** The table fills the page and loads the next rows when its end scrolls into view. */
+  fill?: boolean
 }) {
   const columns = useMemo<ColumnDef<AdminTeam>[]>(
     () => [
@@ -121,7 +124,12 @@ export function AdminTeamsSection({
       onSearchChange={server?.onSearchChange}
       searching={server?.searching}
       loading={server?.loading}
+      loadingMore={server?.loadingMore}
+      hasMore={server?.hasMore}
+      onLoadMore={server?.onLoadMore}
+      loadMoreTestId="admin-teams-load-more"
       onSortingChange={server?.onSortingChange}
+      fillHeight={fill}
       globalFilterFn={
         server
           ? undefined
@@ -145,12 +153,7 @@ export function AdminTeamsSection({
       }
       toolbar={(table) =>
         server ? (
-          <AdminDirectoryPager
-            page={server.page}
-            pageSize={server.pageSize}
-            total={server.total}
-            onPageChange={server.onPageChange}
-          />
+          <AdminDirectoryCount total={server.total} />
         ) : (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === teams.length

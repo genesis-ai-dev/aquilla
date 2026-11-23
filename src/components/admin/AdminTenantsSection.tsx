@@ -9,7 +9,7 @@ import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { AdminDirectoryPager, type AdminTableServer } from "@/components/admin/admin-directory-ui"
+import { AdminDirectoryCount, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 
 /**
@@ -29,6 +29,7 @@ export function AdminTenantsSection({
   onOpenOrgPath,
   onOpenInvites,
   server,
+  fill = false,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
@@ -38,8 +39,10 @@ export function AdminTenantsSection({
   onOpenOrgPath: (orgId: number, subpath: string) => void
   /** Open the admin invites tab with this org pre-selected. */
   onOpenInvites?: (orgId: number) => void
-  /** When set, search, sort, and pages are the server's. Rows are shown as returned. */
+  /** When set, search and sort are the server's. Rows are shown as returned. */
   server?: AdminTableServer
+  /** The table fills the page and loads the next rows when its end scrolls into view. */
+  fill?: boolean
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -183,7 +186,12 @@ export function AdminTenantsSection({
       onSearchChange={server?.onSearchChange}
       searching={server?.searching}
       loading={server?.loading}
+      loadingMore={server?.loadingMore}
+      hasMore={server?.hasMore}
+      onLoadMore={server?.onLoadMore}
+      loadMoreTestId="admin-tenants-load-more"
       onSortingChange={server?.onSortingChange}
+      fillHeight={fill}
       globalFilterFn={
         server
           ? undefined
@@ -208,13 +216,7 @@ export function AdminTenantsSection({
       }
       toolbar={(table) =>
         server ? (
-          <AdminDirectoryPager
-            page={server.page}
-            pageSize={server.pageSize}
-            total={server.total}
-            onPageChange={server.onPageChange}
-            noun="orgs"
-          />
+          <AdminDirectoryCount total={server.total} noun="orgs" />
         ) : (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === orgs.length

@@ -30,6 +30,7 @@ import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { ManageAccessLink } from "@/components/org/access/ManageAccessLink"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
@@ -845,15 +846,25 @@ export function TeamDetail() {
                       </p>
                     ) : null}
                   </div>
-                  {isAdmin && activeOrgId != null && groupIdNum != null ? (
-                    <Link
-                      to={teamSettingsPath(activeOrgId, groupIdNum)}
-                      aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
-                      className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
-                    >
-                      <Settings />
-                    </Link>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* AQU-2324: the team on the Places lens. Shown to whoever can
+                        set roles here (org Maintainer+, or this team's Maintainer
+                        — the access page shows a team its own members). The
+                        controls below stay: bulk add, team-only Maintainers and
+                        attaching a project have no equivalent there yet. */}
+                    {canEditTeamRoles && groupIdNum != null ? (
+                      <ManageAccessLink orgId={activeOrgId} open={{ place: { type: "team", id: String(groupIdNum) } }} />
+                    ) : null}
+                    {isAdmin && activeOrgId != null && groupIdNum != null ? (
+                      <Link
+                        to={teamSettingsPath(activeOrgId, groupIdNum)}
+                        aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
+                        className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
+                      >
+                        <Settings />
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 

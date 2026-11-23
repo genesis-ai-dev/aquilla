@@ -937,7 +937,6 @@ export const th: Catalog = {
   "editor.station.evenedPart": "ปรับแล้ว {db} ยังไม่สุด",
   "editor.station.notEvened": "ยังไม่ปรับความดัง",
   "editor.station.yourVolume": "ระดับเสียงของคุณ {db}",
-  "editor.station.evenClear": "ล้าง",
   "editor.station.evenAgain": "ปรับความดังอีกครั้ง",
   "editor.station.helpEvenTerm": "ปรับความดัง",
   "editor.station.helpEven": "มาก่อนระดับเสียงของคุณ: ปรับความดังของการบันทึกก่อน แล้วจึงใช้ระดับเสียงและเฟดของคุณ ล้างจะเอาออกเฉพาะการปรับความดัง",

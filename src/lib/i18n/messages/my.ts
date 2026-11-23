@@ -937,7 +937,6 @@ export const my: Catalog = {
   "editor.station.evenedPart": "ညီအောင်လုပ်ပြီး {db}၊ အပြည့်မဟုတ်",
   "editor.station.notEvened": "ညီအောင် မလုပ်ရသေး",
   "editor.station.yourVolume": "သင့်အသံ {db}",
-  "editor.station.evenClear": "ဖယ်ရန်",
   "editor.station.evenAgain": "ထပ်မံ ညီအောင်လုပ်ရန်",
   "editor.station.helpEvenTerm": "ညီအောင်လုပ်ခြင်း",
   "editor.station.helpEven": "သင့်အသံ မတိုင်မီ ဖြစ်သည်- အသံသွင်းချက်ကို အရင်ညီအောင်လုပ်ပြီးမှ သင့်အသံနှင့် ဖိတ်များ လာသည်။ ဖယ်ရန်သည် ညီအောင်လုပ်ခြင်းကိုသာ ဖယ်သည်။",

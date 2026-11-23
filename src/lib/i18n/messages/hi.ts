@@ -1114,7 +1114,6 @@ export const hi: Catalog = {
   "editor.station.evenedPart": "बराबर {db}, पूरा नहीं",
   "editor.station.notEvened": "बराबर नहीं",
   "editor.station.yourVolume": "आपकी आवाज़ {db}",
-  "editor.station.evenClear": "हटाएँ",
   "editor.station.evenAgain": "फिर से बराबर करें",
   "editor.station.helpEvenTerm": "बराबर करना",
   "editor.station.helpEven": "आपकी आवाज़ से पहले आता है: पहले रिकॉर्डिंग बराबर की जाती है, फिर आपकी आवाज़ और फ़ेड। हटाएँ सिर्फ़ बराबर करना हटाता है।",

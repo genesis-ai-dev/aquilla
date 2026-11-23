@@ -1143,7 +1143,6 @@ export const am: Catalog = {
   "editor.station.evenedPart": "ተስተካክሏል {db}፣ ሙሉ በሙሉ አይደለም",
   "editor.station.notEvened": "አልተስተካከለም",
   "editor.station.yourVolume": "ድምፅዎ {db}",
-  "editor.station.evenClear": "አስወግድ",
   "editor.station.evenAgain": "እንደገና አስተካክል",
   "editor.station.helpEvenTerm": "ማስተካከል",
   "editor.station.helpEven": "ከድምፅዎ በፊት ይመጣል፦ መጀመሪያ ቀረጻው ይስተካከላል፣ ከዚያ ድምፅዎ እና ፌዶቹ። አስወግድ ማስተካከሉን ብቻ ያስወግዳል።",

@@ -937,7 +937,6 @@ export const zh_Hans: Catalog = {
   "editor.station.evenedPart": "已统一 {db}，未完全提升",
   "editor.station.notEvened": "未统一响度",
   "editor.station.yourVolume": "你的音量 {db}",
-  "editor.station.evenClear": "清除",
   "editor.station.evenAgain": "再次统一响度",
   "editor.station.helpEvenTerm": "统一响度",
   "editor.station.helpEven": "在你的音量之前生效：先统一录音响度，再应用你的音量和淡入淡出。清除只去掉统一响度。",

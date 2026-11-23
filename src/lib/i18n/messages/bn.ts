@@ -1144,7 +1144,6 @@ export const bn: Catalog = {
   "editor.station.evenedPart": "সমান {db}, পুরোপুরি নয়",
   "editor.station.notEvened": "সমান করা নেই",
   "editor.station.yourVolume": "আপনার ভলিউম {db}",
-  "editor.station.evenClear": "সরান",
   "editor.station.evenAgain": "আবার সমান করুন",
   "editor.station.helpEvenTerm": "সমান করা",
   "editor.station.helpEven": "আপনার ভলিউমের আগে আসে: আগে রেকর্ডিং সমান করা হয়, তারপর আপনার ভলিউম ও ফেড। সরান শুধু সমান করা সরায়।",

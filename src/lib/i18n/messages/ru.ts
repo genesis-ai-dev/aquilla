@@ -948,7 +948,6 @@ export const ru: Catalog = {
   "editor.station.evenedPart": "Выровнено {db}, не полностью",
   "editor.station.notEvened": "Не выровнено",
   "editor.station.yourVolume": "ваша громкость {db}",
-  "editor.station.evenClear": "Снять",
   "editor.station.evenAgain": "Выровнять снова",
   "editor.station.helpEvenTerm": "Выравнивание",
   "editor.station.helpEven": "Идёт до вашей громкости: сначала выравнивается запись, затем применяются ваша громкость и затухания. «Снять» убирает только выравнивание.",

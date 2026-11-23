@@ -1106,7 +1106,6 @@ export const pt: Catalog = {
   "editor.station.evenedPart": "Nivelado {db}, não totalmente",
   "editor.station.notEvened": "Não nivelado",
   "editor.station.yourVolume": "seu volume {db}",
-  "editor.station.evenClear": "Remover",
   "editor.station.evenAgain": "Nivelar de novo",
   "editor.station.helpEvenTerm": "Nivelar",
   "editor.station.helpEven": "Vem antes do seu volume: a gravação é nivelada primeiro, depois entram seu volume e os fades. Remover tira só o nivelamento.",

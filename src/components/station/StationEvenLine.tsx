@@ -102,7 +102,7 @@ export function StationEvenLine({ host, take, target, ownDb, editable }: {
         <>
           {dot}
           <button type="button" disabled={busy} className={link} onClick={() => void (evened ? clear() : again())}>
-            {evened ? t("editor.station.evenClear") : t("editor.station.evenAgain")}
+            {evened ? t("common.clear") : t("editor.station.evenAgain")}
           </button>
         </>
       ) : null}

@@ -932,7 +932,6 @@ export const ms: Catalog = {
   "editor.station.evenedPart": "Diseragamkan {db}, tidak sepenuhnya",
   "editor.station.notEvened": "Tidak diseragamkan",
   "editor.station.yourVolume": "kelantangan anda {db}",
-  "editor.station.evenClear": "Kosongkan",
   "editor.station.evenAgain": "Seragamkan semula",
   "editor.station.helpEvenTerm": "Penyeragaman",
   "editor.station.helpEven": "Berlaku sebelum kelantangan anda: rakaman diseragamkan dahulu, kemudian kelantangan dan pudar anda. Kosongkan hanya membuang penyeragaman.",

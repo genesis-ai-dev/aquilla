@@ -935,7 +935,6 @@ export const id: Catalog = {
   "editor.station.evenedPart": "Diratakan {db}, tidak sepenuhnya",
   "editor.station.notEvened": "Belum diratakan",
   "editor.station.yourVolume": "volume Anda {db}",
-  "editor.station.evenClear": "Hapus",
   "editor.station.evenAgain": "Ratakan lagi",
   "editor.station.helpEvenTerm": "Perataan",
   "editor.station.helpEven": "Berlaku sebelum volume Anda: rekaman diratakan dulu, lalu volume dan fade Anda. Hapus hanya menghapus perataan.",

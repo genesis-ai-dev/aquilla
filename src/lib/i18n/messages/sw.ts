@@ -1135,7 +1135,6 @@ export const sw: Catalog = {
   "editor.station.evenedPart": "Imesawazishwa {db}, si kikamilifu",
   "editor.station.notEvened": "Haijasawazishwa",
   "editor.station.yourVolume": "sauti yako {db}",
-  "editor.station.evenClear": "Ondoa",
   "editor.station.evenAgain": "Sawazisha tena",
   "editor.station.helpEvenTerm": "Kusawazisha",
   "editor.station.helpEven": "Huja kabla ya sauti yako: rekodi husawazishwa kwanza, kisha sauti yako na kufifia. Ondoa huondoa usawazishaji tu.",

@@ -1141,7 +1141,6 @@ export const ha: Catalog = {
   "editor.station.evenedPart": "An daidaita {db}, ba gaba ɗaya ba",
   "editor.station.notEvened": "Ba a daidaita ba",
   "editor.station.yourVolume": "ƙararka {db}",
-  "editor.station.evenClear": "Cire",
   "editor.station.evenAgain": "Sake daidaitawa",
   "editor.station.helpEvenTerm": "Daidaitawa",
   "editor.station.helpEven": "Yana zuwa kafin ƙararka: ana daidaita rikodin da farko, sai ƙararka da fade. Cire yana cire daidaitawa kawai.",

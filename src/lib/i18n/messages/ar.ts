@@ -937,7 +937,6 @@ export const ar: Catalog = {
   "editor.station.evenedPart": "موحَّد {db}، ليس إلى النهاية",
   "editor.station.notEvened": "غير موحَّد",
   "editor.station.yourVolume": "صوتك {db}",
-  "editor.station.evenClear": "إزالة",
   "editor.station.evenAgain": "توحيد مرة أخرى",
   "editor.station.helpEvenTerm": "التوحيد",
   "editor.station.helpEven": "يأتي قبل صوتك: يُوحَّد التسجيل أولًا ثم يُطبَّق صوتك والتلاشي. «إزالة» تزيل التوحيد فقط.",

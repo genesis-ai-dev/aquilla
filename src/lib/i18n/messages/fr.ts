@@ -929,7 +929,6 @@ export const fr: Catalog = {
   "editor.station.evenedPart": "Égalisée {db}, pas jusqu’au bout",
   "editor.station.notEvened": "Non égalisée",
   "editor.station.yourVolume": "votre volume {db}",
-  "editor.station.evenClear": "Retirer",
   "editor.station.evenAgain": "Égaliser à nouveau",
   "editor.station.helpEvenTerm": "Égaliser",
   "editor.station.helpEven": "Passe avant votre volume : l’enregistrement est égalisé d’abord, puis viennent votre volume et les fondus. Retirer n’enlève que l’égalisation.",

@@ -1143,7 +1143,6 @@ export const pa: Catalog = {
   "editor.station.evenedPart": "ਬਰਾਬਰ {db}, ਪੂਰਾ ਨਹੀਂ",
   "editor.station.notEvened": "ਬਰਾਬਰ ਨਹੀਂ",
   "editor.station.yourVolume": "ਤੁਹਾਡੀ ਆਵਾਜ਼ {db}",
-  "editor.station.evenClear": "ਹਟਾਓ",
   "editor.station.evenAgain": "ਮੁੜ ਬਰਾਬਰ ਕਰੋ",
   "editor.station.helpEvenTerm": "ਬਰਾਬਰ ਕਰਨਾ",
   "editor.station.helpEven": "ਤੁਹਾਡੀ ਆਵਾਜ਼ ਤੋਂ ਪਹਿਲਾਂ ਆਉਂਦਾ ਹੈ: ਪਹਿਲਾਂ ਰਿਕਾਰਡਿੰਗ ਬਰਾਬਰ ਹੁੰਦੀ ਹੈ, ਫਿਰ ਤੁਹਾਡੀ ਆਵਾਜ਼ ਅਤੇ ਫ਼ੇਡ। ਹਟਾਓ ਸਿਰਫ਼ ਬਰਾਬਰੀ ਹਟਾਉਂਦਾ ਹੈ।",

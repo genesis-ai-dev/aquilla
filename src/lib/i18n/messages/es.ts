@@ -1106,7 +1106,6 @@ export const es: Catalog = {
   "editor.station.evenedPart": "Igualada {db}, no del todo",
   "editor.station.notEvened": "Sin igualar",
   "editor.station.yourVolume": "tu volumen {db}",
-  "editor.station.evenClear": "Quitar",
   "editor.station.evenAgain": "Igualar de nuevo",
   "editor.station.helpEvenTerm": "Igualar",
   "editor.station.helpEven": "Va antes de tu volumen: primero se iguala la grabación y luego se aplican tu volumen y los fundidos. Quitar elimina solo la igualación.",

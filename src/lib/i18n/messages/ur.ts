@@ -1143,7 +1143,6 @@ export const ur: Catalog = {
   "editor.station.evenedPart": "برابر {db}، پوری طرح نہیں",
   "editor.station.notEvened": "برابر نہیں",
   "editor.station.yourVolume": "آپ کی آواز {db}",
-  "editor.station.evenClear": "ہٹائیں",
   "editor.station.evenAgain": "دوبارہ برابر کریں",
   "editor.station.helpEvenTerm": "برابر کرنا",
   "editor.station.helpEven": "آپ کی آواز سے پہلے آتا ہے: پہلے ریکارڈنگ برابر کی جاتی ہے، پھر آپ کی آواز اور فیڈ۔ ہٹائیں صرف برابری ہٹاتا ہے۔",

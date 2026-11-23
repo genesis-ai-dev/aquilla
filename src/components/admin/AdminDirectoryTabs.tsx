@@ -36,13 +36,13 @@ import {
 function asServer<T>(directory: ReturnType<typeof useAdminDirectory<T>>): AdminTableServer {
   return {
     total: directory.total,
-    page: directory.page,
-    pageSize: directory.pageSize,
-    onPageChange: directory.setPage,
     search: directory.search,
     onSearchChange: directory.setSearch,
     searching: directory.searching,
     loading: directory.loading,
+    loadingMore: directory.loadingMore,
+    hasMore: directory.hasMore,
+    onLoadMore: directory.loadMore,
     onSortingChange: directory.setSorting,
   }
 }
@@ -180,7 +180,7 @@ export function AdminTenantsTable({
     initialSort: { id: "organization", desc: false },
   })
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <DirectoryError message={directory.error} />
       <AdminTenantsSection
         orgs={directory.rows}
@@ -189,8 +189,9 @@ export function AdminTenantsTable({
         onOpenOrgPath={onOpenOrgPath}
         onOpenInvites={onOpenInvites}
         server={asServer(directory)}
+        fill
       />
-    </>
+    </div>
   )
 }
 
@@ -256,10 +257,10 @@ export function AdminTeamsTable({
     initialSort: { id: "team", desc: false },
   })
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <DirectoryError message={directory.error} />
-      <AdminTeamsSection teams={directory.rows} onOpenTeam={onOpenTeam} server={asServer(directory)} />
-    </>
+      <AdminTeamsSection teams={directory.rows} onOpenTeam={onOpenTeam} server={asServer(directory)} fill />
+    </div>
   )
 }
 
@@ -292,7 +293,7 @@ export function AdminPeopleTable({
     }
   }, [jwt])
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <DirectoryError message={directory.error} />
       <AdminPeopleSection
         users={directory.rows}
@@ -300,8 +301,9 @@ export function AdminPeopleTable({
         onSelectUser={onSelectUser}
         initialSort={initialSort}
         server={asServer(directory)}
+        fill
       />
-    </>
+    </div>
   )
 }
 
@@ -321,15 +323,16 @@ export function AdminProjectsTable({
     initialSort: lens === "needs-attention" ? { id: "status", desc: true } : { id: "name", desc: false },
   })
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <DirectoryError message={directory.error} />
       <AdminProjectsSection
         projects={directory.rows}
         initialLens={lens}
         onSelectOrg={onSelectOrg}
         server={{ ...asServer(directory), lens, onLensChange: setLens }}
+        fill
       />
-    </>
+    </div>
   )
 }
 

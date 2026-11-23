@@ -157,8 +157,8 @@ export function AdminConsole() {
     body = <AdminElevationGate jwt={jwt} email={adminEmail} onElevated={refreshElevation} />
   } else if (jwt) {
     body = (
-      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList className="flex-wrap">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="min-h-0 flex-1">
+        <TabsList className="shrink-0 flex-wrap">
           {TABS.map((t) => (
             <TabsTrigger
               key={t.key}
@@ -170,8 +170,8 @@ export function AdminConsole() {
           ))}
         </TabsList>
 
-        <div className="mt-6">
-          <TabsContent value="overview">
+        <div className="mt-6 flex min-h-0 flex-1 flex-col">
+          <TabsContent value="overview" className="min-h-0 overflow-y-auto">
             <AdminOverviewTab
               jwt={jwt}
               onOpenOrg={selectOrg}
@@ -182,14 +182,17 @@ export function AdminConsole() {
             />
           </TabsContent>
 
-          <TabsContent value="retention">
+          <TabsContent value="retention" className="min-h-0 overflow-y-auto">
             <AdminRetentionSection jwt={jwt} />
           </TabsContent>
-          <TabsContent value="migration">
+          <TabsContent value="migration" className="min-h-0 overflow-y-auto">
             <AdminMigrationSection jwt={jwt} />
           </TabsContent>
 
-          <TabsContent value="tenants">
+          <TabsContent
+            value="tenants"
+            className={orgIdParam > 0 ? "min-h-0 overflow-y-auto" : "flex min-h-0 flex-col overflow-hidden"}
+          >
             {orgIdParam > 0 ? (
               <AdminTenantDetail
                 key={orgIdParam}
@@ -212,11 +215,18 @@ export function AdminConsole() {
             )}
           </TabsContent>
 
-          <TabsContent value="teams">
+          <TabsContent value="teams" className="flex min-h-0 flex-col overflow-hidden">
             <AdminTeamsTable jwt={jwt} onOpenTeam={openTeam} />
           </TabsContent>
 
-          <TabsContent value="people">
+          <TabsContent
+            value="people"
+            className={
+              Number.isInteger(userIdParam) && userIdParam > 0
+                ? "min-h-0 overflow-y-auto"
+                : "flex min-h-0 flex-col overflow-hidden"
+            }
+          >
             {Number.isInteger(userIdParam) && userIdParam > 0 ? (
               <AdminPersonView
                 key={userIdParam}
@@ -235,7 +245,7 @@ export function AdminConsole() {
             )}
           </TabsContent>
 
-          <TabsContent value="projects">
+          <TabsContent value="projects" className="flex min-h-0 flex-col overflow-hidden">
             <AdminProjectsTable
               key={startLens}
               jwt={jwt}
@@ -244,15 +254,15 @@ export function AdminConsole() {
             />
           </TabsContent>
 
-          <TabsContent value="activity">
+          <TabsContent value="activity" className="min-h-0 overflow-y-auto">
             <AdminActivityTab jwt={jwt} />
           </TabsContent>
 
-          <TabsContent value="platform">
+          <TabsContent value="platform" className="min-h-0 overflow-y-auto">
             <AdminPlatformSection jwt={jwt} />
           </TabsContent>
 
-          <TabsContent value="invites">
+          <TabsContent value="invites" className="min-h-0 overflow-y-auto">
             <AdminInvitesTab jwt={jwt} initialOrgId={selectedInvitesOrgId ?? undefined} />
           </TabsContent>
         </div>
@@ -266,8 +276,9 @@ export function AdminConsole() {
       header={<OrgBreadcrumb section="Admin" />}
       statusBar={null}
       main={
-        <Page size="wide">
+        <Page size="wide" fill>
           <PageHeader
+            className="shrink-0"
             title="Admin console"
             description="Site-wide, cross-tenant view. Oversight is read-only; the Platform tab is editable."
             inset={false}

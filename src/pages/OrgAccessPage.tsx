@@ -20,6 +20,7 @@ import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOrgAccess } from "@/hooks/useOrgAccess"
 import {
   countPlaces,
@@ -60,6 +61,7 @@ export function OrgAccessPage() {
   const t = useT()
   const { activeOrg } = useActiveOrg()
   const state = useOrgAccess()
+  const { session } = useFrontierSession()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState("")
   // AQU-2320: the Give access dialog, with the place it was opened from.
@@ -146,7 +148,18 @@ export function OrgAccessPage() {
                   </TabsList>
                   <TabsContent value="places" className="mt-3">
                     {lens === "places" && (
-                      <PlacesLens tree={state.data.tree} query={query} onGiveAccess={canGive ? setGiveAt : undefined} />
+                      <PlacesLens
+                        tree={state.data.tree}
+                        query={query}
+                        onGiveAccess={canGive ? setGiveAt : undefined}
+                        editing={activeOrg ? {
+                          orgId: activeOrg.id,
+                          grantable: state.data.grantable,
+                          people: state.data.people,
+                          viewerUsername: session?.username ?? null,
+                          onChanged: state.reload,
+                        } : undefined}
+                      />
                     )}
                   </TabsContent>
                   <TabsContent value="people" className="mt-3">

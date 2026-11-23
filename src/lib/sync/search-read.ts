@@ -37,9 +37,10 @@ function authHeaders(jwt: string): HeadersInit {
 }
 
 /**
- * GET /api/v1/projects/:projectId/search?q=&side=&limit=
+ * GET /api/v1/projects/:projectId/search?q=&side=&limit=&fileId=
  *
- * Returns FTS5-ranked search results across every file in the project.
+ * Returns FTS5-ranked search results across every file in the project, or
+ * within `opts.fileId` when given.
  * The query is sanitized server-side before being passed to FTS5 — callers
  * pass raw user input; bare punctuation, FTS reserved words, etc. are
  * stripped before MATCH.
@@ -57,6 +58,7 @@ export async function fetchProjectSearch(
   const params = new URLSearchParams()
   params.set("q", q)
   if (opts.side) params.set("side", opts.side)
+  if (opts.fileId) params.set("fileId", opts.fileId)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.matchCase) params.set("case", "1")
   if (opts.wholeWord) params.set("word", "1")

@@ -62,6 +62,25 @@ describe("useWorkspaceSearchController (AQU-2654)", () => {
     expect(ownerRenders).toBe(rendersBefore)
   })
 
+  it("asks the server for the one file a file-scoped search names", async () => {
+    // Narrowing in the browser was not enough: the server had already cut the
+    // project-wide list to one page, so a file's hits could all be on page 2.
+    vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1")])
+    const { result } = renderHook(() =>
+      useWorkspaceSearchController({ projectId: "p1", getToken: async () => "jwt" }),
+    )
+    await act(async () => {
+      await result.current.search("器皿", { fileId: "f1" })
+    })
+    expect(vi.mocked(fetchProjectSearch).mock.calls[0][2]).toMatchObject({ fileId: "f1" })
+    expect(result.current.store.getSnapshot().results.map((r) => r.cellId)).toEqual(["c1"])
+
+    await act(async () => {
+      await result.current.search("器皿")
+    })
+    expect(vi.mocked(fetchProjectSearch).mock.calls[1][2].fileId).toBeUndefined()
+  })
+
   it("lands a finished search as one transition: results, ready and loading together", async () => {
     vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1")])
     const { result } = renderHook(() =>

@@ -38,6 +38,8 @@ export interface SearchResponse {
 
 export interface FetchSearchOptions {
   side?: "source" | "target"
+  /** Search one file. The server takes `limit` within it. */
+  fileId?: string
   /** Server clamps to [1, 500]; default 50. */
   limit?: number
   /** Case-sensitive literal/regexp match. Off keeps the default FTS search. */

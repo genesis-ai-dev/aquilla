@@ -124,8 +124,8 @@ describe("AQU-2320 Give access dry run", () => {
 
   it.each<[string, FixtureUser, { type: string; id: string }, number, Person, number, string, RegExp]>([
     ["only an Owner grants at the org", "maintainer", { type: "org", id: "1" }, 600, person("org_contrib"), 403, "owner_only", /Maintainer at org "Fixture Org".*your role there: Maintainer/],
-    // team_only sees its own team (org role Reviewer, below the roster floor).
-    ["a team needs an org Maintainer", "team_only", { type: "team", id: "1" }, 100, person("direct_below"), 403, "maintainer_only", /Viewer at team "fixture\/translators".*your role there: Reviewer/],
+    // direct_above sees its own team (org role Reviewer, below the roster floor).
+    ["a team needs an org Maintainer", "direct_above", { type: "team", id: "1" }, 100, person("direct_below"), 403, "maintainer_only", /Viewer at team "fixture\/translators".*your role there: Reviewer/],
     ["a team holding Owner on a project is closed to a Maintainer", "maintainer", { type: "team", id: "2" }, 100, person("org_contrib"), 403, "team_above_you", /team "fixture\/leads"/],
     ["a project offers no Maintainer", "owner", { type: "project", id: "p1" }, 600, person("org_contrib"), 400, "role_not_offered", /Maintainer at project "Alpha".*Project lead, Contributor/],
     ["a lane offers no Project lead", "owner", { type: "lane", id: "lanefr01" }, 500, person("org_contrib"), 400, "role_not_offered", /lane "French"/],
@@ -151,12 +151,35 @@ describe("AQU-2320 Give access dry run", () => {
     expect(body.cap).toBe(500)
   })
 
-  it("does not answer about a place or a person outside what this viewer's lenses show", async () => {
-    // direct_above sees only fixture/translators › p1.
-    const hidden = await preview("direct_above", { place: { type: "project", id: "p2" }, roleLevel: 100, person: person("team_only") })
-    expect(hidden.status).toBe(404)
-    // personal belongs to another org entirely.
-    const stranger = await preview("owner", { place: { type: "project", id: "p1" }, roleLevel: 100, person: person("personal") })
-    expect(stranger.status).toBe(404)
+  it("a project lead learns nothing about places, people or orgs their lenses do not show: one identical refusal", async () => {
+    // direct_above leads p1 (direct 600) and sees only fixture/translators › p1.
+    // Removing the place gate, the person gate or the org gate makes one of these differ.
+    const asLead = async (orgId: number, body: object) => {
+      const res = await app.request(
+        `/api/v2/orgs/${orgId}/access/preview`,
+        { method: "POST", headers: { ...authHeader(await jwtFor("direct_above")), "Content-Type": "application/json" }, body: JSON.stringify(body) },
+        env,
+      )
+      return { status: res.status, body: await res.json() }
+    }
+    const visible = { place: { type: "project", id: "p1" }, roleLevel: 100 }
+    const answers = await Promise.all([
+      asLead(FIXTURE_ORG_ID, { ...visible, place: { type: "project", id: "p2" }, person: person("team_only") }), // hidden project
+      asLead(FIXTURE_ORG_ID, { ...visible, place: { type: "org", id: "1" }, person: person("team_only") }), // org they cannot see
+      asLead(FIXTURE_ORG_ID, { ...visible, person: person("external") }), // person only on p2
+      asLead(FIXTURE_ORG_ID, { ...visible, person: person("personal") }), // person in another org
+      asLead(FIXTURE_ORG_ID, { ...visible, person: { userId: "999999" } }), // no such person
+      asLead(2, { ...visible, person: person("team_only") }), // foreign org
+      asLead(999999, { ...visible, person: person("team_only") }), // no such org
+    ])
+    for (const answer of answers) expect(answer).toEqual({ status: 403, body: { error: "no access to this roster" } })
+    // The same lead, asking about a visible place and a visible person, is answered.
+    const ok = await asLead(FIXTURE_ORG_ID, { ...visible, person: person("team_only") })
+    expect(ok.status).toBe(200)
+  })
+
+  it("never names the org to a viewer without the org roster", async () => {
+    const { body } = await preview("direct_above", { place: { type: "project", id: "p1" }, roleLevel: 100, person: person("team_only") })
+    expect(JSON.stringify(body)).not.toContain("Fixture Org")
   })
 })

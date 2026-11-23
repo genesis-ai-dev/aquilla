@@ -62,7 +62,11 @@ export async function loadGrantWorld(env: Env, vs: ViewerScope, orgId: number): 
 
   return {
     world: {
-      org: { type: "org", id: String(org.id), name: org.name },
+      // Same redaction as the GET (redactUnseenPlaces): a viewer without the
+      // org roster never reads its name, in a path or in a "via" line.
+      org: seesOrg
+        ? { type: "org", id: String(org.id), name: org.name }
+        : { type: "org", id: String(org.id), name: "", hidden: true },
       teams,
       projects,
       lanes,

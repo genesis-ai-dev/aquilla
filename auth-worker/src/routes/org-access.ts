@@ -185,20 +185,33 @@ orgAccess.post("/:orgId/access/preview", authMiddleware, zValidator("json", prev
   const orgId = Number(c.req.param("orgId"))
   if (!Number.isSafeInteger(orgId) || orgId <= 0) return c.json({ error: "bad org id" }, 400)
   const vs = new ViewerScope(c.env, c.get("user"))
-  const loaded = await loadGrantWorld(c.env, vs, orgId)
-  if (!loaded) return c.json({ error: "no access to this roster" }, 403)
+  // One answer for every "not yours to ask about": an org this viewer sees
+  // nothing of (or that does not exist), a place their Places lens does not
+  // show, a person their People lens does not show. Identical to the GET's
+  // 403, so none of the three can be told apart or used to enumerate.
+  const hidden = () => c.json({ error: "no access to this roster" }, 403)
+  // The lenses' own visibility rule, reused rather than restated: the place
+  // must be a node of this viewer's tree (grantable carries one key per node,
+  // lanes after the read wall), the person a row of this viewer's roster.
+  const access = await buildOrgAccess(c.env, vs, orgId)
+  if (!access.ok) return hidden()
   const body = c.req.valid("json")
+  if (!(`${body.place.type}:${body.place.id}` in access.payload.grantable)) return hidden()
+  const loaded = await loadGrantWorld(c.env, vs, orgId)
+  if (!loaded) return hidden()
   let target: GrantTarget
   if ("email" in body.person) {
     target = { kind: "invite", email: body.person.email }
   } else {
-    const account = await loadGrantTarget(c.env, orgId, Number(body.person.userId))
-    if (!account) return c.json({ error: "person not found in this organization" }, 404)
+    const userId = body.person.userId
+    if (!access.payload.people.some((p) => p.userId === userId && !p.pendingInvite)) return hidden()
+    const account = await loadGrantTarget(c.env, orgId, Number(userId))
+    if (!account) return hidden()
     target = account
   }
   const result = previewGrant(loaded.world, loaded.granter, target, { place: body.place, roleLevel: body.roleLevel })
   if (result.ok) return c.json({ preview: result.preview })
-  if ("notFound" in result) return c.json({ error: "place not found" }, 404)
+  if ("notFound" in result) return hidden()
   const { status, message, ...rest } = result.refusal
   return c.json({ error: message, ...rest }, status)
 })

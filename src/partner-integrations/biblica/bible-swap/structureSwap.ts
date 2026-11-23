@@ -17,6 +17,9 @@ import {
     iterateChapterMarkersInParagraph,
     collectPsalmChapterLabelXml,
     isSpeakerLabelParagraphStyle,
+    isSectionHeadingParagraphStyle,
+    isBlankSpacerParagraphStyle,
+    splitLeadingSectionHeadings,
     readChapterTransitionFromParagraph,
     studyHasEnglishSubheaderBefore,
     rewriteRemappedChapterMarkersInStory,
@@ -28,8 +31,9 @@ import {
     findParagraphAtPos,
     getParagraphIndex,
     paragraphsIntersecting,
+    type IndexedParagraph,
 } from "./paragraphIndex";
-import { buildBibleVerseIndex, collectContentText, extractBookCode, isBookMarkerParagraphStyle, iterateContentAbs } from "./surgicalSwap";
+import { buildBibleVerseIndex, collectContentText, extractBookCode, isBookMarkerParagraphStyle, iterateContentAbs, iterateCsrAbs } from "./surgicalSwap";
 import type {
     BibleVerseIndex,
     ChapterBlockIndex,
@@ -101,6 +105,131 @@ function wrapStudyParagraphReplacement(
         .match(/AppliedParagraphStyle="([^"]+)"/);
     const style = styleMatch?.[1] ?? "ParagraphStyle/text%3ap";
     return `<ParagraphStyleRange AppliedParagraphStyle="${style}">${inner}</ParagraphStyleRange>`;
+}
+
+function isDropCapDigitStyle(style: string): boolean {
+    return (
+        /(?:^|\/)cv%3adc(?:_sp)?(?:$|\b)/.test(style) ||
+        /(?:^|\/)cv:dc(?:_sp)?(?:$|\b)/.test(style)
+    );
+}
+
+/** The study drop-cap digit and the space after it, kept when the body is replaced. */
+function studyDropCapPrefix(studyStoryXml: string, paraStart: number): string {
+    const para = findParagraphAt(studyStoryXml, paraStart);
+    if (!para || !isChapterBoundaryParagraphAt(studyStoryXml, paraStart)) return "";
+    let prefix = "";
+    for (const csr of iterateCsrAbs(studyStoryXml, para.bodyStart, para.bodyEnd)) {
+        if (!isDropCapDigitStyle(csr.appliedCharacterStyle)) continue;
+        prefix += studyStoryXml.slice(csr.absFullStart, csr.absFullEnd);
+    }
+    return prefix;
+}
+
+/**
+ * A drop-cap paragraph is one study paragraph. A Bible slice for its opening
+ * verse can still start with a section heading. That heading has to stay its
+ * own paragraph in front of the drop cap; the digit stays in the drop cap.
+ */
+function firstParagraphAndRest(xml: string): { first: string; rest: string } {
+    const paras = getParagraphIndex(xml);
+    if (paras.length === 0) return { first: "", rest: "" };
+    const first = paras[0];
+    return {
+        first: xml.slice(first.fullStart, first.fullEnd),
+        rest: xml.slice(first.fullEnd),
+    };
+}
+
+function composeBoundaryParagraphReplacement(
+    studyStoryXml: string,
+    boundaryStart: number,
+    boundaryEnd: number,
+    ordered: BlockSplice[]
+): string {
+    const chapterNumbers = ordered.map((sp) => Number.parseInt(sp.studyChapter ?? "", 10));
+    const distinctChapters = new Set(ordered.map((sp) => sp.studyChapter).filter(Boolean));
+    const openingChapter =
+        distinctChapters.size > 1
+            ? String(Math.max(...chapterNumbers.filter((n) => !Number.isNaN(n))))
+            : null;
+    const filling = openingChapter
+        ? ordered.filter((sp) => sp.studyChapter === openingChapter)
+        : ordered;
+    // The previous chapter's verses share this drop-cap paragraph. They have
+    // to stay in their own paragraphs in front of it. Flattening them into
+    // the drop cap is what dropped the chapter digit and repeated the heading.
+    const before = openingChapter
+        ? ordered
+              .filter((sp) => sp.studyChapter !== openingChapter)
+              .map((sp) => stripBoundaryDropCapDigits(sp.replacement))
+              .join("")
+        : "";
+
+    let headings = "";
+    let inner = "";
+    let rest = "";
+    for (const sp of filling) {
+        const peeled = splitLeadingSectionHeadings(sp.replacement);
+        headings += peeled.headings;
+        // A splice that stops on the drop-cap paragraph is only the chapter
+        // tail or the opening verse. A splice that continues past it carries
+        // the rest of the chapter, which must stay in its own paragraphs.
+        if (sp.absEnd <= boundaryEnd) {
+            inner += extractParagraphStyleRangeInner(peeled.body);
+            continue;
+        }
+        const split = firstParagraphAndRest(peeled.body);
+        inner += extractParagraphStyleRangeInner(split.first);
+        rest += split.rest;
+    }
+    const prefix = studyDropCapPrefix(studyStoryXml, boundaryStart);
+    if (
+        prefix &&
+        !inner.includes("cv%3adc") &&
+        !inner.includes("cv:dc")
+    ) {
+        inner = prefix + inner;
+    }
+    return (
+        before +
+        headings +
+        wrapStudyParagraphReplacement(studyStoryXml, boundaryStart, inner) +
+        rest
+    );
+}
+
+/** The Bible drop-cap digit belongs on the study drop cap, not on the previous chapter. */
+function stripBoundaryDropCapDigits(xml: string): string {
+    return xml.replace(
+        /<CharacterStyleRange\b[^>]*AppliedCharacterStyle="(?:CharacterStyle\/)?cv(?:%3a|:)dc(?:_sp)?"[^>]*>[\s\S]*?<\/CharacterStyleRange>/g,
+        ""
+    );
+}
+
+/**
+ * The drop-cap paragraph that opens this range, when nothing but a section
+ * heading stands in front of it. Later verses in the same range stay after it.
+ */
+function openingBoundaryParagraph(
+    studyStoryXml: string,
+    absStart: number,
+    absEnd: number
+): ReturnType<typeof findParagraphAt> {
+    const paras = paragraphsIntersecting(studyStoryXml, absStart, absEnd);
+    for (const para of paras) {
+        if (isChapterBoundaryParagraphAt(studyStoryXml, para.fullStart)) {
+            return para;
+        }
+        if (
+            isSectionHeadingParagraphStyle(para.appliedParagraphStyle) ||
+            isBlankSpacerParagraphStyle(para.appliedParagraphStyle)
+        ) {
+            continue;
+        }
+        return null;
+    }
+    return null;
 }
 
 function mergeCoalescedParagraphReplacements(
@@ -217,7 +346,12 @@ function isChapterBoundaryParagraphAt(
         .slice(para.fullStart, Math.min(para.fullStart + 160, studyStoryXml.length))
         .match(/AppliedParagraphStyle="([^"]+)"/);
     const style = styleMatch?.[1] ?? "";
-    return /text%3ap_dc[12]|text:p_dc[12]/.test(style);
+    return isDropCapParagraphStyle(style);
+}
+
+/** A chapter-opening drop cap. Footnote styles such as `p_dc1_fn` do not qualify. */
+function isDropCapParagraphStyle(style: string): boolean {
+    return /text(?:%3a|:)(?:lh_dc\d*|p_dc[12])(?![0-9A-Za-z_])/.test(style);
 }
 
 /**
@@ -321,8 +455,13 @@ export function coalesceParagraphSplices(
     // IDML. Sort by study chapter number so the closing chapter precedes the next.
     const byPara = new Map<number, BlockSplice[]>();
     for (const sp of replacements) {
+        const boundary = openingBoundaryParagraph(
+            studyStoryXml,
+            sp.absStart,
+            sp.absEnd
+        );
         const para = findParagraphAt(studyStoryXml, sp.absStart);
-        const key = para?.fullStart ?? sp.absStart;
+        const key = boundary?.fullStart ?? para?.fullStart ?? sp.absStart;
         const group = byPara.get(key) ?? [];
         group.push(sp);
         byPara.set(key, group);
@@ -330,6 +469,35 @@ export function coalesceParagraphSplices(
 
     const coalesced: BlockSplice[] = [];
     for (const group of byPara.values()) {
+        const rangeStart = Math.min(...group.map((g) => g.absStart));
+        const rangeEnd = Math.max(...group.map((g) => g.absEnd));
+        const boundary = openingBoundaryParagraph(
+            studyStoryXml,
+            rangeStart,
+            rangeEnd
+        );
+        if (boundary) {
+            const ordered =
+                group.length === 1
+                    ? group
+                    : sortBoundarySplicesForCoalesce(
+                          studyStoryXml,
+                          group,
+                          boundary.fullStart
+                      );
+            coalesced.push({
+                absStart: rangeStart,
+                absEnd: rangeEnd,
+                replacement: composeBoundaryParagraphReplacement(
+                    studyStoryXml,
+                    boundary.fullStart,
+                    boundary.fullEnd,
+                    ordered
+                ),
+                studyChapter: ordered[0]?.studyChapter,
+            });
+            continue;
+        }
         if (group.length === 1) {
             coalesced.push({
                 ...group[0],
@@ -611,19 +779,25 @@ export function buildStructureSwapSplices(
             // verses or, once clipped, loses the footnotes that paragraph
             // carries — and the reader counts those footnotes as part of the
             // verse (RUT 4:22, 2PE 3:18, HAB 3:19).
-            const lastSpanSlices = spanSlices
-                .slice()
-                .reverse()
-                .find((s) => s.length > 0);
             const appendSlices: ReturnType<typeof buildInsertSlicesFromRefs> = [];
             for (const slice of buildInsertSlicesFromRefs(inserts)) {
-                const tail = lastSpanSlices?.[lastSpanSlices.length - 1];
-                if (
-                    tail &&
-                    tail.chapter === slice.chapter &&
-                    slice.firstVerse === tail.lastVerse + 1
-                ) {
-                    tail.lastVerse = slice.lastVerse;
+                // A verse the study skips belongs to the span it falls after,
+                // including a hole in front of a study note (Deuteronomy 14:22
+                // sits between 14:4 and 14:28). Appending it to the last span
+                // parks it after the note and, when the earlier span already
+                // carries it, prints the heading twice.
+                let host = -1;
+                for (let i = 0; i < spans.length; i++) {
+                    const tail = spanSlices[i][spanSlices[i].length - 1];
+                    if (!tail || tail.chapter !== slice.chapter) continue;
+                    const nextVerse = spans[i + 1]?.firstVerse ?? Number.POSITIVE_INFINITY;
+                    if (slice.firstVerse > tail.lastVerse && slice.lastVerse < nextVerse) {
+                        host = i;
+                    }
+                }
+                if (host >= 0) {
+                    const tail = spanSlices[host][spanSlices[host].length - 1];
+                    tail.lastVerse = Math.max(tail.lastVerse, slice.lastVerse);
                 } else {
                     appendSlices.push(slice);
                 }
@@ -689,29 +863,28 @@ export function buildStructureSwapSplices(
                         studyStoryXml,
                         span.absStart
                     );
-                    if (onBoundary && slices.length > 0) {
-                        // A prior span may have counted this closing verse in
-                        // placedMax; still emit this span's slice for coalesce
-                        // with the next chapter on the same boundary paragraph.
-                        trimmed.push(...slices);
-                    } else {
-                        const placed = placedMaxByChapter.get(chapter) ?? 0;
-                        const isBoundaryDuplicate =
-                            span.firstVerse === span.lastVerse &&
-                            placed >= span.lastVerse &&
-                            spans.length > 1 &&
-                            !onBoundary;
-                        if (isBoundaryDuplicate) {
-                            return;
-                        }
-                        splices.push({
-                            absStart: span.absStart,
-                            absEnd: span.absEnd,
-                            replacement: "",
-                            studyChapter: span.chapter,
-                        });
+                    if (onBoundary) {
+                        // This side of the boundary was already written by an
+                        // earlier span. Leave the paragraph to the other
+                        // chapter's splice so the verses are not repeated.
                         return;
                     }
+                    const placed = placedMaxByChapter.get(chapter) ?? 0;
+                    const isBoundaryDuplicate =
+                        span.firstVerse === span.lastVerse &&
+                        placed >= span.lastVerse &&
+                        spans.length > 1 &&
+                        !onBoundary;
+                    if (isBoundaryDuplicate) {
+                        return;
+                    }
+                    splices.push({
+                        absStart: span.absStart,
+                        absEnd: span.absEnd,
+                        replacement: "",
+                        studyChapter: span.chapter,
+                    });
+                    return;
                 }
 
                 const replacement = preserveStudyChapterMarker(
@@ -968,6 +1141,177 @@ export function buildStructureSwapSplices(
     return { splices, mergedSplices, stats };
 }
 
+function markerStyleKind(style: string): "chapter" | "verse" | null {
+    if (/(?:^|\/)meta%3ac$/.test(style) || /(?:^|\/)meta:c$/.test(style)) return "chapter";
+    if (/(?:^|\/)meta%3av$/.test(style) || /(?:^|\/)meta:v$/.test(style)) return "verse";
+    return null;
+}
+
+function characterRangeText(
+    storyXml: string,
+    bodyStart: number,
+    bodyEnd: number
+): string {
+    let text = "";
+    for (const content of iterateContentAbs(storyXml, bodyStart, bodyEnd)) {
+        text += storyXml.slice(content.absInnerStart, content.absInnerEnd);
+    }
+    return text;
+}
+
+/**
+ * Chapter number of a paragraph whose only text is a `meta:c` / `meta:v` pair.
+ * Prose in the same paragraph means this is not a bare book-end marker.
+ */
+function bareClosingMarkerChapter(
+    storyXml: string,
+    para: IndexedParagraph
+): string | null {
+    let chapter: string | null = null;
+    let sawMarker = false;
+    for (const csr of iterateCsrAbs(storyXml, para.bodyStart, para.bodyEnd)) {
+        const text = characterRangeText(storyXml, csr.absBodyStart, csr.absBodyEnd).trim();
+        if (!text) continue;
+        const kind = markerStyleKind(csr.appliedCharacterStyle);
+        if (!kind) return null;
+        sawMarker = true;
+        if (kind === "chapter") {
+            chapter = text.match(/\d+/)?.[0] ?? null;
+        }
+    }
+    return sawMarker ? chapter : null;
+}
+
+/** Exodus 1 is `text:li4_dc1`, which is not one of the `p_dc` / `lh_dc` boundary styles. */
+function isChapterOpeningDropCapStyle(style: string): boolean {
+    return (
+        isDropCapParagraphStyle(style) ||
+        /text(?:%3a|:)li\d*_dc\d*(?![0-9A-Za-z_])/.test(style)
+    );
+}
+
+function chapterOneDropCapDigit(
+    storyXml: string,
+    para: IndexedParagraph
+): boolean {
+    if (!isChapterOpeningDropCapStyle(para.appliedParagraphStyle)) {
+        return false;
+    }
+    for (const csr of iterateCsrAbs(storyXml, para.bodyStart, para.bodyEnd)) {
+        if (!/(?:^|\/)cv%3adc$/.test(csr.appliedCharacterStyle) && !/(?:^|\/)cv:dc$/.test(csr.appliedCharacterStyle)) {
+            continue;
+        }
+        return characterRangeText(storyXml, csr.absBodyStart, csr.absBodyEnd).trim() === "1";
+    }
+    return false;
+}
+
+/** `intro:ie` is the Next Page break that starts each book's first text page. */
+function isIntroEndParagraphStyle(style: string): boolean {
+    const name = style.replace(/^ParagraphStyle\//, "");
+    return /(?:^|\/)intro(?:%3a|:)ie$/.test(name);
+}
+
+/**
+ * Page breaks that land on a folio-only master in the English file.
+ * `meta:id` starts the book intro. `intro:ie` starts the first scripture page.
+ * Portuguese reflow moves both onto `2-bible.text`, which draws a running head.
+ */
+function isBookOpeningPageBreak(style: string): boolean {
+    const name = style.replace(/^ParagraphStyle\//, "");
+    return /(?:^|\/)(?:intro(?:%3a|:)ie|meta(?:%3a|:)id)$/.test(name);
+}
+
+/**
+ * Genesis's closing `50:` / `26` marker is not a verse, so the swap leaves it
+ * in front of Exodus. Drop that pair when the next text paragraph is the
+ * next book's chapter-1 drop cap. A marker whose chapter is already 1 stays.
+ *
+ * The markers often sit inside `intro:ie`. That paragraph's style starts the
+ * next page, which is the folio-only book opening. Deleting the paragraph
+ * deletes the page break, so the chapter starts on a running-head page.
+ * Strip the marker runs and keep the paragraph.
+ */
+export function stripStaleBookEndMarkers(storyXml: string): string {
+    const paras = getParagraphIndex(storyXml);
+    const cuts: Array<{ start: number; end: number }> = [];
+    for (let i = 0; i < paras.length; i++) {
+        const chapter = bareClosingMarkerChapter(storyXml, paras[i]);
+        if (!chapter || chapter === "1") continue;
+        let next = i + 1;
+        while (
+            next < paras.length &&
+            (isBlankSpacerParagraphStyle(paras[next].appliedParagraphStyle) ||
+                isSectionHeadingParagraphStyle(paras[next].appliedParagraphStyle))
+        ) {
+            next++;
+        }
+        if (next >= paras.length) continue;
+        if (!chapterOneDropCapDigit(storyXml, paras[next])) continue;
+        if (isIntroEndParagraphStyle(paras[i].appliedParagraphStyle)) {
+            for (const csr of iterateCsrAbs(storyXml, paras[i].bodyStart, paras[i].bodyEnd)) {
+                const text = characterRangeText(storyXml, csr.absBodyStart, csr.absBodyEnd).trim();
+                if (!text || !markerStyleKind(csr.appliedCharacterStyle)) continue;
+                cuts.push({ start: csr.absFullStart, end: csr.absFullEnd });
+            }
+            continue;
+        }
+        cuts.push({ start: paras[i].fullStart, end: paras[i].fullEnd });
+    }
+    if (cuts.length === 0) return storyXml;
+    let xml = storyXml;
+    for (const cut of [...cuts].sort((a, b) => b.start - a.start)) {
+        xml = xml.slice(0, cut.start) + xml.slice(cut.end);
+    }
+    return xml;
+}
+
+/**
+ * Paper patches over both ends of the header band on a book-opening page.
+ *
+ * `2-bible.text` draws `{book} {chapter}:{verse}` at the outside of a 33pt
+ * band and the folio on a center tab. `A-Parent` and `B-intro` draw the folio
+ * only, and the English openings sit on those masters by page number.
+ * Portuguese is longer, so the opening moves onto the text master. The patch
+ * travels with the page break, so it follows the text.
+ *
+ * IDML calls this placement `Anchored`. `Custom` is not a value, and InDesign
+ * then leaves the rectangle inline in the 0.1pt break, where it cannot cover
+ * the margin. One band is not enough either: the opening can land on a left
+ * or a right page, and the folio stays in the middle either way. `PinPosition`
+ * stays off so the bands can sit in the margin, outside the text frame.
+ */
+function bookOpeningCoverXml(id: string): string {
+    const point = (x: number, y: number): string =>
+        `<PathPointType Anchor="${x} ${y}" LeftDirection="${x} ${y}" RightDirection="${x} ${y}" />`;
+    const box = (x0: number, y0: number, x1: number, y1: number): string =>
+        [point(x0, y0), point(x0, y1), point(x1, y1), point(x1, y0)].join("");
+    const rect = (
+        self: string,
+        points: string,
+        anchor: string,
+        align: string
+    ): string =>
+        `<Rectangle Self="${self}" ContentType="GraphicType" StoryTitle="$ID/" AppliedObjectStyle="ObjectStyle/$ID/[None]" FillColor="Color/Paper" StrokeWeight="0" StrokeColor="Swatch/None" ItemTransform="1 0 0 1 0 0" Visible="true" Locked="false" Name="book-open-cover"><Properties><PathGeometry><GeometryPathType PathOpen="false"><PathPointArray>${points}</PathPointArray></GeometryPathType></PathGeometry></Properties><AnchoredObjectSetting AnchoredPosition="Anchored" SpineRelative="false" LockPosition="false" PinPosition="false" AnchorPoint="${anchor}" HorizontalAlignment="${align}" HorizontalReferencePoint="PageEdge" VerticalAlignment="TopAlign" VerticalReferencePoint="PageEdge" AnchorXoffset="0" AnchorYoffset="0" AnchorSpaceAbove="0" /><TextWrapPreference Inverse="false" ApplyToMasterPageOnly="false" TextWrapSide="BothSides" TextWrapMode="None"><Properties><TextWrapOffset Top="0" Left="0" Bottom="0" Right="0" /></Properties></TextWrapPreference></Rectangle>`;
+    return `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">${rect(`${id}l`, box(0, 0, 150, 33), "TopLeftAnchor", "LeftAlign")}${rect(`${id}r`, box(-150, 0, 0, 33), "TopRightAnchor", "RightAlign")}</CharacterStyleRange>`;
+}
+
+export function coverBookOpeningRunningHeads(storyXml: string): string {
+    if (storyXml.includes('Name="book-open-cover"')) return storyXml;
+    const paras = getParagraphIndex(storyXml);
+    const inserts: number[] = [];
+    for (const para of paras) {
+        if (!isBookOpeningPageBreak(para.appliedParagraphStyle)) continue;
+        inserts.push(para.bodyStart);
+    }
+    if (inserts.length === 0) return storyXml;
+    let xml = storyXml;
+    for (let i = inserts.length - 1; i >= 0; i--) {
+        xml = xml.slice(0, inserts[i]) + bookOpeningCoverXml(`boc${i + 1}`) + xml.slice(inserts[i]);
+    }
+    return xml;
+}
+
 /**
  * Replace Study chapter text spans with matching Bible verse-range slices.
  */
@@ -986,6 +1330,8 @@ export function applyStructureSwapToStudyXml(
     if (remaps && remaps.size > 0) {
         xml = rewriteRemappedChapterMarkersInStory(xml, remaps);
     }
+    xml = stripStaleBookEndMarkers(xml);
+    xml = coverBookOpeningRunningHeads(xml);
     return {
         xml,
         stats,

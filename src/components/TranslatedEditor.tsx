@@ -534,7 +534,7 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
-  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+  /** Smart edits for this cell (`isSmartEditsEnabled`). Offsets are into the
    *  committed plain text; see smart-edit-decoration-plugin.ts. */
   smartEdits?: SmartEditSuggestion[]
   onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
@@ -776,8 +776,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const isReadOnly = !editable || Boolean(heldByLabel) || Boolean(preparedIdmlContent?.error)
   const isReadOnlyRef = useRef(isReadOnly)
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
-  // Visible style segments lock a placed IDML cell so a bold or italic edge
-  // can be dragged without the caret taking the pointer. The preview sentence,
+  // Visible style segments lock a placed IDML cell so a bold, italic, or
+  // small-caps edge can be dragged without the caret taking the pointer. The preview sentence,
   // before it is passed into the runs, never mounts this IDML editor.
   const visibleStyleSegments = useVisibleStyleSegments()
   const segmentEdgeMode = Boolean(idmlContext) && !isReadOnly && visibleStyleSegments

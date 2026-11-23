@@ -106,7 +106,7 @@ describe("SearchDockPanel — one search per pause", () => {
         vi.advanceTimersByTime(300)
       })
       expect(onSearch).toHaveBeenCalledTimes(1)
-      expect(onSearch).toHaveBeenCalledWith("light", {})
+      expect(onSearch).toHaveBeenCalledWith("light", { limit: 50 })
     } finally {
       vi.useRealTimers()
     }
@@ -162,5 +162,73 @@ describe("SearchDockPanel — hover only names icon buttons", () => {
   it("the icon-only full-panel button keeps its name on hover", async () => {
     render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ onOpenFullPanel: vi.fn() })} /></TooltipProvider>)
     await expectTooltip(screen.getByRole("button", { name: "Open full search panel" }), "Open full search panel")
+  })
+})
+
+// AQU-2732: the panel lists 50. Nothing said when there were more, so "50
+// results" read the same for 50 matches and for 5,000, and the "N more" line
+// could not appear at all.
+describe("SearchDockPanel — a cut list says so (AQU-2732)", () => {
+  const hits = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      cellId: `c${i}`, fileId: "f1", fileName: "2KI", original: "", translated: `the temple ${i}`,
+      context: "", matchedFields: new Set(), matchCount: 1, matchedTokens: [],
+      snippet: `the <mark>temple</mark> ${i}`, rank: 1,
+    })) as unknown as WorkspaceSearchResult[]
+
+  it("counts the list against the total and says how many more there are", () => {
+    render(<SearchDockPanel {...baseProps({ results: hits(50), total: 63, onExpandResults: vi.fn() })} />)
+    expect(screen.getByText("50 of 63")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("13 more — open full panel for all results")
+    expect(screen.getAllByRole("option")).toHaveLength(50)
+  })
+
+  it("says nothing of more when the list is all of them", () => {
+    render(<SearchDockPanel {...baseProps({ results: hits(50), total: 50, onExpandResults: vi.fn() })} />)
+    expect(screen.getByText("50 results")).toBeInTheDocument()
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("does not put a number on a total that is only a floor", () => {
+    render(
+      <SearchDockPanel
+        {...baseProps({ results: hits(50), total: 120, totalIsLowerBound: true, onExpandResults: vi.fn() })}
+      />,
+    )
+    expect(screen.getByText("50 of 120 or more")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("More results — open full panel for all results")
+  })
+
+  it("asks for a panel's worth while typing, and for the rest when the results are expanded", () => {
+    // Typing is debounced (AQU-2655); the scope toggle and the expand are not.
+    vi.useFakeTimers()
+    try {
+    const pause = () => act(() => { vi.advanceTimersByTime(300) })
+    const onSearch = vi.fn()
+    const onExpandResults = vi.fn()
+    const props = baseProps({ activeFileId: "f1", activeFileName: "2 Kings", onSearch, onExpandResults })
+    const { rerender } = render(<SearchDockPanel {...props} />)
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "temple" } })
+    pause()
+    expect(onSearch).toHaveBeenLastCalledWith("temple", { fileId: "f1", limit: 50 })
+
+    // The scope names what the count is of, so the list follows the toggle.
+    rerender(<SearchDockPanel {...props} results={hits(50)} total={63} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Project" }))
+    expect(onSearch).toHaveBeenLastCalledWith("temple", { limit: 50 })
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand all results" }))
+    expect(onExpandResults).toHaveBeenCalledWith("temple")
+    expect(onSearch).toHaveBeenLastCalledWith("temple", { limit: 500 })
+
+    // While they are open, typing keeps them whole.
+    rerender(<SearchDockPanel {...props} results={hits(63)} total={63} resultsExpanded />)
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "temples" } })
+    pause()
+    expect(onSearch).toHaveBeenLastCalledWith("temples", { limit: 500 })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

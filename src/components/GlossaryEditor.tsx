@@ -52,6 +52,7 @@ import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
+import { hasUnsentTermWrites } from "@/lib/terminology/unsent-term-writes"
 import type { PredictedEquivalent } from "@/lib/terminology/equivalents"
 import { exportConceptsCsv } from "@/lib/terminology/csv"
 import { exportConceptsTbx } from "@/lib/terminology/tbx"
@@ -284,11 +285,17 @@ export function GlossaryEditor({
     () => conceptsForLaneTag(concepts, activeLane, project?.lanes ?? []),
     [concepts, activeLane, project?.lanes],
   )
+  const conceptsProjectId = project?.id ?? null
   useEffect(() => {
     if (pendingWritesRef.current > 0 && !conceptsEqual(serverConcepts, conceptsRef.current)) return
+    // A list that arrives while one of this tab's term writes is still unsent
+    // was read before that write: it would take the change off the screen
+    // until the write's own re-read put it back. The acknowledgement re-reads
+    // the list, and that one is taken.
+    if (conceptsProjectId && hasUnsentTermWrites(conceptsProjectId)) return
     conceptsRef.current = serverConcepts
     setOptimisticConcepts(null)
-  }, [serverConcepts])
+  }, [serverConcepts, conceptsProjectId])
   // AQU-822: the floor is the org's configured termbaseEditMinRole (carried on
   // the project record), not a hardcoded project_lead level.
   const canManage = canEditTermbase(project?.syncRole, project?.termbaseEditMinRole)

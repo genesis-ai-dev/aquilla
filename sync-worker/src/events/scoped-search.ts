@@ -2,8 +2,9 @@
 //
 // This module is the SINGLE choke-point for all full-text cell-search queries.
 // Every search surface MUST route through `queryScopedSearch`,
-// `queryScopedPattern`, or `queryScopedExact` — each accepts a
-// `VerifiedProjectId` rather than a raw
+// `queryScopedPattern`, `queryScopedText`, or `queryScopedExact` (or the
+// `…Page` form of each, which also says how many cells matched in all) — each
+// accepts a `VerifiedProjectId` rather than a raw
 // string, so passing an un-verified projectId is a TypeScript compile error.
 //
 // The permission boundary is structural, not advisory:
@@ -24,8 +25,11 @@ import {
   findPatternError,
   findTextMatches,
   markedSnippet,
+  markedSnippetOfAll,
+  needsSubstringSearch,
   postgresCanRunRegexp,
   type TextFindOptions,
+  type TextMatch,
 } from "../../../db/shared/find-pattern"
 import { withLongOperationTimeout } from "../../../db/shim/postgres"
 
@@ -100,6 +104,30 @@ export interface ParallelPassageRow extends SearchResultOut {
   pairedValue: string | null
 }
 
+/**
+ * One page of hits, and how many rows the search matched in all (AQU-2732).
+ *
+ * The page is cut at `limit`; without the total a full page of 50 reads the
+ * same whether there were 50 matches or 5,000, and Replace all changed the
+ * first page while saying nothing of the rest.
+ */
+export interface SearchPage<Row> {
+  results: Row[]
+  /**
+   * Rows the page's own filter admits: the project, the side, the file, the
+   * lane wall, and neither a parked cell nor an uncounted file. It is counted
+   * by the query that produced the page, so the two cannot drift apart. Never
+   * less than `results.length`.
+   */
+  total: number
+  /**
+   * True when `total` is a floor, not the count. Only `queryScopedPattern`
+   * can say this: whole word and regular expressions are finally decided in
+   * the worker, over a bounded read, so past that read the rest is unknown.
+   */
+  totalIsLowerBound: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Raw DB row shapes (internal only)
 // ---------------------------------------------------------------------------
@@ -109,6 +137,33 @@ interface LocationRowRaw {
   cell_type: string | null
   place_label: string | null
   position: number | string | null
+  /** `TOTAL_SELECT`. A bigint, so the driver may hand it over as a string. */
+  total_count?: number | string | null
+}
+
+/**
+ * How many rows the WHERE admits, counted before ORDER BY and LIMIT cut the
+ * page. A window over the page's own query: there is then one WHERE, and a
+ * filter added to it later is counted too.
+ *
+ * What it costs follows the matches, not the page. With the window above
+ * them the joins run for every matching row, where a bare LIMIT ran them for
+ * the page only: about 5 µs a match on a local Bible. That is nothing for a
+ * term with hundreds of hits (11 → 14 ms) and about 100 ms for "the" (23,210
+ * hits, 40 → 150 ms). A second, uncorrelated `COUNT(*)` over the same WHERE
+ * was measured against it: no better on "the" (110 ms), and worse for text
+ * matching, where it reads the whole project a second time.
+ */
+const TOTAL_SELECT = "  COUNT(*) OVER() AS total_count,"
+
+/** The count rides on every row. An empty page has no row, and matched nothing. */
+function totalOf(rows: ReadonlyArray<Pick<LocationRowRaw, "total_count">>): number {
+  const counted = Number(rows[0]?.total_count ?? 0)
+  return Number.isFinite(counted) ? Math.max(counted, rows.length) : rows.length
+}
+
+function noMatches<Row>(): SearchPage<Row> {
+  return { results: [], total: 0, totalIsLowerBound: false }
 }
 
 interface SearchRowRaw extends LocationRowRaw {
@@ -306,6 +361,11 @@ function pairedSubselect(laneIds: SearchLaneWall): { sql: string; binds: unknown
  * project. The project scope (`AND cells.project_id = ?`) is hardcoded — the
  * caller cannot bypass it.
  *
+ * A query in a script the word index cannot search (see
+ * `needsSubstringSearch`) is not answered from the index at all: it goes to
+ * `queryScopedText`, which matches each typed word as text and ranks the
+ * hits itself.
+ *
  * Throws on tsquery syntax errors so the route layer can decide 400 vs 500.
  * Returns [] when the sanitizer reduces `q` to nothing.
  */
@@ -313,10 +373,35 @@ export async function queryScopedSearch(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   q: string,
-  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall; fileId?: string },
 ): Promise<SearchResultOut[]> {
+  return (await queryScopedSearchPage(db, verifiedProjectId, q, opts)).results
+}
+
+/** `queryScopedSearch`, with the number of cells that matched in all. */
+export async function queryScopedSearchPage(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall; fileId?: string },
+): Promise<SearchPage<SearchResultOut>> {
   const ftsQuery = sanitizeFtsQuery(q)
-  if (!ftsQuery) return []
+  if (!ftsQuery) return noMatches()
+
+  // `value_tsv` holds words, and a script written without spaces has none to
+  // hold: 一切銅器皿 is ONE lexeme, so 器皿 is not in the index. Worse than a
+  // plain miss, 、器皿、 does index it, and the index would then return that
+  // one cell as though it were the whole answer. Korean fails the same way
+  // from the other direction (하나님이 is indexed, 하나님 is not). Match these
+  // as text.
+  if (needsSubstringSearch(q)) {
+    return queryScopedTextPage(db, verifiedProjectId, q, {
+      side: opts.side,
+      limit: opts.limit,
+      laneIds: opts.laneIds,
+      fileId: opts.fileId,
+    })
+  }
 
   const limit = clampLimit(opts.limit)
   const paired = pairedSubselect(opts.laneIds)
@@ -336,6 +421,7 @@ export async function queryScopedSearch(
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
     "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank,",
+    TOTAL_SELECT,
     // One opposite-side value, never a row multiplier. A target hit has a
     // single source lane; a source hit may have several target lanes, and
     // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
@@ -363,6 +449,12 @@ export async function queryScopedSearch(
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
+  // "Search this file" has to narrow the query, not the page it returns: the
+  // LIMIT below is taken across whatever this WHERE admits.
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
   if (cellWall.sql) {
     parts.push(cellWall.sql)
     binds.push(...cellWall.binds)
@@ -374,16 +466,20 @@ export async function queryScopedSearch(
   const sql = parts.join(" ")
 
   const result = await db.prepare(sql).bind(...binds).all<SearchRowRaw>()
-  return result.results.map((row) => ({
-    cellId: row.cell_id,
-    fileId: row.file_id,
-    side: row.side,
-    value: row.value,
-    snippet: row.snippet,
-    rank: row.rank,
-    pairedValue: row.paired_value ?? null,
-    ...locationFromRow(row),
-  }))
+  return {
+    results: result.results.map((row) => ({
+      cellId: row.cell_id,
+      fileId: row.file_id,
+      side: row.side,
+      value: row.value,
+      snippet: row.snippet,
+      rank: row.rank,
+      pairedValue: row.paired_value ?? null,
+      ...locationFromRow(row),
+    })),
+    total: totalOf(result.results),
+    totalIsLowerBound: false,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +490,8 @@ export interface PatternSearchOptions extends TextFindOptions {
   laneIds: SearchLaneWall
   side?: "source" | "target"
   limit?: number
+  /** Restrict to one file. Omitted searches the project. */
+  fileId?: string
 }
 
 /**
@@ -414,6 +512,28 @@ export async function queryScopedPattern(
   q: string,
   opts: PatternSearchOptions,
 ): Promise<SearchResultOut[]> {
+  return (await queryScopedPatternPage(db, verifiedProjectId, q, opts)).results
+}
+
+/**
+ * `queryScopedPattern`, with the number of cells that matched in all.
+ *
+ * The total is the count whenever it can be known:
+ *   - match case alone is decided in SQL, so SQL's count is the answer;
+ *   - whole word and regular expressions are decided here, in the worker, over
+ *     the rows SQL let through. When that read took every such row, the cells
+ *     the worker accepted are the count.
+ * It is a floor (`totalIsLowerBound`) only when SQL let through more rows than
+ * the read took: `MAX_LIMIT` of them for whole word or a regexp Postgres can
+ * run, `PATTERN_SCAN_CAP` for one it cannot. The cells accepted so far all
+ * match; whether the unread ones do is not known without reading them.
+ */
+export async function queryScopedPatternPage(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: PatternSearchOptions,
+): Promise<SearchPage<SearchResultOut>> {
   const find: TextFindOptions = {
     matchCase: opts.matchCase === true,
     wholeWord: opts.wholeWord === true,
@@ -437,6 +557,7 @@ export async function queryScopedPattern(
     "  cells.file_id AS file_id,",
     "  cells.side AS side,",
     "  cells.value AS value,",
+    TOTAL_SELECT,
     paired.sql,
     LOCATION_SELECT,
     "FROM cells",
@@ -463,6 +584,12 @@ export async function queryScopedPattern(
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
+  // After the value filter on purpose: the regexp fallback below drops that
+  // filter's bind by position.
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
   if (cellWall.sql) {
     parts.push(cellWall.sql)
     binds.push(...cellWall.binds)
@@ -485,9 +612,14 @@ export async function queryScopedPattern(
     result = await db.prepare(scanParts.join(" ")).bind(...scanBinds).all<PatternRowRaw>()
   }
   const out: SearchResultOut[] = []
+  // Every row read is tested, not only the first `limit` that pass: the ones
+  // past the page are what the total is made of.
+  let accepted = 0
   for (const row of result.results) {
     const hits = findTextMatches(row.value, q, find)
     if (hits.length === 0) continue
+    accepted += 1
+    if (out.length >= limit) continue
     out.push({
       cellId: row.cell_id,
       fileId: row.file_id,
@@ -498,9 +630,17 @@ export async function queryScopedPattern(
       pairedValue: row.paired_value ?? null,
       ...locationFromRow(row),
     })
-    if (out.length >= limit) break
   }
-  return out
+  // Rows SQL admitted that this read did not take.
+  const unread = Math.max(0, totalOf(result.results) - result.results.length)
+  // A literal with no whole-word test is settled by the SQL filter, so every
+  // unread row is a match too. Anything else is settled above, row by row.
+  const sqlDecides = !find.useRegexp && !find.wholeWord
+  return {
+    results: out,
+    total: sqlDecides ? accepted + unread : accepted,
+    totalIsLowerBound: !sqlDecides && unread > 0,
+  }
 }
 
 interface PatternRowRaw extends LocationRowRaw {
@@ -509,6 +649,181 @@ interface PatternRowRaw extends LocationRowRaw {
   side: "source" | "target"
   value: string
   paired_value: string | null
+}
+
+interface TextRowRaw extends PatternRowRaw {
+  /** Occurrences of the typed pieces. An integer, however the driver hands it over. */
+  rank: number | string
+}
+
+// ---------------------------------------------------------------------------
+// queryScopedText — default search for scripts the word index cannot serve
+// ---------------------------------------------------------------------------
+
+/**
+ * Words a text search ANDs. A pasted sentence is the long case; past this
+ * many words the rest add nothing the first sixteen have not already pinned.
+ */
+const MAX_TEXT_TERMS = 16
+
+export interface TextSearchOptions {
+  laneIds: SearchLaneWall
+  side?: "source" | "target"
+  limit?: number
+  /** Restrict to one file. Omitted searches the project. */
+  fileId?: string
+  /** Match the whole query as one piece of text instead of word by word. */
+  phrase?: boolean
+}
+
+/**
+ * Chapter and verse of the reference a hit is shown under (`2KI 12:13`), as
+ * numbers, so 4:10 sorts after 4:3 and 12:13 after both. The source row owns
+ * the reference, as in LOCATION_SELECT. Null for a bare book code or no
+ * reference at all.
+ */
+const HIT_REF_SQL = "COALESCE(loc.source_canonical_ref, NULLIF(BTRIM(cells.canonical_ref), ''))"
+const REF_CHAPTER_SQL = String.raw`substring(${HIT_REF_SQL} from '(\d{1,6}):\d')::int`
+const REF_VERSE_SQL = String.raw`substring(${HIT_REF_SQL} from '\d:(\d{1,6})')::int`
+
+/** The pieces of `q` that must each be present. Order kept, repeats dropped. */
+function textSearchTerms(q: string, phrase: boolean): string[] {
+  const trimmed = q.trim()
+  if (trimmed === "") return []
+  if (phrase) return [trimmed]
+  return [...new Set(trimmed.split(/\s+/))].slice(0, MAX_TEXT_TERMS)
+}
+
+/**
+ * The default (no flags) search for a query `needsSubstringSearch` accepts:
+ * Chinese, Japanese, Thai, Burmese, Korean and the rest of that list.
+ *
+ * It keeps the word search's contract, with "word" read as "what the person
+ * typed between spaces": every such piece must be in the cell, in any order,
+ * case-insensitively, but as text rather than as an indexed word, so 器皿
+ * matches inside 一切銅器皿 and 하나님 matches 하나님이.
+ *
+ * Order is relevance, best first:
+ *   1. cells holding the whole query exactly as typed (several words only);
+ *   2. more occurrences of the typed pieces, summed;
+ *   3. reading order: file, then place in the file. Most cells mention a
+ *      term once, so this is what the list mostly looks like, and it is also
+ *      what makes the order the same on every request.
+ * `rank` in the result is (2), HIGHER is better, as `ts_rank` is for
+ * `queryScopedSearch`.
+ *
+ * "Place in the file" is `sequence_index` where the importer wrote one, and
+ * the chapter and verse of the cell's reference where it did not: a project
+ * migrated from Codex has no `sequence_index` on any cell, and without the
+ * second key its hits came back in cell-id order (2 Kings 4:3, 12:13, 4:4).
+ * The editor's own order is the anchor chain, which SQL cannot sort by
+ * without walking the file; these two agree with it except after a manual
+ * move of a line.
+ *
+ * The project scope (`AND cells.project_id = ?`) is hardcoded, as in every
+ * query in this module.
+ */
+export async function queryScopedText(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: TextSearchOptions,
+): Promise<SearchResultOut[]> {
+  return (await queryScopedTextPage(db, verifiedProjectId, q, opts)).results
+}
+
+/** `queryScopedText`, with the number of cells that matched in all. */
+export async function queryScopedTextPage(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  q: string,
+  opts: TextSearchOptions,
+): Promise<SearchPage<SearchResultOut>> {
+  const terms = textSearchTerms(q, opts.phrase === true)
+  if (terms.length === 0) return noMatches()
+
+  const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
+
+  // Occurrences of one piece: how much shorter the text gets with the piece
+  // cut out, over the piece's length. Two binds per piece.
+  const occurrences =
+    "(char_length(lower(cells.value)) - char_length(replace(lower(cells.value), lower(?), ''))) / char_length(lower(?))"
+
+  const parts: string[] = [
+    "SELECT",
+    "  cells.cell_id AS cell_id,",
+    "  cells.file_id AS file_id,",
+    "  cells.side AS side,",
+    "  cells.value AS value,",
+    `  (${terms.map(() => occurrences).join(" + ")}) AS rank,`,
+    TOTAL_SELECT,
+    paired.sql,
+    LOCATION_SELECT,
+    "FROM cells",
+    LOCATION_FROM,
+    "WHERE cells.project_id = ?",
+    // AQU-1424 / AQU-1626, as in queryScopedSearch: parked cells, deleted
+    // files and hidden companions are not searchable.
+    `AND ${notHiddenSql("cells")}`,
+    `AND ${inCountedFileSql("cells")}`,
+  ]
+  const binds: unknown[] = [...terms.flatMap((term) => [term, term]), ...paired.binds, verifiedProjectId]
+
+  for (const term of terms) {
+    parts.push("AND position(lower(?) in lower(cells.value)) > 0")
+    binds.push(term)
+  }
+  if (opts.side !== undefined) {
+    parts.push("AND cells.side = ?")
+    binds.push(opts.side)
+  }
+  if (opts.fileId !== undefined) {
+    parts.push("AND cells.file_id = ?")
+    binds.push(opts.fileId)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
+  }
+
+  const order: string[] = []
+  if (terms.length > 1) {
+    order.push("(position(lower(?) in lower(cells.value)) > 0) DESC")
+    binds.push(q.trim())
+  }
+  order.push(
+    "rank DESC",
+    "cells.file_id",
+    "COALESCE(loc.source_sequence, 1e300)",
+    `${REF_CHAPTER_SQL} NULLS LAST`,
+    `${REF_VERSE_SQL} NULLS LAST`,
+    "cells.cell_id",
+    "cells.side",
+  )
+  parts.push(`ORDER BY ${order.join(", ")}`)
+  parts.push("LIMIT ?")
+  binds.push(limit)
+
+  const result = await db.prepare(parts.join(" ")).bind(...binds).all<TextRowRaw>()
+  return {
+    results: result.results.map((row) => {
+      const hits: TextMatch[] = terms.flatMap((term) => findTextMatches(row.value, term))
+      return {
+        cellId: row.cell_id,
+        fileId: row.file_id,
+        side: row.side,
+        value: row.value,
+        snippet: markedSnippetOfAll(row.value, hits),
+        rank: Number(row.rank),
+        pairedValue: row.paired_value ?? null,
+        ...locationFromRow(row),
+      }
+    }),
+    total: totalOf(result.results),
+    totalIsLowerBound: false,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -532,8 +847,33 @@ export async function queryScopedExact(
   exactText: string,
   opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
 ): Promise<ParallelPassageRow[]> {
+  return (await queryScopedExactPage(db, verifiedProjectId, exactText, opts)).results
+}
+
+/**
+ * `queryScopedExact`, with the number of rows that matched in all. Rows, as
+ * the list has them: the join below returns a source hit once per target lane
+ * the caller can see, and the total counts it the same way.
+ */
+export async function queryScopedExactPage(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  exactText: string,
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
+): Promise<SearchPage<ParallelPassageRow>> {
   const ftsQuery = sanitizeFtsExactPhrase(exactText)
-  if (!ftsQuery) return []
+  if (!ftsQuery) return noMatches()
+
+  // As in queryScopedSearch: the word index cannot answer these scripts. An
+  // exact phrase is a literal substring anyway, so nothing is lost.
+  if (needsSubstringSearch(exactText)) {
+    return queryScopedTextPage(db, verifiedProjectId, exactText, {
+      side: opts.side,
+      limit: opts.limit,
+      laneIds: opts.laneIds,
+      phrase: true,
+    })
+  }
 
   const limit = clampLimit(opts.limit)
   const pairedWall = wallFor("paired", opts.laneIds)
@@ -552,6 +892,7 @@ export async function queryScopedExact(
     "  cells.value AS value,",
     "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
     "  ts_rank(cells.value_tsv, phraseto_tsquery('simple', ?)) AS rank,",
+    TOTAL_SELECT,
     "  paired.value AS paired_value,",
     LOCATION_SELECT,
     "FROM cells",
@@ -589,16 +930,20 @@ export async function queryScopedExact(
   const sql = parts.join(" ")
 
   const result = await db.prepare(sql).bind(...binds).all<ExactRowRaw>()
-  return result.results.map((row) => ({
-    cellId: row.cell_id,
-    fileId: row.file_id,
-    side: row.side,
-    value: row.value,
-    snippet: row.snippet,
-    rank: row.rank,
-    pairedValue: row.paired_value,
-    ...locationFromRow(row),
-  }))
+  return {
+    results: result.results.map((row) => ({
+      cellId: row.cell_id,
+      fileId: row.file_id,
+      side: row.side,
+      value: row.value,
+      snippet: row.snippet,
+      rank: row.rank,
+      pairedValue: row.paired_value,
+      ...locationFromRow(row),
+    })),
+    total: totalOf(result.results),
+    totalIsLowerBound: false,
+  }
 }
 
 // ---------------------------------------------------------------------------

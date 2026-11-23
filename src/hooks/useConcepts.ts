@@ -34,6 +34,7 @@ export interface UseConceptsOptions {
 export interface UseConcepts {
   /** Every live concept for the project. Empty while loading or unavailable. */
   concepts: Concept[]
+  /** True during the first read for a project, not during a later re-read. */
   isLoading: boolean
   error: string | null
   /** Re-read the projection. Call after a term.* write is acked. */
@@ -61,6 +62,10 @@ export function useConcepts(opts: UseConceptsOptions): UseConcepts {
   // newer one's results, which a bare `setConcepts` in an async body would do
   // on a fast project switch.
   const requestRef = useRef(0)
+  // The project whose concepts have been read at least once. A re-read after
+  // that is a quiet refresh: reporting it as loading put the "loading" panel
+  // over a glossary whose last term had just been removed.
+  const loadedForRef = useRef<string | null>(null)
   const aliveRef = useRef(true)
   useEffect(() => {
     aliveRef.current = true
@@ -82,7 +87,7 @@ export function useConcepts(opts: UseConceptsOptions): UseConcepts {
       })
       return
     }
-    setLoading(true)
+    if (loadedForRef.current !== projectId) setLoading(true)
     try {
       const fetchToken = tokenRef.current
       // Any file scope works — the route verifies the project only.
@@ -100,6 +105,7 @@ export function useConcepts(opts: UseConceptsOptions): UseConcepts {
       }
       const rows = await fetchConcepts(projectId, token)
       settle(() => {
+        loadedForRef.current = projectId
         setConcepts(rows.length === 0 ? EMPTY : rows)
         setError(null)
       })

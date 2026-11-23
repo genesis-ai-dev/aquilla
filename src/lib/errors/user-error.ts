@@ -186,6 +186,16 @@ export function isElevationRequiredBody(raw: string): boolean {
   }
 }
 
+/**
+ * AQU-2728: true when a 403 means the caller lacks the role, so a dialog may
+ * swap the message for its own "only owners can…" line. The admin step-up 403
+ * shares the `forbidden` category but is not a denial: the admin may make the
+ * change once verified, and its own message says so.
+ */
+export function isRoleDenial(error: UserFacingError): boolean {
+  return error.category === "forbidden" && !isElevationRequiredBody(error.raw)
+}
+
 // AQU-1352 §3.9 rule 2: badge labels reused from the access-model legend so the
 // denial names the same origin the members table shows.
 const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {

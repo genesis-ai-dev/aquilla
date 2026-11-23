@@ -33,10 +33,13 @@ export interface UseWorkspaceSearchOptions {
 }
 
 interface SearchOptionsApi {
-  /** Restrict to one file. Server-side filter is not implemented yet —
-   *  Phase 2c. For now we filter client-side after the fetch. */
+  /** Restrict to one file. The server does the narrowing, so `limit` is
+   *  taken within the file rather than across the project. */
   fileId?: string
-  /** Server clamps to 500; default 50. */
+  /**
+   * Rows to return: the server clamps to 500 and defaults to 50. The store's
+   * `total` says how many matched beyond them.
+   */
   limit?: number
   /** "source" | "target" | "both". When omitted or "both", both sides are returned. */
   side?: "both" | "source" | "target"
@@ -100,6 +103,13 @@ function makePassageResult(
 /** What a search surface draws: the hits, whether a fetch is in flight, and the "ready" sentinel. */
 export interface WorkspaceSearchSnapshot {
   results: WorkspaceSearchResult[]
+  /**
+   * How many the search matched before the server cut `results` at the limit
+   * asked for (AQU-2732). Equal to `results.length` when nothing was cut.
+   */
+  total: number
+  /** `total` is a floor: there are at least that many, and may be more. */
+  totalIsLowerBound: boolean
   loading: boolean
   ready: boolean
 }
@@ -123,9 +133,20 @@ interface WritableSearchStore extends WorkspaceSearchStore {
 }
 
 const NO_RESULTS: WorkspaceSearchResult[] = []
+/** An emptied list: the hits and the count of them go together. */
+const EMPTY = { results: NO_RESULTS, total: 0, totalIsLowerBound: false } as const
+
+/**
+ * The total for the list a surface is handed. Rows this client dropped from
+ * the page were counted by the server, so they come off the total; and it is
+ * never less than the list.
+ */
+function totalAfterDrops(serverTotal: number, received: number, kept: number): number {
+  return Math.max(kept, serverTotal - (received - kept))
+}
 
 function createSearchStore(): WritableSearchStore {
-  let snapshot: WorkspaceSearchSnapshot = { results: NO_RESULTS, loading: false, ready: false }
+  let snapshot: WorkspaceSearchSnapshot = { ...EMPTY, loading: false, ready: false }
   const listeners = new Set<() => void>()
   return {
     getSnapshot: () => snapshot,
@@ -137,7 +158,13 @@ function createSearchStore(): WritableSearchStore {
     },
     set(patch) {
       const next = { ...snapshot, ...patch }
-      if (next.results === snapshot.results && next.loading === snapshot.loading && next.ready === snapshot.ready) return
+      if (
+        next.results === snapshot.results
+        && next.total === snapshot.total
+        && next.totalIsLowerBound === snapshot.totalIsLowerBound
+        && next.loading === snapshot.loading
+        && next.ready === snapshot.ready
+      ) return
       snapshot = next
       for (const listener of [...listeners]) listener()
     },
@@ -209,19 +236,19 @@ export function useWorkspaceSearchController(
   // project's hits are gone before the new project's first paint; on mount it
   // finds the store already empty and announces nothing.
   useLayoutEffect(() => {
-    store.set({ ready: false, results: NO_RESULTS })
+    store.set({ ready: false, ...EMPTY })
   }, [projectId, store])
 
   const search = useCallback(async (query: string, opts: SearchOptionsApi = {}) => {
     const pid = projectRef.current
     const fetchToken = tokenFetcherRef.current
     if (!enabledRef.current || !pid) {
-      store.set({ results: NO_RESULTS })
+      store.set(EMPTY)
       return
     }
     const cleaned = query.trim()
     if (!cleaned) {
-      store.set({ results: NO_RESULTS })
+      store.set(EMPTY)
       return
     }
     const gen = ++generationRef.current
@@ -235,15 +262,16 @@ export function useWorkspaceSearchController(
       const token = fetchToken ? await fetchToken(scopeFile) : null
       if (!token) {
         if (generationRef.current !== gen) return
-        store.set({ results: NO_RESULTS, loading: false })
+        store.set({ ...EMPTY, loading: false })
         return
       }
       const sideParam = opts.side === "both" ? undefined : opts.side
-      const rows = await fetchProjectSearch(
+      const page = await fetchProjectSearch(
         pid,
         cleaned,
         {
           side: sideParam,
+          fileId: opts.fileId,
           limit: opts.limit,
           matchCase: opts.caseSensitive,
           wholeWord: opts.matchWord,
@@ -253,17 +281,25 @@ export function useWorkspaceSearchController(
       )
       if (generationRef.current !== gen) return
       const hidden = audioCueFileIds(filesRef.current)
-      const mapped = rows
+      const mapped = page.results
         .filter((r) => !hidden.has(r.fileId))
         .map((r) => makeResult(r, filesRef.current))
+      // The server narrows to the file. This stays for a sync-worker that
+      // predates `fileId` and ignores it: the SPA and the worker deploy apart.
       const filtered = opts.fileId
         ? mapped.filter((r) => r.fileId === opts.fileId)
         : mapped
-      store.set({ results: filtered, ready: true, loading: false })
+      store.set({
+        results: filtered,
+        total: totalAfterDrops(page.total, page.results.length, filtered.length),
+        totalIsLowerBound: page.totalIsLowerBound,
+        ready: true,
+        loading: false,
+      })
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useWorkspaceSearch] search failed:", err)
-      store.set({ results: NO_RESULTS, loading: false })
+      store.set({ ...EMPTY, loading: false })
     }
   }, [store])
 
@@ -275,12 +311,12 @@ export function useWorkspaceSearchController(
       const pid = projectRef.current
       const fetchToken = tokenFetcherRef.current
       if (!enabledRef.current || !pid) {
-        store.set({ results: NO_RESULTS })
+        store.set(EMPTY)
         return
       }
       const cleaned = query.trim()
       if (!cleaned) {
-        store.set({ results: NO_RESULTS })
+        store.set(EMPTY)
         return
       }
       // Default to the current project when no explicit list is given.
@@ -306,7 +342,7 @@ export function useWorkspaceSearchController(
             }
           : async (_id: string) => null as string | null
 
-        const rows = await fetchParallelPassages(
+        const page = await fetchParallelPassages(
           cleaned,
           { projectIds, side: opts.side, limit: opts.limit },
           tokenGetter,
@@ -316,14 +352,20 @@ export function useWorkspaceSearchController(
         // the only project whose siblings this client has fetched, and the
         // only one whose transcripts could be recognised anyway.
         const hidden = audioCueFileIds(filesRef.current)
-        const mapped = rows
+        const mapped = page.results
           .filter((r) => !hidden.has(r.fileId))
           .map((r) => makePassageResult(r, filesRef.current))
-        store.set({ results: mapped, ready: true, loading: false })
+        store.set({
+          results: mapped,
+          total: totalAfterDrops(page.total, page.results.length, mapped.length),
+          totalIsLowerBound: page.totalIsLowerBound,
+          ready: true,
+          loading: false,
+        })
       } catch (err) {
         if (generationRef.current !== gen) return
         console.warn("[useWorkspaceSearch] searchParallelPassages failed:", err)
-        store.set({ results: NO_RESULTS, loading: false })
+        store.set({ ...EMPTY, loading: false })
       }
     },
     [store],
@@ -333,7 +375,7 @@ export function useWorkspaceSearchController(
   // older query cannot land after the box was emptied.
   const clear = useCallback(() => {
     generationRef.current += 1
-    store.set({ results: NO_RESULTS, loading: false })
+    store.set({ ...EMPTY, loading: false })
   }, [store])
 
   // buildIndex / rebuild are kept as no-ops for back-compat. There's no

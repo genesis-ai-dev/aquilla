@@ -480,6 +480,7 @@ import { ParatextBridgeBadge as ParatextBridgeBadgeImpl } from "@/components/par
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { EditorLayoutSwitch as EditorLayoutSwitchImpl } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
+import { isBibleBookFile } from "@/lib/export/bible-book"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
@@ -3040,10 +3041,16 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
-  // AQU-2559: a USFM book can open as one continuous document instead of the
-  // table. Chosen per file on this device; only the Text view has it.
+  // AQU-2559: a Bible book can open as one continuous document instead of the
+  // table. Chosen per file on this device; only the Text view has it. A book
+  // is whatever the Web page export calls one, so a book from any format —
+  // not only USFM — gets the document and its reading preview.
   const bibleDocumentPref = useBibleDocumentViewPref()
-  const documentLayoutOffered = activeFile?.type === "usfm" && lens === "text" && !extensionEditorActive
+  const activeFileIsBibleBook = useMemo(
+    () => isBibleBookFile(activeFile?.type, cellSummaries.filter((c) => c.fileId === activeFileId)),
+    [activeFile?.type, activeFileId, cellSummaries],
+  )
+  const documentLayoutOffered = activeFileIsBibleBook && lens === "text" && !extensionEditorActive
   const documentLayoutActive = documentLayoutOffered && Boolean(activeFileId && bibleDocumentPref.files[activeFileId])
   // AQU-1767 phase 2: history steps carry the file's name so a step made in
   // another file can say which one to open. Read through a ref by the many
@@ -19219,13 +19226,15 @@ export function ProjectWorkspace() {
               />
             }
             searchPanel={
-              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
               <SearchDockPanel
                 activeFileId={activeFileId}
                 activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
                 loading={searchLoading}
                 ready={searchReady}
                 results={searchResults}
+                total={searchTotal}
+                totalIsLowerBound={searchTotalIsLowerBound}
                 onReady={buildIndex}
                 onSearch={(q, opts) => void runSearch(q, opts)}
                 onSearchPassages={runSearchPassages}
@@ -19242,6 +19251,7 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
+                resultsExpanded={searchExpandedQuery !== null}
                 bibleResourcesEnabled={resolveBibleResourcesEnabled(
                   project.bibleResourcesEnabled,
                   projectHasScriptureFiles(project.files),
@@ -19693,10 +19703,12 @@ export function ProjectWorkspace() {
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
-                <WorkspaceSearchState store={searchStore}>{({ results: searchResults }) => (
+                <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound }) => (
                 <SearchResultsView
                   query={searchExpandedQuery}
                   results={searchResults}
+                  total={searchTotal}
+                  totalIsLowerBound={searchTotalIsLowerBound}
                   onJumpToResult={(result) => {
                     setSearchExpandedQuery(null)
                     void handleSearchSelect(result, searchExpandedQuery)
@@ -20175,6 +20187,9 @@ export function ProjectWorkspace() {
                     fileId={activeFileId}
                     lane={activeLane}
                     store={cellStore}
+                    usfm={activeFile?.type === "usfm"}
+                    fileName={activeFile?.name ?? null}
+                    lang={activeLaneTargetLanguage}
                     loading={cellsLoading}
                     editable={!laneWriteFrozen && canPerform("target.cell.commit", project.syncRole?.level ?? null)}
                     lockedBy={checkLockHolder}
@@ -21190,7 +21205,7 @@ export function ProjectWorkspace() {
           onAcknowledge={acknowledgeLaneArchived}
         />
       )}
-      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -21204,6 +21219,8 @@ export function ProjectWorkspace() {
         loading={searchLoading}
         ready={searchReady}
         results={searchResults}
+        total={searchTotal}
+        totalIsLowerBound={searchTotalIsLowerBound}
         onReady={buildIndex}
         onSearch={runSearch}
         onSearchPassages={runSearchPassages}

@@ -51,6 +51,14 @@ export const search = defineNamespace({
     "search.dock.expandAllAriaLabel": "Expand all results",
     "search.dock.expandAllLabel": "Expand all",
     "search.dock.moreResults": "{count} more — open full panel for all results",
+    "search.dock.moreResultsUncounted": "More results — open full panel for all results",
+    "search.resultCountOf": "{shown} of {total}",
+    "search.resultCountOfAtLeast": "{shown} of {total} or more",
+    // A list cut at the most one search returns (the full dialog and the
+    // expanded results)
+    "search.cap.showingFirstOf":
+      "Showing first {shown} of {total} matches — narrow the search to see more",
+    "search.cap.showingFirst": "Showing first {shown} matches — narrow the search to see more",
     "search.dock.replaceHint": "Find & replace with diff preview lives in the full panel.",
     "search.dock.openReplace": "Open find & replace",
 
@@ -113,6 +121,10 @@ export const search = defineNamespace({
     "search.replace.targetOnlyReason":
       "Replace changes the translation only. Each match shows the source text so you can check the wording.",
     "search.replace.sourceMatchNotReplaced": "Source text match — not replaced",
+    "search.replace.cutNotice":
+      "Only the first {shown} of {total} matching cells are in this list. Replace changes cells in this list only; the other {remaining} will not change. Search again after replacing to reach them.",
+    "search.replace.cutNoticeUncounted":
+      "Only the first {shown} matching cells are in this list, and there are more. Replace changes cells in this list only; the rest will not change. Search again after replacing to reach them.",
 
     // Result row column badge (aria-hidden decorative label on a search hit)
 
@@ -276,6 +288,49 @@ export const search = defineNamespace({
           "Shown below a truncated result list (only the first 50 hits render inline) " +
           "telling the user how many more exist and that the full dialog shows all of them.",
         placeholders: { count: "How many additional hits beyond the 50 shown are not listed." },
+      },
+      "search.dock.moreResultsUncounted": {
+        description:
+          "Same line as 'search.dock.moreResults', for a search where the app knows there " +
+          "are more hits than the 50 shown but not how many (a whole-word or regular-" +
+          "expression search over a very large project).",
+      },
+      "search.resultCountOf": {
+        description:
+          "Result-count label when the list was cut short: how many hits are listed out " +
+          "of how many the search matched, e.g. '50 of 63'. Replaces 'search.resultCount' " +
+          "in the dock panel's result group and the full dialog's results footer. Kept " +
+          "to two numbers and one joining word: the dock is narrow.",
+        placeholders: {
+          shown: "How many hits are listed.",
+          total: "How many hits the search matched in all. Always larger than 'shown'.",
+        },
+      },
+      "search.resultCountOfAtLeast": {
+        description:
+          "Same label as 'search.resultCountOf' when the total is a minimum, not an exact " +
+          "count: there are at least that many hits and may be more.",
+        placeholders: {
+          shown: "How many hits are listed.",
+          total: "The fewest hits the search can have matched.",
+        },
+      },
+      "search.cap.showingFirstOf": {
+        description:
+          "Notice above the result list in the full search dialog (Search and Passages " +
+          "modes) and in the expanded-results view, when the search matched more than " +
+          "the most one search returns (500). The list is complete up to that number " +
+          "and cannot be extended, so the advice is to make the search more specific.",
+        placeholders: {
+          shown: "How many matches are listed.",
+          total: "How many matches the search has in all. Always larger than 'shown'.",
+        },
+      },
+      "search.cap.showingFirst": {
+        description:
+          "Same notice as 'search.cap.showingFirstOf' when the app knows there are more " +
+          "matches than it lists but not how many.",
+        placeholders: { shown: "How many matches are listed." },
       },
       "search.dock.replaceHint": {
         description:
@@ -520,6 +575,26 @@ export const search = defineNamespace({
           "unavailable in this mode, so the search reads the translation only. 'Translation' " +
           "and 'source text' are the Command-K dialog's words; the editor columns stay " +
           "Source and Target.",
+      },
+      "search.replace.cutNotice": {
+        description:
+          "Warning above the Replace button in the full dialog's Replace mode, when the " +
+          "search matched more cells than the list holds (at most 500). It says, before " +
+          "the user presses Replace, that the replace reaches only part of the matches " +
+          "and how to reach the rest. 'Replace' here is the action of the button below " +
+          "it, whose own label says how many cells it will change; 'cells' are the " +
+          "translation cells of the project.",
+        placeholders: {
+          shown: "How many matching cells are in the list.",
+          total: "How many cells match in all. Always larger than 'shown'.",
+          remaining: "How many matching cells are not in the list: 'total' minus 'shown'.",
+        },
+      },
+      "search.replace.cutNoticeUncounted": {
+        description:
+          "Same warning as 'search.replace.cutNotice' when the app knows more cells match " +
+          "than the list holds but not how many.",
+        placeholders: { shown: "How many matching cells are in the list." },
       },
       "search.replace.sourceMatchNotReplaced": {
         description:

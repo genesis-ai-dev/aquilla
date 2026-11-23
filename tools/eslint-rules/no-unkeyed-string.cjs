@@ -7,7 +7,10 @@
  *
  *   1. JSXText        — literal text between tags.  Highest confidence.
  *   2. JSX attribute  — a literal on a translatable attribute (aria-label,
- *                       placeholder, title, alt, tooltip content, …).
+ *                       placeholder, title, alt, tooltip content, …), or on a
+ *                       prop named like one (`searchPlaceholder`, `ariaLabel`,
+ *                       `hint`, …). On any other prop, only a literal that
+ *                       reads as a phrase ("Assigned to me") — AQU-2740.
  *   3. Notification   — first string argument to toast.* / alert / confirm.
  *
  * String-bearing JSX expressions are inspected as well as plain literals.
@@ -33,10 +36,12 @@
  */
 
 const {
-  TRANSLATABLE_ATTRS,
+  NON_COPY_ATTR,
   USER_FACING_CALLS,
   isIgnoredFile,
   isAllowedString,
+  isTranslatableAttr,
+  looksLikeProse,
 } = require('./allowlist.cjs')
 
 function calleeName(node) {
@@ -162,13 +167,25 @@ module.exports = {
             : node.name.type === 'JSXNamespacedName'
               ? `${node.name.namespace.name}:${node.name.name.name}`
               : null
-        if (!name || !TRANSLATABLE_ATTRS.has(name)) return
+        if (!name) return
 
         let valueNode = node.value
         if (valueNode && valueNode.type === 'JSXExpressionContainer') {
           valueNode = valueNode.expression
         }
-        reportVisibleStrings(valueNode)
+        if (isTranslatableAttr(name)) {
+          reportVisibleStrings(valueNode)
+          return
+        }
+        if (NON_COPY_ATTR.test(name)) return
+        // A component's own prop (`section=`, `hint=`, `emptyState=`): copy
+        // reaches the screen through it just as often, but so do enum values,
+        // so only a phrase-shaped literal counts here.
+        for (const candidate of visibleStringsOf(valueNode)) {
+          if (looksLikeProse(candidate.text) && !isAllowedString(candidate.text)) {
+            report(candidate.node, candidate.text)
+          }
+        }
       },
 
       JSXExpressionContainer(node) {

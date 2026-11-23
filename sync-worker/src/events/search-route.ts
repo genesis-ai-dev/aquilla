@@ -23,11 +23,21 @@
 //
 // /search returns:
 //   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
-//                canonicalRef, cellType, placeLabel, position }] }
+//                canonicalRef, cellType, placeLabel, position }],
+//     total, totalIsLowerBound }
 //
 // /search/passages additionally returns the opposite-side cell value:
 //   { results: [{ cellId, fileId, side, value, snippet, rank, pairedValue,
-//                canonicalRef, cellType, placeLabel, position }] }
+//                canonicalRef, cellType, placeLabel, position }],
+//     total, totalIsLowerBound }
+//
+// `results` is one page, cut at `limit`. `total` is how many rows the same
+// filter matched before that cut (AQU-2732): the same project, side, file and
+// lane wall, with parked cells and uncounted files left out, because it is
+// counted by the query that produced the page. A caller shows "50 of 596"
+// from the two. `totalIsLowerBound` is true only for a whole-word or regexp
+// search with more candidates than the worker reads to decide them; `total`
+// is then the matches found so far, and there may be more.
 //
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 //
@@ -39,15 +49,15 @@ import { grantedLaneIds, visibleLanesForRead } from "./lane-read-wall"
 import { verifyTokenForProject } from "../auth"
 import {
   makeVerifiedProjectId,
-  queryScopedSearch,
-  queryScopedPattern,
-  queryScopedExact,
+  queryScopedSearchPage,
+  queryScopedPatternPage,
+  queryScopedExactPage,
   // Re-exported so existing tests importing sanitizeFtsQuery from this module
   // continue to compile without modification (Task 7 will migrate them).
   sanitizeFtsQuery,
 } from "./scoped-search"
 
-export type { SearchResultOut, ParallelPassageRow } from "./scoped-search"
+export type { SearchResultOut, ParallelPassageRow, SearchPage } from "./scoped-search"
 
 // Re-export sanitizeFtsQuery so the existing test suite (which imports it
 // from this module) keeps working until Task 7 updates the imports.
@@ -200,8 +210,8 @@ export async function handleSearchReadRequest(
 
   try {
     const pattern = matchCase || wholeWord || useRegexp
-    const results = pattern
-      ? await queryScopedPattern(env.AQUILLA_PG, verifiedProjectId, q, {
+    const page = pattern
+      ? await queryScopedPatternPage(env.AQUILLA_PG, verifiedProjectId, q, {
           side: sideFilter,
           limit,
           matchCase,
@@ -210,13 +220,13 @@ export async function handleSearchReadRequest(
           laneIds,
           fileId,
         })
-      : await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
+      : await queryScopedSearchPage(env.AQUILLA_PG, verifiedProjectId, q, {
           side: sideFilter,
           limit,
           laneIds,
           fileId,
         })
-    return Response.json({ results })
+    return Response.json(page)
   } catch (err) {
     return mapSearchError(err)
   }
@@ -277,12 +287,12 @@ export async function handleSearchPassagesRequest(
   const { sideFilter, limit } = parsed
 
   try {
-    const results = await queryScopedExact(env.AQUILLA_PG, verifiedProjectId, q, {
+    const page = await queryScopedExactPage(env.AQUILLA_PG, verifiedProjectId, q, {
       side: sideFilter,
       limit,
       laneIds,
     })
-    return Response.json({ results })
+    return Response.json(page)
   } catch (err) {
     return mapSearchError(err)
   }

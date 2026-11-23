@@ -53,7 +53,7 @@ describe("fetchProjectSearch", () => {
     expect(url).toContain("regexp=1")
   })
 
-  it("returns the results array on a 200 response", async () => {
+  it("returns the page and how many matched in all", async () => {
     const results = [
       {
         cellId: "c1",
@@ -64,11 +64,24 @@ describe("fetchProjectSearch", () => {
         rank: -3.2,
       },
     ]
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ results }), { status: 200 }),
+    global.fetch = vi.fn().mockImplementation(async (url: string) =>
+      new Response(
+        JSON.stringify(url.includes("q=cut") ? { results, total: 63, totalIsLowerBound: false } : { results }),
+        { status: 200 },
+      ),
     ) as unknown as typeof fetch
-    const out = await fetchProjectSearch("proj-a", "o", {}, "jwt")
-    expect(out).toEqual(results)
+    expect(await fetchProjectSearch("proj-a", "cut", {}, "jwt")).toEqual({
+      results,
+      total: 63,
+      totalIsLowerBound: false,
+    })
+    // A sync-worker that predates `total` sends rows only. They are then all
+    // that is known to have matched.
+    expect(await fetchProjectSearch("proj-a", "old", {}, "jwt")).toEqual({
+      results,
+      total: 1,
+      totalIsLowerBound: false,
+    })
   })
 
   it("throws SearchReadError on non-2xx", async () => {

@@ -19207,13 +19207,15 @@ export function ProjectWorkspace() {
               />
             }
             searchPanel={
-              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
               <SearchDockPanel
                 activeFileId={activeFileId}
                 activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
                 loading={searchLoading}
                 ready={searchReady}
                 results={searchResults}
+                total={searchTotal}
+                totalIsLowerBound={searchTotalIsLowerBound}
                 onReady={buildIndex}
                 onSearch={(q, opts) => void runSearch(q, opts)}
                 onSearchPassages={runSearchPassages}
@@ -19230,6 +19232,7 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
+                resultsExpanded={searchExpandedQuery !== null}
                 bibleResourcesEnabled={resolveBibleResourcesEnabled(
                   project.bibleResourcesEnabled,
                   projectHasScriptureFiles(project.files),
@@ -19681,10 +19684,12 @@ export function ProjectWorkspace() {
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
-                <WorkspaceSearchState store={searchStore}>{({ results: searchResults }) => (
+                <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound }) => (
                 <SearchResultsView
                   query={searchExpandedQuery}
                   results={searchResults}
+                  total={searchTotal}
+                  totalIsLowerBound={searchTotalIsLowerBound}
                   onJumpToResult={(result) => {
                     setSearchExpandedQuery(null)
                     void handleSearchSelect(result, searchExpandedQuery)
@@ -21180,7 +21185,7 @@ export function ProjectWorkspace() {
           onAcknowledge={acknowledgeLaneArchived}
         />
       )}
-      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -21194,6 +21199,8 @@ export function ProjectWorkspace() {
         loading={searchLoading}
         ready={searchReady}
         results={searchResults}
+        total={searchTotal}
+        totalIsLowerBound={searchTotalIsLowerBound}
         onReady={buildIndex}
         onSearch={runSearch}
         onSearchPassages={runSearchPassages}

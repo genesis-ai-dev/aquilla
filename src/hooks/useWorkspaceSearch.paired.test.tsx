@@ -8,11 +8,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { useWorkspaceSearch } from "./useWorkspaceSearch"
 import { fetchProjectSearch } from "@/lib/sync/search-read"
+import type { SearchPage, SearchResult } from "@/lib/sync/search-read-types"
 
 vi.mock("@/lib/sync/search-read", () => ({
   fetchProjectSearch: vi.fn(),
   fetchParallelPassages: vi.fn(),
 }))
+
+/** What the fetcher resolves: the rows, all of them counted. */
+const page = (results: SearchResult[]): SearchPage => ({ results, total: results.length, totalIsLowerBound: false })
 
 beforeEach(() => {
   vi.mocked(fetchProjectSearch).mockReset()
@@ -20,7 +24,7 @@ beforeEach(() => {
 
 describe("useWorkspaceSearch — paired source (AQU-1011)", () => {
   it("maps a target hit's pairedValue onto the source the replace row shows", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([
       {
         cellId: "c1",
         fileId: "f1",
@@ -30,7 +34,7 @@ describe("useWorkspaceSearch — paired source (AQU-1011)", () => {
         rank: 0.2,
         pairedValue: "test",
       },
-    ])
+    ]))
 
     const { result } = renderHook(() =>
       useWorkspaceSearch({
@@ -52,7 +56,7 @@ describe("useWorkspaceSearch — paired source (AQU-1011)", () => {
   })
 
   it("keeps the verse address on the result the replace list labels", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([
       {
         cellId: "c1",
         fileId: "f1",
@@ -66,7 +70,7 @@ describe("useWorkspaceSearch — paired source (AQU-1011)", () => {
         placeLabel: null,
         position: 1,
       },
-    ])
+    ]))
     const { result } = renderHook(() =>
       useWorkspaceSearch({ projectId: "p1", getToken: async () => "jwt" }),
     )
@@ -82,7 +86,7 @@ describe("useWorkspaceSearch — paired source (AQU-1011)", () => {
   })
 
   it("forwards match case, whole word, and regexp to the search request", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([])
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([]))
     const { result } = renderHook(() =>
       useWorkspaceSearch({ projectId: "p1", getToken: async () => "jwt" }),
     )

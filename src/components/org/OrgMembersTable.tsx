@@ -384,6 +384,7 @@ export function OrgMembersTable({
               <MemberAccessSubRow
                 orgId={orgId}
                 userId={m.userId}
+                orgRoleLevel={m.role.level}
                 callerOrgRoleLevel={callerOrgRoleLevel}
                 colSpan={4}
               />

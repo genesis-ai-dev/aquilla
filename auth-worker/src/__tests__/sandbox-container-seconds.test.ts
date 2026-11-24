@@ -93,6 +93,10 @@ async function seedOrgProject(opts: { overLimit: boolean }) {
   await env.AQUILLA_PG.prepare("INSERT INTO org_billing (org_id, tier) VALUES (?, 'free')").bind(ORG).run()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'P', ?, 1)")
     .bind(PROJECT, ORG).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT).run()
   if (!opts.overLimit) return
   const plan = (await resolveOrgPlan(env.AQUILLA_PG, ORG))!
   const raw = Math.ceil(plan.weeklyAllowanceUnits! * 1_000_000 * 1.01 / 4)

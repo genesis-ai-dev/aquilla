@@ -20,6 +20,10 @@ const poll = (device_code: string) => post("token", { client_id, grant_type, dev
 async function seed() {
   await seedUser(1, "alice"); await seedUser(2, "bob")
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('p', 'Project', 1)").run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p', 1, 700, 1)",
+  ).run()
   return jwtFor("alice")
 }
 const approve = (user_code: string, jwt: string, project_id = "p") => post("decision", {

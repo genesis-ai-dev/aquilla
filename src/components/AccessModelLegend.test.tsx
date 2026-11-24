@@ -15,7 +15,7 @@ describe("AccessModelLegend", () => {
     expect(screen.getByText("Direct")).toBeInTheDocument()
     expect(screen.getByText("Via group")).toBeInTheDocument()
     expect(screen.getByText("Org-wide")).toBeInTheDocument()
-    expect(screen.getByText("Creator")).toBeInTheDocument()
+    expect(screen.queryByText("Creator")).not.toBeInTheDocument()
     expect(screen.getByText(/effective role = max-wins/i)).toBeInTheDocument()
   })
 

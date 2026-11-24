@@ -56,6 +56,10 @@ async function seedOwner(): Promise<string> {
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, created_by) VALUES (?, 'Import', 1)",
   ).bind(PROJECT_ID).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT_ID).run()
   return jwtFor("import-owner")
 }
 
@@ -78,8 +82,8 @@ describe("POST /api/v1/import/classify", () => {
       "INSERT INTO projects (id, name, created_by) VALUES (?, 'Import', 1)",
     ).bind(PROJECT_ID).run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 2, 400, 1)",
-    ).bind(PROJECT_ID).run()
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1), (?, 2, 400, 1)",
+    ).bind(PROJECT_ID, PROJECT_ID).run()
 
     const upstream = vi.spyOn(globalThis, "fetch")
     const response = await app.request("/api/v1/import/classify", {

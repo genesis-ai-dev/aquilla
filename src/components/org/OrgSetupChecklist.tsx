@@ -32,7 +32,7 @@ export function OrgSetupChecklist({
 }) {
   const t = useT()
   const navigate = useNavigate()
-  const { members } = useOrgMembers(orgId)
+  const { members, hasReadableRoster } = useOrgMembers(orgId)
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem(dismissKey(orgId)) === "1"
@@ -45,7 +45,7 @@ export function OrgSetupChecklist({
   const invitedTeammate = members.length > 1
   const allDone = createdProject && invitedTeammate
 
-  if (dismissed || allDone) return null
+  if (!hasReadableRoster || dismissed || allDone) return null
 
   function dismiss() {
     try {

@@ -1422,6 +1422,7 @@ export const org = defineNamespace({
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
     // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
     // episode or a document depending on the project.
+    "org.orgProjectsDataTable.awaitingValidation": "Awaiting validation",
     "org.orgProjectsDataTable.unitsColumn": "Done",
     "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
     "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
@@ -2846,6 +2847,9 @@ export const org = defineNamespace({
           "on the project overview, marking that language lane as archived (retired). It " +
           "describes the lane, so where the word must agree with a noun it agrees with " +
           "the word used for a language lane.",
+      },
+      "org.orgProjectsDataTable.awaitingValidation": {
+        description: "Legend for translated text or recorded audio still awaiting validation.",
       },
       "org.orgProjectsDataTable.unitsColumn": {
         description:

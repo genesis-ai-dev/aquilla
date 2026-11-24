@@ -1,4 +1,4 @@
--- 0205_drive_folder_links.sql — a Google Drive folder kept in sync with a project.
+-- 0208_drive_folder_links.sql — a Google Drive folder kept in sync with a project.
 --
 -- A project lead links a Drive folder that is shared with the Aquilla Google
 -- service account. A per-link Durable Object (sync-worker DriveFolderPoller)

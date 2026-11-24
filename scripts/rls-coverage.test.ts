@@ -115,7 +115,7 @@ const UNCOVERED: Record<string, string> = {
   // so, as with file_milestones, it is not granted to app_runtime and a policy
   // `TO app_runtime` would be inert.
   file_revisions: "never granted to app_runtime",
-  // AQU-2459 (0205): a project's linked Google Drive folders. Written and read
+  // AQU-2459 (0208): a project's linked Google Drive folders. Written and read
   // only through the sync-worker perimeter (drive-links-route.ts and the
   // DriveFolderPoller), so, as with file_revisions, it is not granted to
   // app_runtime and a policy `TO app_runtime` would be inert.

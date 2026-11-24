@@ -1256,7 +1256,7 @@ CREATE TABLE file_revisions (
     PRIMARY KEY (project_id, file_id, revision_n)
 );
 
--- A Google Drive folder kept in sync with a project (migration 0205). The
+-- A Google Drive folder kept in sync with a project (migration 0208). The
 -- sync-worker DriveFolderPoller writes each changed Drive file as one file
 -- revision, as `user_id` with that user's live role. drive_folder_files is the
 -- cursor: Drive file → Aquilla file, last applied Drive version and sha256.

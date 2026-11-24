@@ -153,8 +153,7 @@ async function hasDivergedFootprint(
  *
  * A platform admin is the sharpest case (identity is by email; no membership
  * row is needed or usual), and it kills a link at redeem too. The rest apply
- * at mint: an account that created a project (the creator fallback grants
- * owner with no `project_members` row), sits in a team, holds a live API
+ * at mint: an account that has created another project, sits in a team, holds a live API
  * credential, or signs in with Google is somebody's working account, not a
  * translator provisioned for this link.
  */

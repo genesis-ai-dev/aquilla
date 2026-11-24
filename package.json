@@ -178,6 +178,8 @@
     "neon:backfill:lanes:prod": "tsx scripts/neon-target.ts production backfill-lanes",
     "neon:repair-lane-grants:dev": "tsx scripts/neon-target.ts dev repair-lane-grants",
     "neon:repair-lane-grants:prod": "tsx scripts/neon-target.ts production repair-lane-grants",
+    "neon:repair-creator-owner-grants:dev": "tsx scripts/neon-target.ts dev repair-creator-owner-grants",
+    "neon:repair-creator-owner-grants:prod": "tsx scripts/neon-target.ts production repair-creator-owner-grants",
     "neon:repair-cell-metadata:local": "tsx scripts/neon-target.ts local repair-cell-metadata",
     "neon:repair-cell-metadata:dev": "tsx scripts/neon-target.ts dev repair-cell-metadata",
     "neon:repair-cell-metadata:prod": "tsx scripts/neon-target.ts production repair-cell-metadata",
@@ -199,6 +201,7 @@
     "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
+    "@aiden0z/pptx-renderer": "1.4.0",
     "@aquilla/idml-roundtrip": "workspace:2.0.3",
     "@base-ui/react": "^1.9.0",
     "@dnd-kit/core": "6.3.1",
@@ -235,6 +238,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.4.0",
+    "docx-preview": "0.4.1",
     "dompurify": "^3.4.17",
     "hls.js": "^1.7.4",
     "idb": "^8.0.4",

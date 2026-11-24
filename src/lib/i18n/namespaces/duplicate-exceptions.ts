@@ -1001,4 +1001,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "signs off the selected lines now, with a count badge after it. A named kind " +
     "of assigned work and an imperative one-click action take different forms in " +
     "many target languages (an infinitive or noun against an imperative).",
+  "audio.makeSpeech.step3":
+    "The title of step 3 in the Make speech panel: an optional speech-to-speech " +
+    "pass that re-voices a spoken take into another voice. audio.library." +
+    "cloneEngineLabel labels a kind of voice in the Voices panel. A process step " +
+    "and a kind-of-voice label can take different forms (a verb or a noun).",
 }

@@ -78,6 +78,10 @@ async function owner() {
   await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Omni Org', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
     .bind(projectId).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(projectId).run()
   return jwtFor("omni-owner")
 }
 
@@ -154,6 +158,9 @@ describe("warm-up answered by the self-hosted box", () => {
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+    ).bind(projectId).run()
     const calls = stubBackends("up")
     const response = await app.request("http://127.0.0.1/api/v1/audio/transcriptions/warm", {
       method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ projectId, model: "zs" }),

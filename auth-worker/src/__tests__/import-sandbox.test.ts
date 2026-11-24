@@ -21,6 +21,10 @@ async function seedOwner(): Promise<string> {
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, created_by) VALUES (?, 'Sandbox import', 1)",
   ).bind(PROJECT_ID).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT_ID).run()
   return jwtFor("sandbox-owner")
 }
 

@@ -10,6 +10,7 @@ const agents = readFileSync(path.join(root, "AGENTS.md"), "utf8")
 const prBot = readFileSync(path.join(root, "e2e/journeys/PR-BOT.md"), "utf8")
 const fixtures = readFileSync(path.join(root, "e2e/journeys/README.md"), "utf8")
 const previewStack = readFileSync(path.join(root, "scripts/cloudflare-stack-preview.mjs"), "utf8")
+const tooltip = readFileSync(path.join(root, "src/components/ui/tooltip.tsx"), "utf8")
 
 describe("the merge rule the bots follow", () => {
   it("lets the agent merge its own pull request once the walk is PASS", () => {
@@ -67,5 +68,19 @@ describe("the AI fixture the bots walk (AQU-1436)", () => {
     // The verdict rule: a missing fixture is never a finding against the app.
     expect(prBot).toContain("An AI control is walkable on a preview too (AQU-1436)")
     expect(prBot).toContain("**NOT CHECKED**, naming which of the two was missing — never **FAIL**")
+  })
+})
+
+// AQU-2260: a disabled control's note opens on a click. A walk that hovers for
+// it posts FAIL against code that is right (PR 2151). The rule names the two
+// slots a bot clicks and reads, so it is true only while the component still
+// renders them under those names.
+describe("the disabled control's note the bots walk (AQU-2260)", () => {
+  it("tells the bot to click, and names the slots the component renders", () => {
+    expect(prBot).toContain("A disabled control explains itself on a click, never on a hover")
+    for (const slot of ["tooltip-disabled-trigger", "disabled-reason-note"]) {
+      expect(tooltip).toContain(`data-slot="${slot}"`)
+      expect(prBot).toContain(`[data-slot="${slot}"]`)
+    }
   })
 })

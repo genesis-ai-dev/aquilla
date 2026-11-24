@@ -88,6 +88,20 @@ export interface UserFacingError {
 }
 
 /**
+ * AQU-2357: removing the last project Owner is a 409 with `error: "last_owner"`.
+ * Org leave uses the same code and handles it before this mapper.
+ */
+function lastProjectOwnerMessage(raw: string): string | null {
+  try {
+    const body = JSON.parse(raw) as { error?: unknown }
+    if (body.error === "last_owner") return t("error.network.lastProjectOwner")
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
  * Map an HTTP status code to a human-readable message.
  *
  * The optional `context` names what failed (e.g. `"project"`, `"invite"`) and is
@@ -134,13 +148,15 @@ export function messageForStatus(
         category: "not-found",
         status,
       }
-    case 409:
+    case 409: {
+      const lastOwner = lastProjectOwnerMessage(raw)
       return {
-        message: t("error.network.conflict", { contextSuffix }),
+        message: lastOwner ?? t("error.network.conflict", { contextSuffix }),
         raw,
         category: "conflict",
         status,
       }
+    }
     case 410:
       return {
         message: t("error.network.gone", { contextSuffix }),

@@ -383,8 +383,8 @@ export async function listPlatformAdminOrgsPage(
 }
 
 /**
- * Orgs the caller can reach via a project-level grant (direct, group, or
- * creator) — including orgs they also belong to. GET /orgs uses this to keep
+ * Orgs the caller can reach via a project-level grant (direct or group) —
+ * including orgs they also belong to. GET /orgs uses this to keep
  * those orgs off the platform-admin append, so a real guest grant surfaces as
  * Guest in the org picker instead of Admin.
  */
@@ -394,8 +394,7 @@ export async function listProjectGrantOrgIds(env: Env, userId: number): Promise<
        FROM projects p
       WHERE p.org_id IS NOT NULL
         AND (
-          p.created_by = ?
-          OR EXISTS (
+          EXISTS (
             SELECT 1 FROM project_members pm
              WHERE pm.project_id = p.id AND pm.user_id = ?
           )
@@ -406,7 +405,7 @@ export async function listProjectGrantOrgIds(env: Env, userId: number): Promise<
           )
         )`,
   )
-    .bind(userId, userId, userId)
+    .bind(userId, userId)
     .all<{ id: number }>()
   return new Set((rows.results ?? []).map((r) => r.id))
 }
@@ -624,9 +623,9 @@ export interface EffectiveMember {
 
 /**
  * Effective members for a project — per AD-12, max-wins across direct +
- * group + org + creator. A user gets one row, attributed to whichever path
+ * group + org. A user gets one row, attributed to whichever path
  * produced the highest role_level. Ties resolve by declaration order
- * (override > group > org > creator) so an explicit project grant gets
+ * (override > group > org) so an explicit project grant gets
  * attribution credit when it ties with an inherited grant.
  *
  * Per spec 02-foundations.md AD-12 "Required ops surfaces (members UI)":
@@ -638,7 +637,7 @@ export async function listEffectiveProjectMembers(
   env: Env,
   projectId: string,
   orgId: number | null,
-  createdBy: number,
+  _createdBy: number,
 ): Promise<EffectiveMember[]> {
   // Each path is fetched separately and merged via max-wins so attribution
   // is exact (a JOIN-based approach would lose per-user attribution).
@@ -725,15 +724,6 @@ export async function listEffectiveProjectMembers(
     }
   }
 
-  const creatorRow = await env.AQUILLA_PG.prepare(
-    "SELECT id, username, email FROM users WHERE id = ?",
-  )
-    .bind(createdBy)
-    .first<{ id: number; username: string; email: string | null }>()
-  if (creatorRow) {
-    record(creatorRow.id, creatorRow.username, creatorRow.email, "creator", 700)
-  }
-
   // Derive winner + secondarySources for each user.
   const results: EffectiveMember[] = []
   for (const [userId, { username, email, paths }] of allPaths) {
@@ -801,6 +791,8 @@ function deriveEffectiveMembers(
 
 export interface ProjectEffectiveMembers {
   projectId: string
+  /** projects.created_by. History only — not a grant path (AQU-2357). */
+  createdBy: number | null
   members: EffectiveMember[]
 }
 
@@ -836,13 +828,12 @@ export async function listEffectiveMembersForOrg(
        ) gg ON gg.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND (
-          p.created_by = ?
-          OR pm.user_id = ?
+          pm.user_id = ?
           OR gg.max_grant IS NOT NULL
           OR (om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`,
   )
-    .bind(viewerId, viewerId, viewerId, orgId, viewerId, viewerId, viewerId)
+    .bind(viewerId, viewerId, viewerId, orgId, viewerId, viewerId)
     .all<{ id: string; created_by: number }>()
 
   const projects = accessible.results ?? []
@@ -888,18 +879,6 @@ export async function listEffectiveMembersForOrg(
     .bind(...projectIds)
     .all<{ project_id: string; user_id: number; username: string; role_level: number | null }>()
 
-  // 5. Creator usernames, one query for the whole set.
-  const creatorIds = [...new Set(projects.map((p) => p.created_by))]
-  const creatorPlaceholders = creatorIds.map(() => "?").join(", ")
-  const creatorRows = await env.AQUILLA_PG.prepare(
-    `SELECT id, username FROM users WHERE id IN (${creatorPlaceholders})`,
-  )
-    .bind(...creatorIds)
-    .all<{ id: number; username: string }>()
-  const creatorUsername = new Map<number, string>()
-  for (const r of creatorRows.results ?? []) creatorUsername.set(r.id, r.username)
-
-  // Bucket the flat result rows by project, then derive per-project winners.
   const pathsByProject = new Map<string, Map<number, { username: string; paths: PathEntry[] }>>()
   const ensure = (projectId: string): Map<number, { username: string; paths: PathEntry[] }> => {
     let m = pathsByProject.get(projectId)
@@ -928,10 +907,10 @@ export async function listEffectiveMembersForOrg(
     if (r.role_level == null) continue
     record(r.project_id, r.user_id, r.username, "group", r.role_level)
   }
-  // org + creator paths apply to every accessible project. AQU-435: below
-  // Maintainer the org path opens nothing; AQU-1274: it still keeps a team
-  // attachment from silently demoting a higher org role. Direct and group
-  // paths are recorded above, so the per-project map answers both questions.
+  // Org path on every accessible project. AQU-435: below Maintainer the org
+  // path opens nothing; AQU-1274: it still keeps a team attachment from
+  // silently demoting a higher org role. Direct and group paths are recorded
+  // above, so the per-project map answers both questions.
   for (const p of projects) {
     const perProject = ensure(p.id)
     for (const om of orgMembers.results ?? []) {
@@ -944,12 +923,11 @@ export async function listEffectiveMembersForOrg(
       if (level == null) continue
       record(p.id, om.user_id, om.username, "org", level)
     }
-    const cu = creatorUsername.get(p.created_by)
-    if (cu) record(p.id, p.created_by, cu, "creator", 700)
   }
 
   return projects.map((p) => ({
     projectId: p.id,
+    createdBy: p.created_by,
     members: deriveEffectiveMembers(ensure(p.id)),
   }))
 }
@@ -1940,14 +1918,13 @@ async function fetchPortfolioLanes(
  * AQU-745: per-project visibility predicate for the portfolio rollups. Mirrors
  * the GET /api/v2/projects access predicate (projects.ts) so the org dashboard
  * cannot leak project names the caller can't already open. A regular member
- * sees only projects reached via creator / direct membership / group grant; the
+ * sees only projects reached via a direct membership or a group grant; the
  * org path (blanket visibility) fires only at Maintainer+ (ORG_WIDE_ACCESS_FLOOR),
- * and platform admins bypass entirely. Emits `<isAdmin>, <userId>×4` binds in
+ * and platform admins bypass entirely. Emits `<isAdmin>, <userId>×3` binds in
  * this exact order — append them to the query in the same order.
  */
 const PORTFOLIO_VISIBILITY_PREDICATE = `(
           ?::int = 1
-          OR p.created_by = ?
           OR EXISTS (SELECT 1 FROM project_members pm
                       WHERE pm.project_id = p.id AND pm.user_id = ?)
           OR EXISTS (SELECT 1 FROM group_project_grants gpg
@@ -2395,9 +2372,9 @@ async function visiblePortfolioText(
  * Same population billing counts (`countTargetLanesByOrg`): unarchived target
  * lanes on projects that are not archived and not paused. Same decision as
  * `visiblePortfolioText` about which of those lanes the caller may see: a
- * project they created, or where their project role is maintainer or above,
- * contributes every active lane; otherwise only lanes whose legacy tag the
- * read wall would show. Projects they cannot open contribute nothing.
+ * project where their project role is maintainer or above contributes every
+ * active lane; otherwise only lanes whose legacy tag the read wall would
+ * show. Projects they cannot open contribute nothing.
  *
  * The select list is ids and tags. Lane names are not read, so fixing the
  * number cannot put a hidden name on the response.
@@ -2408,7 +2385,7 @@ export async function countVisibleActiveLanguages(
   userId: number,
 ): Promise<number> {
   const { results } = await env.AQUILLA_PG.prepare(
-    `SELECT l.id AS lane_id, p.id AS project_id, p.created_by AS created_by,
+    `SELECT l.id AS lane_id, p.id AS project_id,
             l.legacy_tag AS legacy_tag, l.archived_at AS archived_at
        FROM lanes l
        JOIN projects p ON p.id = l.project_id
@@ -2417,22 +2394,20 @@ export async function countVisibleActiveLanguages(
         AND COALESCE(p.is_active, TRUE)
         AND l.role = 'target'
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}`,
-  ).bind(orgId, 0, userId, userId, userId, userId).all<{
+  ).bind(orgId, 0, userId, userId, userId).all<{
     lane_id: string
     project_id: string
-    created_by: number | string | null
     legacy_tag: string | null
     archived_at: string | null
   }>()
 
   const byProject = new Map<string, {
-    createdBy: number
     lanes: { id: string; legacyTag: string | null; archivedAt: string | null }[]
   }>()
   for (const row of results ?? []) {
     let entry = byProject.get(row.project_id)
     if (!entry) {
-      entry = { createdBy: Number(row.created_by), lanes: [] }
+      entry = { lanes: [] }
       byProject.set(row.project_id, entry)
     }
     entry.lanes.push({ id: row.lane_id, legacyTag: row.legacy_tag, archivedAt: row.archived_at })
@@ -2445,13 +2420,8 @@ export async function countVisibleActiveLanguages(
   // Same stand-in as visiblePortfolioText: an empty email cannot match the
   // platform-admin allowlist and widen this caller. Admins never reach here.
   const user = { id: userId, email: "" } as AuthUser
-  const unsettled: string[] = []
+  const unsettled = [...byProject.keys()]
   let count = 0
-  for (const [projectId, entry] of byProject) {
-    if (entry.createdBy === userId) count += activeCount(entry.lanes)
-    else unsettled.push(projectId)
-  }
-  if (unsettled.length === 0) return count
 
   const roles = await resolveProjectRoles(env, user, unsettled)
   const restricted: string[] = []
@@ -2551,7 +2521,7 @@ export async function listOrgPortfolioPage(
     ...uniqueOrgIds, ...uniqueOrgIds,
     aoeTodayIso(now), ...uniqueOrgIds,
     ...uniqueOrgIds,
-    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId,
     ...extraBinds,
   ).all<PortfolioDbRow>()
 
@@ -2621,7 +2591,7 @@ export async function getOrgDeletedFiles(
       ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
   ).bind(
     orgId,
-    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId,
   ).all<{
     file_id: string
     name: string
@@ -2693,10 +2663,12 @@ export interface MemberEffectiveAccess {
 
 /**
  * Per-project grant-path breakdown for one org member (AD-12 effective-access).
- * Covers the org's non-archived projects where the user has a direct / group /
- * creator path; orgRole is reported once at the top level, but per AQU-435 it
- * only appears as a per-project `org` contribution (and folds into `resolved`)
- * at Maintainer+. Read-only "why does X have access?" surface.
+ * Covers the org's non-archived projects where the user has a direct or group
+ * path. `creator` is history (AQU-2357): true when this person created the
+ * project, and it does not add to `resolved`. orgRole is reported once at the
+ * top level, but per AQU-435 it only appears as a per-project `org`
+ * contribution (and folds into `resolved`) at Maintainer+. Read-only "why
+ * does X have access?" surface.
  */
 export async function getMemberEffectiveAccess(
   env: Env,
@@ -2753,10 +2725,12 @@ export async function getMemberEffectiveAccess(
       hasDirectGrant: row.direct != null,
       hasGroupGrant: groupMax > 0,
     })
-    row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0, row.creator ? 700 : 0)
+    row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0)
   }
 
-  const projects = Array.from(map.values()).sort((a, b) => a.projectName.localeCompare(b.projectName))
+  const projects = Array.from(map.values())
+    .filter((row) => row.resolved > 0)
+    .sort((a, b) => a.projectName.localeCompare(b.projectName))
   return { orgRole, projects }
 }
 
@@ -3275,14 +3249,14 @@ export interface ProjectNameViewer {
  * AQU-1938: the AQU-745 rule the org dashboard uses (PORTFOLIO_VISIBILITY_PREDICATE)
  * as a condition over `projects p`, with its binds in order. The org settings
  * counts are open to every org member, but a project's NAME is not: below
- * Maintainer a member sees only the projects they created or were given. So
+ * Maintainer a member sees only the projects they were given. So
  * the names that ride along with a count go through the same rule, and the
  * rest are left to "and N more".
  */
 export function projectNameVisibleSql(viewer: ProjectNameViewer): { sql: string; binds: unknown[] } {
   return {
     sql: PORTFOLIO_VISIBILITY_PREDICATE,
-    binds: [viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId],
+    binds: [viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId],
   }
 }
 

@@ -40,6 +40,12 @@ async function seedProject(): Promise<void> {
   )
     .bind(PROJECT)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  )
+    .bind(PROJECT)
+    .run()
   for (const [userId, level] of [
     [2, 400],
     [3, 400],
@@ -269,6 +275,21 @@ describe("AQU-2355 POST /lanes grants the new lane to nobody below Maintainer", 
     expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
     const laneId = await laneIdForTag("Spanish")
     expect((await grantsFor(2)).find((g) => g.lane === laneId)?.level).toBe(100)
+  })
+
+  it("offers the project's creator like anyone else below Maintainer (AQU-2357)", async () => {
+    // created_by is history, not a role: 2 made the project and is a Contributor on it.
+    await sql("UPDATE projects SET created_by = 2 WHERE id = ?", PROJECT)
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    const body = (await res.json()) as { people: Array<{ userId: number }> }
+    expect(body.people.map((p) => p.userId)).toContain(2)
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
+    const laneId = await laneIdForTag("Spanish")
+    expect((await grantsFor(2)).map((g) => g.lane)).toContain(laneId)
   })
 
   it("refuses a pick that is not on the offer, and creates no lane", async () => {

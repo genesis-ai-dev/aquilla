@@ -96,10 +96,9 @@ export async function loadNewLaneGrantCandidates(
         WHERE g.project_id = ? AND g.role_level >= ${VIEWER}
           AND pm.role_level < ${MAINTAINER}
           -- Maintainers and Owners see the new lane by role: not offered. One
-          -- read for every path the resolver counts at 600+ (creator, team,
-          -- org), instead of resolving each person in turn.
-          AND NOT EXISTS (SELECT 1 FROM projects p
-                           WHERE p.id = g.project_id AND p.created_by = g.user_id)
+          -- read for every path the resolver counts at 600+ (team, org),
+          -- instead of resolving each person in turn. Having created the
+          -- project is not one of them (AQU-2357).
           AND NOT EXISTS (SELECT 1 FROM group_project_grants gpg
                             JOIN group_members gm ON gm.group_id = gpg.group_id
                            WHERE gpg.project_id = g.project_id AND gm.user_id = g.user_id

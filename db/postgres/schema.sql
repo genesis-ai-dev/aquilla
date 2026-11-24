@@ -2939,6 +2939,7 @@ ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_l
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
 -- Lane and file scopes are not included. Platform admin is env-driven, not a row.
 -- 0121: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+-- AQU-2357: created_by is history. The creator's Owner grant is a project_members row.
 CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,
@@ -2960,12 +2961,6 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gpg.granted_by::BIGINT, gpg.granted_at
     FROM group_project_grants gpg
     JOIN group_members gm ON gm.group_id = gpg.group_id
-  UNION ALL
-  SELECT p.created_by::BIGINT, 'project'::TEXT, p.id::TEXT,
-         700::INT, 'creator'::TEXT, NULL::BIGINT,
-         NULL::BIGINT, p.created_at
-    FROM projects p
-   WHERE p.created_by IS NOT NULL
   UNION ALL
   SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
          gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,

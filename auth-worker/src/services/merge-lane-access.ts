@@ -13,11 +13,12 @@
 //     organization cannot be attached to A, and a team already on A at a
 //     HIGHER role than it had on B would hand B's work to its members at that
 //     higher role; in both cases its members are carried as people instead.
-//   * People with access to B in their own right (a direct membership or B's
-//     creator) get a direct grant on the new lane at the lane role they had on
-//     B: their grant on the folded lane, or Lane lead (500) for a Maintainer or
-//     Owner of B, who read every lane. Someone who could not read the folded
-//     lane on B gets nothing. Someone new to A joins it limited to that lane.
+//   * People with access to B in their own right (a direct membership, which
+//     is how B's creator holds it since AQU-2357) get a direct grant on the new
+//     lane at the lane role they had on B: their grant on the folded lane, or
+//     Lane lead (500) for a Maintainer or Owner of B, who read every lane.
+//     Someone who could not read the folded lane on B gets nothing. Someone new
+//     to A joins it limited to that lane.
 //   * Nobody is raised: a person already at Maintainer or above on A is left
 //     alone, and an existing grant on the lane is never lowered.
 //   * The role on the merged LANE is what carries (up to Lane lead, 500). The
@@ -151,13 +152,11 @@ export async function carryDonorLaneAccess(
     for (const m of members ?? []) carry(Number(m.user_id), Math.max(role, Number(m.role_level ?? 0)))
   }
 
-  // People in their own right: direct members and the donor's creator.
+  // People in their own right: direct members. The donor's creator is one of
+  // them through their Owner grant, not through `created_by` (AQU-2357).
   const { results: directRows } = await db
-    .prepare(
-      `SELECT user_id FROM project_members WHERE project_id = ?
-       UNION SELECT created_by FROM projects WHERE id = ?`,
-    )
-    .bind(donorProjectId, donorProjectId)
+    .prepare("SELECT user_id FROM project_members WHERE project_id = ?")
+    .bind(donorProjectId)
     .all<{ user_id: number | string }>()
   for (const row of directRows ?? []) {
     const userId = Number(row.user_id)

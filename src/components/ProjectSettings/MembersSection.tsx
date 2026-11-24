@@ -129,6 +129,11 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   {sourceKey ? t(sourceKey) : m.role.source}
                 </span>
               )}
+              {m.createdThisProject && (
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {t("org.membersPage.createdThisProject")}
+                </span>
+              )}
             </UsernameWithAvatar>
           )
         },

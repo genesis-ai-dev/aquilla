@@ -741,4 +741,54 @@ describe("POST /:projectId/merge-sibling — carried access stays on the lane (A
     ).all<{ lane_id: string }>()
     expect(linked.map((r) => r.lane_id)).toEqual(["lane-rfr"])
   })
+
+  it("the donor's creator is carried by the path they hold, not for having created it (AQU-2357)", async () => {
+    const sql = (text: string, ...params: unknown[]) => env.AQUILLA_PG.prepare(text).bind(...params).run()
+    for (const [id, name] of [
+      [90, "lead90"],
+      [91, "donor-creator"],
+      [99, "owner99"],
+    ] as const) {
+      await seedUser(id, name)
+    }
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (90, 'Org90', 99)")
+    await seedProject("host-s", "Host", 99)
+    // 91 created the donor and no longer holds a grant of their own on it.
+    await seedProject("donor-s", "Donor", 91)
+    await sql("UPDATE projects SET org_id = 90 WHERE id IN ('host-s', 'donor-s')")
+    await grant("host-s", 90, 500)
+    await grant("donor-s", 90, 500)
+    await seedHostLane("host-s", { id: "lane-sfr", tag: "fr" })
+    await seedHostLane("donor-s", { id: "lane-ssw", tag: "", name: "Swahili" })
+    // They reach the donor through a team, which gave them the folded lane.
+    await sql("INSERT INTO groups (id, org_id, name, created_by) VALUES (96, 90, 'Crew', 99)")
+    await sql("INSERT INTO group_members (group_id, user_id) VALUES (96, 91)")
+    await sql(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES (96, 'donor-s', 400, 99, TRUE)",
+    )
+    await sql("INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (96, 'donor-s', 'lane-ssw')")
+    await sql(
+      "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, team_group_id) VALUES ('donor-s', 91, 'lane-ssw', 400, 96)",
+    )
+
+    mockFold({ merged: 0, skipped: [], lane: "sw", donorLaneId: "lane-ssw" })
+    const res = await post("host-s", await jwtFor("lead90"), { donorProjectId: "donor-s", lane: "sw", donorLaneId: "lane-ssw" })
+    expect(res.status).toBe(200)
+    const lane = await env.AQUILLA_PG.prepare(
+      "SELECT id FROM lanes WHERE project_id = 'host-s' AND role = 'target' AND legacy_tag = 'sw'",
+    ).first<{ id: string }>()
+    // The team carries them: the lane row belongs to the team, so leaving it
+    // takes the lane away, and no direct membership on the host is written.
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT role_level, team_group_id FROM project_member_lane_roles WHERE project_id = 'host-s' AND user_id = 91 AND lane = ?",
+    )
+      .bind(lane!.id)
+      .first<{ role_level: number; team_group_id: number | string | null }>()
+    expect(row?.role_level).toBe(400)
+    expect(Number(row?.team_group_id)).toBe(96)
+    const direct = await env.AQUILLA_PG.prepare(
+      "SELECT 1 AS ok FROM project_members WHERE project_id = 'host-s' AND user_id = 91",
+    ).first()
+    expect(direct).toBeNull()
+  })
 })

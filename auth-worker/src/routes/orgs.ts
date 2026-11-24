@@ -8,6 +8,11 @@ import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail, hasActiveElevation } from "../middleware/platform-admin"
 import { ROLE, type AuthUser, type Env } from "../types"
+import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import {
+  LAST_PROJECT_OWNER_MESSAGE,
+  soleDirectOwnerProjectsInOrg,
+} from "../services/last-project-owner"
 import {
   addGroupMember,
   attachGroupProject,
@@ -694,6 +699,7 @@ orgs.get("/:orgId/members-matrix", async (c) => {
         username: m.username,
         role: { level: m.roleLevel, name: ROLE_NAMES[m.roleLevel] ?? `level_${m.roleLevel}`, source: m.source },
         secondarySources: m.secondarySources,
+        createdThisProject: Number(m.userId) === Number(p.createdBy),
       })),
     })),
   })
@@ -1656,14 +1662,70 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
   }
 
   const roleBefore = await priorMembershipRole(c.env, user, { scope: "org", orgId }, targetUserId)
+  const grantedProjects = await c.env.AQUILLA_PG.prepare(
+    `SELECT p.id AS id
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+      WHERE pm.user_id = ? AND p.org_id = ?`,
+  )
+    .bind(targetUserId, orgId)
+    .all<{ id: string }>()
+  const targetUser = await c.env.AQUILLA_PG.prepare("SELECT username FROM users WHERE id = ?")
+    .bind(targetUserId)
+    .first<{ username: string }>()
+  // A direct Owner row is the project's owner. An org Owner does not substitute
+  // for one, so this removal stops while the person is the only one left.
+  const soleOwnerProjects = await soleDirectOwnerProjectsInOrg(
+    c.env.AQUILLA_PG,
+    orgId,
+    targetUserId,
+  )
+  if (soleOwnerProjects.length > 0) {
+    return c.json(
+      {
+        error: "last_owner",
+        message: LAST_PROJECT_OWNER_MESSAGE,
+        projects: soleOwnerProjects,
+      },
+      409,
+    )
+  }
+  // AQU-2355: read the projects their teams reach before the memberships go.
   const removedTeamProjects = await orgTeamProjectsOf(c.env, orgId, targetUserId)
+  // AQU-2357: a direct project grant is not a way back in after the org
+  // removes someone. Lane and scope rows go with it (AQU-1818).
   await c.env.AQUILLA_PG.batch([
     c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
     c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
+    c.env.AQUILLA_PG.prepare(
+      `DELETE FROM project_member_lane_roles
+        WHERE user_id = ? AND project_id IN (SELECT id FROM projects WHERE org_id = ?)`,
+    ).bind(targetUserId, orgId),
+    c.env.AQUILLA_PG.prepare(
+      `DELETE FROM project_member_scopes
+        WHERE user_id = ? AND project_id IN (SELECT id FROM projects WHERE org_id = ?)`,
+    ).bind(targetUserId, orgId),
+    c.env.AQUILLA_PG.prepare(
+      `DELETE FROM project_members
+        WHERE user_id = ? AND project_id IN (SELECT id FROM projects WHERE org_id = ?)`,
+    ).bind(targetUserId, orgId),
   ])
+  // AQU-2355: the batch above cleared this org's projects. This takes the
+  // team-given rows on any project those teams reach outside it.
   await removeTeamLaneAccess(c.env.AQUILLA_PG, removedTeamProjects, [targetUserId], user.id)
+  for (const project of grantedProjects.results ?? []) {
+    const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, project.id, {
+      userId: targetUserId,
+      username: targetUser?.username,
+    })
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+  }
   await auditMembershipChange(c.env, user, {
     action: "org.member.remove",
     where: { scope: "org", orgId },

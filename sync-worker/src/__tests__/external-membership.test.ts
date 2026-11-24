@@ -26,8 +26,7 @@ import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 const SECRET = 'test-secret'
 const PROJECT = 'proj-m'
 
-// Users. `creator` owns PROJECT through the creator path (no direct row), which
-// is the case the widened target cap exists for.
+// Users. `creator` holds an ordinary Owner grant on PROJECT (AQU-2357).
 const CREATOR = { id: 1, name: 'creator' }
 const CALLER = { id: 2, name: 'maintainer' }
 const TARGET = { id: 3, name: 'ana' }
@@ -60,13 +59,17 @@ async function seedUser(u: { id: number; name: string }): Promise<void> {
   )
 }
 
-/** Seed the project (owned via creator path by CREATOR) plus every user. */
+/** Seed the project, the creator's Owner grant, and every user. */
 async function seedProject(): Promise<void> {
   for (const u of [CREATOR, CALLER, TARGET, PEER, OWNER_ROW]) await seedUser(u)
   await tdb.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'P', $2)`, [
     PROJECT,
     CREATOR.id,
   ])
+  await tdb.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, $2, $3)`,
+    [PROJECT, CREATOR.id, ROLE.OWNER],
+  )
 }
 
 async function setDirectRole(userId: number, level: number): Promise<void> {
@@ -374,7 +377,7 @@ describe('membership — escalation is refused server-side', () => {
     expect(await directRole(OWNER_ROW.id)).toBe(ROLE.OWNER)
   })
 
-  it('a MAINTAINER cannot remove an OWNER who holds the project via the creator path (no direct row)', async () => {
+  it('a MAINTAINER cannot remove the creator once they hold an Owner grant', async () => {
     // The UI's cap reads the DIRECT row, which is absent here — this asserts the
     // widened effective-role cap that keeps the agent surface from no-op
     // "succeeding" against a project's actual owner.

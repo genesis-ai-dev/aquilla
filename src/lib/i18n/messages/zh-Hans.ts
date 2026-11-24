@@ -384,6 +384,8 @@ export const zh_Hans: Catalog = {
   "error.monday.sync": "无法将此项目推送至 Monday。",
   "error.airtable.connect": "无法连接 Airtable。请重试。",
   "error.airtable.disconnect": "无法断开 Airtable 连接。",
+  "error.airtable.loadBases": "无法加载你的 Airtable 数据库。",
+  "error.airtable.loadTables": "无法加载该数据库的表格和字段。",
   "error.termbase.publish": "无法将此术语库分享给组织。",
   "error.termbase.unpublish": "无法停止分享此术语库。",
   "error.termbase.listPublished": "无法加载此组织中分享的术语库。",

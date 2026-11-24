@@ -384,6 +384,8 @@ export const my: Catalog = {
   "error.monday.sync": "ဤပရောဂျက်ကို Monday သို့ မပို့နိုင်ပါ။",
   "error.airtable.connect": "Airtable ကို ချိတ်ဆက်၍ မရပါ။ ထပ်မံကြိုးစားပါ။",
   "error.airtable.disconnect": "Airtable ချိတ်ဆက်မှုကို ဖြုတ်၍ မရပါ။",
+  "error.airtable.loadBases": "သင်၏ Airtable ဒေတာဘေ့စ်များကို ဖွင့်၍ မရပါ။",
+  "error.airtable.loadTables": "ထိုဒေတာဘေ့စ်၏ ဇယားများနှင့် အကွက်များကို ဖွင့်၍ မရပါ။",
   "error.termbase.publish": "ဤဝေါဟာရဘဏ်ကို အဖွဲ့အစည်းနှင့် မမျှဝေနိုင်ပါ။",
   "error.termbase.unpublish": "ဤဝေါဟာရဘဏ် မျှဝေမှုကို မရပ်တန့်နိုင်ပါ။",
   "error.termbase.listPublished": "ဤအဖွဲ့အစည်းတွင် မျှဝေထားသော ဝေါဟာရဘဏ်များကို မဖွင့်နိုင်ပါ။",

@@ -1,6 +1,10 @@
 import * as React from "react"
 import { Toast as ToastPrimitive } from "@base-ui/react/toast"
-import type { ToastManagerAddOptions } from "@base-ui/react/toast"
+import type {
+  ToastManagerAddOptions,
+  ToastManagerPromiseOptions,
+  ToastManagerUpdateOptions,
+} from "@base-ui/react/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,6 +19,18 @@ const toastManager = ToastPrimitive.createToastManager()
 function toastTextKey(value: React.ReactNode | undefined): string | null {
   if (typeof value === "string" || typeof value === "number") return String(value)
   return null
+}
+
+/** A string message is the title. A function is resolved against the settlement. */
+function promiseMessage<Data extends object>(
+  options:
+    | string
+    | ToastManagerUpdateOptions<Data>
+    | ((value: never) => string | ToastManagerUpdateOptions<Data>),
+  value?: unknown,
+): ToastManagerUpdateOptions<Data> {
+  const resolved = typeof options === "function" ? options(value as never) : options
+  return typeof resolved === "string" ? { title: resolved } : resolved
 }
 
 /**
@@ -58,6 +74,33 @@ const toast = {
     if (id != null) quietUpdates.delete(id)
     return toastManager.close(id)
   }) as typeof toastManager.close,
+  /**
+   * One toast for a job. The manager's `promise` writes the store directly, so
+   * the result would pulse (AQU-2125 keeps a settled toast still). Reject to
+   * show `error`; a resolved value shows `success`.
+   */
+  promise<Value, Data extends object = object>(
+    promiseValue: Promise<Value>,
+    options: ToastManagerPromiseOptions<Value, Data>,
+  ): Promise<Value> {
+    const id = toast.add({
+      ...promiseMessage(options.loading),
+      type: "loading",
+      // Each job is its own toast. Title dedupe would let a second line reuse
+      // the first line's toast and settle it early.
+      id: `promise:${crypto.randomUUID()}`,
+    })
+    return promiseValue.then(
+      (result) => {
+        toast.update(id, { ...promiseMessage(options.success, result), type: "success" })
+        return result
+      },
+      (error: unknown) => {
+        toast.update(id, { ...promiseMessage(options.error, error), type: "error" })
+        return Promise.reject(error)
+      },
+    )
+  },
 }
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {

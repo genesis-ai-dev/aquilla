@@ -127,6 +127,30 @@ describe("toast pulse (AQU-2125)", () => {
     expect(pulseOf("30 lines now carry a character")).not.toHaveAttribute("data-pulsing")
   })
 
+  it("settles a rejected promise on the same toast, still", async () => {
+    render(<Toaster />)
+    let rejectPromise: (error: unknown) => void = () => {}
+    const pending = new Promise<boolean>((_resolve, reject) => {
+      rejectPromise = reject
+    })
+    act(() => {
+      void toast.promise(pending, {
+        loading: { title: "Generating a new voice for this line…" },
+        success: { title: "New voice ready" },
+        error: { title: "Couldn't generate a voice for this line" },
+      }).catch(() => {})
+    })
+    await screen.findByText("Generating a new voice for this line…")
+    await act(async () => {
+      rejectPromise(new Error("failed"))
+      await pending.catch(() => {})
+    })
+    expect(screen.getByText("Couldn't generate a voice for this line")).toBeInTheDocument()
+    expect(screen.queryByText("Generating a new voice for this line…")).toBeNull()
+    expect(document.querySelectorAll("[data-slot='toast']")).toHaveLength(1)
+    expect(pulseOf("Couldn't generate a voice for this line")).not.toHaveAttribute("data-pulsing")
+  })
+
   it("still pulses when the same toast is raised again", async () => {
     render(<Toaster />)
     act(() => {

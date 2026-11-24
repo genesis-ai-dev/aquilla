@@ -14167,12 +14167,11 @@ export function ProjectWorkspace() {
         if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateNoText") })
         return false
       }
-      if (!opts?.quiet) toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
       // AQU-2212: a pick reads in the voice picked, before the cast settings
       // catch up; otherwise the line's own cast voice. Named while it runs.
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
-      const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
+      const work = whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
         // AQU-2511: the lane's own voices and cast — the same view `voiceName`
         // above is read from, so the take comes back in the voice just named.
         project: audioProject ?? project,
@@ -14188,12 +14187,20 @@ export function ProjectWorkspace() {
         ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
         ...(opts?.delivery ? { lineDelivery: opts.delivery } : {}),
       }).catch(() => false))
-      if (!opts?.quiet) {
-        toast.add(ok
-          ? { type: "success", title: t("editor.timeline.regenerateDone") }
-          : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      }
-      return ok
+      // Make speech reports its own progress. A single line keeps one toast:
+      // "Generating…" becomes the result, including when generation fails.
+      if (opts?.quiet) return work
+      return toast.promise(
+        work.then((ok) => {
+          if (!ok) throw new Error("regenerate-failed")
+          return true
+        }),
+        {
+          loading: { title: t("editor.timeline.regenerateStarted") },
+          success: { title: t("editor.timeline.regenerateDone") },
+          error: { title: t("editor.timeline.regenerateFailed") },
+        },
+      ).then(() => true, () => false)
     },
     [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
@@ -14587,23 +14594,28 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(inspectedTake.cellId)
     const story = owner ? takeStory(owner.cell, inspectedTake.audioId, tts.laneSettings) : null
     if (!story) return
-    toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
-    void runMakeSpeech(
-      [inspectedTake.cellId],
-      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
-      makeSpeechActions,
-      () => {},
-    ).then((result) => {
-      const ok = result.get(inspectedTake.cellId)?.kind === "done"
-      toast.add(ok
-        ? { type: "success", title: t("editor.timeline.regenerateDone") }
-        : { type: "error", title: t("editor.timeline.regenerateFailed") })
-      if (!ok) return
+    const cellId = inspectedTake.cellId
+    void toast.promise(
+      runMakeSpeech(
+        [cellId],
+        { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+        makeSpeechActions,
+        () => {},
+      ).then((result) => {
+        if (result.get(cellId)?.kind !== "done") throw new Error("regenerate-failed")
+        return result
+      }),
+      {
+        loading: { title: t("editor.timeline.regenerateStarted") },
+        success: { title: t("editor.timeline.regenerateDone") },
+        error: { title: t("editor.timeline.regenerateFailed") },
+      },
+    ).then(() => {
       // Follow the line to the take that plays now, so the panel shows the new one.
-      const next = resolveTakeCellRef.current(inspectedTake.cellId)
+      const next = resolveTakeCellRef.current(cellId)
       const audioId = next ? lineTake(next.cell).audioId : undefined
-      if (audioId) setInspectedTake((cur) => (cur?.cellId === inspectedTake.cellId ? { ...cur, audioId } : cur))
-    })
+      if (audioId) setInspectedTake((cur) => (cur?.cellId === cellId ? { ...cur, audioId } : cur))
+    }, () => {})
   }, [inspectedTake, tts.laneSettings, makeSpeechActions, t])
 
   /**

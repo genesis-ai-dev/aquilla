@@ -43,9 +43,9 @@ describe("cellLines", () => {
     const { lines } = cellLines("the law\\f + \\fr 1:2 \\ft a note\\f* of Yahweh\\x + \\xo 1:2 \\xt Jer 17:8\\x*")
     expect(lines[0].runs).toEqual([
       { kind: "text", text: "the law", marks: [], roles: [] },
-      { kind: "note", noteKind: "footnote", ref: "1:2", text: "a note" },
+      { kind: "note", noteKind: "footnote", ref: "1:2", text: "a note", parts: [{ marker: "ft", text: "a note" }] },
       { kind: "text", text: " of Yahweh", marks: [], roles: [] },
-      { kind: "note", noteKind: "xref", ref: "1:2", text: "Jer 17:8" },
+      { kind: "note", noteKind: "xref", ref: "1:2", text: "Jer 17:8", parts: [{ marker: "xt", text: "Jer 17:8" }] },
     ])
   })
 
@@ -112,7 +112,7 @@ describe("blockClass", () => {
       ["qc", "poetry poetry-centered"],
       ["qr", "poetry poetry-right"],
       ["m", "para para-flush"],
-      ["mi", "para para-flush"],
+      ["mi", "para para-flush para-inset"],
       ["nb", "para para-flush"],
       ["pi", "para para-indent-1"],
       ["pi2", "para para-indent-2"],

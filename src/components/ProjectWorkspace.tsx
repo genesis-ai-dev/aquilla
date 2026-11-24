@@ -286,6 +286,7 @@ import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLi
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { plainTextHtml, runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { setTimelineSelection } from "@/lib/audio/timeline-selection"
 import type { MakeSpeechTextActions } from "@/components/voice/inspector/MakeSpeechPanel"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
@@ -1864,7 +1865,6 @@ export function ProjectWorkspace() {
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   /** Every line selected on the timeline (Shift/⌘-click adds more): what Make speech runs on. */
-  const [timelineSelectedCellIds, setTimelineSelectedCellIds] = useState<readonly string[]>([])
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
@@ -14540,16 +14540,15 @@ export function ProjectWorkspace() {
     () => (lens === "audio" && activeLaneDelivers !== "audio"
       ? {
           lines: makeSpeechLines,
-          selectedCellIds: timelineSelectedCellIds.length > 0
-            ? timelineSelectedCellIds
-            : timelineSelectedCellId ? [timelineSelectedCellId] : [],
+          // The sidebar prefers the timeline's whole selection (timeline-selection.ts).
+          selectedCellIds: timelineSelectedCellId ? [timelineSelectedCellId] : [],
           actions: makeSpeechActions,
           picked: pickedGhostIds,
           onClearPicked: clearPickedGhosts,
           onLineState: handleMakeSpeechLineState,
         }
       : undefined),
-    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, timelineSelectedCellIds, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
+    [lens, activeLaneDelivers, makeSpeechLines, timelineSelectedCellId, makeSpeechActions, pickedGhostIds, clearPickedGhosts, handleMakeSpeechLineState],
   )
 
   const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
@@ -20024,7 +20023,7 @@ export function ProjectWorkspace() {
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
-                    onSelectionChange={setTimelineSelectedCellIds}
+                    onSelectionChange={setTimelineSelection}
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.

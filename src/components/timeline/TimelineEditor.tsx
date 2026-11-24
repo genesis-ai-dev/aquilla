@@ -4319,6 +4319,8 @@ export function TimelineEditor({
   useEffect(() => {
     onSelectionChange?.(selectedIds)
   }, [selectedIds, onSelectionChange])
+  // No timeline, no selection: don't leave it behind for the next view.
+  useEffect(() => () => onSelectionChange?.([]), [onSelectionChange])
   const multiSelectedIds = useMemo(
     () => new Set(selectedIds.filter((id) => id !== selectedId)),
     [selectedIds, selectedId],

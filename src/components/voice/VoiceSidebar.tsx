@@ -22,6 +22,7 @@ import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { useElevenLabsKey } from "@/lib/audio/elevenlabs/key"
 import { voiceBlocker, voiceUsableContext } from "@/lib/audio/voice-usable"
 import { useCustomVoiceStates } from "@/hooks/useCustomVoiceStatus"
+import { useTimelineSelection } from "@/lib/audio/timeline-selection"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { upsertVoice } from "@/lib/audio/voices"
 import type { MakeSpeechActions, MakeSpeechLineState } from "@/lib/audio/make-speech"
@@ -95,9 +96,11 @@ export function VoiceSidebar({
   const [createRequest, setCreateRequest] = useState<{ mode: MakeVoiceMode; seq: number } | null>(null)
   const canEdit = canManageVoices(project.syncRole?.level ?? null, leadsManageVoices ?? project.projectLeadsManageVoices === true)
   const laneVoices = tts.voices
+  // Every line selected on the timeline; the workspace only knows the primary one.
+  const timelineSelection = useTimelineSelection()
   // Which voices can speak this lane's lines now; Make speech won't offer the rest.
   const elevenLabsKey = useElevenLabsKey()
-  const customStates = useCustomVoiceStates(view === "speech" ? laneVoices : [], { projectId, fileId, session })
+  const customStates = useCustomVoiceStates(makeSpeech ? laneVoices : [], { projectId, fileId, session })
   const blockerOf = useMemo(() => {
     const ctx = voiceUsableContext(tts.settings, {
       hasElevenLabsKey: Boolean(elevenLabsKey),
@@ -170,11 +173,12 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellIds={makeSpeech.selectedCellIds}
+        selectedCellIds={timelineSelection.length > 0 ? timelineSelection : makeSpeech.selectedCellIds}
         picked={pickedLines}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
+        blockerOf={blockerOf}
         onBack={() => { makeSpeech.onClearPicked(); setView("cast") }}
       />,
     )
@@ -210,7 +214,7 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellIds={makeSpeech.selectedCellIds}
+        selectedCellIds={timelineSelection.length > 0 ? timelineSelection : makeSpeech.selectedCellIds}
         picked={pickedLines}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}

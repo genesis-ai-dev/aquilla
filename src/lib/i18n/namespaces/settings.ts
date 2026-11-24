@@ -229,6 +229,13 @@ export const settings = defineNamespace({
 
     // ── MediaDefaultsSection ── AQU-1768
     "settings.mediaDefaults.groupLabel": "Timeline and recordings",
+    // AQU-2647: org default for who may edit source text. Projects may override.
+    "settings.sourceText.groupLabel": "Source text",
+    "settings.sourceText.label": "Who can edit source text",
+    "settings.sourceText.description":
+      "Who may change the source text in a project that does not set its own. The same people may hide a cell and split a line at quotation marks. Maintainers and owners always may.",
+    "settings.sourceText.saveFailed": "Couldn’t save who may edit source text.",
+    "settings.sourceText.blocked": "You need to be a maintainer to change this.",
     "settings.mediaDefaults.timingLockedDescription":
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
@@ -906,6 +913,22 @@ export const settings = defineNamespace({
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
           "(timing lock, track editing, who may add and remove cells, recording validation).",
+      },
+      "settings.sourceText.groupLabel": {
+        description: "Heading of the group on the organization's Project defaults page for who may edit source text.",
+      },
+      "settings.sourceText.label": {
+        description: "Row label for the dropdown in that group. The same words as the project setting.",
+      },
+      "settings.sourceText.description": {
+        description:
+          "Help text under that row. Says projects follow this unless they set their own, and that the same people may hide a cell and split a line at quotation marks.",
+      },
+      "settings.sourceText.saveFailed": {
+        description: "Error shown when saving the organization's source-text floor fails.",
+      },
+      "settings.sourceText.blocked": {
+        description: "Error shown when someone below maintainer tries to change the organization's source-text floor.",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",

@@ -148,6 +148,16 @@ describe("overlaySettings", () => {
   })
 })
 
+describe("overlaySettings — AQU-2647 source text floor", () => {
+  it("uses the project's own tier, else the organization's, and leaves inherit visible when neither is passed", () => {
+    expect(overlaySettings(makeRecord(), { sourceTextFloor: "contributor" }, undefined, {
+      sourceTextFloor: "maintainer",
+    }).sourceTextFloor).toBe("contributor")
+    expect(overlaySettings(makeRecord(), {}, undefined, { sourceTextFloor: "project_lead" }).sourceTextFloor).toBe("project_lead")
+    expect(overlaySettings(makeRecord(), {}).sourceTextFloor).toBeUndefined()
+  })
+})
+
 describe("overlaySettings — AQU-1768 org media defaults", () => {
   const media = {
     timingLocked: false,

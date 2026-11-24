@@ -1864,7 +1864,7 @@ export const editor = defineNamespace({
     "editor.row.splitNoQuoteReason": "No quotation to split at \u2014 one speaker throughout.",
     "editor.row.splitFormattedReason": "This line has formatting that can\u2019t be split automatically.",
     "editor.row.splitMarkupReason": "Markup crosses a quotation mark here, so it can\u2019t be split automatically.",
-    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
+    "editor.row.splitSourceLockedReason": "Splitting changes the source text, which you are not allowed to edit.",
     "editor.splitQuotes.title": "Split this line at its quotation marks?",
     "editor.splitQuotes.description": plural({
       one:

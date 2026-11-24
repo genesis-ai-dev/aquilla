@@ -363,6 +363,7 @@ const LEDGER: Record<string, LedgerState> = {
   "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
   "member-scopes.ts": "decides", // OPS-56 (the lane grant rows the read wall enforces, written by one PUT)
   "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
+  "org-access.ts": "decides", // AQU-2318 follow-up (pending invites on the access tree, gated like the invite lists)
   "org-settings.ts": "decides", // D7 (the org's live vendor keys)
   "orgs.ts": "decides",
   "project-members.ts": "decides", // AQU-1322's original eleven
@@ -515,8 +516,11 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // counted, because the org router carries its own upload/delete/reindex
     // behind a MAINTAINER floor that platform power clears just as the
     // project router's PROJECT_LEAD floor did; 21 of 52.
+    // 11-24: AQU-2318 follow-up adds org-access.ts as a new deciding module —
+    // pending invites on the access tree need the invite-list gates, and
+    // platform power counts there only while elevated; 22 of 53.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 18, delegates: 3, undecided: 31 })
+      .toEqual({ decides: 19, delegates: 3, undecided: 31 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

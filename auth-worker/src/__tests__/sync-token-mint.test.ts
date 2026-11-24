@@ -188,6 +188,27 @@ describe("mintSyncTokenForUser: un-elevated platform admin (AQU-2003)", () => {
     if (!res.ok) return
     expect(res.role).toEqual({ level: 400, name: "contributor", source: "override" })
   })
+
+  // [Pen test] A token must not be minted for a file that belongs to another
+  // project, even when the caller is a genuine contributor of the target
+  // project (cross-tenant file binding, AQU authz review).
+  it("refuses a fileId that belongs to a different project", async () => {
+    await seedProjectWithMember(400)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, created_by) VALUES ('p2', 'Other', 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('fOther', 'p2', 'OTHER', 'e-other')",
+    ).run()
+    const res = await mintSyncTokenForUser(env as unknown as Env, authUser(1, "alice"), "p1", "fOther")
+    expect(res).toEqual({ ok: false, reason: "no_access" })
+  })
+
+  it("still mints for a file that does not exist yet (file.create in flight)", async () => {
+    await seedProjectWithMember(400)
+    const res = await mintSyncTokenForUser(env as unknown as Env, authUser(1, "alice"), "p1", "fNew")
+    expect(res.ok).toBe(true)
+  })
 })
 
 describe("signSyncTokenWithRole", () => {

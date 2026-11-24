@@ -91,8 +91,9 @@ index returns a few cells.
   boundaries and returns nothing there.
 - Text stored decomposed while the query is typed composed, or the reverse.
   Neither path normalizes.
-- AI example retrieval and health confidence, which split text the same way
-  and are wrong for the same scripts: AQU-2727.
+- AI example retrieval and health confidence split text the same way and
+  were wrong for the same scripts (AQU-2727). They now compare character
+  n-grams: [0018](0018-retrieval-covers-text-by-character-ngrams.md).
 - Order across files in a project-wide text search is by file id, not by the
   order files appear in the sidebar.
 - The editor's own order is the anchor chain

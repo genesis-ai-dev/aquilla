@@ -328,8 +328,13 @@ export interface UpdateProjectSettingsInput {
   settings: Record<string, unknown>
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
   /**
    * AQU-1075: this write is the link copying a field into a downstream.
    * Skip the inherit prepare (it would detach the field being copied) and
@@ -383,8 +388,13 @@ export interface PatchProjectSettingsInput {
   ops: { key: string; value: unknown }[]
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
 }
 
 /**

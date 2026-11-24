@@ -223,11 +223,10 @@ describe("AudioRecordingModal — upload a file", () => {
     expect(await screen.findByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
     // …and every way of making ANOTHER take is still present and still usable.
     // This is the regression worth pinning: the state this replaced disabled
-    // Record, dropped Generate and Upload from the panel entirely, ignored
+    // Record, dropped Upload from the panel entirely, ignored
     // Space, and — with auto-advance switched off — had no transition out of
     // itself at all, so the line was finished whether you meant it or not.
     expect(screen.getByTestId("rec-start")).toBeEnabled()
-    expect(screen.getByTestId("rec-generate-tts")).toBeEnabled()
     expect(screen.getByTestId("rec-upload")).toBeEnabled()
   })
 

@@ -384,6 +384,8 @@ export const zh_Hant: Catalog = {
   "error.monday.sync": "無法將此專案推送至 Monday。",
   "error.airtable.connect": "無法連線至 Airtable。請重試。",
   "error.airtable.disconnect": "無法中斷 Airtable 連線。",
+  "error.airtable.loadBases": "無法載入你的 Airtable 資料庫。",
+  "error.airtable.loadTables": "無法載入該資料庫的資料表和欄位。",
   "error.termbase.publish": "無法將此術語庫分享給組織。",
   "error.termbase.unpublish": "無法停止分享此術語庫。",
   "error.termbase.listPublished": "無法載入此組織中分享的術語庫。",

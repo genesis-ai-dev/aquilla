@@ -26,6 +26,8 @@ import {
   targetCellDeleteEventId,
   targetCommitEventId,
   validateEventId,
+  revalidateEventId,
+  REVALIDATION_IDS_SINCE,
 } from "./ids"
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
@@ -525,6 +527,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     // source create (establishing the AD-9 source pin); then each prior commit.
     let parent = srcCreateId
     let headEdit: EditHistory | undefined
+    let headIdx = -1
     for (const { e, i } of valueEdits) {
       const html = editValueHtml(e)
       const targetHtml = canonicalTargetWithProof(proof, s, t, html)
@@ -541,6 +544,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       })
       parent = id
       headEdit = e
+      headIdx = i
     }
 
     // Validations: only those on the HEAD value-edit "stick" — the projection
@@ -574,8 +578,29 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
         }
         continue
       }
+      // A validator who signed off an earlier edit of this cell and now signs
+      // off the head has made a second, separate validation, and it needs an
+      // id of its own: the first one's id is already in the log, so reusing it
+      // makes the ingest drop this one as a replay and the cell reads
+      // unvalidated for good. Tombstoned earlier entries count too, because the
+      // first id may have been ingested while that entry was still live.
+      // Sign-offs older than REVALIDATION_IDS_SINCE keep the id they have
+      // always had (see ids.ts for why history is not re-derived).
+      const returning =
+        username !== "" &&
+        typeof v.creationTimestamp === "number" &&
+        v.creationTimestamp >= REVALIDATION_IDS_SINCE &&
+        valueEdits.some(
+          ({ e, i }) =>
+            i !== headIdx &&
+            (e.validatedBy ?? []).some(
+              (earlier) => typeof earlier.username === "string" && earlier.username.trim() === username,
+            ),
+        )
       events.push({
-        id: validateEventId(projectId, fileId, cellId, validatorKey),
+        id: returning
+          ? revalidateEventId(projectId, fileId, cellId, validatorKey, headIdx)
+          : validateEventId(projectId, fileId, cellId, validatorKey),
         kind: "cell.validate",
         fileId,
         cellId,

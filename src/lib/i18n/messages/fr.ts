@@ -376,6 +376,8 @@ export const fr: Catalog = {
   "error.monday.sync": "Impossible de pousser ce projet vers Monday.",
   "error.airtable.connect": "Impossible de connecter Airtable. Réessayez.",
   "error.airtable.disconnect": "Impossible de déconnecter Airtable.",
+  "error.airtable.loadBases": "Impossible de charger vos bases Airtable.",
+  "error.airtable.loadTables": "Impossible de charger les tables et les champs de cette base.",
   "error.termbase.publish": "Impossible de partager cette base terminologique avec l'organisation.",
   "error.termbase.unpublish": "Impossible d'arrêter le partage de cette base terminologique.",
   "error.termbase.listPublished": "Impossible de charger les bases terminologiques partagées dans cette organisation.",

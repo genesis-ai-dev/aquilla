@@ -203,6 +203,7 @@
     "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
+    "@aiden0z/pptx-renderer": "1.4.0",
     "@aquilla/idml-roundtrip": "workspace:2.0.3",
     "@base-ui/react": "^1.9.0",
     "@dnd-kit/core": "6.3.1",
@@ -239,6 +240,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.4.0",
+    "docx-preview": "0.4.1",
     "dompurify": "^3.4.17",
     "hls.js": "^1.7.4",
     "idb": "^8.0.4",

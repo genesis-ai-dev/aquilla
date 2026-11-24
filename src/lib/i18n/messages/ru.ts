@@ -385,6 +385,8 @@ export const ru: Catalog = {
   "error.monday.sync": "Не удалось отправить этот проект в Monday.",
   "error.airtable.connect": "Не удалось подключить Airtable. Попробуйте ещё раз.",
   "error.airtable.disconnect": "Не удалось отключить Airtable.",
+  "error.airtable.loadBases": "Не удалось загрузить ваши базы Airtable.",
+  "error.airtable.loadTables": "Не удалось загрузить таблицы и поля этой базы.",
   "error.termbase.publish": "Не удалось поделиться этой базой терминов с организацией.",
   "error.termbase.unpublish": "Не удалось прекратить общий доступ к этой базе терминов.",
   "error.termbase.listPublished": "Не удалось загрузить базы терминов, доступные в этой организации.",

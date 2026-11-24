@@ -58,6 +58,7 @@ import { transcribe } from "./transcribe"
 import { recordingsUpload } from "./recordingsUpload"
 import { paratextBridge } from "./paratextBridge"
 import { bibleDocument } from "./bibleDocument"
+import { documentPreview } from "./documentPreview"
 
 export const NAMESPACES = [
   common,
@@ -102,4 +103,5 @@ export const NAMESPACES = [
   recordingsUpload,
   paratextBridge,
   bibleDocument,
+  documentPreview,
 ] as const

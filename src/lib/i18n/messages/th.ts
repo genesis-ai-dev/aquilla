@@ -384,6 +384,8 @@ export const th: Catalog = {
   "error.monday.sync": "ไม่สามารถส่งโปรเจกต์นี้ไปยัง Monday ได้",
   "error.airtable.connect": "เชื่อมต่อ Airtable ไม่สำเร็จ โปรดลองอีกครั้ง",
   "error.airtable.disconnect": "ยกเลิกการเชื่อมต่อ Airtable ไม่สำเร็จ",
+  "error.airtable.loadBases": "โหลดฐานข้อมูล Airtable ของคุณไม่สำเร็จ",
+  "error.airtable.loadTables": "โหลดตารางและฟิลด์ของฐานข้อมูลนั้นไม่สำเร็จ",
   "error.termbase.publish": "ไม่สามารถแชร์คลังคำศัพท์นี้กับองค์กรได้",
   "error.termbase.unpublish": "ไม่สามารถหยุดแชร์คลังคำศัพท์นี้ได้",
   "error.termbase.listPublished": "ไม่สามารถโหลดคลังคำศัพท์ที่แชร์ในองค์กรนี้ได้",

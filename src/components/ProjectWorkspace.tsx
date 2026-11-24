@@ -679,6 +679,7 @@ import { listBatchBooks } from "@/lib/review/batch-books"
 import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
 import { listChapterLabels } from "@/lib/export/chapter-scope"
 import { loadBookCells } from "@/lib/review/load-book-cells"
+import { openFlagsInBook } from "@/lib/review/open-flags-in-book"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
@@ -13553,6 +13554,11 @@ export function ProjectWorkspace() {
     void (async () => {
       try {
         const byFile = new Map<string, Awaited<ReturnType<typeof loadBookCells>>>()
+        // Unresolved checks are collected per book after the dialog has closed,
+        // while this loading toast is still up. The open book already has its
+        // flags. With the box on, no book is checked.
+        const leaveFlaggedOut = request === "validate" && !choices.includeFlaggedCells
+        const flagged = leaveFlaggedOut ? new Set<string>() : null
         for (const fileId of choices.fileIds) {
           toast.update(readingId, {
             type: "loading",
@@ -13561,6 +13567,9 @@ export function ProjectWorkspace() {
           let cells
           if (fileId === activeFileId) {
             cells = getActiveCells().filter((cell) => cell.fileId === fileId)
+            if (flagged) {
+              for (const id of flaggedCellIds()) flagged.add(id)
+            }
           } else {
             const mint = await getTokenForProjectFile(project.id, fileId)
             if (!mint.token) throw new Error(names.get(fileId) ?? fileId)
@@ -13572,6 +13581,21 @@ export function ProjectWorkspace() {
               username: currentUsername,
               requiredValidations: validationCount,
             })
+            if (flagged) {
+              const found = await openFlagsInBook({
+                cells,
+                username: currentUsername,
+                myScopes,
+                activeLane,
+                allowSelfValidation: project.allowSelfValidation,
+                includeReadyCells: choices.includeReadyCells,
+                includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
+                projectRules: rules,
+                rulesForCell: libraryLint.rulesForCell,
+                libraryMayLint: libraryLint.signature !== "",
+              })
+              for (const id of found) flagged.add(id)
+            }
           }
           byFile.set(fileId, cells)
         }
@@ -13609,7 +13633,9 @@ export function ProjectWorkspace() {
               activeLane,
             }),
             hasTarget: true,
-            hasOpenFlags: (cellId: string) => flaggedCellIds().has(cellId),
+            ...(flagged
+              ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) }
+              : {}),
             includeReadyCells: choices.includeReadyCells,
             includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
             includeFlaggedCells: choices.includeFlaggedCells,
@@ -13636,7 +13662,7 @@ export function ProjectWorkspace() {
         })
       }
     })()
-  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, actionCtx, actionArgs, t])
+  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, rules, libraryLint, actionCtx, actionArgs, t])
   const booksMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
     const level = project.syncRole?.level ?? null

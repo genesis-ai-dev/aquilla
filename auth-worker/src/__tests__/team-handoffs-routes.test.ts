@@ -122,10 +122,11 @@ beforeEach(async () => {
     )
       .bind(id)
       .run()
+    // AQU-2357: creation writes the lead's Owner row. created_by grants nothing.
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 2, 400), (?, 3, 100)",
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 1, 700), (?, 2, 400), (?, 3, 100)",
     )
-      .bind(id, id)
+      .bind(id, id, id)
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO files (id, project_id, name, kind, event_id) VALUES (?, ?, 'Mark', 'usfm', ?)",

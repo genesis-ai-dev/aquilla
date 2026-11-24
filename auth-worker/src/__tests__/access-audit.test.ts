@@ -53,8 +53,10 @@ async function seed() {
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES
+       ('pa', 1, 700, 1),
        ('pa', 2, 300, 1),
        ('pa', 3, 200, 1),
+       ('pb', 2, 700, 2),
        ('pz', 2, 700, 1)`,
   ).run()
   await env.AQUILLA_PG.prepare(

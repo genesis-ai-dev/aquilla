@@ -96,9 +96,12 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await alice.keyboard.press("Escape")
 
   // An untranslated cell is typed as a preview, outside the style runs.
-  await ws.editIdmlCellFromBlankArea(0, "Chapitre", " Un", "Chapitre Un")
+  // AQU-758 sanitizes whitespace at entry there too: the deliberately doubled
+  // space typed before "Un" collapses to one.
+  await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un", "Chapitre Un")
   // One run: the preview goes into it without a model call, and the cell
-  // opens the protected slot editor from then on.
+  // opens the protected slot editor from then on. The run holds exactly the
+  // sanitized sentence.
   await ws.passIdmlPreviewToStyleSegments(0, "Chapitre Un")
   // The first click on a populated cell happens on the cheap read surface.
   // Preserve its exact slot offset across the ProseMirror remount (offset 9
@@ -106,9 +109,9 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.editIdmlCellAtTextOffset(0, 9, "X", "Chapitre XUn")
   // Re-enter the populated IDML target through its read view. The activation
   // fallback must append at the real ProseMirror slot end, not jump to the
-  // beginning as the browser-recorded AQU-740 regression did. AQU-758
-  // sanitizes slot whitespace at entry: the doubled space typed here reaches
-  // the exported story as one (asserted on the artifact below).
+  // beginning as the browser-recorded AQU-740 regression did. The run editor
+  // applies AQU-758 as well: the doubled space typed here reaches the exported
+  // story as one (asserted on the artifact below).
   await ws.editCell(0, "  — suite")
   await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(

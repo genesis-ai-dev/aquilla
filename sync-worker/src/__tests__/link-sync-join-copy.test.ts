@@ -20,10 +20,18 @@
 // the refusal reads target rows, so a lane minted on the fly would hide a write
 // that lands in the wrong lane.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('partyserver', () => ({
+  getServerByName: vi.fn().mockResolvedValue({
+    fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+  }),
+}))
 import { mirrorSync, deterministicDownstreamFileId, type RevisionManifestReader } from '../events/link-sync'
 import { handleRevisionsRequest } from '../events/revisions-route'
 import { handleStaleSourceRequest } from '../events/stale-source-route'
+import { handleEventsWriteRequest } from '../events/route'
+import { handleFilesReadRequest } from '../events/files-read-route'
 import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
 import type { StoredRevisionManifest } from '../events/file-revision-apply'
 import type { AquillaStatement } from '../../../db/shim/postgres'
@@ -339,6 +347,57 @@ describe('AQU-2549 part 1: joining a copy that already arrived into the project\
       await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
       expect((await sourceOf(t, LANG, COPY_GD)).map((c) => c.value)).toContain('So Abram departed, as the LORD had told him.')
       expect((await sourceOf(t, LANG, OWN_GD)).map((c) => c.value)).not.toContain('So Abram departed, as the LORD had told him.')
+    } finally {
+      await t.close()
+    }
+  })
+  // WHY: restoring the joined copy from Recently deleted brought back a second
+  // file that no longer followed the source and could not be joined again
+  // (evidence pass 4h). The restore is refused with the file it was joined
+  // into, and Recently deleted names it; any other deleted file restores.
+  it('refuses restoring the joined copy, naming the file it was joined into', async () => {
+    const { t, reader } = await copyArrived()
+    try {
+      await recordJoin(t)
+      await mirrorSync(t.db, LANG, { readRevisionManifest: reader })
+      const OTHER = '018f6b2e-1c2a-7a2e-9a0e-5c0c7a1d2b09'
+      await emit(t, LANG, 'file.create', { fileId: OTHER, parentId: null, payload: { name: 'Notes.usfm' } })
+      await emit(t, LANG, 'file.delete', { fileId: OTHER, parentId: null, payload: {} })
+
+      const restore = async (fileId: string, id: string) => {
+        const token = await makeTestToken(SECRET, { projectId: LANG, fileId, role: 500, username: 'lead' } as never)
+        const res = await handleEventsWriteRequest(
+          new Request('https://worker/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              events: [{ id, schemaVersion: 1, kind: 'file.restore', projectId: LANG, fileId, parentId: null, author: 'lead', payload: {}, clientTs: 5000 }],
+            }),
+          }),
+          { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET } as never,
+        )
+        return (await res!.json()) as { accepted: Array<{ id: string }>; rejected: Array<{ id: string; status: number; reason: string }> }
+      }
+
+      const listToken = await makeTestToken(SECRET, { projectId: LANG, fileId: null, role: 500 } as never)
+      const trash = await handleFilesReadRequest(
+        new Request(`https://x/api/v1/projects/${LANG}/files?trash=1`, { headers: { Authorization: `Bearer ${listToken}` } }),
+        { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET } as never,
+      )
+      const { files } = (await trash!.json()) as { files: Array<{ fileId: string; joinedInto?: { fileId: string; name: string } }> }
+      expect(files.find((f) => f.fileId === COPY_GD)?.joinedInto).toEqual({ fileId: OWN_GD, name: NAME })
+      expect(files.find((f) => f.fileId === OTHER)?.joinedInto).toBeUndefined()
+
+      const refused = await restore(COPY_GD, 'evt-2549-restore-copy')
+      expect(refused.accepted).toEqual([])
+      expect(refused.rejected).toHaveLength(1)
+      expect(refused.rejected[0].status).toBe(409)
+      expect(refused.rejected[0].reason).toContain(`joined into "${NAME}"`)
+      expect((await liveFiles(t)).filter((f) => f === 'own' || f === 'copy')).toEqual(['own'])
+
+      const other = await restore(OTHER, 'evt-2549-restore-other')
+      expect(other.rejected).toEqual([])
+      expect(await liveFiles(t)).toContain(OTHER)
     } finally {
       await t.close()
     }

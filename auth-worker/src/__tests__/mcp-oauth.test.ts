@@ -81,6 +81,10 @@ async function seed() {
   await seedUser(1, "alice"); await seedUser(2, "bob")
   await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Alpha', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by, org_id) VALUES ('p', 'Project', 1, 10)").run()
+  // AQU-2357: creation writes this Owner row. created_by grants alice nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p', 1, 700, 1)",
+  ).run()
   return jwtFor("alice")
 }
 

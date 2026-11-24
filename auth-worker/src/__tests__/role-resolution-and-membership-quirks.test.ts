@@ -187,6 +187,11 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
 describe("AQU-285: membership endpoint target-level caps (was: F-B6 privilege holes)", () => {
   async function seedForMembershipTests() {
     await seedBase()
+    // AQU-2357: creation writes the caller's Owner row. An org Owner does not
+    // count as a direct Owner, so demoting the other Owner needs this row.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 1, 700, 1)",
+    ).run()
     // project_lead_user (user 2) — project_lead(500)
     await seedUser(5, "peer_lead")
     await env.AQUILLA_PG.prepare(

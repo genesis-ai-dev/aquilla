@@ -28,6 +28,10 @@ function testEnv(overrides: Record<string, unknown> = {}): typeof env {
 async function seedMember(): Promise<string> {
   await seedUser(1, "lead")
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, 'Smart', 1)").bind(PROJECT_ID).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT_ID).run()
   for (const [id, role, pos] of [["lane-src", "source", 0], ["lane-default", "target", 1]] as const) {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position) VALUES (?, ?, ?, ?, NULL, '', ?)",

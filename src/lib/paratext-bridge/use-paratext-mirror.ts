@@ -8,6 +8,9 @@
 // `target.cell.commit` events, and anything Aquilla also touched waits for the
 // user's mine-or-theirs choice. Last-seen advances only once every unit of a
 // change has been acted on.
+//
+// The other copies of the project on this computer (Paratext 10 beside
+// Paratext 9, say) are watched and read too, never written: copy-inbound.ts.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { emitTargetCellCommits, type CellCommitInput } from "../sync/events-emit"
@@ -20,6 +23,9 @@ import type { ClassifiedUnit } from "./classify"
 import { bridgeStore, type MirrorLink } from "./store"
 import { bridgeStateId } from "./project"
 import { reconcileBook, writeBookEdits, type BookLocation } from "./book-sync"
+import { isSettled, readCopy, settleCopy } from "./copy-inbound"
+import { otherCopies } from "./copies"
+import { toBridgeProject } from "./use-paratext-discovery"
 import { diffCellsAgainstUnits, unitsByRef, type MirrorCell } from "./mirror-map"
 import { onParatextFileChanged, paratextTauri } from "./tauri"
 import { isTauriRuntime } from "../offline/is-tauri"
@@ -46,6 +52,9 @@ export interface MirrorState {
   /** Cells whose text differs from what the Paratext file holds: what "Write
    *  to Paratext" would send now. */
   pending: number
+  /** Verses another copy of the project changed that were not brought in,
+   *  because the cell holds a different text. Send/Receive settles them. */
+  heldElsewhere: number
   error: string | null
 }
 
@@ -65,7 +74,7 @@ interface CommitTarget extends MirrorCell {
   sourceEventId: string | null
 }
 
-const IDLE: MirrorState = { link: null, book: null, busy: null, conflicts: [], refusals: [], onHold: false, unmapped: 0, pending: 0, error: null }
+const IDLE: MirrorState = { link: null, book: null, busy: null, conflicts: [], refusals: [], onHold: false, unmapped: 0, pending: 0, heldElsewhere: 0, error: null }
 
 async function loadCells(host: MirrorHost): Promise<CommitTarget[]> {
   if (!host.projectId || !host.fileId) return []
@@ -102,6 +111,15 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
    *  once the last one is resolved. */
   const pendingUnitsRef = useRef<UnitSet | null>(null)
   const lastBlobRef = useRef<string | null>(null)
+  /** What this hook last committed per cell, and on which parent. The cells
+   *  are read from the server, so until a commit arrives there a second read
+   *  of the same change would commit it again. */
+  const sentRef = useRef(new Map<string, { value: string; parentId: string | null }>())
+  /** Inbound reads run one at a time: two copies often change together. */
+  const inboundRef = useRef<Promise<void>>(Promise.resolve())
+  const heldByCopyRef = useRef(new Map<string, number>())
+  /** The other folders holding this project that have the mirrored book. */
+  const [copies, setCopies] = useState<BookLocation[]>([])
 
   const location = useCallback((): BookLocation | null => {
     const link = linkRef.current
@@ -138,6 +156,9 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       if (!cell) continue
       const value = u.theirs.text.replace(/[ \t\r\n]+$/, "")
       if ((cell.value ?? "") === value) continue
+      const sent = sentRef.current.get(cell.cellId)
+      if (sent && sent.value === value && sent.parentId === cell.parentId) continue
+      sentRef.current.set(cell.cellId, { value, parentId: cell.parentId })
       inputs.push({
         projectId: h.projectId, fileId: h.fileId, cellId: cell.cellId,
         parentId: cell.parentId, sourceEventId: cell.sourceEventId,
@@ -188,18 +209,64 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       const r = await reconcileBook(loc, { pending })
       lastBlobRef.current = r.units.blobHash
       await commitTheirs(r.theirs, cells)
-      if (r.conflicts.length === 0) {
+      const conflicts = r.conflicts.filter((c) => !isSettled(c))
+      if (conflicts.length === 0) {
         await bridgeStore.setLastSeen(loc.stateId, r.units.book, r.units)
         pendingUnitsRef.current = null
       } else {
         pendingUnitsRef.current = r.units
       }
-      setState((s) => ({ ...s, busy: null, conflicts: r.conflicts, onHold: r.onHold }))
+      setState((s) => ({ ...s, busy: null, conflicts, onHold: r.onHold }))
       void refreshPending()
     } catch (e) {
       setState((s) => ({ ...s, busy: null, error: e instanceof Error ? e.message : String(e) }))
     }
   }, [location, commitTheirs, refreshPending])
+
+  /** Inbound from a copy Aquilla does not write to: land what is Paratext's
+   *  alone, count the rest. Quiet on failure; the live copy reports errors. */
+  const syncCopy = useCallback(async (loc: BookLocation) => {
+    try {
+      const cells = await loadCells(hostRef.current)
+      const r = await readCopy(loc, cells)
+      await commitTheirs(r.land.map((u) => ({ unitId: u.id, case: "theirs-only" as const, theirs: u })), cells)
+      await settleCopy(loc, r)
+      heldByCopyRef.current.set(loc.stateId, r.held.length)
+      const heldElsewhere = [...heldByCopyRef.current.values()].reduce((a, b) => a + b, 0)
+      setState((s) => (s.heldElsewhere === heldElsewhere ? s : { ...s, heldElsewhere }))
+      if (r.land.length > 0) void refreshPending()
+    } catch {
+      /* an unreadable copy must not stop the mirror */
+    }
+  }, [commitTheirs, refreshPending])
+
+  const inbound = useCallback((run: () => Promise<void>) => {
+    inboundRef.current = inboundRef.current.then(run, run)
+  }, [])
+
+  // Which other folders hold this project and this book.
+  const linkGuid = state.link?.projectGuid
+  const linkPath = state.link?.projectPath
+  const bookCode = state.book?.code
+  useEffect(() => {
+    heldByCopyRef.current = new Map()
+    setCopies([])
+    if (!supported || !linkGuid || !linkPath || !bookCode) return
+    let cancelled = false
+    void paratextTauri.discover().then((d) => {
+      if (cancelled) return
+      const projects = d.projects.map(toBridgeProject).filter((p) => p !== null)
+      const live = projects.find((p) => p.path === linkPath)
+      if (!live) return
+      const found: BookLocation[] = []
+      for (const p of otherCopies(live, projects)) {
+        const book = p.utf8 ? p.books.find((b) => b.code === bookCode) : undefined
+        if (book) found.push({ projectPath: p.path, fileName: book.fileName, stateId: p.stateId })
+      }
+      setCopies(found)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [supported, linkGuid, linkPath, bookCode])
 
   // A local edit entering or leaving the outbox changes what is unwritten.
   useEffect(() => {
@@ -219,15 +286,35 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
     if (!supported || !link || !book) return
     let unlisten: (() => void) | null = null
     let cancelled = false
-    void sync()
+    inbound(sync)
     void paratextTauri.watch(link.projectPath).catch(() => {})
     void onParatextFileChanged((e) => {
       if (e.projectPath !== link.projectPath || e.fileName !== book.fileName) return
       if (e.blobHash === lastBlobRef.current) return
-      void sync()
+      inbound(sync)
     }).then((fn) => { if (cancelled) fn(); else unlisten = fn })
     return () => { cancelled = true; unlisten?.(); void paratextTauri.unwatch(link.projectPath).catch(() => {}) }
-  }, [supported, state.link, state.book, sync])
+  }, [supported, state.link, state.book, sync, inbound])
+
+  // The same for every other copy: catch up, then follow its folder.
+  useEffect(() => {
+    if (!supported || copies.length === 0) return
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    for (const loc of copies) {
+      inbound(() => syncCopy(loc))
+      void paratextTauri.watch(loc.projectPath).catch(() => {})
+    }
+    void onParatextFileChanged((e) => {
+      const loc = copies.find((c) => c.projectPath === e.projectPath && c.fileName === e.fileName)
+      if (loc) inbound(() => syncCopy(loc))
+    }).then((fn) => { if (cancelled) fn(); else unlisten = fn })
+    return () => {
+      cancelled = true
+      unlisten?.()
+      for (const loc of copies) void paratextTauri.unwatch(loc.projectPath).catch(() => {})
+    }
+  }, [supported, copies, syncCopy, inbound])
 
   const write = useCallback(async (opts?: { allowMarkerChanges?: Set<string> }): Promise<MirrorWriteResult> => {
     const loc = location()

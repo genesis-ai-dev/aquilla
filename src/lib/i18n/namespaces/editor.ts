@@ -895,11 +895,11 @@ export const editor = defineNamespace({
       one: "{count} unvalidated cell",
       other: "{count} unvalidated cells",
     }),
-    "editor.batchFile.readyHelp": "Saved text you have not signed off.",
+    "editor.batchFile.readyHelp": "Signs off translated cells you have not validated yet.",
     "editor.batchFile.includeUnvalidated": "Include unvalidated cells",
     "editor.batchFile.includeUnvalidatedHelp": plural({
-      one: "{count} saved cell you have not signed off.",
-      other: "{count} saved cells you have not signed off.",
+      one: "{count} cell you have not signed off.",
+      other: "{count} cells you have not signed off.",
     }),
     "editor.batchFile.includeUnresolved": "Include cells with unresolved checks",
     "editor.batchFile.includeUnresolvedHelp":
@@ -909,8 +909,8 @@ export const editor = defineNamespace({
       other: "Show {count} flagged cells",
     }),
     "editor.batchFile.aiDrafts": plural({
-      one: "{count} AI draft nobody has checked",
-      other: "{count} AI drafts nobody has checked",
+      one: "{count} unvalidated AI draft",
+      other: "{count} unvalidated AI drafts",
     }),
     "editor.batchFile.aiDraftsHelp":
       "Leave this off to review each one yourself. Turn it on to sign them off together, under your name.",
@@ -969,13 +969,17 @@ export const editor = defineNamespace({
     "editor.batchBooks.draftTitle": "Draft books",
     "editor.batchBooks.description":
       "Each book you check is included in full. To limit one book to a chapter, open that book and use its file menu.",
-    "editor.batchBooks.aiDrafts": "Include AI drafts nobody has checked",
+    "editor.batchBooks.validateDescription":
+      "Each book you check is included in full. Each sign-off is in your name, and a cell you have already signed off is left as it is. To limit one book to a chapter, open that book and use its file menu.",
+    "editor.batchBooks.aiDrafts": "Include AI drafts",
+    "editor.batchBooks.aiDraftsHelp":
+      "Signs off AI drafts that have not been edited or validated yet.",
     "editor.batchBooks.flaggedHelp":
-      "These cells are flagged based on your project checks and rules. Only the book you have open has that list — other books are signed off without it.",
+      "Signs off cells flagged by your project checks and rules.",
     "editor.batchBooks.empty": "Include empty cells",
     "editor.batchBooks.refresh": "Include untouched AI drafts",
     "editor.batchBooks.refreshHelp":
-      "Replaces only AI drafts nobody has edited. Cells a person translated are left alone.",
+      "Replaces unedited AI drafts. Cells a person translated are left alone.",
     "editor.batchBooks.confirmValidate": "Validate books",
     "editor.batchBooks.confirmDraft": "Draft books",
     "editor.batchBooks.menuValidate": "Validate books…",
@@ -7635,7 +7639,7 @@ export const editor = defineNamespace({
       "editor.batchFile.readyHelp": {
         description:
           "Help under Include unvalidated cells in the books batch-validate dialog. "
-          + "The books are not loaded yet, so this line has no count.",
+          + "Describes what ticking the box does without quoting a count.",
       },
       "editor.batchFile.includeUnvalidated": {
         description:
@@ -7670,8 +7674,9 @@ export const editor = defineNamespace({
       },
       "editor.batchFile.aiDrafts": {
         description:
-          "Checkbox label for AI drafts nobody has validated yet. Off unless "
-          + "a reviewer or project lead turns it on.",
+          "Count of AI drafts that are still unvalidated. In the file dialog "
+          + "this is the checkbox label. In the books dialog it is the line under "
+          + "Include AI drafts. Off unless a reviewer or project lead turns it on.",
         placeholders: {
           count: "How many untouched AI drafts are in the open file. Selects the plural form.",
         },
@@ -7806,24 +7811,32 @@ export const editor = defineNamespace({
       "editor.batchBooks.description": {
         description:
           "Explains that each checked book is taken in full, and that a chapter "
-          + "is chosen from the open book's file menu instead.",
+          + "is chosen from the open book's file menu instead. The draft dialog uses this.",
+      },
+      "editor.batchBooks.validateDescription": {
+        description:
+          "Intro for the validate-books dialog. Same book-and-chapter note as "
+          + "editor.batchBooks.description, plus that each sign-off is in the "
+          + "reader's name and a cell they have already signed off is skipped.",
       },
       "editor.batchBooks.aiDrafts": {
         description:
-          "Checkbox in the books batch-validate dialog for AI drafts nobody has "
-          + "checked. Off unless a reviewer or project lead turns it on. The line "
-          + "under it counts those drafts across the books that are checked, when "
-          + "every checked book knows the number.",
+          "Checkbox in the books batch-validate dialog for unvalidated AI drafts. "
+          + "Off unless a reviewer or project lead turns it on.",
+      },
+      "editor.batchBooks.aiDraftsHelp": {
+        description:
+          "Help under Include AI drafts in the books batch-validate dialog when "
+          + "the reader may turn it on. Describes what the box does without a count.",
       },
       "editor.batchBooks.flaggedHelp": {
         description:
-          "Help under Include cells with unresolved checks. The flags come from "
-          + "the project's checks and rules, and that list is known only for the "
-          + "book the reader has open.",
+          "Help under Include cells with unresolved checks in the books dialog. "
+          + "Says the box signs off cells flagged by the project's checks and rules.",
       },
       "editor.batchBooks.empty": {
         description:
-          "Checkbox in the draft-books dialog for cells with source text and no translation. Checked by default. The line under it counts empty cells in the books that are checked.",
+          "Checkbox in the draft-books dialog for cells with source text and no translation. Checked by default.",
       },
       "editor.batchBooks.refresh": {
         description:
@@ -7831,10 +7844,8 @@ export const editor = defineNamespace({
       },
       "editor.batchBooks.refreshHelp": {
         description:
-          "Help under that checkbox in the draft-books dialog when the draft "
-          + "count is not known yet. When it is, the line instead counts untouched "
-          + "AI drafts in the books that are checked. The run replaces only drafts "
-          + "nobody has edited, and leaves a person's translation alone.",
+          "Help under Include untouched AI drafts in the draft-books dialog. "
+          + "Explains that only unedited AI drafts are replaced and human translations stay as they are.",
       },
       "editor.batchBooks.confirmValidate": {
         description: "Confirm button that starts validation of the checked books.",

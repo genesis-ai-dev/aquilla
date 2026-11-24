@@ -65,8 +65,8 @@ describe("BatchFileModal — validation", () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal()
     expect(screen.getByRole("checkbox", { name: "Include unvalidated cells" })).toBeChecked()
-    expect(screen.getByText("2 saved cells you have not signed off.")).toBeInTheDocument()
-    const ai = screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ })
+    expect(screen.getByText("2 cells you have not signed off.")).toBeInTheDocument()
+    const ai = screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ })
     expect(ai).not.toBeChecked()
     expect(screen.getByText("Validate 2 cells?")).toBeInTheDocument()
     expect(screen.queryByText(/can be batch-validated/)).toBeNull()
@@ -84,7 +84,7 @@ describe("BatchFileModal — validation", () => {
   it("sends the AI drafts when a reviewer turns that option on", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal()
-    await user.click(screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ }))
+    await user.click(screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ }))
     await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith({
       includeReadyCells: true,
@@ -97,7 +97,7 @@ describe("BatchFileModal — validation", () => {
   it("keeps a contributor from bulk-validating untouched AI drafts", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal({ canIncludeUntouchedAi: false })
-    const ai = screen.getByRole("checkbox", { name: /1 AI draft nobody has checked/ })
+    const ai = screen.getByRole("checkbox", { name: /1 unvalidated AI draft/ })
     expect(ai).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByText(/one at a time/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Validate text cells" }))
@@ -288,11 +288,11 @@ describe("BatchFileModal — chapter of the open book", () => {
     })
     expect(screen.getByText("Genesis")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("GEN 2")
-    expect(screen.getByText("2 saved cells you have not signed off.")).toBeInTheDocument()
+    expect(screen.getByText("2 cells you have not signed off.")).toBeInTheDocument()
     await user.click(screen.getByRole("combobox", { name: "Chapter" }))
     await user.click(await screen.findByRole("option", { name: "Whole book" }))
     expect(screen.getByRole("combobox", { name: "Chapter" })).toHaveTextContent("Whole book")
-    expect(screen.getByText("3 saved cells you have not signed off.")).toBeInTheDocument()
+    expect(screen.getByText("3 cells you have not signed off.")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Validate text cells" }))
     expect(onConfirmValidate).toHaveBeenCalledWith(expect.objectContaining({ chapter: WHOLE_BOOK }))
   })

@@ -48,6 +48,19 @@ describe("toast secondary action (AQU-1486)", () => {
   })
 })
 
+describe("toast stack", () => {
+  it("keeps every open toast's close button available", async () => {
+    render(<Toaster />)
+    act(() => {
+      toast.add({ timeout: 0, title: "First notice" })
+      toast.add({ timeout: 0, title: "Second notice" })
+    })
+    await screen.findByText("First notice")
+    await screen.findByText("Second notice")
+    expect(screen.getAllByRole("button", { name: "Close toast" })).toHaveLength(2)
+  })
+})
+
 describe("toast button row (AQU-2175)", () => {
   const rowOf = (el: HTMLElement) => el.closest("[data-slot='toast-actions']")
 

@@ -88,9 +88,12 @@ function Toast({ className, ...props }: ToastPrimitive.Root.Props) {
       className={cn(
         // Positioning + stack only — visual chrome lives on the pulse layer so
         // scale can transition without fighting this stacking `transform`.
+        // Each toast keeps its own height and sits fully above the one below.
+        // Hover still sets data-expanded; the same transform applies, so the
+        // pile never collapses into a peek.
         "group/toast pointer-events-auto absolute right-0 bottom-0 z-[calc(1000-var(--toast-index))] w-full origin-bottom outline-none select-none",
-        "[--gap:0.75rem] [--height:var(--toast-frontmost-height,var(--toast-height))] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))] [--peek:0.75rem] [--scale:calc(max(0,1-(var(--toast-index)*0.1)))] [--shrink:calc(1-var(--scale))]",
-        "h-(--height) [transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--peek))-(var(--shrink)*var(--height))))_scale(var(--scale))] [transition:transform_500ms_cubic-bezier(0.22,1,0.36,1),opacity_500ms,height_150ms]",
+        "[--gap:0.75rem] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))]",
+        "h-(--toast-height) [transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))] [transition:transform_500ms_cubic-bezier(0.22,1,0.36,1),opacity_500ms,height_150ms]",
         "after:absolute after:top-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-['']",
         "data-expanded:h-(--toast-height) data-expanded:[transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))]",
         "data-limited:opacity-0 data-starting-style:[transform:translateY(150%)]",
@@ -330,7 +333,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4",
         className
       )}
       {...props}
@@ -402,6 +405,8 @@ function ToastClose({
     <ToastPrimitive.Close
       data-slot="toast-close"
       data-pressing={pressing ? "" : undefined}
+      // The stack stays open, so every toast's close button stays available.
+      aria-hidden={false}
       aria-label={t("common.closeToastAriaLabel")}
       render={render}
       className={cn(

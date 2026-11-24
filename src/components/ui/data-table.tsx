@@ -384,6 +384,8 @@ interface DataTableProps<TData, TValue> {
    * present, the body is a LegendList so large directories stay cheap to paint.
    */
   fillHeight?: boolean
+  /** Use one scrollport for sticky columns as well as sticky headers. */
+  stickyColumns?: boolean
   /**
    * Keep every row in the DOM as one plain HTML table, with no row windowing.
    *
@@ -434,6 +436,7 @@ function DataTable<TData, TValue>({
   className,
   tableClassName,
   fillHeight = false,
+  stickyColumns = false,
   plainRows = false,
   footer,
   hasMore = false,
@@ -481,7 +484,7 @@ function DataTable<TData, TValue>({
   const showEmpty = !loading && !hasRows && emptyStateNode
   const statusLabel = loadingLabel ?? t("common.loadingSpinner")
   const visibleColumnCount = table.getVisibleLeafColumns().length
-  const virtualize = fillHeight && hasRows && !loading && !showEmpty
+  const virtualize = fillHeight && !stickyColumns && hasRows && !loading && !showEmpty
   const columnWidthHints = React.useMemo(
     () =>
       table.getVisibleLeafColumns().map((col) =>
@@ -558,7 +561,7 @@ function DataTable<TData, TValue>({
     getRowKey: (index) => tableRows[index]?.id ?? index,
     estimateRowPx: dense ? 36 : 44,
     enabled:
-      !fillHeight && !plainRows && !renderSubRow && hasRows && !loading && !showEmpty,
+      (!fillHeight || stickyColumns) && !plainRows && !renderSubRow && hasRows && !loading && !showEmpty,
     bodyRef,
   })
 
@@ -703,7 +706,7 @@ function DataTable<TData, TValue>({
             footer={loadMoreFooter}
           />
         ) : (
-          <Table className={tableClassName}>
+          <Table className={tableClassName} data-sorting={sorting.map((item) => `${item.id}:${item.desc ? "desc" : "asc"}`).join(",")}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id} className="hover:bg-transparent">

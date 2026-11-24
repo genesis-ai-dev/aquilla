@@ -828,3 +828,68 @@ describe("stageEvents — batched cell reads (AQU-1670)", () => {
     expect(result.proposal!.events).toHaveLength(2)
   })
 })
+
+describe("stageEvents — source text floor (AQU-2647)", () => {
+  async function setFloor(tier?: "contributor" | "project_lead" | "maintainer") {
+    await env.AQUILLA_PG.prepare(`DELETE FROM project_settings WHERE project_id = ?`).bind(PROJECT).run()
+    await env.AQUILLA_PG
+      .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          cellEditingFloor: "contributor",
+          ...(tier ? { sourceTextFloor: tier } : {}),
+        }),
+      )
+      .run()
+  }
+
+  async function stage(roleLevel: number, userId?: number) {
+    // Hide is not an agent event kind. The events perimeter refuses
+    // source.cell.visibility.set on this same floor.
+    return stageEvents(
+      env.AQUILLA_PG,
+      [{
+        kind: "source.cell.commit",
+        fileId: FILE,
+        cellId: CELL,
+        payload: { value: "In the beginning God" },
+      }],
+      ctx({ roleLevel, ...(userId != null ? { userId } : {}) }),
+    )
+  }
+
+  function refused(result: StageOutcome) {
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("role too low to edit source text")
+  }
+
+  it("defaults to Maintainer, and a grant on one language lane meets that rung", async () => {
+    refused(await stage(500))
+    refused(await stage(400))
+
+    await setFloor("project_lead")
+    expect((await stage(500)).proposal).not.toBeNull()
+    refused(await stage(400))
+
+    await setFloor("contributor")
+    expect((await stage(400)).proposal).not.toBeNull()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('lane-es', ?, 'target', 'Spanish', 'es', 1)`,
+    ).bind(PROJECT).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+       VALUES (?, 42, 'lane-es', 500), (?, 43, 'lane-es', 400)`,
+    ).bind(PROJECT, PROJECT).run()
+
+    await setFloor("maintainer")
+    refused(await stage(100, 42))
+    await setFloor("project_lead")
+    expect((await stage(100, 42)).proposal).not.toBeNull()
+    refused(await stage(100, 43))
+    await setFloor("contributor")
+    expect((await stage(100, 43)).proposal).not.toBeNull()
+  })
+})

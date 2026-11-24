@@ -49,20 +49,21 @@ const REQUIRED_ROLE: Record<string, number> = {
   // mirror would refuse to enqueue it, so the button would do nothing at all
   // and never even produce the 403 that explains why.
   "source.cell.create": ROLE.COMMENTER,
-  "source.cell.commit": ROLE.PROJECT_LEAD,
+  // AQU-2647: Contributor is the lowest rung sourceTextFloor can admit, in
+  // lock-step with the server. The tier in force (default Maintainer) is what
+  // actually decides; this mirror only stops a rank the setting can never allow.
+  "source.cell.commit": ROLE.CONTRIBUTOR,
   "source.cell.delete": ROLE.COMMENTER,
   "source.cell.reorder": ROLE.COMMENTER,
-  // AQU-1422: PROJECT_LEAD, in lock-step with the server. Hiding a cell takes it
-  // out of translation and out of every export for EVERYONE, in every lane — the
-  // same class of decision as source.cell.commit, and not the low-floored
-  // create/delete/reorder trio (those sit at COMMENTER because re-import, DCS
-  // repair and diarization all emit them through a user's own outbox).
+  // AQU-1422 / AQU-2647: hiding a cell shares sourceTextFloor with a source
+  // edit. The static floor matches source.cell.commit (Contributor). It is not
+  // the create/delete/reorder trio at Commenter.
   //
   // THE MIRROR MATTERS HERE PARTICULARLY: this module fails OPEN on an unknown
-  // kind, so a missing row would let a contributor's outbox enqueue a hide that
-  // the server then 403s — the row would vanish optimistically and come back on
+  // kind, so a missing row would let a viewer's outbox enqueue a hide that the
+  // server then 403s — the row would vanish optimistically and come back on
   // reload, which reads as data loss rather than as a refusal.
-  "source.cell.visibility.set": ROLE.PROJECT_LEAD,
+  "source.cell.visibility.set": ROLE.CONTRIBUTOR,
   // In lock-step with the server (sync-worker role-policy.ts): rewriting a
   // cell's markup under its translation is a lead's call.
   "source.cell.metadata.patch": ROLE.PROJECT_LEAD,

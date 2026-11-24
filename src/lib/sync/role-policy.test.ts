@@ -30,7 +30,7 @@ describe("role-policy (client mirror)", () => {
     // future server change forces this mirror to update too.
     expect(requiredRoleFor("cell.waive")).toBe(ROLE.CONTRIBUTOR)
     expect(requiredRoleFor("cell.validate")).toBe(ROLE.REVIEWER)
-    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.CONTRIBUTOR)
     expect(requiredRoleFor("comment.create")).toBe(ROLE.COMMENTER)
   })
 
@@ -51,8 +51,11 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("source.cell.create")).toBe(ROLE.COMMENTER)
     expect(requiredRoleFor("source.cell.delete")).toBe(ROLE.COMMENTER)
     expect(requiredRoleFor("source.cell.reorder")).toBe(ROLE.COMMENTER)
-    // Not a blanket drop: committing a source edit is still a lead's act.
-    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.PROJECT_LEAD)
+    // AQU-2647: a source edit's static floor is Contributor, the lowest the
+    // source-text setting can admit. The setting itself (default Maintainer)
+    // is what refuses a lower rank.
+    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.CONTRIBUTOR)
+    expect(requiredRoleFor("source.cell.visibility.set")).toBe(ROLE.CONTRIBUTOR)
   })
 
   it("lets the client enqueue a commenter's insert instead of blocking it locally", () => {

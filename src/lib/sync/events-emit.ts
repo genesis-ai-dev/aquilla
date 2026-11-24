@@ -31,6 +31,7 @@ import {
   isValidMilestoneId,
   normalizeMilestoneName,
 } from "../../../db/shared/file-milestones"
+import { DEFAULT_SOURCE_TEXT_FLOOR } from "../../../db/shared/source-text-floor"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 // AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
@@ -266,24 +267,48 @@ function withResolvedTargetLane<K extends OutboxEventKind>(
  * static bar alone, so a stale bridge can only make the client more
  * permissive, never wrongly closed.
  */
-function refuseEventBelowFloor(kind: string, roleLevel: number | null): void {
-  if (roleLevel == null) return
-  if (!canPerform(kind, roleLevel)) {
-    throw new InsufficientRoleError(kind, roleLevel, requiredRoleFor(kind) ?? 0)
+const SOURCE_TEXT_EDIT_KINDS = new Set(["source.cell.commit", "source.cell.visibility.set"])
+
+/**
+ * AQU-2647: a lane grant counts for a source edit. The project role is what
+ * every other kind is judged on, and a grant must not lower it.
+ */
+function authorityForKind(kind: string, roleLevel: number | null): number | null {
+  if (roleLevel == null) return null
+  if (!SOURCE_TEXT_EDIT_KINDS.has(kind)) return roleLevel
+  const elevated = getCqrsOutboxBridge()?.sourceTextAuthority
+  return typeof elevated === "number" ? Math.max(roleLevel, elevated) : roleLevel
+}
+
+function refuseEventBelowFloor(kind: string, roleLevel: number | null, sourceTextExempt = false): void {
+  const authority = authorityForKind(kind, roleLevel)
+  if (authority == null) return
+  if (!canPerform(kind, authority)) {
+    throw new InsufficientRoleError(kind, authority, requiredRoleFor(kind) ?? 0)
+  }
+  // An extension data file is not the source text translators work from.
+  // The server exempts that commit; the client must not refuse it first.
+  if (sourceTextExempt) return
+  if (SOURCE_TEXT_EDIT_KINDS.has(kind)) {
+    const configured = getCqrsOutboxBridge()?.sourceTextFloor
+    const floor = typeof configured === "number" ? configured : DEFAULT_SOURCE_TEXT_FLOOR
+    if (authority < floor) throw new InsufficientRoleError(kind, authority, floor)
+    return
   }
   if (kind !== "file.create") return
   const importMinRole = getCqrsOutboxBridge()?.importMinRole
   if (importMinRole == null) return
-  if (!canImportSourceFiles(roleLevel, importMinRole)) {
-    throw new InsufficientRoleError(kind, roleLevel, importDenialFloor(importMinRole))
+  if (!canImportSourceFiles(roleLevel!, importMinRole)) {
+    throw new InsufficientRoleError(kind, roleLevel!, importDenialFloor(importMinRole))
   }
 }
 
 export async function enqueueEvent<K extends OutboxEventKind>(
   rawInput: BuildEventInput<K>,
+  opts?: { sourceTextExempt?: boolean },
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }> {
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
-  refuseEventBelowFloor(rawInput.kind, roleLevel)
+  refuseEventBelowFloor(rawInput.kind, roleLevel, opts?.sourceTextExempt === true)
   const input = withResolvedTargetLane(rawInput)
   const event = buildRawEvent(input)
   // The legacy outbox accepts CqrsRawEvent; our OutboxRawEvent is a superset
@@ -2004,6 +2029,12 @@ export interface SourceCellCommitInput {
   clientTs?: number
   /** Aquilla Tools: provenance when an extension makes the edit. */
   toolOrigin?: OutboxPayloadFor<"source.cell.commit">["tool_origin"]
+  /**
+   * AQU-2647: an extension data-file commit is not the project's source text.
+   * The server exempts it from the source-text floor; this keeps the outbox
+   * from refusing it first.
+   */
+  sourceTextExempt?: boolean
 }
 
 /**
@@ -2034,7 +2065,7 @@ export async function emitSourceCellCommit(input: SourceCellCommitInput): Promis
     },
     ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,
-  })
+  }, input.sourceTextExempt ? { sourceTextExempt: true } : undefined)
   return eventId
 }
 

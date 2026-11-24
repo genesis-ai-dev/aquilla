@@ -26,7 +26,7 @@ interface EventsResponse {
   rejected: Array<{ id: string; status: number; reason: string }>
 }
 
-async function postEvents(db: AquillaDb, events: RawEvent[], role = 500): Promise<EventsResponse> {
+async function postEvents(db: AquillaDb, events: RawEvent[], role = 600): Promise<EventsResponse> {
   const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role })
   const req = new Request("https://worker/events", {
     method: "POST",

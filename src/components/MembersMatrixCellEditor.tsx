@@ -322,6 +322,11 @@ function CellEditorCell({
             )}
           </div>
         </div>
+        {cell.createdThisProject && (
+          <div className="truncate text-[10px] font-normal text-muted-foreground">
+            {t("org.membersPage.createdThisProject")}
+          </div>
+        )}
       </PopoverTrigger>
       {dialog}
       {footer}

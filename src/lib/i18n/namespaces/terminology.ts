@@ -571,15 +571,6 @@ export const terminology = defineNamespace({
       other: "Apply {count} changes",
     }),
 
-    // ── TerminologyPage.tsx: TermbaseImportDialog ────────────────────────────
-    "terminology.importDialog.title": "Import term base",
-    "terminology.importDialog.parsing": "Parsing…",
-    "terminology.importDialog.dropZoneText": "Drop a .{format} file here, or",
-    "terminology.importDialog.chooseFileButton": "Choose {format} file",
-    "terminology.importDialog.csvColumnsHint":
-      "Columns: source_lemma · target_lemma · target_status · definition (optional)",
-    "terminology.importDialog.tbxDialectsHint": "TBX-Basic and TBX-Min dialects supported",
-
     // ── GlossaryEditor.tsx inside the workspace shell — what is left of the
     // retired TerminologyPage.tsx's own chrome ──────────────────────────────
     "terminology.loadingLabel": "Loading terminology",
@@ -1263,42 +1254,6 @@ export const terminology = defineNamespace({
           "Primary button applying the checked rename suggestions; {count} is how many " +
           "are currently checked.",
         placeholders: { count: "Number of rename suggestions currently checked." },
-      },
-      "terminology.importDialog.title": {
-        description:
-          "Title of the dialog for bulk-importing terms into the project's term base " +
-          "from a CSV or TBX file.",
-      },
-      "terminology.importDialog.parsing": {
-        description: "Transient status shown in the import dialog's drop zone while the dropped file is being parsed.",
-      },
-      "terminology.importDialog.dropZoneText": {
-        description:
-          "Instruction in the import dialog's drop zone, naming the currently-selected " +
-          "file format tab's extension. Continues into a 'Choose {format} file' button " +
-          "immediately after it, so keep this able to lead into a button label.",
-        placeholders: {
-          format: "The active tab's file extension without the dot, lowercase (e.g. 'csv', 'tbx').",
-        },
-      },
-      "terminology.importDialog.chooseFileButton": {
-        description: "Button opening the native file picker, naming the expected format.",
-        placeholders: {
-          format: "The active tab's file extension, uppercase (e.g. 'CSV', 'TBX').",
-        },
-      },
-      "terminology.importDialog.csvColumnsHint": {
-        description:
-          "Small caption under the CSV import tab's drop zone, listing the expected " +
-          "column names. The column names themselves (source_lemma, target_lemma, " +
-          "target_status, definition) are the CSV format's own field identifiers — keep " +
-          "them verbatim, do not translate them, only the surrounding words.",
-      },
-      "terminology.importDialog.tbxDialectsHint": {
-        description:
-          "Small caption under the TBX import tab's drop zone. 'TBX-Basic' and " +
-          "'TBX-Min' are the names of specific TermBase eXchange format dialects — " +
-          "proper names, keep verbatim.",
       },
       "terminology.loadingLabel": {
         description:

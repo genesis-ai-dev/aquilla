@@ -106,7 +106,7 @@ export async function buildOrgAccess(
   const projectNode = (p: { id: string; name: string }): AccessTreeNode => ({
     scope: { type: "project", id: p.id, name: p.name },
     children: [],
-    // Direct = the row lives on the project (direct or creator), not via a team.
+    // Direct = the row lives on the project, not via a team.
     directGrantees: onePerPerson(visible
       .filter((g) => g.scopeType === "project" && g.scopeId === p.id && g.source !== "team")
       .map(grantee)),

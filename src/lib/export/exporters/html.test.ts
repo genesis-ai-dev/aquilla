@@ -28,6 +28,10 @@ function makeCell(overrides: Partial<CellData>): CellData {
 
 const NOW = new Date("2026-10-26T15:04:05Z")
 
+/** A note marker carries its note's text as hover text; these assertions are
+ *  about the marker's link and label, so they read the page without it. */
+const untitled = (html: string) => html.replace(/ title="[^"]*"/g, "")
+
 const GENESIS: CellData[] = [
   makeCell({ id: "h1", group: "GEN 1", type: "heading", original: "The creation", translated: "La création" }),
   makeCell({ id: "v1", group: "GEN 1:1", original: "In the beginning", translated: "Au commencement" }),
@@ -324,15 +328,15 @@ describe("buildHtmlPage — layout (AQU-2184)", () => {
     const chapter1 = html.slice(html.indexOf('id="ch-PSA-1"'), html.indexOf('id="ch-PSA-2"'))
     const chapter2 = html.slice(html.indexOf('id="ch-PSA-2"'))
 
-    expect(chapter1).toContain('the law<sup class="note-marker footnote"><a id="ch-PSA-1-n1-ref" href="#ch-PSA-1-n1">1</a></sup>')
-    expect(chapter1).toContain('<a id="ch-PSA-1-n2-ref" href="#ch-PSA-1-n2">2</a>')
+    expect(untitled(chapter1)).toContain('the law<sup class="note-marker footnote"><a id="ch-PSA-1-n1-ref" href="#ch-PSA-1-n1">1</a></sup>')
+    expect(untitled(chapter1)).toContain('<a id="ch-PSA-1-n2-ref" href="#ch-PSA-1-n2">2</a>')
     expect(chapter1).toContain('<li class="note footnote" id="ch-PSA-1-n1">')
     expect(chapter1).toContain('<a class="note-back" href="#ch-PSA-1-n1-ref" aria-label="Back to text">1</a>')
     expect(chapter1).toContain('<span class="note-ref">1:2</span> <span class="note-text">of Yahweh</span>')
     // The notes list closes the chapter it belongs to — it is inside that section.
     expect(chapter1.indexOf("is his delight")).toBeLessThan(chapter1.indexOf('<aside class="notes"'))
     // Chapter two numbers from 1 again, and holds only its own note.
-    expect(chapter2).toContain('<a id="ch-PSA-2-n1-ref" href="#ch-PSA-2-n1">1</a>')
+    expect(untitled(chapter2)).toContain('<a id="ch-PSA-2-n1-ref" href="#ch-PSA-2-n1">1</a>')
     expect(chapter2).toContain("chapter two&#39;s first")
     expect(chapter2).not.toContain("of Yahweh")
   })
@@ -349,7 +353,7 @@ describe("buildHtmlPage — layout (AQU-2184)", () => {
     ]
     const html = buildHtmlPage(cells, { now: NOW })
 
-    expect(html).toContain('<sup class="note-marker xref"><a id="ch-PSA-1-x1-ref" href="#ch-PSA-1-x1">a</a></sup>')
+    expect(untitled(html)).toContain('<sup class="note-marker xref"><a id="ch-PSA-1-x1-ref" href="#ch-PSA-1-x1">a</a></sup>')
     expect(html).toContain('<li class="note xref" id="ch-PSA-1-x1">')
     expect(html).toContain('<span class="note-text">Jer 17:8</span>')
     // Same list, different label series and class: a reader can tell them apart.
@@ -437,7 +441,7 @@ describe("buildHtmlPage — layout (AQU-2184)", () => {
 
     expect(html).not.toContain("dropped note")
     expect(html).toContain('<span class="note-text">kept note</span>')
-    expect(html).toContain('<a id="ch-GEN-1-n1-ref" href="#ch-GEN-1-n1">1</a>')
+    expect(untitled(html)).toContain('<a id="ch-GEN-1-n1-ref" href="#ch-GEN-1-n1">1</a>')
     expect(html).not.toContain("n2")
   })
 
@@ -555,7 +559,7 @@ describe("buildHtmlPage — a USFM book through the real import path", () => {
     expect(html).toContain('<p class="poetry poetry-2">nor stand on the path of sinners,</p>')
     expect(html).toContain('<p class="poetry poetry-1"><sup class="verse-number">2</sup> but his delight is in the law')
     // Verses 3 and 4 share the \\p paragraph; verse 5 opens a new one.
-    expect(html).toContain(
+    expect(untitled(html)).toContain(
       '<sup class="verse-number">3</sup> He will be like a tree<sup class="note-marker xref">' +
         '<a id="ch-PSA-1-x1-ref" href="#ch-PSA-1-x1">a</a></sup> planted by the water, ' +
         '<sup class="verse-number">4</sup> that produces its fruit in its season.',

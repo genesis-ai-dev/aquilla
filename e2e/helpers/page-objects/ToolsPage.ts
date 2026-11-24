@@ -1,8 +1,5 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
 
-/** The first-party editor extension's name (manifest name, also its "Edit with" label). */
-export const DEFAULT_EDITOR = "Aquilla editor (Smart Extension)"
-
 /** The native (built-in) editor's "Edit with" label. The effective default is
  *  marked with a "Your default" badge in the menu; "(default)" in a label
  *  passed to switchEditor is ignored (back-compat). */
@@ -88,31 +85,12 @@ export class ToolsPage {
     await this.page.getByTestId("edit-with-set-default").click()
   }
 
-  /** Restore the product default for this browser context — the first-party
-   *  editor extension (the e2e build pins it off). Call before navigating. */
-  async optIntoDefaultEditorExtension(): Promise<void> {
-    await this.page.context().addInitScript(() => {
-      localStorage.setItem("aquilla.extensions.defaultEditor", "on")
-    })
-  }
-
-  /** Open a file straight into whichever editor is the default, waiting for
-   *  the first-party extension editor's frame to render its rows. */
-  async openFileInDefaultEditor(projectId: string, fileId: string, firstRef: string): Promise<FrameLocator> {
-    await this.page.goto(`/project/${projectId}/editor/file/${fileId}`)
-    const frame = this.toolFrame(DEFAULT_EDITOR)
-    await expect(this.translationBox(frame, firstRef)).toBeVisible({ timeout: 30_000 })
-    return frame
-  }
-
-  /** The target surface of one row in the default editor extension (the
-   *  read view, which becomes the editing surface when activated — like the
-   *  built-in's TranslatedEditor). */
+  /** The target surface of one row in an SDK-based editor extension. */
   translationBox(frame: FrameLocator, ref: string): Locator {
     return frame.locator(`.cell[data-ref="${ref}"] [data-target-read-view]`)
   }
 
-  /** One row (source, target, badges) of the default editor extension. */
+  /** One row (source, target, badges) of an SDK-based editor extension. */
   editorRow(frame: FrameLocator, ref: string): Locator {
     return frame.locator(`.cell[data-ref="${ref}"]`)
   }

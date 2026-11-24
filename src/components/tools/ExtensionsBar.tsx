@@ -17,6 +17,7 @@ import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, Comma
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ExtensionEditorChoice } from "./ExtensionEditor"
 import { ExtensionEditorFallbackNotice, ExtensionEditorSwitcher } from "./ExtensionEditor"
+import { ExtensionColumnToggles } from "./NativeEditorContributions"
 import { useToolsMount } from "./ToolsMountContext"
 
 export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
@@ -80,6 +81,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
           {action.label}
         </Button>
       ))}
+      <ExtensionColumnToggles />
       <Button size="xs" variant="ghost" className="ms-auto" onClick={() => ctx.setPaletteOpen(true)}>
         <Blocks className="size-3.5" aria-hidden />
         {t("extensions.palette.button")}

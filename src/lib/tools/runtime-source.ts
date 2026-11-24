@@ -248,12 +248,23 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       retime: function (fileId, cellId, startSec, endSec) { return call("source.retime", { fileId: fileId, cellId: cellId, startSec: Number(startSec), endSec: Number(endSec) }); },
     },
     // apiRev 3: the host editor's configuration and workspace controls.
+    // apiRev 8: native editor integration (activeCell, reveal, annotate, clearAnnotations).
     editor: {
       config: function (fileId) { return call("editor.config", { fileId: fileId }); },
       setLane: function (fileId, lane) { return call("editor.setLane", { fileId: fileId, lane: String(lane || "") }); },
       setLens: function (lens) { return call("editor.setLens", { lens: lens }); },
       visible: function (fileId, cellIds) { return call("editor.visible", { fileId: fileId, cellIds: cellIds }); },
       openSettings: function (section) { return call("editor.openSettings", { section: section }); },
+      activeCell: function () { return call("editor.activeCell"); },
+      reveal: function (fileId, cellId, opts) { return call("editor.reveal", { fileId: fileId, cellId: cellId, focus: !(opts && opts.focus === false) }); },
+      annotate: function (fileId, spec) {
+        var s = spec && typeof spec === "object" ? spec : {};
+        return call("editor.annotate", { fileId: fileId, layer: s.layer || "default", cells: s.cells || {} });
+      },
+      clearAnnotations: function (opts) {
+        var o = opts && typeof opts === "object" ? opts : {};
+        return call("editor.clearAnnotations", { fileId: o.fileId || null, layer: o.layer || null });
+      },
     },
     backtranslation: {
       list: function (fileId) { return call("backtranslation.list", { fileId: fileId }); },
@@ -323,6 +334,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       hostKey: function (k) {
         return call("ui.hostKey", { key: String(k && k.key || ""), mod: !!(k && k.mod), shift: !!(k && k.shift), alt: !!(k && k.alt) });
       },
+      // apiRev 8: open this extension's side panel in the left dock.
+      openPanel: function () { return call("ui.openPanel"); },
     },
     // apiRev 6: read a declared site through the host's proxy (scope read:web).
     web: {

@@ -61,7 +61,10 @@ export interface HeadlessJob {
   onProgress?: HeadlessJobHooks["onProgress"]
   onPrompt?: HeadlessJobHooks["onPrompt"]
   actionId?: string
-  trigger?: "click" | "open"
+  trigger?: "click" | "open" | "cell" | "selection"
+  /** apiRev 8: cell / source selection context when triggered from EditorTable. */
+  cell?: { fileId: string; cellId: string; ref?: string | null }
+  selection?: { fileId: string; cellId: string; side: "source" | "target"; text: string }
   exportId?: string
   fileIds?: string[]
   lane?: string
@@ -201,7 +204,16 @@ function HeadlessRun({
         project,
         user: { username: session.username, roleLevel },
         mount: job.kind,
-        ...(job.kind === "action" ? { action: { id: job.actionId ?? "", trigger: job.trigger ?? "click" } } : {}),
+        ...(job.kind === "action"
+          ? {
+              action: {
+                id: job.actionId ?? "",
+                trigger: job.trigger ?? "click",
+                ...(job.cell ? { cell: job.cell } : {}),
+                ...(job.selection ? { selection: job.selection } : {}),
+              },
+            }
+          : {}),
         ...(job.kind === "export" ? { export: { id: job.exportId ?? "", fileIds: job.fileIds ?? [], lane: job.lane ?? "" } } : {}),
         ...(job.kind === "import"
           ? { import: { importerId: job.importerId ?? "", phase: job.phase ?? "run", options: job.options ?? {}, ...(job.fileIds ? { fileIds: job.fileIds } : {}), ...(job.field ? { field: job.field } : {}) } }

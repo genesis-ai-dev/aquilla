@@ -1,4 +1,4 @@
--- Migration 0207: who may edit source text (AQU-2647).
+-- Migration 0208: who may edit source text (AQU-2647).
 --
 -- WHY. Editing source text, hiding a cell, and splitting a line at quotes
 -- share one floor. It used to be hard-coded to Project Lead. The default is

@@ -369,7 +369,7 @@ CREATE TABLE project_settings (
     -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
     -- The events route reads this column instead of the settings blob.
     wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
-    -- AQU-2647 (0207): who may edit source text, hide a cell, and split a line
+    -- AQU-2647 (0208): who may edit source text, hide a cell, and split a line
     -- at quotes. Absent reads as maintainer (db/shared/source-text-floor.ts).
     -- The events route reads this column instead of the settings blob.
     wp_source_text_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'sourceTextFloor') STORED,

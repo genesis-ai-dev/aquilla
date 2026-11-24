@@ -43,7 +43,7 @@ describe("source text floor (AQU-2647)", () => {
     const migration = readFileSync(
       path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
-        "../postgres/migrations/0207_source_text_floor.sql",
+        "../postgres/migrations/0208_source_text_floor.sql",
       ),
       "utf8",
     )

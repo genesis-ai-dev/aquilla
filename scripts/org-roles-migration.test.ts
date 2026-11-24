@@ -104,7 +104,7 @@ async function liftGrantRows(): Promise<Array<LiftGrantRecord & { createdAt: str
     orgLevel: Number(r.org_level),
     teamGroupIds: (r.team_group_ids as unknown[]).map(Number),
     createdProjectGrant: r.created_project_grant as boolean,
-    laneIds: [...(r.lane_ids as string[])].sort(),
+    lanes: [...(r.lanes as LiftGrantRecord["lanes"])].sort((a, b) => (a.lane < b.lane ? -1 : a.lane > b.lane ? 1 : 0)),
     createdAt: new Date(r.created_at as string).toISOString(),
   }))
 }
@@ -149,17 +149,19 @@ describe("AQU-2352 dry run and migration 0210", () => {
     ])
     expect(plan.inviteChanges.map((i) => i.token)).toEqual(["t-contrib"])
 
-    // The record AQU-2354 removes these grants by: exactly the lifted pairs,
-    // each with all of their teams on that project and the lane rows 0210 changed.
+    // The record AQU-2354 undoes these grants by: exactly the lifted pairs,
+    // each with all of their teams on that project and every lane row 0210
+    // changed, as it was before (the pre-update values, not 1a's).
     const recorded = await liftGrantRows()
     const rk = (r: { projectId: string; userId: number }) => `${r.projectId}:${r.userId}`
     expect(sorted(recorded.map(({ createdAt: _, ...r }) => r), rk)).toEqual(sorted(liftGrantRecords(plan), rk))
-    expect(recorded.map((r) => [r.projectId, r.userId, r.orgLevel, r.teamGroupIds, r.createdProjectGrant, r.laneIds])).toEqual([
+    expect(recorded.map((r) => [r.projectId, r.userId, r.orgLevel, r.teamGroupIds, r.createdProjectGrant, r.lanes])).toEqual([
       ["p-algerian", 2, 500, [11], true, []],
-      ["p-algerian", 3, 500, [11, 13], true, ["alg"]],
+      // Team 11's Contributor row: now a direct Project Lead row.
+      ["p-algerian", 3, 500, [11, 13], true, [{ lane: "alg", prior_level: 400, prior_team_group_id: 11 }]],
       ["p-old", 2, 500, [10], true, []],
       // `pat` was already a direct Project Lead row: 0210 left it alone.
-      ["p-pattani", 2, 500, [10], true, ["pat-old"]],
+      ["p-pattani", 2, 500, [10], true, [{ lane: "pat-old", prior_level: 400, prior_team_group_id: null }]],
       ["p-test", 4, 400, [12], true, []],
     ])
 
@@ -169,6 +171,16 @@ describe("AQU-2352 dry run and migration 0210", () => {
     expect(sorted(again.laneGrants, lg)).toEqual(sorted(expected.laneGrants, lg))
     expect(planOrgRoles(again, await loadOrgRoleExtras(query)).orgRowChanges).toEqual([])
     expect(await liftGrantRows()).toEqual(recorded)
+
+    // The record is enough to undo step 1a exactly: every lane row comes back as it was.
+    await db.exec(`
+      UPDATE project_member_lane_roles r
+         SET role_level = x.prior_level, team_group_id = x.prior_team_group_id
+        FROM org_role_lift_grants g,
+             jsonb_to_recordset(g.lanes) AS x(lane TEXT, prior_level INTEGER, prior_team_group_id BIGINT)
+       WHERE r.project_id = g.project_id AND r.user_id = g.user_id AND r.lane = x.lane
+    `)
+    expect(sorted((await loadRawAccessTables(query)).laneGrants, lg)).toEqual(sorted(raw.laneGrants, lg))
   })
 
   it("loses nobody a lane, a lane role or a project role, and lists what the lift did", async () => {
@@ -186,7 +198,10 @@ describe("AQU-2352 dry run and migration 0210", () => {
     })
     // A team's Contributor row under an org Project Lead: the lane role would drop.
     expect(pair(3, "p-algerian").lanes).toEqual([
-      { laneId: "alg", archived: false, grantBefore: 400, laneRoleBefore: 500, laneRoleWithoutFix: 400, grantAfter: 500, becomesDirect: true },
+      {
+        laneId: "alg", archived: false, grantBefore: 400, laneRoleBefore: 500, laneRoleWithoutFix: 400, grantAfter: 500,
+        teamGroupIdBefore: 11, becomesDirect: true,
+      },
     ])
     // testGroup: org Contributor over a Viewer team. The lane grant already says Contributor.
     expect(pair(4, "p-test")).toMatchObject({ roleBefore: 400, roleWithoutFix: 100 })

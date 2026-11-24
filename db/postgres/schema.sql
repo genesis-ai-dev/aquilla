@@ -1729,17 +1729,20 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 -- The temporary grants migration 0210 (AQU-2352) wrote when it removed the
 -- AQU-1274 org "lift": one row per lifted (project, person), with the org
 -- level, their teams on the project, whether 0210 inserted the project_members
--- row, and the target-lane rows it raised or made direct. AQU-2354 moves that
--- access onto their team, deletes exactly these grants and then drops this
--- table; AQU-2718 must keep it current when it turns the project rows into
--- lane rows. Migrations only: no app_runtime grant, no RLS policy.
+-- row, and each target-lane row it raised or made direct as it was before
+-- (`lanes`: [{lane, prior_level, prior_team_group_id}]). AQU-2354 moves that
+-- access onto their team, deletes the project rows 0210 created, restores
+-- each lane row to its prior state where the team path does not cover it, and
+-- then drops this table; AQU-2718 must keep it current when it turns the
+-- project rows into lane rows. Migrations only: no app_runtime grant, no RLS
+-- policy.
 CREATE TABLE IF NOT EXISTS org_role_lift_grants (
     project_id            TEXT        NOT NULL,
     user_id               BIGINT      NOT NULL,
     org_level             INTEGER     NOT NULL,
     team_group_ids        BIGINT[],
     created_project_grant BOOLEAN     NOT NULL,
-    lane_ids              TEXT[],
+    lanes                 JSONB       NOT NULL DEFAULT '[]'::jsonb,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, user_id)
 );

@@ -93,8 +93,8 @@ export function buildOrgRolesReport(
   )
   out.push(
     `- **The migration records ${records.length} lifted pair(s) in \`org_role_lift_grants\`** (archived included): the project, the person, the org level, their teams on the project, ` +
-      `whether it created the project grant, and the lane rows it raised (${records.reduce((n, r) => n + r.laneIds.length, 0)}). ` +
-      "These grants are temporary: AQU-2354 moves this access onto their teams and deletes exactly the recorded grants.",
+      `whether it created the project grant, and each lane row it raised with its level and team before (${records.reduce((n, r) => n + r.lanes.length, 0)}). ` +
+      "These grants are temporary: AQU-2354 moves this access onto their teams, deletes the project grants and puts each lane row back as it was where the team does not cover it.",
   )
   out.push(
     `- **Loses the org Members page: ${plan.membersPageLosses.length}** — ${plan.membersPageLosses.map((l) => `${who(l.userId)} (${org(l.orgId)}, ${roleLabel(l.orgLevel)} vs floor ${roleLabel(l.floor)})`).join(", ") || "nobody"}. Intended (AQU-2352).`,

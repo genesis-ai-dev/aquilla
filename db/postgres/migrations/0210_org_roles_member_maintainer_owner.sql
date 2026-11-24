@@ -51,11 +51,11 @@
 
 -- The record of step 1 (Luke, 2026-11-23, AQU-2486 q22). The grants step 1
 -- writes are temporary: AQU-2354 moves this access onto the person's team
--- (their member role there becomes `org_level`), then deletes exactly these
--- grants, only where the team path gives the same role or higher, and drops
--- this table once it is empty. Step 1 writes `granted_by NULL, granted_at
--- now()`, as other migrations do, so the grant rows themselves cannot be told
--- apart later; this table is how they are found. One row per lifted pair:
+-- (their member role there becomes `org_level`), then undoes exactly what
+-- step 1 wrote, only where the team path gives the same role or higher, and
+-- drops this table once it is empty. Step 1 writes `granted_by NULL,
+-- granted_at now()`, as other migrations do, so the rows themselves cannot be
+-- told apart later; this table is how they are found. One row per lifted pair:
 --
 --   org_level              the org role the lift raised them to; the level of
 --                          the direct project row.
@@ -64,9 +64,16 @@
 --   created_project_grant  true when step 1b inserted the project_members row;
 --                          false when one already existed and ON CONFLICT
 --                          skipped it, so that row is not 0210's to delete.
---   lane_ids               the target-lane rows step 1a raised to org_level or
---                          made direct (empty when none). Those rows existed
---                          before 0210; it changed them, it did not create them.
+--   lanes                  each target-lane row step 1a changed, as it was
+--                          before: [{"lane", "prior_level",
+--                          "prior_team_group_id"}], `[]` when none. Step 1a
+--                          wrote (GREATEST(prior_level, org_level), NULL).
+--
+-- Undoing it: AQU-2354 deletes the project row where created_project_grant is
+-- true, and restores each lane row to its prior level and team where the team
+-- path does not cover it. It deletes a lane row only where no prior row
+-- existed, and that never happens for these: step 1a only updates rows that
+-- exist, so every row in `lanes` existed before 0210.
 --
 -- AQU-2718 (project grants below Maintainer become lane grants) must keep this
 -- record current: when it turns a recorded project row into lane rows, it
@@ -78,14 +85,15 @@ CREATE TABLE IF NOT EXISTS org_role_lift_grants (
     org_level             INTEGER     NOT NULL,
     team_group_ids        BIGINT[],
     created_project_grant BOOLEAN     NOT NULL,
-    lane_ids              TEXT[],
+    lanes                 JSONB       NOT NULL DEFAULT '[]'::jsonb,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, user_id)
 );
 
 -- One statement, so steps 1 and 2 read the same snapshot: the lift is
--- computed from the org rows as they were, and the record (1c) reads what
--- 1a and 1b returned.
+-- computed from the org rows as they were, `raised` reads the lane rows as
+-- they were before 1a updates them, and the record (1c) reads what 1a and 1b
+-- returned.
 WITH lifted AS (
   SELECT p.id AS project_id, om.user_id, om.role_level AS org_level
     FROM org_members om
@@ -104,20 +112,26 @@ WITH lifted AS (
        SELECT 1 FROM project_members pm
         WHERE pm.project_id = p.id AND pm.user_id = om.user_id
      )
-), lane_rows AS (
-  UPDATE project_member_lane_roles r
-     SET role_level = GREATEST(r.role_level, l.org_level),
-         team_group_id = NULL
-    FROM lifted l
-   WHERE r.project_id = l.project_id
-     AND r.user_id = l.user_id
-     AND r.role_level >= 100
+), raised AS (
+  SELECT r.project_id, r.user_id, r.lane, l.org_level,
+         r.role_level AS prior_level, r.team_group_id AS prior_team_group_id
+    FROM project_member_lane_roles r
+    JOIN lifted l ON l.project_id = r.project_id AND l.user_id = r.user_id
+   WHERE r.role_level >= 100
      AND (r.role_level < l.org_level OR r.team_group_id IS NOT NULL)
      AND EXISTS (
        SELECT 1 FROM lanes ln
         WHERE ln.project_id = r.project_id AND ln.id = r.lane AND ln.role = 'target'
      )
-  RETURNING r.project_id, r.user_id, r.lane
+), lane_rows AS (
+  UPDATE project_member_lane_roles r
+     SET role_level = GREATEST(x.prior_level, x.org_level),
+         team_group_id = NULL
+    FROM raised x
+   WHERE r.project_id = x.project_id
+     AND r.user_id = x.user_id
+     AND r.lane = x.lane
+  RETURNING r.project_id, r.user_id, r.lane, x.prior_level, x.prior_team_group_id
 ), direct_rows AS (
   INSERT INTO project_members (project_id, user_id, role_level, granted_by, granted_at)
   SELECT project_id, user_id, org_level, NULL, now()
@@ -126,7 +140,7 @@ WITH lifted AS (
   RETURNING project_id, user_id
 ), recorded AS (
   INSERT INTO org_role_lift_grants
-         (project_id, user_id, org_level, team_group_ids, created_project_grant, lane_ids)
+         (project_id, user_id, org_level, team_group_ids, created_project_grant, lanes)
   SELECT l.project_id, l.user_id, l.org_level,
          ARRAY(
            SELECT DISTINCT gpg.group_id
@@ -139,11 +153,16 @@ WITH lifted AS (
            SELECT 1 FROM direct_rows d
             WHERE d.project_id = l.project_id AND d.user_id = l.user_id
          ),
-         ARRAY(
-           SELECT lr.lane FROM lane_rows lr
+         COALESCE((
+           SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'lane', lr.lane,
+                      'prior_level', lr.prior_level,
+                      'prior_team_group_id', lr.prior_team_group_id
+                    ) ORDER BY lr.lane)
+             FROM lane_rows lr
             WHERE lr.project_id = l.project_id AND lr.user_id = l.user_id
-            ORDER BY lr.lane
-         )
+         ), '[]'::jsonb)
     FROM lifted l
   ON CONFLICT (project_id, user_id) DO NOTHING
   RETURNING 1

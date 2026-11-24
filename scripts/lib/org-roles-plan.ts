@@ -54,6 +54,8 @@ export interface LaneFix {
   laneRoleWithoutFix: number
   /** The grant row's level after 0210. */
   grantAfter: number
+  /** The row's `team_group_id` today (0209); null for a direct row. */
+  teamGroupIdBefore: number | null
   /** It was a team's row (0209) and becomes direct. */
   becomesDirect: boolean
 }
@@ -131,6 +133,7 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
       for (const lane of idx.lanesByProject.get(p.id) ?? []) {
         const grant = grants.get(lane.id)
         if (grant == null || grant < VIEWER) continue
+        const teamGroupIdBefore = rowTeam.get(lane.id) ?? null
         lanes.push({
           laneId: lane.id,
           archived: lane.archived,
@@ -139,7 +142,8 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
           // Without the fix the project role is the team attachment's.
           laneRoleWithoutFix: laneRole(team, grant)!,
           grantAfter: Math.max(grant, c.from),
-          becomesDirect: (rowTeam.get(lane.id) ?? null) != null,
+          teamGroupIdBefore: teamGroupIdBefore == null ? null : Number(teamGroupIdBefore),
+          becomesDirect: teamGroupIdBefore != null,
         })
       }
       const teamLevel = team
@@ -179,6 +183,13 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
   return { orgRowChanges, belowMember, lifted, membersPageLosses, inviteChanges }
 }
 
+/** One entry of `org_role_lift_grants.lanes`, keyed as the JSON is: a lane row 0210 changed, as it was before. */
+export interface LiftGrantLane {
+  lane: string
+  prior_level: number
+  prior_team_group_id: number | null
+}
+
 /** One `org_role_lift_grants` row: what 0210 records for a lifted pair. */
 export interface LiftGrantRecord {
   projectId: string
@@ -187,8 +198,11 @@ export interface LiftGrantRecord {
   teamGroupIds: number[]
   /** 0210 inserted the project_members row (false: one existed, ON CONFLICT skipped it). */
   createdProjectGrant: boolean
-  /** The target-lane rows 0210 raised to the org level or made direct. */
-  laneIds: string[]
+  /**
+   * The target-lane rows 0210 raised to the org level or made direct, by lane
+   * id, with their level and team before. 0210 only updates rows, so each existed.
+   */
+  lanes: LiftGrantLane[]
 }
 
 /** The rows 0210 writes to `org_role_lift_grants`, one per lifted pair. */
@@ -200,7 +214,10 @@ export function liftGrantRecords(plan: OrgRolesPlan): LiftGrantRecord[] {
     teamGroupIds: p.teamGroupIds,
     // The lift only fires with no direct row, so 0210 inserts one for every pair.
     createdProjectGrant: true,
-    laneIds: p.lanes.filter((l) => l.grantAfter !== l.grantBefore || l.becomesDirect).map((l) => l.laneId).sort(),
+    lanes: p.lanes
+      .filter((l) => l.grantAfter !== l.grantBefore || l.becomesDirect)
+      .map((l) => ({ lane: l.laneId, prior_level: l.grantBefore, prior_team_group_id: l.teamGroupIdBefore }))
+      .sort((a, b) => (a.lane < b.lane ? -1 : a.lane > b.lane ? 1 : 0)),
   }))
 }
 

@@ -48,7 +48,7 @@ import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
-import { blockClass, cellLines, escapeHtml, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
+import { blockClass, cellLines, escapeHtml, isTableRow, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
 import { parseScriptureReference } from "@/lib/scripture-reference"
 import {
   USFM_LEAD_HEADING_MARKERS,
@@ -418,7 +418,7 @@ function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean, anchors: 
     const last = blocks[blocks.length - 1]
     // Prose lines inside one cell stay one block, broken by <br> — the
     // AQU-2182 behavior for a translation typed across several lines.
-    if (last && line.indent === 0 && !line.blankBefore && last.cls === cls) {
+    if (last && line.indent === 0 && !line.blankBefore && last.cls === cls && cls !== "table-row") {
       last.html += `<br>\n${html}`
       return
     }
@@ -429,7 +429,7 @@ function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean, anchors: 
       blankBefore: line.blankBefore,
       // Only the cell's first line can continue the paragraph above: a later
       // line of the same cell started after a break of its own.
-      continues: flow && index === 0 && line.indent === 0 && !entry.paragraphStart,
+      continues: flow && index === 0 && line.indent === 0 && !entry.paragraphStart && cls !== "table-row",
     })
   })
   return blocks
@@ -445,6 +445,7 @@ function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean, anchors: 
  * split the verse in two on the page.
  */
 function lineClass(entry: Entry, line: CellLine, flow: boolean): string {
+  if (isTableRow(line)) return "table-row"
   if (line.indent > 0) return blockClass(undefined, line.indent)
   if (entry.paragraphMarker) return blockClass(entry.paragraphMarker, 0)
   if (!flow) return entry.kind === "verse" ? "verse" : "text"
@@ -474,6 +475,12 @@ function headingHtml(entry: Entry, notes: NoteCollector): string {
       return `<p class="psalm-title${mark}">${html}</p>`
     case "sp":
       return `<p class="speaker${mark}">${html}</p>`
+    case "qa":
+      return `<p class="acrostic-heading${mark}">${html}</p>`
+    case "cl":
+      return `<h3 class="chapter-label${mark}">${html}</h3>`
+    case "cd":
+      return `<p class="chapter-description${mark}">${html}</p>`
     case "is":
     case "iot":
     case "imt":
@@ -578,6 +585,17 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .speaker{margin:.75rem 0 .25rem;font-style:italic;font-weight:600}
 .verse,.text,.para{margin:0 0 .75rem}
 .para-flush{text-indent:0}
+.para-inset{padding-left:1.25rem;padding-right:1.25rem}
+.para-hanging{text-indent:-1.25rem}
+.poetry-note,.intro-quote{font-style:italic}
+.acrostic-heading{margin:.75rem 0 .25rem;font-style:italic}
+.chapter-label{margin:0 0 .5rem;text-align:center;font-size:1.25rem;color:var(--heading)}
+.chapter-description{margin:0 0 .75rem;font-size:.9375rem}
+.table-row{display:flex;gap:1rem;margin:0;padding:.125rem 0;border-bottom:1px solid var(--rule);text-indent:0}
+.table-cell{flex:1 1 0;min-width:0}
+.table-head{font-style:italic}
+.cell-right{text-align:right}
+.cell-centered{text-align:center}
 .para-indent-1{padding-left:1.25rem}
 .para-indent-2{padding-left:2.5rem}
 .para-indent-3{padding-left:3.75rem}
@@ -600,6 +618,23 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .verse-number{margin-right:.3em;font-size:.7em;font-weight:700;line-height:0;vertical-align:super;color:var(--muted)}
 .small-caps{font-variant-caps:small-caps}
 .wj{color:var(--accent)}
+.key-term{font-weight:700;font-style:italic;cursor:help}
+.glossary-word{text-decoration:underline dotted;text-decoration-color:var(--muted);text-underline-offset:.2em;cursor:help}
+.proper-name{font-weight:700;text-decoration:underline}
+.place-name{text-decoration:underline}
+.proper-name-added{font-weight:700;font-style:italic;text-decoration:underline}
+.quoted-text{font-weight:700}
+.c-italic,.selah{font-style:italic}
+.quote-ref{font-style:italic;font-size:.83em}
+.ordinal{font-size:.66em;vertical-align:text-top}
+.link-text{color:var(--link);text-decoration:underline}
+.pronunciation{font-size:.83em}
+.alt-number{margin-right:.2em;font-size:.66em;vertical-align:text-top;color:var(--link)}
+.figure-caption{font-style:italic;color:var(--muted)}
+rt{font-size:.6em}
+.note-quote{font-style:italic}
+.note-keyword{font-weight:700;font-style:italic}
+.note-verse{font-size:.66em;vertical-align:text-top}
 .note-marker{font-size:.7em;line-height:0;vertical-align:super}
 .note-marker a{color:var(--link);text-decoration:none}
 .notes{margin:1.5rem 0 0;padding-top:.75rem;border-top:1px solid var(--rule);font-size:.9375rem}

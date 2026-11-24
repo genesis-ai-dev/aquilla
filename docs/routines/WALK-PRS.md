@@ -32,8 +32,9 @@ Create a routine (claude.ai → Routines, or `create_trigger` from a session) wi
 
 - **Repositories:** `genesis-ai-dev/aquilla`.
 - **Connectors:** GitHub.
-- **Secrets the session needs:** the `qa-bot` password, and `AQUILLA_QA_ADMIN_PASSWORD` for the
-  admin stories (`e2e/journeys/README.md`).
+- **Secrets the session needs:** the `qa-bot` password, `AQUILLA_QA_ADMIN_PASSWORD` for the
+  admin stories, and `AQUILLA_QA_BOT_2_PASSWORD` for a claim that needs a second signed-in user
+  (`e2e/journeys/README.md`).
 - **Schedule:** hourly during working hours. Each run walks at most six PRs.
 - **Prompt:** paste exactly this, and nothing else. Do not copy the procedure into the prompt.
 

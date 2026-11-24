@@ -1,5 +1,9 @@
 import { validateIdmlTranslation, type IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
-import { idmlCharacterStyleEmphasis } from "@/lib/richtext/idml-style-display"
+import { idmlCharacterStyleEmphasis, idmlStyleIsEmphasis } from "@/lib/richtext/idml-style-display"
+import {
+  idmlParagraphStyleFromMetadata,
+  idmlStyleCatalogFromMetadata,
+} from "@/lib/idml/style-catalog"
 import { idmlWordingKey, type AlignStylesCell } from "./align-styles"
 import { stitchIdmlSlotTexts, type NormalizedCompletion } from "./completion"
 import { readSourceDistributionSlots } from "./segment-distribution"
@@ -50,7 +54,7 @@ export function forceAlignIdmlStyles(cell: AlignStylesCell): NormalizedCompletio
   }
 }
 
-/** True when a bold or italic run that contains a word was left empty. */
+/** True when a bold, italic, or small-caps run that contains a word was left empty. */
 export function idmlPlacementOmitsStyledRuns(cell: AlignStylesCell, html: string | undefined): boolean {
   const prepared = prepare(cell)
   if (!prepared || !html) return prepared ? prepared.slots.some(isRequiredStyledRun) : false
@@ -367,14 +371,20 @@ function prepare(cell: AlignStylesCell): {
   if (!metadata || !cell.originalHtml || !translation || typeof document === "undefined") return undefined
   const source = readSourceDistributionSlots(cell.originalHtml, metadata.editableSlotIndexes)
   if (source.length !== metadata.editableSlotIndexes.length) return undefined
+  const catalog = idmlStyleCatalogFromMetadata(cell.metadata)
+  const paragraphStyleId = idmlParagraphStyleFromMetadata(cell.metadata)
   const slots = source.map((slot) => {
-    const { bold, italic } = idmlCharacterStyleEmphasis(slot.style)
+    const inherit = Boolean(paragraphStyleId) && slot.style.includes("[No character style]")
+    const emphasis = idmlCharacterStyleEmphasis(
+      inherit && paragraphStyleId ? paragraphStyleId : slot.style,
+      catalog,
+    )
     const glue = /source serif/i.test(slot.style) || /^['\u2018\u2019\u201B\u02BC\u2032\u00B4]+$/.test(slot.text.trim())
     return {
       index: slot.index,
       style: slot.style,
       text: slot.text,
-      bold: bold || italic,
+      bold: idmlStyleIsEmphasis(emphasis),
       glue,
       reference: !glue && isReferenceSource(slot.text),
     }

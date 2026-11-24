@@ -10,7 +10,17 @@ import {
   type SegmentEdge,
   type SegmentPiece,
 } from "@/lib/idml/segment-edge"
-import { syncIdmlPlainGroups, syncIdmlStyleSegmentEmpty } from "@/lib/richtext/idml-style-display"
+import {
+  IDML_STYLE_BOLD_CLASS,
+  IDML_STYLE_ITALIC_CLASS,
+  IDML_STYLE_SMALL_CAPS_CLASS,
+  syncIdmlPlainGroups,
+  syncIdmlStyleSegmentEmpty,
+} from "@/lib/richtext/idml-style-display"
+
+const EMPHASIS_SLOT_SELECTOR = [IDML_STYLE_BOLD_CLASS, IDML_STYLE_ITALIC_CLASS, IDML_STYLE_SMALL_CAPS_CLASS]
+  .map((name) => `[data-idml-protected='slot'].${name}`)
+  .join(", ")
 
 const EDGE_PX = 8
 
@@ -47,9 +57,7 @@ export function segmentEdgeHit(
   y: number,
 ): SegmentEdgeHit | null {
   const rtl = getComputedStyle(container).direction === "rtl"
-  const slots = container.querySelectorAll<HTMLElement>(
-    "[data-idml-protected='slot'].idml-style-bold, [data-idml-protected='slot'].idml-style-italic",
-  )
+  const slots = container.querySelectorAll<HTMLElement>(EMPHASIS_SLOT_SELECTOR)
   let best: (SegmentEdgeHit & { distance: number }) | null = null
   for (const slot of slots) {
     const slotIndex = Number(slot.getAttribute("data-idml-slot"))

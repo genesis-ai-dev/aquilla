@@ -3,6 +3,7 @@ import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 
 export const IDML_STYLE_BOLD_CLASS = "idml-style-bold"
 export const IDML_STYLE_ITALIC_CLASS = "idml-style-italic"
+export const IDML_STYLE_SMALL_CAPS_CLASS = "idml-style-small-caps"
 /** Present on a slot whose translator-visible text is still empty. Display only. */
 export const IDML_STYLE_SEGMENT_EMPTY_ATTR = "data-style-segment-empty"
 /**
@@ -106,9 +107,47 @@ function usfmLeafEmphasis(leaf: string): IdmlStyleEmphasis {
 }
 
 /**
- * Word-boundary match for the only two IDML emphasis faces we surface.
+ * USFM `\nd` (name of deity) and `\sc`, plus Biblica's `#base.sc` parent and
+ * layout suffixes (`nd_sp`, `add_nd`). Already-imported cells have no catalog
+ * entry for these, because small caps was not a stored face yet.
+ */
+function leafIsSmallCaps(leaf: string): boolean {
+  return leaf === "nd"
+    || leaf === "sc"
+    || leaf === "#base.sc"
+    || leaf.startsWith("nd_")
+    || leaf.startsWith("sc_")
+    || leaf.endsWith("_nd")
+    || leaf.endsWith("_sc")
+    || leaf.includes("_nd_")
+    || leaf.includes("_sc_")
+}
+
+function nameIsSmallCaps(name: string): boolean {
+  return name.toLowerCase().replace(/[^a-z]+/g, "").includes("smallcaps")
+}
+
+function namedSmallCaps(styleId: string): boolean {
+  const name = styleName(styleId)
+  if (!name || name.startsWith("$ID/")) return false
+  return leafIsSmallCaps(characterStyleLeaf(name)) || nameIsSmallCaps(name)
+}
+
+function withSmallCaps(emphasis: IdmlStyleEmphasis, smallCaps: boolean): IdmlStyleEmphasis {
+  if (!smallCaps || emphasis.smallCaps) return emphasis
+  return { bold: emphasis.bold, italic: emphasis.italic, smallCaps: true }
+}
+
+/** Bold, italic, or small caps — a run the cell draws and can drag as its own segment. */
+export function idmlStyleIsEmphasis(emphasis: IdmlStyleEmphasis): boolean {
+  return emphasis.bold || emphasis.italic || emphasis.smallCaps === true
+}
+
+/**
+ * Word-boundary match for the bold and italic faces we surface.
  * "Embolden", "black", "heavy", and "oblique" stay plain — translators asked
- * to see Bold and Italic, not every InDesign weight/slant alias.
+ * to see Bold and Italic, not every InDesign weight/slant alias. Small caps
+ * is a separate face (`namedSmallCaps`).
  */
 function nameHasEmphasisToken(name: string, token: "bold" | "italic"): boolean {
   const compact = name.toLowerCase().replace(/[^a-z]+/g, "")
@@ -123,17 +162,19 @@ function nameHasEmphasisToken(name: string, token: "bold" | "italic"): boolean {
 }
 
 /**
- * Resolve the display-only bold/italic faces for an imported character or
- * paragraph style. Catalog entries (FontStyle from Styles.xml) win; otherwise
- * the style id's last name tokens are used so already-imported cells still
- * render.
+ * Resolve the display faces for an imported character or paragraph style.
+ * Catalog entries (FontStyle and Capitalization from Styles.xml) win for
+ * weight. Small caps also comes from the style name, so a divine-name run
+ * imported before small caps was stored still renders. Already-imported
+ * cells with no catalog use the style id's last name tokens.
  */
 export function idmlCharacterStyleEmphasis(
   styleId: string,
   catalog?: IdmlStyleCatalog,
 ): IdmlStyleEmphasis {
   const fromCatalog = catalog?.[styleId] ?? catalog?.[decodeCharacterStyleId(styleId)]
-  if (fromCatalog) return fromCatalog
+  const smallCaps = namedSmallCaps(styleId)
+  if (fromCatalog) return withSmallCaps(fromCatalog, smallCaps)
   const name = styleName(styleId)
   if (
     !name
@@ -145,13 +186,13 @@ export function idmlCharacterStyleEmphasis(
   const leaf = characterStyleLeaf(name)
   const usfm = usfmLeafEmphasis(leaf)
   const paragraph = treasureHuntParagraphLeafEmphasis(leaf)
-  return {
+  return withSmallCaps({
     bold: usfm.bold || paragraph.bold || nameHasEmphasisToken(name, "bold"),
     italic: usfm.italic || paragraph.italic || nameHasEmphasisToken(name, "italic"),
-  }
+  }, smallCaps)
 }
 
-/** Paint Bold/Italic onto a live slot without adding persisted attributes. */
+/** Paint bold, italic, and small caps onto a live slot without adding persisted attributes. */
 export function decorateIdmlStyleElement(
   element: HTMLElement,
   styleId = element.getAttribute("data-idml-character-style") ?? "",
@@ -159,21 +200,28 @@ export function decorateIdmlStyleElement(
   paragraphStyleId?: string,
 ): void {
   const inheritParagraph = Boolean(paragraphStyleId) && isDefaultCharacterStyle(styleId)
-  const { bold, italic } = idmlCharacterStyleEmphasis(
+  const emphasis = idmlCharacterStyleEmphasis(
     inheritParagraph ? paragraphStyleId! : styleId,
     catalog,
   )
-  element.classList.toggle(IDML_STYLE_BOLD_CLASS, bold)
-  element.classList.toggle(IDML_STYLE_ITALIC_CLASS, italic)
-  element.style.fontWeight = bold ? "700" : ""
-  element.style.fontStyle = italic ? "italic" : ""
+  const smallCaps = emphasis.smallCaps === true
+  element.classList.toggle(IDML_STYLE_BOLD_CLASS, emphasis.bold)
+  element.classList.toggle(IDML_STYLE_ITALIC_CLASS, emphasis.italic)
+  element.classList.toggle(IDML_STYLE_SMALL_CAPS_CLASS, smallCaps)
+  element.style.fontWeight = emphasis.bold ? "700" : ""
+  element.style.fontStyle = emphasis.italic ? "italic" : ""
+  // InDesign SmallCaps draws lowercase as small caps and leaves capitals
+  // full size. all-small-caps also shrinks an all-caps SENHOR, which is the
+  // word translators type inside this run. Export still writes the InDesign
+  // character style; this property is display only.
+  element.style.fontVariantCaps = smallCaps ? "all-small-caps" : ""
 }
 
 /**
  * Read-surface HTML for a protected IDML cell. Sanitizes first, then applies
- * display-only bold/italic on slots. The extra class/style attributes must
- * never be written back to a cell — the editor and export validators reject
- * them.
+ * display-only bold, italic, and small caps on slots. The extra class/style
+ * attributes must never be written back to a cell — the editor and export
+ * validators reject them.
  */
 export function prepareIdmlDisplayHtml(
   html: string,
@@ -209,7 +257,7 @@ export function looksLikeIdmlHtml(html: string): boolean {
 /**
  * Consecutive plain slots are one part. An empty run shows a single Regular
  * on its first slot; every following plain slot joins that space. Bold,
- * italic, and tokens break the run, matching Align styles.
+ * italic, small caps, and tokens break the run, matching Align styles.
  */
 export function syncIdmlPlainGroups(root: ParentNode): void {
   const paragraphs = [...root.querySelectorAll("p")]
@@ -291,6 +339,7 @@ function isPlainSlot(element: HTMLElement): boolean {
   return element.getAttribute("data-idml-protected") === "slot"
     && !element.classList.contains(IDML_STYLE_BOLD_CLASS)
     && !element.classList.contains(IDML_STYLE_ITALIC_CLASS)
+    && !element.classList.contains(IDML_STYLE_SMALL_CAPS_CLASS)
 }
 
 /** Bold, italic, or both. Plain slots and tokens return null and break the run. */

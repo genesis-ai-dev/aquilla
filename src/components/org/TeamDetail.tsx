@@ -73,7 +73,7 @@ import {
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
 type TeamTab = "overview" | "projects" | "members"
@@ -753,7 +753,7 @@ export function TeamDetail() {
                 }}
                 errorMessage={(e) => {
                   const uf = toUserFacingError(e, "org")
-                  return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+                  return isRoleDenial(uf) ? t("org.roleDialog.orgChangeForbidden") : uf.message
                 }}
               />
 

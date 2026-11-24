@@ -77,9 +77,9 @@ export const LINK_ROLE_ALLOWED: readonly RoleLevel[] = [
 
 /**
  * Roles offered in the per-project Members panel role picker. Owner is
- * included so an Owner can grant it (AQU-2357 / AQU-985). roleChoices hides
- * it from anyone below Owner. Invite links stay on LINK_ROLE_ALLOWED and
- * never offer Owner.
+ * included so an Owner can grant it to a person (AQU-2357 / AQU-985).
+ * roleChoices hides it from anyone below Owner, and from a team's grant on
+ * a project. Invite links stay on LINK_ROLE_ALLOWED and never offer Owner.
  */
 export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.VIEWER,

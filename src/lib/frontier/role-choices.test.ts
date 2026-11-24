@@ -40,6 +40,18 @@ describe("roleChoices", () => {
     expect(levels(roleChoices("project", { callerLevel: ROLE.MAINTAINER }))).not.toContain(ROLE.OWNER)
   })
 
+  it("keeps Owner off a team's grant on a project, even when an Owner is choosing", () => {
+    expect(levels(roleChoices("project", { callerLevel: ROLE.OWNER, teamGrant: true }))).toEqual([
+      ROLE.VIEWER,
+      ROLE.COMMENTER,
+      ROLE.REVIEWER,
+      ROLE.CONTRIBUTOR,
+      ROLE.PROJECT_LEAD,
+      ROLE.MAINTAINER,
+    ])
+    expect(levels(roleChoices("project", { callerLevel: null, teamGrant: true }))).not.toContain(ROLE.OWNER)
+  })
+
   it("never offers more than the person choosing may grant", () => {
     expect(levels(roleChoices("project", { callerLevel: ROLE.PROJECT_LEAD }))).toEqual([
       ROLE.VIEWER,

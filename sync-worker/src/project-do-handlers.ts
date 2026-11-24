@@ -1001,6 +1001,27 @@ export class PresenceTier2Batcher {
     this.arm(connId)
   }
 
+  /**
+   * Apply a connection's held patch now, ahead of its tick.
+   *
+   * A held patch was SENT before whatever the socket sends next, so a frame
+   * that is handled on arrival must not overtake it. `focus.claim` is such a
+   * frame: leaving a cell queues `focusedCell: null` here, entering the next
+   * one claims at once, and a tick that fires afterwards would clear the focus
+   * the claim just granted — the peer keeps the lease but vanishes from
+   * everyone's "X is editing" until they leave the cell.
+   *
+   * The window stays open, so this adds no applies beyond one per frame that
+   * asks for it; later updates still coalesce into the same tick.
+   */
+  flush(connId: string): void {
+    const open = this.windows.get(connId)
+    if (!open?.pending) return
+    const msg = open.pending
+    open.pending = null
+    this.apply(connId, msg)
+  }
+
   /** Drop any held patch + timer for a connection (disconnect). */
   clear(connId: string): void {
     const open = this.windows.get(connId)
@@ -1206,6 +1227,19 @@ export function applyDisconnect(
 export type TokenRefreshOutcome =
   | { ok: true; role: number | null; tokenExpiresAt: number }
   | { ok: false; reason: "identity-mismatch" | "expired" }
+
+/**
+ * AQU-730: the frame a lane-walled socket receives. `rows` holds the cell's
+ * current text in every lane, and one payload goes to the whole project, so a
+ * walled caller gets the frame without it and refetches by ids through the
+ * cells route, which applies the wall. That is the path every client already
+ * takes when a large batch omits `rows`. Any other frame is returned as is.
+ */
+export function stripAppliedRows(msg: ProjectDoServerMessage): ProjectDoServerMessage {
+  if (msg.t !== "event.applied" || msg.rows === undefined) return msg
+  const { rows: _rows, ...rest } = msg
+  return rest
+}
 
 export function resolveTokenRefresh(
   conn: { numericUserId: number | null },

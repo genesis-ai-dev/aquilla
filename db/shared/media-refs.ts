@@ -28,6 +28,25 @@ export const CLONE_CACHE_SUFFIX = ".inworld.json"
  *  Mirrors PEAKS_SIDECAR_SUFFIX in src/lib/audio/peaks-sidecar.ts. */
 export const PEAKS_SIDECAR_SUFFIX = ".peaks"
 
+/** AQU-2671: an AI voice made in the browser uploads its compressed take and
+ *  the original WAV under the same base id (src/lib/audio/lossless-sibling.ts),
+ *  and no cell_audio row names the WAV. So every `<base>.wav` audio key
+ *  classifies onto this base ref, `{fileId}/{base}#lossless-sibling`, which names
+ *  no object; `loadAudioRefs` adds it for each live name `<base>.webm`,
+ *  `.opus`, `.mp3` — or `.wav`, so a take that IS a WAV still keeps itself. */
+export const LOSSLESS_SIBLING_REF_SUFFIX = "#lossless-sibling"
+const LOSSLESS_SIBLING_EXT = ".wav"
+const LOSSLESS_SIBLING_OWNER_EXTS = [".webm", ".opus", ".mp3", LOSSLESS_SIBLING_EXT]
+
+/** The base ref a `.wav` sibling of `name` classifies onto, or null when `name`
+ *  is not a kind of take that can own one. Case-insensitive, as the sweep is. */
+export function losslessSiblingRef(name: string): string | null {
+  const lower = name.toLowerCase()
+  const ext = LOSSLESS_SIBLING_OWNER_EXTS.find((e) => lower.endsWith(e))
+  if (!ext || name.length === ext.length) return null
+  return name.slice(0, -ext.length) + LOSSLESS_SIBLING_REF_SUFFIX
+}
+
 /**
  * Split a bucket key (prefix already stripped) into the namespace it belongs to
  * and the identity to look up. Returns null for anything not swept — which is
@@ -44,10 +63,14 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
       // own — no cell_audio row will ever name it. Map it back onto the clip it
       // describes, as the voice namespace does for the clone cache, so it is
       // kept while the clip is live and collected with it.
-      const ref = audioId.endsWith(PEAKS_SIDECAR_SUFFIX)
+      const clip = audioId.endsWith(PEAKS_SIDECAR_SUFFIX)
         ? audioId.slice(0, -PEAKS_SIDECAR_SUFFIX.length)
         : audioId
-      if (!ref) return null
+      if (!clip) return null
+      // AQU-2671: a WAV is matched by base id, to the live take beside it.
+      const ref = clip.toLowerCase().endsWith(LOSSLESS_SIBLING_EXT)
+        ? (losslessSiblingRef(clip) ?? clip)
+        : clip
       return { namespace: "audio", projectId, ref: `${fileId}/${ref}` }
     }
     // projects/{pid}/voices/{refId} and the {refId}.inworld.json clone cache,
@@ -98,6 +121,13 @@ export function playedObject(url: string | null): { fileId: string | null; name:
 /** Every `(fileId, audioId)` an audio object is still reachable through. */
 export async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<Set<string>> {
   const refs = new Set<string>()
+  // Every name also keeps its `.wav` sibling's base ref (AQU-2671), which is how
+  // `classifyKey` spells every `.wav` key — a WAV take included.
+  const add = (fileId: string, name: string) => {
+    refs.add(`${fileId}/${name}`)
+    const sibling = losslessSiblingRef(name)
+    if (sibling) refs.add(`${fileId}/${sibling}`)
+  }
   // Live takes. `deleted = 1` is the soft-delete the projection writes, so its
   // bytes ARE collectable — that is the point of sweeping regenerated takes.
   //
@@ -112,10 +142,10 @@ export async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<S
     .bind(projectId)
     .all<{ file_id: string; audio_id: string; url: string | null; piece_of: string | null }>()
   for (const r of takes.results ?? []) {
-    refs.add(`${r.file_id}/${r.audio_id}`)
-    if (r.piece_of) refs.add(`${r.file_id}/${r.piece_of}`)
+    add(r.file_id, r.audio_id)
+    if (r.piece_of) add(r.file_id, r.piece_of)
     const played = playedObject(r.url)
-    if (played) refs.add(played.fileId ? `${played.fileId}/${played.name}` : `${r.file_id}/${played.name}`)
+    if (played) add(played.fileId ?? r.file_id, played.name)
   }
 
   // Agent-API audio artifacts: the bytes sit in the per-file audio layout keyed
@@ -128,12 +158,12 @@ export async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<S
     .bind(projectId)
     .all<{ id: string; audio_id: string }>()
   for (const r of artifactAudio.results ?? []) {
-    refs.add(`${r.id}/${r.audio_id}`)
+    add(r.id, r.audio_id)
     // `uuid::text` is canonical lowercase; the key was written from whatever the
     // uploader generated. They agree today, but a case mismatch would read as
     // "orphaned" and delete referenced media, so admit both spellings — a false
     // KEEP costs storage, a false DELETE costs someone's audio.
-    refs.add(`${r.id.toLowerCase()}/${r.audio_id}`)
+    add(r.id.toLowerCase(), r.audio_id)
   }
 
   // A queued/running diarization job still has to fetch its input.
@@ -144,7 +174,7 @@ export async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<S
     )
     .bind(projectId)
     .all<{ file_id: string; audio_object: string }>()
-  for (const r of jobs.results ?? []) refs.add(`${r.file_id}/${r.audio_object}`)
+  for (const r of jobs.results ?? []) add(r.file_id, r.audio_object)
 
   return refs
 }

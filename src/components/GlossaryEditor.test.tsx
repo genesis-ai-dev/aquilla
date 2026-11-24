@@ -96,6 +96,12 @@ vi.mock("@/lib/bible-data/pack-client", () => ({
   loadManifest: () => loadManifest(),
   loadLayer: (layer: string, book: string) => loadLayer(layer, book),
 }))
+// Whether one of this tab's term writes is still waiting for the server.
+let unsentTermWrites = false
+vi.mock("@/lib/terminology/unsent-term-writes", () => ({
+  hasUnsentTermWrites: () => unsentTermWrites,
+  noteTermWriteQueued: vi.fn(),
+}))
 let mockProject: ProjectRecord
 let mockProjectLoading = false
 // AQU-1006 follow-up: concepts come from the sync-worker projection via
@@ -126,6 +132,22 @@ vi.mock("@/components/TranslatedEditor", () => ({
   TranslatedEditor: () => <div data-testid="inline-cell-editor" />,
 }))
 
+// AQU-2654: counts how often the editor hands a term row to React, to hold
+// that typing in a dialog over the list does not redraw the list. The real row
+// renders underneath.
+const glossaryRowRendered = vi.hoisted(() => vi.fn())
+vi.mock("@/components/GlossaryRow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/GlossaryRow")>()
+  const { createElement } = await import("react")
+  return {
+    ...actual,
+    GlossaryRow: (props: import("@/components/GlossaryRow").GlossaryRowProps) => {
+      glossaryRowRendered()
+      return createElement(actual.GlossaryRow, props)
+    },
+  }
+})
+
 import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
@@ -148,6 +170,7 @@ beforeEach(() => {
   for (const m of [emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject]) m.mockClear()
   loadManifest.mockReset().mockResolvedValue({ ok: true, value: { books: { JHN: { layers: ["people"], bytes: {} } } } })
   loadLayer.mockReset().mockResolvedValue({ ok: true, value: jhn4People() })
+  unsentTermWrites = false
   projectCellsEnabled = false
   violationsEnabled = false
   projectCellsLoading = false
@@ -303,6 +326,36 @@ describe("GlossaryEditor", () => {
       expect.objectContaining({ projectId: "p1", conceptId: "c1", mode: "deprecate", author: "tester" }),
     )
     expect(patchSettings).not.toHaveBeenCalled()
+  })
+
+  // The list is re-read whenever an earlier write is acknowledged, so a read
+  // can arrive that does not hold the change just made. Taking it showed the
+  // change, took it away, and showed it again a few seconds later.
+  it("keeps a change on screen when a list read before it arrives", async () => {
+    const view = renderEditor()
+    const reread = (terminology: Concept[]) => {
+      mockProject = { ...mockProject, terminology }
+      view.rerender(
+        <MemoryRouter initialEntries={["/project/p1/terminology"]}>
+          <GlossaryEditor />
+        </MemoryRouter>,
+      )
+    }
+    unsentTermWrites = true
+    fireEvent.click(screen.getByRole("button", { name: /archive term/i }))
+    await waitFor(() => expect(emitTermReject).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText("grace")).toBeNull())
+
+    // Read before the archive reached the server: the term is still active in it.
+    reread([concept({})])
+    expect(screen.queryByText("grace")).toBeNull()
+
+    // The write was taken; the list read after it is the one shown from now on.
+    unsentTermWrites = false
+    reread([concept({ status: "deprecated" })])
+    expect(screen.queryByText("grace")).toBeNull()
+    reread([concept({ sourceTerm: "mercy" })])
+    expect(screen.getByText("mercy")).toBeInTheDocument()
   })
 
   it("adding a term via the create dialog emits term.create for an active concept", async () => {
@@ -623,6 +676,43 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     expect(emitTermApprove).not.toHaveBeenCalled()
   })
 
+  it("typing in the Add term form does not redraw the term list behind it (AQU-2654)", async () => {
+    renderAs({
+      ...hydrated(500, "project_lead"),
+      terminology: [concept({}), concept({ id: "c2", sourceTerm: "mercy" }), concept({ id: "c3", sourceTerm: "truth" })],
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    const dialog = screen.getByRole("dialog")
+    const source = within(dialog).getByPlaceholderText(/new source term/i)
+    const rendering = within(dialog).getByPlaceholderText(/^rendering$/i)
+
+    glossaryRowRendered.mockClear()
+    for (const value of ["c", "co", "cov", "cove", "coven", "covena", "covenan", "covenant"]) {
+      fireEvent.change(source, { target: { value } })
+    }
+    fireEvent.change(rendering, { target: { value: "alianza" } })
+    expect(glossaryRowRendered).not.toHaveBeenCalled()
+
+    // The form still works: what was typed is what gets added.
+    fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", sourceTerm: "covenant", status: "active" }),
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("the Add term form opens empty again after a cancel (AQU-2654)", () => {
+    renderAs(hydrated(500, "project_lead"))
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    fireEvent.change(within(screen.getByRole("dialog")).getByPlaceholderText(/new source term/i), {
+      target: { value: "half-typed" },
+    })
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }))
+    expect(within(screen.getByRole("dialog")).getByPlaceholderText(/new source term/i)).toHaveValue("")
+  })
+
   it("enables the termbase controls for a project lead", () => {
     renderAs(hydrated(500, "project_lead"))
 
@@ -657,6 +747,16 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     for (const control of TERMBASE_CONTROLS) {
       expect(screen.getByRole("button", { name: control })).toBeEnabled()
     }
+  })
+
+  it("a long glossary ends up with every term in the document (AQU-2654)", async () => {
+    // Drawn in two steps (first screen, then the rest) so opening it does not
+    // freeze — but all of it must land: the list is searched with find-in-page.
+    const many = Array.from({ length: 200 }, (_, i) => concept({ id: `c${i}`, sourceTerm: `term-${i}` }))
+    renderAs({ ...hydrated(500, "project_lead"), terminology: many })
+    await waitFor(() => expect(screen.getAllByTestId("glossary-row")).toHaveLength(200))
+    expect(screen.getByRole("button", { name: "term-0" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "term-199" })).toBeInTheDocument()
   })
 
   it("names the org's configured floor in the lock line, not the default", async () => {

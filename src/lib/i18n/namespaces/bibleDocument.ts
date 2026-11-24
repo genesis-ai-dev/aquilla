@@ -36,6 +36,12 @@ export const bibleDocument = defineNamespace({
     "bibleDocument.preview.forbidden": "Your role cannot export this project, so there is no export preview.",
     "bibleDocument.preview.unsupported": "There is no export preview for this file.",
     "bibleDocument.preview.error": "The export preview could not load.",
+    "bibleDocument.preview.modeLabel": "Preview format",
+    "bibleDocument.preview.reading": "Reading",
+    "bibleDocument.preview.usfm": "USFM",
+    "bibleDocument.preview.readingHint": "The book as a reader sees it, laid out like the Web page export. Faded lines still show the source.",
+    "bibleDocument.preview.readingTitle": "Reading preview of this book",
+    "bibleDocument.status.layoutUsfmOnly": "Paragraphs and headings can be added only in a book imported as USFM.",
   },
   context: {
     _context: {
@@ -50,6 +56,9 @@ export const bibleDocument = defineNamespace({
       "bibleDocument.toolbar.heading": { description: "Button that inserts a section heading before a verse.", maxLength: 16 },
       "bibleDocument.status.failed": { description: "Status text when some verses could not be saved.", placeholders: { count: "Number of verses." } },
       "bibleDocument.preview.summary": { description: "Count above the export preview.", placeholders: { translated: "Number of translated verses and headings.", total: "Number of verses and headings in the book." } },
+      "bibleDocument.preview.reading": { description: "Preview format option: the book laid out as a printed page.", maxLength: 12 },
+      "bibleDocument.preview.usfm": { description: "Preview format option: the raw USFM file. 'USFM' stays untranslated.", maxLength: 12 },
+      "bibleDocument.status.layoutUsfmOnly": { description: "Status text when the translator tries to add a paragraph break, heading or paragraph style in a Bible book that was not imported from a USFM file; only USFM exports can carry that layout." },
       "bibleDocument.preview.lossy": { description: "Warning above the export preview: footnotes or character styles inside these source verses are not in the translation.", placeholders: { count: "Number of verses." } },
     },
   },

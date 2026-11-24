@@ -47,8 +47,9 @@ async function seed(testDb: TestDb) {
   await testDb.pg.query(
     `INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-a', 'Project A', 10, 1)`,
   )
+  // AQU-2357: creation writes user 1's Owner row. created_by grants nothing.
   await testDb.pg.query(
-    `INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-a', 2, 600), ('proj-a', 3, 100)`,
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-a', 1, 700, 1), ('proj-a', 2, 600, 1), ('proj-a', 3, 100, 1)`,
   )
 }
 
@@ -303,6 +304,9 @@ describe("?sort=created", () => {
     await testDb.pg.query(`UPDATE projects SET created_at = '2026-10-01' WHERE id = 'proj-a'`)
     await testDb.pg.query(
       `INSERT INTO projects (id, name, org_id, created_by, created_at) VALUES ('proj-0', 'AAA first by name', 10, 1, '2026-01-01')`,
+    )
+    await testDb.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-0', 1, 700, 1)`,
     )
     const { token } = await seedCredential(testDb, { userId: 1 })
     // The credential is project-scoped; widen it for the project list.

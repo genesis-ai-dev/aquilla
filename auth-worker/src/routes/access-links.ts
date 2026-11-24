@@ -53,6 +53,26 @@ import {
 
 const accessLinks = new Hono<AuthHonoEnv>()
 
+// AQU-2686: the whole feature sits behind ACCESS_LINKS_ENABLED, off in every
+// deployed environment until we know whether it is still needed (AQU-2363) and
+// AQU-2592's fix has landed. Registered before the routes, so it runs ahead of
+// auth, validation and every DB read: a switched-off feature answers the same
+// 404 to everyone and touches nothing. The redeem page shows its usual
+// "invalid or expired" copy for any non-2xx, so no client change is needed.
+export const ACCESS_LINKS_DISABLED = { error: "PIN access links are switched off." } as const
+
+export function accessLinksEnabled(env: { ACCESS_LINKS_ENABLED?: string }): boolean {
+  return env.ACCESS_LINKS_ENABLED === "true"
+}
+
+accessLinks.use("*", async (c, next) => {
+  if (!accessLinksEnabled(c.env)) {
+    c.header("Cache-Control", "no-store")
+    return c.json(ACCESS_LINKS_DISABLED, 404)
+  }
+  await next()
+})
+
 // 90-day default lifetime. Longer than the 30-day invite TTL because a diode
 // deployment is a standing arrangement, not a one-off join; still bounded so a
 // forgotten link eventually dies. Override with `expiresAt` at mint time.
@@ -133,8 +153,7 @@ async function hasDivergedFootprint(
  *
  * A platform admin is the sharpest case (identity is by email; no membership
  * row is needed or usual), and it kills a link at redeem too. The rest apply
- * at mint: an account that created a project (the creator fallback grants
- * owner with no `project_members` row), sits in a team, holds a live API
+ * at mint: an account that has created another project, sits in a team, holds a live API
  * credential, or signs in with Google is somebody's working account, not a
  * translator provisioned for this link.
  */

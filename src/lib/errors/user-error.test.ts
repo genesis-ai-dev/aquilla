@@ -198,6 +198,22 @@ describe("messageForStatus 403 role_required", () => {
     )
   })
 
+  it("names only the scopes a walled member can see", () => {
+    const r = messageForStatus(403, body({
+      roleLevel: 400,
+      source: "group",
+      scopePath: [
+        { type: "org", id: "o", name: "Secret Org", hidden: true },
+        { type: "project", id: "p", name: "Alpha" },
+        { type: "lane", id: "fr", name: "French" },
+        { type: "lane", id: "es", name: "Spanish", hidden: true },
+      ],
+    }))
+    expect(r.message).toContain("… › Alpha › French")
+    expect(r.message).not.toContain("Secret Org")
+    expect(r.message).not.toContain("Spanish")
+  })
+
   it("falls back to the generic copy for an unstructured 403", () => {
     const r = messageForStatus(403, JSON.stringify({ error: "nope" }))
     expect(r.message).toBe("You don't have permission to do that.")

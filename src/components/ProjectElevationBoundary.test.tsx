@@ -126,7 +126,7 @@ describe("App route table", () => {
   it("puts every project read surface inside the boundary", () => {
     const app = readFileSync(join(__dirname, "..", "App.tsx"), "utf8")
     expect(app).toContain(
-      '<Route path="/projects/:id" element={<ProjectElevationBoundary><ProjectOverview /></ProjectElevationBoundary>} />',
+      '<Route path="/projects/:id" element={<ProjectElevationBoundary><LazyRoute><ProjectOverview /></LazyRoute></ProjectElevationBoundary>} />',
     )
     for (const page of ["ProjectSettings", "ProjectSettingsDialog", "ProjectApprovals"]) {
       const routes = app.match(new RegExp(`element=\\{.*<${page} />.*\\}`, "g")) ?? []

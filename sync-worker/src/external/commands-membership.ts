@@ -37,6 +37,10 @@ import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
 import { notifyProjectDoMemberRemoved } from '../member-removed'
 import { notifyProjectDoMemberRoleChanged } from '../member-role-changed'
+import {
+  LAST_PROJECT_OWNER_MESSAGE,
+  removingDirectOwnerLeavesNone,
+} from '../../../db/shared/last-project-owner'
 import type {
   ChangesetSummary,
   ExternalEnv,
@@ -320,6 +324,22 @@ export async function gateOne(
           { code: 'target_outranks_caller', username: cmd.username, targetRole: targetLevel, callerRole: callerLevel },
         ),
       }
+    }
+  }
+
+  // AQU-2357: an Owner may remove or demote another direct Owner only while
+  // another direct Owner remains. An org Owner does not count.
+  const dropsOwner =
+    directLevel != null &&
+    directLevel >= ROLE.OWNER &&
+    (cmd.kind === 'RemoveMember' || (cmd.kind === 'SetRole' && cmd.role < ROLE.OWNER))
+  if (dropsOwner && (await removingDirectOwnerLeavesNone(db, projectId, Number(target.id)))) {
+    return {
+      ok: false,
+      response: errorResponse('conflict', LAST_PROJECT_OWNER_MESSAGE, {
+        code: 'last_owner',
+        username: cmd.username,
+      }),
     }
   }
 

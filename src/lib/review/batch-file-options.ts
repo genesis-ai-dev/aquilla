@@ -124,6 +124,17 @@ export function classifyBatchDraft<T extends DraftChoiceCell>(cells: readonly T[
   return { empty, refreshable, humanOwned, hidden }
 }
 
+/**
+ * AQU-1397: how many cells the draft modal has anything to offer for — its
+ * empty cells plus its untouched AI drafts to refresh. The file menu shows its
+ * two draft entries only when this is above zero, so the menu offers exactly
+ * the list the Draft window offers, and never opens it onto "nothing to draft".
+ */
+export function draftableCount(cells: readonly DraftChoiceCell[]): number {
+  const groups = classifyBatchDraft(cells)
+  return groups.empty.length + groups.refreshable.length
+}
+
 /** The cells the draft modal's current ticks will actually send. */
 export function selectBatchDraft<T>(
   groups: Pick<DraftFileGroups<T>, "empty" | "refreshable">,

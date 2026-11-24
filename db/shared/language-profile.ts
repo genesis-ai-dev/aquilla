@@ -64,8 +64,11 @@ export {
   approvedExceptions,
   convertOrthography,
   convertOrthographyText,
+  exceptionWordProblem,
   findOldOrthography,
+  foldExceptionWord,
   hasOrthography,
+  normalizeExceptionWord,
 } from './orthography'
 
 export type {

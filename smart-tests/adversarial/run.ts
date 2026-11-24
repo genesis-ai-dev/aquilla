@@ -10,6 +10,7 @@ import { seedFor } from "./fuzz"
 import { agentNeverActed } from "./health"
 import { verifyInvariants, withoutLockedOut, type AdversarialOutcome, type Contract, type Snapshot } from "./invariants"
 import { createMutator } from "./mutators"
+import { showsIntendedValue } from "./observe"
 import { readRunContext, readSnapshot, seedFixture } from "./state"
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -34,10 +35,6 @@ function inputGroups(contract: Contract): [string, string][][] {
  * goal and then stopped must not have the missing half blamed on the product.
  */
 async function newlySeen(page: Page, attack: Attack, contract: Contract, action: AgentAction, seen: Set<number>): Promise<void> {
-  if (attack.observe === "any-action") {
-    if (["click", "fill", "select"].includes(action.kind)) seen.add(0)
-    return
-  }
   if (attack.observe === "pressed") {
     if (action.kind !== "click") return
     for (const req of contract.required) {
@@ -62,8 +59,14 @@ async function newlySeen(page: Page, attack: Attack, contract: Contract, action:
     ? [req.value] : req.kind === "comment-once" ? [req.body] : [])
   // The comment composer is a contenteditable (MentionTextarea), so a value-only
   // read would never observe a comment-once body.
-  if (await page.locator("input, textarea, [contenteditable]").evaluateAll((elements, values) => elements.some((element) =>
-    values.includes(((element as HTMLInputElement).value ?? (element as HTMLElement).innerText ?? "").trim())), wanted)) seen.add(0)
+  const fields = await page.locator("input, textarea, [contenteditable]").evaluateAll((elements) => elements.map((element) => ({
+    value: (element as HTMLInputElement).value ?? (element as HTMLElement).innerText ?? "",
+    label: element.getAttribute("aria-label") ?? "",
+    placeholder: element.getAttribute("placeholder") ?? "",
+    type: element.getAttribute("type") ?? "",
+    role: element.getAttribute("role") ?? "",
+  })))
+  if (showsIntendedValue(fields, wanted)) seen.add(0)
 }
 
 /**

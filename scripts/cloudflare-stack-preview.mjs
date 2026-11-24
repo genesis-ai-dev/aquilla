@@ -48,7 +48,13 @@ const PREVIEW_ADMIN_EMAIL = "qa-admin@local.test"
 
 // Deliberately independent of production Wrangler profiles. Runtime secrets
 // come from each parent's Previews Base, never from local .dev.vars files.
-export function previewConfig(surface, { cwd, urls = {} }) {
+// AQU-2631 needs an unmerged schema. Keep its preview off shared dev storage.
+// Remove this temporary binding after the migration reaches dev; the Neon branch
+// qa-aqu-2631-login-security expires on 2026-11-30.
+const ISOLATED_PREVIEW_DATABASES = {
+  "aqu-2631-protect-login-methods-with-optional-authenticator": "b6fb7d3234d246758021a1cafa226050",
+}
+export function previewConfig(surface, { cwd, urls = {}, branch = "" }) {
   const name = PREVIEW_WORKERS[surface]
   if (!name) throw new Error(`Unknown preview surface: ${surface}`)
   const config = {
@@ -65,7 +71,7 @@ export function previewConfig(surface, { cwd, urls = {} }) {
     config.assets = { directory: resolve(cwd, "dist"), binding: "ASSETS", not_found_handling: "single-page-application" }
     return config
   }
-  config.previews.hyperdrive = [{ binding: "HYPERDRIVE", id: "53581197ff7a4202a5ed0ef08537d4a6" }]
+  config.previews.hyperdrive = [{ binding: "HYPERDRIVE", id: ISOLATED_PREVIEW_DATABASES[branch] ?? "53581197ff7a4202a5ed0ef08537d4a6" }]
   config.previews.r2_buckets = [{ binding: "SNAPSHOTS", bucket_name: "aquilla-snapshots-dev" }]
   config.previews.version_metadata = { binding: "CF_VERSION_METADATA" }
   config.previews.vars = {
@@ -165,7 +171,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
   const deploy = async (surface) => {
     const configPath = join(temp, `${surface}.json`)
     const outputPath = join(temp, `${deploymentIndex++}.ndjson`)
-    writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls })))
+    writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls, branch })))
     await run("pnpm", ["exec", "wrangler", "preview", "--config", configPath,
       "--name", name, "--tag", commitSha, "--message", `Branch ${branch} @ ${commitSha}`], {
       cwd, env: { ...env, WRANGLER_CI_OVERRIDE_NAME: PREVIEW_WORKERS[surface], WRANGLER_OUTPUT_FILE_PATH: outputPath },
@@ -179,7 +185,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
   try {
     for (const surface of ["auth", "sync"]) {
       const configPath = join(temp, `${surface}.json`)
-      writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls })))
+      writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls, branch })))
       const result = await run("pnpm", ["exec", "wrangler", "preview", "base-config", "secret", "list",
         "--config", configPath, "--json"], { cwd, env: { ...env, WRANGLER_CI_OVERRIDE_NAME: PREVIEW_WORKERS[surface] } })
       const names = new Set(JSON.parse(result.stdout).map((secret) => secret.name))

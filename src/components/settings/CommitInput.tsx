@@ -25,7 +25,7 @@ export function CommitTextInput({
   ...rest
 }: InputRest & {
   value: string
-  onCommit: (next: string, info: CommitInfo<string>) => void
+  onCommit: (next: string, info: CommitInfo<string>) => void | Promise<{ kind: string } | void>
   /** An empty value is not a whole one: it is never saved. */
   required?: boolean
 }) {

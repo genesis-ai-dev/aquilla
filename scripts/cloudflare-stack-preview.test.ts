@@ -227,3 +227,11 @@ describe("full-stack Cloudflare previews", () => {
     expect(() => previewOrigin({ ...entry, preview_urls: ["https://api.aquilla.app"] }, "auth", "test")).toThrow("URL")
   })
 })
+
+it("isolates AQU-2631's unmerged security schema without changing other previews",()=>{
+ const branch="aqu-2631-protect-login-methods-with-optional-authenticator"
+ for(const surface of ["auth","sync"]){
+  expect(previewConfig(surface,{cwd:"/tmp",branch}).previews.hyperdrive?.[0].id).toBe("b6fb7d3234d246758021a1cafa226050")
+  expect(previewConfig(surface,{cwd:"/tmp",branch:"another-ticket"}).previews.hyperdrive?.[0].id).toBe("53581197ff7a4202a5ed0ef08537d4a6")
+ }
+})

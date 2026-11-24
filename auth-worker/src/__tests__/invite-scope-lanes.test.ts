@@ -18,6 +18,12 @@ async function seedProject(id: string, createdBy: number): Promise<void> {
   )
     .bind(id, `Project ${id}`, createdBy)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?)",
+  )
+    .bind(id, createdBy, createdBy)
+    .run()
 }
 
 async function laneScopesFor(projectId: string, userId: number): Promise<string[]> {

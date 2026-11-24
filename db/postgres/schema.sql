@@ -29,6 +29,7 @@ CREATE TABLE users (
     username      TEXT UNIQUE NOT NULL,
     email         TEXT UNIQUE NOT NULL,
     password_hash TEXT,
+    password_login_disabled BOOLEAN NOT NULL DEFAULT false,
     preferences   TEXT NOT NULL DEFAULT '{}',
     created_at    TIMESTAMPTZ DEFAULT now(),
     updated_at    TIMESTAMPTZ DEFAULT now(),
@@ -364,6 +365,10 @@ CREATE TABLE project_settings (
     -- every source import, so it joins this projection rather than being the
     -- one write-path read that reopens the blob (db/shared/import-floor.ts).
     wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
+    -- AQU-2309 (0205): who may set, rename, resize and remove hand-set
+    -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
+    -- The events route reads this column instead of the settings blob.
+    wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -2956,6 +2961,7 @@ ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_l
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
 -- Lane and file scopes are not included. Platform admin is env-driven, not a row.
 -- 0121: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+-- AQU-2357: created_by is history. The creator's Owner grant is a project_members row.
 CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,
@@ -2977,12 +2983,6 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gpg.granted_by::BIGINT, gpg.granted_at
     FROM group_project_grants gpg
     JOIN group_members gm ON gm.group_id = gpg.group_id
-  UNION ALL
-  SELECT p.created_by::BIGINT, 'project'::TEXT, p.id::TEXT,
-         700::INT, 'creator'::TEXT, NULL::BIGINT,
-         NULL::BIGINT, p.created_at
-    FROM projects p
-   WHERE p.created_by IS NOT NULL
   UNION ALL
   SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
          gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,
@@ -3315,3 +3315,34 @@ CREATE TABLE email_change_requests (
 
 ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMPTZ;
 ALTER TABLE password_reset_tokens ADD COLUMN email_at_issue TEXT;
+
+-- AQU-2631: optional account settings protection; never a login requirement.
+CREATE TABLE IF NOT EXISTS account_security (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ generation TEXT NOT NULL,
+ secret_enc TEXT NOT NULL,
+ enabled BOOLEAN NOT NULL DEFAULT false,
+ setup_session TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ confirmed_step BIGINT,
+ last_step BIGINT NOT NULL DEFAULT -1,
+ recovery_hashes JSONB NOT NULL DEFAULT '[]',
+ PRIMARY KEY(user_id,deployment)
+);
+CREATE TABLE IF NOT EXISTS account_security_grants (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ session_key TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK(kind IN ('primary','google','factor')),
+ generation TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ PRIMARY KEY(user_id,deployment,session_key,kind)
+);
+CREATE TABLE IF NOT EXISTS account_security_attempts (
+ user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ deployment TEXT NOT NULL,
+ started_at TIMESTAMPTZ NOT NULL,
+ attempts INTEGER NOT NULL,
+ PRIMARY KEY(user_id,deployment)
+);

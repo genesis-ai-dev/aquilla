@@ -13,7 +13,7 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { recordGroup, type StepInput } from "@/lib/history/history"
-import { AudioLines, Languages, Play, Sparkles, Wand2, X } from "lucide-react"
+import { AudioLines, Copy, Languages, Play, Sparkles, Wand2, X } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -24,7 +24,9 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
-import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
+import { clearSelection, useSelectedIds } from "@/lib/audio/selection"
+import { cellTextForDisplay, effectiveSourceText } from "@/lib/cell-text"
+import { chapterOfReference, formatSelectionCopy, writeFormattedSelection } from "@/lib/editor/selection-copy"
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
@@ -50,7 +52,7 @@ import {
   noPermissionMessage,
   summarizeBatchValidate,
 } from "@/lib/review/batch-validate-summary"
-import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineName, lineNumber, lineReference, readLineNumbering } from "@/lib/cells/line-name"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { showBulkValidateToast, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
@@ -193,10 +195,50 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // can still be named the way the reader sees it.
   const fileCellIds = useCellIds(cellStore, orderedBy, mediaLayer)
   const structureCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const readNumbering = useCallback(
+    () => readAtVersion(cellStoreVersion, () => readLineNumbering(cellStore, fileCellIds, structureCache)),
+    [cellStore, cellStoreVersion, fileCellIds, structureCache],
+  )
 
   const selectedCells = useMemo(() => {
-    return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
-  }, [cellStore, cellStoreVersion, selected])
+    return readAtVersion(cellStoreVersion, () => {
+      const cells = cellStore.getCellsByIds(selected)
+      const order = new Map(fileCellIds.map((id, index) => [id, index]))
+      cells.sort((a, b) =>
+        (order.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+      return cells
+    })
+  }, [cellStore, cellStoreVersion, fileCellIds, selected])
+
+  // Copy reads the cells, not the mounted rows, so a chapter pastes in full.
+  // Document order, verse number from the # column, one paragraph per line.
+  const copyPayload = useCallback((side: "source" | "target") => {
+    const numbering = readNumbering()
+    return formatSelectionCopy(selectedCells.map((cell) => {
+      const raw = side === "source" ? effectiveSourceText(cell) : cell.translated
+      const chapter = chapterOfReference(cell.group) ?? chapterOfReference(cell.globalReferences?.[0])
+      return {
+        number: lineNumber(cell, numbering),
+        chapter: chapter?.key ?? null,
+        chapterLabel: chapter?.label ?? null,
+        text: cellTextForDisplay(raw),
+      }
+    }))
+  }, [readNumbering, selectedCells])
+  const sourceCopy = useMemo(() => copyPayload("source"), [copyPayload])
+  const targetCopy = useMemo(() => copyPayload("target"), [copyPayload])
+  const onCopySide = useCallback((side: "source" | "target") => {
+    const payload = side === "source" ? sourceCopy : targetCopy
+    if (!payload.text) return
+    void writeFormattedSelection(payload).then(() => {
+      toast.add({
+        type: "success",
+        title: t(side === "source" ? "editor.selection.copiedSource" : "editor.selection.copiedTarget"),
+      })
+    }, () => {
+      toast.add({ type: "error", title: t("editor.selection.copyFailed") })
+    })
+  }, [sourceCopy, targetCopy, t])
 
   const missingCount = useMemo(
     () => selectedCells.filter((c) => !c.translated.trim() && c.original?.trim()).length,
@@ -290,18 +332,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     // Lines go by their references ("GEN 1:1") when every one has one, else by
     // the table's # column ("rows 4, 5 and 10", Sam's ask), else unnamed rather
     // than half-named: a heading has no number.
-    const refs = lines.map(namedCellRef)
-    const rowNumbers = readAtVersion(cellStoreVersion, () =>
-      structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-    // The table's rule: a line's imported number, else its place in the file
-    // (a plain document numbers 1, 2, 3…). A file that has imported numbers
-    // leaves its headings unnumbered, so those name nothing.
-    const position = rowNumbers.size > 0 ? null : new Map(fileCellIds.map((id, i) => [id, i + 1]))
-    const numbers = lines.map((c) => rowNumbers.get(c.id) ?? position?.get(c.id))
+    // The same pieces `nameCell` below joins (src/lib/cells/line-name.ts).
+    const numbering = readNumbering()
+    const refs = lines.map((c) => lineReference(c, numbering))
+    const numbers = lines.map((c) => lineNumber(c, numbering))
     const names = refs.every((ref): ref is string => Boolean(ref))
       ? { key: "editor.selection.validatePartialNamed" as const, items: refs as string[] }
-      : numbers.every((n): n is number => n !== undefined)
-        ? { key: "editor.selection.validatePartialRows" as const, items: (numbers as number[]).map(String) }
+      : numbers.every((n): n is string => n !== null)
+        ? { key: "editor.selection.validatePartialRows" as const, items: numbers as string[] }
         : null
     const shown = names && names.items.length > PARTIAL_REFS_SHOWN
       ? [
@@ -324,7 +362,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         </span>
       </span>
     )
-  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, cellStore, cellStoreVersion, fileCellIds, structureCache])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane, project.id, textScopeCanValidate, noPermissionReason, allowSelfValidation, t, formatLocaleList, readNumbering])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -387,19 +425,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the table's # column, else nothing. The same rule the partial-validate
   // hover uses, so one line is named identically wherever it is mentioned.
   const nameCell = useCallback(
-    (cell: CellData): string => {
-      const ref = namedCellRef(cell)
-      if (ref) return ref
-      const rowNumbers = readAtVersion(cellStoreVersion, () =>
-        structureCache.read(fileCellIds, cellStore)).sequentialNumberByCellId
-      // A file with imported numbers leaves its headings unnumbered, so those
-      // name nothing; a plain document numbers by position instead.
-      const number = rowNumbers.size > 0
-        ? rowNumbers.get(cell.id)
-        : (fileCellIds.indexOf(cell.id) + 1) || undefined
-      return number === undefined ? "" : t("audio.batchVoice.rowName", { number })
-    },
-    [cellStore, cellStoreVersion, fileCellIds, structureCache, t],
+    (cell: CellData): string =>
+      lineName(cell, readNumbering(), {
+        row: (label) => t("editor.line.rowName", { number: label }),
+        empty: t("editor.line.emptyName"),
+      }),
+    [readNumbering, t],
   )
   // AQU-186: cells with at least one infraction or fix proposal — v1 minimum:
   // show affordance when ≥ 1 selected cell has a translated value (proxy for
@@ -755,13 +786,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id, onValidationCommitted, t])
 
   // AQU-365: viewers (and any role below the lowest gated action here —
-  // REVIEWER 300, the validate floor) get no selection affordance at all.
+  // REVIEWER 300, the validate floor) get none of the actions that write.
+  // Copy does not write, so they still get the bar: sharing a chapter with
+  // a translator is the reason a selection of a whole chapter exists.
   // canPerform fails OPEN when the role is unknown (local/legacy projects
-  // with no syncRole), so this only suppresses the bar for a KNOWN
-  // sub-reviewer role — never blocks legacy non-cloud projects.
-  if (roleLevel != null && !canPerform("cell.validate", roleLevel) && !canCommitTarget) {
-    return null
-  }
+  // with no syncRole), so this only limits a KNOWN sub-reviewer role.
+  const copyOnly = roleLevel != null && !canPerform("cell.validate", roleLevel) && !canCommitTarget
 
   if (selectedCells.length === 0) return null
 
@@ -786,12 +816,36 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-lg" />
+      <AppTooltip content={sourceCopy.text ? null : t("editor.selection.copyEmpty")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => onCopySide("source")}
+          disabled={!sourceCopy.text}
+        >
+          <Copy className="me-1 h-3.5 w-3.5" />
+          {t("editor.selection.copySource")}
+        </Button>
+      </AppTooltip>
+      <AppTooltip content={targetCopy.text ? null : t("editor.selection.copyEmpty")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => onCopySide("target")}
+          disabled={!targetCopy.text}
+        >
+          <Copy className="me-1 h-3.5 w-3.5" />
+          {t("editor.selection.copyTarget")}
+        </Button>
+      </AppTooltip>
       {/* AQU-2123: hands-free review of a chosen range. First of the audio
           actions because it is the one a team lead reaching for a selection in
           the Audio lens wants: listen to what is there, then decide. Offered on
           an audio-only lane too (there is audio to hear and no text to voice),
           which is why this is the one audio action not gated on `audioOnlyLane`. */}
-      {audioMode && (
+      {!copyOnly && audioMode && (
         <AppTooltip content={
           !session?.jwt ? t("editor.selection.playSelectedUnavailable") :
           playableSelectedCount === 0 ? t("editor.selection.playSelectedNoAudio") :
@@ -818,7 +872,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           These carry their own words, so they have none. Why one is greyed
           out opens on a click on it; what Voice together and Generate voice
           each do, being easy to confuse, is behind an (i) beside each. */}
-      {audioMode && !audioOnlyLane && (
+      {!copyOnly && audioMode && !audioOnlyLane && (
         <span className="flex shrink-0 items-center gap-0.5">
         <AppTooltip content={
           !onVoiceTogether ? t("editor.selection.voiceUnavailable") :
@@ -856,7 +910,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           voice, rather than one shared clip. Sits beside "Voice together"
           because the two are easy to confuse and the (i)s beside them are
           where the difference is stated. */}
-      {audioMode && !audioOnlyLane && (
+      {!copyOnly && audioMode && !audioOnlyLane && (
         <span className="flex shrink-0 items-center gap-0.5">
         <AppTooltip content={voiceableCount === 0 ? t("audio.batchVoice.needTranslated") : null}>
           <Button
@@ -882,7 +936,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         )}
         </span>
       )}
-      {!audioMode && !audioOnlyLane && (
+      {!copyOnly && !audioMode && !audioOnlyLane && (
         <>
       <AppTooltip content={
         // AQU-1459: the permission reason comes FIRST. A validator sees why the
@@ -971,7 +1025,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           OUTSIDE the `!audioMode` branch, unlike the text actions: the Audio
           view is where recordings are worked on, and this is the one
           validation it offers. */}
-      {(fileHasAudio || audioOnlyLane) && (
+      {!copyOnly && (fileHasAudio || audioOnlyLane) && (
         <>
           <AppTooltip content={validateAudioDisabledReason || null}>
             <Button
@@ -1008,7 +1062,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           </AppTooltip>
         </>
       )}
-      {!audioMode && !audioOnlyLane && (
+      {!copyOnly && !audioMode && !audioOnlyLane && (
         <>
       {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false

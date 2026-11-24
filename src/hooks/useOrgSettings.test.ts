@@ -328,6 +328,68 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
     expect(result.current.version).toBe(4)
   })
 
+  // A change must go from "what I chose" straight to "what the server holds",
+  // never back through the old value on the way.
+  it("shows a change before the server has said anything", async () => {
+    mockFetchResponse = serverTruth()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    // The pre-write read never answers: the value must not wait for it.
+    vi.mocked(restClient.fetchOrgSettings).mockImplementationOnce(() => new Promise(() => {}))
+    act(() => {
+      void result.current.patch({ rules: [rule("r1"), rule("r2")] })
+    })
+    expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
+  })
+
+  it("keeps a change when a read from before the write lands during it", async () => {
+    mockFetchResponse = serverTruth()
+    let answer!: (result: OrgPatchResult) => void
+    vi.mocked(restClient.patchOrgSettings).mockImplementationOnce(
+      () => new Promise<OrgPatchResult>((resolve) => { answer = resolve }),
+    )
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    let outcome!: Promise<unknown>
+    act(() => {
+      outcome = result.current.patch({ rules: [rule("r1"), rule("r2")] })
+    })
+    await waitFor(() => expect(restClient.patchOrgSettings).toHaveBeenCalled())
+    // A re-read (a return to the tab) answers with the row as it was.
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
+
+    const saved: OrgSettingsResponse = { ...serverTruth(), settings: { rules: [rule("r1"), rule("r2")] }, version: 4 }
+    await act(async () => {
+      answer({ kind: "ok", value: saved })
+      await outcome
+    })
+    expect(result.current.version).toBe(4)
+
+    // And one that lands after it, still holding the old row, is dropped.
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
+    expect(result.current.version).toBe(4)
+  })
+
+  it("keeps the settings it holds when a re-read fails", async () => {
+    mockFetchResponse = serverTruth()
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1"]))
+
+    mockFetchResponse = null
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1"])
+  })
+
   it("a save whose reply lacks the override counts keeps the last known counts (AQU-1771)", async () => {
     // The reset prompt reads these before each change; losing them after one
     // save meant it never came back.
@@ -932,6 +994,32 @@ describe("useOrgSettings — re-reads when the tab comes back", () => {
     await waitFor(() => expect(result.current.version).toBe(2))
     expect(result.current.countStructuralCells).toBe(false)
     expect(fetches()).toBe(first + 1)
+    now.mockRestore()
+  })
+
+  // AQU-2654: a return that finds the row unchanged is not a change.
+  it("keeps what it holds when the row read on return says the same thing", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000_000)
+    // A new, equal object per read, as the network gives.
+    vi.mocked(restClient.fetchOrgSettings).mockImplementation(async () => makeResponse())
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useOrgSettings(1, 600)
+    })
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const fetches = () => vi.mocked(restClient.fetchOrgSettings).mock.calls.length
+    const first = fetches()
+    const settingsBefore = result.current.settings
+    const rendersBefore = renders
+
+    now.mockReturnValue(2_020_000)
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(fetches()).toBe(first + 1))
+    await act(async () => { await Promise.resolve() })
+
+    expect(result.current.settings).toBe(settingsBefore)
+    expect(renders).toBe(rendersBefore)
     now.mockRestore()
   })
 })

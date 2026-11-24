@@ -33,6 +33,7 @@
 import { DurableObject } from "cloudflare:workers"
 import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
 import { isDeployedEnvironment } from "./environment-guard"
+import { visibleLanesForRead } from "./events/lane-read-wall"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -61,6 +62,7 @@ import {
   type PresenceState,
   type ProjectDoServerMessage,
   type ServerPresenceTier1,
+  stripAppliedRows,
 } from "./project-do-handlers"
 import {
   ALARM_SLACK_MS,
@@ -220,6 +222,12 @@ interface ConnectionState {
    */
   tokenExpiresAt: number | null
   /**
+   * AQU-730: true when the lane read wall limits this caller (below
+   * Maintainer, wall on). Such a socket gets `event.applied` without `rows`.
+   * False in ALLOW_UNAUTHENTICATED dev.
+   */
+  rowsWalled: boolean
+  /**
    * AQU-1791: epoch ms of the last frame received on this socket (any frame —
    * the heartbeat `ping` is the one every live client sends unprompted).
    */
@@ -239,6 +247,8 @@ interface ConnectionState {
 
 interface DOEnv {
   SYNC_SECRET_KEY?: string
+  /** AQU-730: same switch the read routes use. See ConnectionState.rowsWalled. */
+  LANE_READ_WALL?: string
   /** AQU-2459: the worker's R2 bucket; link sync reads revision manifests. */
   SNAPSHOTS?: R2Bucket
   ALLOW_UNAUTHENTICATED?: string
@@ -379,6 +389,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
         numericUserId: attachment.numericUserId,
         role: attachment.role,
         tokenExpiresAt: attachment.tokenExpiresAt,
+        rowsWalled: attachment.rowsWalled,
         lastSeenAt: seen.lastSeenAt,
         heartbeatSeen: seen.heartbeatSeen,
         // The AQU-1839 refresh rate limit is in-memory on purpose: a socket
@@ -611,6 +622,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     let numericUserId: number | null = null
     let role: number | null = null
     let tokenExpiresAt: number | null = null
+    let rowsWalled = false
     if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
@@ -632,6 +644,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       numericUserId = auth.claims.userId
       role = auth.claims.role
       tokenExpiresAt = auth.claims.exp * 1000
+      rowsWalled = visibleLanesForRead(this.env.LANE_READ_WALL, auth.claims) !== null
     } else {
       userId = url.searchParams.get("user") ?? "anon"
     }
@@ -672,6 +685,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       numericUserId,
       role,
       tokenExpiresAt,
+      rowsWalled,
       lastSeenAt: Date.now(),
       heartbeatSeen: false,
       lastTokenRefreshAt: 0,
@@ -794,10 +808,13 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
   private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {
     const payload = JSON.stringify(msg)
+    // AQU-730: `rows` on an event.applied frame is every lane's text.
+    const walled = stripAppliedRows(msg)
+    const walledPayload = walled === msg ? payload : JSON.stringify(walled)
     for (const [ws, conn] of this.connections) {
       if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
       try {
-        ws.send(payload)
+        ws.send(conn.rowsWalled ? walledPayload : payload)
       } catch {
         /* swallow */
       }
@@ -899,6 +916,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // out of a cell indefinitely. Mirrors the write-drop policy already
       // applied to actual content writes (see shouldBeReadOnly callers).
       if (shouldBeReadOnly(conn.role)) return
+      // Presence patches this socket sent BEFORE the claim may still be held
+      // by the coalescing tick. Apply them first, or a queued
+      // `focusedCell: null` from leaving the previous cell lands after the
+      // grant and wipes the new cell's focus from every peer's roster.
+      this.presenceBatcher.flush(conn.connId)
       const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       const granted = result.emit.length > 0
       this.locks = result.locks
@@ -925,6 +947,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "focus.release") {
+      this.presenceBatcher.flush(conn.connId)
       const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       const released = result.emit.length > 0
       this.locks = result.locks
@@ -1054,6 +1077,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
     const wasWriteCapable = !shouldBeReadOnly(conn.role)
     conn.role = outcome.role
     conn.tokenExpiresAt = outcome.tokenExpiresAt
+    // A promotion to Maintainer lifts the wall and a demotion restores it.
+    conn.rowsWalled = visibleLanesForRead(this.env.LANE_READ_WALL, auth.claims) !== null
     // AQU-1836: the attachment is what sweepExpiredConnections reads after a
     // wake — left at the old expiry, the alarm armed for it would close this
     // socket on the very schedule the refresh exists to avoid. The alarm

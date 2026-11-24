@@ -12,20 +12,32 @@ itself, and what is still open. The code it describes:
 
 | Piece | Where |
 | --- | --- |
-| Risk areas and file map | `scripts/release-risk.mjs` (`classifyFiles`, `HOLDING_AREAS`) |
-| PR labels `risk:<area>` | `.github/workflows/risk-label.yml` → `scripts/release-risk-label.mjs` |
-| Planner (cherry-pick model) | `scripts/release-plan.mjs`, `scripts/release-plan-walk.mjs` |
+| Risk areas and file map | `scripts/release-risk.mjs` (`classifyFiles`, `HOLDING_AREAS`, `AREA_GATES`) |
+| PR labels `risk:<area>` and the gate jobs | `.github/workflows/risk-label.yml` → `scripts/release-risk-label.mjs` |
+| Planner (cherry-pick model, walk policy) | `scripts/release-plan.mjs`, `scripts/release-plan-walk.mjs` |
 | Cut (builds the branch by pick) | `scripts/release-cut.mjs`, `.github/workflows/release-cut.yml` (hourly at :05, on tag, on button) |
+| Hold nudge | `scripts/release-hold-nudge.mjs` (a step of the cut workflow) |
 | Full suite on a release branch | `.github/workflows/release-verify.yml` (check name `release-verify`) |
-| Hourly deploy | `.github/workflows/release-deploy.yml` (:45) → `scripts/release-deploy-check.mjs` |
+| Deploy | `.github/workflows/release-deploy.yml` (when verify finishes, and every ten minutes) → `scripts/release-deploy-check.mjs` |
+| Rollback watch and line halt | `scripts/release-rollback.mjs`, the `release:halt` issue label |
+| Walk status on a PR | `.github/workflows/walk-status.yml` → `scripts/release-walk-status.mjs`; the walker is `docs/routines/WALK-PRS.md` |
 | Dev deploy on merge | `.github/workflows/dev-deploy.yml` |
 | Update indicator in the app | `src/components/UpdateIndicator.tsx`, `src/hooks/useUpdateCheck.ts` |
 
 Both deploy workflows are off until a repository variable is set to `on`:
 `HOURLY_RELEASE` for production, `AUTO_DEV_DEPLOY` for dev. Flipping each
 one is the decision to let that environment deploy without a person
-pressing a button. Until then everything else here (labels, planner, cuts,
-verify) already runs and changes nothing about who deploys.
+pressing a button.
+
+Four more repository variables are the switches of the 2026-11-19 changes
+(§6). Each can be flipped without a deploy:
+
+| Variable | Unset | Set |
+| --- | --- | --- |
+| `WALK_POLICY` | Only a failed walk holds a PR (`fail-only`). | `strict`: anything but a PASS walk holds, as before 2026-11-19. |
+| `AUTO_ROLLBACK` | The rollback watch reports what it would do. | `on`: it promotes the previous versions back and halts the line. |
+| `AUTO_MIGRATE` | A migration holds for a person; the deploy stops at a pending one. | `on`: a green `migration-gate` lifts the hold, and the deploy applies additive pending migrations itself. |
+| `ROLLBACK_WATCH_MINUTES` | 10 | How long the watch runs after a deploy. |
 
 ## 1. Forbidden outcomes, confirmed against the code
 
@@ -69,7 +81,7 @@ file can be in several areas.
   (client parent selection: a wrong `parentId` is a lost edit by CAS).
 - `src/lib/import.ts`; `db/postgres/schema.sql` (also `migration`).
 
-**offline-sync** (holding) — the client's write buffer and its two drains.
+**offline-sync** (holding) — the client's write buffer, its drain and the reconciler.
 - `src/lib/sync/outbox.ts`, `outbox-flush.ts` (HTTP drain; 403 quarantine;
   removal only on accepted or permanent 4xx), `outbox-recovery.ts`,
   `outbox-sanitize.ts`, `outbox-types.ts`, `ws-reconciler.ts`,
@@ -102,30 +114,59 @@ file can be in several areas.
 
 **migration** (holding): `db/postgres/migrations/**`, `db/postgres/schema.sql`.
 
-**infra** (holding): any `wrangler.toml`, `config/cloudflare-deployments.json`,
-`.github/workflows/**`, and the deploy/release scripts (`cloudflare-*`,
-`verify-*`, `resolve-deployment-target`, `tag-release`, `tag-metadata`,
-`record-github-deployment`, `assert-workers-build-env`, `ci-build`,
-`release-*`).
+**infra** (holding, no gate): any `wrangler.toml`,
+`config/cloudflare-deployments.json`, the workflows on the web release line
+or behind a required check (every `.github/workflows/*.yml` not listed under
+`ci` below), the deploy scripts (`cloudflare-*`, `verify-*`,
+`resolve-deployment-target`, `tag-release`, `tag-metadata`,
+`record-github-deployment`, `assert-workers-build-env`, `ci-build`, and the
+desktop line's `desktop-release*` and `desktop-bundle*`, including
+`scripts/lib/desktop-release.ts` and `scripts/lib/desktop-bundle.ts`), the
+file map itself (`release-risk*`), and every gate's own machinery: the
+harnesses, corpora and goldens of §3, `src/lib/sync/offline-gate/**`, and
+`scripts/gate-*`.
+
+**release-tooling** (holding, gate `plan-diff`): the other `scripts/release-*`
+files: planner, walk lookup, cut, deploy check, stall and hold reports,
+rollback watch, notifier. Split out of infra on 2026-11-19: what a person
+checked on these was "does the line still do what it did", which a dry run
+answers.
+
+**deps** (holding, gate `deps-gate`): `sync-worker/` and `auth-worker/`
+`package.json` and `pnpm-lock.yaml`. Split out of the gate machinery on
+2026-11-19: 28 of the 122 infra touches merged since 2026-11-01 were these
+four files, almost all version bumps.
 
 **export** (noted): `src/lib/export/**`, `packages/idml-roundtrip/**`,
 `src/lib/parsers/usfm-lossless/**`, the sync-worker export routes.
 
 **sync** (noted): the rest of `sync-worker/src/` and `src/lib/sync/`.
 
+**ci** (noted): workflows that neither deploy the web app, decide a release,
+nor run a gate or a required check: `tauri-*`, `desktop-release-*`,
+`dependency-audit`, `audio-delta-sync`, `dev-neon-refresh`,
+`adversarial-jev`, `notify-help-bot`, `e2e-hetzner`. GitHub runs a workflow
+from dev the moment it merges, so keeping one of these out of a release
+slice protected nothing; the hold only delayed the other files in the PR.
+The list is by name: a new workflow is infra until someone places it.
+
 Everything else (UI, copy, agent harness, audio, comments, search, …) has
-no area and ships on the hour once its walk is `PASS` or `none`.
+no area and ships on the next cut unless its walk failed (§3, *Plan*).
 
 ## 3. The line
 
 ```
-PR → dev            risk-label.yml labels it risk:<areas>; ci.yml runs the suites its diff touches
+PR → dev            risk-label.yml labels it risk:<areas> and runs the gate of each area it touches;
+                    walk-status.yml reports the walk as the `qa-walk` status; ci.yml runs the suites its diff touches
 merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
-:05 every hour      release-cut.yml: plan, cut, push release/YYYY/MM/DD-NN
-   push             release-verify.yml (typecheck, lint, all unit, all workers, build) + smart Jev (Hetzner)
+:05 every hour      release-cut.yml: plan, nudge on PRs held past 4 h, cut, push release/YYYY/MM/DD-NN
+   push             release-verify.yml (typecheck, lint, all unit, all workers in shards, build) + smart Jev (Hetzner)
                     — fires only because the cut pushes as RELEASE_BOT_TOKEN; a GITHUB_TOKEN push starts nothing
-:45 every hour      release-deploy.yml (when on): if release-verify=success and Jev≠FAIL on HEAD → deploy:aquilla → tag
+verify finishes     release-deploy.yml (when on; also every ten minutes): if no `release:halt` issue is open,
+                    release-verify=success and Jev≠FAIL on HEAD → apply additive migrations (when on) → deploy:aquilla → tag
    tag              release-cut.yml again (dispatched; a GITHUB_TOKEN tag does not chain on its own)
+   +10 minutes      rollback watch: failed invocations against the hour before, then a live check;
+                    a bad release is promoted back and the line halted (when on; otherwise reported)
 ```
 
 **Plan.** `release-plan.mjs` lists every PR merged to dev that the tagged
@@ -133,7 +174,13 @@ production tip does not carry (by `(cherry picked from commit …)`
 provenance or PR number), classifies each by the files its merge touched,
 and reads its walk verdict and the `release:approved` label from GitHub.
 A PR is *held* when a holding area it touches has no green gate (below)
-or its walk is not `PASS`/`none`; the label clears both. The walk is read
+or its walk holds; the label clears both. Which walks hold is the walk
+policy (`release-plan.mjs`, `walkHolds`). Under the default, `fail-only`,
+only a walk that tried and could not prove the claim holds: FAIL, FLAKY,
+BLOCKED. A PR nobody walked (`unknown`) and a PASS at test level only
+(`partial`) ship. `WALK_POLICY=strict` is the rule as it was until
+2026-11-19: anything but `PASS` or `none` holds. §6 has why it moved.
+The walk is read
 from the bot's comment in either shape it posts (the `## Bot walk — PR <n> @
 <sha>` heading, or the `<!-- aquilla-qa-walk <sha> -->` marker it has opened
 with since 2026-11-06), and only from an author with standing in the
@@ -141,14 +188,31 @@ repository: an organization member, the owner or a collaborator
 (`author_association` on the comment), or a login named in the
 `WALK_TRUSTED_LOGINS` repository variable. Anyone can comment on a PR in a
 public repository, so a stranger's `**PASS**` or `**FAIL**` is not a walk. A PASS the bot qualified, such as `**PASS (test level
-only)**`, is `partial`: it ran tests and never opened a preview, so the PR
-holds until a real walk or the label. A walk may be
+only)**`, is `partial`: it ran tests and never opened a preview; it holds
+only under the strict policy. A walk may be
 posted after the merge: the planner takes the newest walk that names the
 PR's head sha, which is how a dev re-walk (`e2e/journeys/PR-BOT.md`,
 *Re-walk on dev after merge*, for a PR whose preview walk a pending
 migration blocked) replaces the BLOCKED comment before it. Held PRs are
 skipped, not a wall: the plan is the ready PRs in dev order plus the held
 list with a reason each.
+
+**Direct commits.** A commit pushed straight to `dev` with no PR sits on
+dev's first-parent line like a PR merge, and the plan lists it in its dev
+position (`direct: true`, with its sha and subject where a PR has a number
+and a title). It has no walk, no gate run and no PR to carry
+`release:approved`, so its files decide. A commit that touches only the
+generated locale catalogs (`src/lib/i18n/messages/<locale>.ts`, never
+`en.ts`, `index.ts` or `all.ts`, and `src/lib/i18n/source-hashes.json`) is
+ready and is picked like a PR. Any other direct commit is held as `not a
+PR` until a person picks it by hand (Cut, below). Only a direct commit
+that changes no file (a merge that brought nothing in) is left out.
+Until 2026-11-20 the planner skipped every commit without a PR number and
+said nothing: six localization commits pushed between 2026-11-14 and
+2026-11-20 never reached the release line, and #2075 and #2124, which
+appended locale keys after them, were listed as `pick conflict in
+src/lib/i18n/source-hashes.json` on every hourly cut. The record is
+`docs/decisions/0014-direct-dev-commits-on-the-release-line.md`.
 
 **Gates: how a high-risk area becomes low-risk by test.** A gate is a
 required check on the PR's head sha, named in `release-risk.mjs`
@@ -217,26 +281,109 @@ today:
   (`membership-fail-open …`, and `token_missing_project POST /events`), so
   a PR that changes either flips the golden and goes to a person.
 
+- **`offline-sync` → `offline-gate`** (`risk-label.yml`, only for PRs
+  touching the offline-sync area). The real outbox, its HTTP drain
+  (`flushOutboxBatch` under `useOutboxFlusher`), the recovery journal and
+  the WebSocket reconciler run 35 scripted faults against a fake server
+  that records what it accepted: offline then online, 5xx then success, a
+  response lost mid-batch, an expired token, a 403, a permanent 4xx, a
+  second tab, a reload mid-flush, a socket dropped mid-send. The shipped
+  client drains over HTTP only: nothing under `src/` sends the
+  `outbox.event` frame the worker accepts, so the four socket rows prove
+  the reconciler's half (a truthful `send()`, reconnect, parsed
+  `event.applied` and `event.stale`) under a sender the harness supplies. The harness, not the scenario, checks the invariant:
+  every enqueued event ends accepted by the server, still in the outbox, or
+  held or removed by a documented rule, and never in none of them. The
+  per-scenario outcome is `src/lib/sync/offline-gate/golden.json`; the job
+  fails when the golden changed in the PR. Scenarios and what is not
+  covered: `src/lib/sync/offline-gate/README.md`.
+- **`migration` → `migration-gate`** (`risk-label.yml`,
+  `scripts/gate-migration.ts`; counts only while `AUTO_MIGRATE` is `on`).
+  Three legs. *Additive*: every statement the PR's new migration files run
+  is on a short list production's current code cannot notice (a new table,
+  a new nullable or defaulted column, a new index, a new type), with the
+  forms that rewrite or lock `events` and `cells` taken off it. *Schema*:
+  the base commit's `schema.sql` plus the new files is, catalog for
+  catalog, the PR's `schema.sql`, which is the drift that answers 500 with
+  every test green. *Old code, new schema*: the BASE commit's replay
+  corpus and both permission matrices still answer their goldens on the
+  PR's `schema.sql`. That is the state production is in between the
+  migration and the deploy. An edited or removed migration file, or a
+  statement off the list, is a person's call. Measured on the four
+  migrations merged 2026-11-12 to 2026-11-18 (0201, 0202, 0203, 0205): all
+  four pass the first two legs.
+- **`release-tooling` → `plan-diff`** (`risk-label.yml`,
+  `scripts/gate-plan-diff.mjs`). The base commit's own
+  `scripts/release-*.test.*` pass against the PR's scripts, and on today's
+  real queue the PR's planner, cut and deploy check answer exactly as the
+  base's do: the same PRs ready and held for the same reasons, the same
+  picks producing the same tree, the same deploy decision. A difference is
+  the PR changing what ships on purpose; the printed diff is what a person
+  reviews.
+- **`deps` → `deps-gate`** (`risk-label.yml`, `scripts/gate-deps.mjs`).
+  Nothing but dependency versions changed in a worker's `package.json` (no
+  script, no override, no alias or git source); the packages the gates run
+  through (`vitest`, `@electric-sql/pglite`) resolve in the lockfile to
+  what the base resolves them to; and the replay corpus and both matrices
+  hold on the new set.
+
+Four of these run their checker from the base commit, checked out beside
+the PR as a worktree, and all of their own files are `infra`: the same
+honesty rule as the first two gates.
+
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
-`git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
-This is what Matthew did by hand, mechanised. A pick that does not land
-is reported as held with a reason a person can act on, and the cut
-continues with the rest:
+`git cherry-pick -x` each ready entry onto it, in dev order: `-m 1` for a
+merge commit; a squash merge and a direct commit have one parent and are
+picked as they are. This is what Matthew did by hand, mechanised. A pick
+that does not land is reported as held with a reason a person can act on,
+and the cut continues with the rest:
 
 - `pick conflict in <paths>; needs #N`: git stopped on unmerged paths and
   the pick is aborted. `needs #N` is the newest held PR merged before it
   whose diff touches one of those paths, read off the `files` the plan
   carries per PR (no GitHub call), which is almost always the PR it was
   built on; approving that PR is the fix. With no such PR the entry stops
-  at the paths.
+  at the paths. When what it was built on is a held direct commit, the
+  reason reads `needs direct commit <short sha>`, and picking that commit
+  by hand (below) is the fix.
 - `empty pick: already in base, or needs #N`: git stopped with nothing to
   commit ("The previous cherry-pick is now empty"). Either production
   already carries the change, or the change only exists relative to a
-  held PR and is a no-op against the base. The pick is skipped, never
-  committed empty: an empty commit with `-x` provenance would tell the
-  planner production carries the PR while it does not. The PR is listed
-  on every cut until the held PR ships or, for a change production really
-  has, until a person records it by hand.
+  held PR and is a no-op against the base. When the plan proves the first
+  (`release-cut.mjs`, `provablyInBase`: the plan lists the PR's files and
+  no PR still off the branch touches any of them), the pick is committed
+  empty and listed as **Recorded, no change**: its `-x` provenance is what
+  the planner reads, so the PR leaves the queue. Otherwise the pick is
+  skipped, never committed empty: provenance on a change production lacks
+  would mark the PR released. That PR is listed on every cut until the
+  held PR it needs ships. (Before 2026-11-19 every empty pick was skipped,
+  and #1968, #2046, #2047 and #2051 sat on every cut for days waiting for
+  a person to "record it by hand" with no stated way to do so.)
+
+**Releasing a held direct commit.** A direct commit held as `not a PR`
+is listed on every cut, in the held line, as `<short sha> "<subject>" (not
+a PR)`. A run that cuts nothing because no entry is ready lists it in its
+run summary too. (A run that stops on a release in flight plans nothing;
+that release's own notes carry the list.) It stays listed until a person
+acts, because the pick is the sign-off:
+
+1. Decide that it should ship. Read the commit: nobody reviewed it. A
+   shell version bump, for one, raises the minimum shell version
+   production asks for, so that shell has to be published first.
+2. On the release branch in flight (or one cut by hand), run
+   `git cherry-pick -x <sha>` and push. Add `-m 1` only when the commit is
+   a merge. `release-verify` and smart Jev run again on the new HEAD.
+3. Once that branch is tagged, the planner reads the `(cherry picked from
+   commit <sha>)` line and the commit leaves the list. `-x` is not
+   optional here: a PR picked without it is still known by the number in
+   its subject, and a direct commit has no number.
+
+When the pick comes out empty because production already has the change,
+record it instead with an empty commit on the release branch whose body
+carries the same line, the remedy an empty pick of a PR already has:
+`git commit --allow-empty -m "Record <short sha> as released" -m "(cherry
+picked from commit <full sha>)"`, the last part on one line with all 40
+characters of the sha.
 
 Each reason appears in the run summary as a `- #N: <reason>` line, in the
 held line of the release notes, and in the commit comment. When nothing
@@ -255,14 +402,44 @@ approval or reverts the pick on the branch; a new HEAD re-verifies.
 
 **Deploy.** `release-deploy-check.mjs` reads, for the branch HEAD only,
 the `release-verify` check conclusion and the newest Jev marker comment's
-decision line. Deploy iff verify succeeded and Jev reported anything but
-FAIL. No Jev comment yet means wait for the next hour. The deploy is the
-unchanged `pnpm run deploy:aquilla` chain (schema guard, SPA, sync, auth,
-live checks, calver tag). The deploy job runs on GitHub's schedule, so
-`GITHUB_REF_NAME` is `dev` there while the checkout is the release branch;
-the job names that branch in `DEPLOY_REF_NAME`, which the deploy guard
-(`scripts/verify-deploy-branch.sh`), the build stamp (`scripts/build-info.ts`)
-and the Cloudflare version label read ahead of GitHub's ref.
+decision line, and whether an issue labelled `release:halt` is open. Deploy
+iff none is open, verify succeeded and Jev reported anything but FAIL. No
+Jev comment yet means wait for the next look. The workflow looks when
+Release verify finishes green and every ten minutes; the stall report for
+a red verify stays hourly, at :45. Until 2026-11-19 it looked only at :45
+and the worker suites ran back to back in one job (23 minutes of
+auth-worker, then 47 of sync-worker), so every release took about two
+hours from cut to tag and twelve a day was the ceiling with no hold at
+all. The deploy is the unchanged `pnpm run deploy:aquilla` chain (schema
+guard, SPA, sync, auth, live checks, calver tag). The deploy job does not
+run on the release branch's ref, so `GITHUB_REF_NAME` is `dev` there while
+the checkout is the release branch; the job names that branch in
+`DEPLOY_REF_NAME`, which the deploy guard (`scripts/verify-deploy-branch.sh`),
+the build stamp (`scripts/build-info.ts`) and the Cloudflare version label
+read ahead of GitHub's ref.
+
+**Migrations at deploy.** While `AUTO_MIGRATE` is `on`, the deploy job runs
+`neon:status:prod` first and, when migrations are pending, asks
+`gate-migration.ts additive` about exactly those files. If every statement
+is additive it runs `neon:apply:prod --snapshot` (a Neon branch off
+production first, as the apply guard requires) and deploys. If not, it
+leaves them pending and the schema guard stops the deploy as it always
+did: a non-additive migration reaches the line only through
+`release:approved`, and the person who approved it applies it.
+
+**Rollback watch.** After the tag, `release-rollback.mjs watch` compares
+each production Worker's failed-invocation rate since the deploy with its
+rate over the hour before (Cloudflare Workers analytics), for ten minutes,
+then runs the live checks once. One Worker over the limit (5%, or three
+times its own baseline, on at least 200 invocations) or a failed live
+check is a bad release. While `AUTO_ROLLBACK` is `on`, the watch promotes
+the versions recorded before the deploy back to 100% on all three surfaces
+and opens an issue labelled `release:halt`, which stops every deploy until
+a person closes it: production is then behind its own tag, and the next
+slice is cut from that tag. Otherwise it posts what it would have done.
+The limits of the signal are in the script's header: a handler that
+catches its error and answers 500 is not a failed invocation, and a subtle
+wrong answer is invisible to both checks.
 
 **Tag → next cut.** The tag closes the release; the deploy workflow
 dispatches the cut so the next slice starts at once; the :05 schedule is
@@ -278,45 +455,77 @@ self-heal through `chunk-reload.ts` as before.
 
 ## 4. What the held path looks like for a person
 
-1. A PR touching a holding area gets `risk:<area>` labels at open time
-   and a run summary saying it is off the hourly line.
+1. A PR touching a holding area gets `risk:<area>` labels at open time,
+   and the gate job of each area it touches runs on its head.
 2. It merges to dev like any other (ci.yml, walk, review agent).
-3. Every hourly cut skips it and lists it under **Held, not in this
-   release** with the reason. An events-only PR whose `replay-gate` check
-   is green, or an auth-only PR whose `auth-matrix` check is green, is not
-   held at all: it never reaches this list.
-4. Manual QA as today (the dev deploy carries it). When satisfied, a
+3. Every cut skips it while an area it touches has no green gate, and lists
+   it under **Held, not in this release** with the reason. A PR whose
+   every holding area has a green gate is not held at all: it never
+   reaches this list. `infra` has no gate and always reaches it.
+4. Four hours after the merge, the cut workflow names the PR once in the
+   release channel (`release-hold-nudge.mjs`), with how many others have
+   waited as long.
+5. Manual QA as today (the dev deploy carries it). When satisfied, a
    person adds `release:approved` to the PR.
-5. The next cut picks it. If the manual QA finds a problem, the fix is a
+6. The next cut picks it. If the manual QA finds a problem, the fix is a
    new PR; the held PR just stays held.
+
+A direct commit has no PR, so steps 1, 2 and 4 do not exist for it: it is
+either a catalog-only commit the cut picks, or it is listed as `not a PR`
+until a person picks it onto a release branch (section 3, *Releasing a
+held direct commit*).
 
 Holding is by merged diff, not by label: removing a `risk:*` label changes
 nothing, and `release:approved` is the one label the planner reads.
 
+`release:approved` is for a held PR. From 2026-11-12 to 2026-11-17 nearly
+every merged PR carried it, risk label or none, because nearly every PR
+was held for a missing walk; when the labelling stopped, so did the
+releases. A week in which most PRs need the label is the line reporting a
+broken gate, not a week of risky changes.
+
 ## 5. Open items
 
-- **Replay corpus: real projects.** The gate runs (section 3) but the
-  corpus holds one synthetic project. Someone with production read
-  access captures ~20 real projects (`node scripts/replay-corpus.mjs
-  export --url … --project …`, then `upload`, then
-  `UPDATE_REPLAY_GOLDEN=1`; `sync-worker/replay-corpus/README.md`).
-  Pick projects clients work in daily, a few thousand to ~50k events each:
-  PGlite replays a Bible-scale log too slowly for a PR check. Until real
-  projects are in, the gate proves the harness and the chain rules it
-  pins, not production shapes. The `fetch` step in `risk-label.yml` needs
-  `CLOUDFLARE_API_TOKEN` with R2 read on `aquilla-snapshots`.
+- **Replay corpus: real projects. Done.** The golden pins 20 production
+  projects and the synthetic one (`sync-worker/replay-corpus/golden.json`).
 - **Auth matrix: breadth.** The gate runs (section 3) over the route
   families named there. Not yet in the table: member-scopes writes,
   access-links, changeset approvals, the MCP tools/call adapter, and the
   lane read wall (`LANE_READ_WALL=1`). Each is one more probe row; add it
   and regenerate the golden in a PR of its own so the diff is the review.
-- **Automatic rollback on error-rate rise.** `cloudflare-version-deploy.mjs`
-  promotes `${versionId}@100%` and keeps no previous version id; there is
-  no rollback script. Design: record the previous Worker version id per
-  surface in the deploy manifest, read PostHog error-tracking (or the
-  Workers error rate) for the 10 minutes after a deploy, and promote the
-  previous version back if the rate exceeds the hour before by a fixed
-  factor. Until then the fix is forward: next hour.
+- **Automatic rollback: built, in observe mode.** §3, *Rollback watch*.
+  Open: flip `AUTO_ROLLBACK` to `on` after the watch has reported
+  correctly on real releases (its thresholds are a first guess); add the
+  `CLOUDFLARE_ANALYTICS_TOKEN` secret (a Cloudflare token with Account
+  Analytics read and nothing else), without which every watch reads
+  `no-signal`; and add a signal for handled 5xx answers (the zone's
+  HTTP analytics for the API host, or PostHog error tracking), which the
+  invocation count cannot see. The desktop hot bundle a release publishes
+  is not rolled back.
+- **Automatic migrations: built, switched off.** §3, *Migrations at
+  deploy*. Open: prove the stored `NEON_API_KEY` can create a branch (the
+  dev refresh has been refused with HTTP 401 on it, AGENTS.md), then flip
+  `AUTO_MIGRATE`. Until then a migration PR holds as before, gate green or
+  not.
+- **Walks.** The walker routine (`docs/routines/WALK-PRS.md`) has to be
+  created in a Claude account, and its accounts added to the dev access
+  list (`docs/security/preview-access.md`). `qa-walk` reports on every PR
+  but is not a required check; requiring it is the step that makes "a PR
+  merges on a PASS walk" true again, and should wait until the routine
+  has walked a week of PRs.
+- **Offline gate: two losses it pins, and what it cannot drive.** The
+  golden records two events that end in no bucket, each marked as a known
+  loss so the gate fails if either changes. (1) `flushOutboxBatch` deletes
+  a non-comment event that has no `fileId` without posting it or telling a
+  listener; no current emitter omits `fileId`, and
+  `outbox-flush.test.ts` pins the delete as a programmer-error path, but
+  it is the shape of forbidden outcome #4 and a quarantine would keep the
+  event readable. (2) The recovery journal covers `target.cell.commit`
+  only, so a lone validate enqueued in the instant before a page is torn
+  down is gone. Both are decisions for a person, not fixed here. Not
+  driven: multi-account drain, Tauri offline routing, storage quota, real
+  page teardown and cross-tab locks
+  (`src/lib/sync/offline-gate/README.md`).
 - **`export` as a holding area.** Not on the meeting's list, on the
   draft's. Default here: noted, not holding. Decide.
 - **`RELEASE_BOT_TOKEN`** (done 2026-10-31: a fine-grained PAT, contents +
@@ -340,12 +549,58 @@ nothing, and `release:approved` is the one label the planner reads.
   the runner replaces the login list when it exists.
   The comments on the HEAD are read across every page, and `release-verify`
   counts only as a check run GitHub Actions produced.
-- **Jev cadence.** One Hetzner stack, one suite at a time, queued. An
-  hourly cut whose Jev run takes longer than an hour simply deploys the
-  hour after; two cuts can not race because one release is in flight at
+- **Jev cadence.** One Hetzner stack, one suite at a time, queued. A
+  cut whose Jev run is slow simply deploys at a later ten-minute look; two cuts can not race because one release is in flight at
   a time. If the queue backs up, the Jev run on an older HEAD is
   superseded and the deploy waits.
 - **PR-level test trimming** (meeting: many PR tests belong on the
   release). `release-verify` now carries the full suite; what to drop
   from `ci.yml` on PRs is a separate change with its own review.
 - **Kieran** has not seen this yet.
+
+## 6. 2026-11-19: why the line did one to three releases a day
+
+Three weeks after the decision above, production got one to three releases
+a day against 13 to 25 PRs merged each working day. The measurement, from
+the release cut of 2026-11-19 21:12 UTC, with 47 merged PRs waiting:
+
+| Why held | PRs |
+| --- | --- |
+| No walk comment at all | 28 |
+| Walk at test level only | 7 |
+| Walk failed | 1 |
+| A holding area with no gate (3 infra, 2 offline-sync, 1 migration with offline-sync) | 6 |
+| Approved, but the pick was empty | 4 |
+
+So the hold was not the risk areas. The `events` and `auth` gates were
+doing their job: every PR carrying `risk:events` or `risk:auth` in that
+list was held for its walk, not its area. The hold was the walk, and the
+walk was missing for reasons that had nothing to do with the changes:
+
+1. 2026-11-06 to 2026-11-12, the planner could not read the comment format
+   the walker had moved to (`release-plan-walk.mjs` header).
+2. From 2026-11-12, CI previews admit only the dev access list (#2004),
+   the walker's accounts were not on it, and the walker fell back to
+   running tests and posting `PASS (test level only)`.
+3. Nothing started a walk and nothing noticed a missing one before the
+   cut.
+
+Meanwhile people cleared the hold by labelling every PR `release:approved`
+in batches, so the line ran at the speed of the labelling.
+
+What changed, each against the cause it answers:
+
+| Cause | Change |
+| --- | --- |
+| An unproven walk held three PRs in four, and is not an outcome that cannot be fixed forward | Default walk policy `fail-only`; the rollback watch stands behind it |
+| The walker could not sign in, and said so nowhere | Access-list rows for its accounts; the routine stops and reports a refusal instead of falling back |
+| Nothing started a walk or showed a missing one | The scheduled routine; the `qa-walk` status on every PR |
+| `offline-sync`, `migration`, and most of `infra` had no gate | `offline-gate`, `migration-gate`, `plan-diff`, `deps-gate`; off-line workflows are `ci` |
+| About two hours from cut to tag | Worker suites sharded; deploy looks when verify finishes |
+| 47 PRs waited two days in silence | The four-hour hold nudge |
+| Empty picks listed forever | Recorded when the plan proves production has them |
+
+The principle this section is here to keep: when the line holds most PRs
+for the same reason, the reason is a gate to build or a gate that broke,
+and the answer is a test that proves the specific outcome, not a label.
+

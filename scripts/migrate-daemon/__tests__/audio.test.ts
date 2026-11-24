@@ -84,7 +84,7 @@ function addBook(root: string, relPath: string, cellId: string, ...clips: string
 function deps(over: Partial<AudioDeps> = {}): AudioDeps {
   return {
     copyObject: async () => {},
-    sync: { ingest: async () => ({ status: 200, ms: 1, accepted: 0 }) } as never,
+    sync: { ingest: async () => ({ status: 200, ms: 1, accepted: 0 }), finalize: async () => {} } as never,
     copyConcurrency: 2,
     dryRun: false,
     ...over,
@@ -92,15 +92,25 @@ function deps(over: Partial<AudioDeps> = {}): AudioDeps {
 }
 
 describe("migrateProjectAudio", () => {
-  it("copies pointer objects R2-to-R2 and ingests deterministic attach/select events", async () => {
+  it("copies pointer objects R2-to-R2, ingests deterministic attach/select events, then finalizes the files they touched", async () => {
     const copies: string[][] = []
-    const ingests: Array<{ projectId: string; events: Array<{ kind: string }> }> = []
+    const ingests: Array<{ projectId: string; events: Array<{ kind: string; fileId?: string | null }> }> = []
+    // One log for both calls: the finalize must come AFTER the ingest it counts.
+    const calls: string[] = []
+    const finalizes: Array<{ projectId: string; fileIds: string[] }> = []
     const result = await migrateProjectAudio(deps({
       copyObject: async (...args) => { copies.push(args) },
-      sync: { ingest: async (projectId: string, events: Array<{ kind: string }>) => {
-        ingests.push({ projectId, events })
-        return { status: 200, ms: 1, accepted: events.length }
-      } } as never,
+      sync: {
+        ingest: async (projectId: string, events: Array<{ kind: string; fileId?: string | null }>) => {
+          calls.push("ingest")
+          ingests.push({ projectId, events })
+          return { status: 200, ms: 1, accepted: events.length }
+        },
+        finalize: async (projectId: string, fileIds: string[]) => {
+          calls.push("finalize")
+          finalizes.push({ projectId, fileIds })
+        },
+      } as never,
     }), { project: PROJECT, dir: repoWithAudio() })
 
     expect(copies).toHaveLength(1)
@@ -117,19 +127,71 @@ describe("migrateProjectAudio", () => {
       "cell.audio.select",
     ])
     expect(result).toMatchObject({ total: 1, copied: 1, events: 2, missingOid: 0, lfsMiss: 0, failed: 0 })
+    // The ingest defers every counter, so without a finalize the takes play in
+    // the editor while the book reads "0% recorded". Scoped to the one file the
+    // events named, never the empty list the route reads as the whole project.
+    expect(calls).toEqual(["ingest", "finalize"])
+    expect(finalizes).toEqual([{ projectId: PROJECT.aquilla_id, fileIds: [ingests[0].events[0].fileId] }])
+    expect(finalizes[0].fileIds[0]).toBeTruthy()
   })
 
-  it("dry-run reads the manifest but does not copy or ingest audio", async () => {
+  // An ordinary attach selects its own row, and the select that pins Codex's
+  // choice only lands once: a re-run's copy is an id replay. So every take but
+  // the chosen one has to arrive unable to select, or a recording whose bytes
+  // turn up on a later run takes the verse over from the validated one.
+  it("attaches every take but the chosen one as history", async () => {
+    const dir = repoWithAudio()
+    for (const [name, byte] of [["old.webm", "cd"], ["newer.webm", "ef"]]) {
+      fs.writeFileSync(path.join(dir, `.project/attachments/pointers/${name}`),
+        `version https://git-lfs.github.com/spec/v1\noid sha256:${byte.repeat(32)}\nsize 12\n`)
+    }
+    const file = path.join(dir, "files/target/GEN 1.codex")
+    const notebook = JSON.parse(fs.readFileSync(file, "utf8")) as {
+      cells: Array<{ metadata: { attachments: Record<string, unknown> } }>
+    }
+    notebook.cells[0].metadata.attachments = {
+      old: { url: ".project/attachments/files/old.webm", type: "audio", createdAt: 50 },
+      clip: { url: ".project/attachments/files/clip.webm", type: "audio", createdAt: 100 },
+      newer: { url: ".project/attachments/files/newer.webm", type: "audio", createdAt: 150 },
+    }
+    fs.writeFileSync(file, JSON.stringify(notebook))
+
+    const events: Array<{ kind: string; payload: { audioId: string; historyOnly?: boolean } }> = []
+    await migrateProjectAudio(deps({
+      sync: {
+        ingest: async (_projectId: string, batch: typeof events) => {
+          events.push(...batch)
+          return { status: 200, ms: 1, accepted: batch.length }
+        },
+        finalize: async () => {},
+      } as never,
+    }), { project: PROJECT, dir })
+
+    const attached = events
+      .filter((event) => event.kind === "cell.audio.attach")
+      .map((event) => `${event.payload.audioId} ${event.payload.historyOnly === true ? "history" : "selects"}`)
+    // Copies finish in no fixed order, so the attaches are compared as a set.
+    expect(attached.sort()).toEqual(["clip.webm selects", "newer.webm history", "old.webm history"])
+    expect(events.filter((event) => event.kind === "cell.audio.select").map((event) => event.payload.audioId))
+      .toEqual(["clip.webm"])
+  })
+
+  it("dry-run reads the manifest but does not copy, ingest or finalize audio", async () => {
     let copies = 0
     let ingests = 0
+    let finalizes = 0
     const result = await migrateProjectAudio(deps({
       dryRun: true,
       copyObject: async () => { copies++ },
-      sync: { ingest: async () => { ingests++; return { status: 200, ms: 1, accepted: 0 } } } as never,
+      sync: {
+        ingest: async () => { ingests++; return { status: 200, ms: 1, accepted: 0 } },
+        finalize: async () => { finalizes++ },
+      } as never,
     }), { project: PROJECT, dir: repoWithAudio() })
     expect(result.total).toBe(1)
     expect(copies).toBe(0)
     expect(ingests).toBe(0)
+    expect(finalizes).toBe(0)
   })
 
   it("does not mark an audio migration complete when every attachment lacks an LFS pointer", async () => {

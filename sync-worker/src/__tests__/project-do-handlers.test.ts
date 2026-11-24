@@ -12,6 +12,7 @@ import {
   PresenceTier2Batcher,
   releaseUserLocks,
   resolveTokenRefresh,
+  stripAppliedRows,
   presenceFrameOwnerConnId,
   presenceFrameAudience,
   presenceSnapshotFor,
@@ -541,6 +542,66 @@ describe("PresenceTier2Batcher (AQU-1831 — batched per tick)", () => {
     batcher.clear("alice")
     vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 2)
     expect(applied.map((m) => m.viewingCell)).toEqual(["c1"])
+  })
+
+  it("a claim never lets an earlier held patch clear the focus it grants (peer stays shown as editing across cells)", () => {
+    // The frames one socket sends when its user clicks from one cell into the
+    // next, in wire order, dispatched the way the DO does: presence patches
+    // through the tick, focus frames on arrival — after flush(). Before flush
+    // existed the held `focusedCell: null` from LEAVING c1 was applied a tick
+    // after the claim on c2 and erased it: the user kept the lease, but every
+    // peer's "X is editing" label disappeared after the first cell.
+    const who = { connId: "tab-a", userId: "alice" }
+    let locks = emptyLocks()
+    let presence = emptyPresence()
+    const sent: ProjectDoServerMessage[] = []
+    const batcher = new PresenceTier2Batcher((_connId, msg) => {
+      const r = applyPresenceUpdate(presence, who, msg, Date.now())
+      presence = r.presence
+      sent.push(...r.emit)
+    })
+    const focus = (frame: { t: "focus.claim" | "focus.release"; cellId: string }) => {
+      batcher.flush(who.connId)
+      const r = frame.t === "focus.claim"
+        ? applyFocusClaim(locks, presence, who, { t: "focus.claim", cellId: frame.cellId }, Date.now())
+        : applyFocusRelease(locks, presence, who, { t: "focus.release", cellId: frame.cellId }, Date.now())
+      locks = r.locks
+      presence = r.presence
+      sent.push(...r.emit)
+    }
+    const enter = (cellId: string) => {
+      batcher.push(who.connId, { t: "presence.update", currentFileId: "f1", selection: null })
+      focus({ t: "focus.claim", cellId })
+      batcher.push(who.connId, {
+        t: "presence.update",
+        currentFileId: "f1",
+        selection: { side: "target", anchor: 0, head: 0 },
+      })
+    }
+    const leave = (cellId: string) => {
+      batcher.push(who.connId, { t: "presence.update", currentFileId: "f1", selection: null })
+      focus({ t: "focus.release", cellId })
+      batcher.push(who.connId, {
+        t: "presence.update",
+        currentFileId: "f1",
+        focusedCell: null,
+        selection: null,
+      })
+    }
+
+    enter("c1")
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 5)
+    for (const [from, to] of [["c1", "c2"], ["c2", "c3"]] as const) {
+      leave(from)
+      enter(to)
+      // Every tick that could still be holding a patch has fired.
+      vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 5)
+      expect(locks.get(to)?.userId).toBe("alice")
+      expect(presence.get("tab-a")?.focusedCell).toBe(to)
+      // What peers are told last is what they draw: it must name the new cell.
+      const lastDiff = sent.filter((m) => m.t === "presence.diff").at(-1)
+      expect(lastDiff?.t === "presence.diff" && lastDiff.user.focusedCell).toBe(to)
+    }
   })
 })
 
@@ -1585,5 +1646,37 @@ describe("releaseUserLocks", () => {
     const result = releaseUserLocks(locks, "demoted", 5_000)
     expect(result.emit).toEqual([])
     expect([...result.locks.keys()]).toEqual(["c1"])
+  })
+})
+
+// AQU-730: `rows` is the cell's text in every lane, and one frame goes to the
+// whole project. A lane-walled socket gets the frame without it.
+describe("stripAppliedRows", () => {
+  const frame: ProjectDoServerMessage = {
+    t: "event.applied",
+    id: "e1",
+    kind: "target.cell.commit",
+    project: "p1",
+    file: "f1",
+    cell: "c1",
+    by: "alice",
+    serverSeq: 42,
+    rows: [],
+  }
+
+  it("drops rows and keeps every other field, so the client refetches by ids", () => {
+    const stripped = stripAppliedRows(frame)
+    expect(stripped).not.toHaveProperty("rows")
+    expect(stripped).toEqual({ ...frame, rows: undefined })
+    expect(JSON.parse(JSON.stringify(stripped))).toEqual({
+      t: "event.applied", id: "e1", kind: "target.cell.commit", project: "p1", file: "f1", cell: "c1", by: "alice", serverSeq: 42,
+    })
+  })
+
+  it("returns a frame with no rows, and any other frame, as the same object", () => {
+    const { rows: _rows, ...bare } = frame as Extract<ProjectDoServerMessage, { t: "event.applied" }>
+    expect(stripAppliedRows(bare)).toBe(bare)
+    const released: ProjectDoServerMessage = { t: "lock.released", cellId: "c1", by: { userId: "alice", ts: 1 } }
+    expect(stripAppliedRows(released)).toBe(released)
   })
 })

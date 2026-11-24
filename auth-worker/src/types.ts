@@ -77,6 +77,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** Service binding to aquilla-sync-worker (wrangler.toml [[env.<env>.services]]).
+   *  Same-zone global fetch to SYNC_WORKER_URL is answered by the zone origin,
+   *  not the Worker (AQU-2216), so in-app agent staging must go through this
+   *  binding when it is present. Unset in local dev, which uses SYNC_WORKER_URL. */
+  SYNC_WORKER?: { fetch: (input: string, init?: RequestInit) => Promise<Response> }
+
   /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
    *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
   POSTHOG_KEY?: string
@@ -129,6 +135,11 @@ export interface Env {
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
    * lookup for identities absent from Neon. */
   LEGACY_USER_MIGRATION_ENABLED?: string
+
+  /** AQU-2686: switch for PIN access links (routes/access-links.ts). Only the
+   * exact string "true" turns them on; unset or anything else answers every
+   * access-link route with a 404 before it reads the request or the DB. */
+  ACCESS_LINKS_ENABLED?: string
   /** Cloudflare D1 HTTP API coordinates. The token must have D1 Read only. */
   FRONTIER_D1_ACCOUNT_ID?: string
   FRONTIER_D1_DATABASE_ID?: string

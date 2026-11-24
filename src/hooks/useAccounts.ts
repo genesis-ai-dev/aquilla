@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -39,6 +40,19 @@ async function loadSnapshotWithTimeout() {
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId)
   }
+}
+
+/** Flat records of strings (sessions, their summaries): equal field by field. */
+function sameFlatRecord<T extends object>(a: T | null, b: T | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  const left = Object.entries(a)
+  const right = b as Record<string, unknown>
+  return left.length === Object.keys(b).length && left.every(([key, value]) => Object.is(value, right[key]))
+}
+
+function sameSummaries(a: SessionSummary[], b: SessionSummary[]): boolean {
+  return a.length === b.length && a.every((summary, i) => sameFlatRecord(summary, b[i]))
 }
 
 class AccountTransitionFailure extends Error {
@@ -105,8 +119,14 @@ function useAccountsState(enabled = true) {
     const published = await publishDataOwner(key)
     if (!published || refreshRequestRef.current !== requestId) return
     prevKeyRef.current = key
-    setActive(nextActive)
-    setSessions(nextSessions)
+    // AQU-2654: every read builds new objects, and the store is re-read on
+    // every return to the tab (session-store's focus/visibility reconcile). A
+    // new object with the same account in it is a new context value: every
+    // consumer of the session re-rendered, and every effect keyed on the
+    // session object re-ran, for a read that found nothing changed. Keep the
+    // objects React already has unless a field moved.
+    setActive(previous => sameFlatRecord(previous, nextActive) ? previous : nextActive)
+    setSessions(previous => sameSummaries(previous, nextSessions) ? previous : nextSessions)
     setHydrated(true)
     setAnalyticsRevision(value => value + 1)
     setLoadError(null)
@@ -235,7 +255,9 @@ function useAccountsState(enabled = true) {
     await refresh()
   }, [refresh])
 
-  return {
+  // One value object while nothing in it changed: this is the context value,
+  // and `analyticsRevision` (not part of it) moves on every reconcile.
+  return useMemo(() => ({
     active,
     sessions,
     loading,
@@ -249,7 +271,7 @@ function useAccountsState(enabled = true) {
     activate,
     remove,
     removeAll,
-  }
+  }), [active, sessions, loading, hydrated, loadError, transitionError, refresh, adopt, add, activate, remove, removeAll])
 }
 
 type AccountsContextValue = ReturnType<typeof useAccountsState>

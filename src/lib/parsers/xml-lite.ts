@@ -19,6 +19,15 @@ export interface XmlElement {
   tagName: string
   attributes: Record<string, string>
   children: XmlNode[]
+  /** Only with `parseXmlLite(xml, { offsets: true })`: where the element sits
+   *  in the parsed string. `start` is its `<`, `openEnd` is just past its start
+   *  tag, `closeStart` is its end tag's `<` (equal to `end` when self-closing),
+   *  `end` is just past the element. Lets a caller splice the ORIGINAL bytes of
+   *  an element instead of re-serialising it (AQU-2539, the DOCX exporter). */
+  start?: number
+  openEnd?: number
+  closeStart?: number
+  end?: number
 }
 
 export type XmlNode = XmlElement | { text: string }
@@ -68,23 +77,80 @@ function safeFromCodePoint(code: number, fallback: string): string {
  * malformed markup (unclosed or mismatched tags) rather than guessing — a
  * silent partial parse is how a truncated upload turns into a partial import.
  */
-export function parseXmlLite(xml: string): XmlElement {
+export function parseXmlLite(xml: string, options?: { offsets?: boolean }): XmlElement {
   const root: XmlElement = { tagName: "#document", attributes: {}, children: [] }
   const stack: XmlElement[] = [root]
-  let i = 0
+  const offsets = options?.offsets === true
 
-  const pushText = (raw: string) => {
-    if (raw === "") return
-    stack[stack.length - 1].children.push({ text: decodeXmlEntities(raw) })
+  scanXmlTags(xml, {
+    text(raw) {
+      stack[stack.length - 1].children.push({ text: decodeXmlEntities(raw) })
+    },
+    cdata(literal) {
+      // CDATA is literal — it must NOT go through entity decoding.
+      stack[stack.length - 1].children.push({ text: literal })
+    },
+    open(body, start, end, selfClosing) {
+      const element = readStartTag(body)
+      if (offsets) {
+        element.start = start
+        element.openEnd = end
+        if (selfClosing) {
+          element.closeStart = end
+          element.end = end
+        }
+      }
+      stack[stack.length - 1].children.push(element)
+      if (!selfClosing) stack.push(element)
+    },
+    close(name, start, end) {
+      const open = stack.pop()
+      if (!open || open === root || open.tagName !== name) {
+        throw new Error(`Malformed XML: unexpected closing tag </${name}>`)
+      }
+      if (offsets) {
+        open.closeStart = start
+        open.end = end
+      }
+    },
+  })
+
+  if (stack.length !== 1) {
+    throw new Error(`Malformed XML: unclosed tag <${stack[stack.length - 1].tagName}>`)
   }
+  return root
+}
 
+/** What `scanXmlTags` reports, in document order. */
+export interface XmlTagVisitor {
+  /** Raw (still entity-encoded) character data between tags; never empty. */
+  text?(raw: string): void
+  /** A CDATA section's literal content; never empty. */
+  cdata?(literal: string): void
+  /** A start tag. `body` is the tag without `<`, `>` and a self-closing `/`;
+   *  `start` is the `<`, `end` is just past the `>`. */
+  open?(body: string, start: number, end: number, selfClosing: boolean): void
+  /** An end tag `</name>`. `start` is the `<`, `end` is just past the `>`. */
+  close?(name: string, start: number, end: number): void
+}
+
+/**
+ * The ONE tokenizer behind `parseXmlLite` (AQU-2539). Exported so a caller that
+ * needs only element boundaries — the DOCX exporter numbering `w:p` elements in
+ * a string it splices — recognises exactly the elements the tree parser builds,
+ * in the same order, without building the tree. Comments, processing
+ * instructions and declarations are skipped; a `>` inside a quoted attribute
+ * value does not end a tag. Throws on an unterminated tag.
+ */
+export function scanXmlTags(xml: string, visit: XmlTagVisitor): void {
+  let i = 0
   while (i < xml.length) {
     const lt = xml.indexOf("<", i)
     if (lt === -1) {
-      pushText(xml.slice(i))
+      if (visit.text) visit.text(xml.slice(i))
       break
     }
-    pushText(xml.slice(i, lt))
+    if (lt > i && visit.text) visit.text(xml.slice(i, lt))
 
     // Non-element constructs carry no addressable content for these formats.
     if (xml.startsWith("<!--", lt)) {
@@ -93,9 +159,8 @@ export function parseXmlLite(xml: string): XmlElement {
     }
     if (xml.startsWith("<![CDATA[", lt)) {
       const end = xml.indexOf("]]>", lt)
-      // CDATA is literal — it must NOT go through entity decoding.
       const literal = end === -1 ? xml.slice(lt + 9) : xml.slice(lt + 9, end)
-      if (literal !== "") stack[stack.length - 1].children.push({ text: literal })
+      if (literal !== "" && visit.cdata) visit.cdata(literal)
       i = end === -1 ? xml.length : end + 3
       continue
     }
@@ -113,27 +178,54 @@ export function parseXmlLite(xml: string): XmlElement {
     const inner = xml.slice(lt + 1, gt)
 
     if (inner.startsWith("/")) {
-      const name = inner.slice(1).trim()
-      const open = stack.pop()
-      if (!open || open === root || open.tagName !== name) {
-        throw new Error(`Malformed XML: unexpected closing tag </${name}>`)
-      }
-      i = gt + 1
-      continue
+      if (visit.close) visit.close(inner.slice(1).trim(), lt, gt + 1)
+    } else {
+      const selfClosing = inner.endsWith("/")
+      if (visit.open) visit.open(selfClosing ? inner.slice(0, -1) : inner, lt, gt + 1, selfClosing)
     }
-
-    const selfClosing = inner.endsWith("/")
-    const body = selfClosing ? inner.slice(0, -1) : inner
-    const element = readStartTag(body)
-    stack[stack.length - 1].children.push(element)
-    if (!selfClosing) stack.push(element)
     i = gt + 1
   }
+}
 
-  if (stack.length !== 1) {
-    throw new Error(`Malformed XML: unclosed tag <${stack[stack.length - 1].tagName}>`)
-  }
-  return root
+/**
+ * Throw unless `xml` is well-formed in the ways a spliced part can break:
+ * every end tag closes the element that is open, nothing is left open, and
+ * there is exactly one root element. Builds no tree, so it costs a scan, not
+ * the ~19× memory of `parseXmlLite` (AQU-2539: the DOCX exporter's guard).
+ */
+export function assertWellFormedXml(xml: string): void {
+  const stack: string[] = []
+  let roots = 0
+  scanXmlTags(xml, {
+    text(raw) {
+      if (stack.length === 0 && raw.trim() !== "") throw new Error("Malformed XML: text outside the root element")
+      if (raw.includes("<")) throw new Error("Malformed XML: unescaped '<' in text")
+      if (/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.test(raw)) {
+        throw new Error("Malformed XML: unescaped '&' in text")
+      }
+    },
+    open(body, start, _end, selfClosing) {
+      const name = startTagName(body)
+      if (stack.length === 0) roots++
+      if (roots > 1) throw new Error(`Malformed XML: second root element <${name}> at ${start}`)
+      if (!selfClosing) stack.push(name)
+    },
+    close(name, start) {
+      const open = stack.pop()
+      if (open !== name) {
+        throw new Error(`Malformed XML: </${name}> at ${start} closes <${open ?? "nothing"}>`)
+      }
+    },
+  })
+  if (stack.length > 0) throw new Error(`Malformed XML: <${stack[stack.length - 1]}> is never closed`)
+  if (roots !== 1) throw new Error("Malformed XML: no root element")
+}
+
+/** The element name at the head of a start-tag body (`w:p` for `w:p w14:paraId="…"`). */
+export function startTagName(body: string): string {
+  const nameMatch = /^([^\s/>]+)/.exec(body)
+  if (!nameMatch) throw new Error("Malformed XML: tag with no name")
+  return nameMatch[1]
 }
 
 function skipPast(xml: string, from: number, terminator: string): number {
@@ -159,11 +251,9 @@ function findTagEnd(xml: string, lt: number): number {
 const ATTRIBUTE_RE = /([^\s=/>]+)\s*=\s*("([^"]*)"|'([^']*)')/g
 
 function readStartTag(body: string): XmlElement {
-  const nameMatch = /^([^\s/>]+)/.exec(body)
-  if (!nameMatch) throw new Error("Malformed XML: tag with no name")
-  const tagName = nameMatch[1]
+  const tagName = startTagName(body)
   const attributes: Record<string, string> = {}
-  ATTRIBUTE_RE.lastIndex = nameMatch[0].length
+  ATTRIBUTE_RE.lastIndex = tagName.length
   let attr: RegExpExecArray | null
   while ((attr = ATTRIBUTE_RE.exec(body)) !== null) {
     attributes[attr[1]] = decodeXmlEntities(attr[3] ?? attr[4] ?? "")

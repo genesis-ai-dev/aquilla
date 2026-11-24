@@ -66,10 +66,11 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "cc",
  "dirs",
  "ed25519-dalek",
  "flate2",
@@ -92,6 +93,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-mcp-bridge",
  "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-wdio-webdriver",
  "tempfile",
@@ -4941,6 +4943,23 @@ dependencies = [
  "thiserror 2.0.18",
  "url",
  "windows",
+ "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "726b6da0dd5bd1344f84f4108a622c07d01923baacb5c803a605189672c5352f"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-deep-link",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
  "zbus",
 ]
 

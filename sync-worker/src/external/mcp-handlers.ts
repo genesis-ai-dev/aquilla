@@ -33,6 +33,8 @@ import { handleExternalChangesetsRequest } from './changesets-route'
 import { handleExternalTranscriptionRequest } from './transcription-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
+import { ORG_MEMBER_COMMAND_KINDS } from './commands-org-members'
+import { listOrgMembers, ORG_MEMBERS_READ_FLOOR, resolveOrgMemberLevel } from './org-members-read'
 import { listOrgsForCredential } from './orgs-list'
 import { claimSupportAccess, PLATFORM_ROLE_LEVEL } from './support-access'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
@@ -414,6 +416,35 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         '(at most 25, one per person) but never with other command kinds, and each ' +
         'command\'s projectId must equal the changeset\'s. Receipt shape: { credentialId, ' +
         'channel, changesetId, command: "Membership", appliedAt, projectId, membership[] }.',
+    },
+    // AQU-2662: the ORG half of governance. Separate from `membership` above
+    // because almost nothing carries over — a different roster, a different
+    // floor, a different scope rule, and a reach that spans every project in
+    // the org rather than one.
+    orgMembership: {
+      readTool: 'list_org_members',
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ORG_MEMBER_COMMAND_KINDS,
+      note:
+        'Read the org roster with list_org_members, then stage AddOrgMember / SetOrgRole / ' +
+        'RemoveOrgMember via prepare_translations\'s `commands` argument and commit with ' +
+        'confirm_changeset. Receipt-only (a plain org_members row write, not an event). ' +
+        'People are named by USERNAME. Every one of these requires org OWNER (700) on the ' +
+        'TARGET org and each must be the SOLE command in its changeset; prepare ALWAYS ' +
+        'stages them in ask-mode regardless of the credential\'s mode, because staffing an ' +
+        'org is exactly the class of change that must pass a human at the approvalUrl. A ' +
+        'project-scoped credential can never reach this surface at all (scope_denied), and ' +
+        'the changeset URL\'s project id is only where the plan is filed \u2014 it is not the ' +
+        'thing being changed. Refusals, all permission_denied: below OWNER on the target ' +
+        'org, granting a role above your own, targeting yourself, or demoting/removing the ' +
+        'organization\'s owner seat or its last remaining owner. list_org_members\'s ' +
+        '`direct` field picks the command (AddOrgMember needs no org_members row, SetOrgRole ' +
+        'and RemoveOrgMember need one) and its `orgOwner` field marks the seat none of them ' +
+        'can touch. An org role reaches EVERY project in the org, so to confine an org ' +
+        'maintainer to N projects you RemoveOrgMember once and then InviteMember on each of ' +
+        'the N projects \u2014 two changesets, two approvals, because org and project ' +
+        'membership commands never share one.',
     },
     multiLanguage: {
       note:
@@ -996,6 +1027,48 @@ async function listMembers(
   return runRead(env, token, `${encodeURIComponent(projectId)}/members`)
 }
 
+/** The ORG roster (AQU-2662). Unlike listMembers this does not delegate to the
+ *  REST route: it reads through the same shared listOrgMembers the route does,
+ *  the way list_orgs / list_projects pair with their routes through
+ *  orgs-list.ts / projects-list.ts. */
+async function listOrgMembersTool(
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  const raw = str(args, 'orgId')
+  if (raw === undefined) return fail('validation_failed', 'orgId is required')
+  // Same refusal as the write half: org governance is out of reach for a
+  // project-scoped credential.
+  if (cred.projectId != null) {
+    return fail('scope_denied', 'a project-scoped credential cannot read the org membership roster')
+  }
+  const orgId = Number(raw)
+  if (!Number.isInteger(orgId)) return fail('validation_failed', 'orgId must be an integer org id')
+  if (!credentialAllowsOrganization(cred, String(orgId))) {
+    return fail('scope_denied', 'credential is not scoped to this org')
+  }
+  const callerLevel = await resolveOrgMemberLevel(env.AQUILLA_PG, orgId, cred.userId)
+  if (callerLevel == null || callerLevel < ORG_MEMBERS_READ_FLOOR) {
+    return fail(
+      'permission_denied',
+      'org role owner is required to read the org membership roster',
+      // Nested under `details` so this denial is byte-identical to the REST
+      // route's (org-read-routes.ts), which callers may already branch on.
+      { details: { requiredRole: ORG_MEMBERS_READ_FLOOR } },
+    )
+  }
+  const roster = await listOrgMembers(env.AQUILLA_PG, orgId)
+  if (!roster) return fail('not_found', `org ${orgId} not found`)
+  return ok({
+    data: roster.members,
+    total: roster.total,
+    truncated: roster.truncated,
+    nextCursor: null,
+  })
+}
+
 async function readTermConsistency(
   env: ExternalEnv,
   token: string,
@@ -1211,6 +1284,39 @@ async function prepareSetBriefTool(
     ...(args.parameters !== undefined ? { parameters: args.parameters } : {}),
     ...(args.freeformNotes !== undefined ? { freeformNotes: args.freeformNotes } : {}),
     ifMatchVersion: version,
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
+/** prepare_orthography_exceptions (AQU-2642 §4): the dedicated MCP door onto
+ *  PatchOrthographyExceptions. Only argument marshalling lives here — the op
+ *  validation, the CONTRIBUTOR/MAINTAINER split, the no-orthography refusal and
+ *  the commit-time merge all stay in commands-orthography-exceptions.ts.
+ *
+ *  `ifMatchVersion` is passed through only when the caller supplied one: the
+ *  merge is the point of this command, so the server must NOT helpfully pin a
+ *  version the caller did not ask to pin (that would turn every concurrent
+ *  entry into a plan_stale). */
+async function prepareOrthographyExceptionsTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!Array.isArray(args.ops) || args.ops.length === 0) {
+    return fail(
+      'validation_failed',
+      'ops must be a non-empty array of { action: "add" | "remove", word, ref? }',
+    )
+  }
+
+  const command = {
+    kind: 'PatchOrthographyExceptions',
+    projectId,
+    ops: args.ops,
+    ...(args.ifMatchVersion !== undefined ? { ifMatchVersion: args.ifMatchVersion } : {}),
   }
   return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
@@ -1654,12 +1760,16 @@ export async function callTool(
       return listTerms(env, token, args)
     case 'list_members':
       return listMembers(env, token, args)
+    case 'list_org_members':
+      return listOrgMembersTool(env, cred, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':
       return patchSettings(env, token, args, ctx)
     case 'prepare_set_brief':
       return prepareSetBriefTool(env, token, args, ctx)
+    case 'prepare_orthography_exceptions':
+      return prepareOrthographyExceptionsTool(env, token, args, ctx)
     case 'regenerate_brief_summary':
       return regenerateBriefSummaryTool(env, token, args, ctx)
     case 'upload_artifact':

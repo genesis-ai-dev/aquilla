@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { buildReleaseBranch, cutSummary, dependencyHint, releaseNotes, unpickedReport } from "./release-cut.mjs"
+import { buildReleaseBranch, cutSummary, dependencyHint, DIRECT_HELD_NOTE, noCutSummary, releaseNotes, unpickedReport } from "./release-cut.mjs"
+import { planRelease, unreleasedPrs } from "./release-plan.mjs"
 
 const plan = {
   cut: true,
@@ -59,6 +60,35 @@ describe("releaseNotes", () => {
   it("prints a placeholder when a title could not be fetched", () => {
     expect(releaseNotes(plan, {})).toContain("| #771 | (title unavailable) | PASS | — |")
   })
+
+  // A commit pushed straight to dev has no PR page: the notes carry its
+  // short sha and its own subject, and a held one gets the sentence that
+  // says what a person does, since there is nothing to label.
+  it("gives a direct commit a row by short sha and subject, and says how a held one is released", () => {
+    const notes = releaseNotes(
+      {
+        ...plan,
+        areas: [],
+        prs: [
+          { number: 801, walk: "PASS", areas: [] },
+          { direct: true, sha: "8ddd5c959f00d", subject: "chore(i18n): localize progress | recovery", walk: "none", areas: [] },
+        ],
+        held: [{ direct: true, sha: "cafabc90f00d", subject: "fix(desktop): restore the logo", why: "not a PR" }],
+      },
+      { 801: "Add a column" },
+    )
+    expect(notes).toBe([
+      "## Release release/2026/09/24-02 · 1 PRs + 1 direct commit",
+      "",
+      "| PR | Title | Walk @ head sha | Areas |",
+      "| --- | --- | --- | --- |",
+      "| #801 | Add a column | PASS | — |",
+      "| 8ddd5c959 | chore(i18n): localize progress \\| recovery | none (locale catalogs, no PR) | — |",
+      "",
+      '**Held, not in this release:** cafabc90f "fix(desktop): restore the logo" (not a PR).',
+      DIRECT_HELD_NOTE,
+    ].join("\n"))
+  })
 })
 
 // Since 2026-10-31 every hourly run ended in "No cut: every ready PR
@@ -92,6 +122,28 @@ describe("cutSummary", () => {
   it("is one line when every pick landed", () => {
     expect(cutSummary(plan, { sha: "c0ffee", picked: [{}], unpicked: [] })).toBe("Cut `release/2026/09/24-02` at `c0ffee` (1 picked onto `b45e`).")
     expect(unpickedReport([])).toBe("")
+  })
+
+  // No PR page shows a direct commit waiting, so the run summary is where a
+  // person finds it, on a run that cuts nothing as well.
+  it("names a direct commit by short sha and subject, and a run that cuts nothing still lists the ones waiting", () => {
+    const bump = { direct: true, sha: "cafabc90f00d", subject: "fix(desktop): restore the logo", why: "not a PR" }
+    expect(unpickedReport([{ ...bump, why: "pick conflict in src/x.ts; needs #7" }])).toBe(
+      '- cafabc90f "fix(desktop): restore the logo": pick conflict in src/x.ts; needs #7',
+    )
+    expect(cutSummary({ ...plan, prs: [{}, { direct: true }] }, { sha: "b45e", picked: [], unpicked: [bump] })).toBe([
+      "No cut: none of the 1 ready PR(s) and 1 direct commit(s) could be picked onto `b45e`:",
+      '- cafabc90f "fix(desktop): restore the logo": not a PR',
+    ].join("\n"))
+    expect(noCutSummary({ reason: "1 PR(s) and 1 direct commit(s) waiting on a person, none ready", held: [{ number: 5, why: "walk fail" }, bump] })).toBe([
+      "No cut: 1 PR(s) and 1 direct commit(s) waiting on a person, none ready.",
+      "",
+      "Direct commits on dev waiting for a person:",
+      '- cafabc90f "fix(desktop): restore the logo": not a PR',
+      "",
+      DIRECT_HELD_NOTE,
+    ].join("\n"))
+    expect(noCutSummary({ reason: "release in flight: release/2026/09/23-01", held: [] })).toBe("No cut: release in flight: release/2026/09/23-01.")
   })
 })
 
@@ -133,6 +185,17 @@ describe("dependencyHint", () => {
     expect(dependencyHint(pr, ["src/other.ts"], held)).toBeUndefined()
     expect(dependencyHint(pr, ["src/lib/i18n/namespaces/org.ts"], [{ number: 1743, sha: "b", mergedAt: at(10) }])).toBeUndefined()
   })
+
+  // 2026-11-20: #2075 and #2124 conflicted on every cut behind six commits
+  // pushed straight to dev, and the hint could name none of them.
+  it("names a held direct commit by its short sha, and tells two direct commits apart by sha", () => {
+    const shell = "src-tauri/tauri.conf.json"
+    const earlier = { direct: true, sha: "0ddba11000d", subject: "chore(desktop): bump shell", mergedAt: at(7), files: [shell] }
+    const bump = { direct: true, sha: "cafabc90f00d", subject: "chore(desktop): bump shell", mergedAt: at(9), files: [shell] }
+    expect(dependencyHint({ number: 1744, sha: "d", mergedAt: at(12) }, [shell], [...held, earlier, bump])).toBe("cafabc90f")
+    // Neither has a PR number: the other commit is a candidate, the pick itself is not.
+    expect(dependencyHint(bump, [shell], [earlier, bump])).toBe("0ddba1100")
+  })
 })
 
 // The cut picks ready PRs onto the tagged tip. A pick that does not land is
@@ -164,6 +227,14 @@ describe("buildReleaseBranch against a scratch repo", () => {
     write(file, `${number}\n`)
     git("add", "-A")
     git("commit", "-qm", `AQU-${number}: squashed (#${number})`)
+    return git("rev-parse", "HEAD")
+  }
+  // A commit pushed straight to dev: one parent, no PR number in its subject.
+  const directCommit = (subject: string, file: string, text: string) => {
+    git("checkout", "-q", "dev")
+    write(file, text)
+    git("add", "-A")
+    git("commit", "-qm", subject)
     return git("rev-parse", "HEAD")
   }
   // Dev order for the hint: PR #n merged at hour n.
@@ -277,26 +348,54 @@ describe("buildReleaseBranch against a scratch repo", () => {
     expect(git("show", `${built.sha}:README.md`)).toBe("base")
   })
 
-  it("holds an empty pick whose change the base already carries, with no PR to name", () => {
-    // A hotfix committed straight onto the release line and tagged, then
-    // merged to dev as its own PR with another sha.
+  // A hotfix committed straight onto the release line and tagged, then
+  // merged to dev as its own PR with another sha: the pick is empty, and no
+  // PR still off the branch touches its file, so the base has the change.
+  const hotfixTwin = () => {
     git("checkout", "-q", "-b", "hotfix", "2026.09.28.01")
     write("docs/hot.md", "fix\n")
     git("add", "-A")
     git("commit", "-qm", "hotfix")
     git("tag", "2026.09.28.02")
     git("checkout", "-q", "dev")
-    const base = git("rev-parse", "2026.09.28.02")
-    const twin = mergePr(1, "docs/hot.md", "fix\n")
+    return { base: git("rev-parse", "2026.09.28.02"), twin: mergePr(1, "docs/hot.md", "fix\n") }
+  }
+
+  it("records an empty pick the plan proves is in the base, as an empty commit with its provenance", () => {
+    const { base, twin } = hotfixTwin()
+    const other = mergePr(2, "docs/other.md", "x\n")
     const built = buildReleaseBranch({
       branch: "release/2026/09/29-01",
       base,
-      prs: [{ number: 1, sha: twin, mergedAt: at(1), files: ["docs/hot.md"] }],
-      held: [],
+      prs: [{ number: 1, sha: twin, mergedAt: at(1), files: ["docs/hot.md"] }, { number: 2, sha: other, mergedAt: at(2), files: ["docs/other.md"] }],
+      held: [{ number: 7, sha: "x", mergedAt: at(0), files: ["src/unrelated.ts"] }],
+      cwd: root,
+    })
+    expect(built.picked.map((p) => p.number)).toEqual([2])
+    expect(built.unpicked).toEqual([])
+    expect(built.recorded.map((p) => [p.number, p.kind])).toEqual([[1, "recorded"]])
+    // The record is what the planner reads: the next plan no longer lists #1.
+    expect(git("log", "--format=%b", `${base}..${built.sha}`)).toContain(`(cherry picked from commit ${twin})`)
+    expect(git("diff", "--name-only", base, built.sha)).toBe("docs/other.md")
+    nothingInProgress()
+  })
+
+  it.each([
+    ["a held PR touches the same file", [{ number: 7, sha: "x", files: ["docs/hot.md"] }], ["docs/hot.md"], "empty pick: already in base, or needs #7"],
+    ["the plan carries no files for the PR", [], undefined, "empty pick: already in base, or needs a held PR"],
+    ["a candidate carries no files", [{ number: 7, sha: "x" }], ["docs/hot.md"], "empty pick: already in base, or needs a held PR"],
+  ])("skips an empty pick it cannot prove (%s)", (_name, held, files, why) => {
+    const { base, twin } = hotfixTwin()
+    const built = buildReleaseBranch({
+      branch: "release/2026/09/29-01",
+      base,
+      prs: [{ number: 1, sha: twin, mergedAt: at(1), ...(files ? { files } : {}) }],
+      held,
       cwd: root,
     })
     expect(built.picked).toEqual([])
-    expect(built.unpicked.map((p) => [p.kind, p.why])).toEqual([["empty", "empty pick: already in base, or needs a held PR"]])
+    expect(built.recorded).toEqual([])
+    expect(built.unpicked.map((p) => [p.kind, p.why])).toEqual([["empty", why]])
     expect(built.sha).toBe(base)
     nothingInProgress()
   })
@@ -321,5 +420,48 @@ describe("buildReleaseBranch against a scratch repo", () => {
     expect(() => buildReleaseBranch({ branch: "release/2026/09/29-01", base, prs: [{ number: 1, sha: m1 }], cwd: root })).toThrow(/gpg/)
     nothingInProgress()
     expect(git("rev-parse", "release/2026/09/29-01")).toBe(base)
+  })
+
+  // The whole seam on the shape of 2026-11-20: the planner's own output goes
+  // through the cut, and the cut's branch goes back through the planner.
+  it("cuts what the planner plans for direct commits, and the next plan reads the picks back", () => {
+    const catalog = "src/lib/i18n/messages/fr.ts"
+    const shell = "src-tauri/tauri.conf.json"
+    mergePr(1, catalog, "k1\n")
+    const catalogs = directCommit("chore(i18n): localize labels", catalog, "k1\nk2\n")
+    const m2 = mergePr(2, catalog, "k1\nk2\nk3\n")
+    const bump = directCommit("chore(desktop): bump shell", shell, "0.2.3\n")
+    mergePr(3, shell, "0.2.4\n")
+    git("update-ref", "refs/remotes/origin/dev", "dev")
+
+    // The walk lookup is the planner's GitHub half; a PASS stands in for it on the PRs.
+    const unreleased = unreleasedPrs({ cwd: root })
+    const prs = unreleased.prs.map((entry) => (entry.direct ? entry : { ...entry, walk: "PASS" }))
+    const planned = planRelease({ openReleases: [], prs, now: "2026-09-29T12:00:00Z", base: unreleased.base })
+    expect(planned.prs.map((p) => p.number ?? p.sha)).toEqual([1, catalogs, 2, 3])
+    expect(planned.held.map((p) => [p.sha, p.why])).toEqual([[bump, "not a PR"]])
+
+    const base = planned.base as string
+    const built = buildReleaseBranch({ branch: planned.branch as string, base, prs: planned.prs, held: planned.held, cwd: root })
+    // #2 appends below the direct commit's line. It lands because the commit
+    // was picked first, in dev order, as is (one parent, so no -m 1).
+    expect(built.picked.map((p) => p.number ?? p.sha)).toEqual([1, catalogs, 2])
+    expect(git("show", `${built.sha}:${catalog}`)).toBe("k1\nk2\nk3")
+    expect(git("log", "--format=%b", `${base}..${built.sha}`)).toContain(`(cherry picked from commit ${catalogs})`)
+    // #3 was built on the held commit, and its reason says which one.
+    const short = bump.slice(0, 9)
+    expect(built.unpicked.map((p) => [p.number, p.needs, p.why])).toEqual([[3, short, `pick conflict in ${shell}; needs direct commit ${short}`]])
+    nothingInProgress()
+
+    const notes = releaseNotes({ ...planned, prs: built.picked, held: [...planned.held, ...built.unpicked] })
+    expect(notes).toContain(`| ${catalogs.slice(0, 9)} | chore(i18n): localize labels | none (locale catalogs, no PR) | — |`)
+    expect(notes).toContain(`${short} "chore(desktop): bump shell" (not a PR), #3 (pick conflict in ${shell}; needs direct commit ${short}).`)
+
+    // Tagged, the picks are released by their -x line and the floor is the
+    // newest of them; the held commit and the PR behind it are still listed.
+    git("tag", "2026.09.29.01", built.sha)
+    const next = unreleasedPrs({ cwd: root })
+    expect(next.prs.map((p) => p.number ?? p.sha)).toEqual([bump, 3])
+    expect(next.floor).toBe(m2)
   })
 })

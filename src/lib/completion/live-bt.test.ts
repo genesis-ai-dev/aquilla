@@ -87,7 +87,7 @@ describe("createLiveBtQueue", () => {
     expect(run).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(run).toHaveBeenCalledTimes(1)
-    expect(run).toHaveBeenCalledWith("c1", "e2")
+    expect(run).toHaveBeenCalledWith("c1", "e2", "live")
   })
 
   it("does not carry an older commit id onto a save that has none", async () => {
@@ -96,7 +96,7 @@ describe("createLiveBtQueue", () => {
     queue.notify("c1", "e1")
     queue.notify("c1")
     await vi.advanceTimersByTimeAsync(10)
-    expect(run).toHaveBeenCalledWith("c1", undefined)
+    expect(run).toHaveBeenCalledWith("c1", undefined, "live")
   })
 
   it("runs at most `concurrency` readings at once", async () => {
@@ -129,7 +129,7 @@ describe("createLiveBtQueue", () => {
     d.resolve()
     await vi.advanceTimersByTimeAsync(0)
     expect(run).toHaveBeenCalledTimes(2)
-    expect(run).toHaveBeenLastCalledWith("c1", "e2")
+    expect(run).toHaveBeenLastCalledWith("c1", "e2", "live")
   })
 
   it("keeps going after a reading fails", async () => {
@@ -142,6 +142,35 @@ describe("createLiveBtQueue", () => {
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(0)
     expect(run.mock.calls.map((c) => c[0])).toEqual(["a", "b"])
+  })
+
+  it("reads a requested cell at once, as a request, and reports what is waiting", async () => {
+    const d = deferred()
+    const states: Array<{ waiting: string[]; running: string[] }> = []
+    const run = vi.fn(() => d.promise)
+    const queue = createLiveBtQueue({ run, delayMs: 1000, concurrency: 1, onChange: (s) => states.push(s) })
+    queue.request("a")
+    queue.request("b")
+    // No debounce: "a" is already running, "b" waits for the slot.
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledWith("a", undefined, "request")
+    expect(states.at(-1)).toEqual({ waiting: ["b"], running: ["a"] })
+    d.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(run).toHaveBeenLastCalledWith("b", undefined, "request")
+  })
+
+  it("counts a cell as waiting from its save, and a request overrides the debounce", async () => {
+    const states: Array<{ waiting: string[]; running: string[] }> = []
+    const run = vi.fn(async () => {})
+    const queue = createLiveBtQueue({ run, delayMs: 1000, onChange: (s) => states.push(s) })
+    queue.notify("a", "e1")
+    expect(states.at(-1)).toEqual({ waiting: ["a"], running: [] })
+    queue.request("a")
+    expect(run).toHaveBeenCalledWith("a", "e1", "request")
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(states.at(-1)).toEqual({ waiting: [], running: [] })
   })
 
   it("drops everything waiting on cancelAll", async () => {

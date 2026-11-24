@@ -20,12 +20,10 @@
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import { Fragment, type Node as ProseMirrorNode, type ResolvedPos } from "@tiptap/pm/model"
-import { TextSelection, type Transaction } from "@tiptap/pm/state"
+import { TextSelection } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
-import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code, Sparkles } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
-import { Button } from "@/components/ui/button"
+import { Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
@@ -50,7 +48,7 @@ import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKey
 import posthog from "@/lib/posthog"
 import type { ForecastClient } from "@/lib/forecast/forecast-client"
 import { useForecast } from "@/context/ForecastContext"
-import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
+import { FormattingBubbleToolbar } from "@/components/FormattingBubbleToolbar"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
@@ -293,6 +291,55 @@ function adjacentIdmlSlotEdgeChar(resolved: ResolvedPos, side: "before" | "after
 }
 
 /**
+ * The character of the paragraph beside `pos`, for AQU-758 in a plain editor.
+ * A paragraph edge or a line break reads as "", the way a slot edge does.
+ */
+function plainBoundaryChar(doc: ProseMirrorNode, pos: number, side: "before" | "after"): string {
+  const resolved = doc.resolve(pos)
+  const offset = resolved.parentOffset
+  if (side === "before") {
+    return offset > 0 ? resolved.parent.textBetween(offset - 1, offset, "", "") : ""
+  }
+  return offset < resolved.parent.content.size
+    ? resolved.parent.textBetween(offset, offset + 1, "", "")
+    : ""
+}
+
+/**
+ * AQU-758 for a plain editor: write `text` over `from`–`to` with the run
+ * editor's whitespace rules applied. Line breaks become hard breaks. Returns
+ * false when the rules leave the text as it is, so the editor's own input
+ * handling (and its input rules) still runs.
+ */
+function writeSanitizedPlainText(
+  view: EditorView,
+  from: number,
+  to: number,
+  text: string,
+  mode: "paste" | "type",
+): boolean {
+  const { state } = view
+  const sanitized = sanitizeIdmlSlotInsertion(
+    text,
+    plainBoundaryChar(state.doc, from, "before"),
+    plainBoundaryChar(state.doc, to, "after"),
+    mode,
+  )
+  if (mode === "type" && sanitized === text) return false
+  if (sanitized === "" && from === to) return true
+  const hardBreak = state.schema.nodes.hardBreak
+  const lines = sanitized.split("\n")
+  const tr = lines.length === 1 || !hardBreak
+    ? state.tr.insertText(lines.join(" "), from, to)
+    : state.tr.replaceWith(from, to, lines.flatMap((line, index) => [
+        ...(index > 0 ? [hardBreak.create()] : []),
+        ...(line ? [state.schema.text(line)] : []),
+      ]))
+  view.dispatch(tr.scrollIntoView())
+  return true
+}
+
+/**
  * The slot text a write should land in. A selection is cut down to the editable
  * parts it covers, so text spanning protected anchors is replaced slot by slot
  * instead of dragging the IDML structure with it.
@@ -422,6 +469,12 @@ interface TranslatedEditorProps {
   /** Receives actionable protected-anchor errors for the parent row banner. */
   onIdmlValidationError?: (message: string | null) => void
   /**
+   * AQU-758 for a plain editor: drop the leading, trailing and doubled spaces
+   * the IDML run editor refuses at entry. Set for an IDML preview, whose
+   * sentence "Pass to style segments" later moves into the runs unchanged.
+   */
+  sanitizeEntryWhitespace?: boolean
+  /**
    * AQU-667: the current authoritative value is an AI draft (sparkle / batch
    * "Draft all") that the store — not this editor — produced. When set and the
    * value changes, the editor absorbs it *even while focused* so the prediction
@@ -483,7 +536,7 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
-  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+  /** Smart edits for this cell (`isSmartEditsEnabled`). Offsets are into the
    *  committed plain text; see smart-edit-decoration-plugin.ts. */
   smartEdits?: SmartEditSuggestion[]
   onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
@@ -558,6 +611,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   initialIdmlSelection = null,
   onInitialIdmlSelectionApplied,
   onIdmlValidationError,
+  sanitizeEntryWhitespace = false,
   aiDrafted = false,
   onCommit,
   pendingInputRef,
@@ -698,6 +752,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     onIdmlValidationErrorRef.current = onIdmlValidationError
   }, [onIdmlValidationError])
+  // The editor's handlers are built once per mount; read the flag through a ref.
+  const sanitizeEntryWhitespaceRef = useRef(sanitizeEntryWhitespace)
+  useEffect(() => {
+    sanitizeEntryWhitespaceRef.current = sanitizeEntryWhitespace
+  }, [sanitizeEntryWhitespace])
   useEffect(() => {
     setIdmlError(preparedIdmlContent?.error ?? null)
     if (preparedIdmlContent?.error) {
@@ -725,8 +784,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const isReadOnly = !editable || Boolean(heldByLabel) || Boolean(preparedIdmlContent?.error)
   const isReadOnlyRef = useRef(isReadOnly)
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
-  // Visible style segments lock a placed IDML cell so a bold or italic edge
-  // can be dragged without the caret taking the pointer. The preview sentence,
+  // Visible style segments lock a placed IDML cell so a bold, italic, or
+  // small-caps edge can be dragged without the caret taking the pointer. The preview sentence,
   // before it is passed into the runs, never mounts this IDML editor.
   const visibleStyleSegments = useVisibleStyleSegments()
   const segmentEdgeMode = Boolean(idmlContext) && !isReadOnly && visibleStyleSegments
@@ -999,8 +1058,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       transformPastedHTML(html: string) {
         return idmlContext ? sanitizeIdmlEditorHtml(html) : sanitizeEditorHtml(html)
       },
-      handleTextInput(view, _from, _to, text) {
-        if (!idmlContext) return false
+      handleTextInput(view, from, to, text) {
+        if (!idmlContext) {
+          if (!sanitizeEntryWhitespaceRef.current || view.composing) return false
+          return writeSanitizedPlainText(view, from, to, text, "type")
+        }
         // AQU-810: composed text is applied by ProseMirror's native DOM-change
         // path, which the click handlers have already anchored inside an
         // editable slot. Redirecting it here would dispatch during the
@@ -1010,7 +1072,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         return true
       },
       handlePaste(view, event, slice) {
-        if (!idmlContext) return false
+        if (!idmlContext) {
+          if (!sanitizeEntryWhitespaceRef.current) return false
+          // A preview is a plain sentence: its formatting never reaches the
+          // runs, so the paste is taken as text under the AQU-758 rules.
+          const plainText = event.clipboardData?.getData("text/plain")
+            ?? slice.content.textBetween(0, slice.content.size, "\n")
+          event.preventDefault()
+          const { from, to } = view.state.selection
+          writeSanitizedPlainText(view, from, to, plainText, "paste")
+          return true
+        }
         // IDML accepts only literal text and bare line breaks inside a slot.
         // Rich clipboard markup, including forged data-idml-* attributes, is
         // deliberately discarded before the transaction reaches the guards.
@@ -1881,20 +1953,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     onGestureEnd: () => commitEditorSnapshot.current(),
   })
 
-  const [, forceEditorStateUpdate] = useState(0)
-  useEffect(() => {
-    if (!editor) return
-    const refresh = ({ transaction }: { transaction?: Transaction } = {}) => {
-      if (transaction && !transaction.docChanged && !transaction.selectionSet) return
-      forceEditorStateUpdate((n) => (n + 1) % 1_000_000)
-    }
-    editor.on("transaction", refresh)
-    editor.on("selectionUpdate", refresh)
-    return () => {
-      editor.off("transaction", refresh)
-      editor.off("selectionUpdate", refresh)
-    }
-  }, [editor])
+  // AQU-2654: no per-transaction re-render of this component. The one thing
+  // drawn from live editor state is the selection bubble's pressed marks, and
+  // `FormattingBubbleToolbar` subscribes to exactly that.
 
   const handleEditorKeyDownCapture = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return
@@ -2107,79 +2168,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
-        {/* `relative z-30`: the row's floating action rail is z-20 and, since
-            round 5 made the mic/upload/TTS buttons permanent rather than
-            appearing only on an empty untranslated line, it is wide enough to
-            reach across this toolbar. Without a higher layer the rail's
-            buttons sit on top and swallow clicks meant for Bold/Inline
-            code/… — a formatting button that simply would not take. */}
-        <div
-          data-testid="formatting-bubble-menu"
-          className="relative z-30 flex gap-0.5 rounded-lg bg-card p-0.5"
+        <FormattingBubbleToolbar
+          editor={editor}
           onMouseDown={handleFormattingToolbarMouseDown}
-        >
-          <AppTooltip content={t("editor.format.boldTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              aria-label={t("editor.format.bold")}
-              className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
-            >
-              <Bold className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.italicTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              aria-label={t("editor.format.italic")}
-              className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
-            >
-              <Italic className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.underlineTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleUnderline().run()}
-              aria-label={t("editor.format.underline")}
-              className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
-            >
-              <UnderlineIcon className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.strikethrough")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleStrike().run()}
-              aria-label={t("editor.format.strikethrough")}
-              className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
-            >
-              <Strikethrough className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          <AppTooltip content={t("editor.format.code")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={() => editor.chain().focus().toggleCode().run()}
-              aria-label={t("editor.format.code")}
-              className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
-            >
-              <Code className="h-3 w-3" />
-            </Button>
-          </AppTooltip>
-          {forecast && <WordsThatFitMenu editor={editor} client={forecast.client} cellId={cellId} />}
-        </div>
+          forecastClient={forecast?.client}
+          cellId={cellId}
+        />
       </BubbleMenu>}
       {idmlError && (
         <div

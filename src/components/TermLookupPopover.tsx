@@ -10,12 +10,14 @@
  *   onViewConcept — opens the matching concept in Terminology
  */
 
+import { cloneElement, useRef, useState } from "react"
+import type { KeyboardEvent, MouseEvent, ReactElement } from "react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import type { Concept, TermMatchingSettings, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
-import { conceptsForSourceSurface } from "@/lib/terminology/source-lookup"
+import { conceptAnswersSourceSurface, conceptsForSourceSurface } from "@/lib/terminology/source-lookup"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -125,6 +127,14 @@ export interface TermLookupPopoverProps {
   sourceTerm: string
   /** Full concept set to search (caller provides, from subscribed termbases). */
   concepts: Concept[]
+  /**
+   * Concepts OF `concepts` the caller already knows match this occurrence —
+   * the source column found the highlight by matching them. When one of them
+   * answers the lookup, the trigger is decorated without searching the
+   * glossary; the full lookup then runs when the popover opens (AQU-2654).
+   * Optional: without it the lookup decides, as before.
+   */
+  knownConcepts?: readonly Concept[]
   /** Project affix inventory + fold defaults feeding the shared matcher. */
   termMatching?: TermMatchingSettings
   /** Opens a matching concept in the Terminology page. */
@@ -144,9 +154,135 @@ export interface TermLookupPopoverProps {
   anchor?: HTMLElement | null
 }
 
+/**
+ * The popover's body. A component of its own so that the lookup — which
+ * concepts this surface resolves to, AQU-1272's shared-matcher verdict — runs
+ * when the popup mounts, not when the row that holds the trigger draws
+ * (AQU-2654: every highlighted term of every row used to pay for it).
+ */
+function LookupPanels({
+  sourceTerm,
+  concepts,
+  termMatching,
+  onViewConcept,
+}: Pick<TermLookupPopoverProps, "sourceTerm" | "concepts" | "termMatching" | "onViewConcept">) {
+  const t = useT()
+  const matches = conceptsForSourceSurface(sourceTerm, concepts, termMatching)
+  return (
+    <div
+      className="space-y-4"
+      role="tooltip"
+      aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
+    >
+      {matches.map((concept) => (
+        <ConceptPanel
+          key={concept.id}
+          concept={concept}
+          onViewConcept={onViewConcept}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** What an inline trigger element may already carry. */
+interface InlineTriggerProps {
+  onClick?: (event: MouseEvent<HTMLElement>) => void
+  onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
+}
+
+/**
+ * The lookup over an INLINE trigger — a highlighted term in running source
+ * text — with nothing mounted until the reader asks (AQU-2654, decision 0013:
+ * "closed is unmounted").
+ *
+ * The source column wraps every highlighted term of every row. A Popover root,
+ * a trigger and a (closed) portal per term was most of what a row with a
+ * glossary rendered: the same row drew twice the components of one without.
+ * Here a closed lookup is the caller's own element with the attributes and
+ * keys of a popover trigger on it, and the Popover is mounted the first time
+ * it is opened — anchored to that element, which is never re-created, so a
+ * selection or the focus in the source text is not disturbed. It stays
+ * mounted afterwards, so closing animates as before.
+ *
+ * Same contract as the controlled chip flow (`open` + `anchor`), owned here.
+ */
+function InlineTermLookup({
+  sourceTerm,
+  concepts,
+  termMatching,
+  onViewConcept,
+  children,
+}: Pick<TermLookupPopoverProps, "sourceTerm" | "concepts" | "termMatching" | "onViewConcept" | "children">) {
+  const [open, setOpen] = useState(false)
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  // The event that dismissed the popover, when it was a press on the trigger
+  // itself: that press is "close", and the click it ends in must not re-open.
+  const dismissedBy = useRef<Event | null>(null)
+
+  const child = children as ReactElement<InlineTriggerProps>
+  const toggle = (element: HTMLElement) => {
+    setAnchor(element)
+    setOpen((current) => !current)
+  }
+  const trigger = cloneElement(child, {
+    role: "button",
+    tabIndex: 0,
+    "aria-haspopup": "dialog",
+    "aria-expanded": open,
+    "data-slot": "popover-trigger",
+    ...(open ? { "data-popup-open": "" } : {}),
+    onClick: (event: MouseEvent<HTMLElement>) => {
+      child.props.onClick?.(event)
+      const dismissal = dismissedBy.current
+      dismissedBy.current = null
+      if (dismissal) {
+        // Dismissed by this very click, or by the press that began it.
+        if (dismissal === event.nativeEvent) return
+        if (dismissal.type !== "click" && event.nativeEvent.timeStamp - dismissal.timeStamp < 1000) return
+      }
+      toggle(event.currentTarget)
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      child.props.onKeyDown?.(event)
+      if (event.target !== event.currentTarget) return
+      if (event.key !== "Enter" && event.key !== " ") return
+      event.preventDefault()
+      toggle(event.currentTarget)
+    },
+  } as Partial<InlineTriggerProps>)
+
+  return (
+    <>
+      {trigger}
+      {anchor && (
+        <Popover
+          open={open}
+          onOpenChange={(next, details) => {
+            if (next) return
+            const target = details.event.target
+            dismissedBy.current = target instanceof Node && anchor.contains(target) ? details.event : null
+            setOpen(false)
+          }}
+        >
+          <PopoverContent className="w-80 p-3 text-sm" sideOffset={6} anchor={anchor}>
+            <LookupPanels
+              sourceTerm={sourceTerm}
+              concepts={concepts}
+              termMatching={termMatching}
+              onViewConcept={onViewConcept}
+            />
+          </PopoverContent>
+        </Popover>
+      )}
+    </>
+  )
+}
+
 export function TermLookupPopover({
   sourceTerm,
   concepts,
+  knownConcepts,
   termMatching,
   onViewConcept,
   children,
@@ -155,16 +291,36 @@ export function TermLookupPopover({
   onOpenChange,
   anchor,
 }: TermLookupPopoverProps) {
-  const t = useT()
   const isControlled = open !== undefined
 
   // AQU-1272: the shared matcher decides, so a prefixed or differently pointed
   // occurrence resolves to its entry like it does for chips and enforcement.
-  const matches = conceptsForSourceSurface(sourceTerm, concepts, termMatching)
+  //
+  // Here only "is there anything to show" is needed. A concept the caller
+  // already matched answers that with the lookup's own per-concept predicate;
+  // the lookup over the whole glossary is the fallback (no hint, or a hinted
+  // concept the lookup turns away, e.g. on an excluded form).
+  const hasMatch =
+    (knownConcepts?.some((concept) => conceptAnswersSourceSurface(sourceTerm, concept, termMatching)) ?? false) ||
+    conceptsForSourceSurface(sourceTerm, concepts, termMatching).length > 0
 
   // No matches → just render trigger with no popover decoration
-  if (matches.length === 0) {
+  if (!hasMatch) {
     return <>{children}</>
+  }
+
+  // An inline trigger (a term in running text): nothing mounted until opened.
+  if (!isControlled && !triggerIsNativeButton) {
+    return (
+      <InlineTermLookup
+        sourceTerm={sourceTerm}
+        concepts={concepts}
+        termMatching={termMatching}
+        onViewConcept={onViewConcept}
+      >
+        {children}
+      </InlineTermLookup>
+    )
   }
 
   const content = (
@@ -173,19 +329,12 @@ export function TermLookupPopover({
       sideOffset={6}
       anchor={anchor ?? undefined}
     >
-      <div
-        className="space-y-4"
-        role="tooltip"
-        aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
-      >
-        {matches.map((concept) => (
-          <ConceptPanel
-            key={concept.id}
-            concept={concept}
-            onViewConcept={onViewConcept}
-          />
-        ))}
-      </div>
+      <LookupPanels
+        sourceTerm={sourceTerm}
+        concepts={concepts}
+        termMatching={termMatching}
+        onViewConcept={onViewConcept}
+      />
     </PopoverContent>
   )
 
@@ -200,10 +349,7 @@ export function TermLookupPopover({
 
   return (
     <Popover>
-      <PopoverTrigger
-        nativeButton={triggerIsNativeButton}
-        render={children}
-      />
+      <PopoverTrigger nativeButton render={children} />
       {content}
     </Popover>
   )

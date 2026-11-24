@@ -23,7 +23,7 @@ import {
   type AsrModel, type AsrModelChoice,
 } from "../../../db/shared/asr-models"
 import {
-  isAllowedExampleUrl, omniConfigured, omniTranscribe, omniTranscribeResponseSchema,
+  isAllowedExampleUrl, omniConfigured, omniRefusesModel, omniTranscribe, omniTranscribeResponseSchema,
   omniWarmingSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg, type OmniBackend,
 } from "./omni-asr"
 import {
@@ -99,10 +99,14 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
   const picked = resolveAsrModel(input.model, input.language)
   // Without the Modal service, Automatic keeps the pre-Omnilingual behaviour
   // for languages Whisper lacks: Whisper auto-detect, not a 503. Only an
-  // explicit Omnilingual choice is refused.
-  const model: AsrModel = input.model === "auto" && picked === "omni-ctc" && !omniConfigured(env)
-    ? "whisper" : picked
-  const omniModel: OmniModel | null = model === "omni-zs" ? "zs" : model === "omni-ctc" ? "ctc" : null
+  // explicit Omnilingual choice is refused. `omni-fast` is not such a choice:
+  // it is what the Transcribe lens runs by default, so a deployment without
+  // the service (self-hosted, local dev) would fail every row of that view.
+  // It gets Whisper too, and the reply says so.
+  const wantsOmni = (input.model === "auto" && picked === "omni-ctc") || picked === "omni-fast"
+  const model: AsrModel = wantsOmni && !omniConfigured(env) ? "whisper" : picked
+  const omniModel: OmniModel | null = model === "omni-zs" ? "zs"
+    : model === "omni-ctc" ? "ctc" : model === "omni-fast" ? "fast" : null
   if (omniModel === null && !env.OPENROUTER_API_KEY) return fail(503, "Hosted transcription is not configured")
   if (omniModel !== null && !omniConfigured(env)) return fail(503, "Omnilingual transcription is not configured")
   if (omniModel === null && !OPENROUTER_AUDIO_FORMATS.has(input.audio.format)) {
@@ -185,12 +189,24 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     const lang = toOmniCode(input.language)
     let response: Response
     let backend: OmniBackend
+    // The model that answered: `fast` becomes `omni-ctc` on an older service.
+    let ranModel: AsrModel = model
     try {
       ({ response, backend } = await omniTranscribe(env, {
         model: omniModel, audio: input.audio.data,
         ...(lang ? { lang } : {}),
         ...(omniModel === "zs" ? { examples: input.examples } : {}),
       }))
+      if (omniModel === "fast" && await omniRefusesModel(response)) {
+        // This worker ships before the service learns `fast` (Modal redeploy,
+        // or an older self-hosted box). The refusal ran no GPU, so the same
+        // reservation covers one retry as CTC: omniCostBoundCents sized it for
+        // that. The reply says which model ran, so the caller is not misled.
+        ({ response, backend } = await omniTranscribe(env, {
+          model: "ctc", audio: input.audio.data, ...(lang ? { lang } : {}),
+        }))
+        ranModel = "omni-ctc"
+      }
     } catch {
       // A timeout may follow GPU work: keep the reservation held.
       return fail(502, "Transcription provider unavailable")
@@ -233,7 +249,7 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
       ok: true, headers, creditsCharged: toCredits(rawCents),
       body: {
         text, chunks: words.map(({ text, start, end }) => ({ text, start, end })),
-        model, timingsApproximate: timingsApproximate ?? false,
+        model: ranModel, timingsApproximate: timingsApproximate ?? false,
         granularity: words.length ? "word" : "none",
       },
     }

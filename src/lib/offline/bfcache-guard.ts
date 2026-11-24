@@ -18,6 +18,9 @@
 // Commits that haven't reached the leader at that instant are lost, but the
 // alternative is a dead leader for the rest of the process, which loses
 // everything after it.
+//
+// Terminating also frees the leader lock (leader-lock.ts), which the worker
+// holds; otherwise the next page's leader would wait on the frozen one forever.
 
 let leaderWorker: Worker | undefined
 let installed = false

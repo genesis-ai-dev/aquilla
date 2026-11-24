@@ -311,12 +311,16 @@ dead_letter_queue = "aquilla-side-effects-dlq"
 
 # ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app
-# Physically separate R2, DO namespace. Auth model unchanged: same SYNC_SECRET_KEY
-# as prod. A logged-in user can use the dev frontend and their writes land in
-# aquilla-snapshots-dev, leaving prod data untouched.
+# Physically separate R2, DO namespace. Same auth model as prod. A logged-in
+# user can use the dev frontend and their writes land in aquilla-snapshots-dev,
+# leaving prod data untouched.
 #
 # Deploy: `wrangler deploy --env development` (CI does this on push to dev).
-# Secrets: after first deploy, copy SYNC_SECRET_KEY from prod with
+# Secrets: SYNC_SECRET_KEY must equal the DEVELOPMENT identity worker's
+# (aquilla-dev-identity), which mints the tokens this worker verifies. Do not
+# copy production's: a key shared with production lets anything that reads it
+# on dev forge production sync tokens (docs/OPSEC.md V7,
+# docs/DEPLOYMENT-ENVIRONMENTS.md "Worker secrets").
 #   `wrangler secret put SYNC_SECRET_KEY --env development`
 # ---------------------------------------------------------------------------
 [env.development]

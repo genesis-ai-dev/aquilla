@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { SOURCE_SELECTION_RAIL_Z } from "@/lib/editor/source-cell-layers"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
-import { hasSourceTermMatch } from "@/lib/terminology/source-lookup"
+import { activeConceptsOf, hasSourceTermMatch } from "@/lib/terminology/source-lookup"
 import { TermLookupPopover } from "./TermLookupPopover"
 import { AddConceptPopover } from "./AddConceptDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -53,7 +53,8 @@ export function SourceSelectionToolbar({
   onToolbarMouseUp,
 }: SourceSelectionToolbarProps) {
   const t = useT()
-  const activeConcepts = useMemo(() => concepts.filter((c) => c.status === "active"), [concepts])
+  // AQU-2654: the active list every source row shares, so the lookup cache is shared too.
+  const activeConcepts = activeConceptsOf(concepts)
   // AQU-1272: the matcher's verdict, not a bidirectional substring test — the
   // affordance has to appear on exactly the occurrences the project's fold /
   // affix / forms settings recognise, and on no others.

@@ -29,6 +29,8 @@ export const NEON_TARGET_COMMANDS = [
   "backfill-lanes",
   "backfill-lane-batch",
   "repair-lane-grants",
+  "repair-creator-owner-grants",
+  "repair-cell-metadata",
   "prune-phantom-voices",
   "fold-cast-by-character",
   "verify-lanes",
@@ -54,6 +56,10 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
+  // AQU-2357: Owner rows for projects created between the migration and the deploy.
+  if (command === "repair-creator-owner-grants") return "scripts/neon-repair-creator-owner-grants.ts"
+  // AQU-2658: put back the source cells a metadata merge turned into arrays.
+  if (command === "repair-cell-metadata") return "scripts/neon-repair-cell-metadata.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
   // AQU-2125: fold line-by-line voice casting into one entry per character.
   if (command === "fold-cast-by-character") return "scripts/neon-fold-cast-by-character.ts"
@@ -84,6 +90,8 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command.startsWith("backfill-") ||
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
+    command === "repair-creator-owner-grants" ||
+    command === "repair-cell-metadata" ||
     command === "prune-phantom-voices" ||
     command === "fold-cast-by-character" ||
     command === "seed-extract" ||

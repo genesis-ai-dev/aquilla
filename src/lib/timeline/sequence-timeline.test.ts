@@ -10,6 +10,7 @@ import {
   scopeCells,
   sequenceTimelineCells,
   staysOffSequenceTimeline,
+  timelineCellsForMilestoneSplit,
   timelineChaptersOf,
   type TimelineChapter,
 } from "./sequence-timeline"
@@ -135,6 +136,41 @@ describe("where Play all goes at the end of a chapter", () => {
     expect(nextPlayableChapter(CHAPTERS, "RUT 3", () => true)).toBeNull()
     expect(nextPlayableChapter(CHAPTERS, "RUT 1", () => false)).toBeNull()
     expect(nextPlayableChapter(CHAPTERS, "unknown", () => true)).toBeNull()
+  })
+})
+
+describe("split into milestones on the timeline", () => {
+  const cells = [line("a"), line("b"), line("c"), line("d")]
+  const milestones = [
+    { key: "m1", cellIds: ["a", "b"] },
+    { key: "m2", cellIds: ["c", "d"] },
+  ]
+
+  it("draws the open milestone when the split is on, and the whole file when it is off", () => {
+    const cases: {
+      name: string
+      split: boolean
+      milestones: { key: string; cellIds: string[] }[]
+      key: string | null
+      want: string[] | "same"
+    }[] = [
+      { name: "split off", split: false, milestones, key: "m2", want: "same" },
+      { name: "the milestone on the page", split: true, milestones, key: "m2", want: ["c", "d"] },
+      { name: "no page chosen yet", split: true, milestones, key: null, want: ["a", "b"] },
+      { name: "a key from another file", split: true, milestones, key: "gone", want: ["a", "b"] },
+      { name: "a file with no milestones", split: true, milestones: [], key: "m1", want: "same" },
+      { name: "the only milestone is the whole file", split: true, milestones: [{ key: "all", cellIds: ["a", "b", "c", "d"] }], key: "all", want: "same" },
+      { name: "an empty milestone", split: true, milestones: [{ key: "empty", cellIds: [] }], key: "empty", want: [] },
+    ]
+    for (const entry of cases) {
+      const shown = timelineCellsForMilestoneSplit(cells, {
+        split: entry.split,
+        milestones: entry.milestones,
+        milestoneKey: entry.key,
+      })
+      if (entry.want === "same") expect(shown, entry.name).toBe(cells)
+      else expect(shown.map((cell) => cell.id), entry.name).toEqual(entry.want)
+    }
   })
 })
 

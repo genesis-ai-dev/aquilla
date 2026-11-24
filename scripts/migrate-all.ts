@@ -56,7 +56,7 @@ import { computeOrphanRetractions } from "./lib/migrate-orphans"
 import { eventHash } from "./migrate-daemon/plan"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
 import type { AudioImport } from "../src/lib/migrate/audio"
-import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
+import { buildOidIndex, planCellAudio, buildCellAudioEvents, touchedFileIds } from "../src/lib/migrate/audio-copy"
 import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
 import { R2Client, gitlabLfsKey, audioDestKey } from "../src/lib/migrate/r2-s3"
 import { RunLock, LockHeldError } from "../src/lib/migrate/run-lock"
@@ -153,7 +153,11 @@ const STATE_FILE = ".migrate-state.json"
 // v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
 // v5: cells Codex parked with the eye icon (`data.hidden`) migrate hidden —
 //     source.cell.visibility.set, NOT a retraction (AQU-1425).
-const CONTENT_LOGIC_VERSION = 5
+// v6: a validator's sign-off of a later edit gets its own event id, so it is
+//     no longer dropped as a replay of their first one (AQU-2750). Only
+//     sign-offs made since 2026-11-24 change; a re-derive sends those and
+//     nothing else.
+const CONTENT_LOGIC_VERSION = 6
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }
@@ -332,14 +336,35 @@ async function fetchExistingEventIds(projectId: string): Promise<Set<string>> {
 
 // Recompute every file's rollup counters once per project (set-based), since the
 // ingest deferred the per-cell recompute. Must run AFTER all of a project's
-// events are ingested.
-async function finalizeCounters(projectId: string): Promise<void> {
+// events are ingested. `fileIds` narrows it to the files a pass touched
+// (AQU-557); omitted or empty, the route recomputes the whole project.
+async function finalizeCounters(projectId: string, fileIds: string[] = []): Promise<void> {
   const res = await fetch(`${SYNC}/migrate/finalize`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ projectId }),
+    body: JSON.stringify(fileIds.length > 0 ? { projectId, fileIds } : { projectId }),
   })
   if (!res.ok) throw new Error(`finalize HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+}
+
+// The audio passes ingest with the counters deferred like every other pass, and
+// used to stop there: the takes were attached and played, and the book kept
+// reading "0% recorded" until the nightly progress self-heal reached its file.
+// So each audio pass finalizes the files its events touched.
+//
+// A failure here is reported, not thrown. The takes are already in, and the
+// rows this writes are derived — the self-heal (sync-worker
+// progress-selfheal-cron.ts) repairs a file whose rows are behind its audio
+// events. Throwing would mark the project failed over data that is correct, and
+// --audio-fast would not finalize on the retry anyway: its delta is empty then.
+async function finalizeAudioFiles(projectId: string, events: IngestEvent[]): Promise<void> {
+  const fileIds = touchedFileIds(events)
+  if (fileIds.length === 0) return
+  try {
+    await finalizeCounters(projectId, fileIds)
+  } catch (err) {
+    console.log(`  ⚠ finalize failed (${(err as Error).message}); progress rows will lag until the nightly self-heal`)
+  }
 }
 
 // Org/team placement comes from syncGroupsToNeon (src/lib/migrate/group-sync):
@@ -741,7 +766,10 @@ async function doProjectAudio(p: CodexProjectMatch, args: Args) {
   process.stdout.write(
     `\r    ${args.apply ? "uploaded" : "would upload"} ${uploaded} clips${missing ? ` (${missing} missing on disk)` : ""}\n`,
   )
-  if (args.apply && events.length) await ingest(projectId, events)
+  if (args.apply && events.length) {
+    await ingest(projectId, events)
+    await finalizeAudioFiles(projectId, events)
+  }
   console.log(`  ✓ audio${args.apply ? "" : " (dry-run)"}`)
   if (args.apply) {
     STATE[String(p.id)] = { ...STATE[String(p.id)], audioSha: sha ?? undefined }
@@ -867,7 +895,10 @@ async function doProjectAudioFast(p: CodexProjectMatch, args: Args) {
     if (existing.size) console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (event-ids ${secs(tDelta, tIngest)})`)
     // Smaller chunks than the content pass: each audio event's projection does a
     // deselect + upsert, so a big single POST can exceed the edge timeout.
-    if (newEvents.length) await ingest(projectId, newEvents, false, 300)
+    if (newEvents.length) {
+      await ingest(projectId, newEvents, false, 300)
+      await finalizeAudioFiles(projectId, newEvents)
+    }
     console.log(`  ⏱ ingest ${secs(tIngest, Date.now())}`)
   }
   console.log(`  ✓ audio-fast`)

@@ -345,3 +345,18 @@ describe("forms and exclusions", () => {
     expect(() => new RegExp(src, "giu")).not.toThrow()
   })
 })
+
+describe("concept regex cache (AQU-2654)", () => {
+  it("rebuilds for a concept edited in place, and resets scan state between calls", () => {
+    const concept = { sourceTerm: "grace", match: { forms: ["graces"] } }
+    expect(matchesConcept("many graces", concept)).toBe(true)
+    // Two scans of the same text must agree: the cached `g` regex keeps a
+    // lastIndex, and a second scan that started from it would find nothing.
+    expect(findConceptMatches("grace upon grace", concept)).toHaveLength(2)
+    expect(findConceptMatches("grace upon grace", concept)).toHaveLength(2)
+    concept.sourceTerm = "mercy"
+    concept.match = { forms: [] }
+    expect(matchesConcept("many graces", concept)).toBe(false)
+    expect(matchesConcept("new mercy", concept)).toBe(true)
+  })
+})

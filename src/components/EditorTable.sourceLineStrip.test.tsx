@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -245,29 +245,114 @@ const closeMenu = () => {
  * not an explanation.
  */
 describe("EditorTable — the row's structural controls", () => {
-  it("renders nothing at all when there is nothing to offer", async () => {
-    // The one case that still hides: no access. A contributor on an untimed
-    // file with the workflow off can edit no source text, restructure nothing
-    // and retime nothing, so the cell is not a menu trigger — a permanently
-    // empty menu would be furniture.
+  it("copies the source text when nothing else is offered, and the cell text is not highlighted", async () => {
+    // A contributor on an untimed file can edit nothing. The menu still
+    // exists, because Copy source text is how the words leave the cell.
+    const write = vi.fn().mockResolvedValue(undefined)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText },
+    })
     renderTable({ project: projectAt(400) })
     await screen.findByText("First cue")
-    expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
+    const trigger = menuBtn("cue-a")
+    expect(trigger.className).not.toContain("select-text")
+    fireEvent.contextMenu(trigger)
+    const item = await screen.findByTestId("cell-menu-copy-source")
+    expect(item).toHaveTextContent("Copy source text")
+    expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull()
+    fireEvent.click(item)
+    await waitFor(() => {
+      expect(write.mock.calls.length + writeText.mock.calls.length).toBeGreaterThan(0)
+    })
+    const pasted = writeText.mock.calls.length > 0
+      ? String(writeText.mock.calls.at(-1)?.[0])
+      : await (write.mock.calls.at(-1)?.[0]?.[0] as ClipboardItem).getType("text/plain").then((blob) => blob.text())
+    expect(pasted).toBe("First cue")
+  })
+
+  it("explains an empty Copy source text on click, and draws the menu as one list", async () => {
+    // An empty cell still offers the entry. The reason is a disabled note
+    // opened by the click, not a second line, and the list is not split
+    // between copy, edit, and the row actions. Lead rank so Edit is in
+    // the list — that is the row the old divider sat under.
+    renderTable({ project: projectAt(500), sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    openMenu("added")
+    const item = await screen.findByTestId("cell-menu-copy-source")
+    expect(item).toHaveTextContent("Copy source text")
+    expect(item).not.toHaveTextContent("Nothing to copy")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(screen.queryByTestId("cell-menu-copy-source-reason")).toBeNull()
+    expect(document.querySelector("[data-slot='menu-separator']")).toBeNull()
+    expect(await entry("edit-source")).toBeInTheDocument()
+    expect(await entry("insert-above")).toBeInTheDocument()
+
+    fireEvent.click(item)
+    const note = await screen.findByText("Nothing to copy")
+    expect(note.closest("[data-slot='disabled-reason-note']")).not.toBeNull()
+    expect(screen.getByTestId("cell-menu-copy-source")).toBeInTheDocument()
   })
 
   it("opens from a right-click on the source cell", async () => {
-    // The menu used to be a three-dot button in the cell's corner. It is the
-    // source cell itself now: right-click the text, and the text stays
-    // selectable (the trigger's default is select-none).
+    // The source cell itself is a trigger. Its text is not selectable; the
+    // menu's Copy source text is the way out.
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
     const trigger = menuBtn("cue-a")
     expect(trigger).toHaveAttribute("data-editor-cell-surface", "source")
     expect(trigger).toHaveAttribute("data-slot", "context-menu-trigger")
-    expect(trigger.className).toContain("select-text")
-    expect(trigger.className).not.toContain("select-none")
-    expect(within(rowEl("cue-a")).queryByRole("button", { name: "Cell actions" })).toBeNull()
+    expect(trigger.className).not.toContain("select-text")
     fireEvent.contextMenu(trigger)
+    expect(await entry("insert-above")).toBeInTheDocument()
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
+  })
+
+  it("opens the SAME menu from the three-dot button in the cell's corner", async () => {
+    // A right-click is invisible: an owner who had just opened add/remove to
+    // contributors looked for the ellipsis, found none, and concluded the
+    // setting had not taken. The button is the visible way in, and it opens
+    // the context menu itself rather than a second copy of the list.
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
+    await screen.findByText("First cue")
+    const button = within(rowEl("added")).getByRole("button", { name: "Cell actions" })
+    expect(button).toHaveAttribute("data-testid", "cell-menu-button-added")
+    // It lives inside the trigger, so the event it sends reaches it.
+    expect(menuBtn("added")).toContainElement(button)
+    expect(button).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(button)
+    expect(await entry("insert-above")).toBeInTheDocument()
+    expect(await entry("remove")).toBeInTheDocument()
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
+
+    fireEvent.click(await entry("insert-above"))
+    expect(onAddLineAt).toHaveBeenCalledWith(20, 25)
+  })
+
+  it("does not re-open the menu when the button is pressed to close it", async () => {
+    // Pressing the button while its menu is open dismisses the menu (an outside
+    // press); the click that completes the same press must not open it again.
+    renderTable({ sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    const button = within(rowEl("added")).getByRole("button", { name: "Cell actions" })
+    fireEvent.click(button)
+    await entry("insert-above")
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
+
+    fireEvent.pointerDown(button)
+    closeMenu()
+    await waitFor(() => expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull())
+    // `detail: 1` is a pointer click; 0 would be the keyboard.
+    fireEvent.click(button, { detail: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull()
+
+    // The next press starts clean.
+    fireEvent.pointerDown(button)
+    fireEvent.click(button, { detail: 1 })
     expect(await entry("insert-above")).toBeInTheDocument()
   })
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getAdminMe } from "@/lib/frontier/admin"
+import { peekPlatformAdmin, probePlatformAdmin } from "@/lib/frontier/platform-admin-probe"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 
@@ -13,12 +13,16 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
  * Follows the useOrg fetch convention: setState lives in a useCallback, the
  * effect just kicks it off, and an aliveRef guards against StrictMode's
  * setup→cleanup→setup dry-run (see useOrg.ts for the full rationale).
+ *
+ * The probe itself is shared (`platform-admin-probe.ts`): every consumer on a
+ * page joins one request, and a consumer that mounts while the answer is still
+ * fresh starts settled — no request, no loading frame, no extra commit.
  */
 export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(() => (jwt ? peekPlatformAdmin(jwt) ?? false : false))
+  const [loading, setLoading] = useState(() => !jwt || peekPlatformAdmin(jwt) === undefined)
   const aliveRef = useRef(true)
   const requestRef = useRef(0)
   const jwtRef = useRef(jwt)
@@ -44,9 +48,17 @@ export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
       }
       return
     }
+    const known = peekPlatformAdmin(jwt)
+    if (known !== undefined) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+        setIsAdmin(known)
+        setLoading(false)
+      }
+      return
+    }
     if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setLoading(true)
     try {
-      const ok = await getAdminMe(jwt)
+      const ok = await probePlatformAdmin(jwt)
       if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setIsAdmin(ok)
     } catch (err) {
       if (err instanceof UserError && err.category === "session-expired") {

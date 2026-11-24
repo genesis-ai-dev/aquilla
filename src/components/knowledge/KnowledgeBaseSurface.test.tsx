@@ -73,12 +73,15 @@ beforeEach(() => {
   api.original.mockResolvedValue(new Blob(["original"]))
   // A just-created row comes back with updated_at = now(), which is what keeps it
   // on the "Indexing…" side of the staleness window (AQU-1376).
-  api.upload.mockResolvedValue(doc({
-    id: "uploaded",
-    name: "new.md",
-    indexStatus: "pending",
-    updatedAt: new Date().toISOString(),
-  }))
+  api.upload.mockResolvedValue({
+    doc: doc({
+      id: "uploaded",
+      name: "new.md",
+      indexStatus: "pending",
+      updatedAt: new Date().toISOString(),
+    }),
+    textTruncated: false,
+  })
   api.remove.mockResolvedValue(undefined)
   api.reindex.mockResolvedValue(undefined)
 })
@@ -124,6 +127,24 @@ describe("KnowledgeBaseSurface", () => {
     await waitFor(() => expect(api.upload).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", file))
     expect(await screen.findByText("new.md")).toBeInTheDocument()
     expect(screen.getByText("Indexing…")).toBeInTheDocument()
+  })
+
+  it("tells the uploader when only the first part of the text was read (AQU-2594)", async () => {
+    api.upload.mockResolvedValue({ doc: doc({ id: "long", name: "long.pdf" }), textTruncated: true })
+    const { container } = render(
+      <KnowledgeBaseSurface scope={{ kind: "org", id: 7 }} jwt="jwt" canManage showTitle={false} />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(["%PDF"], "long.pdf")] } })
+
+    await waitFor(() =>
+      expect(toastMock.add).toHaveBeenCalledWith({
+        type: "warning",
+        title: "Uploaded long.pdf, but it is very long: only its first 2 million characters were read.",
+      }),
+    )
+    expect(toastMock.add).not.toHaveBeenCalledWith(expect.objectContaining({ type: "success" }))
   })
 
   // AQU-1499: a partner's .docx can be refused for a reason that names its own

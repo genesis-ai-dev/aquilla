@@ -4,11 +4,11 @@
  * others empty. That is the only case the corner warning is for: the source
  * uses several of those runs, and the typed translation uses fewer of them.
  *
- * Bold, italic, and tokens break the group, matching the on-screen join.
+ * Bold, italic, small caps, and tokens break the group, matching the on-screen join.
  */
 
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { idmlCharacterStyleEmphasis } from "@/lib/richtext/idml-style-display"
+import { idmlCharacterStyleEmphasis, idmlStyleIsEmphasis } from "@/lib/richtext/idml-style-display"
 import {
   idmlParagraphStyleFromMetadata,
   idmlStyleCatalogFromMetadata,
@@ -115,11 +115,10 @@ function slotIsPlain(
 ): boolean {
   const styleId = slot.getAttribute("data-idml-character-style") ?? ""
   const inherit = Boolean(paragraphStyleId) && isDefaultCharacterStyle(styleId)
-  const { bold, italic } = idmlCharacterStyleEmphasis(
+  return !idmlStyleIsEmphasis(idmlCharacterStyleEmphasis(
     inherit ? paragraphStyleId! : styleId,
     catalog,
-  )
-  return !bold && !italic
+  ))
 }
 
 function isDefaultCharacterStyle(styleId: string): boolean {

@@ -131,6 +131,10 @@ export function MembersMatrixCellEditor({
   }
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
+  // AQU-2654: the matrix is members × projects cells, and a closed RoleDialog
+  // in each one was most of what a cell rendered. The dialog mounts the first
+  // time this cell opens it and then stays, so closing still animates out.
+  const [dialogMounted, setDialogMounted] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
   // Only an add of someone new asks for Language lanes; load them then.
@@ -190,12 +194,17 @@ export function MembersMatrixCellEditor({
     }
   }
 
-  function openDialog() {
-    setOpen(false)
+  function showDialog() {
+    setDialogMounted(true)
     setDialogOpen(true)
   }
 
-  const dialog = (
+  function openDialog() {
+    setOpen(false)
+    showDialog()
+  }
+
+  const dialog = !dialogMounted ? null : (
     <RoleDialog
       open={dialogOpen}
       onOpenChange={setDialogOpen}
@@ -227,7 +236,7 @@ export function MembersMatrixCellEditor({
           className="block w-full px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed"
           disabled={!session?.jwt}
           aria-label={t("org.membersMatrixCellEditor.addToProjectAriaLabel", { username })}
-          onClick={() => setDialogOpen(true)}
+          onClick={showDialog}
         >
           <span aria-hidden>—</span>
         </button>
@@ -278,6 +287,11 @@ export function MembersMatrixCellEditor({
               )}
             </div>
           </div>
+          {cell.createdThisProject && (
+            <div className="truncate text-[10px] font-normal text-muted-foreground">
+              {t("org.membersPage.createdThisProject")}
+            </div>
+          )}
         </PopoverTrigger>
         <PopoverContent className="w-64 p-2" side="bottom">
           {canEdit ? (

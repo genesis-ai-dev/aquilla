@@ -1277,6 +1277,7 @@ function LinePicker({
       inputValue={query}
       onInputValueChange={(next: string) => setQuery(next)}
       autoHighlight
+      highlightItemOnHover={false}
       onValueChange={(row: PickerRow | null) => {
         if (!row) return
         if (row.value === "skip") onPick("skip")

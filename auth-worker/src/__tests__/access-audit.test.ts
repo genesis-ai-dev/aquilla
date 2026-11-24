@@ -4,12 +4,20 @@
  */
 
 import { env } from "cloudflare:test"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import app from "../index"
 import { resolveProjectRoles } from "../services/project-permissions"
 import type { AuthUser } from "../types"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 import type { AccessAuditReport } from "../services/access-audit"
+import { setPoolGuardEnabled } from "../../../db/shared/test-pool-guard"
+
+// AQU-2613 / AQU-2630: buildAccessAudit walks the org's people eight at a
+// time and each of them issues several statements, so this route holds more
+// than one request's pool. AQU-2630 narrows it; until then the pool guard is
+// off here and on everywhere else.
+beforeAll(() => setPoolGuardEnabled(false))
+afterAll(() => setPoolGuardEnabled(true))
 
 function user(id: number, username: string): AuthUser {
   return {
@@ -45,8 +53,10 @@ async function seed() {
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES
+       ('pa', 1, 700, 1),
        ('pa', 2, 300, 1),
        ('pa', 3, 200, 1),
+       ('pb', 2, 700, 2),
        ('pz', 2, 700, 1)`,
   ).run()
   await env.AQUILLA_PG.prepare(

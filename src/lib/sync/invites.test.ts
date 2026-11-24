@@ -315,6 +315,20 @@ describe("acceptServerInvite", () => {
     expect((result as { invitedEmail?: string }).invitedEmail).toBeUndefined()
   })
 
+  // AQU-2639: AQU-1579's unverified-address refusal shares the 403, but it is
+  // the opposite situation — the signed-in account IS the invited one, it just
+  // has not proven it owns the address. Collapsing it into "wrong_email" sent
+  // the join page's wrong-account screen, whose only exits (sign out, or have
+  // the owner add you) neither applied nor worked.
+  it("classifies a 403 code:'email_unverified' apart from a wrong-address 403", async () => {
+    global.fetch = mockFetch(403, {
+      error: "Verify your email address before accepting an invite sent to it.",
+      code: "email_unverified",
+    }) as unknown as typeof fetch
+    const result = await acceptServerInvite("jwt", "token", API)
+    expect(result).toEqual({ ok: false, reason: "email_unverified" })
+  })
+
   it("returns {ok:false, reason:'network'} on network error without throwing", async () => {
     global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
     const result = await acceptServerInvite("jwt", "t", API)
@@ -343,6 +357,18 @@ describe("acceptMultiInvite", () => {
     global.fetch = mockFetch(403, { error: "different email" }) as unknown as typeof fetch
     const result = await acceptMultiInvite("jwt", "tok", API)
     expect(result).toEqual({ ok: false, reason: "wrong_email" })
+  })
+
+  // AQU-2639: likewise the unverified-address refusal — a single-project token
+  // is redeemed through this endpoint first, so this is usually the call that
+  // reports it.
+  it("classifies a 403 code:'email_unverified' apart from a wrong-address 403", async () => {
+    global.fetch = mockFetch(403, {
+      error: "Verify your email address before accepting an invite sent to it.",
+      code: "email_unverified",
+    }) as unknown as typeof fetch
+    const result = await acceptMultiInvite("jwt", "tok", API)
+    expect(result).toEqual({ ok: false, reason: "email_unverified" })
   })
 
   // AQU-2576: this is the endpoint JoinPage calls first, so the masked

@@ -226,7 +226,7 @@ describe('MCP tools/list', () => {
     })
   })
 
-  it('returns all 38 tools each with an input schema', async () => {
+  it('returns all 40 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -244,7 +244,10 @@ describe('MCP tools/list', () => {
         'list_changesets',
         // AQU-2403 membership roster read.
         'list_members',
-        'list_memory', 'list_orgs', 'list_projects',
+        'list_memory',
+        // AQU-2662 ORG membership roster read.
+        'list_org_members',
+        'list_orgs', 'list_projects',
         // AQU-2195 style-rule read.
         'list_style_rules',
         // AQU-1175 termbase read.
@@ -252,6 +255,8 @@ describe('MCP tools/list', () => {
         'patch_settings', 'prepare_import',
         // AQU-2407 brief writes.
         'prepare_set_brief', 'regenerate_brief_summary',
+        // AQU-2642 orthography exception merge.
+        'prepare_orthography_exceptions',
         'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
         'read_content', 'read_history',
         // AQU-1231 quality reads.
@@ -262,7 +267,7 @@ describe('MCP tools/list', () => {
         'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(38)
+    expect(body.result.tools).toHaveLength(40)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

@@ -1,15 +1,14 @@
-import { CheckingPage } from "@/components/checking/CheckingPage"
 import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
+import { Navigate, Routes, Route, useParams, useLocation, matchPath, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgOverview } from "@/components/org/OrgOverview"
 import { OrgProjectsPage } from "@/components/org/OrgProjectsPage"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
-import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
+import { DesktopGoogleReturn } from "@/components/auth/DesktopGoogleReturn"
 import { GoogleLoginReturn } from "@/pages/GoogleLoginReturn"
 import { Login } from "@/pages/Login"
 import { NotFound } from "@/pages/NotFound"
@@ -43,6 +42,7 @@ import { Toaster } from "@/components/ui/toast"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
+import { CompletionBatchStatusHost } from "@/components/CompletionBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { StorageFullBanner } from "@/components/StorageFullBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
@@ -66,7 +66,6 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
-import { ToolsMountProvider } from "@/components/tools/ToolsMountContext"
 import { SmartExtensionsGate } from "@/components/tools/SmartExtensionsGate"
 import { BuildJobNotifier } from "@/components/tools/builder/BuildJobNotifier"
 import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
@@ -127,8 +126,13 @@ const PreferencesDialog = lazy(() =>
   import("@/pages/Preferences").then((m) => ({ default: m.PreferencesDialog })),
 )
 // Heavy workspace / admin routes — loaded only when navigated to
+// The Smart Extensions mount context pulls in the extension SDK and first-party
+// tool bundles, so it loads with the workspace rather than on first paint.
 const ProjectWorkspace = lazy(() =>
-  import("@/components/ProjectWorkspace").then((m) => ({
+  Promise.all([
+    import("@/components/ProjectWorkspace"),
+    import("@/components/tools/ToolsMountContext"),
+  ]).then(([m, { ToolsMountProvider }]) => ({
     // Smart Extensions (prototype): the project's installed extensions feed
     // the panel, inline and editor mounts inside the workspace. One stable
     // component type, so surface hops keep the instance (AQU-1496).
@@ -140,6 +144,14 @@ const ProjectWorkspace = lazy(() =>
       )
     },
   })),
+)
+// The project overview (plans, autopilot, date pickers) and the external
+// checker page are routes of their own; keep them off the first load.
+const ProjectOverview = lazy(() =>
+  import("@/components/org/ProjectOverview").then((m) => ({ default: m.ProjectOverview })),
+)
+const CheckingPage = lazy(() =>
+  import("@/components/checking/CheckingPage").then((m) => ({ default: m.CheckingPage })),
 )
 const OrgDataEgress = lazy(() =>
   import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
@@ -236,7 +248,18 @@ const ProjectApprovals = lazy(() =>
   import("@/pages/ProjectApprovals/ProjectApprovals").then((m) => ({ default: m.ProjectApprovals })),
 )
 const ToolsPage = lazy(() =>
-  import("@/pages/Tools/ToolsPage").then((m) => ({ default: m.ToolsPage })),
+  Promise.all([
+    import("@/pages/Tools/ToolsPage"),
+    import("@/components/tools/ToolsMountContext"),
+  ]).then(([m, { ToolsMountProvider }]) => ({
+    default: function ToolsPageWithMount() {
+      return (
+        <ToolsMountProvider>
+          <m.ToolsPage />
+        </ToolsMountProvider>
+      )
+    },
+  })),
 )
 const ToolRunPage = lazy(() =>
   import("@/pages/Tools/ToolRunPage").then((m) => ({ default: m.ToolRunPage })),
@@ -450,6 +473,9 @@ export default function App() {
           <AiModelConsentDialog />
           <AiModelDownloadChip />
           <AudioBulkProgressBanner />
+          {/* AQU-2654: batch drafting keeps running after the user leaves the
+              editor — its progress, completion and failure follow them. */}
+          <CompletionBatchStatusHost />
           <GlobalAudioShortcuts />
           <VersionBadge />
           <UpdateOnNavigate />
@@ -464,10 +490,15 @@ export default function App() {
 function AppRoutes() {
   const location = useLocation()
   const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)?.backgroundLocation
+  // A bookmark or OAuth return has no background page. Mount just the dialog
+  // so a second settings screen or a background redirect cannot take over.
+  const directLoginMethods = !backgroundLocation && !!matchPath("/preferences/login-methods", location.pathname)
+  const showMainRoute = !directLoginMethods && !(backgroundLocation && matchPath("/preferences/login-methods", backgroundLocation.pathname))
 
   return (
     <>
       <BuildJobNotifier />
+      <DesktopGoogleReturn />
       {/* AQU-2265: `?highlight=<id>` scrolls to one setting and flashes it. */}
       <SettingHighlighter />
       {/* Workspace routes intentionally suspend to this outer boundary: when
@@ -475,7 +506,7 @@ function AppRoutes() {
           project overview mounted so its blocking "Opening project" overlay
           remains observable. Org lazy routes catch suspension locally below. */}
       <Suspense fallback={<SuspenseRouteFallback />}>
-        <Routes location={backgroundLocation ?? location}>
+        {showMainRoute && <Routes location={backgroundLocation ?? location}>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
@@ -484,12 +515,12 @@ function AppRoutes() {
         <Route path="/oauth/consent" element={<LazyRoute><OAuthConsent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
-        <Route path="/projects/:id" element={<ProjectElevationBoundary><ProjectOverview /></ProjectElevationBoundary>} />
+        <Route path="/projects/:id" element={<ProjectElevationBoundary><LazyRoute><ProjectOverview /></LazyRoute></ProjectElevationBoundary>} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
             diode-zone flow lands here with no session and no onboarding). */}
-        <Route path="/check/:token" element={<CheckingPage />} />
+        <Route path="/check/:token" element={<LazyRoute><CheckingPage /></LazyRoute>} />
         <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />
@@ -573,7 +604,7 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<ProjectElevationBoundary><LazyRoute><ProjectApprovals /></LazyRoute></ProjectElevationBoundary>} />
-        <Route path="/project/:id/extensions" element={<ProjectElevationBoundary><LazyRoute><SmartExtensionsGate><ToolsMountProvider><ToolsPage /></ToolsMountProvider></SmartExtensionsGate></LazyRoute></ProjectElevationBoundary>} />
+        <Route path="/project/:id/extensions" element={<ProjectElevationBoundary><LazyRoute><SmartExtensionsGate><ToolsPage /></SmartExtensionsGate></LazyRoute></ProjectElevationBoundary>} />
         <Route path="/project/:id/extensions/:toolId" element={<ProjectElevationBoundary><LazyRoute><SmartExtensionsGate><ToolRunPage /></SmartExtensionsGate></LazyRoute></ProjectElevationBoundary>} />
         <Route path="/project/:id/tools" element={<RedirectToExtensions />} />
         <Route path="/project/:id/tools/:toolId" element={<RedirectToExtensions />} />
@@ -601,9 +632,9 @@ function AppRoutes() {
 
         {/* AQU-270: catch-all 404 — must be last (audit finding F-IA3) */}
         <Route path="*" element={<NotFound />} />
-        </Routes>
+        </Routes>}
       </Suspense>
-      {backgroundLocation ? (
+      {backgroundLocation || directLoginMethods ? (
         <Routes>
           <Route path="/preferences" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
           <Route path="/preferences/:section" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />

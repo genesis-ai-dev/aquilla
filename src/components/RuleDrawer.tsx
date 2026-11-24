@@ -15,6 +15,7 @@ import { isCompletionConfigured } from "@/lib/completion/completion-service"
 import { ruleAppliesToCell } from "@/lib/rules/rule-engine"
 import {
   buildRegexProposal,
+  hasOrthographyFix,
   requestBatchFix,
   requestSurgicalFix,
   type FixPreview,
@@ -66,7 +67,11 @@ export function RuleDrawer({
     isCompletionConfigured(completionSettings, session?.jwt ?? null)
 
   const proposeForCell = useCallback(async (cell: CellData) => {
-    if (!rule || !completionSettings) return
+    // AQU-2642: no `completionSettings` guard — a check the lane's own rules
+    // can correct (old-orthography) is answered inside `requestSurgicalFix`
+    // without a model, so requiring AI here would keep offering the
+    // translator nothing but Amend rule.
+    if (!rule) return
     setBusy(cell.id)
     try {
       // A `kind: "none"` proposal still opens the sheet: it carries the
@@ -93,7 +98,6 @@ export function RuleDrawer({
         setProposal(buildRegexProposal(rule.autofix, violatingCells, "cached-regex"))
         return
       }
-      if (!completionSettings) return
       setProposal(await requestBatchFix({
         rule, violatingCells, passingCells,
         settings: completionSettings, session: session ?? null,
@@ -145,9 +149,12 @@ export function RuleDrawer({
   // Why a fix affordance is unavailable, so a disabled button is never a dead
   // end — the span carries the hover because a disabled button has
   // pointer-events: none and its own tooltip would never fire.
+  // AQU-2642: `hasOrthographyFix` is the second exemption from the AI gate,
+  // beside a rule carrying a saved regex: both compute their correction
+  // locally, so an unconfigured model is no reason to grey the button out.
   const fixBlockedReason = !canApply
     ? t("rules.drawer.fixNotPermitted")
-    : !aiReady
+    : !aiReady && !hasOrthographyFix(rule)
       ? t("rules.drawer.aiNotConfigured")
       : null
   const fixAllBlockedReason = rule.autofix && canApply ? null : fixBlockedReason

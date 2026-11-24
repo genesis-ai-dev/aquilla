@@ -4,7 +4,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Workspace file actions in the chapter-row File options ⋯ menu.
  *
- * With a file open the menu lists workspace actions (e.g. Run AI completions)
+ * With a file open the menu lists workspace actions (e.g. Draft next batch)
  * and file actions together: Rename, Move, Assign work, Segmentation, then Export.
  *
  * This spec verifies the menu opens, lists those items in that file-action
@@ -21,7 +21,7 @@ test("workspace actions dropdown lists available actions", async ({ alice }) => 
 
   await expect(menu.getByRole("menuitem", { name: /^Export$/i })).toBeVisible({ timeout: 3_000 })
   await expect(
-    menu.getByRole("menuitem", { name: /Run AI completions/i })
+    menu.getByRole("menuitem", { name: /Draft next batch/i })
   ).toBeVisible({ timeout: 3_000 })
   await expect(menu.getByRole("menuitem", { name: /^Rename$/i })).toBeVisible({ timeout: 3_000 })
   await expect(menu.getByRole("menuitem", { name: /Move to corpus/i })).toBeVisible({ timeout: 3_000 })

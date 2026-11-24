@@ -229,7 +229,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     ])
     const mark = screen.getByTestId("langquest-list-mark")
     expect(mark).toHaveAttribute("data-health", "broken")
-    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken, reconnect LangQuest")
+    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken — reconnect LangQuest")
     expect(within(screen.getByText("Kalam").closest("span")!.parentElement!).getByTestId("langquest-list-mark")).toBe(mark)
     expect(screen.getAllByTestId("langquest-list-mark")).toHaveLength(1)
   })

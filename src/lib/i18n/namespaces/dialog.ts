@@ -10,7 +10,7 @@ export const dialog = defineNamespace({
     "dialog.assign.kind.translate": "Translate",
     "dialog.assign.kind.validate": "Validate",
     "dialog.assign.kindValidateDescription":
-      "Their progress counts the lines they approve themselves, in text and audio.",
+      "Their progress counts the lines they validate themselves, in text and audio.",
     "dialog.assign.scope.selection": "Current selection",
     "dialog.assign.scope.allVerses": "All verses in file",
     "dialog.assign.scope.entireFile": "Entire file",

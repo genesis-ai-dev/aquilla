@@ -88,7 +88,7 @@ export class Workspace {
     const dialog = this.page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
-    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByLabel("Film name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()

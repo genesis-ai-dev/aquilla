@@ -116,7 +116,7 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
     draw(cutTake(), P1)
     const takeRow = screen.getByTestId(`take-row-${P1}`)
     expect(within(takeRow).queryByTestId("audio-validation-button")).toBeNull()
-    expect(within(takeRow).getByTestId(`take-pieces-approved-${P1}`)).toHaveTextContent("1 of 3 pieces approved")
+    expect(within(takeRow).getByTestId(`take-pieces-approved-${P1}`)).toHaveTextContent("1 of 3 pieces validated")
   })
 
   // Slice 3A (Sam, Oct 29, second round). In the recorder's list, at its real
@@ -144,7 +144,7 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
 
     expect(within(row).queryByTestId(`take-split-${P1}`)).toBeNull()
     expect(row).not.toHaveTextContent(/split in/)
-    expect(count).toHaveTextContent("1 of 3 pieces approved")
+    expect(count).toHaveTextContent("1 of 3 pieces validated")
 
     // The name: room for "Take 12" (Oct 25); the length: never shrinks.
     expect(label).toHaveTextContent(/^Take 2$/)
@@ -246,14 +246,14 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
       { project: { ...project, validationCountAudio: 2 } as ProjectRecord },
     )
     const line = screen.getByTestId(`take-pieces-approved-${P1}`)
-    expect(line).toHaveTextContent("2 of 3 pieces approved")
+    expect(line).toHaveTextContent("2 of 3 pieces validated")
     expect(line).toHaveAttribute("data-all-approved", "false")
   })
 
   it("says so when every piece is approved", () => {
     draw(cutTake({ [P1]: { validatorCount: 1 }, [P3]: { validatorCount: 1 } }), P1)
     const line = screen.getByTestId(`take-pieces-approved-${P1}`)
-    expect(line).toHaveTextContent("3 of 3 pieces approved")
+    expect(line).toHaveTextContent("3 of 3 pieces validated")
     expect(line).toHaveAttribute("data-all-approved", "true")
   })
 

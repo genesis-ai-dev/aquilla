@@ -9,8 +9,8 @@ export interface BranchingSearchResult {
   sourceText: string
   /** Paired target text. Empty string for source-only projects (no target). */
   targetText: string
-  /** Fraction of the FULL original query's unique words present in this cell's
-   *  bag-of-words. [0, 1]. */
+  /** Fraction of the FULL original query's distinct character n-grams present
+   *  in this cell's source. [0, 1]. */
   queryCoverage: number
   /** File holding the hit's source cell (AQU-1393) — what the Examples panel
    *  names as the match's origin. Optional: a response cached before the
@@ -21,8 +21,8 @@ export interface BranchingSearchResult {
 
 export interface BranchingSearchResponse {
   results: BranchingSearchResult[]
-  /** cellId → the contiguous words from the winning branch this cell
-   *  satisfied. Empty array is possible (defensive bailout). */
+  /** cellId → the pieces of the query, quoted as typed, that this cell
+   *  covered — one string per contiguous stretch. */
   provenance: Record<string, string[]>
   /** Resolved upstream id, or null for self-contained / source-only. */
   upstreamProjectId: string | null

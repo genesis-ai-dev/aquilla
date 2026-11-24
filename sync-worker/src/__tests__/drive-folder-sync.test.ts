@@ -124,6 +124,10 @@ async function setup(opts: { linkUserId?: number } = {}) {
       { id: 2, username: 'ex-lead', email: 'ex@x', password_hash: 'x' },
     ],
     projects: [{ id: PROJECT, name: 'P', created_by: 1 }],
+    // AQU-2357: creating a project writes an ordinary Owner grant; created_by
+    // alone grants nothing. User 2 holds no grant, so it stands in for a
+    // lead who was removed.
+    project_members: [{ project_id: PROJECT, user_id: 1, role_level: 700, granted_by: 1 }],
     drive_folder_links: [
       { id: LINK, project_id: PROJECT, folder_id: FOLDER, folder_name: 'Live', user_id: opts.linkUserId ?? 1, username: opts.linkUserId === 2 ? 'ex-lead' : 'lead', created_at: 1 },
     ],

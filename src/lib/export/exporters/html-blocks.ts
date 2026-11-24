@@ -22,13 +22,13 @@
 // Everything that reaches the page goes through `escapeHtml` — including note
 // text and a note's origin reference, which are cell text like any other.
 
-import type { UsfmInlineMark } from "@/lib/parsers/usfm-display"
-import { segmentUsfmForDisplay } from "@/lib/parsers/usfm-display"
+import type { UsfmInlineMark, UsfmNotePart } from "@/lib/parsers/usfm-display"
+import { segmentUsfmForDisplay, TABLE_ROLE_PREFIX } from "@/lib/parsers/usfm-display"
 
 /** One inline piece of a rendered line. */
 export type InlineRun =
-  | { kind: "text"; text: string; marks: readonly UsfmInlineMark[]; roles: readonly string[] }
-  | { kind: "note"; noteKind: "footnote" | "endnote" | "xref"; ref: string; text: string }
+  | { kind: "text"; text: string; marks: readonly UsfmInlineMark[]; roles: readonly string[]; attributes?: string }
+  | { kind: "note"; noteKind: "footnote" | "endnote" | "xref"; ref: string; text: string; parts?: readonly UsfmNotePart[] }
 
 /** One rendered line of a cell — a break marker inside the cell ends a line. */
 export interface CellLine {
@@ -94,7 +94,7 @@ export function cellLines(raw: string): CellText {
       continue
     }
     if (seg.kind === "note") {
-      runs.push({ kind: "note", noteKind: seg.noteKind, ref: seg.ref, text: seg.text })
+      runs.push({ kind: "note", noteKind: seg.noteKind, ref: seg.ref, text: seg.text, parts: seg.parts })
       continue
     }
     // `~` is USFM's no-break space, and stays one (AQU-2182). Only reached
@@ -103,7 +103,7 @@ export function cellLines(raw: string): CellText {
     // inside USFM a newline is the file's own line wrapping, not content.
     const text = seg.text.replace(/~/g, NBSP).replace(SPACE_RUN, " ")
     if (text === "") continue
-    runs.push({ kind: "text", text, marks: seg.marks, roles: seg.roles })
+    runs.push({ kind: "text", text, marks: seg.marks, roles: seg.roles, ...(seg.attributes ? { attributes: seg.attributes } : {}) })
   }
   flush()
   return { lines, trailingBlank: blankBefore }
@@ -143,21 +143,127 @@ const MARK_WRAPPERS: Record<UsfmInlineMark, { open: string; close: string }> = {
   superscript: { open: "<sup>", close: "</sup>" },
 }
 
-/** Marker-free, escaped, styled inline HTML for one line's runs. */
+/**
+ * Character markers that carry meaning but no bold/italic mark of their own:
+ * role (`usfm-markers.ts`) → the page's class. The look of each follows the
+ * shared scripture editor Paratext 10 uses (its `usj-nodes.css`), so a book
+ * reads here as it does there: a key term is bold italic, a proper name is
+ * underlined, a transliterated word is italic. Two differences, on purpose: a
+ * key term and a glossary word say what they are on hover, and a glossary
+ * word gets a dotted underline (that editor shows it as plain text).
+ */
+const ROLE_CLASS: Record<string, string> = {
+  "words-of-jesus": "wj",
+  keyword: "key-term",
+  "wordlist-entry": "glossary-word",
+  "wordlist-greek": "glossary-word",
+  "wordlist-hebrew": "glossary-word",
+  "wordlist-aramaic": "glossary-word",
+  "wordlist-real": "glossary-word",
+  "proper-name": "proper-name",
+  "geographic-name": "place-name",
+  "proper-name-added": "proper-name-added",
+  "quoted-text": "quoted-text",
+  "book-quote": "c-italic",
+  transliterated: "c-italic",
+  signature: "c-italic",
+  "secondary-source": "c-italic",
+  deuterocanon: "c-italic",
+  selah: "selah",
+  "acrostic-char": "c-italic",
+  "list-total": "c-italic",
+  "list-key": "c-italic",
+  "intro-quoted-text": "c-italic",
+  "inline-quote-ref": "quote-ref",
+  ordinal: "ordinal",
+  "link-text": "link-text",
+  pronunciation: "pronunciation",
+  "verse-alt": "alt-number",
+  "verse-published": "alt-number",
+  "chapter-alt": "alt-number",
+  "figure-caption": "figure-caption",
+}
+
+/** Roles whose hover text names them; the attribute payload follows when there is one. */
+const ROLE_TITLE: Record<string, string> = {
+  keyword: "Key term",
+  "wordlist-entry": "Glossary word",
+  "wordlist-greek": "Greek word list",
+  "wordlist-hebrew": "Hebrew word list",
+  "wordlist-aramaic": "Aramaic word list",
+  "wordlist-real": "Glossary word",
+}
+
+/** `lemma="grace" strong="G5485"` → `lemma: grace, strong: G5485`; a bare
+ *  default value reads as it is. */
+function attributeText(attributes: string): string {
+  const pairs = [...attributes.matchAll(/([\w-]+)\s*=\s*"([^"]*)"/g)]
+  if (pairs.length === 0) return attributes
+  return pairs.map(([, key, value]) => `${key}: ${value}`).join(", ")
+}
+
+/** A ruby gloss, from `\rb base|gloss="…"\rb*` or the bare default form. */
+function rubyGloss(attributes: string | undefined): string | null {
+  if (!attributes) return null
+  const named = attributes.match(/gloss\s*=\s*"([^"]*)"/)
+  if (named) return named[1]
+  return attributes.includes("=") ? null : attributes
+}
+
+function textRunHtml(run: InlineRun & { kind: "text" }): string {
+  let html = escapeHtml(run.text)
+  for (const mark of [...run.marks].reverse()) {
+    const wrapper = MARK_WRAPPERS[mark]
+    html = `${wrapper.open}${html}${wrapper.close}`
+  }
+  for (const role of [...run.roles].reverse()) {
+    if (role === "ruby-base") {
+      const gloss = rubyGloss(run.attributes)
+      if (gloss) html = `<ruby>${html}<rt>${escapeHtml(gloss)}</rt></ruby>`
+      continue
+    }
+    const cls = ROLE_CLASS[role]
+    if (!cls) continue
+    const name = ROLE_TITLE[role]
+    const detail = name && run.attributes ? `${name} (${attributeText(run.attributes)})` : name
+    html = `<span class="${cls}"${detail ? ` title="${escapeHtml(detail)}"` : ""}>${html}</span>`
+  }
+  return html
+}
+
+/** The table cell a run sits in (`table:tc1:2`), or null outside a table. */
+function tableRole(run: InlineRun): string | null {
+  if (run.kind !== "text") return null
+  return run.roles.find((role) => role.startsWith(TABLE_ROLE_PREFIX)) ?? null
+}
+
+/** Is this line a table row (`\tr \th1 … \tc1 …`)? */
+export function isTableRow(line: CellLine): boolean {
+  return line.runs.some((run) => tableRole(run) !== null)
+}
+
+/** `table:thr1:2` → the cell's classes: heading or not, and its alignment. */
+function tableCellClass(role: string): string {
+  const marker = role.slice(TABLE_ROLE_PREFIX.length).split(":")[0].replace(/[\d-]+$/, "")
+  const align = marker.endsWith("r") && marker !== "tr" ? " cell-right" : marker.endsWith("cc") || marker === "thc" ? " cell-centered" : ""
+  return `table-cell${marker.startsWith("th") ? " table-head" : ""}${align}`
+}
+
+/** Marker-free, escaped, styled inline HTML for one line's runs. A table
+ *  row's runs are grouped into its cells. */
 export function lineInlineHtml(line: CellLine, notes?: NoteCollector): string {
-  return line.runs
-    .map((run) => {
-      if (run.kind === "note") return notes ? notes.marker(run) : ""
-      let html = escapeHtml(run.text)
-      for (const mark of [...run.marks].reverse()) {
-        const wrapper = MARK_WRAPPERS[mark]
-        html = `${wrapper.open}${html}${wrapper.close}`
-      }
-      // Words of Jesus carry no visual mark of their own (the convention is
-      // a publisher's choice), so the page styles the role directly.
-      if (run.roles.includes("words-of-jesus")) html = `<span class="wj">${html}</span>`
-      return html
-    })
+  const runHtml = (run: InlineRun) => (run.kind === "note" ? (notes ? notes.marker(run) : "") : textRunHtml(run))
+  if (!isTableRow(line)) return line.runs.map(runHtml).join("")
+  // A note has no role of its own: it stays in the cell it follows.
+  const cells: { role: string | null; html: string }[] = []
+  for (const run of line.runs) {
+    const role = run.kind === "note" ? (cells[cells.length - 1]?.role ?? null) : tableRole(run)
+    const last = cells[cells.length - 1]
+    if (last && last.role === role) last.html += runHtml(run)
+    else cells.push({ role, html: runHtml(run) })
+  }
+  return cells
+    .map((cell) => (cell.role ? `<span class="${tableCellClass(cell.role)}">${cell.html.trim()}</span>` : cell.html))
     .join("")
 }
 
@@ -182,13 +288,45 @@ export function blockClass(marker: string | undefined, indent: number): string {
     case "qr":
       return "poetry poetry-right"
     case "m":
-    case "mi":
     case "nb":
+    case "lf":
       return "para para-flush"
+    case "mi":
+    case "pmo":
+    case "pmc":
+      return "para para-flush para-inset"
+    case "pm":
+    case "psi":
+      return "para para-inset"
     case "pi":
+      return `para para-indent-${level}`
     case "ph":
     case "phi":
-      return `para para-indent-${level}`
+      return `para para-hanging para-indent-${level}`
+    case "pmr":
+      return "para para-right para-inset"
+    case "cls":
+    case "lit":
+      return "para para-right"
+    case "qd":
+      return "para para-flush poetry-note"
+    case "io":
+    case "ili":
+      return `para list list-${level}`
+    case "ipi":
+      return "para para-inset"
+    case "imi":
+      return "para para-flush para-inset"
+    case "ipq":
+      return "para para-inset intro-quote"
+    case "imq":
+      return "para para-flush para-inset intro-quote"
+    case "ipr":
+      return "para para-right intro-quote"
+    case "iq":
+      return `poetry poetry-${level} intro-quote`
+    case "im":
+      return "para para-flush"
     case "li":
     case "lim":
       return `para list list-${level}`
@@ -232,7 +370,9 @@ export function createNoteCollector(sectionId: string): NoteCollector {
       const label = isXref ? letterLabel(++xrefCount) : String(++noteCount)
       const id = `${sectionId}-${isXref ? "x" : "n"}${isXref ? xrefCount : noteCount}`
       entries.push({ id, label, note })
-      return `<sup class="note-marker ${isXref ? "xref" : "footnote"}"><a id="${id}-ref" href="#${id}">${escapeHtml(label)}</a></sup>`
+      // The note's text on hover, as the shared scripture editor shows it.
+      const title = note.text ? ` title="${escapeHtml(note.text)}"` : ""
+      return `<sup class="note-marker ${isXref ? "xref" : "footnote"}"><a id="${id}-ref" href="#${id}"${title}>${escapeHtml(label)}</a></sup>`
     },
     listHtml() {
       if (entries.length === 0) return ""
@@ -242,12 +382,39 @@ export function createNoteCollector(sectionId: string): NoteCollector {
         return (
           `<li class="note ${kind}" id="${entry.id}">` +
           `<a class="note-back" href="#${entry.id}-ref" aria-label="Back to text">${escapeHtml(entry.label)}</a> ` +
-          `${ref}<span class="note-text">${escapeHtml(entry.note.text)}</span></li>`
+          `${ref}<span class="note-text">${noteTextHtml(entry.note)}</span></li>`
         )
       })
       return `<aside class="notes" aria-label="Notes">\n<h3 class="notes-title">Notes</h3>\n<ul>\n${items.join("\n")}\n</ul>\n</aside>`
     },
   }
+}
+
+/** A note's own markers → the class its text gets in the notes list: the
+ *  words quoted from the verse and an alternative rendering are italic, a
+ *  keyword and a label are bold italic, a verse number is raised. */
+const NOTE_PART_CLASS: Record<string, string> = {
+  fq: "note-quote",
+  fqa: "note-quote",
+  xq: "note-quote",
+  xk: "note-quote",
+  fk: "note-keyword",
+  fl: "note-keyword",
+  fv: "note-verse",
+  fm: "note-verse",
+}
+
+function noteTextHtml(note: InlineRun & { kind: "note" }): string {
+  if (!note.parts || note.parts.length === 0) return escapeHtml(note.text)
+  return note.parts
+    .map((part) => {
+      const cls = NOTE_PART_CLASS[part.marker]
+      const text = escapeHtml(part.text)
+      // `\fp` opens a further paragraph of the same note.
+      const lead = part.marker === "fp" ? "<br>" : ""
+      return cls ? `${lead}<span class="${cls}">${text}</span>` : `${lead}${text}`
+    })
+    .join("")
 }
 
 /** 1 → "a", 26 → "z", 27 → "aa" — cross-reference labels. */

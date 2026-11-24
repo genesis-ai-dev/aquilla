@@ -3,14 +3,21 @@
 // A sandboxed iframe, like the Bible reading preview (ReadingPreviewPane): the
 // file's own styles cannot touch the app's and the app's cannot touch the
 // page. The sandbox allows no scripts; `allow-same-origin` only lets this
-// component reach into the frame to draw the page.
+// component reach into the frame to draw the page. A content security policy
+// keeps the page from loading anything from a network.
 
 import { useEffect, useRef, useState } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { DocumentPreviewKind } from "@/lib/document-preview/build"
 import { createDocumentPreviewRenderer, type DocumentPreviewRenderer } from "@/lib/document-preview/renderers"
 
-const SHELL = `<!doctype html><html><head><meta charset="utf-8"><style>
+// The frame asks no server for anything. A file's own styles can name a URL
+// (a background, a font), and fetching it would tell that server someone
+// opened the file; the policy lets the page use only what the renderer inlined
+// (data: URLs) or holds in memory (blob: URLs).
+const POLICY = "default-src 'none'; img-src data: blob:; media-src data: blob:; font-src data: blob:; style-src 'unsafe-inline'"
+
+const SHELL = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${POLICY}"><style>
 html,body{margin:0}
 body{background:#e4e4e7;color:#000;overflow:auto}
 .docx-wrapper{background:transparent!important;padding:12px!important}

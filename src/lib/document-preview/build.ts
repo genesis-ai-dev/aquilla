@@ -27,35 +27,45 @@ export interface BuildPreviewOptions {
   targetLanguage?: string | null
 }
 
+export interface PreviewDocument {
+  bytes: ArrayBuffer
+  /** InDesign lines whose styling in the preview is not final (idml-placement.ts). */
+  approximated: number
+}
+
 /**
  * The translated document's bytes, as the export would write them now.
  *
- * Throws when the export does: the InDesign export refuses to write a package
- * while any translation fails its proof (a protected mark missing from a line
- * still being typed, say). `original` is left usable either way.
+ * An InDesign translation that is not in its style runs yet is placed first,
+ * on a copy (idml-placement.ts). Throws when the export does: the InDesign
+ * export refuses to write a package while any translation fails its proof. `original` is left usable either way.
  */
 export async function buildPreviewDocument(
   kind: DocumentPreviewKind,
   original: ArrayBuffer,
   cells: CellData[],
   options: BuildPreviewOptions = {},
-): Promise<ArrayBuffer> {
+): Promise<PreviewDocument> {
   const removedCells = [...(options.removedCells ?? []), ...hiddenRoundTripRemovals(cells)]
   const scoped = scopeRoundTripCells(cells, "current")
   if (kind === "docx") {
     const { exportDocx } = await import("@/lib/export/exporters/docx")
     const result = await exportDocx(original, scoped, { removedCells, targetLanguage: options.targetLanguage })
-    return result.blob.arrayBuffer()
+    return { bytes: await result.blob.arrayBuffer(), approximated: 0 }
   }
   if (kind === "idml") {
-    const { exportIdml } = await import("@/lib/export/exporters/idml")
+    const [{ exportIdml }, { placeIdmlTranslationsForPreview }] = await Promise.all([
+      import("@/lib/export/exporters/idml"),
+      import("./idml-placement"),
+    ])
+    const placed = placeIdmlTranslationsForPreview(scoped)
     // The export hands its buffer to a worker and loses it: give it a copy.
-    const result = await exportIdml(original.slice(0), scoped)
-    return result.blob.arrayBuffer()
+    const result = await exportIdml(original.slice(0), placed.cells)
+    return { bytes: await result.blob.arrayBuffer(), approximated: placed.approximated }
   }
   const { exportPptx } = await import("@/lib/export/exporters/pptx")
   const result = await exportPptx(original, scoped, { removedCells })
-  return result.blob.arrayBuffer()
+  return { bytes: await result.blob.arrayBuffer(), approximated: 0 }
 }
 
 /**

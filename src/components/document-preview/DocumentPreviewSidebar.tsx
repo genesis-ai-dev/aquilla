@@ -72,6 +72,11 @@ export function DocumentPreviewSidebar(props: DocumentPreviewSidebarProps) {
             {t("documentPreview.behind")}
           </p>
         ) : null}
+        {state.status === "ready" && state.approximated > 0 ? (
+          <p className="border-b px-3 py-1.5 text-xs text-muted-foreground" data-testid="document-preview-approximated">
+            {t("documentPreview.approximated", { count: state.approximated })}
+          </p>
+        ) : null}
         {message ? (
           <p role="status" aria-busy={waiting} className="p-4 text-sm text-muted-foreground">{message}</p>
         ) : null}

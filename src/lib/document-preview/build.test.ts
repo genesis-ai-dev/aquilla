@@ -40,7 +40,7 @@ describe("buildPreviewDocument", () => {
   // The preview is the export: a translated line shows its translation, and a
   // line with none still shows the client's own words.
   it("puts translations into the original and leaves untranslated lines alone", async () => {
-    const bytes = await buildPreviewDocument("pptx", await deck(), [
+    const { bytes } = await buildPreviewDocument("pptx", await deck(), [
       cell("a", "Title words", "Mots du titre"),
       cell("b", "Body words", ""),
     ])
@@ -50,7 +50,7 @@ describe("buildPreviewDocument", () => {
   // AQU-1423: a hidden line is not in the download, so it must not be in the
   // preview either, whatever translation it still holds.
   it("shows no translation for a hidden line", async () => {
-    const bytes = await buildPreviewDocument("pptx", await deck(), [
+    const { bytes } = await buildPreviewDocument("pptx", await deck(), [
       cell("a", "Title words", "Mots du titre", { hidden: true }),
       cell("b", "Body words", "Mots du corps"),
     ])

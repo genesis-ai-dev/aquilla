@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /** A Word, PowerPoint or InDesign file previewed beside the editor. */
 export const documentPreview = defineNamespace({
@@ -10,7 +10,11 @@ export const documentPreview = defineNamespace({
     "documentPreview.hint.pptx": "The slides an export writes now. Untranslated lines still show the source.",
     "documentPreview.hint.idml": "The text an InDesign export writes now, in reading order with its paragraph styles. Page layout, pictures and fonts are not shown.",
     "documentPreview.page": "Page {name}",
-    "documentPreview.behind": "The newest edit cannot be exported yet, so the preview shows the last version that can. Check the line you are editing for a missing mark.",
+    "documentPreview.behind": "Some lines cannot be exported as they are, so the preview shows the last version that can. Open Export to see which.",
+    "documentPreview.approximated": plural({
+      one: "{count} line is not in its style segments yet. The preview shows it in the first one.",
+      other: "{count} lines are not in their style segments yet. The preview shows each in its first one.",
+    }),
     "documentPreview.updating": "Updating…",
     "documentPreview.forbidden": "Your role cannot export this project, so there is no preview.",
     "documentPreview.missing": "The original of this file is not stored, so there is no preview. Import the file again to get one.",
@@ -24,7 +28,8 @@ export const documentPreview = defineNamespace({
     },
     keys: {
       "documentPreview.page": { description: "Small label above the first text of a page in the InDesign preview.", placeholders: { name: "The page's name in the file, usually a number." } },
-      "documentPreview.behind": { description: "Notice above the preview when the file cannot be exported with the text as typed right now, for example because a protected formatting mark is missing from a translation." },
+      "documentPreview.behind": { description: "Notice above the preview when the file cannot be exported with the text as it is now. 'Export' is the name of the export dialog." },
+      "documentPreview.approximated": { description: "Notice above the InDesign preview. A line of an InDesign file can have several differently styled segments; a translation typed as one sentence has not been divided between them yet. Use the same words for 'style segments' as the editor's 'Pass to style segments' action.", placeholders: { count: "Number of lines." } },
       "documentPreview.updating": { description: "Small status text while the preview redraws after an edit.", maxLength: 16 },
       "documentPreview.renderError": { description: "Shown when the file was built but the browser could not draw it. The downloaded export still works." },
     },

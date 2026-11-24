@@ -16,8 +16,9 @@ export type DocumentPreviewState =
   | { status: "forbidden" | "missing" | "error" }
   /** `updating`: these bytes are older than the cells; newer ones are on the way.
    *  `behind`: the export refused the cells as they are now, so these bytes
-   *  are the last ones it would write (the original, if it never wrote any). */
-  | { status: "ready"; bytes: ArrayBuffer; updating: boolean; behind: boolean }
+   *  are the last ones it would write (the original, if it never wrote any).
+   *  `approximated`: InDesign lines whose styling here is not final. */
+  | { status: "ready"; bytes: ArrayBuffer; updating: boolean; behind: boolean; approximated: number }
 
 interface Loaded {
   key: string
@@ -30,6 +31,7 @@ interface Built {
   key: string
   signature: string
   bytes: ArrayBuffer
+  approximated: number
   /** The export threw for this signature; `bytes` are from before it. */
   behind: boolean
 }
@@ -88,12 +90,18 @@ export function useDocumentPreview(args: {
     const timer = window.setTimeout(() => {
       void buildPreviewDocument(kind, original, cellsRef.current, { removedCells: current.removed, targetLanguage })
         .then(
-          (bytes) => {
-            if (!cancelled) setBuilt({ key, signature, bytes, behind: false })
+          (document) => {
+            if (!cancelled) setBuilt({ key, signature, ...document, behind: false })
           },
           () => {
             if (cancelled) return
-            setBuilt((prior) => ({ key, signature, bytes: prior?.key === key ? prior.bytes : original, behind: true }))
+            setBuilt((prior) => ({
+              key,
+              signature,
+              bytes: prior?.key === key ? prior.bytes : original,
+              approximated: prior?.key === key ? prior.approximated : 0,
+              behind: true,
+            }))
           },
         )
     }, hasBuilt ? REBUILD_DELAY_MS : 0)
@@ -108,5 +116,5 @@ export function useDocumentPreview(args: {
   if (!current) return { status: "loading" }
   if (current.outcome !== "ready") return { status: current.outcome }
   if (built?.key !== key) return { status: "loading" }
-  return { status: "ready", bytes: built.bytes, updating: built.signature !== signature, behind: built.behind }
+  return { status: "ready", bytes: built.bytes, updating: built.signature !== signature, behind: built.behind, approximated: built.approximated }
 }

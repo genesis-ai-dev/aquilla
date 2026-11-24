@@ -348,26 +348,54 @@ describe("buildReleaseBranch against a scratch repo", () => {
     expect(git("show", `${built.sha}:README.md`)).toBe("base")
   })
 
-  it("holds an empty pick whose change the base already carries, with no PR to name", () => {
-    // A hotfix committed straight onto the release line and tagged, then
-    // merged to dev as its own PR with another sha.
+  // A hotfix committed straight onto the release line and tagged, then
+  // merged to dev as its own PR with another sha: the pick is empty, and no
+  // PR still off the branch touches its file, so the base has the change.
+  const hotfixTwin = () => {
     git("checkout", "-q", "-b", "hotfix", "2026.09.28.01")
     write("docs/hot.md", "fix\n")
     git("add", "-A")
     git("commit", "-qm", "hotfix")
     git("tag", "2026.09.28.02")
     git("checkout", "-q", "dev")
-    const base = git("rev-parse", "2026.09.28.02")
-    const twin = mergePr(1, "docs/hot.md", "fix\n")
+    return { base: git("rev-parse", "2026.09.28.02"), twin: mergePr(1, "docs/hot.md", "fix\n") }
+  }
+
+  it("records an empty pick the plan proves is in the base, as an empty commit with its provenance", () => {
+    const { base, twin } = hotfixTwin()
+    const other = mergePr(2, "docs/other.md", "x\n")
     const built = buildReleaseBranch({
       branch: "release/2026/09/29-01",
       base,
-      prs: [{ number: 1, sha: twin, mergedAt: at(1), files: ["docs/hot.md"] }],
-      held: [],
+      prs: [{ number: 1, sha: twin, mergedAt: at(1), files: ["docs/hot.md"] }, { number: 2, sha: other, mergedAt: at(2), files: ["docs/other.md"] }],
+      held: [{ number: 7, sha: "x", mergedAt: at(0), files: ["src/unrelated.ts"] }],
+      cwd: root,
+    })
+    expect(built.picked.map((p) => p.number)).toEqual([2])
+    expect(built.unpicked).toEqual([])
+    expect(built.recorded.map((p) => [p.number, p.kind])).toEqual([[1, "recorded"]])
+    // The record is what the planner reads: the next plan no longer lists #1.
+    expect(git("log", "--format=%b", `${base}..${built.sha}`)).toContain(`(cherry picked from commit ${twin})`)
+    expect(git("diff", "--name-only", base, built.sha)).toBe("docs/other.md")
+    nothingInProgress()
+  })
+
+  it.each([
+    ["a held PR touches the same file", [{ number: 7, sha: "x", files: ["docs/hot.md"] }], ["docs/hot.md"], "empty pick: already in base, or needs #7"],
+    ["the plan carries no files for the PR", [], undefined, "empty pick: already in base, or needs a held PR"],
+    ["a candidate carries no files", [{ number: 7, sha: "x" }], ["docs/hot.md"], "empty pick: already in base, or needs a held PR"],
+  ])("skips an empty pick it cannot prove (%s)", (_name, held, files, why) => {
+    const { base, twin } = hotfixTwin()
+    const built = buildReleaseBranch({
+      branch: "release/2026/09/29-01",
+      base,
+      prs: [{ number: 1, sha: twin, mergedAt: at(1), ...(files ? { files } : {}) }],
+      held,
       cwd: root,
     })
     expect(built.picked).toEqual([])
-    expect(built.unpicked.map((p) => [p.kind, p.why])).toEqual([["empty", "empty pick: already in base, or needs a held PR"]])
+    expect(built.recorded).toEqual([])
+    expect(built.unpicked.map((p) => [p.kind, p.why])).toEqual([["empty", why]])
     expect(built.sha).toBe(base)
     nothingInProgress()
   })

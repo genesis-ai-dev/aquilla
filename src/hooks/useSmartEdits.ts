@@ -1,13 +1,14 @@
-// Smart edits in the editor (flag: `smartEdits`, src/lib/features/flags.ts).
+// Smart edits in the editor (project-wide and on by default: `isSmartEditsEnabled`,
+// src/lib/features/flags.ts).
 //
 // EditorTable owns one SmartEditStore and asks for suggestions a PASSAGE at a
-// time — the active cell and its neighbours — so the server sees the whole
-// passage at once (one Jev call for all of it, context for every cell) and a
-// translator moving cell to cell inside it costs nothing more. Rows read their
-// own slice through context, so no per-row prop threads through MemoizedRow.
+// time — the active cell and its neighbours — so the server has the passage as
+// context. It asks only about the cells it has no answer for: a translator
+// moving cell to cell inside a passage, or committing one cell of it, costs one
+// cell's worth of work, not the passage again. Rows read their own slice
+// through context, so no per-row prop threads through MemoizedRow.
 
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
-import { readAtVersion } from "./useActiveCellStore"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useFrontierSession } from "./useFrontierSession"
 import {
   fetchSmartEdits,
@@ -16,7 +17,7 @@ import {
   type SmartEditPassageCell,
   type SmartEditSuggestion,
 } from "@/lib/smart-edits/client"
-import { SmartEditStore } from "@/lib/smart-edits/store"
+import { NO_SUGGESTIONS, SmartEditStore } from "@/lib/smart-edits/store"
 import { fetchHarmonizerSuggestions } from "@/lib/harmonizer/client"
 
 /** Cells either side of the active one sent as its passage. */
@@ -67,35 +68,50 @@ export function useSmartEditsPassage(options: {
   const harmonizerEnabled = options.harmonizerEnabled ?? false
   const { session } = useFrontierSession()
   const token = session?.jwt
-  const store = useMemo(() => new SmartEditStore(), [])
+  const [store] = useState(() => new SmartEditStore())
   const getCellRef = useRef(options.getCell)
   useEffect(() => {
     getCellRef.current = options.getCell
   })
 
+  // A request outlives the cell move that follows it — its answer is stored
+  // against the text it was asked about, so a late one is still right, and
+  // dropping it would only make the server do the work twice. It does not
+  // outlive the project, lane or session it was made for.
+  const scopeRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const scope = new AbortController()
+    scopeRef.current = scope
+    return () => scope.abort()
+  }, [token, projectId, lane])
+
   useEffect(() => {
     if (!enabled || !token || !activeCellId) return
-    const controller = new AbortController()
     const timer = window.setTimeout(() => {
+      const signal = scopeRef.current?.signal
+      if (!signal || signal.aborted) return
       const cells = passageWindow(cellIds, activeCellId)
         .map((id) => getCellRef.current(id))
         .filter((c): c is SmartEditPassageCell => c !== null && c.target.trim().length > 0)
-      if (cells.length === 0 || store.isFresh(cells)) return
-      // One passage, both sources, one store write: two writes would let the
-      // second wipe the first's suggestions for the same cells.
+      const stale = store.claim(cells)
+      if (stale.length === 0) return
+      // The harmonizer checks across cells, so with it on the whole passage is
+      // asked about again. One passage, both sources, one store write: two
+      // writes would let the second wipe the first's suggestions.
+      const asked = harmonizerEnabled ? cells : stale
       void Promise.all([
-        fetchSmartEdits({ projectId, lane, cells }, token, controller.signal),
-        harmonizerEnabled
-          ? fetchHarmonizerSuggestions({ projectId, lane, cells }, token, controller.signal)
-          : Promise.resolve([]),
-      ]).then(([edits, harmonies]) => {
-        if (!controller.signal.aborted) store.setPassage(cells, [...edits, ...harmonies])
-      })
+        fetchSmartEdits(
+          { projectId, lane, cells, ...(harmonizerEnabled ? {} : { only: asked.map((c) => c.cellId) }) },
+          token,
+          signal,
+        ),
+        harmonizerEnabled ? fetchHarmonizerSuggestions({ projectId, lane, cells }, token, signal) : Promise.resolve([]),
+      ]).then(
+        ([edits, harmonies]) => store.settle(asked, signal.aborted ? undefined : [...edits, ...harmonies]),
+        () => store.settle(asked),
+      )
     }, DEBOUNCE_MS)
-    return () => {
-      window.clearTimeout(timer)
-      controller.abort()
-    }
+    return () => window.clearTimeout(timer)
   }, [enabled, harmonizerEnabled, token, projectId, lane, cellIds, activeCellId, activeText, store])
 
   const cellIdsRef = useRef(cellIds)
@@ -133,11 +149,11 @@ export function useSmartEditsPassage(options: {
   }, [enabled, llmEnabled, token, store, projectId, lane])
 }
 
-const NO_SUGGESTIONS: SmartEditSuggestion[] = []
 const noopSubscribe = () => () => {}
-const zero = () => 0
 
-/** Suggestions for one row, valid for exactly `text`. */
+/** Suggestions for one row, valid for exactly `text`. The snapshot is the
+ *  store's own array for that cell, so a row re-renders only when its own
+ *  suggestions change. */
 export function useSmartEditsForCell(cellId: string, text: string): {
   suggestions: SmartEditSuggestion[]
   feedback: SmartEditsContextValue["feedback"] | undefined
@@ -145,12 +161,10 @@ export function useSmartEditsForCell(cellId: string, text: string): {
 } {
   const ctx = useContext(SmartEditsContext)
   const store = ctx?.store
-  const version = useSyncExternalStore(store?.subscribe ?? noopSubscribe, store?.getVersion ?? zero, zero)
-  const suggestions = useMemo(
-    () => (store ? readAtVersion(version, () => store.forCell(cellId, text)) : NO_SUGGESTIONS),
-    [store, version, cellId, text],
+  const suggestions = useSyncExternalStore(store?.subscribe ?? noopSubscribe, () =>
+    store ? store.forCell(cellId, text) : NO_SUGGESTIONS,
   )
   const ask = ctx?.askLlm
   const askLlm = useMemo(() => (ask ? () => ask(cellId, text) : undefined), [ask, cellId, text])
-  return { suggestions: suggestions.length ? suggestions : NO_SUGGESTIONS, feedback: ctx?.feedback, askLlm }
+  return { suggestions, feedback: ctx?.feedback, askLlm }
 }

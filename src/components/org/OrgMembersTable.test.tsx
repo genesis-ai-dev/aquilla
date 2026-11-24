@@ -3,13 +3,18 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { OrgMembersTable } from "./OrgMembersTable"
+import { UserError } from "@/lib/errors/user-error"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
-import type { OrgMember } from "@/lib/frontier/orgs"
+import { getMemberAccess, type OrgMember } from "@/lib/frontier/orgs"
 import { expectClickNote } from "@/test-utils/tooltip"
 import { shownCase } from "@/test-utils/shown-case"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "joel", createdAt: "x" }, loading: false }),
+}))
+vi.mock("@/lib/frontier/orgs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/frontier/orgs")>()),
+  getMemberAccess: vi.fn(),
 }))
 
 afterEach(() => vi.clearAllMocks())
@@ -145,14 +150,27 @@ describe("OrgMembersTable — the one role dialog (AQU-2289)", () => {
     expect(within(dialog).getByRole("tab", { name: "Invite by email" })).toBeInTheDocument()
   })
 
-  it("says why a save was refused in plain words", async () => {
-    const add = vi.fn(async () => { throw Object.assign(new Error("forbidden"), { status: 403 }) })
+  // AQU-2728: both refusals are a 403. Only the first is a denial; a platform
+  // admin who still has to enter their admin code is told that, not "owners only".
+  it.each([
+    {
+      refusal: "the caller lacks the role",
+      body: '{"error":"only org owners can manage membership"}',
+      shown: "Only organization owners can change member roles.",
+    },
+    {
+      refusal: "the admin code is needed first",
+      body: '{"error":"elevation required to manage membership on an org you do not belong to"}',
+      shown: "Verify with your admin code, then try again.",
+    },
+  ])("says why a save was refused when $refusal", async ({ body, shown }) => {
+    const add = vi.fn(async () => { throw new UserError(403, body, "org") })
     renderTable({ add })
     await openChangeRole("esther")
     fireEvent.click(await screen.findByRole("combobox", { name: /role for esther/i }))
     await pickRoleOption(ROLE.MAINTAINER)
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(await screen.findByRole("alert")).toHaveTextContent(shown)
   })
 })
 
@@ -198,5 +216,36 @@ describe("OrgMembersTable — role chips (AQU-2332)", () => {
     const note = await screen.findByRole("button", { name: /org-level role: project lead/i })
     expect(note.getAttribute("aria-label")).toBe("Org-level role: Project Lead")
     expect(shownCase(within(note).getByText("Project Lead"))).toBe("as written")
+  })
+})
+
+// AQU-2729: an open row's panel loads its own copy of the member's access, so
+// the roster has to tell it when that member's role changes.
+describe("OrgMembersTable — open member panel (AQU-2729)", () => {
+  it("loads the panel again when the member's role changes", async () => {
+    const table = (members: OrgMember[]) => (
+      <OrgMembersTable
+        orgId={7}
+        members={members}
+        callerOrgRoleLevel={ROLE.OWNER}
+        canAddToProjects={false}
+        onAddToProjects={() => {}}
+        add={vi.fn(async () => ({}))}
+        addMany={vi.fn(async () => [])}
+        onRequestRemove={() => {}}
+      />
+    )
+    vi.mocked(getMemberAccess)
+      .mockResolvedValueOnce({ orgRole: ROLE.CONTRIBUTOR, projects: [] })
+      .mockResolvedValueOnce({ orgRole: ROLE.MAINTAINER, projects: [] })
+    const { rerender } = render(table(MEMBERS))
+    fireEvent.click(await screen.findByRole("button", { name: "Project access for esther" }))
+    expect(await screen.findByText(/Org role:/)).toHaveTextContent("Contributor")
+
+    // What the roster refresh hands the table once a role change has saved.
+    rerender(table(MEMBERS.map((m) =>
+      m.username === "esther" ? { ...m, role: { level: ROLE.MAINTAINER, name: "maintainer" } } : m,
+    )))
+    await waitFor(() => expect(screen.getByText(/Org role:/)).toHaveTextContent("Maintainer"))
   })
 })

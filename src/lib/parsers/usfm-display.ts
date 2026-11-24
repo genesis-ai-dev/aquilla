@@ -55,7 +55,19 @@ export interface UsfmTextSegment {
    *  own; a consumer that must style one of those (`\wj`, words of Jesus, on
    *  the HTML export's page) reads it here. Empty for unmarked runs. */
   roles: readonly string[]
+  /** The USFM 3 attribute payload that closed this run, without its `|`:
+   *  `lemma="grace" strong="G5485"` for `\w grace|lemma="grace" strong="G5485"\w*`,
+   *  or the bare default value (`grace` for `\w gracious|grace\w*`). Never
+   *  displayed as text; a reader's view shows it on hover. */
+  attributes?: string
 }
+
+/** A table cell marker (`\th1`, `\tc2`, `\tcr1`, `\thc1-2` …) has no end
+ *  marker: it holds until the next cell or the end of the row. The text after
+ *  it carries the role `table:<marker>:<n>`, `n` counting cells in the row, so
+ *  a consumer can tell two neighbouring cells apart. */
+export const TABLE_ROLE_PREFIX = "table:"
+const TABLE_CELL_RE = /^(?:th|thr|thc|tc|tcr|tcc)\d*(?:-\d+)?$/
 
 /** Character-marker role (usfm-markers.ts) → the marks it renders as. Roles
  *  absent here (wordlist-entry, keyword, proper-name, words-of-jesus …) are
@@ -88,10 +100,21 @@ export interface UsfmNoteSegment {
   ref: string
   /** Marker-stripped note body for popover/panel display. */
   text: string
+  /** The same body, split where its own markers change (`\ft`, `\fq`, `\fk`,
+   *  `\xt` …), each piece with the marker in force over it, so a reader's view
+   *  can set a quotation or a keyword apart. The origin reference is left out,
+   *  as in `text`. */
+  parts: readonly UsfmNotePart[]
   /** Full raw span "\f + \fr 2:1 \ft …\f*" (for debugging/tests). */
   raw: string
   rawStart: number
   rawEnd: number
+}
+
+export interface UsfmNotePart {
+  /** Base marker name without level or nesting: "ft", "fq", "xt" … "" before the first one. */
+  marker: string
+  text: string
 }
 
 export interface UsfmBreakSegment {
@@ -108,8 +131,10 @@ export type UsfmDisplaySegment = UsfmTextSegment | UsfmNoteSegment | UsfmBreakSe
 
 /** Matches any USFM marker token, including mixed-case (\xtSee), hyphenated
  *  z-namespace (\zpa-xb), nested (\+nd), end (\nd*) and the bare milestone
- *  terminator (\*). Mirrors usfm-tokenize.ts MARKER_RE. */
-const MARKER_TOKEN_RE = /\\(?:\+?[a-zA-Z]+(?:-[a-zA-Z]+)*\d*\*?|\*)/g
+ *  terminator (\*). Like usfm-tokenize.ts MARKER_RE, plus a level before the
+ *  hyphen (\qt1-s, a levelled milestone) and a column span (\tc1-2), so
+ *  neither leaves "-s" or "-2" behind as text. */
+const MARKER_TOKEN_RE = /\\(?:\+?[a-zA-Z]+\d*(?:-[a-zA-Z0-9]+)*\*?|\*)/g
 
 /** Note-family openers that produce chip segments instead of inline text. */
 const NOTE_KINDS: Record<string, UsfmNoteSegment["noteKind"]> = {
@@ -134,7 +159,7 @@ function tokenBase(token: string): string {
 }
 
 /** Parse the inside of a note span: "+ \fr 2:1 \ft body…" → caller/ref/text. */
-function parseNoteBody(inner: string): { caller: string; ref: string; text: string } {
+function parseNoteBody(inner: string): { caller: string; ref: string; text: string; parts: UsfmNotePart[] } {
   const callerMatch = inner.match(/^\s*(\S+)\s*/)
   const caller = callerMatch ? callerMatch[1] : ""
   let body = callerMatch ? inner.slice(callerMatch[0].length) : inner
@@ -147,7 +172,44 @@ function parseNoteBody(inner: string): { caller: string; ref: string; text: stri
     .replace(/\|[^\\]*/g, " ") // drop USFM 3 attribute payloads inside notes
     .replace(/\s+/g, " ")
     .trim()
-  return { caller, ref, text }
+  return { caller, ref, text, parts: noteParts(body) }
+}
+
+/** Markers inside a note that end at the next one instead of at an end marker. */
+const NOTE_SPAN_MARKERS = new Set(["ft", "fq", "fqa", "fk", "fl", "fw", "fp", "xt", "xk", "xq", "xta", "xop"])
+
+function noteParts(body: string): UsfmNotePart[] {
+  const parts: UsfmNotePart[] = []
+  const re = new RegExp(MARKER_TOKEN_RE.source, "g")
+  let span = ""
+  const paired: string[] = []
+  let cursor = 0
+  const push = (to: number) => {
+    const text = body.slice(cursor, to).replace(/\|[^\\]*/g, " ").replace(/\s+/g, " ")
+    if (text.trim() === "") return
+    const marker = paired[paired.length - 1] ?? span
+    const last = parts[parts.length - 1]
+    if (last && last.marker === marker) last.text += text
+    else parts.push({ marker, text })
+  }
+  let m: RegExpExecArray | null
+  while ((m = re.exec(body)) !== null) {
+    push(m.index)
+    cursor = m.index + m[0].length
+    if (m[0] === "\\*") continue
+    // The one space after an opening marker is markup, as in the verse itself.
+    if (!m[0].endsWith("*") && /\s/.test(body[cursor] ?? "")) cursor += 1
+    const base = tokenBase(m[0])
+    if (m[0].endsWith("*")) paired.pop()
+    else if (NOTE_SPAN_MARKERS.has(base)) { span = base; paired.length = 0 }
+    else paired.push(base)
+  }
+  push(body.length)
+  if (parts.length > 0) {
+    parts[0].text = parts[0].text.replace(/^\s+/, "")
+    parts[parts.length - 1].text = parts[parts.length - 1].text.replace(/\s+$/, "")
+  }
+  return parts
 }
 
 /**
@@ -164,13 +226,17 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
   // innermost last. While any is open, a "|" starts the USFM 3 attribute
   // payload — clipped from display.
   const charStack: string[] = []
+  // The table cell open on this row, if any, and how many the row has had.
+  let tableRole: string | null = null
+  let tableCells = 0
 
   /** The open roles that still apply. `\no` (role "normal") cancels
    *  everything outside it, so only the roles after the innermost \no count. */
   const activeRoles = (): readonly string[] => {
-    if (charStack.length === 0) return NO_ROLES
+    if (charStack.length === 0) return tableRole ? [tableRole] : NO_ROLES
     const reset = charStack.lastIndexOf("normal")
-    return reset === -1 ? [...charStack] : charStack.slice(reset + 1)
+    const open = reset === -1 ? charStack : charStack.slice(reset + 1)
+    return tableRole ? [tableRole, ...open] : [...open]
   }
 
   /** Marks in force right now — the visual reduction of `activeRoles()`. */
@@ -187,9 +253,13 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
   const pushText = (from: number, to: number) => {
     if (to <= from) return
     let end = to
+    let attributes: string | undefined
     if (charStack.length > 0) {
       const pipe = raw.slice(from, to).indexOf("|")
-      if (pipe !== -1) end = from + pipe
+      if (pipe !== -1) {
+        end = from + pipe
+        attributes = raw.slice(end + 1, to).trim() || undefined
+      }
     }
     if (end > from) {
       const roles = activeRoles()
@@ -200,6 +270,7 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
         rawEnd: end,
         marks: activeMarks(roles),
         roles,
+        ...(attributes ? { attributes } : {}),
       })
     }
   }
@@ -228,9 +299,9 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
         pushText(cursor, start)
         const rawEnd = close + closeToken.length
         const inner = raw.slice(start + token.length, close)
-        const { caller, ref, text } = parseNoteBody(inner)
+        const { caller, ref, text, parts } = parseNoteBody(inner)
         segments.push({
-          kind: "note", noteKind, caller, ref, text,
+          kind: "note", noteKind, caller, ref, text, parts,
           raw: raw.slice(start, rawEnd), rawStart: start, rawEnd,
         })
         cursor = rawEnd
@@ -242,6 +313,8 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
 
     const spec = classifyMarker(base)
     pushText(cursor, start)
+    const name = token.slice(1)
+    if (!isEnd && TABLE_CELL_RE.test(name)) tableRole = `${TABLE_ROLE_PREFIX}${name}:${++tableCells}`
 
     // The single space/newline after an opening marker separates markup from
     // content — it belongs to the markup, not the text.
@@ -260,6 +333,8 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
       // Structural line marker inside a verse (\p, \q2, \b, \li …) → break.
       const levelMatch = token.match(/(\d+)\*?$/)
       const level = levelMatch ? parseInt(levelMatch[1], 10) : 1
+      tableRole = null
+      tableCells = 0
       segments.push({
         kind: "break",
         indent: INDENTED_BREAK_BASES.has(base) ? level : 0,

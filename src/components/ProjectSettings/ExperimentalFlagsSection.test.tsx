@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-libra
 import { ExperimentalFlagsSection } from "./ExperimentalFlagsSection"
 import * as projectIndex from "@/lib/store/project-index"
 import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
-import { FLAGS, isAutopilotVisible, isFlagEnabled } from "@/lib/features/flags"
+import { FLAGS, isAutopilotVisible, isFlagEnabled, isSmartEditsEnabled } from "@/lib/features/flags"
 import { ROLE } from "@/lib/frontier/roles"
 import { en } from "@/lib/i18n/messages/en"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -107,7 +107,7 @@ describe("ExperimentalFlagsSection — a toggle made before the seed read lands 
 
   it("the late seed still fills every stored flag the user has not touched", async () => {
     // The seed yields only on the keys the user set; it is not skipped outright.
-    await createProject(makeProject({ experimentalFlags: { smartEdits: true } }))
+    await createProject(makeProject({ experimentalFlags: { harmonizer: true } }))
     const stored = await getProject("p1")
     const landSeed = holdSeedRead()
     render(<ExperimentalFlagsSection projectId="p1" />)
@@ -115,7 +115,7 @@ describe("ExperimentalFlagsSection — a toggle made before the seed read lands 
 
     await landSeed(stored)
     expect(screen.getByRole("switch", CHECKING_SWITCH)).toBeChecked()
-    expect(screen.getByRole("switch", { name: "Smart edits" })).toBeChecked()
+    expect(screen.getByRole("switch", { name: "Harmonizer" })).toBeChecked()
   })
 
   it("moving to another project shows that project's stored flags, not the previous one's toggles", async () => {
@@ -334,6 +334,44 @@ describe("ExperimentalFlagsSection — Smart Extensions switch (AQU-1937)", () =
   })
 })
 
+describe("ExperimentalFlagsSection — Smart edits switch", () => {
+  // Smart edits show a team what it has already corrected, so they are on for
+  // every member of every project until a maintainer says otherwise — not a
+  // per-browser switch each translator has to find. The editor reads the same
+  // stored value through isSmartEditsEnabled.
+  const SMART_EDITS_SWITCH = { name: "Smart edits" } as const
+
+  it("is on for a project that never stored a value, and a maintainer turns it off for everyone", async () => {
+    const onSet = vi.fn()
+    await createProject(makeProject())
+    expect(isSmartEditsEnabled(makeProject())).toBe(true)
+    expect(isSmartEditsEnabled(makeProject({ smartEditsEnabled: false }))).toBe(false)
+    render(<ExperimentalFlagsSection projectId="p1" roleLevel={ROLE.MAINTAINER} onSetSmartEditsEnabled={onSet} />)
+    const toggle = await screen.findByRole("switch", SMART_EDITS_SWITCH)
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith(false))
+  })
+
+  it("below maintainer the switch shows the project's choice and cannot change it", async () => {
+    const onSet = vi.fn()
+    await createProject(makeProject())
+    render(
+      <ExperimentalFlagsSection
+        projectId="p1"
+        roleLevel={ROLE.PROJECT_LEAD}
+        smartEditsEnabled={false}
+        onSetSmartEditsEnabled={onSet}
+      />,
+    )
+    const toggle = await screen.findByRole("switch", SMART_EDITS_SWITCH)
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(toggle)
+    expect(onSet).not.toHaveBeenCalled()
+  })
+})
+
 describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () => {
   function rowText(name: string): string {
     const toggle = screen.getByRole("switch", { name })
@@ -363,13 +401,12 @@ describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () =
     expect(screen.queryByText(/this device only/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/stays on this device/i)).not.toBeInTheDocument()
 
-    for (const name of ["Try Autopilot", "Smart Extensions"]) {
+    for (const name of ["Try Autopilot", "Smart Extensions", "Smart edits"]) {
       expect(rowText(name)).not.toMatch(/this device/i)
     }
     for (const name of [
       "Community checking (WIP)",
       "Agent modes",
-      "Smart edits",
       "Harmonizer",
       "Smart edits: AI wording",
       "Bible data",

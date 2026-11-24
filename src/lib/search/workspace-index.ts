@@ -41,6 +41,8 @@ export interface SearchOptions {
   useRegexp?: boolean
   /** Content-side filter. "source" | "target"; omit (or "both") to return both sides. */
   side?: "both" | "source" | "target"
+  /** Rows to ask the server for. It clamps to 500 and defaults to 50. */
+  limit?: number
 }
 
 /** Find-widget toggles. All false keeps the default full-text search. */

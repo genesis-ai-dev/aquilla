@@ -6,7 +6,8 @@
  * cell looked before this preference existed.
  *
  * Once a translation sits in the runs, the target cell stops taking keystrokes
- * while this is on, so the edges of the bold and italic boxes can be dragged.
+ * while this is on, so the edges of the bold, italic, and small-caps boxes
+ * can be dragged.
  *
  * Key schema: `aq.visible-style-segments.v1` (value `"on"`; absent = off).
  */
@@ -70,6 +71,7 @@ export interface VisibleStyleSegmentLabels {
   bold: string
   italic: string
   boldItalic: string
+  smallCaps: string
 }
 
 /** Quote a label so it is a legal CSS `content` string. */
@@ -82,6 +84,7 @@ const LABEL_VARS: Record<keyof VisibleStyleSegmentLabels, string> = {
   bold: "--aq-style-label-bold",
   italic: "--aq-style-label-italic",
   boldItalic: "--aq-style-label-bold-italic",
+  smallCaps: "--aq-style-label-small-caps",
 }
 
 /**

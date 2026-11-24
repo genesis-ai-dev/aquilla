@@ -30,6 +30,8 @@ async function seedProject(projectId: string, createdBy: number): Promise<void> 
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)")
     .bind(projectId, "Trail", createdBy)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await grant(projectId, createdBy, 700)
 }
 
 async function grant(projectId: string, userId: number, role: number): Promise<void> {

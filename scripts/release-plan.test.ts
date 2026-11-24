@@ -14,7 +14,10 @@ import {
   releasedMarks,
   splitReleased,
   unreleasedPrs,
+  walkHolds,
+  walkPolicy,
 } from "./release-plan.mjs"
+import { holdNudge } from "./release-hold-nudge.mjs"
 
 const pr = (
   number: number,
@@ -105,19 +108,31 @@ describe("planRelease", () => {
     expect(plan.held.map((p) => p.why)).toEqual(["touches migration", "walk fail"])
   })
 
-  it("holds on a FAIL or unknown walk the same way a path hold does", () => {
+  it("holds on a failed walk the same way a path hold does", () => {
     const failed = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "fail" }), pr(2, recent)], now: NOW })
     expect(failed.prs.map((p) => p.number)).toEqual([2])
     expect(failed.held.map((p) => p.number)).toEqual([1])
-
-    const unknown = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "unknown" }), pr(2, recent)], now: NOW })
-    expect(unknown.held.map((p) => p.number)).toEqual([1])
   })
 
-  it("holds on a partial walk (a PASS at test level only) and says so", () => {
-    const plan = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "partial" }), pr(2, recent)], now: NOW })
-    expect(plan.prs.map((p) => p.number)).toEqual([2])
-    expect(plan.held.map((p) => p.why)).toEqual(["walk partial"])
+  // 2026-11-19: 36 of 47 waiting PRs were held for having no walk or a
+  // test-level one, and none of those is an outcome that cannot be fixed
+  // forward. The default policy ships them; `strict` is the rule as it was.
+  it("ships an unwalked or test-level PR by default, and holds both under the strict policy", () => {
+    const prs = [pr(1, recent, { walk: "unknown" }), pr(2, recent, { walk: "partial" }), pr(3, recent, { walk: "fail" })]
+    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    expect(plan.prs.map((p) => p.number)).toEqual([1, 2])
+    expect(plan.held.map((p) => p.why)).toEqual(["walk fail"])
+    expect(plan.walkPolicy).toBe("fail-only")
+
+    const strict = planRelease({ openReleases: [], prs, now: NOW, policy: "strict" })
+    expect(strict.cut).toBe(false)
+    expect(strict.held.map((p) => p.why)).toEqual(["walk unknown", "walk partial", "walk fail"])
+  })
+
+  it("still lists the held PRs while a release is in flight", () => {
+    const plan = planRelease({ openReleases: ["release/2026/09/23-01"], prs: [migration(1, recent), pr(2, recent)], now: NOW })
+    expect(plan.cut).toBe(false)
+    expect(plan.held.map((p) => [p.number, p.why])).toEqual([[1, "touches migration"]])
   })
 
   it("a person's release:approved label puts a held PR back on the line", () => {
@@ -198,6 +213,11 @@ describe("prHolds", () => {
     expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] })).toBe(true)
   })
 
+  it("a missing walk does not excuse an ungated holding area", () => {
+    expect(prHolds({ areas: ["auth"], walk: "unknown" })).toBe(true)
+    expect(prHolds({ areas: ["auth"], walk: "unknown", gates: ["auth"] })).toBe(false)
+  })
+
   it("decides a direct commit from its files alone, and names its holding areas in the reason", () => {
     expect(prHolds(direct("a", "chore(i18n): localize", CATALOGS))).toBe(false)
     expect(prHolds(direct("b", "docs: fix a typo", ["docs/SEO.md"]))).toBe(true)
@@ -224,6 +244,53 @@ describe("isLocaleCatalogOnly", () => {
     [["docs/src/lib/i18n/source-hashes.json"], false],
   ])("%j is %s", (files, expected) => {
     expect(isLocaleCatalogOnly(files)).toBe(expected)
+  })
+})
+
+describe("walk policy", () => {
+  it.each([
+    ["PASS", false, false],
+    ["none", false, false],
+    ["unknown", false, true],
+    ["partial", false, true],
+    ["fail", true, true],
+  ])("%s: holds under fail-only %s, under strict %s", (walk, failOnly, strict) => {
+    expect(walkHolds(walk, "fail-only")).toBe(failOnly)
+    expect(walkHolds(walk, "strict")).toBe(strict)
+  })
+
+  it("reads WALK_POLICY, and anything else is the default", () => {
+    expect(walkPolicy({ WALK_POLICY: "strict" })).toBe("strict")
+    expect(walkPolicy({ WALK_POLICY: "Strict" })).toBe("fail-only")
+    expect(walkPolicy({})).toBe("fail-only")
+  })
+})
+
+// One line per PR, in the hour its wait crosses the limit: on 2026-11-19 the
+// line had 47 PRs behind it for two days and nothing said so.
+describe("holdNudge", () => {
+  const held = (number: number, mergedAt: string, why = "touches infra") => ({ number, mergedAt, why })
+  const plan = {
+    held: [
+      held(1, "2026-11-17T09:30:00Z"),
+      held(2, "2026-11-19T07:40:00Z", "touches migration"),
+      held(3, "2026-11-19T10:30:00Z", "walk fail"),
+    ],
+  }
+
+  it("names the PR that crossed the limit this hour, with the count and the oldest", () => {
+    expect(holdNudge(plan, "2026-11-19T12:05:00Z")).toBe(
+      "⏳ Held 4 h, not in production: #2 (touches migration). 2 merged changes have now waited that long; the oldest is #1, 2 d. A green gate or the `release:approved` label puts a PR on the next cut; a direct commit waits for a person to pick it.",
+    )
+  })
+
+  it("says nothing in an hour no PR crossed it, however many are waiting", () => {
+    expect(holdNudge(plan, "2026-11-19T13:05:00Z")).toBeNull()
+    expect(holdNudge({ held: [] }, "2026-11-19T12:05:00Z")).toBeNull()
+  })
+
+  it("reads merge times across UTC offsets as instants", () => {
+    expect(holdNudge({ held: [held(9, "2026-11-19T02:10:00-06:00")] }, "2026-11-19T12:15:00Z")).toContain("#9 (touches infra)")
   })
 })
 

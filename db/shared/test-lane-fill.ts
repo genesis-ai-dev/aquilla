@@ -10,8 +10,9 @@
 // AQU-1611c: the projection target_lang columns are gone, so this trigger
 // cannot read NEW.target_lang. A row that arrives with lane_id already set
 // is left alone. A row that omits it mints the lane its role implies: a
-// source cell or source binding gets the source lane; everything else gets
-// the target lane whose legacy_tag is '' (the former default). A fixture
+// source cell, or any binding but a target one (AQU-2554), gets the source
+// lane; everything else gets the target lane whose legacy_tag is '' (the
+// former default). A fixture
 // that used to name a non-empty tag must pass lane_id, or the writer SQL
 // must go through aquilla_test_resolve_target_lane / source (see
 // rewriteTestLaneResolve). Production SQL is unchanged. With the GUC off,
@@ -67,7 +68,7 @@ BEGIN
   IF TG_TABLE_NAME = 'cells' AND v_row ->> 'side' = 'source' THEN
     v_role := 'source';
     v_tag := NULL;
-  ELSIF TG_TABLE_NAME = 'artifact_bindings' AND v_row ->> 'binding_role' = 'source' THEN
+  ELSIF TG_TABLE_NAME = 'artifact_bindings' AND v_row ->> 'binding_role' <> 'target' THEN
     v_role := 'source';
     v_tag := NULL;
   ELSE

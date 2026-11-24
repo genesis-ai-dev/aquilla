@@ -245,29 +245,68 @@ const closeMenu = () => {
  * not an explanation.
  */
 describe("EditorTable — the row's structural controls", () => {
-  it("renders nothing at all when there is nothing to offer", async () => {
-    // The one case that still hides: no access. A contributor on an untimed
-    // file with the workflow off can edit no source text, restructure nothing
-    // and retime nothing, so the cell is not a menu trigger — a permanently
-    // empty menu would be furniture.
+  it("copies the source text when nothing else is offered, and the cell text is not highlighted", async () => {
+    // A contributor on an untimed file can edit nothing. The menu still
+    // exists, because Copy source text is how the words leave the cell.
+    const write = vi.fn().mockResolvedValue(undefined)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText },
+    })
     renderTable({ project: projectAt(400) })
     await screen.findByText("First cue")
-    expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
-    expect(screen.queryByTestId("cell-menu-button-cue-a")).toBeNull()
+    const trigger = menuBtn("cue-a")
+    expect(trigger.className).not.toContain("select-text")
+    fireEvent.contextMenu(trigger)
+    const item = await screen.findByTestId("cell-menu-copy-source")
+    expect(item).toHaveTextContent("Copy source text")
+    expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull()
+    fireEvent.click(item)
+    await waitFor(() => {
+      expect(write.mock.calls.length + writeText.mock.calls.length).toBeGreaterThan(0)
+    })
+    const pasted = writeText.mock.calls.length > 0
+      ? String(writeText.mock.calls.at(-1)?.[0])
+      : await (write.mock.calls.at(-1)?.[0]?.[0] as ClipboardItem).getType("text/plain").then((blob) => blob.text())
+    expect(pasted).toBe("First cue")
+  })
+
+  it("explains an empty Copy source text on click, and draws the menu as one list", async () => {
+    // An empty cell still offers the entry. The reason is a disabled note
+    // opened by the click, not a second line, and the list is not split
+    // between copy, edit, and the row actions. Lead rank so Edit is in
+    // the list — that is the row the old divider sat under.
+    renderTable({ project: projectAt(500), sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    openMenu("added")
+    const item = await screen.findByTestId("cell-menu-copy-source")
+    expect(item).toHaveTextContent("Copy source text")
+    expect(item).not.toHaveTextContent("Nothing to copy")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(screen.queryByTestId("cell-menu-copy-source-reason")).toBeNull()
+    expect(document.querySelector("[data-slot='menu-separator']")).toBeNull()
+    expect(await entry("edit-source")).toBeInTheDocument()
+    expect(await entry("insert-above")).toBeInTheDocument()
+
+    fireEvent.click(item)
+    const note = await screen.findByText("Nothing to copy")
+    expect(note.closest("[data-slot='disabled-reason-note']")).not.toBeNull()
+    expect(screen.getByTestId("cell-menu-copy-source")).toBeInTheDocument()
   })
 
   it("opens from a right-click on the source cell", async () => {
-    // The source cell itself is a trigger: right-click the text, and the text
-    // stays selectable (the trigger's default is select-none).
+    // The source cell itself is a trigger. Its text is not selectable; the
+    // menu's Copy source text is the way out.
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
     const trigger = menuBtn("cue-a")
     expect(trigger).toHaveAttribute("data-editor-cell-surface", "source")
     expect(trigger).toHaveAttribute("data-slot", "context-menu-trigger")
-    expect(trigger.className).toContain("select-text")
-    expect(trigger.className).not.toContain("select-none")
+    expect(trigger.className).not.toContain("select-text")
     fireEvent.contextMenu(trigger)
     expect(await entry("insert-above")).toBeInTheDocument()
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
   })
 
   it("opens the SAME menu from the three-dot button in the cell's corner", async () => {

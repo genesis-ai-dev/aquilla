@@ -10,6 +10,7 @@ checks afterwards, so any capable fast model will do.
 No Jev import here, so this file is testable without the pinned environment.
 """
 
+import json
 import re
 
 # Tried in order after TEXT_MODEL. Small, fast, JSON-mode models from three
@@ -48,3 +49,30 @@ def post_text(post, url, key, body):
         except RuntimeError as error:
             if not PROVIDER_ERROR.fullmatch(str(error)) or index == len(models) - 1:
                 raise
+
+
+def valid_text_reply(result):
+    """Whether Jev will accept this reply as a field value.
+
+    The same rule as upstream's `text_value` (jev_ultrafast/model.py): a JSON
+    object holding only a non-blank `text` of at most 2000 characters.
+    """
+    try:
+        output = json.loads(result["choices"][0]["message"]["content"])
+        value = output["text"]
+        return set(output) == {"text"} and isinstance(value, str) and bool(value.strip()) and len(value) <= 2000
+    except (ValueError, KeyError, TypeError, IndexError):
+        return False
+
+
+def post_valid_text(post, url, key, body):
+    """Ask once more when the helper's reply is not a usable field value.
+
+    Upstream stops the whole journey on one malformed reply ("Text helper
+    returned no valid field value; nothing typed."). After the 2026-11 outage
+    that was still 5-10% of every typing attack, each one inconclusive. The
+    second reply is returned as it is: if it is also unusable, upstream raises
+    its own error and the run records it.
+    """
+    result = post_text(post, url, key, body)
+    return result if valid_text_reply(result) else post_text(post, url, key, body)

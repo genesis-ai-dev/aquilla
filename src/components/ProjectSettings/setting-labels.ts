@@ -39,6 +39,7 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   memberProgressViewMinRole: "projectSettings.visibility.progressLabel",
   autopilotEnabled: "autopilot.settings.autopilotLabel",
   smartExtensionsEnabled: "extensions.flag.label",
+  smartEditsEnabled: "smartEdits.flagLabel",
   languageProfile: "bibleData.profile.title",
   projectFacts: "projectDecisions.title",
   translationInstructions: "terminology.livingMemory.instructionsTitle",

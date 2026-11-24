@@ -26,6 +26,10 @@ async function freeOrg(project = PROJECT, orgId: number | null = 1) {
   await seedUser(1, 'alice')
   await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Free org', 1) ON CONFLICT DO NOTHING").run()
   await env.AQUILLA_PG.prepare('INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, 1)').bind(project, 'Jev', orgId).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    'INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)',
+  ).bind(project).run()
   return authHeader(await jwtFor('alice'))
 }
 

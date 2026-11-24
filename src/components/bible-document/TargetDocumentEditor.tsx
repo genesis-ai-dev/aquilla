@@ -14,6 +14,7 @@ import { TextSelection } from "@tiptap/pm/state"
 import { buildDoc, layoutOf, readDoc, type UnitLayout } from "@/lib/bible-document/doc-model"
 import {
   bibleDocumentExtensions,
+  type BibleDocumentRejection,
   insertHeading,
   refreshDecorations,
   setParagraphMarker,
@@ -38,6 +39,8 @@ export interface TargetDocumentHandle {
 export interface TargetDocumentEditorProps {
   units: readonly DocUnit[]
   editable: boolean
+  /** False for a book not imported as USFM: only words may change. */
+  layoutEditable: boolean
   /** The person holding this cell, when it is not us. Read at call time. */
   lockedBy: (cellId: string) => string | null
   /** Changes whenever the set of locks does. */
@@ -49,7 +52,7 @@ export interface TargetDocumentEditorProps {
   onActiveCellChange: (cellId: string | null) => void
   onParagraphMarkerChange: (marker: string | null) => void
   onUnsavedChange: (unsaved: ReadonlyMap<string, string>, failed: number) => void
-  onRejected?: (reason: "skeleton" | "locked" | "read-only") => void
+  onRejected?: (reason: BibleDocumentRejection) => void
 }
 
 function skeletonKey(units: readonly DocUnit[]): string {
@@ -57,7 +60,7 @@ function skeletonKey(units: readonly DocUnit[]): string {
 }
 
 export const TargetDocumentEditor = forwardRef<TargetDocumentHandle, TargetDocumentEditorProps>(function TargetDocumentEditor(
-  { units, editable, lockedBy, lockVersion, dir, fontSize, ariaLabel, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected },
+  { units, editable, layoutEditable, lockedBy, lockVersion, dir, fontSize, ariaLabel, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected },
   ref,
 ) {
   const layoutRef = useRef<ReadonlyMap<string, UnitLayout>>(new Map())
@@ -70,8 +73,8 @@ export const TargetDocumentEditor = forwardRef<TargetDocumentHandle, TargetDocum
   const againRef = useRef(false)
 
   // Callbacks and flags the editor's plugins read at call time.
-  const live = useRef({ editable, lockedBy, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected })
-  live.current = { editable, lockedBy, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected }
+  const live = useRef({ editable, layoutEditable, lockedBy, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected })
+  live.current = { editable, layoutEditable, lockedBy, onCommit, onActiveCellChange, onParagraphMarkerChange, onUnsavedChange, onRejected }
 
   const report = useCallback(() => {
     const { unsaved, failed } = ledgerRef.current.snapshot()
@@ -113,6 +116,7 @@ export const TargetDocumentEditor = forwardRef<TargetDocumentHandle, TargetDocum
       bibleDocumentExtensions({
         layout: () => layoutRef.current,
         editable: () => live.current.editable,
+        layoutEditable: () => live.current.layoutEditable,
         lockedBy: (cellId) => live.current.lockedBy(cellId),
         activeCellId: () => activeRef.current,
         ghost: (cellId) => ghostRef.current.get(cellId) ?? "",

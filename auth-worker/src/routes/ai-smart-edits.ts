@@ -17,6 +17,16 @@
 //      path as routes/import-classify.ts), with the team's past corrections as
 //      context, and reduced to exact-span edits before anything is returned.
 //
+// The edit memory is kept current by lib/smart-edits/miner.ts::mineIfDue: at
+// most one mining claim per project per minute, run after the response on its
+// own connection, so a request here reads the memory and never waits on (or
+// repeats) the mining.
+//
+// A request may name the cells it wants suggestions for (`only`); the rest of
+// `cells` is then context for Jev alone. The editor asks only about cells it
+// has no current answer for, so moving through a passage does not re-score —
+// or re-verify with Jev — the cells either side on every step.
+//
 // Like the seam route, this never fails its caller: no key, a timeout, an
 // upstream error or the rate cap all degrade to tier-0-only suggestions, and
 // `jev` in the response says which. Jev stays outside the credit guard for the
@@ -48,7 +58,8 @@ import {
   parseVerifyAnswers,
   VERIFY_MIN_PROBABILITY,
 } from "../../../src/lib/smart-edits/jev-request"
-import { cellKeyOf, minePass } from "../lib/smart-edits/miner"
+import { cellKeyOf, mineIfDue } from "../lib/smart-edits/miner"
+import { withPostResponseDb } from "../lib/post-response-db"
 import { loadObservations, loadScoreInputs, passagePhraseKeys } from "../lib/smart-edits/memory-read"
 import { buildLlmMessages, LLM_MAX_TOKENS, parseLlmEdits } from "../../../src/lib/smart-edits/llm"
 import { tokenize } from "../../../src/lib/smart-edits/tokens"
@@ -75,8 +86,6 @@ const MAX_CELLS = 60
 const MAX_CELL_CHARS = 4_000
 const SUGGEST_MAX_PER_USER_PER_WINDOW = 400
 const JEV_TIMEOUT_MS = 8_000
-/** Background mining passes per request after the synchronous one. */
-const BACKGROUND_PASSES = 4
 
 const cellSchema = z.object({
   fileId: z.string().trim().min(1).max(255),
@@ -93,6 +102,8 @@ const suggestSchema = z.object({
   /** false = tier 0 only (the replay eval's baseline, and a client that wants
    *  zero model spend). Default true. */
   verify: z.boolean().default(true),
+  /** Cell ids to suggest for; the other cells are context only. Absent = all. */
+  only: z.array(z.string().max(255)).max(MAX_CELLS).optional(),
 })
 
 const feedbackSchema = z.object({
@@ -131,11 +142,13 @@ function runInBackground(c: Context<AppEnv>, task: Promise<unknown>): void {
   }
 }
 
-async function mineMore(db: Env["AQUILLA_PG"], projectId: string): Promise<void> {
-  for (let i = 0; i < BACKGROUND_PASSES; i++) {
-    const r = await minePass(db, projectId)
-    if (!r.more) return
-  }
+const logMineFailure = (err: unknown) => console.warn("[smart-edits] mine failed:", err)
+
+/** Mining that outlives the response runs on its own connection: the
+ *  request's is closed the moment the response returns. */
+function mineAfterResponse(c: Context<AppEnv>) {
+  return (work: (db: Env["AQUILLA_PG"]) => Promise<void>): void =>
+    runInBackground(c, withPostResponseDb(c.env, work).catch(logMineFailure))
 }
 
 aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema), async (c) => {
@@ -159,25 +172,21 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
   })
   if (!suggestLimit.allowed) return c.json({ suggestions: [], rateLimited: true })
 
-  // Fold in edits made since the last request (bounded), then keep going in
-  // the background if a backlog remains. A failed pass never blocks reading.
-  try {
-    const pass = await minePass(db, input.projectId)
-    if (pass.more) runInBackground(c, mineMore(db, input.projectId).catch((err) => console.warn("[smart-edits] mine", err)))
-  } catch (err) {
-    console.warn("[smart-edits] mine pass failed:", err)
-  }
+  // A failed mining claim never blocks reading.
+  await mineIfDue(db, input.projectId, mineAfterResponse(c)).catch(logMineFailure)
 
   const cellsById = new Map(input.cells.map((cell) => [cellKeyOf(cell.fileId, cell.cellId, input.lane), cell]))
   const passage = [...cellsById.entries()].map(([id, cell]) => ({ id, source: cell.source, target: cell.target }))
+  const only = input.only && new Set(input.only)
+  const asked = only ? passage.filter((p) => only.has(cellsById.get(p.id)!.cellId)) : passage
   // An unreadable memory (e.g. migration 0130 not yet applied on this
   // database) is "no suggestions", never a 500 — nobody asked for these.
   let observations: Observation[]
   let candidates: ReturnType<typeof findCandidates>
   let scoreInputs: Awaited<ReturnType<typeof loadScoreInputs>>
   try {
-    observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys(passage.map((p) => p.target)))
-    candidates = findCandidates(passage, observations)
+    observations = await loadObservations(db, input.projectId, input.lane, passagePhraseKeys(asked.map((p) => p.target)))
+    candidates = findCandidates(asked, observations)
     if (candidates.length === 0) return c.json({ suggestions: [], jev: "skipped" })
     scoreInputs = await loadScoreInputs(db, input.projectId, input.lane, candidates, observations)
   } catch (err) {
@@ -316,11 +325,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(input.projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0
 
-  try {
-    await minePass(db, input.projectId)
-  } catch (err) {
-    console.warn("[smart-edits] mine pass failed:", err)
-  }
+  await mineIfDue(db, input.projectId, mineAfterResponse(c)).catch(logMineFailure)
   // The team's corrections are context, not a precondition: if the memory
   // cannot be read, the model still gets the source and the passage.
   let observations: Observation[] = []

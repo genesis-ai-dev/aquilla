@@ -7,6 +7,10 @@
 // that switch between panels, so at most one is open. Keeping the decision in
 // one pure function keeps that rule checkable: `asideEdge` renders `tabs`,
 // `aside` renders `openPanel`.
+//
+// The document preview (a Word or PowerPoint file rendered as the document it
+// is) is a fourth button in the same rail. It does not need a scripture file:
+// it is offered wherever the open file has a preview.
 
 export interface RightRailInputs {
   /**
@@ -32,16 +36,24 @@ export interface RightRailInputs {
   verseResourcesOpen: boolean
   /** AQU-1689: persisted per-project open flag for the Who's Who panel. */
   whosWhoOpen: boolean
+  /**
+   * The center surface is the editor's text view, on a file whose original
+   * can be rendered as a document (`documentPreviewKind`).
+   */
+  documentPreviewAvailable: boolean
+  /** Persisted per-project open flag for the document preview. */
+  documentPreviewOpen: boolean
 }
 
-/** One of the scripture side panels the rail switches between. */
-export type RightRailPanel = "bibles" | "resources" | "people"
+/** One of the side panels the rail switches between. */
+export type RightRailPanel = "bibles" | "resources" | "people" | "preview"
 
 export interface RightRailSurfaces {
   /**
-   * The buttons in the single right rail, top to bottom. Empty outside the
-   * scripture editor; otherwise every feature that is available, whether or
-   * not its panel is open (the open one renders as the active button).
+   * The buttons in the single right rail, top to bottom: every feature that is
+   * available, whether or not its panel is open (the open one renders as the
+   * active button). The scripture panels need the scripture editor; the
+   * document preview needs only a file it can render.
    */
   tabs: RightRailPanel[]
   /** The one panel rendered in `aside`, or null when all are closed. */
@@ -64,17 +76,23 @@ export function computeRightRailSurfaces({
   parallelBiblesOpen,
   verseResourcesOpen,
   whosWhoOpen,
+  documentPreviewAvailable,
+  documentPreviewOpen,
 }: RightRailInputs): RightRailSurfaces {
-  if (!inScriptureEditor) return { tabs: [], openPanel: null }
-  const tabs: RightRailPanel[] = ["bibles"]
-  // AQU-461: Verse Resources also needs the project's Bible-resources gate.
-  if (verseResourcesAvailable) tabs.push("resources")
-  // AQU-1689: Who's Who also needs its own enrichment.
-  if (whosWhoAvailable) tabs.push("people")
+  const tabs: RightRailPanel[] = []
+  if (inScriptureEditor) {
+    tabs.push("bibles")
+    // AQU-461: Verse Resources also needs the project's Bible-resources gate.
+    if (verseResourcesAvailable) tabs.push("resources")
+    // AQU-1689: Who's Who also needs its own enrichment.
+    if (whosWhoAvailable) tabs.push("people")
+  }
+  if (documentPreviewAvailable) tabs.push("preview")
   const open: Record<RightRailPanel, boolean> = {
     bibles: parallelBiblesOpen,
     resources: verseResourcesOpen,
     people: whosWhoOpen,
+    preview: documentPreviewOpen,
   }
   return { tabs, openPanel: tabs.find((tab) => open[tab]) ?? null }
 }

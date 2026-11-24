@@ -210,6 +210,15 @@ describe("AQU-2352 dry run and migration 0210", () => {
     expect(report.plan.lifted.some((p) => p.userId === 5 || p.userId === 6)).toBe(false)
     // Biblica ETT's floor is Project Lead: its two org Project Leads lose the org Members page.
     expect(report.plan.membersPageLosses.map((l) => [l.userId, l.floor])).toEqual([[2, 500], [3, 500]])
+    // Org-wide named member progress needs both floors; the progress floor is
+    // Maintainer here (unset), so nobody below Maintainer had it.
+    expect(report.plan.namedProgressLosses).toEqual([])
+    // Biblica ETT on the dev copy sets both floors to Project Lead: its org
+    // Project Leads lose the org-wide member progress too, and the report says so.
+    await db.exec(`UPDATE org_settings SET settings = '{"rosterViewMinRole":500,"memberProgressViewMinRole":500}' WHERE org_id = 1`)
+    const both = buildOrgRolesReport(raw, await loadOrgRoleExtras(query), { mode: "test", generatedAt: "t" })
+    expect(both.plan.namedProgressLosses.map((l) => [l.userId, l.floor])).toEqual([[2, 500], [3, 500]])
+    expect(both.markdown).toContain("Loses the org-wide member progress: 2")
     expect(report.markdown).toContain("Pattani Malay Bible")
     expect(report.liftGrantsRecorded).toBe(report.plan.lifted.length)
     expect(report.markdown).toContain("The migration records 5 lifted pair(s) in `org_role_lift_grants`")

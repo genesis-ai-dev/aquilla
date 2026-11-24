@@ -99,6 +99,9 @@ export function buildOrgRolesReport(
   out.push(
     `- **Loses the org Members page: ${plan.membersPageLosses.length}** — ${plan.membersPageLosses.map((l) => `${who(l.userId)} (${org(l.orgId)}, ${roleLabel(l.orgLevel)} vs floor ${roleLabel(l.floor)})`).join(", ") || "nobody"}. Intended (AQU-2352).`,
   )
+  out.push(
+    `- **Loses the org-wide member progress: ${plan.namedProgressLosses.length}** — ${plan.namedProgressLosses.map((l) => `${who(l.userId)} (${org(l.orgId)}, ${roleLabel(l.orgLevel)} vs floor ${roleLabel(l.floor)})`).join(", ") || "nobody"}. Intended, as for the Members page.`,
+  )
   out.push(`- **Pending org invites that become Member: ${plan.inviteChanges.length}**.`)
   if (plan.belowMember.length > 0) out.push(`- Org rows below Member (left alone): ${plan.belowMember.length}.`)
   out.push("")
@@ -151,6 +154,15 @@ export function buildOrgRolesReport(
   else {
     out.push("| Org | Person | Org role today | Floor |", "|---|---|---|---|")
     for (const l of plan.membersPageLosses) out.push(`| ${cell(org(l.orgId))} | ${cell(who(l.userId))} | ${roleLabel(l.orgLevel)} | ${roleLabel(l.floor)} |`)
+    out.push("")
+  }
+
+  out.push("## Who loses the org-wide member progress", "")
+  out.push("The org's per-person progress (`GET /orgs/:orgId/assignments/workload`, `GET /usage/org/:orgId`) checks the ORG role against both the roster floor and `memberProgressViewMinRole` (default Maintainer). They still see progress on their own projects where those projects' floors let them.", "")
+  if (plan.namedProgressLosses.length === 0) out.push("Nobody.", "")
+  else {
+    out.push("| Org | Person | Org role today | Floor |", "|---|---|---|---|")
+    for (const l of plan.namedProgressLosses) out.push(`| ${cell(org(l.orgId))} | ${cell(who(l.userId))} | ${roleLabel(l.orgLevel)} | ${roleLabel(l.floor)} |`)
     out.push("")
   }
 

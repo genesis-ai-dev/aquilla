@@ -27,6 +27,8 @@ export const ORG_MEMBER = 100
 export interface OrgRoleExtras {
   /** `org_settings.settings` → `rosterViewMinRole`, per org that set one. */
   rosterFloors: Map<number, number>
+  /** `org_settings.settings` → `memberProgressViewMinRole`, per org that set one. */
+  progressFloors: Map<number, number>
   /** Unused org invites (expired ones included; their row is still accepted-checked). */
   pendingOrgInvites: Array<{ token: string; org_id: number; role_level: number; email: string | null; expired: boolean }>
   /** When each org was created and when each org row was granted, for the cross-check. */
@@ -88,6 +90,12 @@ export interface OrgRolesPlan {
   belowMember: OrgRowChange[]
   lifted: LiftedPair[]
   membersPageLosses: MembersPageLoss[]
+  /**
+   * Who loses the org-wide named member progress (the org's assignment
+   * workload, `GET /usage/org/:orgId`): `canViewNamedProgress` checks the ORG
+   * role against both floors, so `floor` is the higher of the two.
+   */
+  namedProgressLosses: MembersPageLoss[]
   inviteChanges: Array<{ token: string; orgId: number; from: number; email: string | null; expired: boolean }>
 }
 
@@ -174,12 +182,20 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
     const floor = extras.rosterFloors.get(c.orgId) ?? DEFAULT_ROSTER_VIEW_MIN_ROLE
     if (c.from >= floor && c.to < floor) membersPageLosses.push({ orgId: c.orgId, userId: c.userId, orgLevel: c.from, floor })
   }
+  const namedProgressLosses: MembersPageLoss[] = []
+  for (const c of orgRowChanges) {
+    const floor = Math.max(
+      extras.rosterFloors.get(c.orgId) ?? DEFAULT_ROSTER_VIEW_MIN_ROLE,
+      extras.progressFloors.get(c.orgId) ?? DEFAULT_ROSTER_VIEW_MIN_ROLE,
+    )
+    if (c.from >= floor && c.to < floor) namedProgressLosses.push({ orgId: c.orgId, userId: c.userId, orgLevel: c.from, floor })
+  }
 
   const inviteChanges = extras.pendingOrgInvites
     .filter((i) => i.role_level > ORG_MEMBER && i.role_level < MAINTAINER)
     .map((i) => ({ token: i.token, orgId: i.org_id, from: i.role_level, email: i.email, expired: i.expired }))
 
-  return { orgRowChanges, belowMember, lifted, membersPageLosses, inviteChanges }
+  return { orgRowChanges, belowMember, lifted, membersPageLosses, namedProgressLosses, inviteChanges }
 }
 
 /** One entry of `org_role_lift_grants.lanes`, keyed as the JSON is: a lane row 0210 changed, as it was before. */
@@ -300,12 +316,14 @@ export interface ReadQuery {
 /** Read what the plan needs beyond the access tables. SELECTs only. */
 export async function loadOrgRoleExtras(db: ReadQuery): Promise<OrgRoleExtras> {
   const rosterFloors = new Map<number, number>()
+  const progressFloors = new Map<number, number>()
   for (const r of (await db.query(`SELECT org_id, settings FROM org_settings`)).rows) {
     try {
       const parsed = JSON.parse(String(r.settings ?? "{}")) as Record<string, unknown>
-      const v = parsed.rosterViewMinRole
       // Same validation as auth-worker extractRoleFloor.
-      if (typeof v === "number" && Number.isFinite(v) && v >= 100 && v <= 700) rosterFloors.set(Number(r.org_id), v)
+      const floor = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 100 && v <= 700
+      if (floor(parsed.rosterViewMinRole)) rosterFloors.set(Number(r.org_id), parsed.rosterViewMinRole as number)
+      if (floor(parsed.memberProgressViewMinRole)) progressFloors.set(Number(r.org_id), parsed.memberProgressViewMinRole as number)
     } catch {
       // An unreadable blob reads as the default, as in the worker.
     }
@@ -330,5 +348,5 @@ export async function loadOrgRoleExtras(db: ReadQuery): Promise<OrgRoleExtras> {
   for (const r of (await db.query(`SELECT org_id, user_id, granted_at FROM org_members`)).rows) {
     orgMemberGrantedAt.set(`${Number(r.org_id)}:${Number(r.user_id)}`, r.granted_at == null ? null : new Date(r.granted_at as string).toISOString())
   }
-  return { rosterFloors, pendingOrgInvites, orgCreatedAt, orgMemberGrantedAt }
+  return { rosterFloors, progressFloors, pendingOrgInvites, orgCreatedAt, orgMemberGrantedAt }
 }

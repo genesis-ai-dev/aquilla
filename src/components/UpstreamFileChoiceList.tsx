@@ -206,7 +206,16 @@ export function ReplaceFileOption({
             {t("projectSettings.linkSource.replaceTargetTaken", { name: targetName ?? "" })}
           </p>
         ) : (
-          <ReplaceMatchNote state={choices.matches.get(file.id)} />
+          <>
+            <ReplaceMatchNote state={choices.matches.get(file.id)} />
+            {/* AQU-2549: the file follows the source under the source file's
+                name, so the lead hears it before he links. */}
+            {targetName && targetName !== file.name && (
+              <p className="text-xs text-muted-foreground">
+                {t("projectSettings.linkSource.replaceRenames", { from: targetName, to: file.name })}
+              </p>
+            )}
+          </>
         ))}
     </div>
   )

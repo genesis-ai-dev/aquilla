@@ -8,7 +8,7 @@
 // goes to Recently deleted. Server halves: auth-worker
 // source-linking-join-copy.test.ts, sync-worker link-sync-join-copy.test.ts.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -24,7 +24,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchLinkFileMatches } from "@/lib/sync/link-file-match"
 import { fetchLinkedFileCopies, joinLinkedCopy, type LinkedFileCopies } from "@/lib/sync/link-join-copy"
 import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
-import { toUserFacingError } from "@/lib/errors/user-error"
+import { UserError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface JoinLinkedCopyDialogProps {
@@ -55,6 +55,10 @@ export function JoinLinkedCopyDialog({
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const ask = useRef(0)
+  // AQU-2549: the pickers' visible labels, so a same-named pair does not
+  // read as one name twice.
+  const copyLabelId = useId()
+  const targetLabelId = useId()
 
   useEffect(() => {
     if (!open || !jwt) return
@@ -79,6 +83,7 @@ export function JoinLinkedCopyDialog({
   }, [open, jwt, projectId])
 
   const copy = useMemo(() => list?.copies.find((c) => c.fileId === copyId) ?? null, [list, copyId])
+  const targetName = list?.ownFiles.find((f) => f.id === targetId)?.name
 
   // The comparison for the pair now picked, as the link dialog shows it.
   useEffect(() => {
@@ -109,7 +114,11 @@ export function JoinLinkedCopyDialog({
         setNote(t("projectSettings.sourceLink.joinIncomplete"))
       }
     } catch (err) {
-      setError(toUserFacingError(err, "project").message)
+      // A refusal from the server says why. Anything else is the request not
+      // reaching it (Chrome's "Failed to fetch", Safari's "Load failed"):
+      // nothing was joined, and nothing is sent later, so never the outbox's
+      // "will sync when you reconnect".
+      setError(err instanceof UserError ? err.message : t("projectSettings.sourceLink.joinNoConnection"))
     } finally {
       setJoining(false)
     }
@@ -132,51 +141,67 @@ export function JoinLinkedCopyDialog({
           <p className="text-sm text-muted-foreground">{t("projectSettings.sourceLink.joinNoCopies")}</p>
         ) : (
           <div className="space-y-3 text-sm">
-            <Select
-              items={list.copies.map((c) => ({ value: c.fileId, label: c.name }))}
-              value={copyId}
-              onValueChange={(value) => {
-                if (typeof value !== "string") return
-                setCopyId(value)
-                setTargetId(list.copies.find((c) => c.fileId === value)?.suggestedFileId ?? null)
-              }}
-              disabled={joining}
-            >
-              <SelectTrigger className="w-full" aria-label={t("projectSettings.sourceLink.joinCopyLabel")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {list.copies.map((c) => (
-                  <SelectItem key={c.fileId} value={c.fileId}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1">
+              <p id={copyLabelId} className="text-xs font-medium">
+                {t("projectSettings.sourceLink.joinCopyLabel")}
+              </p>
+              <Select
+                items={list.copies.map((c) => ({ value: c.fileId, label: c.name }))}
+                value={copyId}
+                onValueChange={(value) => {
+                  if (typeof value !== "string") return
+                  setCopyId(value)
+                  setTargetId(list.copies.find((c) => c.fileId === value)?.suggestedFileId ?? null)
+                }}
+                disabled={joining}
+              >
+                <SelectTrigger className="w-full" aria-labelledby={copyLabelId}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {list.copies.map((c) => (
+                    <SelectItem key={c.fileId} value={c.fileId}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {copy?.translated ? (
               <p className="text-xs text-destructive" role="alert">
                 {t("projectSettings.sourceLink.joinCopyTranslated", { name: copy.name })}
               </p>
             ) : (
               <>
-                <Select
-                  items={list.ownFiles.map((f) => ({ value: f.id, label: f.name }))}
-                  value={targetId}
-                  onValueChange={(value) => typeof value === "string" && setTargetId(value)}
-                  disabled={joining}
-                >
-                  <SelectTrigger className="w-full" aria-label={t("projectSettings.sourceLink.joinTargetLabel")}>
-                    <SelectValue placeholder={t("projectSettings.linkSource.replaceTargetPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {list.ownFiles.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="space-y-1">
+                  <p id={targetLabelId} className="text-xs font-medium">
+                    {t("projectSettings.sourceLink.joinTargetLabel")}
+                  </p>
+                  <Select
+                    items={list.ownFiles.map((f) => ({ value: f.id, label: f.name }))}
+                    value={targetId}
+                    onValueChange={(value) => typeof value === "string" && setTargetId(value)}
+                    disabled={joining}
+                  >
+                    <SelectTrigger className="w-full" aria-labelledby={targetLabelId}>
+                      <SelectValue placeholder={t("projectSettings.linkSource.replaceTargetPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {list.ownFiles.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>
+                          {f.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {targetId && <ReplaceMatchNote state={match} join />}
+                {/* AQU-2549: the file takes the source file's name. */}
+                {copy && targetName && targetName !== copy.name && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("projectSettings.linkSource.replaceRenames", { from: targetName, to: copy.name })}
+                  </p>
+                )}
               </>
             )}
           </div>

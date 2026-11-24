@@ -110,6 +110,52 @@ describe("JoinLinkedCopyDialog (AQU-2549 part 1)", () => {
     expect(joinButton().hasAttribute("disabled")).toBe(true)
   })
 
+  // WHY (evidence pass): a same-named pair read "GEN.usfm" twice with no
+  // labels to tell the copy from the lead's own file.
+  it("labels the two pickers where they can be seen", async () => {
+    fetchLinkedFileCopies.mockResolvedValue({ copies: [COPY], ownFiles: OWN })
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
+    renderDialog()
+    expect(await screen.findByText("Copy from the source project")).toBeTruthy()
+    expect(screen.getByText("Your file to join it into")).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Copy from the source project" })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Your file to join it into" })).toBeTruthy()
+  })
+
+  // WHY (evidence pass 4g): with no connection Chrome said "changes will sync
+  // when you reconnect" (nothing is sent later) and Safari showed "Load failed".
+  for (const raw of ["Failed to fetch", "Load failed"]) {
+    it(`says the join did not happen when the request cannot be sent ("${raw}")`, async () => {
+      const user = userEvent.setup()
+      fetchLinkedFileCopies.mockResolvedValue({ copies: [COPY], ownFiles: OWN })
+      fetchLinkFileMatches.mockResolvedValue([matchOf()])
+      joinLinkedCopy.mockRejectedValue(new TypeError(raw))
+      const { onJoined } = renderDialog()
+      await screen.findByText("1532 of 1533 lines are the same in both files.")
+      await user.click(joinButton())
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "The copy wasn't joined because there's no connection. Try again when you're connected.",
+      )
+      expect(screen.queryByText(/will sync/)).toBeNull()
+      expect(onJoined).not.toHaveBeenCalled()
+    })
+  }
+
+  // WHY (settled Nov 24): the lead's file takes the source file's name.
+  it("says the lead's file will be renamed when the names differ", async () => {
+    fetchLinkedFileCopies.mockResolvedValue({
+      copies: [{ ...COPY, suggestedFileId: undefined }],
+      ownFiles: [{ id: "own-draft", name: "Genesis draft" }],
+    })
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ fileId: "own-draft" })])
+    const user = userEvent.setup()
+    renderDialog()
+    await user.click(await screen.findByRole("combobox", { name: "Your file to join it into" }))
+    await user.click(await screen.findByRole("option", { name: "Genesis draft" }))
+    expect(await screen.findByText(`Genesis draft will be renamed ${NAME}, the source file's name.`)).toBeTruthy()
+  })
+
   it("says so when there is no copy to join", async () => {
     fetchLinkedFileCopies.mockResolvedValue({ copies: [], ownFiles: OWN })
     renderDialog()

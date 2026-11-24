@@ -14,7 +14,7 @@
 // handed in as `actions`; the order they run in is make-speech.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
@@ -40,6 +40,7 @@ import {
   type MakeSpeechLineState,
   type MakeSpeechRecipe,
 } from "@/lib/audio/make-speech"
+import type { VoiceBlocker } from "@/lib/audio/voice-usable"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { LineDelivery, Voice } from "@/lib/parsers/types"
 
@@ -79,6 +80,8 @@ export interface MakeSpeechPanelProps {
   onSaveDelivery?: (cellIds: readonly string[], delivery: LineDelivery) => Promise<void> | void
   /** Each line's state as the run goes, for whoever draws the lines (the timeline's sparkles). */
   onLineState?: (cellId: string, state: MakeSpeechLineState) => void
+  /** Why a voice can't speak these lines right now; null when it can. Such a voice can't be picked. */
+  blockerOf?: (voice: Voice) => VoiceBlocker | null
   onBack: () => void
 }
 
@@ -90,6 +93,12 @@ const STATE_KEYS: Record<MakeSpeechLineState["kind"], MessageKey> = {
   skipped: "audio.makeSpeech.stateSkipped",
   failed: "audio.makeSpeech.stateFailed",
 }
+const BLOCKER_KEYS = {
+  "elevenlabs-key": "audio.makeSpeech.blockedElevenLabsKey",
+  "gemini-key": "audio.makeSpeech.blockedGeminiKey",
+  training: "audio.makeSpeech.blockedTraining",
+  "training-failed": "audio.makeSpeech.blockedTrainingFailed",
+} as const satisfies Record<Exclude<VoiceBlocker["kind"], "language">, MessageKey>
 const STEP_KEYS = {
   translate: "audio.makeSpeech.stepTranslating",
   speak: "audio.makeSpeech.stepSpeaking",
@@ -97,9 +106,10 @@ const STEP_KEYS = {
 } as const satisfies Record<string, MessageKey>
 
 export function MakeSpeechPanel({
-  projectId, voices, lines, selectedCellIds, picked, actions, onSaveDelivery, onLineState, onBack,
+  projectId, voices, lines, selectedCellIds, picked, actions, onSaveDelivery, onLineState, blockerOf, onBack,
 }: MakeSpeechPanelProps) {
   const t = useT()
+  const { locale } = useI18n()
   const [recipe, setRecipe] = useState<MakeSpeechRecipe>(() => loadMakeSpeechRecipe(projectId))
   const update = (patch: Partial<MakeSpeechRecipe>) => setRecipe((cur) => {
     const next = { ...cur, ...patch }
@@ -116,15 +126,37 @@ export function MakeSpeechPanel({
   const untranslated = targetIds.filter((id) => byId.get(id)?.hasText === false).length
 
   // ── The voices ──
+  // A voice that can't speak these lines (no key, still training, made for
+  // another language) is shown but can't be picked, and never chosen for you.
+  const blocked = useMemo(
+    () => new Map(voices.flatMap((v) => {
+      const why = blockerOf?.(v)
+      return why ? [[v.id, why] as const] : []
+    })),
+    [voices, blockerOf],
+  )
+  const usable = useMemo(() => voices.filter((v) => !blocked.has(v.id)), [voices, blocked])
   // One voice reads every selected line: the last one chosen, else the first
   // line's own, else the project's first.
-  const firstCast = targetIds.map((id) => byId.get(id)?.voiceId).find((id) => id && voices.some((v) => v.id === id))
-  const reader = voices.some((v) => v.id === recipe.readerVoiceId)
+  const firstCast = targetIds.map((id) => byId.get(id)?.voiceId).find((id) => id && usable.some((v) => v.id === id))
+  const reader = usable.some((v) => v.id === recipe.readerVoiceId)
     ? recipe.readerVoiceId
-    : firstCast ?? voices[0]?.id ?? null
+    : firstCast ?? usable[0]?.id ?? null
   // Only a trained voice or an ElevenLabs voice can take a clone; an Inworld
   // or Gemini voice can read text but cannot re-voice a take.
-  const cloneable = useMemo(() => voices.filter((v) => voiceConversionKey(v) != null), [voices])
+  const cloneable = useMemo(() => usable.filter((v) => voiceConversionKey(v) != null), [usable])
+  const blockedReason = (voice: Voice): string | undefined => {
+    const why = blocked.get(voice.id)
+    if (!why) return undefined
+    if (why.kind === "language") {
+      let language = why.language
+      try {
+        language = new Intl.DisplayNames([locale], { type: "language" }).of(why.language) ?? why.language
+      } catch { /* malformed tag: show it as is */ }
+      return t("audio.makeSpeech.blockedLanguage", { name: voice.name, language })
+    }
+    return t(BLOCKER_KEYS[why.kind], { name: voice.name })
+  }
   const character = cloneable.some((v) => v.id === recipe.characterVoiceId && v.id !== reader)
     ? recipe.characterVoiceId
     : cloneable.find((v) => v.id !== reader)?.id ?? null
@@ -286,9 +318,17 @@ export function MakeSpeechPanel({
         <Step n={2} title={t("audio.makeSpeech.step2")}>
           <VoiceChips
             ariaLabel={t("audio.makeSpeech.readerAriaLabel")}
-            voices={voices} value={reader} disabled={running}
+            voices={voices} value={reader} disabled={running} blockedReason={blockedReason}
             onPick={(voiceId) => update({ readerVoiceId: voiceId })}
           />
+          {reader == null && voices.length > 0 && (
+            <p className="text-[11px] text-destructive" data-testid="make-speech-no-usable">{t("audio.makeSpeech.noUsableVoice")}</p>
+          )}
+          {blocked.size > 0 && (
+            <ul className="space-y-0.5 text-[11px] text-muted-foreground" data-testid="make-speech-blocked">
+              {voices.filter((v) => blocked.has(v.id)).map((v) => <li key={v.id}>{blockedReason(v)}</li>)}
+            </ul>
+          )}
           {onSaveDelivery && tunable && (
             <div className="space-y-2.5 border-t pt-2.5" data-testid="make-speech-delivery">
               <div className="space-y-1.5">
@@ -382,18 +422,21 @@ export function MakeSpeechPanel({
 }
 
 /** One voice out of the project's, picked by a click. */
-function VoiceChips({ ariaLabel, voices, value, disabled, onPick }: {
+function VoiceChips({ ariaLabel, voices, value, disabled, blockedReason, onPick }: {
   ariaLabel: string
   voices: Voice[]
   value: string | null
   disabled: boolean
+  /** Why a voice can't be picked; such a chip is disabled. */
+  blockedReason?: (voice: Voice) => string | undefined
   onPick: (voiceId: string) => void
 }) {
   return (
     <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
       {voices.map((voice) => (
         <button
-          key={voice.id} type="button" aria-pressed={value === voice.id} disabled={disabled}
+          key={voice.id} type="button" aria-pressed={value === voice.id}
+          disabled={disabled || blockedReason?.(voice) != null} title={blockedReason?.(voice)}
           className={cn(
             "flex h-7 max-w-full items-center gap-1.5 rounded-full border ps-1 pe-2.5 text-xs disabled:opacity-50",
             value === voice.id ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-accent",

@@ -262,4 +262,44 @@ describe("MakeSpeechPanel", () => {
     )
     expect(screen.queryByTestId("make-speech-delivery")).toBeNull()
   })
+  // AQU-2742: a voice that can't speak these lines can't be picked, says why,
+  // and is never chosen for you — even when the line is cast to it.
+  it("never reads with a voice that can't speak these lines, and says why each one can't", async () => {
+    const { calls, actions } = harness()
+    const voices: Voice[] = [
+      { id: "nova", name: "Nova", provider: "inworld", language: "en-US" },
+      elevenVoice("layla", "Layla"),
+      elevenVoice("chip", "Chip"),
+    ]
+    const blockerOf = (v: Voice) => v.id === "nova" ? { kind: "language" as const, language: "en-US" }
+      : v.id === "chip" ? { kind: "elevenlabs-key" as const } : null
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={voices} selectedCellIds={["a"]} onBack={vi.fn()} actions={actions}
+        lines={lines.map((l) => ({ ...l, voiceId: "nova" }))} blockerOf={blockerOf}
+      />,
+    )
+    const chips = within(screen.getByRole("group", { name: "The voice that reads the selected lines" }))
+    expect(chips.getByRole("button", { name: "Nova" })).toBeDisabled()
+    expect(chips.getByRole("button", { name: "Chip" })).toBeDisabled()
+    expect(chips.getByRole("button", { name: "Layla" })).toHaveAttribute("aria-pressed", "true")
+    const why = screen.getByTestId("make-speech-blocked")
+    expect(why).toHaveTextContent("Nova speaks American English, not the language of these lines.")
+    expect(why).toHaveTextContent("Chip needs your ElevenLabs key.")
+    fireEvent.click(screen.getByRole("button", { name: "Make speech for 1 line" }))
+    await waitFor(() => expect(calls).toEqual(["speak a layla"]))
+  })
+
+  it("offers no run when no voice can speak these lines", () => {
+    const { actions } = harness()
+    render(
+      <MakeSpeechPanel
+        projectId="p1" voices={[elevenVoice("chip", "Chip")]} selectedCellIds={["a"]} onBack={vi.fn()} actions={actions}
+        lines={lines} blockerOf={() => ({ kind: "training" })}
+      />,
+    )
+    expect(screen.getByTestId("make-speech-no-usable")).toBeInTheDocument()
+    expect(screen.getByTestId("make-speech-run")).toBeDisabled()
+  })
 })
+

@@ -756,6 +756,12 @@ export const audio = defineNamespace({
     "audio.makeSpeech.cloneVoiceGone": "The voice to clone into was removed from this project.",
     "audio.makeSpeech.cloneNoTake": "The spoken take didn't arrive in time, so there was nothing to clone. Try again.",
     "audio.makeSpeech.cloneNotCloneable": "{name} can read text but can't be cloned into. Pick a trained or ElevenLabs voice.",
+    "audio.makeSpeech.blockedElevenLabsKey": "{name} needs your ElevenLabs key. Connect it under Add a voice.",
+    "audio.makeSpeech.blockedGeminiKey": "{name} needs a Gemini API key. Add one in project settings.",
+    "audio.makeSpeech.blockedTraining": "{name} is still training.",
+    "audio.makeSpeech.blockedTrainingFailed": "{name} didn't finish training. Train it again to use it.",
+    "audio.makeSpeech.blockedLanguage": "{name} speaks {language}, not the language of these lines.",
+    "audio.makeSpeech.noUsableVoice": "None of these voices can speak these lines yet.",
     "audio.makeSpeech.reviewTitle": plural({
       one: "Check the translation",
       other: "Check the translations",
@@ -3287,6 +3293,29 @@ export const audio = defineNamespace({
       },
       "audio.makeSpeech.cloneNoTake": {
         description: "Reason shown under a line in the Make speech progress list when step 3 (Clone) found no spoken audio to convert.",
+      },
+      "audio.makeSpeech.blockedElevenLabsKey": {
+        description: "Under the voice chips in Make speech step 2: why an ElevenLabs voice can't be picked. The user hasn't connected their own ElevenLabs API key on this device. 'Add a voice' is the name of the sidebar view where the key is connected. ElevenLabs is a brand name: do not translate it.",
+        placeholders: { name: "The voice's name, e.g. 'Layla'." },
+      },
+      "audio.makeSpeech.blockedGeminiKey": {
+        description: "Under the voice chips in Make speech step 2: why a Gemini voice can't be picked. The project has no Gemini API key on this device; the key is added in the project settings. Gemini is a brand name: do not translate it.",
+        placeholders: { name: "The voice's name, e.g. 'Kore'." },
+      },
+      "audio.makeSpeech.blockedTraining": {
+        description: "Under the voice chips in Make speech step 2: why a voice trained from the organization's recordings can't be picked yet. Training takes a few minutes.",
+        placeholders: { name: "The voice's name, e.g. 'Hearth'." },
+      },
+      "audio.makeSpeech.blockedTrainingFailed": {
+        description: "Under the voice chips in Make speech step 2: why a voice trained from the organization's recordings can't be picked. Its training failed.",
+        placeholders: { name: "The voice's name, e.g. 'Hearth'." },
+      },
+      "audio.makeSpeech.blockedLanguage": {
+        description: "Under the voice chips in Make speech step 2: why a voice can't be picked. It was made for one language and the lines being spoken are in another.",
+        placeholders: { name: "The voice's name, e.g. 'Nova'.", language: "The voice's language name, e.g. 'English (United States)'." },
+      },
+      "audio.makeSpeech.noUsableVoice": {
+        description: "Shown in Make speech step 2 when no voice in the project can speak the selected lines (every voice is blocked; the reasons are listed below it).",
       },
       "audio.makeSpeech.cloneNotCloneable": {
         description: "Reason shown under a line in the Make speech progress list when the voice chosen for step 3 (Clone) cannot be used for speech-to-speech. ElevenLabs is a brand name: do not translate it.",

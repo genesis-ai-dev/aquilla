@@ -26,9 +26,13 @@ import {
   redactUnseenPlaces,
   type AccessTreeNode,
   type DirectGrantee,
+  type PlaceExtras,
   type PlaceGrant,
 } from "../services/org-access-places"
-import type { Env } from "../types"
+import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
+import { getOrgMemberRole } from "../services/org-permissions"
+import { resolveProjectRole } from "../services/project-permissions"
+import { INVITE_MIN_ROLE, ROLE, type Env } from "../types"
 
 export type { AccessTreeNode, DirectGrantee }
 export interface OrgAccessPerson { userId: string; displayName: string; isGuest: boolean; grants: AccessChainEntry[] }
@@ -67,10 +71,38 @@ async function loadOrgGrants(env: Env, orgId: number): Promise<(PlaceGrant & Nam
   }))
 }
 
+/**
+ * Pending invites appear only where the viewer could list them anyway, through
+ * the same gates as GET /orgs/:id/invites (owner) and GET /projects/:id/invites
+ * (Project lead). Platform-admin power counts only while elevated, as there.
+ * Seeing a roster is not enough: the roster floor can sit far below these.
+ */
+async function keepListableInvites(
+  env: Env,
+  vs: ViewerScope,
+  orgId: number,
+  isElevated: () => Promise<boolean>,
+  extras: PlaceExtras,
+): Promise<void> {
+  if (extras.orgInvites.length > 0) {
+    const membership = (await getOrgMemberRole(env, orgId, vs.viewer.id)) ?? 0
+    const ownsOrg = membership >= ROLE.OWNER
+      || ((await isPlatformAdminEmail(env, vs.viewer.email)) && (await isElevated()))
+    if (!ownsOrg) extras.orgInvites = []
+  }
+  for (const projectId of [...extras.projectInvites.keys()]) {
+    const role = await resolveProjectRole(env, vs.viewer, projectId)
+    const leads = role != null && role.level >= INVITE_MIN_ROLE
+      && (role.source !== "platform" || (await isElevated()))
+    if (!leads) extras.projectInvites.delete(projectId)
+  }
+}
+
 export async function buildOrgAccess(
   env: Env,
   vs: ViewerScope,
   orgId: number,
+  isElevated: () => Promise<boolean>,
 ): Promise<{ ok: true; payload: OrgAccessPayload } | { ok: false; status: 403; error: string }> {
   const org = await env.AQUILLA_PG.prepare("SELECT id, name FROM organizations WHERE id = ?")
     .bind(orgId).first<{ id: number; name: string }>()
@@ -95,6 +127,7 @@ export async function buildOrgAccess(
   if (!seesOrg && visibleProjects.size === 0) return { ok: false, status: 403, error: "no access to this roster" }
 
   const extras = await loadPlaceExtras(env, orgId, String(vs.viewer.id))
+  await keepListableInvites(env, vs, orgId, isElevated, extras)
   const visible: typeof grants = []
   for (const g of grants) if (await visibleTo(vs, g)) visible.push(g)
   // A team the viewer belongs to is a place they can see even without the org
@@ -148,7 +181,7 @@ const orgAccess = new Hono<AuthHonoEnv>()
 orgAccess.get("/:orgId/access", authMiddleware, async (c) => {
   const orgId = Number(c.req.param("orgId"))
   if (!Number.isSafeInteger(orgId) || orgId <= 0) return c.json({ error: "bad org id" }, 400)
-  const result = await buildOrgAccess(c.env, new ViewerScope(c.env, c.get("user")), orgId)
+  const result = await buildOrgAccess(c.env, new ViewerScope(c.env, c.get("user")), orgId, () => hasActiveElevation(c))
   if (!result.ok) return c.json({ error: result.error }, result.status)
   return c.json(result.payload)
 })

@@ -139,8 +139,9 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
   await recordAuthEvent(c.env.AQUILLA_PG, "credential_mint", mintIdent, true)
 
   // Resolve the caller's live authority on the requested scope. A credential
-  // can only be scoped where the user holds >= CONTRIBUTOR; 'act' needs
-  // >= MAINTAINER. scopeLevel === null means "unscoped" (user-global).
+  // can be scoped to a project where the user holds >= CONTRIBUTOR, or to an
+  // org they are a member of (AQU-2352); 'act' needs >= MAINTAINER.
+  // scopeLevel === null means "unscoped" (user-global).
   //
   // OPS-44: the scope level is taken from the caller's authority with
   // UN-ELEVATED platform-admin power stripped out. A PAT outlives the session

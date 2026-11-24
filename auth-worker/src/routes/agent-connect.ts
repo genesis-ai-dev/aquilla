@@ -49,6 +49,17 @@ export async function scopeLevel(
   const numericOrgId = Number(orgId)
   return Number.isInteger(numericOrgId) ? await getEffectiveOrgRole(env, numericOrgId, user) : null
 }
+/**
+ * The level an agent credential's scope needs (AQU-2352). Act mode needs
+ * Maintainer. Ask mode needs Contributor on a project, and on an org any org
+ * role: below Maintainer that is Member now, and credentials.ts takes the same
+ * floor for a key. Scoping only narrows: every call still resolves the
+ * person's live role on each project.
+ */
+export function agentScopeFloor(mode: "ask" | "act", projectId: string | null | undefined): number {
+  if (mode === "act") return ROLE.MAINTAINER
+  return projectId ? ROLE.CONTRIBUTOR : ROLE.VIEWER
+}
 /** The approver's authority at consent time, with un-elevated platform-admin
  * power removed (OPS-44, same rule as credential minting). The resulting
  * credential never expires, so an admin approving on bare admin authority would
@@ -176,7 +187,7 @@ routes.post("/decision", authMiddleware, async (c) => {
     if (grant.requested_project_id && grant.requested_project_id !== input.project_id) {
       return c.json({ error: "scope_denied" }, 403)
     }
-    const floor = mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR
+    const floor = agentScopeFloor(mode, input.project_id)
     const level = await approverScopeLevel(c, c.get("user"), input.project_id, input.org_id)
     if (level == null || level < floor) return c.json({ error: "scope_denied" }, 403)
   }
@@ -235,7 +246,7 @@ routes.post("/token", async (c) => {
   // been lowered in between.
   const level = user
     ? await scopeLevel(c.env, user, grant.project_id, grant.org_id) : null
-  if (level == null || level < (grant.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) {
+  if (level == null || level < agentScopeFloor(grant.mode, grant.project_id)) {
     return c.json({ error: "access_denied" }, 400)
   }
   const minted = await mintApiToken()

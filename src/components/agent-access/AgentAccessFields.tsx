@@ -53,9 +53,13 @@ export function useAgentAccess(
     () => projects.filter(p => p.role.level >= floor && (!pinnedProjectId || p.id === pinnedProjectId)),
     [projects, floor, pinnedProjectId],
   )
+  // AQU-2352: an ask-mode agent may be scoped to any org the person is a
+  // member of (below Maintainer that is Member), as for a key; act needs
+  // Maintainer. Same rule as the server's agentScopeFloor.
+  const orgFloor = mode === "act" ? ROLE.MAINTAINER : ROLE.VIEWER
   const orgOptions = useMemo(
-    () => (pinnedProjectId ? [] : orgs.filter(o => o.role.level >= floor)),
-    [orgs, floor, pinnedProjectId],
+    () => (pinnedProjectId ? [] : orgs.filter(o => o.role.level >= orgFloor)),
+    [orgs, orgFloor, pinnedProjectId],
   )
   // Clear a selection the mode change just made ineligible, so the button can
   // never submit a scope the server will refuse.

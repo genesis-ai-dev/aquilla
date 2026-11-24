@@ -158,14 +158,20 @@ describe("browser authorization → existing credential consumer", () => {
     expect(await validateApiCredential(env.AQUILLA_PG, token.access_token)).toMatchObject({ mode: "act", orgId: "1" })
   })
   it("refuses org scope below the mode's floor", async () => {
+    // AQU-2352: an org Member (100, what an org Contributor became) may scope
+    // an ask-mode agent to the org, as for a key (credentials.ts); act needs
+    // Maintainer. Scoping only narrows: each project is still resolved.
     await seedUser(1, "alice"); await seedUser(2, "bob")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
-    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)").run()
     const bob = await jwtFor("bob")
     const act = await start("act")
     expect((await post("decision", { user_code: act.user_code, approve: true, code_confirmed: true, org_id: "1" }, bob)).status).toBe(403)
     const ask = await start("ask")
     expect((await post("decision", { user_code: ask.user_code, approve: true, code_confirmed: true, org_id: "1" }, bob)).status).toBe(200)
+    const token = await (await poll(ask.device_code)).json() as { access_token?: string; org_id?: string }
+    expect(token).toMatchObject({ org_id: "1" })
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token!)).toMatchObject({ mode: "ask", orgId: "1" })
   })
   it("keeps a requested project pinned and takes exactly one scope", async () => {
     // The pin is the agent's guarantee that approval means what it asked for;

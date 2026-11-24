@@ -286,6 +286,18 @@ describe("ApiTokensSection", () => {
     await waitFor(() => expect(screen.queryByText("aqk_freshplaintext")).not.toBeInTheDocument())
   })
 
+  it("offers an org where the caller is a Member as a token scope (AQU-2352)", async () => {
+    // An org role below Maintainer is Member (100) now, and the server lets any
+    // member scope a key to the org (credentials.ts), so the picker offers it.
+    mockListMyOrgs.mockResolvedValue([{ id: 2, name: "Member Org", role: { level: 100, name: "viewer" } }])
+    render(<ApiTokensSection />)
+    await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: "New token" }))
+    await screen.findByText("New API token")
+    const trigger = await pickSelectOption(/Organization/i, /Member Org/i)
+    expect(trigger).toHaveTextContent("Member Org")
+  })
+
   it("mint: a fast double-submit only mints once (H2 double-submit guard)", async () => {
     // Hold the mint in flight so both clicks land before it resolves — the
     // re-entrancy guard (not just the busy-disabled button) must drop the second.

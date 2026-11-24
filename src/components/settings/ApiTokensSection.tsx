@@ -581,10 +581,11 @@ function MintTokenDialog({
   // before that lands — minting two credentials. This ref flips synchronously.
   const submittingRef = useRef(false)
 
-  // Scope choices are capped to what the caller can actually use: >= CONTRIBUTOR
-  // to scope a credential at all (matches the server's scope_denied rule).
+  // Scope choices are capped to what the caller can actually use (the
+  // server's scope_denied rule): any org they are a member of (AQU-2352: below
+  // Maintainer that is Member), and a project at >= CONTRIBUTOR.
   const orgOptions = useMemo(
-    () => orgs.filter((o) => o.role.level >= ROLE.CONTRIBUTOR),
+    () => orgs.filter((o) => o.role.level >= ROLE.VIEWER),
     [orgs],
   )
   const projectOptions = useMemo(

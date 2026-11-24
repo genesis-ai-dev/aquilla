@@ -80,9 +80,10 @@ describe("agent consent", () => {
     fireEvent.click(screen.getByRole("checkbox"))
     expect(authorize).toBeDisabled()
     fireEvent.click(screen.getByRole("radio", { name: /whole organization/i }))
-    // The viewer-level org is below the contributor floor and is not offered.
+    // AQU-2352: an org Member (100) may scope an ask-mode agent to the org, as
+    // for a key; act needs Maintainer (the next test).
     fireEvent.click(screen.getByRole("combobox", { name: "Organization" }))
-    expect(screen.queryByRole("option", { name: "Guest org" })).not.toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: "Guest org" })).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: "Escape" })
     await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
     await pickSelectOption("Organization", "Come and See")
@@ -105,13 +106,14 @@ describe("agent consent", () => {
     api.mockResolvedValue({ ...request, requestedProjectId: null })
     const authorize = await review()
     fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("radio", { name: /Act/ }))
     fireEvent.click(screen.getByRole("radio", { name: /whole organization/i }))
-    // "Guest org" is below the floor, so "Come and See" is the only choice.
+    // Act needs Maintainer: "Guest org" (Member) is below it, so "Come and See" is the only choice.
     expect(screen.getByRole("combobox", { name: "Organization" })).toHaveTextContent("Come and See")
     expect(authorize).toBeEnabled()
     api.mockResolvedValueOnce({ status: "approved" })
     fireEvent.click(authorize)
-    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", expect.objectContaining({ org_id: "1" })))
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", expect.objectContaining({ org_id: "1", mode: "act" })))
   })
   it("drops a selection that switching to act mode makes ineligible", async () => {
     // A contributor-level project is fine for ask and not for act; the button

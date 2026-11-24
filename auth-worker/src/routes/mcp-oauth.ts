@@ -45,7 +45,7 @@ import {
   sha256Hex,
 } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
-import { scopeLevel } from "./agent-connect"
+import { agentScopeFloor, scopeLevel } from "./agent-connect"
 import { pinnedClientFetcher, resolveClient, type Fetcher, type ResolvedClient } from "../lib/mcp-oauth/client-metadata"
 import { secretMatches, staticClientFor } from "../lib/mcp-oauth/static-clients"
 
@@ -385,7 +385,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   } else {
     // Codes issued before 0119 keep their original scope until they expire.
     const level = await scopeLevel(c.env, user, row.project_id, row.org_id)
-    if (level == null || level < (row.mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR)) return invalidGrant()
+    if (level == null || level < agentScopeFloor(row.mode === "act" ? "act" : "ask", row.project_id)) return invalidGrant()
   }
 
   const minted = await mintApiToken()

@@ -376,6 +376,8 @@ export const id: Catalog = {
   "error.monday.sync": "Tidak dapat mengirim proyek ini ke Monday.",
   "error.airtable.connect": "Tidak dapat menghubungkan Airtable. Coba lagi.",
   "error.airtable.disconnect": "Tidak dapat memutuskan koneksi Airtable.",
+  "error.airtable.loadBases": "Tidak dapat memuat basis Airtable Anda.",
+  "error.airtable.loadTables": "Tidak dapat memuat tabel dan bidang dari basis tersebut.",
   "error.termbase.publish": "Tidak dapat membagikan basis istilah ini ke organisasi.",
   "error.termbase.unpublish": "Tidak dapat menghentikan pembagian basis istilah ini.",
   "error.termbase.listPublished": "Tidak dapat memuat basis istilah yang dibagikan di organisasi ini.",

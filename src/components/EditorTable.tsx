@@ -8112,7 +8112,13 @@ function EditorRow({
       const pm = rowRef.current?.querySelector<HTMLElement>(".ProseMirror")
       if (!pm) return false
       if (document.activeElement !== pm) {
-        pm.focus()
+        // The activation window made the row an editing host with the caret
+        // parked inside it. Left open, the browser hands focus straight back
+        // to the row: an IDML editor, which keeps the caret where it is below,
+        // never focused and its typing went to the row. The buffered text is
+        // already in pendingActivationInputRef; the editor drains it on focus.
+        closeActivationCapture()
+        pm.focus({ preventScroll: true })
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
         if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return true
         const sel = window.getSelection()
@@ -8136,7 +8142,7 @@ function EditorRow({
       // unmounts, another row takes over) — that settles the edit too.
       settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
+  }, [isEditorActive, cell.id, closeActivationCapture, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -9840,6 +9846,7 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
+                    sanitizeEntryWhitespace={idmlPreview}
                     initialIdmlSelection={pendingIdmlPointerSelection}
                     onInitialIdmlSelectionApplied={() => {
                       setPendingIdmlPointerSelection(null)

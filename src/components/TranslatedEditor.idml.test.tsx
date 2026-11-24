@@ -815,6 +815,64 @@ describe("TranslatedEditor — protected IDML mode", () => {
   })
 
   /**
+   * An untranslated IDML cell is typed as a preview in the plain editor, and
+   * "Pass to style segments" moves that sentence into the runs as it stands.
+   * The run editor's entry rules must hold there too, or a doubled space
+   * typed in the preview reaches InDesign. A plain (non-IDML) cell keeps the
+   * spaces its translator typed.
+   */
+  it("drops doubled and edge spaces typed or pasted into an IDML preview, and only there (AQU-758)", async () => {
+    const typeInto = (editor: Editor, text: string) => {
+      for (const char of text) {
+        const { view } = editor
+        const { from, to } = view.state.selection
+        const handled = view.someProp(
+          "handleTextInput",
+          (handler) => handler(view, from, to, char, () => view.state.tr.insertText(char, from, to)),
+        )
+        if (!handled) view.dispatch(view.state.tr.insertText(char, from, to))
+      }
+    }
+    const pasteInto = (surface: HTMLElement, text: string) => {
+      fireEvent.paste(surface, {
+        clipboardData: {
+          types: ["text/plain"],
+          files: [],
+          items: [],
+          getData: (type: string) => (type === "text/plain" ? text : ""),
+        },
+      })
+    }
+
+    for (const preview of [true, false]) {
+      const onCommit = vi.fn()
+      const { container, unmount } = render(
+        <TranslatedEditor
+          cellId={`preview-whitespace-${preview}`}
+          initialPlain=""
+          sanitizeEntryWhitespace={preview}
+          onCommit={onCommit}
+        />,
+      )
+      await act(async () => { await Promise.resolve() })
+      const surface = container.querySelector(".ProseMirror") as EditorSurface
+      const editor = surface.editor!
+
+      act(() => {
+        fireEvent.focus(surface)
+        typeInto(editor, "a  b")
+        pasteInto(surface, "  c   d  ")
+        fireEvent.blur(surface)
+      })
+
+      const committed = onCommit.mock.calls.at(-1)?.[0] as { value: string } | undefined
+      if (preview) expect(committed?.value).toBe("a b c d")
+      else expect(committed?.value).not.toBe("a b c d")
+      unmount()
+    }
+  })
+
+  /**
    * AQU-1962: the Russian BSB regression. A space typed at a protected-run
    * boundary used to save and then merge back — the editor's parse normalized
    * whitespace at the edge of a slot's inline content away on the next

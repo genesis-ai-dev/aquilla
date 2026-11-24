@@ -384,6 +384,8 @@ export const ar: Catalog = {
   "error.monday.sync": "تعذّر رفع هذا المشروع إلى Monday.",
   "error.airtable.connect": "تعذّر ربط Airtable. حاول مرة أخرى.",
   "error.airtable.disconnect": "تعذّر إلغاء ربط Airtable.",
+  "error.airtable.loadBases": "تعذّر تحميل قواعد بياناتك في Airtable.",
+  "error.airtable.loadTables": "تعذّر تحميل جداول قاعدة البيانات تلك وحقولها.",
   "error.termbase.publish": "تعذّر مشاركة قاعدة المصطلحات هذه مع المؤسسة.",
   "error.termbase.unpublish": "تعذّر إيقاف مشاركة قاعدة المصطلحات هذه.",
   "error.termbase.listPublished": "تعذّر تحميل قواعد المصطلحات المشتركة في هذه المؤسسة.",

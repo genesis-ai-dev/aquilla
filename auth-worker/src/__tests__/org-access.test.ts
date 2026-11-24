@@ -136,6 +136,16 @@ describe("AQU-1352 §3.6 org People & access", () => {
     })
   })
 
+  it("an org role below Maintainer reaches no place, even over a lower team (AQU-2352: no AQU-1274 lift)", async () => {
+    // team_only is on the team p1 has at Contributor; give them an org row at
+    // Project Lead, as written before 0210. The lift used to list them on p1 via the org.
+    await env.AQUILLA_PG.prepare("UPDATE org_members SET role_level = 500 WHERE org_id = 1 AND user_id = 5").run()
+    const body = (await (await orgAccess("owner")).json()) as Payload
+    const viaOrg = findPlace(body, "project", "p1")!.inherited.filter((row) => row.kind === "person" && row.from.type === "org")
+    expect(viaOrg.some((row) => row.displayName === "team_only")).toBe(false)
+    expect(viaOrg.every((row) => row.roleLevel >= 600)).toBe(true)
+  })
+
   it("a language lane inherits the project grant and keeps a grant that names only the other lane", async () => {
     await env.AQUILLA_PG.prepare(
       `INSERT INTO lanes (id, project_id, role, language, name, legacy_tag, position) VALUES

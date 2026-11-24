@@ -351,22 +351,14 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
     memberCount: extras.memberCount.get(team.id) ?? 0,
   })
 
-  const hasDirect = (userId: string, projectId: string) =>
-    input.grants.some((g) => g.userId === userId && g.scopeType === "project" && g.scopeId === projectId && g.source === "direct")
-  const hasGroup = (userId: string, projectId: string) =>
-    input.grants.some((g) => g.userId === userId && g.scopeType === "project" && g.scopeId === projectId && g.source === "team")
-
-  const orgPeopleReaching = (projectId: string | null): InheritedSource[] => {
+  // The same people at every place: the org path depends on the org role alone.
+  const orgPeopleReaching = (): InheritedSource[] => {
     if (!input.seesOrg) return []
     const rows: InheritedSource[] = []
     for (const g of orgGrants) {
-      const level = projectId == null
-        ? (g.roleLevel >= ORG_WIDE_ACCESS_FLOOR ? g.roleLevel : null)
-        : orgPathContribution({
-            orgLevel: g.roleLevel,
-            hasDirectGrant: hasDirect(g.userId, projectId),
-            hasGroupGrant: hasGroup(g.userId, projectId),
-          })
+      // AQU-2352: Maintainer and Owner reach every place; an org role below
+      // that (Member) reaches none and raises no other path (no AQU-1274 lift).
+      const level = orgPathContribution(g.roleLevel)
       if (level == null) continue
       rows.push(personSource(g, level, input.org))
     }
@@ -451,7 +443,7 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
         isGuest: person.isGuest,
       }))
       const viaTeam = teamRows(teamsOn(project.id).filter((a) => attachmentApplies(a, lane.id)))
-      const viaOrg = orgPeopleReaching(project.id).filter((row) => {
+      const viaOrg = orgPeopleReaching().filter((row) => {
         if (!wallOn || row.roleLevel >= ORG_WIDE_ACCESS_FLOOR) return true
         return extras.laneGrants.some(
           (g) => g.projectId === project.id && g.userId === row.userId && g.laneId === lane.id && g.roleLevel >= 100,
@@ -471,7 +463,7 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
     return {
       scope: { type: "project", id: project.id, name: project.name },
       directGrantees: withInvites(directOf(projectDirect(project.id)), wholeProjectInvites),
-      inherited: [...orgPeopleReaching(project.id), ...teamRows(teamsOn(project.id))],
+      inherited: [...orgPeopleReaching(), ...teamRows(teamsOn(project.id))],
       children: laneNodes(project),
     }
   }
@@ -485,7 +477,7 @@ export function assembleAccessTree(input: PlaceAssembly): { tree: AccessTreeNode
   const teamNode = (team: TeamRow): AccessTreeNode => ({
     scope: { type: "team", id: team.id, name: team.name },
     directGrantees: directOf(input.grants.filter((g) => g.scopeType === "team" && g.scopeId === team.id)),
-    inherited: orgPeopleReaching(null),
+    inherited: orgPeopleReaching(),
     children: projectsForTeam(team.id),
   })
 

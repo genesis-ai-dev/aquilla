@@ -3,8 +3,6 @@ import {
   IDML_STYLE_BOLD_CLASS,
   IDML_STYLE_ITALIC_CLASS,
   IDML_STYLE_SMALL_CAPS_CLASS,
-  IDML_EMPHASIS_GROUP_ATTR,
-  IDML_EMPHASIS_RUN_ATTR,
   IDML_PLAIN_GROUP_ATTR,
   IDML_STYLE_SEGMENT_EMPTY_ATTR,
   decorateIdmlStyleElement,
@@ -189,60 +187,6 @@ describe("prepareIdmlDisplayHtml", () => {
     expect(group(4)).toBe("join")
     expect(group(5)).toBeNull()
     expect(group(6)).toBe("label")
-  })
-
-  it("paints consecutive slots with the same bold or italic face as one segment", () => {
-    const decorated = prepareIdmlDisplayHtml(
-      `<p data-idml-version="2">`
-      + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Italic" data-idml-protected="slot">D</span>`
-      + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/Italic" data-idml-protected="slot">a</span>`
-      + `<span data-idml-slot="2" data-idml-character-style="CharacterStyle/char%3aItalic" data-idml-protected="slot">ily</span>`
-      + `<span data-idml-slot="3" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">R.</span>`
-      + `<span data-idml-slot="4" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot"> Albert</span>`
-      + `<span data-idml-token="0" data-idml-token-kind="tab" data-idml-protected="token" contenteditable="false"></span>`
-      + `<span data-idml-slot="5" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">One</span>`
-      + `<span data-idml-slot="6" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"> plain</span>`
-      + `<span data-idml-slot="7" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">Two</span>`
-      + `</p>`,
-    )
-    const root = document.createElement("div")
-    root.innerHTML = decorated
-    const face = (slot: number) => root.querySelector(`[data-idml-slot="${slot}"]`)
-      ?.getAttribute(IDML_EMPHASIS_GROUP_ATTR) ?? null
-    expect(face(0)).toBe("start")
-    expect(face(1)).toBe("mid")
-    expect(face(2)).toBe("end")
-    expect(face(3)).toBe("start")
-    expect(face(4)).toBe("end")
-    expect(face(5)).toBeNull()
-    expect(face(6)).toBeNull()
-    expect(face(7)).toBeNull()
-    const italicRun = root.querySelector("[data-idml-slot='0']")?.parentElement
-    expect(italicRun?.getAttribute(IDML_EMPHASIS_RUN_ATTR)).toBe("italic")
-    expect(italicRun?.contains(root.querySelector("[data-idml-slot='2']"))).toBe(true)
-    expect(italicRun?.contains(root.querySelector("[data-idml-slot='3']"))).toBe(false)
-    expect(root.querySelector("[data-idml-slot='3']")?.parentElement?.getAttribute(IDML_EMPHASIS_RUN_ATTR)).toBe("bold")
-    expect(root.querySelector("[data-idml-slot='5']")?.parentElement?.hasAttribute(IDML_EMPHASIS_RUN_ATTR)).toBe(false)
-  })
-
-  it("keeps a title that wraps, including the space between its words, in one run", () => {
-    const letters = ["Si", "m", "p", "l", "y", " ", "T", "r", "i", "n", "i", "t", "y"]
-    const decorated = prepareIdmlDisplayHtml(
-      `<p data-idml-version="2">`
-      + letters.map((letter, index) =>
-        `<span data-idml-slot="${index}" data-idml-character-style="CharacterStyle/Italic" data-idml-protected="slot">${letter}</span>`,
-      ).join("")
-      + `<span data-idml-slot="${letters.length}" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"> and </span>`
-      + `<span data-idml-slot="${letters.length + 1}" data-idml-character-style="CharacterStyle/Italic" data-idml-protected="slot">None Greater</span>`
-      + `</p>`,
-    )
-    const root = document.createElement("div")
-    root.innerHTML = decorated
-    const runs = [...root.querySelectorAll(`[${IDML_EMPHASIS_RUN_ATTR}]`)]
-    expect(runs).toHaveLength(1)
-    expect(runs[0]?.getAttribute(IDML_EMPHASIS_RUN_ATTR)).toBe("italic")
-    expect(runs[0]?.textContent).toBe("Simply Trinity")
-    expect(root.querySelector(`[data-idml-slot="${letters.length + 1}"]`)?.parentElement?.hasAttribute(IDML_EMPHASIS_RUN_ATTR)).toBe(false)
   })
 
   it("draws a small-caps divine-name run as its own segment, including an all-caps SENHOR", () => {

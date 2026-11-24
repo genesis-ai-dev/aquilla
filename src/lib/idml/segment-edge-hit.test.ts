@@ -66,27 +66,6 @@ describe("style segment edge hit", () => {
     container.remove()
   })
 
-  it("grabs only the outside of a run that paints as one box", () => {
-    const container = document.createElement("div")
-    const faces = ["start", "mid", "end"] as const
-    faces.forEach((face, index) => {
-      const slot = document.createElement("span")
-      slot.setAttribute("data-idml-protected", "slot")
-      slot.setAttribute("data-idml-slot", String(index))
-      slot.setAttribute("data-style-emphasis-group", face)
-      slot.className = "idml-style-italic"
-      slot.getClientRects = () => rectList([rect(100 + index * 40, 10, 40, 16)])
-      container.append(slot)
-    })
-    document.body.append(container)
-
-    expect(segmentEdgeHit(container, 102, 18)).toEqual({ slotIndex: 0, edge: "start", physical: "left" })
-    expect(segmentEdgeHit(container, 218, 18)).toEqual({ slotIndex: 2, edge: "end", physical: "right" })
-    expect(segmentEdgeHit(container, 140, 18)).toBeNull()
-
-    container.remove()
-  })
-
   it("paints words into and out of the box while the drag is still down", () => {
     const host = document.createElement("div")
     host.innerHTML =

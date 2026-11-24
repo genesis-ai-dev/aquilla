@@ -184,7 +184,6 @@ describe("TranslatedEditor — protected IDML mode", () => {
     const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string }
     expect(committed.valueHtml).not.toContain("data-style-segment-empty")
     expect(committed.valueHtml).not.toContain("data-style-plain-group")
-    expect(committed.valueHtml).not.toContain("data-style-emphasis-group")
     expect(committed.valueHtml).not.toContain("idml-style-")
   })
 

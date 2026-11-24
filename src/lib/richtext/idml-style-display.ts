@@ -12,16 +12,6 @@ export const IDML_STYLE_SEGMENT_EMPTY_ATTR = "data-style-segment-empty"
  * in the same typing space and draws neither a word nor a gap.
  */
 export const IDML_PLAIN_GROUP_ATTR = "data-style-plain-group"
-/**
- * Display only. Consecutive slots with the same bold/italic face paint as one
- * box: `start` and `end` keep the outer corners, `mid` keeps neither.
- */
-export const IDML_EMPHASIS_GROUP_ATTR = "data-style-emphasis-group"
-/**
- * Display only. One element around a whole same-face run, so a line wrap
- * stays inside that segment instead of starting a new box.
- */
-export const IDML_EMPHASIS_RUN_ATTR = "data-style-emphasis-run"
 
 /** A zero-width composition sentinel is not text the translator wrote. */
 export function idmlSlotHasVisibleContent(text: string, hasBreak: boolean): boolean {
@@ -244,7 +234,6 @@ export function prepareIdmlDisplayHtml(
     syncIdmlStyleSegmentEmpty(slot, slot.textContent ?? "", Boolean(slot.querySelector("br")))
   }
   syncIdmlPlainGroups(template.content)
-  wrapIdmlEmphasisRuns(template.content)
   const container = document.createElement("div")
   container.append(template.content.cloneNode(true))
   return container.innerHTML
@@ -262,10 +251,7 @@ export function looksLikeIdmlHtml(html: string): boolean {
 export function syncIdmlPlainGroups(root: ParentNode): void {
   const paragraphs = [...root.querySelectorAll("p")]
   const hosts = paragraphs.length > 0 ? paragraphs : [root]
-  for (const host of hosts) {
-    markPlainGroup(host)
-    markEmphasisGroup(host)
-  }
+  for (const host of hosts) markPlainGroup(host)
 }
 
 function markPlainGroup(parent: ParentNode): void {
@@ -295,93 +281,9 @@ function markPlainGroup(parent: ParentNode): void {
   close()
 }
 
-/**
- * Put each same-face run in one inline element. The segment box is drawn on
- * that element, so "Simply Trinity" stays one segment when the line wraps.
- * The editor keeps the slots unwrapped; this is display HTML only.
- */
-export function wrapIdmlEmphasisRuns(root: ParentNode): void {
-  const paragraphs = [...root.querySelectorAll("p")]
-  const hosts = paragraphs.length > 0 ? paragraphs : [root]
-  for (const host of hosts) wrapEmphasisRun(host)
-}
-
-function wrapEmphasisRun(parent: ParentNode): void {
-  const children = [...parent.children]
-  let index = 0
-  while (index < children.length) {
-    const child = children[index]
-    if (!(child instanceof HTMLElement) || child.getAttribute(IDML_EMPHASIS_GROUP_ATTR) !== "start") {
-      index += 1
-      continue
-    }
-    const run = [child]
-    index += 1
-    while (index < children.length) {
-      const next = children[index]
-      if (!(next instanceof HTMLElement)) break
-      const role = next.getAttribute(IDML_EMPHASIS_GROUP_ATTR)
-      if (role !== "mid" && role !== "end") break
-      run.push(next)
-      index += 1
-      if (role === "end") break
-    }
-    const face = emphasisFace(run[0]!)
-    if (!face || run.length < 2) continue
-    const wrapper = document.createElement("span")
-    wrapper.setAttribute(IDML_EMPHASIS_RUN_ATTR, face)
-    run[0]!.before(wrapper)
-    wrapper.append(...run)
-  }
-}
-
 function isPlainSlot(element: HTMLElement): boolean {
   return element.getAttribute("data-idml-protected") === "slot"
     && !element.classList.contains(IDML_STYLE_BOLD_CLASS)
     && !element.classList.contains(IDML_STYLE_ITALIC_CLASS)
     && !element.classList.contains(IDML_STYLE_SMALL_CAPS_CLASS)
-}
-
-/** Bold, italic, or both. Plain slots and tokens return null and break the run. */
-function emphasisFace(element: HTMLElement): "bold" | "italic" | "bold-italic" | null {
-  if (element.getAttribute("data-idml-protected") !== "slot") return null
-  const bold = element.classList.contains(IDML_STYLE_BOLD_CLASS)
-  const italic = element.classList.contains(IDML_STYLE_ITALIC_CLASS)
-  if (bold && italic) return "bold-italic"
-  if (bold) return "bold"
-  if (italic) return "italic"
-  return null
-}
-
-/**
- * InDesign tracking stores one character range per letter, so a title arrives
- * as many slots with the same face. They are one phrase on the page.
- */
-function markEmphasisGroup(parent: ParentNode): void {
-  let face: string | null = null
-  let group: HTMLElement[] = []
-  const close = () => {
-    if (group.length >= 2) {
-      group.forEach((slot, index) => {
-        const role = index === 0 ? "start" : index === group.length - 1 ? "end" : "mid"
-        slot.setAttribute(IDML_EMPHASIS_GROUP_ATTR, role)
-      })
-    } else {
-      group[0]?.removeAttribute(IDML_EMPHASIS_GROUP_ATTR)
-    }
-    group = []
-    face = null
-  }
-  for (const child of parent.children) {
-    if (!(child instanceof HTMLElement)) continue
-    const next = emphasisFace(child)
-    if (!next || (face !== null && next !== face)) {
-      child.removeAttribute(IDML_EMPHASIS_GROUP_ATTR)
-      close()
-      if (!next) continue
-    }
-    face = next
-    group.push(child)
-  }
-  close()
 }

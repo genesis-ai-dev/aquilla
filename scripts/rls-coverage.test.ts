@@ -146,6 +146,10 @@ const UNCOVERED: Record<string, string> = {
   // the cut can be undone and redone with them. Written and read only by the
   // sync-worker's projection of cell.audio.cut / cell.audio.uncut.
   cell_audio_cut_votes: "never granted to app_runtime",
+  // AQU-2352 (0210): the temporary grants 0210 wrote when it removed the org
+  // lift, kept so AQU-2354 can delete exactly those. Read and written only by
+  // migrations; no worker touches it.
+  org_role_lift_grants: "never granted to app_runtime — migrations only",
   // Decision 11 (0191): each person's undo history for a project, read and
   // written only by auth-worker's /edit-history route for the caller's own row.
   edit_histories: "never granted to app_runtime",

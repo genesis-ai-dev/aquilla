@@ -6,7 +6,9 @@
 //
 //   1. Everyone the AQU-1274 lift raises today keeps that level as their own:
 //      their lane-grant rows on that project are raised to it and become
-//      direct, and they get a direct project row at it.
+//      direct, and they get a direct project row at it. Each pair is recorded
+//      in `org_role_lift_grants` (`liftGrantRecords`), so AQU-2354 can delete
+//      exactly these grants once their team carries the role.
 //   2. Every org row at 101–599 becomes Member (100).
 //   3. Pending org invites at 101–599 become Member.
 //
@@ -63,6 +65,8 @@ export interface LiftedPair {
   projectArchived: boolean
   orgLevel: number
   teamLevel: number
+  /** Their teams attached to the project: the paths the lift raises. */
+  teamGroupIds: number[]
   /** The project role today (the lift's) and without the fix (the team's). */
   roleBefore: number
   roleWithoutFix: number
@@ -139,6 +143,13 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
         })
       }
       const teamLevel = team
+      const teamGroupIds = [
+        ...new Set(
+          (idx.attachments.get(p.id) ?? [])
+            .filter((g) => (idx.membersByGroup.get(g.group_id) ?? []).some((m) => Number(m.user_id) === c.userId))
+            .map((g) => Number(g.group_id)),
+        ),
+      ].sort((a, b) => a - b)
       lifted.push({
         orgId: c.orgId,
         userId: c.userId,
@@ -146,6 +157,7 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
         projectArchived: p.archived,
         orgLevel: c.from,
         teamLevel,
+        teamGroupIds,
         roleBefore: resolveRole(idx, c.userId, p.id)?.level ?? c.from,
         roleWithoutFix: teamLevel,
         lanes,
@@ -165,6 +177,31 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
     .map((i) => ({ token: i.token, orgId: i.org_id, from: i.role_level, email: i.email, expired: i.expired }))
 
   return { orgRowChanges, belowMember, lifted, membersPageLosses, inviteChanges }
+}
+
+/** One `org_role_lift_grants` row: what 0210 records for a lifted pair. */
+export interface LiftGrantRecord {
+  projectId: string
+  userId: number
+  orgLevel: number
+  teamGroupIds: number[]
+  /** 0210 inserted the project_members row (false: one existed, ON CONFLICT skipped it). */
+  createdProjectGrant: boolean
+  /** The target-lane rows 0210 raised to the org level or made direct. */
+  laneIds: string[]
+}
+
+/** The rows 0210 writes to `org_role_lift_grants`, one per lifted pair. */
+export function liftGrantRecords(plan: OrgRolesPlan): LiftGrantRecord[] {
+  return plan.lifted.map((p) => ({
+    projectId: p.projectId,
+    userId: p.userId,
+    orgLevel: p.orgLevel,
+    teamGroupIds: p.teamGroupIds,
+    // The lift only fires with no direct row, so 0210 inserts one for every pair.
+    createdProjectGrant: true,
+    laneIds: p.lanes.filter((l) => l.grantAfter !== l.grantBefore || l.becomesDirect).map((l) => l.laneId).sort(),
+  }))
 }
 
 /** The tables as they read once 0210 has run. */

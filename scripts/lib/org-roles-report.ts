@@ -8,6 +8,7 @@ import {
   applyPlanToRaw,
   laneRoleDrops,
   laneRoles,
+  liftGrantRecords,
   planOrgRoles,
   withoutFixRaw,
   type OrgRoleExtras,
@@ -25,6 +26,8 @@ export interface OrgRolesReport {
   json: unknown
   unintendedLosses: number
   laneRoleDropsAfter: number
+  /** Rows 0210 writes to `org_role_lift_grants`: every lifted pair, archived included. */
+  liftGrantsRecorded: number
 }
 
 /** Pure: build the report from the tables. Exported for the migration test. */
@@ -69,6 +72,7 @@ export function buildOrgRolesReport(
   const old = plan.orgRowChanges.filter((c) => !after11(c))
   const recent = plan.orgRowChanges.filter((c) => after11(c))
 
+  const records = liftGrantRecords(plan)
   const liveLifted = plan.lifted.filter((p) => !p.projectArchived)
   const liftPeople = new Set(liveLifted.map((p) => p.userId))
   const fixedLanes = liveLifted.flatMap((p) => p.lanes.filter((l) => !l.archived))
@@ -86,6 +90,11 @@ export function buildOrgRolesReport(
     `- **The AQU-1274 lift raises ${liftPeople.size} people on ${liveLifted.length} live person–project pairs** (${plan.lifted.length - liveLifted.length} more on archived projects). ` +
       `Without the fix, ${diffNoFix.totals.unintendedLosses} pairs would drop a project role and ${dropsNoFix.length} lane roles would drop. ` +
       `The migration gives each of them a direct project grant at their org level and raises ${fixedLanes.filter((l) => l.grantAfter !== l.grantBefore).length} lane grant(s) to it.`,
+  )
+  out.push(
+    `- **The migration records ${records.length} lifted pair(s) in \`org_role_lift_grants\`** (archived included): the project, the person, the org level, their teams on the project, ` +
+      `whether it created the project grant, and the lane rows it raised (${records.reduce((n, r) => n + r.laneIds.length, 0)}). ` +
+      "These grants are temporary: AQU-2354 moves this access onto their teams and deletes exactly the recorded grants.",
   )
   out.push(
     `- **Loses the org Members page: ${plan.membersPageLosses.length}** — ${plan.membersPageLosses.map((l) => `${who(l.userId)} (${org(l.orgId)}, ${roleLabel(l.orgLevel)} vs floor ${roleLabel(l.floor)})`).join(", ") || "nobody"}. Intended (AQU-2352).`,
@@ -174,9 +183,10 @@ export function buildOrgRolesReport(
   return {
     plan,
     markdown,
-    json: { plan, totals: diff.totals, laneRoleDropsAfter: dropsAfter, laneRoleDropsWithoutFix: dropsNoFix },
+    json: { plan, totals: diff.totals, laneRoleDropsAfter: dropsAfter, laneRoleDropsWithoutFix: dropsNoFix, liftGrantRecords: records },
     unintendedLosses: diff.totals.unintendedLosses,
     laneRoleDropsAfter: dropsAfter.length,
+    liftGrantsRecorded: records.length,
   }
 }
 

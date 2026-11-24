@@ -8,12 +8,13 @@
 // is a team's row (0209), the testGroup case (org Contributor over a Viewer
 // team), an org Contributor with a direct row (no lift), an org Contributor on
 // no team (no lift), an org Maintainer, an archived project, the org Members
-// page floor at Project Lead, and pending org invites.
+// page floor at Project Lead, pending org invites, and a lifted person on two
+// teams of one project (both are recorded in org_role_lift_grants).
 import { readFileSync } from "node:fs"
 import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { loadRawAccessTables, type ReadQuery } from "./lib/access-snapshot"
-import { applyPlanToRaw, loadOrgRoleExtras, planOrgRoles } from "./lib/org-roles-plan"
+import { applyPlanToRaw, liftGrantRecords, loadOrgRoleExtras, planOrgRoles, type LiftGrantRecord } from "./lib/org-roles-plan"
 import { buildOrgRolesReport } from "./lib/org-roles-report"
 
 const migration = readFileSync(
@@ -68,10 +69,11 @@ beforeEach(async () => {
     INSERT INTO org_members (org_id, user_id, role_level) VALUES
       (1, 1, 700), (1, 2, 500), (1, 3, 500), (1, 5, 400), (1, 6, 400), (1, 7, 600), (2, 4, 400), (2, 1, 700);
     INSERT INTO project_members (project_id, user_id, role_level) VALUES ('p-algerian', 5, 400);
-    INSERT INTO groups VALUES (10, 1, 'biblica/pattani', 'u1'), (11, 1, 'biblica/algerian', 'u2'), (12, 2, 'test', NULL);
-    INSERT INTO group_members VALUES (10, 2, NULL), (11, 2, NULL), (11, 3, NULL), (11, 5, NULL), (12, 4, NULL);
+    INSERT INTO groups VALUES (10, 1, 'biblica/pattani', 'u1'), (11, 1, 'biblica/algerian', 'u2'), (12, 2, 'test', NULL),
+      (13, 1, 'biblica/algerian-review', NULL);
+    INSERT INTO group_members VALUES (10, 2, NULL), (11, 2, NULL), (11, 3, NULL), (11, 5, NULL), (12, 4, NULL), (13, 3, NULL);
     INSERT INTO group_project_grants VALUES (10, 'p-pattani', 400, true), (10, 'p-old', 400, true),
-      (11, 'p-algerian', 400, true), (12, 'p-test', 100, true);
+      (11, 'p-algerian', 400, true), (12, 'p-test', 100, true), (13, 'p-algerian', 100, true);
     INSERT INTO group_project_lanes VALUES (10, 'p-pattani', 'pat'), (10, 'p-old', 'old'), (11, 'p-algerian', 'alg'),
       (11, 'p-algerian', 'alg2'), (12, 'p-test', 'tst');
     INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, team_group_id) VALUES
@@ -92,6 +94,20 @@ afterEach(async () => {
 })
 
 const sorted = <T>(rows: T[], key: (r: T) => string) => [...rows].sort((a, b) => key(a).localeCompare(key(b)))
+
+/** `org_role_lift_grants` as LiftGrantRecords, plus each row's created_at. */
+async function liftGrantRows(): Promise<Array<LiftGrantRecord & { createdAt: string }>> {
+  const rows = (await db.query<Record<string, unknown>>("SELECT * FROM org_role_lift_grants ORDER BY project_id, user_id")).rows
+  return rows.map((r) => ({
+    projectId: String(r.project_id),
+    userId: Number(r.user_id),
+    orgLevel: Number(r.org_level),
+    teamGroupIds: (r.team_group_ids as unknown[]).map(Number),
+    createdProjectGrant: r.created_project_grant as boolean,
+    laneIds: [...(r.lane_ids as string[])].sort(),
+    createdAt: new Date(r.created_at as string).toISOString(),
+  }))
+}
 
 describe("AQU-2352 dry run and migration 0210", () => {
   it("the migration's result is exactly the dry run's plan, and a second run changes nothing", async () => {
@@ -133,11 +149,26 @@ describe("AQU-2352 dry run and migration 0210", () => {
     ])
     expect(plan.inviteChanges.map((i) => i.token)).toEqual(["t-contrib"])
 
+    // The record AQU-2354 removes these grants by: exactly the lifted pairs,
+    // each with all of their teams on that project and the lane rows 0210 changed.
+    const recorded = await liftGrantRows()
+    const rk = (r: { projectId: string; userId: number }) => `${r.projectId}:${r.userId}`
+    expect(sorted(recorded.map(({ createdAt: _, ...r }) => r), rk)).toEqual(sorted(liftGrantRecords(plan), rk))
+    expect(recorded.map((r) => [r.projectId, r.userId, r.orgLevel, r.teamGroupIds, r.createdProjectGrant, r.laneIds])).toEqual([
+      ["p-algerian", 2, 500, [11], true, []],
+      ["p-algerian", 3, 500, [11, 13], true, ["alg"]],
+      ["p-old", 2, 500, [10], true, []],
+      // `pat` was already a direct Project Lead row: 0210 left it alone.
+      ["p-pattani", 2, 500, [10], true, ["pat-old"]],
+      ["p-test", 4, 400, [12], true, []],
+    ])
+
     await db.exec(migration)
     const again = await loadRawAccessTables(query)
     expect(sorted(again.projectMembers, pm)).toEqual(sorted(expected.projectMembers, pm))
     expect(sorted(again.laneGrants, lg)).toEqual(sorted(expected.laneGrants, lg))
     expect(planOrgRoles(again, await loadOrgRoleExtras(query)).orgRowChanges).toEqual([])
+    expect(await liftGrantRows()).toEqual(recorded)
   })
 
   it("loses nobody a lane, a lane role or a project role, and lists what the lift did", async () => {
@@ -165,5 +196,7 @@ describe("AQU-2352 dry run and migration 0210", () => {
     // Biblica ETT's floor is Project Lead: its two org Project Leads lose the org Members page.
     expect(report.plan.membersPageLosses.map((l) => [l.userId, l.floor])).toEqual([[2, 500], [3, 500]])
     expect(report.markdown).toContain("Pattani Malay Bible")
+    expect(report.liftGrantsRecorded).toBe(report.plan.lifted.length)
+    expect(report.markdown).toContain("The migration records 5 lifted pair(s) in `org_role_lift_grants`")
   })
 })

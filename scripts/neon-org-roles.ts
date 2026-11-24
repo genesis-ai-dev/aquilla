@@ -10,7 +10,9 @@
 //   * who loses the org Members page (their org role no longer meets the
 //     org's roster floor);
 //   * the access diff before vs after migration 0210 (must lose nobody), and
-//     the totals, with a cross-check against the counts in AQU-2352.
+//     the totals, with a cross-check against the counts in AQU-2352;
+//   * how many lifted pairs 0210 records in `org_role_lift_grants`, the
+//     temporary grants AQU-2354 later removes.
 //
 // THE WRITE IS MIGRATION 0210 (db/postgres/migrations/0210_org_roles_member_
 // maintainer_owner.sql), applied with the other pending migrations by
@@ -53,6 +55,7 @@ async function main() {
     if (jsonOut) writeFileSync(jsonOut, JSON.stringify(report.json, null, 2))
     console.error(
       `[aqu-2352] dry run: ${report.plan.orgRowChanges.length} org row(s) to Member, ${report.plan.lifted.length} lifted pair(s), ` +
+        `${report.liftGrantsRecorded} pair(s) the migration records in org_role_lift_grants, ` +
         `${report.unintendedLosses} unintended loss(es), ${report.laneRoleDropsAfter} lane-role drop(s). Nothing written.`,
     )
   } finally {

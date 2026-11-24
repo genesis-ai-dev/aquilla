@@ -34,7 +34,8 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 /**
- * "File details" modal opened from a sidebar file row's ⋯ / right-click menu.
+ * "File details" modal opened from a sidebar file row's ⋯ / right-click menu,
+ * and from the editor File options menu under This file.
  * Metadata only — rename, move, export, and delete stay on the file menu.
  */
 export function FileDetailsModal({

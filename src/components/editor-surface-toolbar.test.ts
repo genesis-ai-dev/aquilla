@@ -10,6 +10,7 @@ describe("fileOptionsForAgentSurface", () => {
       { id: "next-unfinished", label: "Next unfinished" },
       { id: "diarize", label: "Diarize" },
       { id: "sep-file-actions", type: "separator" },
+      { id: "file-details", label: "File details" },
       { id: "file-rename", label: "Rename" },
       { id: "file-move", label: "Move to corpus" },
       { id: "file-export", label: "Export" },
@@ -18,6 +19,7 @@ describe("fileOptionsForAgentSurface", () => {
     ]
 
     expect(fileOptionsForAgentSurface(items).map((item) => item.id)).toEqual([
+      "file-details",
       "file-rename",
       "file-move",
       "file-export",

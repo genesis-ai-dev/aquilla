@@ -435,7 +435,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { Archive, CheckSquare, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, CheckSquare, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw, Info } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -18383,6 +18383,13 @@ export function ProjectWorkspace() {
 
     items.push({ id: "sep-file-actions", type: "separator" })
     items.push({ id: "file-section", type: "label", label: t("nav.fileMenu.section.file") })
+    // The same File details item the sidebar file menu opens.
+    items.push({
+      id: "file-details",
+      label: t("fileDetails.menuItem"),
+      icon: Info,
+      onClick: () => setDetailsFileId(activeFileId),
+    })
     if (suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)) {
       items.push({
         id: "redetect-suggestions",

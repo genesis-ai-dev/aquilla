@@ -12,6 +12,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Route } from "@playwright/test"
 import { test, expect } from "../../helpers/multi-user"
+import { EXTENSION_DOCUMENT } from "../../helpers/editor-mode"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
@@ -72,7 +73,7 @@ test("describe → watch it build → try it on sample verses → add it → it 
   const checklist = review.getByTestId("requirements")
   await expect(checklist).toContainText("1 of 2 covered")
   await expect(checklist.locator('[data-status="not_possible"]')).toContainText("The bridge has no keystroke timing.")
-  const preview = review.getByTestId("extension-preview-frame").contentFrame()
+  const preview = review.getByTestId("extension-preview-frame").contentFrame().frameLocator(EXTENSION_DOCUMENT)
   await expect(preview.locator("body")).toContainText("words", { timeout: 30_000 })
 
   // 3 Add to project → its page, then the editor's side panel.
@@ -83,7 +84,7 @@ test("describe → watch it build → try it on sample verses → add it → it 
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   await new Workspace(alice).waitForEditor()
   await tools.openInSidePanelFromPalette("Word Count")
-  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]')
+  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
 })
 

@@ -63,6 +63,9 @@ test("a custom editor extension replaces the editor, writes with attribution, an
   await openSeededProject(alice, seeded)
   // No trip to the management page: the extensions palette (Ctrl+Shift+E)
   // offers the installed editor for this file.
+  // The shortcut exists only once the project's extensions have loaded and the
+  // bar is drawn (ExtensionsBar); pressed before that, it is nobody's key.
+  await expect(alice.getByRole("button", { name: "Smart Extensions (⌘⇧E)", exact: true })).toBeVisible()
   await alice.keyboard.press("Control+Shift+E")
   await alice.getByRole("option", { name: `${EDITOR}: use as editor for this file` }).click()
   const frame = tools.toolFrame(EDITOR)

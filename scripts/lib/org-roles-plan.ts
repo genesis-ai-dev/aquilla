@@ -118,7 +118,6 @@ export function planOrgRoles(raw: RawAccessTables, extras: OrgRoleExtras): OrgRo
     if (p.org_id == null) continue
     for (const c of orgRowChanges) {
       if (c.orgId !== p.org_id) continue
-      if (Number(p.created_by) === c.userId) continue
       const k = `${c.userId}:${p.id}`
       if (idx.direct.has(k)) continue
       const team = idx.teamRole.get(k)

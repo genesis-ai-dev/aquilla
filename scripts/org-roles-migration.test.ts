@@ -214,4 +214,35 @@ describe("AQU-2352 dry run and migration 0210", () => {
     expect(report.liftGrantsRecorded).toBe(report.plan.lifted.length)
     expect(report.markdown).toContain("The migration records 5 lifted pair(s) in `org_role_lift_grants`")
   })
+
+  it("lifts a project's creator like anyone else: created_by grants nothing since AQU-2357", async () => {
+    // They created the project, and the Owner row 0207 gave them was later
+    // removed. Today they reach it only through a team at Contributor, which
+    // the lift raises to their org Project Lead.
+    await db.exec(`
+      INSERT INTO users VALUES (8, 'creator-lead');
+      INSERT INTO org_members (org_id, user_id, role_level) VALUES (1, 8, 500);
+      INSERT INTO projects VALUES ('p-own', 'Their own project', 1, 8, NULL);
+      INSERT INTO lanes VALUES ('own', 'p-own', 'target', 'Own', NULL, '', 1, NULL);
+      INSERT INTO groups VALUES (14, 1, 'biblica/own', NULL);
+      INSERT INTO group_members VALUES (14, 8, NULL);
+      INSERT INTO group_project_grants VALUES (14, 'p-own', 400, true);
+      INSERT INTO group_project_lanes VALUES (14, 'p-own', 'own');
+      INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, team_group_id) VALUES ('p-own', 8, 'own', 400, 14);
+    `)
+    const raw = await loadRawAccessTables(query)
+    const report = buildOrgRolesReport(raw, await loadOrgRoleExtras(query), { mode: "test", generatedAt: "t" })
+    const pair = report.plan.lifted.find((p) => p.userId === 8 && p.projectId === "p-own")
+    expect(pair).toMatchObject({ orgLevel: 500, teamLevel: 400, roleBefore: 500, roleWithoutFix: 400 })
+    expect(report.unintendedLosses).toBe(0)
+    expect(report.laneRoleDropsAfter).toBe(0)
+
+    await db.exec(migration)
+    const pm = (await db.query<{ role_level: number }>("SELECT role_level FROM project_members WHERE project_id = 'p-own' AND user_id = 8")).rows
+    expect(pm).toEqual([{ role_level: 500 }])
+    expect((await liftGrantRows()).find((r) => r.projectId === "p-own")).toMatchObject({
+      userId: 8, orgLevel: 500, teamGroupIds: [14], createdProjectGrant: true,
+      lanes: [{ lane: "own", prior_level: 400, prior_team_group_id: 14 }],
+    })
+  })
 })

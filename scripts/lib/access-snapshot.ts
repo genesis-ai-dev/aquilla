@@ -7,8 +7,9 @@
 //   * effective project role: the live resolver's max-wins
 //     (db/shared/project-roles.ts `resolveProjectRoleSharedInternal`): a direct
 //     `project_members` row, the highest attached team's `group_project_grants`
-//     role, an org role at Maintainer+ (or, below that, the AQU-1274 lift over a
-//     team path with no direct row), and the creator at Owner. Team-member roles
+//     role, and an org role at Maintainer+ (or, below that, the AQU-1274 lift over a
+//     team path with no direct row). `projects.created_by` is history, not a
+//     path (AQU-2357: the creator holds an ordinary Owner row). Team-member roles
 //     (`group_members.role_level`) are not read, exactly as the live resolver
 //     does not (AQU-2454). Platform admins are not modelled: they come from an
 //     env allowlist, not from the tables.
@@ -151,7 +152,6 @@ export function resolveRole(idx: AccessIndex, userId: number, projectId: string)
       else if (direct == null && team != null) contributions.push({ level: org, source: "org (AQU-1274 lift)", priority: 2 })
     }
   }
-  if (Number(project.created_by) === userId) contributions.push({ level: OWNER, source: "creator", priority: 1 })
   if (contributions.length === 0) return null
   contributions.sort((a, b) => b.level - a.level || b.priority - a.priority)
   return { level: contributions[0]!.level, source: contributions[0]!.source }
@@ -279,7 +279,6 @@ export function accessPairs(idx: AccessIndex): Array<{ userId: number; projectId
     if (Number(om.role_level) < MAINTAINER) continue
     for (const projectId of projectsByOrg.get(Number(om.org_id)) ?? []) add(Number(om.user_id), projectId)
   }
-  for (const p of idx.raw.projects) add(Number(p.created_by), p.id)
   return out
 }
 

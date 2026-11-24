@@ -1,10 +1,11 @@
 // AQU-1352 P1 (spec §3, §5): one read shape for every grant, one pure resolver.
 //
 // `access_grants` (migration 0119) is a UNION ALL view over org_members,
-// project_members, group_members x group_project_grants and projects.created_by.
+// project_members and group_members x group_project_grants (0207 dropped
+// projects.created_by: the creator holds an ordinary Owner row, AQU-2357).
 // resolveFromGrants reproduces db/shared/project-roles.ts
 // resolveProjectRoleShared EXACTLY (AD-12 max-wins, AQU-435 floor — no
-// AQU-1274 lift since AQU-2352 — creator, platform admin). It also returns the `chain` of
+// AQU-1274 lift since AQU-2352 — platform admin). It also returns the `chain` of
 // contributing grants for the future member inspector.
 //
 // Callers reach resolveProjectRoleViaGrants through ACCESS_GRANTS_RESOLVER

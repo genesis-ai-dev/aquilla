@@ -12,9 +12,11 @@
 -- WHAT, in this order (the lift is computed before any org row changes):
 --
 --   1. Everyone the lift raises today — org role 101–599 above their best
---      team attachment on a project of that org, no direct project row, not
---      the creator; archived projects included, so unarchiving one later
---      restores what they had — keeps that level as their own:
+--      team attachment on a project of that org, no direct project row;
+--      archived projects included, so unarchiving one later restores what
+--      they had — keeps that level as their own. A project's creator is no
+--      exception: since 0207 (AQU-2357) `projects.created_by` grants nothing,
+--      and a creator still holding 0207's Owner row has a direct row anyway:
 --      a. each of their target-lane grant rows on that project at Viewer or above
 --         is raised to the org level if lower, and becomes a direct grant
 --         (`team_group_id` NULL), so a later team change neither lowers nor
@@ -47,7 +49,7 @@
 -- code on unmigrated data (a PR preview on the shared dev database only)
 -- would drop the people step 1 lists to their team role until this runs.
 -- Idempotent: a second run finds no org row at 101–599 and writes nothing.
--- Requires 0209 (`team_group_id`).
+-- Requires 0209 (`team_group_id`) and 0207 (the creator's Owner row).
 
 -- The record of step 1 (Luke, 2026-11-23, AQU-2486 q22). The grants step 1
 -- writes are temporary: AQU-2354 moves this access onto the person's team
@@ -107,7 +109,6 @@ WITH lifted AS (
    WHERE om.role_level > 100
      AND om.role_level < 600
      AND om.role_level > t.team_level
-     AND p.created_by IS DISTINCT FROM om.user_id
      AND NOT EXISTS (
        SELECT 1 FROM project_members pm
         WHERE pm.project_id = p.id AND pm.user_id = om.user_id

@@ -465,7 +465,7 @@ import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleCo
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
 import { documentPreviewKind } from "@/lib/document-preview/build"
-import { readDocumentPreviewOpen, writeDocumentPreviewOpen } from "@/lib/document-preview/open-state"
+import { useDocumentPreviewOpen, writeDocumentPreviewOpen } from "@/lib/document-preview/open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -9758,9 +9758,7 @@ export function ProjectWorkspace() {
   )
   // The document preview: a Word or PowerPoint file drawn as the document it
   // is, in the same rail. Offered on the editor for a file it can render.
-  const [documentPreviewOpen, setDocumentPreviewOpen] = useState<boolean>(() =>
-    projectId ? readDocumentPreviewOpen(projectId) : false,
-  )
+  const documentPreviewOpen = useDocumentPreviewOpen(projectId)
   const activeDocumentPreviewKind = centerSurface === "editor" ? documentPreviewKind(activeFile?.type) : null
   const documentPreviewShown = activeDocumentPreviewKind !== null && documentPreviewOpen
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
@@ -19069,7 +19067,6 @@ export function ProjectWorkspace() {
     setParallelBiblesOpen(next.bibles)
     setVerseResourcesOpen(next.resources)
     setWhosWhoOpen(next.people)
-    setDocumentPreviewOpen(next.preview)
     if (projectId) {
       writeParallelBiblesOpen(projectId, next.bibles)
       writeVerseResourcesOpen(projectId, next.resources)

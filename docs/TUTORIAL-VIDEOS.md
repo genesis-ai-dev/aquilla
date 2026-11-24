@@ -11,7 +11,7 @@ doc mode. What tutorials add to it: one fixed format, a voice timed to the
 screen, an Aquilla frame round the app, a way to tell when a video is out of
 date, and an address the help site can read.
 
-Each of the five videos is under a minute and shows one task from start to
+Each video is under a minute and shows one task from start to
 finish.
 
 | Video | For | Id |
@@ -21,6 +21,7 @@ finish.
 | Validate a verse | reviewers | `validate-a-verse` |
 | Comment on a verse | everyone | `comment-on-a-verse` |
 | Export your work | leads | `export-your-work` |
+| Find help when you're stuck | everyone | `find-help` |
 
 ## Making them
 
@@ -78,6 +79,12 @@ Needs ffmpeg on the PATH and Playwright's Chromium. The finished files land in
    `expect`. A tutorial that cannot finish fails; it is never published half
    done.
 3. `pnpm tutorials --only <id>` and watch the result.
+
+`find-help` also films the help site. With `TUTORIALS_HELP_SITE_DIR` set to
+a built `aquilla-help` (`pnpm build` there makes `dist/`), the browser is
+served those files at help.aquilla.app, so no network is needed and the video
+shows that checkout of the help site. Without it the live site is filmed
+(`e2e/recordings/tutorials/help-site.ts`).
 
 Every video starts from the same place: the demo project
 (`auth-worker/src/routes/marketing-seed.ts`) is seeded again at each sign-in.

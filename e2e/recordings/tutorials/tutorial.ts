@@ -77,7 +77,11 @@ export class Tutorial {
     if (!text) throw new Error(`tutorial ${this.def.id}: no line "${key}" in catalog.ts`)
     const spoken = this.voice[hashText(text)]
     const ms = (spoken?.durationMs ?? guessSpokenMs(text)) + BREATH_MS
-    this.screens.push(steadyScreen(await this.page.locator("#root").ariaSnapshot()))
+    // The app's screen is its #root; a page that is not the app (the help
+    // site) is read whole.
+    const app = this.page.locator("#root")
+    const screen = (await app.count()) > 0 ? app : this.page.locator("body")
+    this.screens.push(steadyScreen(await screen.ariaSnapshot()))
     this.lines.push({ key, text, t: Date.now() - this.startedAt, ms, voiced: Boolean(spoken) })
     await this.show.caption(text, { holdMs: ms })
   }

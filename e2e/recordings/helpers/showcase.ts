@@ -92,7 +92,9 @@ export class Showcase {
 
   /** Inject the caption/lower-third overlay layer + a persistent brand bug. */
   private async ensureOverlay(): Promise<void> {
-    if (this.overlayReady) return
+    // A take that goes to another page (a tutorial that opens the help site)
+    // loses the layer with the page: put it in again there.
+    if (this.overlayReady && (await this.page.locator("#__showcase_layer").count()) > 0) return
     await this.page.addStyleTag({
       content: `
         #__showcase_layer{position:fixed;inset:0;z-index:2147483647;pointer-events:none;font-family:Inter,system-ui,sans-serif}

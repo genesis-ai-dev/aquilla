@@ -85,6 +85,20 @@ export const TUTORIALS = [
       outro: "Your translations are inside, ready to share or publish.",
     },
   },
+  {
+    id: "find-help",
+    title: "Find help when you're stuck",
+    audience: "everyone",
+    lines: {
+      intro: "Here's how to find help when you're stuck.",
+      menu: "Open the Help and community menu, and choose Help.",
+      opens: "The help site opens in a new tab.",
+      ask: "Type your question in plain words, and the help assistant answers from the guides.",
+      browse: "Or browse the guides by topic on the left.",
+      search: "To find a page fast, use Search at the top.",
+      outro: "You can come back any time from the same menu.",
+    },
+  },
 ] as const satisfies readonly TutorialDef[]
 
 export type TutorialId = (typeof TUTORIALS)[number]["id"]

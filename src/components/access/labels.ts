@@ -1,7 +1,7 @@
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { orgRoleName, roleNameKey } from "@/lib/frontier/roles"
 import { formatScopePath, viaTeamName } from "@/lib/access/scope-path"
-import type { GrantOrigin } from "@/lib/access/types"
+import type { GrantOrigin, ScopePath } from "@/lib/access/types"
 
 /** AQU-1352 §3.7 rule 1: the badge text for a grant origin. Never a number. */
 export function originLabel(t: TFunction, origin: GrantOrigin): string {
@@ -27,11 +27,6 @@ export function originLabel(t: TFunction, origin: GrantOrigin): string {
   }
 }
 
-/**
- * Role label or "No access". Levels are never rendered as numbers: an
- * off-ladder level gets a translated generic label, not resolveRoleName's
- * English "Level N" fallback.
- */
 /** An ORGANIZATION role's label: 100 is Member, which opens nothing (AQU-2352). */
 export function orgRoleLabel(t: TFunction, level: number | null): string {
   if (level == null) return t("org.access.noAccess")
@@ -39,8 +34,18 @@ export function orgRoleLabel(t: TFunction, level: number | null): string {
   return key ? t(key, { count: 1 }) : t("org.access.unknownRole")
 }
 
+/**
+ * Role label or "No access". Levels are never rendered as numbers: an
+ * off-ladder level gets a translated generic label, not resolveRoleName's
+ * English "Level N" fallback.
+ */
 export function roleLabel(t: TFunction, level: number | null): string {
   if (level == null) return t("org.access.noAccess")
   const key = roleNameKey(level)
   return key ? t(key, { count: 1 }) : t("org.access.unknownRole")
+}
+
+/** A grant's role label: an org-scope grant is an org role (100 is Member). */
+export function grantRoleLabel(t: TFunction, level: number | null, scopePath: ScopePath): string {
+  return scopePath.at(-1)?.type === "org" ? orgRoleLabel(t, level) : roleLabel(t, level)
 }

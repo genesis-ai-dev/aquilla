@@ -126,6 +126,8 @@ describe("OrgSwitcher", () => {
     expect(document.querySelector('[data-slot="combobox-clear"]')).not.toBeNull()
 
     expect(screen.getByText("Zebra Corp")).toBeInTheDocument()
+    // AQU-2352: an org role of 100 is Member, never Viewer.
+    expect(screen.getByText("Member")).toBeInTheDocument()
     expect(screen.queryByText("Come and See")).not.toBeInTheDocument()
     expect(screen.queryByText("Side Org")).not.toBeInTheDocument()
     // All-orgs scope is a navigation shortcut, not a searchable org — hide while typing.

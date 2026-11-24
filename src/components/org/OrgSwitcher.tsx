@@ -14,6 +14,7 @@ import { THIS_COMPUTER_PATH, isThisComputerRoute } from "@/components/this-compu
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
+import { orgRoleDisplayName } from "@/lib/frontier/roles"
 import { Badge } from "@/components/ui/badge"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -102,7 +103,8 @@ function memberItem(org: OrgSummary, fallbackName: string): OrgSwitcherItem {
     key: `member:${org.id}`,
     id: org.id,
     label: org.name ?? fallbackName,
-    roleName: org.role.name,
+    // AQU-2352: the server names org 100 "viewer"; at org scope it is Member.
+    roleName: orgRoleDisplayName(org.role),
     viaPlatformAdmin: org.viaPlatformAdmin,
     personal: org.personal,
   }

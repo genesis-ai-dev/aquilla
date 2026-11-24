@@ -224,7 +224,8 @@ function GrantedRow({ person, path }: { person: DirectGrantee; path: ScopeRef[] 
       {secondary && <span className="min-w-0 truncate text-sm text-muted-foreground">{secondary}</span>}
       {person.isGuest && <Badge variant="outline" data-testid="guest-badge">{t("org.access.inspector.guest")}</Badge>}
       <span className="ms-auto">
-        <RoleBadge roleLevel={person.roleLevel} origin={origin} />
+        {/* Granted at an organization, 100 is Member (AQU-2352). */}
+        <RoleBadge roleLevel={person.roleLevel} origin={origin} orgScope={path.at(-1)?.type === "org"} />
       </span>
     </li>
   )
@@ -266,7 +267,7 @@ function ReachesRow({
         <Badge variant="outline" data-testid="guest-badge">{t("org.access.inspector.guest")}</Badge>
       )}
       <span className="ms-auto inline-flex items-center gap-1">
-        <RoleBadge roleLevel={source.roleLevel} origin={{ kind: "inherited", from: [source.from] }} />
+        <RoleBadge roleLevel={source.roleLevel} origin={{ kind: "inherited", from: [source.from] }} orgScope={source.from.type === "org"} />
         {canOpen && (
           <button
             type="button"

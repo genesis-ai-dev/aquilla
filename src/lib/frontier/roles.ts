@@ -118,6 +118,15 @@ export function orgRoleName(level: number): string {
 }
 
 /**
+ * The name to show for an org role the server sent as `{ level, name }`: the
+ * server names 100 "viewer" from the project ladder, which at org scope is
+ * Member. Every other name is kept (a platform admin's org reads "admin").
+ */
+export function orgRoleDisplayName(role: { level: number; name: string }): string {
+  return role.level === ROLE.VIEWER ? ORG_MEMBER_ROLE_NAME : role.name
+}
+
+/**
  * Roles offered when adding someone to an organization or inviting them:
  * Member and Maintainer. Owner is change-only (below).
  */

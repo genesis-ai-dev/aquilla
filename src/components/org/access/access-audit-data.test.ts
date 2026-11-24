@@ -60,13 +60,14 @@ describe("access audit labels and CSV", () => {
     expect(auditSourceLabel(t, "platform")).toBe("Platform admin")
   })
 
+  // AQU-2352: the org role column says Member for 100, as the audit tree does.
   it("writes one row per lane, and still a row when a person has no project", () => {
     const csv = accessAuditCsv(t, report)
     const lines = csv.trim().split("\r\n")
     expect(lines[0]).toBe("Person,Organization role,Teams,Project,Effective role,Comes from,Language lane,Language lane role")
-    expect(lines[1]).toBe('"Anna, Jr",Viewer,Translators (Project Lead),John,Contributor,Team,Spanish,Viewer')
-    expect(lines[2]).toBe('"Anna, Jr",Viewer,Translators (Project Lead),John,Contributor,Team,French,Reviewer')
-    expect(lines[3]).toBe('"Anna, Jr",Viewer,Translators (Project Lead),Mark,Owner,Creator,,')
+    expect(lines[1]).toBe('"Anna, Jr",Member,Translators (Project Lead),John,Contributor,Team,Spanish,Viewer')
+    expect(lines[2]).toBe('"Anna, Jr",Member,Translators (Project Lead),John,Contributor,Team,French,Reviewer')
+    expect(lines[3]).toBe('"Anna, Jr",Member,Translators (Project Lead),Mark,Owner,Creator,,')
     expect(lines[4]).toBe("Gio,Not an organization member,,,,,," )
   })
 })

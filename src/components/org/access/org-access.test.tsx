@@ -211,4 +211,13 @@ describe("orgAccessCsv", () => {
     expect(lines[1]).toContain(",Ruth,2026-09-01T00:00:00.000Z")
     expect(lines[2].startsWith(`Ruth,${formatScopePath([org])},`)).toBe(true)
   })
+  it("labels 100 Member on the organization and Viewer on a project (AQU-2352)", () => {
+    const { result } = renderHook(() => useT())
+    const lines = orgAccessCsv(result.current, [{ userId: "4", displayName: "Mo", isGuest: false, grants: [
+      { scopePath: [org], roleLevel: 100, origin: { kind: "direct" } },
+      { scopePath: [org, project], roleLevel: 100, origin: { kind: "direct" } },
+    ] }]).trimEnd().split("\r\n")
+    expect(lines[1]).toContain(",Member,")
+    expect(lines[2]).toContain(",Viewer,")
+  })
 })

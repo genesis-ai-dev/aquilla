@@ -7,7 +7,7 @@ import type { GrantOrigin, ScopeRef } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
-import { originLabel, roleLabel } from "./labels"
+import { orgRoleLabel, originLabel, roleLabel } from "./labels"
 
 /**
  * The rung utilities, spelled out. Tailwind finds class names by scanning the
@@ -64,17 +64,20 @@ function sourcePlace(origin: GrantOrigin): ScopeRef | undefined {
 export function RoleBadge({
   roleLevel,
   origin,
+  orgScope = false,
   hrefFor,
   className,
 }: {
   roleLevel: number | null
   origin: GrantOrigin
+  /** The grant is held at organization scope, where 100 is Member (AQU-2352). */
+  orgScope?: boolean
   /** URL for the place an inherited grant is set at. */
   hrefFor?: (scope: ScopeRef) => string | undefined
   className?: string
 }) {
   const t = useT()
-  const role = roleLabel(t, roleLevel)
+  const role = orgScope ? orgRoleLabel(t, roleLevel) : roleLabel(t, roleLevel)
   const rung = roleRung(roleLevel)
   const inherited = origin.kind === "inherited"
   const place = sourcePlace(origin)

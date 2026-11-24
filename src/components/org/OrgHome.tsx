@@ -16,7 +16,7 @@ import { getPortfolioAggregates, deadlineStatus, type PortfolioAggregates, type 
 import { emptyPortfolioAggregate } from "@/lib/frontier/portfolio-metrics"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
-import { roleDisplayText } from "@/lib/frontier/roles"
+import { orgRoleDisplayName, roleDisplayText } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -110,7 +110,7 @@ function orgDisplayName(org: OrgSummary): string {
 }
 
 function roleLabel(org: OrgSummary): string {
-  return roleDisplayText(org.role.name)
+  return roleDisplayText(orgRoleDisplayName(org.role))
 }
 
 /** Catalog keys for ORG_SUMMARY_COLUMNS' headers, resolved with `t()` inside
@@ -146,7 +146,7 @@ function useOrgSummaryColumns(): ColumnDef<OrgPortfolioSummary>[] {
         ),
         meta: { className: "w-[8.5rem] whitespace-nowrap" },
         cell: ({ row }) => (
-          <RoleLabel name={row.original.org.role.name} />
+          <RoleLabel name={orgRoleDisplayName(row.original.org.role)} />
         ),
       },
       {

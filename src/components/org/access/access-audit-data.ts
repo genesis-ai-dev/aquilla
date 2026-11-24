@@ -3,7 +3,7 @@
  * GET /api/v2/orgs/:orgId/access-audit. Effective roles are already resolved
  * on the server; this module only labels and exports them.
  */
-import { roleLabel } from "@/components/access/labels"
+import { orgRoleLabel, roleLabel } from "@/components/access/labels"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -94,7 +94,7 @@ export function accessAuditCsv(t: TFunction, report: AccessAuditReport): string 
     t("org.accessAudit.csvLaneRole"),
   ]
   const orgRole = (person: AccessAuditPerson) =>
-    person.orgRole == null ? t("org.accessAudit.notOrgMember") : roleLabel(t, person.orgRole)
+    person.orgRole == null ? t("org.accessAudit.notOrgMember") : orgRoleLabel(t, person.orgRole)
   const teams = (person: AccessAuditPerson) => person.teams.map((team) => auditTeamLabel(t, team)).join("; ")
   const rows: string[][] = []
   for (const person of report.people) {

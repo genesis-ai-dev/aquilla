@@ -31,9 +31,13 @@ export const ORG_ROLE_REFUSAL =
   "an organization role is Member (100), Maintainer (600) or Owner (700); Viewer through Project Lead are given on lanes"
 
 /**
- * The org role an importer stores for a level from an older ladder: Owner and
+ * The org role a writer stores for a level from an older ladder: Owner and
  * Maintainer keep their meaning, and anything below Maintainer becomes Member,
- * which is what it already opened (nothing, AQU-435). Never rounds up.
+ * which is what it already opened (nothing, AQU-435). Viewer through Project
+ * Lead never round up. A level below 100 is no role at all and is stored as
+ * Member, the lowest org role, since a write only ever stores an org role.
+ * (Migration 0210 leaves an existing row below 100 alone and its dry run lists
+ * it; it rewrites only what it knows.)
  */
 export function orgRoleForStorage(level: number): OrgRoleLevel {
   if (level >= ORG_OWNER) return ORG_OWNER

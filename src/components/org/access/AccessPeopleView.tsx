@@ -34,7 +34,7 @@ export function AccessPeopleView({ people, org }: { people: OrgAccessPerson[]; o
                 className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs"
                 data-testid="access-chip"
               >
-                <RoleBadge roleLevel={g.roleLevel} origin={g.origin} hrefFor={accessNodeHref} />
+                <RoleBadge roleLevel={g.roleLevel} origin={g.origin} orgScope={g.scopePath.at(-1)?.type === "org"} hrefFor={accessNodeHref} />
                 <ScopeBreadcrumb path={g.scopePath} className="text-xs" icons />
               </li>
             ))}

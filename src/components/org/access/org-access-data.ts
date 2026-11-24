@@ -8,7 +8,7 @@ import { UserError } from "@/lib/errors/user-error"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { AccessChainEntry, ScopeRef } from "@/lib/access/types"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
-import { originLabel, roleLabel } from "@/components/access/labels"
+import { grantRoleLabel, originLabel } from "@/components/access/labels"
 
 export interface DirectGrantee {
   userId: string
@@ -65,7 +65,7 @@ export function orgAccessCsv(t: TFunction, people: OrgAccessPerson[]): string {
     p.grants.map((g) => [
       p.displayName,
       formatScopePath(g.scopePath),
-      roleLabel(t, g.roleLevel),
+      grantRoleLabel(t, g.roleLevel, g.scopePath),
       originLabel(t, g.origin),
       g.grantedBy ?? "",
       g.grantedAt ?? "",

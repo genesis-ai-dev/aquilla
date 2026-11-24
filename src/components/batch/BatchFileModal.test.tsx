@@ -165,9 +165,12 @@ describe("BatchFileModal — open check flags (AQU-2507)", () => {
     })
   })
 
-  it("shows no flag box on a file nothing has flagged", () => {
+  it("keeps the unresolved-checks choice when nothing is flagged, grayed so it changes nothing", () => {
     renderModal()
-    expect(screen.queryByRole("checkbox", { name: "Include cells with unresolved checks" })).toBeNull()
+    const box = screen.getByRole("checkbox", { name: "Include cells with unresolved checks" })
+    expect(box).toHaveAttribute("aria-disabled", "true")
+    expect(box).not.toBeChecked()
+    expect(screen.getByText("0 cells with open check flags")).toBeInTheDocument()
   })
 })
 
@@ -274,6 +277,33 @@ describe("BatchFileModal — a chapter with nothing left to validate", () => {
 })
 
 describe("BatchFileModal — chapter of the open book", () => {
+  it("keeps choices from other chapters on screen, grayed, when this chapter has none", () => {
+    renderModal({
+      bookName: "Genesis",
+      chapters: ["GEN 1", "GEN 2"],
+      initialChapter: "GEN 2",
+      validateOptions: {
+        ...baseOptions,
+        hasOpenFlags: (cellId: string) => cellId === "flagged",
+      },
+      validateCandidates: [
+        cell({ id: "ready", group: "GEN 1:1" }),
+        cell({ id: "ai", aiDrafted: true, group: "GEN 1:2" }),
+        cell({ id: "flagged", group: "GEN 2:1" }),
+      ],
+    })
+    const unvalidated = screen.getByRole("checkbox", { name: "Include unvalidated cells" })
+    const drafts = screen.getByRole("checkbox", { name: "0 unvalidated AI drafts" })
+    const unresolved = screen.getByRole("checkbox", { name: "Include cells with unresolved checks" })
+    expect(unvalidated).toBeChecked()
+    expect(unvalidated).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText("0 cells you have not signed off.")).toBeInTheDocument()
+    expect(drafts).not.toBeChecked()
+    expect(drafts).toHaveAttribute("aria-disabled", "true")
+    expect(unresolved).not.toBeChecked()
+    expect(unresolved).not.toHaveAttribute("aria-disabled", "true")
+  })
+
   it("opens on the chapter in view and can widen to the whole book", async () => {
     const user = userEvent.setup()
     const { onConfirmValidate } = renderModal({

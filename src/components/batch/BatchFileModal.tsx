@@ -261,38 +261,42 @@ export function BatchFileModal({
         {emptyValidate && <EmptyValidateStatus copy={emptyValidate} />}
         {request.kind === "validate" && !validateGroups.blocked && !emptyValidate && (
           <FieldSet>
-            {validateGroups.ready.length > 0 && (
-              <OptionRow
-                id="batch-file-ready"
-                checked={includeReady}
-                onCheckedChange={setIncludeReady}
-                label={t("editor.batchFile.includeUnvalidated")}
-                help={t("editor.batchFile.includeUnvalidatedHelp", { count: validateGroups.ready.length })}
-              />
-            )}
-            {validateGroups.untouched.length > 0 && (
-              <OptionRow
-                id="batch-file-ai"
-                checked={canIncludeUntouchedAi && includeAi}
-                disabled={!canIncludeUntouchedAi}
-                onCheckedChange={setIncludeAi}
-                label={t("editor.batchFile.aiDrafts", { count: validateGroups.untouched.length })}
-                help={canIncludeUntouchedAi
+            {/* A chapter with none of a kind keeps the choice on screen, grayed.
+                The tick stays, and the run still has no such cells to sign off. */}
+            <OptionRow
+              id="batch-file-ready"
+              checked={includeReady}
+              disabled={validateGroups.ready.length === 0}
+              onCheckedChange={setIncludeReady}
+              label={t("editor.batchFile.includeUnvalidated")}
+              help={t("editor.batchFile.includeUnvalidatedHelp", { count: validateGroups.ready.length })}
+            />
+            <OptionRow
+              id="batch-file-ai"
+              checked={canIncludeUntouchedAi && includeAi}
+              disabled={!canIncludeUntouchedAi || validateGroups.untouched.length === 0}
+              onCheckedChange={setIncludeAi}
+              label={t("editor.batchFile.aiDrafts", { count: validateGroups.untouched.length })}
+              help={validateGroups.untouched.length === 0
+                ? t("editor.batchBooks.aiDraftsHelp")
+                : canIncludeUntouchedAi
                   ? t("editor.batchFile.aiDraftsHelp")
                   : t("editor.batchFile.aiDraftsLocked")}
-              />
-            )}
-            {validateGroups.flagged.length > 0 && (
-              <OptionRow
-                id="batch-file-flagged"
-                checked={includeFlagged}
-                onCheckedChange={setIncludeFlagged}
-                label={t("editor.batchFile.includeUnresolved")}
-                help={t("editor.batchFile.includeUnresolvedHelp")}
-              >
+            />
+            <OptionRow
+              id="batch-file-flagged"
+              checked={includeFlagged}
+              disabled={validateGroups.flagged.length === 0}
+              onCheckedChange={setIncludeFlagged}
+              label={t("editor.batchFile.includeUnresolved")}
+              help={validateGroups.flagged.length > 0
+                ? t("editor.batchFile.includeUnresolvedHelp")
+                : t("editor.batchFile.flagged", { count: 0 })}
+            >
+              {validateGroups.flagged.length > 0 && (
                 <FlaggedCells cells={validateGroups.flagged} flagIssue={flagIssue} />
-              </OptionRow>
-            )}
+              )}
+            </OptionRow>
           </FieldSet>
         )}
         {request.kind === "draft" && (

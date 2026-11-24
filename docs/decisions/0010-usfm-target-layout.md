@@ -50,6 +50,14 @@ come out in the exported file.
 - A break or heading added before an untranslated verse stores a value that is
   only a lead. The export keeps the source words for that verse, but progress
   counts the cell as translated.
+- A book not imported as USFM opens in the document too, but its layout is
+  locked: the editor refuses any change to its paragraphs, headings or styles
+  (`src/lib/bible-document/editor-extensions.ts::BibleDocumentRules`), because
+  its own export (DOCX, IDML, …) would print the markers as text.
+- The Web page export reads leads as headings and breaks
+  (`src/lib/export/exporters/html.ts::buildHtmlPage`). That page is also the
+  document's reading preview, which every Bible book gets, whatever its format
+  (`src/lib/export/bible-book.ts::isBibleBookFile`).
 - The browser builds its export plan from the cells on screen
   (`src/lib/bible-document/export-plan.ts::buildClientUsfmPlan`) and the server
   from SQL. The two must agree; `src/lib/bible-document/export-plan.test.ts`
@@ -61,5 +69,6 @@ come out in the exported file.
   cell of its own, so it cannot be validated or commented on separately.
 - Footnotes and character styles inside a source verse are still replaced by a
   plain translation. The preview counts those verses.
-- USX uploads, and every format other than USFM, have no export preview.
-- Other exporters (HTML, plain text) do not read leads as headings.
+- USX uploads, and every format other than USFM, have no USFM preview; they
+  get the reading preview only.
+- Other exporters (plain text, Markdown) do not read leads as headings.

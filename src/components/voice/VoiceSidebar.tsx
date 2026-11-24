@@ -17,8 +17,12 @@ import { VoiceLibraryPanel } from "../VoiceLibraryPanel"
 import { Button } from "@/components/ui/button"
 import { AddVoicePanel, type MakeVoiceMode } from "./inspector/AddVoicePanel"
 import { ClipInspector } from "./inspector/ClipInspector"
-import { MakeSpeechPanel, type MakeSpeechLine } from "./inspector/MakeSpeechPanel"
+import { MakeSpeechPanel, type MakeSpeechLine, type MakeSpeechTextActions } from "./inspector/MakeSpeechPanel"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { useElevenLabsKey } from "@/lib/audio/elevenlabs/key"
+import { voiceBlocker, voiceUsableContext } from "@/lib/audio/voice-usable"
+import { useCustomVoiceStates } from "@/hooks/useCustomVoiceStatus"
+import { useTimelineSelection } from "@/lib/audio/timeline-selection"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { upsertVoice } from "@/lib/audio/voices"
 import type { MakeSpeechActions, MakeSpeechLineState } from "@/lib/audio/make-speech"
@@ -27,7 +31,7 @@ import { liveTargetLaneLanguages } from "@/lib/lanes/lane-language"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { LineDelivery, ProjectRecord as Project } from "@/lib/parsers/types"
+import type { LineDelivery, ProjectRecord as Project, Voice } from "@/lib/parsers/types"
 
 interface VoiceSidebarProps {
   cells: CellData[]
@@ -63,8 +67,9 @@ interface VoiceSidebarProps {
   /** AQU-2577: what Make speech runs on and with. Absent: the button is not offered. */
   makeSpeech?: {
     lines: MakeSpeechLine[]
-    selectedCellId: string | null
-    actions: MakeSpeechActions
+    /** The lines selected on the timeline, in file order. */
+    selectedCellIds: readonly string[]
+    actions: MakeSpeechActions & Partial<MakeSpeechTextActions>
     /** The lines picked on the timeline (their sparkles). */
     picked: readonly string[]
     onClearPicked: () => void
@@ -91,6 +96,19 @@ export function VoiceSidebar({
   const [createRequest, setCreateRequest] = useState<{ mode: MakeVoiceMode; seq: number } | null>(null)
   const canEdit = canManageVoices(project.syncRole?.level ?? null, leadsManageVoices ?? project.projectLeadsManageVoices === true)
   const laneVoices = tts.voices
+  // Every line selected on the timeline; the workspace only knows the primary one.
+  const timelineSelection = useTimelineSelection()
+  // Which voices can speak this lane's lines now; Make speech won't offer the rest.
+  const elevenLabsKey = useElevenLabsKey()
+  const customStates = useCustomVoiceStates(makeSpeech ? laneVoices : [], { projectId, fileId, session })
+  const blockerOf = useMemo(() => {
+    const ctx = voiceUsableContext(tts.settings, {
+      hasElevenLabsKey: Boolean(elevenLabsKey),
+      laneLanguage: targetLanguage,
+      customState: (voice) => customStates.get(voice.id),
+    })
+    return (voice: Voice) => voiceBlocker(voice, ctx)
+  }, [tts.settings, elevenLabsKey, targetLanguage, customStates])
   const makeNew = (mode: MakeVoiceMode) => {
     setView("cast")
     setCreateRequest((cur) => ({ mode, seq: (cur?.seq ?? 0) + 1 }))
@@ -155,12 +173,12 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellId={makeSpeech.selectedCellId}
+        selectedCellIds={timelineSelection.length > 0 ? timelineSelection : makeSpeech.selectedCellIds}
         picked={pickedLines}
-        targetLanguage={languageLabel}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
+        blockerOf={blockerOf}
         onBack={() => { makeSpeech.onClearPicked(); setView("cast") }}
       />,
     )
@@ -196,11 +214,12 @@ export function VoiceSidebar({
         projectId={projectId}
         voices={laneVoices}
         lines={makeSpeech.lines}
-        selectedCellId={makeSpeech.selectedCellId}
-        targetLanguage={languageLabel}
+        selectedCellIds={timelineSelection.length > 0 ? timelineSelection : makeSpeech.selectedCellIds}
+        picked={pickedLines}
         actions={makeSpeech.actions}
         onSaveDelivery={saveDelivery}
         onLineState={makeSpeech.onLineState}
+        blockerOf={blockerOf}
         onBack={() => setView("cast")}
       />,
     )

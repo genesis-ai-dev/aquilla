@@ -1,5 +1,5 @@
 import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
-import { EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
+import { EXTENSION_DOCUMENT, EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -36,7 +36,7 @@ export class Workspace {
    *  renders the same row anatomy (data-cell-id, data-cell-type, the read
    *  view, the action rail and its aria-labels), so journeys run unchanged. */
   private get root(): Page | FrameLocator {
-    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
+    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME).frameLocator(EXTENSION_DOCUMENT) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */
@@ -1003,14 +1003,45 @@ export class Workspace {
   }
 
   /**
-   * AQU-740: type a draft into an IDML target, then Backspace it away again.
-   * Deleting a slot's final character used to let the browser drop the emptied
-   * slot span, which the round-trip guard refused — the character stuck and
-   * the "protected formatting" banner appeared. The cell must end exactly as
-   * it started (untranslated, no commit), with every protected anchor intact.
+   * An untranslated IDML cell is typed as one unstyled preview: the plain
+   * editor, and a saved target whose words sit outside the source's style
+   * runs. "Pass to style segments" puts a one-run cell's preview into that
+   * run without a model call. Only a placed cell opens the protected slot
+   * editor, so every slot-editing probe starts here.
+   */
+  async passIdmlPreviewToStyleSegments(index: number, expectedText: string): Promise<void> {
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+    await expect(readView.locator("[data-idml-slot]")).toHaveCount(0)
+    const placed = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
+    await this.cellRow(index).getByTestId("pass-to-style-segments").click()
+    await placed
+    // Exact text: toHaveText collapses whitespace, and the run must hold
+    // exactly what the preview held.
+    await expect.poll(() => readView.locator('span[data-idml-slot="0"]')
+      .evaluate((element) => element.textContent)).toBe(expectedText)
+    await expect(this.cellRow(index).getByTestId("pass-to-style-segments")).toHaveCount(0)
+  }
+
+  /**
+   * AQU-740: Backspace a placed IDML target down to nothing. Deleting a slot's
+   * final character used to let the browser drop the emptied slot span, which
+   * the round-trip guard refused — the character stuck and the "protected
+   * formatting" banner appeared. `base` is the placed slot text the caret
+   * lands after; it and the typed draft are both deleted. Escape then saves
+   * the emptied cell, which reads as untranslated again, with every protected
+   * anchor intact.
    */
   async deleteIdmlDraftToEmpty(
     index: number,
+    base: string,
     draft: string,
     expectedSlotCount: number,
   ): Promise<void> {
@@ -1022,9 +1053,9 @@ export class Workspace {
     await expect(target.locator("span[data-idml-slot][data-idml-character-style]"))
       .toHaveCount(expectedSlotCount)
     await this.page.keyboard.type(draft)
-    await expect(target).toContainText(draft)
+    await expect(target).toContainText(`${base}${draft}`)
 
-    for (let press = 0; press < draft.length; press += 1) {
+    for (let press = 0; press < base.length + draft.length; press += 1) {
       await this.page.keyboard.press("Backspace")
     }
     await this.expectEmptyIdmlTarget(target)
@@ -1033,7 +1064,16 @@ export class Workspace {
     await expect(
       this.page.getByText(/This edit would remove protected InDesign formatting/i),
     ).toHaveCount(0)
+    const emptied = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
     await this.page.keyboard.press("Escape")
+    await emptied
     await expect(target).toBeHidden()
   }
 
@@ -1045,9 +1085,9 @@ export class Workspace {
    * Japanese or Devanagari input method produces — and `Input.insertText`
    * commits the candidate. The committed text must land exactly once: the
    * regression echoed every intermediate update and left the raw romaji
-   * keystrokes between the copies. Ends untranslated (draft backspaced away,
-   * Escape), like `deleteIdmlDraftToEmpty`, so later assertions on the cell
-   * still hold.
+   * keystrokes between the copies. `base` is the placed slot text the caret
+   * lands after. Ends as it started (draft backspaced away, Escape), so later
+   * assertions on the cell still hold.
    */
   /**
    * An emptied IDML target is not textually blank in the DOM: the slot holding
@@ -1062,6 +1102,7 @@ export class Workspace {
 
   async composeIdmlImeDraft(
     index: number,
+    base: string,
     compositionUpdates: string[],
     committedText: string,
   ): Promise<void> {
@@ -1092,19 +1133,20 @@ export class Workspace {
         await expect.poll(() => target.evaluate((el) => {
           const editor = (el as HTMLElement & { editor?: { state: { doc: { textContent: string } } } }).editor
           return (editor?.state.doc.textContent ?? "").replace(/\u200b/g, "")
-        })).toBe(update)
+        })).toBe(`${base}${update}`)
       }
       await session.send("Input.insertText", { text: committedText })
     } finally {
       await session.detach()
     }
     await expect.poll(() => slot.evaluate((element) => element.textContent))
-      .toBe(committedText)
+      .toBe(`${base}${committedText}`)
 
     for (let press = 0; press < committedText.length; press += 1) {
       await this.page.keyboard.press("Backspace")
     }
-    await this.expectEmptyIdmlTarget(target)
+    await expect.poll(() => slot.evaluate((element) =>
+      (element.textContent ?? "").replace(/\u200b/g, ""))).toBe(base)
     await this.page.keyboard.press("Escape")
     await expect(target).toBeHidden()
   }
@@ -1114,21 +1156,22 @@ export class Workspace {
    * that space and its adjacent word in one operation, not require one press
    * for whitespace and another for the word.
    */
-  async deleteIdmlWordPastTrailingSpace(index: number): Promise<void> {
+  async deleteIdmlWordPastTrailingSpace(index: number, base: string): Promise<void> {
     const target = await this.activateTargetCell(index)
-    await this.page.keyboard.type("alpha beta ")
+    await this.page.keyboard.type(" alpha beta ")
     const slot = target.locator('span[data-idml-slot="0"]')
     await expect.poll(() => slot.evaluate((element) => element.textContent))
-      .toBe("alpha beta ")
+      .toBe(`${base} alpha beta `)
 
     await this.page.keyboard.press("Alt+Backspace")
     await expect.poll(() => slot.evaluate((element) => element.textContent))
-      .toBe("alpha ")
+      .toBe(`${base} alpha `)
 
-    // Restore the original untranslated state without committing a draft.
-    await this.page.keyboard.press("ControlOrMeta+A")
-    await this.page.keyboard.press("Backspace")
-    await expect(target).toHaveText("")
+    // Back to the placed text, so Escape has no change to save.
+    for (let press = 0; press < " alpha ".length; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target).toHaveText(base)
     await this.page.keyboard.press("Escape")
     await expect(target).toBeHidden()
   }
@@ -1138,7 +1181,7 @@ export class Workspace {
    * identically. Commit two lines, click after the final character on line two,
    * and prove the next character appends instead of landing one position early.
    */
-  async verifyIdmlMultilineReentry(index: number): Promise<void> {
+  async verifyIdmlMultilineReentry(index: number, base: string): Promise<void> {
     let target = await this.activateTargetCell(index)
     await this.page.keyboard.type("abc")
     await this.page.keyboard.press("Enter")
@@ -1158,7 +1201,10 @@ export class Workspace {
     await expect(readView).toBeVisible({ timeout: 10_000 })
     const slot = readView.locator('span[data-idml-slot="0"]')
     await expect(slot.locator("br")).toHaveCount(1)
-    await expect(slot).toHaveText("abcxyz")
+    await expect(slot).toHaveText(`${base}abcxyz`)
+    // A raw mouse click needs the line on screen; Playwright only scrolls for
+    // its own locator clicks.
+    await slot.scrollIntoViewIfNeeded()
     const point = await slot.evaluate((element) => {
       const lastLine = element.lastChild
       if (!lastLine || lastLine.nodeType !== Node.TEXT_NODE) {
@@ -1180,16 +1226,18 @@ export class Workspace {
         editor?: { state: { selection: { $from: { parentOffset: number } } } }
       }).editor
       return editor?.state.selection.$from.parentOffset ?? -1
-    })).toBe(7)
+    })).toBe(base.length + 7)
 
     await this.page.keyboard.type("q")
-    await expect(target.locator('span[data-idml-slot="0"]')).toHaveText("abcxyzq")
+    await expect(target.locator('span[data-idml-slot="0"]')).toHaveText(`${base}abcxyzq`)
 
-    // Clear both protected slots and persist the untranslated state so this
-    // regression probe cannot affect the artifact assertions later in the test.
-    await this.page.keyboard.press("ControlOrMeta+A")
-    await this.page.keyboard.press("Backspace")
-    await this.commitTargetCellEdit(index, "")
+    // a, b, c, break, x, y, z, q — back to the placed text, saved, so this
+    // probe leaves the cell as it found it.
+    for (let press = 0; press < 8; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target.locator('span[data-idml-slot="0"]')).toHaveText(base)
+    await this.commitTargetCellEdit(index, base)
     await expect(target).toBeHidden()
   }
 
@@ -1198,10 +1246,10 @@ export class Workspace {
    * line box. Without the synthetic trailing-break compensation the empty last
    * line had no height and the browser parked the visible cursor back at the
    * cell's first line. Types a draft with a break, asserts the compensation
-   * and the extra line box, then deletes everything back so the cell ends
-   * exactly as it started (untranslated, no commit).
+   * and the extra line box, then deletes the draft back so the cell ends
+   * exactly as it started (its placed `base` text, no commit).
    */
-  async verifyIdmlTrailingBreakCaret(index: number): Promise<void> {
+  async verifyIdmlTrailingBreakCaret(index: number, base: string): Promise<void> {
     const target = await this.activateTargetCell(index)
     await this.page.keyboard.type("xy")
     await expect(target).toContainText("xy")
@@ -1221,11 +1269,11 @@ export class Workspace {
     await this.page.keyboard.type("z")
     await expect(target.locator(".idml-trailing-break")).toHaveCount(0)
 
-    // x, y, break, z — four presses back to an untranslated cell.
+    // x, y, break, z — four presses back to the placed text.
     for (let press = 0; press < 4; press += 1) {
       await this.page.keyboard.press("Backspace")
     }
-    await expect(target).toHaveText("")
+    await expect(target).toHaveText(base)
     await expect(
       this.page.getByText(/This edit would remove protected InDesign formatting/i),
     ).toHaveCount(0)

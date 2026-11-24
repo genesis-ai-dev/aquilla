@@ -101,11 +101,12 @@ describe("AQU-1352 §3.8 member access payload", () => {
   })
 
   it("gives org/team containers a descendant count from visible grants only (§3.8 rule 1)", async () => {
-    // creator: org 400 (opens nothing, AQU-435) + creator of p3 → org row sits in
-    // "everything else" and contains exactly one visible project.
+    // creator: org 400 (opens nothing, AQU-435). created_by of p3 is history
+    // and opens nothing (AQU-2357), so the org row counts no visible project.
+    // This fixture deliberately has no Owner row — that absence is the proof.
     const body = (await (await access("owner", "creator", "project:p1")).json()) as Payload
     const orgEntry = body.elsewhere.find((e) => inner(e)?.type === "org")
-    expect(orgEntry?.descendantCount).toBe(1)
+    expect(orgEntry?.descendantCount).toBe(0)
     expect(body.elsewhere.filter((e) => inner(e)?.type === "project").every((e) => e.descendantCount == null)).toBe(true)
   })
 

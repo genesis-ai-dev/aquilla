@@ -1602,7 +1602,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                       id="pname"
                       required
                       value={name}
-                      onCommit={(next, info) => void commit.name(next, info)}
+                      onCommit={(next, info) => commit.name(next, info)}
                       disabled={!canRenameProject}
                       aria-label={t("projectSettings.info.titleLabel")}
                       className="w-56 bg-background"
@@ -2887,6 +2887,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
             onSetSmartExtensionsEnabled={(enabled) => {
               void commit.recordedPatch()({ smartExtensionsEnabled: enabled }).then(() => notifySmartExtensionsChanged(id))
             }}
+            smartEditsEnabled={sharedSettingsBlob.smartEditsEnabled}
+            onSetSmartEditsEnabled={(enabled) => { void commit.recordedPatch()({ smartEditsEnabled: enabled }) }}
           />
         )}
           </div>

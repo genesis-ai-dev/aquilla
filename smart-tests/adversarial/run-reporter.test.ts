@@ -22,6 +22,35 @@ describe("harness health", () => {
     expect(harnessHealth([...canaryOk, { project: "attacks", status: "skipped", evidence: verdict("inconclusive") }], 1).available).toBe(false)
   })
 
+  const attack = (value: string, extra: Partial<NonNullable<Recorded["evidence"]>> = {}): Recorded =>
+    ({ project: "attacks", status: "skipped", evidence: { ...verdict(value)!, ...extra } })
+  const dead = { agents: [{ status: "driver_error", errors: [{ reason: "Model provider returned HTTP 404; no action executed." }] }] }
+
+  it("is unavailable when most agent-driven attacks were inconclusive, the 2026-11 text-model outage", () => {
+    // 15 of 18 attacks could not type for ten days; three click-only passes kept every PR check green.
+    const run = [...Array.from({ length: 15 }, () => attack("inconclusive", dead)), ...Array.from({ length: 3 }, () => attack("passed"))]
+    expect(harnessHealth([...canaryOk, ...run], 18)).toEqual({
+      available: false,
+      reason: "15 of 18 agent-driven attacks ended inconclusive. Most common driver error: Model provider returned HTTP 404; no action executed.",
+    })
+  })
+
+  it("stays available when a minority of attacks were inconclusive, as on an ordinary run", () => {
+    const run = [...Array.from({ length: 5 }, () => attack("inconclusive")), ...Array.from({ length: 9 }, () => attack("passed"))]
+    expect(harnessHealth([...canaryOk, ...run], 14).available).toBe(true)
+  })
+
+  it("does not let scripted probes vouch for an agent that could not act", () => {
+    // Probes run no model. Four of them passing must not outvote a dead driver.
+    const run = [...Array.from({ length: 3 }, () => attack("inconclusive", dead)), attack("passed"),
+      ...Array.from({ length: 4 }, () => attack("passed", { scripted: true }))]
+    expect(harnessHealth([...canaryOk, ...run], 8).available).toBe(false)
+  })
+
+  it("is available when only scripted probes were selected and they ran", () => {
+    expect(harnessHealth([...canaryOk, attack("passed", { scripted: true })], 1).available).toBe(true)
+  })
+
   it("is unavailable when attacks were planned but none ran", () => {
     expect(harnessHealth(canaryOk, 5).reason).toBe("No attack ran after the canary.")
   })

@@ -73,6 +73,26 @@ describe("checkUsfmStructure — chapter/verse numbering", () => {
     expect(find(`\\id GEN\n\\c 1\n\\p\n\\v one Text.\n`, "verse-invalid")).toHaveLength(1)
   })
 
+  // A real book had a key held down after `\\v 1`. The number is past 2^53,
+  // where adding one changes nothing, and the import froze counting from it.
+  it("reports a runaway verse number as invalid instead of counting from it", () => {
+    const usfm = `\\id GEN\n\\c 1\n\\p\n\\v 1 a\n\\v 1999999999999999999999999999999999999999999ll99 b\n\\v 3 c\n`
+    const invalid = find(usfm, "verse-invalid")
+    expect(invalid).toHaveLength(1)
+    expect(invalid[0].detail).toBe("1999999999999999999999999999999999999999999ll99")
+    // The verses around it are still checked as usual.
+    expect(find(usfm, "verse-missing").map((f) => f.detail)).toEqual(["2"])
+  })
+
+  it("does not walk an absurd verse bridge or chapter jump", () => {
+    expect(find(`\\id GEN\n\\c 1\n\\p\n\\v 1-90000000 a\n`, "verse-invalid")).toHaveLength(1)
+    expect(find(`\\id GEN\n\\c 99999999999999999999\n\\p\n\\v 1 a\n`, "chapter-invalid")).toHaveLength(1)
+  })
+
+  it("still accepts the largest numbers a real book has", () => {
+    expect(codes(`\\id PSA\n\\c 119\n\\p\n\\v 176 a\n`).filter((c) => c.endsWith("-invalid"))).toEqual([])
+  })
+
   it("reports a blank chapter number", () => {
     expect(find(`\\id GEN\n\\c\n\\p\n`, "chapter-invalid")).toHaveLength(1)
   })

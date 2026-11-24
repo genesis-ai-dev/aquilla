@@ -114,7 +114,7 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.copies.thisCopy": "This copy",
     "paratextBridge.copies.title": "Copies on this computer",
     "paratextBridge.copies.hint":
-      "Paratext 9, Paratext 10 and Paratext Lite each keep their own copy of a project. Aquilla reads and writes one of them. The others catch up when their app runs Send/Receive.",
+      "Paratext 9, Paratext 10 and Paratext Lite each keep their own copy of a project. Aquilla shows edits made in any of them and writes to one. The others catch up when their app runs Send/Receive.",
     "paratextBridge.copies.notLive":
       "Aquilla writes to this project's {app} copy. This copy catches up when its own app runs Send/Receive.",
     "paratextBridge.copies.makeLive": "Write to this copy instead",
@@ -188,6 +188,10 @@ export const paratextBridge = defineNamespace({
       one: "{count} cell has no matching line in the Paratext file and was left out.",
       other: "{count} cells have no matching line in the Paratext file and were left out.",
     }),
+    "paratextBridge.mirror.heldElsewhere": plural({
+      one: "{count} verse changed in another copy of this project was not brought in, because the text here is different. Run Send/Receive in Paratext to bring them together.",
+      other: "{count} verses changed in another copy of this project were not brought in, because the text here is different. Run Send/Receive in Paratext to bring them together.",
+    }),
   },
   context: {
     _context: {
@@ -229,6 +233,7 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.mirror.badge": { description: "Editor header badge on a project mirroring a Paratext project.", placeholders: { book: "Three-letter book code like MAT." } },
       "paratextBridge.mirror.description": { description: "Which Paratext file the open Aquilla file mirrors.", placeholders: { file: "File name like 41MATTPP1.SFM." } },
       "paratextBridge.mirror.unmapped": { description: "Cells skipped on write because the file has no line for their reference.", placeholders: { count: "Number of cells." } },
+      "paratextBridge.mirror.heldElsewhere": { description: "In the editor's Paratext panel. The same project sits in two folders (Paratext 9 and Paratext 10, say); Aquilla reads both. These verses were edited in the copy Aquilla does not write to, and Aquilla already holds a different text for them.", placeholders: { count: "Number of verses." } },
     },
   },
   surfaces: [],

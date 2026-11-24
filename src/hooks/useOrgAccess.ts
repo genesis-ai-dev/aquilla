@@ -85,5 +85,8 @@ export function useOrgAccess(): OrgAccessState {
   )
 
   if (state.status !== "ready" || !data) return state.status === "error" ? { status: "error" } : { status: "loading" }
-  return { status: "ready", data, org: data.tree[0]?.scope, grants }
+  // A walled viewer's tree has no organization node (AQU-2318). The people
+  // tab still needs a place to open the inspector from, so it uses the root.
+  const org = data.tree.find((node) => node.scope.type === "org")?.scope ?? data.tree[0]?.scope
+  return { status: "ready", data, org, grants }
 }

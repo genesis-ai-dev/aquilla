@@ -464,6 +464,8 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { documentPreviewKind } from "@/lib/document-preview/build"
+import { useDocumentPreviewOpen, writeDocumentPreviewOpen } from "@/lib/document-preview/open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -764,6 +766,9 @@ const ImportTimelineTextDialog = lazy(() =>
 )
 const WhosWhoSidebar = lazy(() =>
   import("./bible-data/WhosWhoSidebar").then((m) => ({ default: m.WhosWhoSidebar })),
+)
+const DocumentPreviewSidebar = lazy(() =>
+  import("./document-preview/DocumentPreviewSidebar").then((m) => ({ default: m.DocumentPreviewSidebar })),
 )
 const CharacterCheckDrawer = lazy(() =>
   import("./timeline/CharacterCheckDrawer").then((m) => ({ default: m.CharacterCheckDrawer })),
@@ -9751,6 +9756,11 @@ export function ProjectWorkspace() {
   const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
     projectId ? readWhosWhoOpen(projectId) : false,
   )
+  // The document preview: a Word or PowerPoint file drawn as the document it
+  // is, in the same rail. Offered on the editor for a file it can render.
+  const documentPreviewOpen = useDocumentPreviewOpen(projectId)
+  const activeDocumentPreviewKind = centerSurface === "editor" ? documentPreviewKind(activeFile?.type) : null
+  const documentPreviewShown = activeDocumentPreviewKind !== null && documentPreviewOpen
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -14229,7 +14239,8 @@ export function ProjectWorkspace() {
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
-    checkOpen
+    checkOpen ||
+    documentPreviewShown
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -19041,6 +19052,8 @@ export function ProjectWorkspace() {
     parallelBiblesOpen,
     verseResourcesOpen,
     whosWhoOpen,
+    documentPreviewAvailable: activeDocumentPreviewKind !== null,
+    documentPreviewOpen,
   })
   // The rail's buttons act like tabs: opening one panel closes the other two,
   // and `null` closes whichever is open.
@@ -19049,6 +19062,7 @@ export function ProjectWorkspace() {
       bibles: panel === "bibles",
       resources: panel === "resources",
       people: panel === "people",
+      preview: panel === "preview",
     }
     setParallelBiblesOpen(next.bibles)
     setVerseResourcesOpen(next.resources)
@@ -19057,6 +19071,7 @@ export function ProjectWorkspace() {
       writeParallelBiblesOpen(projectId, next.bibles)
       writeVerseResourcesOpen(projectId, next.resources)
       writeWhosWhoOpen(projectId, next.people)
+      writeDocumentPreviewOpen(projectId, next.preview)
     }
   }
 
@@ -20527,6 +20542,24 @@ export function ProjectWorkspace() {
                     setWhosWhoOpen(next)
                     if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
+                />
+                </Suspense>
+              )}
+              {/* The document preview: the open Word or PowerPoint file as the
+                  document an export writes now — open panel only. */}
+              {rightRail.openPanel === "preview" && activeDocumentPreviewKind && activeFileId && project && (
+                <Suspense fallback={null}>
+                <DocumentPreviewSidebar
+                  key={`${activeFileId}:${activeLane ?? ""}`}
+                  kind={activeDocumentPreviewKind}
+                  projectId={project.id}
+                  fileId={activeFileId}
+                  lane={activeLane}
+                  targetLanguage={laneLanguageCodeForTag(activeLane, laneRows)}
+                  cells={legacyCells}
+                  cellsLoading={cellsLoading}
+                  getToken={getTokenForFile}
+                  onClose={() => selectRightRailPanel(null)}
                 />
                 </Suspense>
               )}

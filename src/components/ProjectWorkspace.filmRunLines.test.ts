@@ -220,38 +220,14 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     // `timelineLines`), so the film's lines are `playbackCells` themselves.
     // With Split into milestones on (AQU-2711) the timeline's lines are the
     // milestone on screen; Play plays its lines, or the heard lines cut to it
-    // (`timelineHeardCells`), and stops at its last line.
+    // (`timelineHeardCells`), and stops at its last line. Which heard lines,
+    // and when the film stops, are held by sequence-timeline.test.ts
+    // (`heardLinesOfMilestone`, `showsPartOfFile`), film-pieces.test.ts and
+    // the milestone run above.
     expect(workspace).toContain("() => timelineCellsForMilestoneSplit(timelineLines, {")
-    // Split into milestones on: the heard lines are the milestone's, cut once
-    // (`heardLinesOfMilestone`), for the timeline and Play alike.
-    expect(workspace).toContain("() => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue, cueLinksPending),")
-    expect(workspace).toContain("() => recordingsLines(timelineCells, timelineHeardCells, timingMode === \"audioFirst\"),")
-    expect(workspace).toContain("playStartLineId(row, timelineHeardCells,")
-    expect(workspace).toContain("targetCells={timelineHeardCells}")
-    // …and Play ends at the milestone's last line: no run on to the film's end.
-    expect(workspace).toContain("oneMilestone: showsPartOfFile(timelineCells, timelineLines),")
     expect(workspace).toContain("const filmLines = playbackCells")
     expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")
-  })
-
-  // AQU-2711 x AQU-2253 (review, Nov 25): the recorder, the dub driver and
-  // the line-by-line clock walk the same heard lines as the timeline and Play:
-  // with Split into milestones on, the milestone's (`timelineHeardCells`).
-  it("the recorder, the dub driver and the line-by-line clock take the heard lines cut to the milestone", () => {
-    const cut = workspace.indexOf("const timelineHeardCells = useMemo(")
-    const driver = workspace.indexOf("const dubDriverCells = timelineHeardCells ?? audioMergedCells")
-    expect(cut).toBeGreaterThan(-1)
-    expect(driver).toBeGreaterThan(cut)
-    expect(workspace).not.toContain("const dubDriverCells = audioCueCells")
-    expect(workspace).toContain("cells={recorderCells}")
-    expect(workspace).toContain("const recorderCells = recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId)")
-    expect(workspace).toContain("const heardLinesPlay = playsHeardLines(timelineHeardCells,")
-    expect(workspace).toContain("useSkipSilentLinesOnVirtualClock(dubDriverCells,")
-    // …and the line-by-line clock's Play from the start begins at the
-    // milestone's first heard line, never at 0:00 (the split off: 0:00).
-    expect(workspace).toContain("startVirtualClock(timelineDurationSec, timelineClockStartSec)")
-    expect(workspace).toContain("const timelineClockStartSec = useMemo(")
   })
 
   it("Space and a click on the timeline start the queue with those lines, and no others", () => {

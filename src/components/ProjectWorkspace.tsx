@@ -1,4 +1,5 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
+import { useLatchedLines } from "@/hooks/useLatchedLines"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -255,9 +256,8 @@ import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video
 import {
   getVirtualClockPlaying,
   getVirtualClockSec,
-  startVirtualClock,
-  stopVirtualClock,
   subscribeVirtualClock,
+  useVirtualClockForFile,
   useVirtualClockPlaying,
   virtualClockController,
   virtualClockPause,
@@ -16168,7 +16168,8 @@ export function ProjectWorkspace() {
   // on the timeline, cut once so the timeline, Play, the recorder and the
   // line-by-line clock show the same page as the subtitle cards. Every heard
   // line belongs to exactly one milestone (`heardLinesOfMilestone`): by its
-  // pair, or by where it starts (while the pairs load, by where it starts).
+  // pair, or by where it starts; while the pairs are worked on, the settled
+  // ones keep deciding.
   // The whole file on the timeline: `audioCueCells` itself.
   const timelineMilestoneLines = useMemo(() => {
     if (milestonePages.length === 0) return EMPTY_MILESTONE_LINES
@@ -16176,13 +16177,19 @@ export function ProjectWorkspace() {
     return milestonePages.map((page) => page.cellIds.flatMap((id) => byId.get(id) ?? []))
   }, [milestonePages, timelineLines])
   const timelineHeardCells = useMemo(
-    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue, cueLinksPending),
-    [audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks, cueLinksPending],
+    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue),
+    [audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks],
   )
   // The recorder walks the milestone's heard lines. Opened on a line the cut
   // does not hold, it walks the whole cue file, so the line it was opened on
   // is there to record.
-  const recorderCells = recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId)
+  // Fixed when it opens and kept until it closes (`useLatchedLines`): Next and
+  // Prev move the line it is on, and must never swap the list under it.
+  const recorderCells = useLatchedLines(
+    recordingCellId !== null,
+    recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId),
+    audioCueCells ?? legacyCells,
+  )
   // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
   // live on them) does not play its own recording lines, so the recording
   // cannot be the sound there: the film's own sound is the original.
@@ -16272,14 +16279,19 @@ export function ProjectWorkspace() {
     }
     return Number.isFinite(first) ? first : 0
   }, [timelineHeardCells, audioCueCells])
-  useEffect(() => {
-    if (!virtualIsTransport) {
-      stopVirtualClock()
-      return
-    }
-    startVirtualClock(timelineDurationSec, timelineClockStartSec)
-    return () => stopVirtualClock()
-  }, [virtualIsTransport, timelineDurationSec, timelineClockStartSec])
+  // The milestone on the timeline, when only part of the file is: a new one
+  // starts the clock again; its first heard line moving does not.
+  const timelineMilestoneKey = useMemo(() => {
+    if (!showsPartOfFile(timelineCells, timelineLines)) return null
+    const first = timelineCells[0]?.id
+    return milestonePages.find((page) => first != null && page.cellIds.includes(first))?.key ?? null
+  }, [timelineCells, timelineLines, milestonePages])
+  useVirtualClockForFile({
+    owns: virtualIsTransport,
+    durationSec: timelineDurationSec,
+    startSec: timelineClockStartSec,
+    milestoneKey: timelineMilestoneKey,
+  })
   // REGISTERED AS THE CONTROLLER, which is what keeps the playback bar's six
   // `drivesVideo ? controller : queue` branches two-way instead of three. That
   // store already means "the non-queue transport currently driving" — see

@@ -33,7 +33,7 @@
 // number in the timeline and one in the playback bar. Routing it through the
 // workspace would re-render that whole tree on every tick.
 
-import { useSyncExternalStore } from "react"
+import { useEffect, useRef, useSyncExternalStore } from "react"
 import type { VideoController } from "./video-controller"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 
@@ -227,12 +227,14 @@ function startTimer(): void {
 }
 
 /** Take the transport. Idempotent; refreshes the duration. `start` is where
- *  Play from the start begins (`startSec`). The workspace hands the clock back
- *  before a new start, so a new one meets a clock that has just started. */
+ *  Play from the start begins (`startSec`). Called again while driving, it
+ *  moves the start in place: a playing clock plays on from where it is, and
+ *  a paused one before the new start moves up to it. */
 export function startVirtualClock(duration: number, start = 0): void {
   durationSec = Number.isFinite(duration) && duration > 0 ? duration : 0
   startSec = Number.isFinite(start) && start > 0 ? start : 0
   if (driving) {
+    if (!playing && anchorSec < startSec) reanchor(startSec)
     notify()
     return
   }
@@ -354,6 +356,34 @@ export function getVirtualClockPlaying(): boolean {
  * recorder calls `getVideoController()?.pause()`, so a transport that did not
  * register would keep playing underneath a take.
  */
+/**
+ * AQU-2711 x AQU-2253 (review, Nov 25): the workspace's hold on the clock.
+ * Taken while `owns`, handed back when not. Taken again from the start when
+ * the file's length or the milestone on the timeline changes. A change to the
+ * start alone (the milestone's first heard line retimed, or an earlier one
+ * added) moves it in place, so playback never stops for it.
+ */
+export function useVirtualClockForFile({ owns, durationSec: duration, startSec: start, milestoneKey }: {
+  owns: boolean
+  durationSec: number
+  startSec: number
+  milestoneKey: string | null
+}): void {
+  const startRef = useRef(start)
+  startRef.current = start
+  useEffect(() => {
+    if (!owns) {
+      stopVirtualClock()
+      return
+    }
+    startVirtualClock(duration, startRef.current)
+    return () => stopVirtualClock()
+  }, [owns, duration, milestoneKey])
+  useEffect(() => {
+    if (owns) startVirtualClock(duration, start)
+  }, [owns, duration, start])
+}
+
 export const virtualClockController: VideoController = {
   play: virtualClockPlay,
   pause: virtualClockPause,

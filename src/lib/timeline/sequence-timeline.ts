@@ -158,10 +158,13 @@ type TimedLine = { id: string; startTime?: number | null; endTime?: number | nul
  * in the file's order):
  *  - one paired with subtitle lines, to the milestone of its earliest paired
  *    line;
- *  - one paired with none (or with none on any milestone, or while the pairs
- *    are still loading, `pairsPending`), by where it starts: to the milestone
+ *  - one paired with none (or with none on any milestone), by where it
+ *    starts: to the milestone
  *    whose time range it starts in; in a gap, to the next one; after the last,
  *    to the last; with no times at all, to the first.
+ * While the pairs are being worked on, the pairs already settled keep
+ * deciding, so no line jumps milestones; one whose pair does not exist yet is
+ * unpaired until it does.
  * With the whole file on the timeline (`milestone` is `all`: the split off, or
  * one milestone holding everything) the heard lines come back as they are.
  */
@@ -171,7 +174,6 @@ export function heardLinesOfMilestone<T extends TimedLine>(
   all: readonly TimedLine[],
   pages: readonly (readonly TimedLine[])[],
   textForCue: ReadonlyMap<string, readonly string[]>,
-  pairsPending = false,
 ): T[] | null {
   if (!heard || milestone === all) return heard
   const pageOf = new Map<string, number>()
@@ -200,15 +202,12 @@ export function heardLinesOfMilestone<T extends TimedLine>(
     return lastTimed
   }
   const placeOf = (cue: T): number => {
-    if (!pairsPending) {
-      let earliest = Infinity
-      for (const id of textForCue.get(cue.id) ?? []) {
-        const i = pageOf.get(id)
-        if (i != null) earliest = Math.min(earliest, i)
-      }
-      if (Number.isFinite(earliest)) return earliest
+    let earliest = Infinity
+    for (const id of textForCue.get(cue.id) ?? []) {
+      const i = pageOf.get(id)
+      if (i != null) earliest = Math.min(earliest, i)
     }
-    return byTime(cue.startTime)
+    return Number.isFinite(earliest) ? earliest : byTime(cue.startTime)
   }
   return heard.filter((cue) => placeOf(cue) === target)
 }

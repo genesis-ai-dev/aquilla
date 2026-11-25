@@ -14,7 +14,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
 import {
+  getVirtualClockPlaying,
+  getVirtualClockSec,
   resetVirtualClockForTests,
+  useVirtualClockForFile,
+  virtualClockPause,
   startVirtualClock,
   tickVirtualClock,
   useVirtualClockPlaying,
@@ -92,5 +96,56 @@ describe("subscribing to the clock from React", () => {
   it("is null before it owns the file", () => {
     const { result } = renderHook(() => useVirtualClockSec())
     expect(result.current).toBeNull()
+  })
+})
+
+// AQU-2711 x AQU-2253 (review, Nov 25): the workspace owns the clock through
+// one hook. A new milestone, or the clock handed over, starts it again; a
+// change to the milestone's first heard line (a retime, an earlier line
+// added) moves its start in place and never stops it mid-play.
+describe("useVirtualClockForFile", () => {
+  const props = { owns: true, durationSec: 660, startSec: 600, milestoneKey: "m1" as string | null }
+  const advance = (ms: number) => {
+    now += ms
+    act(() => tickVirtualClock())
+  }
+
+  it("takes the clock at the milestone's start, and hands it back", () => {
+    const hook = renderHook((p: typeof props) => useVirtualClockForFile(p), { initialProps: props })
+    expect(getVirtualClockSec()).toBe(600)
+    hook.rerender({ ...props, owns: false })
+    expect(getVirtualClockSec()).toBeNull()
+  })
+
+  it("the first heard line moves while playing: plays on, from where it was", () => {
+    const hook = renderHook((p: typeof props) => useVirtualClockForFile(p), { initialProps: props })
+    act(() => virtualClockPlay())
+    advance(2000)
+    hook.rerender({ ...props, startSec: 590 })
+    expect(getVirtualClockPlaying()).toBe(true)
+    expect(getVirtualClockSec()).toBeCloseTo(602, 1)
+  })
+
+  it("the first heard line moves later while paused before it: the head goes to it", () => {
+    const hook = renderHook((p: typeof props) => useVirtualClockForFile(p), { initialProps: props })
+    hook.rerender({ ...props, startSec: 610 })
+    expect(getVirtualClockSec()).toBe(610)
+  })
+
+  it("paused inside the milestone, a start that moves earlier leaves the head where it is", () => {
+    const hook = renderHook((p: typeof props) => useVirtualClockForFile(p), { initialProps: props })
+    act(() => virtualClockSeek(630))
+    hook.rerender({ ...props, startSec: 590 })
+    expect(getVirtualClockSec()).toBe(630)
+  })
+
+  it("another milestone: starts again at its start", () => {
+    const hook = renderHook((p: typeof props) => useVirtualClockForFile(p), { initialProps: props })
+    act(() => virtualClockPlay())
+    advance(2000)
+    hook.rerender({ ...props, startSec: 700, durationSec: 900, milestoneKey: "m2" })
+    expect(getVirtualClockPlaying()).toBe(false)
+    expect(getVirtualClockSec()).toBe(700)
+    act(() => virtualClockPause())
   })
 })

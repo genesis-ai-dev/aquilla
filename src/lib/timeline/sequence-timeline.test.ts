@@ -271,9 +271,13 @@ describe("heardLinesOfMilestone", () => {
     expect([...seen].sort()).toEqual(heard.map((c) => c.id).sort())
   })
 
-  it("while the pairs load, every heard line is placed by time with the same rule", () => {
-    const placed = pages.map((page) => ids(heardLinesOfMilestone(heard, page, all, pages, textForCue, true)))
-    expect(placed).toEqual([["c1", "c5", "c6"], ["c2", "c3"], ["c4", "c7"]])
+  // While the pairs are being worked on (the auto-linker, a reconcile, Re-pair
+  // all), the pairs already settled keep deciding: no line jumps milestones.
+  // A line whose pair does not exist yet is placed by time, as any unpaired one.
+  it("while the pairs load, the settled pairs keep deciding; the rest go by time", () => {
+    const settled = new Map<string, readonly string[]>([["c6", ["s4"]]])
+    const placed = pages.map((page) => ids(heardLinesOfMilestone(heard, page, all, pages, settled)))
+    expect(placed).toEqual([["c1", "c5"], ["c2", "c3"], ["c4", "c6", "c7"]])
   })
 
   it("the whole file on the timeline (split off, or one milestone holding it all): unchanged", () => {

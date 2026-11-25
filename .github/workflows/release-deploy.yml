@@ -1,6 +1,6 @@
 name: Release deploy
 
-# The hourly production deploy (docs/RELEASE-RISK-GATES.md). Every hour it
+# The production deploy of the release line (docs/RELEASE-RISK-GATES.md). It
 # finds the one release branch in flight and deploys its HEAD when, for that
 # exact sha, the `release-verify` check succeeded and smart Jev has reported
 # anything but FAIL — the same two conditions a person checks today, read by
@@ -29,9 +29,23 @@ name: Release deploy
 # a failure in the slice, or a second fault, is posted with an @mention so a
 # person or the release agent looks (docs/RELEASE-RISK-GATES.md).
 
+# When it looks. The deploy used to be read only at :45, so a HEAD verified at
+# :50 waited 55 minutes for nothing, and every release took about two hours
+# from cut to tag (2026-11-05 to 2026-11-18). Three triggers now, all running
+# the same check:
+# - Release verify finishing green on a release branch: the usual path, the
+#   deploy starts the minute the HEAD is proven.
+# - Every ten minutes: the backstop, and what picks up a Jev report that
+#   lands after verify did.
+# - :45: the same check plus the stall report (a red release-verify), which
+#   stays hourly so a stuck release pages once an hour, not six times.
 on:
+  workflow_run:
+    workflows: ['Release verify']
+    types: [completed]
   schedule:
     - cron: '45 * * * *'
+    - cron: '5,15,25,35,55 * * * *'
   workflow_dispatch:
     inputs:
       check_only:
@@ -44,6 +58,9 @@ permissions:
   contents: write
   deployments: write
   actions: write
+  # The check reads open `release:halt` issues; the watch job opens one when
+  # it takes a release back.
+  issues: write
 
 concurrency:
   group: release-deploy
@@ -51,7 +68,7 @@ concurrency:
 
 jobs:
   check:
-    if: vars.HOURLY_RELEASE == 'on' || inputs.check_only
+    if: (vars.HOURLY_RELEASE == 'on' || inputs.check_only) && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     outputs:
       deploy: ${{ steps.check.outputs.deploy }}
@@ -85,7 +102,7 @@ jobs:
       # Only a verify failure gets here (the script says "none" for anything
       # else). actions: write above is what lets it rerun the failed jobs.
       - name: Unstick or report a stalled release
-        if: steps.check.outputs.deploy != 'true'
+        if: steps.check.outputs.deploy != 'true' && (github.event_name == 'workflow_dispatch' || github.event.schedule == '45 * * * *')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
@@ -138,6 +155,10 @@ jobs:
       # `pnpm desktop:bundle:keygen`). Unset, the publish is a ::warning::, not
       # a failure — docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md.
       DESKTOP_BUNDLE_SIGNING_KEY: ${{ secrets.DESKTOP_BUNDLE_SIGNING_KEY }}
+      # Public build-time values for the Google Drive import (Picker). Vite
+      # inlines them into the SPA; without them the panel shows "not configured".
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_API_KEY: ${{ vars.VITE_GOOGLE_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -180,6 +201,48 @@ jobs:
         working-directory: sync-worker
       - run: pnpm install --frozen-lockfile
         working-directory: auth-worker
+      # The rollback watch and the migration checker belong to this workflow
+      # file, which GitHub runs from dev, while the checkout is the release
+      # branch: an older slice may not carry them (the same trap as the
+      # notifier above). A worktree of the workflow's own commit holds dev's
+      # copies; they run from the release checkout, where wrangler and that
+      # release's wrangler.toml are.
+      - name: Stage this workflow's own scripts
+        run: git worktree add --detach "$RUNNER_TEMP/tools" "$GITHUB_SHA"
+      # A pending migration stops `deploy:aquilla` at its schema guard, which
+      # is why a schema change used to wait for a person on every release.
+      # While AUTO_MIGRATE is on, the deploy applies the pending files itself
+      # when every statement in them is additive (gate-migration.ts: the list
+      # production's current code cannot notice), behind a Neon snapshot
+      # branch. Anything else is left pending, and the guard stops the deploy
+      # exactly as before.
+      - name: Apply pending migrations that are additive
+        if: vars.AUTO_MIGRATE == 'on'
+        run: |
+          if status="$(pnpm -s neon:status:prod 2>&1)"; then
+            echo "schema is current"
+            exit 0
+          fi
+          printf '%s\n' "$status"
+          mapfile -t pending < <(printf '%s\n' "$status" | sed -n 's/^✗ pending migration: //p')
+          if [ "${#pending[@]}" -eq 0 ]; then
+            echo "::warning::neon:status:prod failed without naming a pending migration; leaving it to the deploy's schema guard"
+            exit 0
+          fi
+          files=()
+          for name in "${pending[@]}"; do files+=("db/postgres/migrations/$name"); done
+          pnpm exec tsx "$RUNNER_TEMP/tools/scripts/gate-migration.ts" additive "${files[@]}"
+          pnpm neon:apply:prod --snapshot
+      # What a rollback would promote back: the version of each Worker that
+      # serves production now, read before anything is deployed.
+      - name: Record the versions production runs now
+        id: snapshot
+        run: |
+          if node "$RUNNER_TEMP/tools/scripts/release-rollback.mjs" snapshot "$RUNNER_TEMP/rollback-snapshot.json"; then
+            echo "taken=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::could not record the serving versions; this release is not watched"
+          fi
       # SPA, sync, auth, then the tag: the same chain a person runs. Each
       # step re-runs the Neon schema guard and refuses a non-release branch.
       # Release branches cut before #1791 carry a deploy guard that reads only
@@ -204,6 +267,9 @@ jobs:
           export GITHUB_REF_NAME="$DEPLOY_REF_NAME"
           export GITHUB_SHA="$(git rev-parse HEAD)"
           pnpm run deploy:aquilla
+          # The watch counts failures from here: the moment every surface
+          # serves the new version.
+          echo "DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       # A tag pushed with a token from this workflow does not start the
       # tag-push trigger of release-cut.yml (GitHub never chains runs from
       # GITHUB_TOKEN events), so the next slice is asked for by hand here.
@@ -234,3 +300,64 @@ jobs:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
         run: |
           bash "$RUNNER_TEMP/release-discord-notify.sh" "<@&1564768432677847051> ❌ Production deploy of ${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD) failed. https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      # The rollback watch (scripts/release-rollback.mjs has the reasoning and
+      # the limits of the signal). Ten minutes of each Worker's failed
+      # invocations against the hour before, then one live check. It acts only
+      # while AUTO_ROLLBACK is `on`; otherwise it posts what it would have
+      # done. Last in the job on purpose: the tag, the next cut and the
+      # release notice are already out, and the workflow's concurrency group
+      # keeps the next deploy from starting until this has finished.
+      - name: Watch the release, and take it back if it fails
+        id: watch
+        if: steps.snapshot.outputs.taken == 'true'
+        env:
+          AUTO_ROLLBACK: ${{ vars.AUTO_ROLLBACK }}
+          WATCH_MINUTES: ${{ vars.ROLLBACK_WATCH_MINUTES }}
+          # Account Analytics read only. Unset, the watch asks with the deploy
+          # token, and reads `no-signal` if that token cannot read analytics.
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
+        run: |
+          node "$RUNNER_TEMP/tools/scripts/release-rollback.mjs" watch "$RUNNER_TEMP/rollback-snapshot.json" > "$RUNNER_TEMP/watch.json" \
+            || { echo "::warning::the rollback watch could not run"; echo '{"action":"no-signal","reason":"the watch itself failed; see the run log","mode":"observe","rolledBack":[]}' > "$RUNNER_TEMP/watch.json"; }
+          cat "$RUNNER_TEMP/watch.json"
+          node -e '
+            const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+            const out = [`action=${w.action}`, `mode=${w.mode}`, `rolled=${(w.rolledBack ?? []).length}`]
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n")
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Rollback watch (${w.mode}): ${w.action} — ${w.reason}\n`)
+          ' "$RUNNER_TEMP/watch.json"
+      # A release taken back leaves production behind its own tag, and the
+      # next slice is cut from that tag: without a stop it ships the same
+      # change again within the hour. The issue is the stop
+      # (release-deploy-check.mjs, HALT_LABEL), and where the fix is discussed.
+      - name: Halt the line after a rollback
+        if: steps.watch.outputs.action == 'rollback' && steps.watch.outputs.mode == 'act'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)"
+          reason="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).reason' "$RUNNER_TEMP/watch.json")"
+          gh label create "release:halt" --color B60205 --description "Stops every production deploy while an issue carrying it is open" --force
+          gh issue create --label "release:halt" --title "Release ${tag} was rolled back" --body "$(printf '%s\n\n%s\n\n%s\n\n%s' \
+            "The rollback watch took \`${tag}\` (\`${DEPLOY_REF_NAME}\`) back: ${reason}" \
+            "Production runs the versions from before this release. The calver tag still names it, and the next slice is cut from that tag, so every deploy is stopped while this issue is open." \
+            "To resume: merge the fix or the revert to dev, delete any open \`release/*\` branch cut before it (the next cut then carries the fix), and close this issue." \
+            "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+      - name: Post the watch to Discord when it has something to say
+        if: steps.watch.outputs.action == 'rollback' || steps.watch.outputs.action == 'no-signal'
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          ACTION: ${{ steps.watch.outputs.action }}
+          MODE: ${{ steps.watch.outputs.mode }}
+        run: |
+          reason="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).reason' "$RUNNER_TEMP/watch.json")"
+          where="${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD)"
+          if [ "$ACTION" = "rollback" ] && [ "$MODE" = "act" ]; then
+            line="<@&1564768432677847051> ⏪ Release ${where} was rolled back and the line is halted: ${reason}"
+          elif [ "$ACTION" = "rollback" ]; then
+            line="<@&1564768432677847051> ⚠️ Release ${where} would have been rolled back (AUTO_ROLLBACK is not on): ${reason}"
+          else
+            line="👁️ The rollback watch could not see release ${where}: ${reason}"
+          fi
+          bash "$RUNNER_TEMP/release-discord-notify.sh" "${line:0:1800}"
+

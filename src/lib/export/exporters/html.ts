@@ -32,9 +32,17 @@
 // it never imported would be a guess. Its inline markers are still typeset. A
 // scripture file imported before AQU-2184 has `paragraphStart` (that predates
 // this) but no marker, so its verses still flow in their paragraphs as prose;
-// only the poetry level of a paragraph's FIRST line is missing, and its
-// continuation lines, which carry their own markers in the cell text, indent
-// as they should.
+// only the poetry level of a paragraph's FIRST line is missing.
+//
+// AQU-2743 — where the markup now is. A USFM import stores the READING in a
+// cell and parks its footnotes in `metadata.usfmNotes`, so there are two kinds
+// of cell on this page and both have to read well:
+//   * imported before AQU-2743: the markers are in the text, and `cellLines`
+//     renders notes, character styles and each line's poetry level from them.
+//   * imported after: the text is clean, and the notes come off the metadata
+//     (`withParkedNotes`) as a marker at the end of their own verse plus the
+//     chapter's notes list. A line break inside a verse survives as a line;
+//     its poetry LEVEL and inline character styles do not — AQU-2746.
 //
 // Inline USFM markers never reach the page raw, and every piece of cell text
 // is HTML-escaped — a translation that reads `<script>`, or a footnote whose
@@ -48,8 +56,16 @@ import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
-import { blockClass, cellLines, escapeHtml, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
+import { blockClass, cellLines, escapeHtml, isTableRow, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
 import { parseScriptureReference } from "@/lib/scripture-reference"
+import {
+  USFM_LEAD_HEADING_MARKERS,
+  isNoBreakLead,
+  splitUsfmLead,
+  type UsfmLead,
+  type UsfmLeadBlock,
+} from "../../../../db/shared/usfm-layout"
+import { readUsfmNotes } from "../../../../db/shared/usfm-notes"
 
 export { escapeHtml }
 
@@ -70,6 +86,10 @@ export interface HtmlExportOptions {
    *  whole-project zip (AQU-2183) — a single-book export is one file with no
    *  index to return to, so it must not grow a dead link. */
   backLink?: HtmlBackLink | null
+  /** Tag each verse number with its reference (`data-ref="GEN 1:3"`), so the
+   *  Bible document's reading preview can follow the verse being edited.
+   *  Off for downloads: the exported file stays as it was. */
+  verseAnchors?: boolean
 }
 
 /** The "back to the index" link a zip's book page carries (AQU-2183). */
@@ -81,23 +101,13 @@ export interface HtmlBackLink {
 }
 
 /** The only fields the page reads; `CellData` satisfies it. */
-export type HtmlExportCell = Pick<CellData, "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker"> &
+export type HtmlExportCell = Pick<
+  CellData,
+  "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker" | "metadata"
+> &
   Parameters<typeof effectiveSourceText>[0]
 
-/**
- * Does this file read as a Bible book — does any line carry a Bible verse
- * reference (a known book code with a chapter and verse, `RUT 1:1`)?
- *
- * AQU-2210: a `codex` file is not always Scripture. Migrated projects hold
- * dubbing episodes (`TheChosen-101-en-5-2 1:cue-…`), Pilgrim's Progress
- * (`PilgrimsProgress 1:13`) and commentaries under the same type, and the file
- * row cannot tell them apart (no book code; Codex's corpus marker is not
- * migrated). The lines can, by the same reference test that numbers a verse
- * on the page — so a file offered the page gets numbered verses.
- */
-export function hasBibleVerses(cells: readonly Pick<CellData, "group">[]): boolean {
-  return cells.some((cell) => parseScriptureReference(cell.group)?.verse != null)
-}
+export { hasBibleVerses, isBibleBookFile } from "@/lib/export/bible-book"
 
 export function exportHtml(cells: readonly HtmlExportCell[], opts: HtmlExportOptions = {}): Blob {
   return new Blob([buildHtmlPage(cells, opts)], { type: "text/html;charset=utf-8" })
@@ -107,6 +117,8 @@ interface Entry {
   kind: "verse" | "heading" | "text"
   /** Verse number, or range ("1-2"), when the cell is a verse with a readable ref. */
   verse: string | null
+  /** A verse's reference ("GEN 1:3"); the reading preview scrolls to it. */
+  ref: string | null
   /** The heading's own USFM marker ("s1", "d", "r", "mt1"), read back from its
    *  synthetic reference; null for anything that is not a marked heading. */
   headingMarker: string | null
@@ -143,14 +155,15 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
   let untranslated = 0
   // The page only lays out paragraphs it actually imported (see the header).
   const flow = cells.some((cell) => cell.paragraphStart === true)
+  const anchors = opts.verseAnchors === true
 
   for (const cell of cells) {
-    const entry = entryFor(cell)
-    if (!entry) continue
-    if (entry.untranslated) untranslated++
+    const entries = entriesFor(cell)
+    if (entries.length === 0) continue
+    if (entries[entries.length - 1].untranslated) untranslated++
     const label = chapterLabelForCell(cell)
     if (!label) {
-      pending.push(entry)
+      pending.push(...entries)
       continue
     }
     let chapter = byLabel.get(label)
@@ -167,7 +180,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
     // Entries that waited ahead of this cell belong with it: inside the
     // chapter when it continues one, at the top of the chapter when it opens
     // one.
-    chapter.entries.push(...pending, entry)
+    chapter.entries.push(...pending, ...entries)
     pending = []
   }
   if (chapters.length === 0) leading.push(...pending)
@@ -179,7 +192,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
   parts.push(`<h1 class="book-title">${escapeHtml(title)}</h1>`)
   if (chapters.length === 0) {
     // No chapters at all: the entries ARE the document, not front matter.
-    parts.push(`<section class="chapter">\n${bodyHtml(leading, "doc", flow)}\n</section>`)
+    parts.push(`<section class="chapter">\n${bodyHtml(leading, "doc", flow, anchors)}\n</section>`)
   } else {
     if (leading.length > 0) {
       parts.push(`<section class="front-matter">\n${leading.map(frontMatterHtml).join("\n")}\n</section>`)
@@ -192,7 +205,7 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
     for (const c of chapters) {
       parts.push(
         `<section class="chapter" id="${c.id}">\n<h2 class="chapter-title">${escapeHtml(c.title)}</h2>\n` +
-          bodyHtml(c.entries, c.id, flow) +
+          bodyHtml(c.entries, c.id, flow, anchors) +
           `\n</section>`,
       )
     }
@@ -242,13 +255,56 @@ export function summarizeHtmlCells(cells: readonly HtmlExportCell[]): { lines: n
   return { lines, untranslated }
 }
 
-function entryFor(cell: HtmlExportCell): Entry | null {
-  const translated = cell.translated.trim()
+/**
+ * A cell's entries: the section headings the translation added ahead of it,
+ * then the cell itself.
+ *
+ * AQU-2559 (docs/decisions/0010-usfm-target-layout.md): layout a translator
+ * adds in the Bible document is a lead on the verse it precedes — `\s1 Title`
+ * lines, or a bare `\p` / `\q1` / `\nb`. The USFM export writes it into the
+ * file; the page reads it the same way, so the reading preview and the
+ * exported page show the headings and breaks the translator typed instead of
+ * the raw markers.
+ */
+function entriesFor(cell: HtmlExportCell): Entry[] {
+  const lead = splitUsfmLead(cell.translated.trim())
+  const headings: Entry[] = []
+  for (const block of lead.blocks) {
+    if (block.text === "" || !USFM_LEAD_HEADING_MARKERS.has(block.marker)) continue
+    headings.push({
+      kind: "heading",
+      verse: null,
+      ref: null,
+      headingMarker: block.marker,
+      lines: cellLines(block.text).lines,
+      trailingBlank: false,
+      untranslated: false,
+      paragraphStart: true,
+      paragraphMarker: undefined,
+    })
+  }
+  const entry = entryFor(cell, lead)
+  return entry ? [...headings, entry] : headings
+}
+
+/** The paragraph marker a lead names (its last bare marker); null when none. */
+function leadParagraphMarker(blocks: readonly UsfmLeadBlock[]): string | null {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const { marker, text } = blocks[i]
+    if (text === "" && marker !== "nb" && marker !== "b") return marker
+  }
+  return null
+}
+
+function entryFor(cell: HtmlExportCell, lead: UsfmLead = splitUsfmLead(cell.translated.trim())): Entry | null {
+  // A value that is only a lead keeps the source's words, as the USFM export
+  // does (decision 0010) — the break or heading still applies.
+  const translated = lead.body.trim()
   const untranslated = translated === ""
   const raw = untranslated ? effectiveSourceText(cell).trim() : translated
   if (!raw) return null
   const text = cellLines(raw)
-  const lines = splitPlainLines(text.lines)
+  const lines = withParkedNotes(splitPlainLines(text.lines), cell)
   if (lines.length === 0) return null
   // A USFM import types its verses `verse`; a migrated Codex book types every
   // verse `text` and says it is one only through its reference (AQU-2210). So
@@ -260,17 +316,21 @@ function entryFor(cell: HtmlExportCell): Entry | null {
     : cell.type === "verse" || (ref?.verse && !isStructuralCell(cell.type)) ? "verse"
     : "text"
   const verse = kind === "verse" ? (ref?.verse ?? null) : null
+  // Paragraph structure is the source's, and it rides the SOURCE row, so it
+  // is read the same way whichever side's text is on the page — unless the
+  // translation's lead overrides it: a marker opens a paragraph in that
+  // style, a heading closes the one above, `\nb` joins the paragraph above.
+  const hasLead = lead.blocks.length > 0
   return {
     kind,
     verse,
+    ref: kind === "verse" && cell.group ? cell.group : null,
     headingMarker: headingMarkerFromRef(cell.group),
     lines,
     trailingBlank: text.trailingBlank,
     untranslated,
-    // Paragraph structure is the source's, and it rides the SOURCE row, so it
-    // is read the same way whichever side's text is on the page.
-    paragraphStart: cell.paragraphStart === true,
-    paragraphMarker: cell.paragraphMarker,
+    paragraphStart: hasLead ? !isNoBreakLead(lead.blocks) : cell.paragraphStart === true,
+    paragraphMarker: (hasLead ? leadParagraphMarker(lead.blocks) : null) ?? cell.paragraphMarker,
   }
 }
 
@@ -291,6 +351,47 @@ function splitPlainLines(lines: readonly CellLine[]): CellLine[] {
   return out
 }
 
+/**
+ * A content-only cell's notes, put back on the page (AQU-2743).
+ *
+ * `cellLines` finds a footnote because the marker is still in the cell text.
+ * A USFM import stores the reading instead, with the notes parked in
+ * `metadata.usfmNotes`, so without this a verse's footnotes and
+ * cross-references — the apparatus a printed Bible is partly made of — would
+ * simply not be on the page.
+ *
+ * They go at the END of the cell's last line, not at the character offset they
+ * came from. The offset addresses the source, and this page may be showing a
+ * translation of a different length and word order; verse-end is the same
+ * compromise the USFM exporter settled on for the same reason (AQU-1295).
+ *
+ * A cell whose text still carries its own note markers — anything imported
+ * before AQU-2743 — renders them in place and is left alone, so one page never
+ * shows a note twice.
+ */
+function withParkedNotes(lines: CellLine[], cell: HtmlExportCell): CellLine[] {
+  if (lines.length === 0) return lines
+  if (lines.some((line) => line.runs.some((run) => run.kind === "note"))) return lines
+  const notes = readUsfmNotes(cell.metadata)
+  if (notes.length === 0) return lines
+  const last = lines[lines.length - 1]
+  return [
+    ...lines.slice(0, -1),
+    {
+      ...last,
+      runs: [
+        ...last.runs,
+        ...notes.map((n) => ({
+          kind: "note" as const,
+          noteKind: n.kind,
+          ref: n.ref,
+          text: n.text,
+        })),
+      ],
+    },
+  ]
+}
+
 /** One block of the page: a paragraph or a poetry line. */
 interface Block {
   cls: string
@@ -303,7 +404,7 @@ interface Block {
 }
 
 /** The body of one section — its blocks, then the notes its verses carried. */
-function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean): string {
+function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean, anchors: boolean): string {
   const notes = createNoteCollector(sectionId)
   const out: string[] = []
   let current: Block | null = null
@@ -322,7 +423,7 @@ function bodyHtml(entries: readonly Entry[], sectionId: string, flow: boolean): 
       pendingBlank = false
       continue
     }
-    const blocks = cellBlocks(entry, notes, flow)
+    const blocks = cellBlocks(entry, notes, flow, anchors)
     if (pendingBlank && blocks.length > 0) {
       blocks[0] = { ...blocks[0], blankBefore: true }
       pendingBlank = false
@@ -362,15 +463,15 @@ function renderBlock(block: Block): string {
 
 /** One cell's blocks: its first line carries the verse number, each poetry
  *  line stands on its own, and consecutive prose lines stay one block. */
-function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean): Block[] {
+function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean, anchors: boolean): Block[] {
   const blocks: Block[] = []
   entry.lines.forEach((line, index) => {
-    const html = (index === 0 ? verseNumberHtml(entry) : "") + lineInlineHtml(line, notes)
+    const html = (index === 0 ? verseNumberHtml(entry, anchors) : "") + lineInlineHtml(line, notes)
     const cls = lineClass(entry, line, flow)
     const last = blocks[blocks.length - 1]
     // Prose lines inside one cell stay one block, broken by <br> — the
     // AQU-2182 behavior for a translation typed across several lines.
-    if (last && line.indent === 0 && !line.blankBefore && last.cls === cls) {
+    if (last && line.indent === 0 && !line.blankBefore && last.cls === cls && cls !== "table-row") {
       last.html += `<br>\n${html}`
       return
     }
@@ -381,7 +482,7 @@ function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean): Block[] 
       blankBefore: line.blankBefore,
       // Only the cell's first line can continue the paragraph above: a later
       // line of the same cell started after a break of its own.
-      continues: flow && index === 0 && line.indent === 0 && !entry.paragraphStart,
+      continues: flow && index === 0 && line.indent === 0 && !entry.paragraphStart && cls !== "table-row",
     })
   })
   return blocks
@@ -397,14 +498,17 @@ function cellBlocks(entry: Entry, notes: NoteCollector, flow: boolean): Block[] 
  * split the verse in two on the page.
  */
 function lineClass(entry: Entry, line: CellLine, flow: boolean): string {
+  if (isTableRow(line)) return "table-row"
   if (line.indent > 0) return blockClass(undefined, line.indent)
   if (entry.paragraphMarker) return blockClass(entry.paragraphMarker, 0)
   if (!flow) return entry.kind === "verse" ? "verse" : "text"
   return "para"
 }
 
-function verseNumberHtml(entry: Entry): string {
-  return entry.verse ? `<sup class="verse-number">${escapeHtml(entry.verse)}</sup> ` : ""
+function verseNumberHtml(entry: Entry, anchors: boolean): string {
+  if (!entry.verse) return ""
+  const ref = anchors && entry.ref ? ` data-ref="${escapeHtml(entry.ref)}"` : ""
+  return `<sup class="verse-number"${ref}>${escapeHtml(entry.verse)}</sup> `
 }
 
 /** Marker → element + class, so section headings, parallel-passage references
@@ -424,6 +528,12 @@ function headingHtml(entry: Entry, notes: NoteCollector): string {
       return `<p class="psalm-title${mark}">${html}</p>`
     case "sp":
       return `<p class="speaker${mark}">${html}</p>`
+    case "qa":
+      return `<p class="acrostic-heading${mark}">${html}</p>`
+    case "cl":
+      return `<h3 class="chapter-label${mark}">${html}</h3>`
+    case "cd":
+      return `<p class="chapter-description${mark}">${html}</p>`
     case "is":
     case "iot":
     case "imt":
@@ -528,6 +638,17 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .speaker{margin:.75rem 0 .25rem;font-style:italic;font-weight:600}
 .verse,.text,.para{margin:0 0 .75rem}
 .para-flush{text-indent:0}
+.para-inset{padding-left:1.25rem;padding-right:1.25rem}
+.para-hanging{text-indent:-1.25rem}
+.poetry-note,.intro-quote{font-style:italic}
+.acrostic-heading{margin:.75rem 0 .25rem;font-style:italic}
+.chapter-label{margin:0 0 .5rem;text-align:center;font-size:1.25rem;color:var(--heading)}
+.chapter-description{margin:0 0 .75rem;font-size:.9375rem}
+.table-row{display:flex;gap:1rem;margin:0;padding:.125rem 0;border-bottom:1px solid var(--rule);text-indent:0}
+.table-cell{flex:1 1 0;min-width:0}
+.table-head{font-style:italic}
+.cell-right{text-align:right}
+.cell-centered{text-align:center}
 .para-indent-1{padding-left:1.25rem}
 .para-indent-2{padding-left:2.5rem}
 .para-indent-3{padding-left:3.75rem}
@@ -550,6 +671,23 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .verse-number{margin-right:.3em;font-size:.7em;font-weight:700;line-height:0;vertical-align:super;color:var(--muted)}
 .small-caps{font-variant-caps:small-caps}
 .wj{color:var(--accent)}
+.key-term{font-weight:700;font-style:italic;cursor:help}
+.glossary-word{text-decoration:underline dotted;text-decoration-color:var(--muted);text-underline-offset:.2em;cursor:help}
+.proper-name{font-weight:700;text-decoration:underline}
+.place-name{text-decoration:underline}
+.proper-name-added{font-weight:700;font-style:italic;text-decoration:underline}
+.quoted-text{font-weight:700}
+.c-italic,.selah{font-style:italic}
+.quote-ref{font-style:italic;font-size:.83em}
+.ordinal{font-size:.66em;vertical-align:text-top}
+.link-text{color:var(--link);text-decoration:underline}
+.pronunciation{font-size:.83em}
+.alt-number{margin-right:.2em;font-size:.66em;vertical-align:text-top;color:var(--link)}
+.figure-caption{font-style:italic;color:var(--muted)}
+rt{font-size:.6em}
+.note-quote{font-style:italic}
+.note-keyword{font-weight:700;font-style:italic}
+.note-verse{font-size:.66em;vertical-align:text-top}
 .note-marker{font-size:.7em;line-height:0;vertical-align:super}
 .note-marker a{color:var(--link);text-decoration:none}
 .notes{margin:1.5rem 0 0;padding-top:.75rem;border-top:1px solid var(--rule);font-size:.9375rem}

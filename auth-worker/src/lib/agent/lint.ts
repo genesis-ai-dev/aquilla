@@ -11,6 +11,8 @@
 // src/lib/rules/__fixtures__/rule-lint-parity.ts. Builtin/algorithmic checks
 // need the full lqa registry and stay client-side for now.
 
+import { catastrophicPatternReason } from "../../../../db/shared/regex-safety"
+
 export interface LintRule {
   id: string
   name: string
@@ -63,7 +65,11 @@ export function compileRulePattern(rule: LintRule, pattern: string): RegExp | nu
   const unicodeFlag = rule.id.startsWith("term:") ? "u" : ""
   // ReDoS guard: this runs in the worker request path. Skip oversized patterns
   // and the classic nested-quantifier shape `(a+)+` / `(a*)*` / `(a|b+){2,}`.
-  if (!unicodeFlag && (pattern.length > 1000 || /\([^()]*[+*][^()]*\)\s*(?:[+*]|\{\d+,\d*\})/.test(pattern))) {
+  // Skip oversized authored patterns, and screen EVERY pattern for
+  // catastrophic backtracking. The screen deliberately does not trust the
+  // `term:` id prefix: rule ids are stored text, so an authored rule could
+  // carry one. Compiled term patterns pass it (their affix groups are bounded).
+  if ((!unicodeFlag && pattern.length > 1000) || catastrophicPatternReason(pattern)) {
     return null
   }
   try {

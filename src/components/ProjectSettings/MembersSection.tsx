@@ -31,7 +31,8 @@ import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectM
 import { RoleDialog } from "@/components/access/RoleDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectScopePath } from "@/hooks/useProjectScopePath"
-import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
+import { ScopeBreadcrumb, ScopeGrantChip } from "@/components/access/ScopeBreadcrumb"
+import { viaTeamName } from "@/lib/access/scope-path"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
@@ -112,11 +113,27 @@ export function MembersSection({ projectId }: { projectId: string }) {
         cell: ({ row }) => {
           const m = row.original
           const sourceKey = SOURCE_LABEL_KEYS[m.role.source]
+          const viaTeam = m.role.source === "group" ? (viaTeamName(m.inheritedFrom ?? []) ?? "") : null
+          const chipCoversSource = m.role.source === "group" && scopePath.length > 0
           return (
             <UsernameWithAvatar userId={m.userId} username={m.username}>
-              <span className="truncate text-xs font-normal text-muted-foreground">
-                {sourceKey ? t(sourceKey) : m.role.source}
-              </span>
+              {scopePath.length > 0 && (
+                <ScopeGrantChip
+                  path={scopePath}
+                  viaTeam={viaTeam}
+                  className="truncate text-xs font-normal text-muted-foreground"
+                />
+              )}
+              {!chipCoversSource && (
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {sourceKey ? t(sourceKey) : m.role.source}
+                </span>
+              )}
+              {m.createdThisProject && (
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {t("org.membersPage.createdThisProject")}
+                </span>
+              )}
             </UsernameWithAvatar>
           )
         },
@@ -158,7 +175,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
         },
       },
     ],
-    [t],
+    [scopePath, t],
   )
 
   // AQU-485: below-floor callers must not see this pane at all (ProjectSettings

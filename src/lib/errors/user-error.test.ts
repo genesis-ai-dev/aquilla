@@ -184,7 +184,7 @@ describe("messageForStatus 403 role_required", () => {
   it("names role, origin and required role", () => {
     const r = messageForStatus(403, body({ roleLevel: 400, source: "group" }))
     expect(r.category).toBe("forbidden")
-    expect(r.message).toBe("You are Contributor here (Via group). Maintainer is required.")
+    expect(r.message).toBe("You are Contributor here (Via team). Maintainer is required.")
   })
 
   it("never renders a numeric level", () => {
@@ -196,6 +196,22 @@ describe("messageForStatus 403 role_required", () => {
     expect(messageForStatus(403, body({ roleLevel: null, source: null })).message).toBe(
       "You don't have a role here. Maintainer is required.",
     )
+  })
+
+  it("names only the scopes a walled member can see", () => {
+    const r = messageForStatus(403, body({
+      roleLevel: 400,
+      source: "group",
+      scopePath: [
+        { type: "org", id: "o", name: "Secret Org", hidden: true },
+        { type: "project", id: "p", name: "Alpha" },
+        { type: "lane", id: "fr", name: "French" },
+        { type: "lane", id: "es", name: "Spanish", hidden: true },
+      ],
+    }))
+    expect(r.message).toContain("… › Alpha › French")
+    expect(r.message).not.toContain("Secret Org")
+    expect(r.message).not.toContain("Spanish")
   })
 
   it("falls back to the generic copy for an unstructured 403", () => {

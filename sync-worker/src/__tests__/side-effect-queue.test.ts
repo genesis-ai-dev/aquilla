@@ -361,6 +361,9 @@ describe('runCommentFanout', () => {
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
       .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-1', 1, 700, 1)")
+      .run()
 
     await seedComment(db, {
       projectId: 'proj-1',
@@ -450,6 +453,9 @@ describe('runCommentFanout', () => {
       .run()
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-1', 1, 700, 1)")
       .run()
     // A body at the spec's 50,000-char ceiling would not reliably fit inside a
     // queue message; the fan-out message carries identity only, so it cannot.
@@ -604,6 +610,9 @@ describe('dispatchCommentNotification', () => {
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
       .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-1', 1, 700, 1)")
+      .run()
     const email = makeEmailBinding()
 
     await dispatchCommentNotification(
@@ -629,6 +638,9 @@ describe('dispatchCommentNotification', () => {
       .run()
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-1', 1, 700, 1)")
       .run()
     const email = makeEmailBinding()
     const broken = {

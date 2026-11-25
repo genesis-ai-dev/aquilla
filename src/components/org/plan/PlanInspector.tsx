@@ -28,7 +28,7 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planAudioTotal, planOpenKind, planPct, planUnitExpectsAudio,
+  planAudioTotal, planDoneCheck, planOpenKind, planPct, planUnitExpectsAudio,
   planUnitShowsWayToWork, planUnitLabel, planUnitNote,
   planUnitExpectsText, planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
 } from "@/lib/plan/plan-status"
@@ -141,10 +141,6 @@ export function PlanInspector({
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
   const noteKind = planUnitNote(unit, now, audioFiles, textFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
-  // AQU-1493: whether Mark done should pause to say the unit is short, judged
-  // on the COUNTS. A rounded percentage once read 100 on a book six cells short
-  // and let it through without a word. An empty unit still pauses, as it did.
-  const validatedShort = unit.totalCount === 0 || unit.validatedCount < unit.totalCount
   const readoutTips = usePlanReadoutTips()
   const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane, version: dataVersion })
 
@@ -160,6 +156,11 @@ export function PlanInspector({
   // consult.
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
   const shortfall = planUnitShortfall(unit, hasAudio, hasText)
+  // Whether Mark done pauses, and on what figure: judged on the mediums this
+  // file owes, like the shortfall above. It read the text counts alone, so a
+  // finished audio-only book paused on "Validated is at 0%" under "Nothing
+  // left". See `planDoneCheck`.
+  const doneCheck = planDoneCheck(unit, hasAudio, hasText)
   // AQU-1278: the cue sheet's cell count on a dubbing project, the unit's own
   // everywhere else. See `planAudioTotal`. The bars here are the only place it
   // is needed — the "Assigned to" block is handed its own audio gate by
@@ -658,7 +659,7 @@ export function PlanInspector({
                     cannot make, so this acknowledges the mismatch and moves on. */}
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[13px] leading-relaxed"
                    data-testid="plan-done-nudge">
-                  {t("org.projectOverview.plan.doneBelowFullNudge", { validated: validatedPct })}
+                  {t("org.projectOverview.plan.doneBelowFullNudge", { validated: doneCheck.validatedPct })}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button size="sm" disabled={busy} data-testid="plan-mark-done-anyway" onClick={markDone}>
@@ -692,7 +693,7 @@ export function PlanInspector({
                   rowClassName="gap-2"
                 >
                   <Button size="sm" disabled={busy} data-testid="plan-mark-done"
-                    onClick={() => (validatedShort ? setConfirmingDone(true) : markDone())}>
+                    onClick={() => (doneCheck.short ? setConfirmingDone(true) : markDone())}>
                     {t("org.projectOverview.plan.markDone")}
                   </Button>
                 </InfoLabel>

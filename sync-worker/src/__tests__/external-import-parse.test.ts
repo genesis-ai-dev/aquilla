@@ -28,7 +28,10 @@ import {
   SERVER_PARSEABLE_FILE_TYPES,
   BINARY_PARSE_FILE_TYPES,
   PREVIEW_SAMPLE_CELLS,
+  stringsToPlanImportCells,
 } from '../external/import-parse'
+import { parseTextFormat } from '../../../src/lib/parsers/parse-text-formats'
+import { USFM_MARKER_SHAPES_CRLF } from '../../../src/lib/parsers/__fixtures__/usfm-marker-shapes'
 import {
   DOCX_PARITY_EXPECTED_CELLS,
   DOCX_PARITY_FILE_NAME,
@@ -1018,5 +1021,41 @@ describe('discovery importing section', () => {
     expect(
       Object.keys(map.endpoints).some((k) => k.includes('/artifacts/:artifactId/parse')),
     ).toBe(true)
+  })
+})
+
+
+// AQU-2743: the in-app "Upload files" importer and this route must put the
+// SAME text in a cell. They did not: the server ran usfmContentOnly over the
+// parsed strings (AQU-1283) and the browser committed them raw, so one NIV
+// file imported two ways gave clean verses through the API and verses full of
+// \f, \wj, \b and \r in the app. The projection now lives in the one parse
+// core both entry points call, which is what this guard holds: the server's
+// content-only mapping must find nothing left to clean.
+describe('USFM import parity between the browser and this route (AQU-2743)', () => {
+  const strings = parseTextFormat({
+    fileType: 'usfm',
+    text: USFM_MARKER_SHAPES_CRLF,
+    name: '41MAT.SFM',
+  })[0].strings
+
+  it('maps every parsed string to a cell byte-for-byte, notes included', () => {
+    const { cells, warnings } = stringsToPlanImportCells(strings, { contentOnly: true })
+    expect(cells).toHaveLength(strings.length)
+    for (const [i, cell] of cells.entries()) {
+      expect(cell.content).toBe(strings[i].original)
+      expect(cell.metadata?.usfmNotes).toEqual(strings[i].metadata?.usfmNotes)
+    }
+    // `residual-markup` counts cells that still carry a backslash after the
+    // content-only pass. One parse step, so there is nothing left to warn about.
+    expect(warnings.map((w) => w.code)).not.toContain('residual-markup')
+  })
+
+  it('is the same mapping with the content-only pass switched off', () => {
+    const projected = stringsToPlanImportCells(strings, { contentOnly: true }).cells
+    const asParsed = stringsToPlanImportCells(strings).cells
+    expect(projected.map((c) => [c.content, c.metadata])).toEqual(
+      asParsed.map((c) => [c.content, c.metadata]),
+    )
   })
 })

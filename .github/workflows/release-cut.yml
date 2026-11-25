@@ -86,7 +86,28 @@ jobs:
           # Extra logins whose walk comments count, on top of organization
           # members and collaborators; see release-plan-walk.mjs.
           WALK_TRUSTED_LOGINS: ${{ vars.WALK_TRUSTED_LOGINS }}
+          # `strict` restores "anything but a PASS walk holds"; unset, only a
+          # failed walk holds (release-plan.mjs, walkPolicy).
+          WALK_POLICY: ${{ vars.WALK_POLICY }}
+          # `on` lets a green migration-gate lift the migration hold, because
+          # release-deploy.yml then applies the migration itself
+          # (release-risk.mjs GATE_SWITCHES).
+          AUTO_MIGRATE: ${{ vars.AUTO_MIGRATE }}
         run: node scripts/release-plan.mjs > "$RUNNER_TEMP/plan.json"
+
+      # One line to the release channel in the hour a merged PR's wait for a
+      # person passes HOLD_NUDGE_HOURS. On the schedule only, so a tag push
+      # or a button press in the same hour does not say it twice.
+      - name: Say which PRs have waited too long for a person
+        if: github.event_name == 'schedule'
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          node scripts/release-hold-nudge.mjs "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/nudge.txt" || true
+          if [ -s "$RUNNER_TEMP/nudge.txt" ]; then
+            cat "$RUNNER_TEMP/nudge.txt" >> "$GITHUB_STEP_SUMMARY"
+            bash scripts/release-discord-notify.sh "$(cat "$RUNNER_TEMP/nudge.txt")"
+          fi
 
       - name: Cut
         env:

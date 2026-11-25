@@ -4,10 +4,11 @@ export const smartEdits = defineNamespace({
   keys: {
     "smartEdits.flagLabel": "Smart edits",
     "smartEdits.flagDescription":
-      "Underline wordings your team has corrected elsewhere in this project, and suggest the same change. Suggestions come from your team's own edits; no AI model writes them. Only on this device.",
+      "Underline wordings your team has corrected elsewhere in this project, and suggest the same change. Suggestions come from your team's own edits; no AI model writes them. On for everyone in this project unless a maintainer turns it off.",
+    "smartEdits.flagRoleHint": "Only a maintainer can change this.",
     "smartEdits.llmFlagLabel": "Smart edits: AI wording",
     "smartEdits.llmFlagDescription":
-      "When smart edits have no suggestion of their own, let you ask an AI model for one. Each request uses AI credits. Only on this device.",
+      "When smart edits have no suggestion of their own, you can ask an AI model for one. Each request uses AI credits. Only on this device.",
     "smartEdits.popoverTitle": "Suggested edit",
     "smartEdits.accept": "Accept",
     "smartEdits.dismiss": "Dismiss",
@@ -32,12 +33,14 @@ export const smartEdits = defineNamespace({
         "Smart edits: dotted underlines in the target editor on wordings that other " +
         "translators on the same project have corrected elsewhere. Clicking one opens a " +
         "small popover with the suggested replacement, an example of the earlier " +
-        "correction, and Accept / Dismiss. The two flag strings appear as toggles in " +
-        "Project settings → Experimental.",
+        "correction, and Accept / Dismiss. Smart edits are on for every member of a " +
+        "project unless a maintainer turns them off; the flag strings appear as toggles " +
+        "in Project settings → Experimental.",
     },
     keys: {
       "smartEdits.flagLabel": { description: "Toggle label in Project settings → Experimental.", maxLength: 32 },
       "smartEdits.llmFlagLabel": { description: "Toggle label in Project settings → Experimental.", maxLength: 40 },
+      "smartEdits.flagRoleHint": { description: "Tooltip on the disabled Smart edits toggle for a member below maintainer." },
       "smartEdits.popoverTitle": { description: "Heading of the popover opened from an underline.", maxLength: 32 },
       "smartEdits.accept": { description: "Button: apply the suggested wording to the cell.", maxLength: 16 },
       "smartEdits.dismiss": { description: "Button: hide this suggestion and count it as unhelpful.", maxLength: 16 },

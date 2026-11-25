@@ -16,7 +16,8 @@
 
 import { useState, useCallback, useRef, useEffect } from "react"
 import { Search, Replace, BookOpen, Maximize2, Book, ArrowLeft, ExternalLink } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatCount } from "@/lib/i18n/format"
 import {
   Command,
   CommandEmpty,
@@ -36,6 +37,7 @@ import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import type { FindToggles } from "@/lib/search/workspace-index"
 import { findPatternError } from "../../db/shared/find-pattern"
+import { SEARCH_FULL_LIMIT, SEARCH_PANEL_LIMIT } from "@/lib/sync/search-read-types"
 import type { ReplaceAllPayload } from "./ParallelPassagesPanel"
 import {
   aquiferSearch,
@@ -54,8 +56,15 @@ export interface SearchDockPanelProps {
   loading: boolean
   ready: boolean
   results: WorkspaceSearchResult[]
+  /**
+   * How many the search matched before the list was cut at the limit asked
+   * for (AQU-2732). Omitted reads as "the list is all of them".
+   */
+  total?: number
+  /** `total` is a floor: there are at least that many, and may be more. */
+  totalIsLowerBound?: boolean
   onReady: () => void
-  onSearch: (query: string, options?: { fileId?: string; side?: "both" | "source" | "target" } & Partial<FindToggles>) => void
+  onSearch: (query: string, options?: { fileId?: string; side?: "both" | "source" | "target"; limit?: number } & Partial<FindToggles>) => void
   onSearchPassages: (query: string) => void
   onClearResults: () => void
   onSelect: (result: WorkspaceSearchResult, query: string) => void
@@ -69,6 +78,12 @@ export interface SearchDockPanelProps {
   onOpenFullPanel?: (intent: { mode: "search" | "replace"; query: string; find: FindToggles }) => void
   /** AQU-309: Called when user wants to expand all results into the main area */
   onExpandResults?: (query: string) => void
+  /**
+   * The expanded results are open. They draw this panel's search, so while
+   * they are up it asks for the most one search returns instead of a panel's
+   * worth.
+   */
+  resultsExpanded?: boolean
   /** Bible Aquifer reference mode — when true, a "Bible resources" mode is
    *  offered. Sourced from project settings (`bibleResourcesEnabled`). */
   bibleResourcesEnabled?: boolean
@@ -85,18 +100,21 @@ export function SearchDockPanel({
   activeFileName,
   loading,
   results,
+  total: totalProp,
+  totalIsLowerBound = false,
   onReady,
   onSearch,
   onClearResults,
   onSelect,
   onOpenFullPanel,
   onExpandResults,
+  resultsExpanded = false,
   bibleResourcesEnabled = false,
   projectId,
   getJwt,
   canonicalRef,
 }: SearchDockPanelProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
   const [scope, setScope] = useState<"file" | "project">(activeFileId ? "file" : "project")
@@ -121,8 +139,17 @@ export function SearchDockPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // A panel's worth per keystroke, so typing costs what it always did. The
+  // list is cut there and the count line says so; the expanded results and the
+  // full dialog are where the rest is read.
+  const panelLimit = resultsExpanded ? SEARCH_FULL_LIMIT : SEARCH_PANEL_LIMIT
+
   const handleSearch = useCallback(
-    (q: string, flags: FindToggles) => {
+    (
+      q: string,
+      flags: FindToggles,
+      over: { scope?: "file" | "project"; limit?: number } = {},
+    ) => {
       if (!q.trim()) {
         onClearResults()
         return
@@ -132,17 +159,37 @@ export function SearchDockPanel({
         return
       }
       onSearch(q, {
-        ...(scope === "file" && activeFileId ? { fileId: activeFileId } : {}),
+        ...((over.scope ?? scope) === "file" && activeFileId ? { fileId: activeFileId } : {}),
+        limit: over.limit ?? panelLimit,
         ...(flags.caseSensitive ? { caseSensitive: true } : {}),
         ...(flags.matchWord ? { matchWord: true } : {}),
         ...(flags.useRegexp ? { useRegexp: true } : {}),
       })
     },
-    [onSearch, onClearResults, scope, activeFileId],
+    [onSearch, onClearResults, scope, activeFileId, panelLimit],
   )
 
   function searchWith(flags: FindToggles) {
     handleSearch(query, flags)
+  }
+
+  // The count line is about the scope it sits under, so the list follows the
+  // toggle instead of waiting for the next keystroke.
+  function handleScopeChange(next: "file" | "project") {
+    setScope(next)
+    handleSearch(query, find, { scope: next })
+  }
+
+  const shown = Math.min(results.length, SEARCH_PANEL_LIMIT)
+  const total = Math.max(totalProp ?? results.length, results.length)
+  const more = total - shown
+  const cut = more > 0 || totalIsLowerBound
+
+  function handleExpandResults() {
+    onExpandResults?.(query)
+    // "Expand all" has to hold more than the panel does. Skipped when the
+    // search is already whole, or already as long as one search gets.
+    if (cut && results.length < SEARCH_FULL_LIMIT) handleSearch(query, find, { limit: SEARCH_FULL_LIMIT })
   }
 
   function handleQueryChange(q: string) {
@@ -217,7 +264,7 @@ export function SearchDockPanel({
             { label: t("common.file"), value: "file", disabled: !activeFileId },
             { label: t("common.project"), value: "project" },
           ]}
-          onValueChange={setScope}
+          onValueChange={handleScopeChange}
         />
 
         {/* Open full panel */}
@@ -309,16 +356,19 @@ export function SearchDockPanel({
             <CommandGroup>
               {onExpandResults && (
                 <div className="flex items-center justify-between pb-0.5 pt-0.5">
-                  <span className="px-2 text-[10px] text-muted-foreground">
-                    {t("search.resultCount", {
-                      count: results.length,
-                    })}
+                  <span className="px-2 text-[10px] tabular-nums text-muted-foreground">
+                    {cut
+                      ? t(totalIsLowerBound ? "search.resultCountOfAtLeast" : "search.resultCountOf", {
+                          shown: formatCount(shown, locale),
+                          total: formatCount(total, locale),
+                        })
+                      : t("search.resultCount", { count: results.length })}
                   </span>
                   {/* Its words name it: no hover (AQU-2260). */}
                   <button
                     type="button"
                     aria-label={t("search.dock.expandAllAriaLabel")}
-                    onClick={() => onExpandResults(query)}
+                    onClick={handleExpandResults}
                     className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
                     <Maximize2 className="h-2.5 w-2.5" />
@@ -326,7 +376,7 @@ export function SearchDockPanel({
                   </button>
                 </div>
               )}
-              {results.slice(0, 50).map((r) => (
+              {results.slice(0, SEARCH_PANEL_LIMIT).map((r) => (
                 <CommandItem
                   key={`${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`}
                   value={`${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`}
@@ -348,10 +398,12 @@ export function SearchDockPanel({
                   ) : null}
                 </CommandItem>
               ))}
-              {results.length > 50 && (
-                <CommandEmpty>
-                  {t("search.dock.moreResults", { count: results.length - 50 })}
-                </CommandEmpty>
+              {cut && (
+                <p className="px-1.5 py-2 text-center text-[10px] text-muted-foreground" role="status">
+                  {more > 0 && !totalIsLowerBound
+                    ? t("search.dock.moreResults", { count: formatCount(more, locale) })
+                    : t("search.dock.moreResultsUncounted")}
+                </p>
               )}
             </CommandGroup>
           )}

@@ -9,9 +9,10 @@
  * These tests verify intent, not just wiring.
  */
 
+import { useState } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { ParallelPassagesPanel, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { ParallelPassagesPanel, type ParallelPanelMode, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import { expectDisabledNote } from "@/test-utils/tooltip"
 import { toast } from "@/components/ui/toast"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -71,7 +72,7 @@ describe("ParallelPassagesPanel — smoke", () => {
   it("renders the dialog open without crashing", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { level: 1, name: "Search and replace" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Find & replace" })).toBeInTheDocument()
   })
 
   it("puts the replace field with the notes under it, and does not add a second diff list", () => {
@@ -306,7 +307,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "XX" },
     })
 
-    expect(screen.getByText(/1 match.*skipped.*html tag boundary/i)).toBeInTheDocument()
+    expect(screen.getByText(/1 match.*skipped.*crosses formatting tags/i)).toBeInTheDocument()
   })
 
   it("does not show skip note when no HTML-spanning matches exist", () => {
@@ -320,7 +321,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "hi" },
     })
 
-    expect(screen.queryByText(/html tag boundary/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/formatting tags/i)).not.toBeInTheDocument()
   })
 })
 
@@ -557,9 +558,9 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
       target: { value: "prova" },
     })
 
-    const option = screen.getByRole("option", { name: /genesis . target/i })
-    const targetLabel = within(option).getByText("Target")
-    const sourceLabel = within(option).getByText("Source")
+    const option = screen.getByRole("option", { name: /genesis . translation/i })
+    const targetLabel = within(option).getByText("Translation")
+    const sourceLabel = within(option).getByText("Source text")
     expect(targetLabel.compareDocumentPosition(within(option).getByText("teste")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(sourceLabel.compareDocumentPosition(within(option).getByText("test of content")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(targetLabel.compareDocumentPosition(sourceLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -605,16 +606,16 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
 
     const sideTabs = screen.getByRole("tablist", { name: /content side/i })
     expect(within(sideTabs).getByRole("tab", { name: "Both" })).toHaveAttribute("aria-disabled", "true")
-    expect(within(sideTabs).getByRole("tab", { name: "Source" })).toHaveAttribute("aria-disabled", "true")
-    expect(within(sideTabs).getByRole("tab", { name: "Target" })).toHaveAttribute("aria-selected", "true")
-    const option = screen.getByRole("option", { name: /genesis \(1 of 2\).*source/i })
+    expect(within(sideTabs).getByRole("tab", { name: "Source text" })).toHaveAttribute("aria-disabled", "true")
+    expect(within(sideTabs).getByRole("tab", { name: "Translation" })).toHaveAttribute("aria-selected", "true")
+    const option = screen.getByRole("option", { name: /genesis \(1 of 2\).*source text/i })
     expect(option.className).toContain("hover:bg-accent/40")
     expect(option.className).toContain("data-selected:bg-transparent")
     expect(option.className).not.toMatch(/data-selected:bg-accent/)
-    expect(screen.getByText(/source match — not replaced/i)).toBeInTheDocument()
-    expect(screen.getByRole("option", { name: /genesis \(1 of 2\).*source/i })).toBeInTheDocument()
+    expect(screen.getByText(/source text match — not replaced/i)).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /genesis \(1 of 2\).*source text/i })).toBeInTheDocument()
     expect(
-      screen.getByText(/replace changes target text only/i),
+      screen.getByText(/replace changes the translation only/i),
     ).toBeInTheDocument()
   })
 
@@ -623,7 +624,7 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
     render(<ParallelPassagesPanel {...baseProps({ mode: "search", onSearch })} />)
 
     fireEvent.change(screen.getByPlaceholderText(/search project/i), { target: { value: "content" } })
-    fireEvent.click(screen.getByRole("tab", { name: "Source" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Source text" }))
 
     expect(onSearch).toHaveBeenCalledWith(
       "content",
@@ -753,5 +754,129 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
         expect.objectContaining({ caseSensitive: true }),
       ),
     )
+  })
+
+  it("shows match case, whole word, and regexp only in Replace, and Search ignores them", async () => {
+    const onSearch = vi.fn()
+    const seeded = render(
+      <ParallelPassagesPanel
+        {...baseProps({
+          mode: "search",
+          onSearch,
+          initialQuery: "hello",
+          initialFind: { caseSensitive: true, matchWord: true, useRegexp: true },
+        })}
+      />,
+    )
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Match whole word" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Use regular expression" })).not.toBeInTheDocument()
+    await waitFor(() => expect(onSearch).toHaveBeenCalled())
+    const seededOpts = onSearch.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(seededOpts).not.toHaveProperty("caseSensitive")
+    expect(seededOpts).not.toHaveProperty("matchWord")
+    expect(seededOpts).not.toHaveProperty("useRegexp")
+    seeded.unmount()
+
+    onSearch.mockClear()
+    render(<ReplaceThenSearch onSearch={onSearch} />)
+    fireEvent.change(getFindInput(), { target: { value: "hello" } })
+    fireEvent.click(screen.getByRole("button", { name: "Match case" }))
+    fireEvent.click(screen.getByRole("button", { name: "Match whole word" }))
+    fireEvent.click(screen.getByRole("button", { name: "Use regular expression" }))
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        "hello",
+        expect.objectContaining({ caseSensitive: true, matchWord: true, useRegexp: true }),
+      ),
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Search" }))
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+    await waitFor(() => expect(onSearch).toHaveBeenLastCalledWith("hello", expect.any(Object)))
+    const searchOpts = onSearch.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(searchOpts).not.toHaveProperty("caseSensitive")
+    expect(searchOpts).not.toHaveProperty("matchWord")
+    expect(searchOpts).not.toHaveProperty("useRegexp")
+
+    fireEvent.click(screen.getByRole("tab", { name: "Passages" }))
+    expect(screen.queryByRole("button", { name: "Match case" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Replace" }))
+    expect(screen.getByRole("button", { name: "Match case" })).toHaveAttribute("aria-pressed", "true")
+    await waitFor(() =>
+      expect(onSearch).toHaveBeenLastCalledWith(
+        "hello",
+        expect.objectContaining({ caseSensitive: true, matchWord: true, useRegexp: true }),
+      ),
+    )
+  })
+})
+
+function ReplaceThenSearch({
+  onSearch,
+}: {
+  onSearch: NonNullable<Parameters<typeof ParallelPassagesPanel>[0]["onSearch"]>
+}) {
+  const [mode, setMode] = useState<ParallelPanelMode>("replace")
+  return (
+    <ParallelPassagesPanel
+      {...baseProps({ mode, onModeChange: setMode, onSearch })}
+    />
+  )
+}
+
+// AQU-2732: the dialog is where the side panel sends people "for all results"
+// and the list Replace works from. It drew 50 and said nothing of the rest, so
+// Replace all changed the first 50 cells of a term and looked finished.
+describe("ParallelPassagesPanel — a cut list says so (AQU-2732)", () => {
+  const listed = [
+    makeResult({ cellId: "c1", translated: "the temple gate" }),
+    makeResult({ cellId: "c2", translated: "the temple court" }),
+  ]
+
+  it("asks for the most one search returns, in every mode", () => {
+    const onSearch = vi.fn()
+    const onSearchPassages = vi.fn()
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", onSearch, onSearchPassages })} />)
+    fireEvent.change(screen.getByPlaceholderText(/search project/i), { target: { value: "temple" } })
+    fireEvent.keyDown(screen.getByPlaceholderText(/search project/i), { key: "Enter" })
+    expect(onSearch).toHaveBeenLastCalledWith("temple", expect.objectContaining({ limit: 500 }))
+
+    fireEvent.click(screen.getByRole("tab", { name: "Replace" }))
+    expect(onSearch).toHaveBeenLastCalledWith("temple", expect.objectContaining({ limit: 500, side: "target" }))
+
+    fireEvent.click(screen.getByRole("tab", { name: "Passages" }))
+    expect(onSearchPassages).toHaveBeenLastCalledWith("temple", { limit: 500 })
+  })
+
+  it.each(["search", "passages"] as const)("says the %s list is the first of more", (mode) => {
+    render(<ParallelPassagesPanel {...baseProps({ mode, results: listed, total: 596 })} />)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Showing first 2 of 596 matches — narrow the search to see more",
+    )
+    expect(screen.getByText("2 of 596")).toBeInTheDocument()
+  })
+
+  it("says before Replace is pressed how many cells it changes and how many it cannot reach", () => {
+    render(<ParallelPassagesPanel {...baseProps({ results: listed, total: 596 })} />)
+    fireEvent.change(getFindInput(), { target: { value: "temple" } })
+    fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), { target: { value: "house" } })
+
+    expect(getApplyButton()).toHaveTextContent("Replace 2 cells")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Only the first 2 of 596 matching cells are in this list. Replace changes cells in this list only; the other 594 will not change.",
+    )
+  })
+
+  it("leaves the count unsaid when the total is only a floor", () => {
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", results: listed, total: 2, totalIsLowerBound: true })} />)
+    expect(screen.getByRole("status")).toHaveTextContent("Showing first 2 matches — narrow the search to see more")
+  })
+
+  it("says nothing when the list is all of them", () => {
+    render(<ParallelPassagesPanel {...baseProps({ mode: "search", results: listed, total: 2 })} />)
+    expect(screen.queryByRole("status")).toBeNull()
+    expect(screen.getByText("2 results")).toBeInTheDocument()
   })
 })

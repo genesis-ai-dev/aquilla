@@ -6,6 +6,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import {
   MenuGroup,
   MenuItem,
+  MenuItemDisabledWithReason,
   MenuSeparator,
 } from "@/components/ui/menu-parts"
 
@@ -17,8 +18,18 @@ interface FileActionMenuProps {
   /** Opens the Export dialog for this file. Always shown — the dialog
    *  explains the block when org policy forbids export (AQU-253). */
   onExport?: () => void
-  /** AQU-656: mint a token on click, then download the imported bytes. */
+  /**
+   * AQU-656: mint a token on click, then download the imported bytes.
+   * Omit both this and `downloadOriginalDisabledReason` when the file has
+   * no stored original.
+   */
   onDownloadOriginal?: () => void
+  /**
+   * AQU-2476: below the export floor the row stays and is disabled, with
+   * this reason behind its (i). Nothing runs on click. Takes precedence
+   * over `onDownloadOriginal`.
+   */
+  downloadOriginalDisabledReason?: string
   /** Opens Assign work scoped to this file. Hidden when the caller
    *  cannot open the assign UI. */
   onAssignWork?: () => void
@@ -59,7 +70,8 @@ export interface FileReorderActions {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onExport, onDownloadOriginal, onAssignWork,
+  onShowDetails, onRename, onMove, onExport, onDownloadOriginal,
+  downloadOriginalDisabledReason, onAssignWork,
   onSegmentation, onReimport, onUploadRecordings, onDelete, reorder,
 }: FileActionMenuProps) {
   const t = useT()
@@ -112,11 +124,18 @@ export function FileActionMenu({
             <Download /> {t("nav.workspaceActions.export")}
           </MenuItem>
         )}
-        {onDownloadOriginal && (
+        {downloadOriginalDisabledReason ? (
+          <MenuItemDisabledWithReason
+            label={t("fileDetails.downloadOriginal")}
+            reason={downloadOriginalDisabledReason}
+          >
+            <Download /> {t("fileDetails.downloadOriginal")}
+          </MenuItemDisabledWithReason>
+        ) : onDownloadOriginal ? (
           <MenuItem onClick={onDownloadOriginal}>
             <Download /> {t("fileDetails.downloadOriginal")}
           </MenuItem>
-        )}
+        ) : null}
       </MenuGroup>
       {onDelete && (
         <>

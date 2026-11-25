@@ -105,7 +105,7 @@ describe("uploadSourceOriginal", () => {
       getToken: async () => "tok", fetchFn: fetchFn as typeof fetch,
       baseUrl: "https://sync.test", signal: controller.signal,
       retryDelaysMs: [0, 0],
-    })).rejects.toThrow("Import cancelled")
+    })).rejects.toThrow("Import canceled")
     expect(fetchFn).toHaveBeenCalledOnce()
   })
 
@@ -385,7 +385,7 @@ describe("source upload refusal messages", () => {
       () => { throw new Error("expected the binding to fail") },
       (e: Error) => e,
     )
-    expect(err.message).toMatch(/^Artifact binding failed: That item no longer exists/)
+    expect(err.message).toMatch(/^Couldn't attach original file: That item no longer exists/)
     expect(err.cause).toMatch(/404.*artifact not found/)
   })
 })

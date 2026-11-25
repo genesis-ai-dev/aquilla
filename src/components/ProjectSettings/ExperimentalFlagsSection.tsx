@@ -11,6 +11,10 @@
 //     what was wrong: every member of every project was one click from
 //     revealing an experiment, and the choice never left their browser.
 //
+//   • Smart Extensions and Smart edits are project-wide and server-stored the
+//     same way, at the ordinary settings floor (maintainer). Smart edits are
+//     the one switch here that is ON unless someone turns it off.
+//
 //   • Everything from the `src/lib/features/flags.ts` registry stays
 //     DEVICE-LOCAL: it lives on the IDB project record, never in
 //     ProjectWideSettings, so switching one on here never changes a
@@ -40,6 +44,8 @@ export function ExperimentalFlagsSection({
   onSetAutopilotEnabled,
   smartExtensionsEnabled,
   onSetSmartExtensionsEnabled,
+  smartEditsEnabled,
+  onSetSmartEditsEnabled,
 }: {
   projectId: string
   /** Server-hydrated record from the parent's read hook. Used only to upsert
@@ -59,6 +65,9 @@ export function ExperimentalFlagsSection({
   /** AQU-1937: the project-wide Smart Extensions switch (Maintainer+). */
   smartExtensionsEnabled?: boolean
   onSetSmartExtensionsEnabled?: (enabled: boolean) => void
+  /** The project-wide smart edits switch (Maintainer+). Absent → on. */
+  smartEditsEnabled?: boolean
+  onSetSmartEditsEnabled?: (enabled: boolean) => void
 }) {
   const { t } = useI18n()
   // Tagged with the project they belong to: the settings route reuses this
@@ -113,6 +122,9 @@ export function ExperimentalFlagsSection({
   const canToggleExtensions = Boolean(onSetSmartExtensionsEnabled)
     && (roleLevel == null || roleLevel >= SETTINGS_EDIT_ROLE_FLOOR)
 
+  const canToggleSmartEdits = Boolean(onSetSmartEditsEnabled)
+    && (roleLevel == null || roleLevel >= SETTINGS_EDIT_ROLE_FLOOR)
+
   // Legacy registry entries are read-only grandfathers — never offered as a
   // toggle (see the module header).
   const deviceFlags = Object.entries(FLAGS).filter(([, def]) => !def.legacy)
@@ -152,6 +164,22 @@ export function ExperimentalFlagsSection({
                 onCheckedChange={(checked) => onSetSmartExtensionsEnabled?.(checked)}
                 aria-label={t("extensions.flag.label")}
                 data-testid="smart-extensions-switch"
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          saveId="smartEditsEnabled"
+          label={<label htmlFor="experimental-smart-edits">{t("smartEdits.flagLabel")}</label>}
+          description={t("smartEdits.flagDescription")}
+          control={
+            <DisabledFieldTooltip disabled={!canToggleSmartEdits} tooltip={t("smartEdits.flagRoleHint")}>
+              <Switch
+                id="experimental-smart-edits"
+                checked={smartEditsEnabled ?? true}
+                disabled={!canToggleSmartEdits}
+                onCheckedChange={(checked) => onSetSmartEditsEnabled?.(checked)}
+                aria-label={t("smartEdits.flagLabel")}
               />
             </DisabledFieldTooltip>
           }

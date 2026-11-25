@@ -86,6 +86,8 @@ export interface OverviewLaneTableProps {
   projectId: string
   /** Display name for the staffing grant sentence. */
   projectName?: string | null
+  /** Org display name for the staffing scope title. */
+  orgName?: string | null
   /** Org that owns the project — for StaffLanePopover's roster + AssignModal. */
   orgId: number | null
   jwt: string | null
@@ -248,6 +250,7 @@ function LaneProgressBar({ lane, dimmed = false }: {
 export function OverviewLaneTable({
   projectId,
   projectName,
+  orgName,
   orgId,
   jwt,
   lanes,
@@ -476,6 +479,7 @@ export function OverviewLaneTable({
                     laneId={row.original.laneId}
                     laneLabel={label}
                     projectName={projectName}
+                    orgName={orgName}
                     orgId={orgId}
                     anchorOnly
                     open={staffLane === laneStaffKey(row.original)}
@@ -510,6 +514,7 @@ export function OverviewLaneTable({
       showText,
       onChanged,
       orgId,
+      orgName,
       projectId,
       projectName,
       refreshMembers,

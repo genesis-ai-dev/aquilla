@@ -1015,17 +1015,21 @@ textarea,
 }
 
 /* Display-only IDML emphasis. Applied at render from data-idml-character-style
-   — never persisted, never editable. Bold and italic only. */
+   — never persisted, never editable. Bold, italic, and small caps.
+   all-small-caps shrinks capitals too, so SENHOR drawn in the divine-name
+   run still reads as small caps. Export writes the InDesign character style. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+.idml-style-small-caps { font-variant-caps: all-small-caps; }
 
-/* Visible style segments: only bold and italic runs are blocks. Consecutive
-   plain runs are one typing space. An empty plain run shows a single faint
-   "Regular" on its first slot, with no box; the plain slots after it add
-   neither another word nor a gap. An empty bold or italic run shows its own
-   faint label until the translator types. Labels are not document text. */
+/* Visible style segments: bold, italic, and small-caps runs are blocks.
+   Consecutive plain runs are one typing space. An empty plain run shows a
+   single faint "Regular" on its first slot, with no box; the plain slots
+   after it add neither another word nor a gap. An empty styled run shows
+   its own faint label until the translator types. Labels are not document text. */
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps {
   border-radius: 0.2em;
   padding-inline: 0.18em;
   margin-inline: 1px;
@@ -1038,14 +1042,16 @@ textarea,
   background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
 }
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps[data-style-segment-empty] {
   display: inline-block;
   min-height: 1.15em;
   vertical-align: baseline;
 }
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps:not(.idml-style-bold):not(.idml-style-italic)[data-style-segment-empty]::before {
   color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
   pointer-events: none;
   user-select: none;
@@ -1059,8 +1065,12 @@ textarea,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
   content: var(--aq-style-label-bold-italic, "Bold italic");
 }
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps:not(.idml-style-bold):not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-small-caps, "Small caps");
+}
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps.idml-segment-caret {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
 }
 [data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
@@ -1082,8 +1092,8 @@ textarea,
 }
 
 /* While style segments are visible, a placed translation is adjusted by
-   dragging the side of a bold or italic box, the way a window is resized.
-   The bar is the grab. The resize cursor is set on the slot itself. */
+   dragging the side of a bold, italic, or small-caps box, the way a window
+   is resized. The bar is the grab. The resize cursor is set on the slot itself. */
 [data-segment-edge-mode] {
   user-select: none;
   -webkit-user-select: none;
@@ -1204,3 +1214,26 @@ textarea,
 @utility role-rung-5-edge { border-color: var(--role-rung-5); }
 @utility role-rung-6-edge { border-color: var(--role-rung-6); }
 @utility role-rung-7-edge { border-color: var(--role-rung-7); }
+
+/*
+ * Dropdown rows stay plain until the keyboard moves the highlight
+ * (data-plain-until-key, set by plain-until-keyboard.tsx). The pointer still
+ * gets the same wash the notification inbox uses. Unlayered so it wins over
+ * the focus / data-highlighted utilities while the popup is held plain.
+ * An open submenu row (data-open / data-popup-open) keeps its path highlight.
+ */
+[data-plain-until-key] :is(
+  [data-slot="menu-item"],
+  [data-slot="menu-checkbox-item"],
+  [data-slot="menu-radio-item"],
+  [data-slot="menu-sub-trigger"],
+  [data-slot="select-item"],
+  [data-slot="combobox-item"],
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="menuitemradio"]
+):is(:focus, [data-highlighted]):not(:hover, [data-open], [data-popup-open]) {
+  background-color: transparent;
+  color: inherit;
+}

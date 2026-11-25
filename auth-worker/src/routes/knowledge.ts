@@ -11,9 +11,13 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type Env } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
+import {
+  roleWithoutUnelevatedAdmin,
+  orgLevelWithoutUnelevatedAdmin,
+} from "../services/elevation-gate"
 import { DocumentExtractionError, extractTextFromDocx, startsAsPdf } from "./parse-document"
-import { declaresOversizeBody } from "../../../shared/http-body-limit"
 import { shipLog } from "../posthog-logs"
+import { declaresOversizeBody, readBytesWithLimit } from "../../../shared/http-body-limit"
 import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-doc"
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
@@ -84,7 +88,12 @@ function kbContentTypeForExtension(fileName: string): string {
 }
 
 type ExtractResult =
-  | { ok: true; text: string }
+  | {
+      ok: true
+      text: string
+      /** Only the first MAX_KB_TEXT_CHARS of the document's text was kept. */
+      truncated: boolean
+    }
   | {
       ok: false
       code: ErrorCode
@@ -148,7 +157,11 @@ function extractText(fileName: string, bytes: Uint8Array, pdfText: string | null
       status: 422,
     }
   }
-  return { ok: true, text: text.slice(0, MAX_KB_TEXT_CHARS) }
+  return {
+    ok: true,
+    text: text.slice(0, MAX_KB_TEXT_CHARS),
+    truncated: text.length > MAX_KB_TEXT_CHARS,
+  }
 }
 
 /** Fire-and-forget a background task off c.executionCtx.waitUntil when there
@@ -380,6 +393,25 @@ async function readPdfUpload(
  *  server-to-server route the Agent API bridges through (routes/
  *  knowledge-internal.ts, AQU-1762) runs exactly this, rather than forking a
  *  second uploader that would strand its docs at index_status 'pending'. */
+/**
+ * OPS-59: the numeric writer for a propagation's bookkeeping write.
+ *
+ * `project_settings.updated_by` is BIGINT, so this must NOT be the username
+ * that `knowledge_docs.created_by` (TEXT) takes — that mismatch is the whole
+ * finding. Two kinds of caller reach {@link handleUpload}: the in-app routes,
+ * which carry an authenticated session, and `routes/knowledge-internal.ts`,
+ * a shared-secret server-to-server route that has no session at all and names
+ * its principal in `x-acting-user-id` instead. Reading the session
+ * unconditionally would throw on the second. `settingsWriterId` coerces
+ * whatever comes back, so an unreadable value costs the attribution, not the
+ * write.
+ */
+function propagationWriterId(c: Context<AuthHonoEnv>): number | string | null {
+  const sessionUser = c.get("user") as AuthHonoEnv["Variables"]["user"] | undefined
+  if (sessionUser) return sessionUser.id
+  return c.req.header("x-acting-user-id")?.trim() ?? null
+}
+
 export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
@@ -422,12 +454,25 @@ export async function handleUpload(
     bytes = read.bytes
     pdfText = read.text
   } else {
-    bytes = new Uint8Array(await c.req.arrayBuffer())
+    // AQU-2594: read through the cap (AQU-1858's reader), not whole and then
+    // measured: a chunked body could otherwise hold the platform's 100 MB+
+    // request limit in a 128 MB isolate.
+    const upload = await readBytesWithLimit(c.req.raw.headers, c.req.raw.body, MAX_KB_ORIGINAL_BYTES)
+    if (!upload.ok) {
+      const { body, status } = errorJson(
+        "validation_failed",
+        `file exceeds the ${MAX_KB_ORIGINAL_BYTES}-byte limit`,
+        400,
+      )
+      return c.json(body, status)
+    }
+    bytes = upload.bytes
   }
   if (bytes.byteLength === 0) {
     const { body, status } = errorJson("validation_failed", "uploaded file is empty", 400)
     return c.json(body, status)
   }
+  // A PDF's form is capped at MAX_KB_PDF_FORM_BYTES; its original has its own cap.
   if (bytes.byteLength > MAX_KB_ORIGINAL_BYTES) {
     const { body, status } = errorJson(
       "validation_failed",
@@ -515,8 +560,12 @@ export async function handleUpload(
   const doc = await getDocMeta(c.env.AQUILLA_PG, id)
   if ("projectId" in scope) {
     try {
+      // OPS-59: `createdBy` is a USERNAME (it feeds the TEXT
+      // knowledge_docs.created_by column); project_settings.updated_by is
+      // BIGINT, so the propagation's bookkeeping write must carry the numeric
+      // user id or it fails and knowledgeDocCopies is never recorded.
       await propagateKnowledgeDocs(c.env.AQUILLA_PG, scope.projectId, {
-        updatedBy: createdBy,
+        updatedBy: propagationWriterId(c),
         blobs: bucket,
         r2KeyPrefix: c.env.R2_KEY_PREFIX,
       })
@@ -525,7 +574,9 @@ export async function handleUpload(
     }
   }
 
-  return c.json({ doc }, 201)
+  // AQU-2594: say when only the first part of the text was kept, so the
+  // uploader is told rather than handed a silently shorter document.
+  return c.json(extracted.truncated ? { doc, textTruncated: true } : { doc }, 201)
 }
 
 async function handleDelete(
@@ -546,8 +597,10 @@ async function handleDelete(
   if (bucket) await bucket.delete(meta.r2Key).catch(() => {})
   if (meta.projectId) {
     try {
+      // OPS-59: meta.createdBy is a username; this write needs the numeric
+      // id, and the actor deleting is the correct attribution regardless.
       await propagateKnowledgeDocs(c.env.AQUILLA_PG, meta.projectId, {
-        updatedBy: meta.createdBy,
+        updatedBy: propagationWriterId(c),
         blobs: bucket ?? null,
         r2KeyPrefix: c.env.R2_KEY_PREFIX,
       })
@@ -612,6 +665,68 @@ async function requireRole(
   return { ok: true }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// OPS-58 (2026-11-23). `requireRole` above resolves a role a platform operator
+// wins outright: resolveProjectRole contributes { source: "platform", level:
+// 700 } for every ADMIN_EMAILS / platform_admins operator, and this router's
+// write floor is ROLE.PROJECT_LEAD (500), so the floor was cleared by the
+// admin contribution's own value on every project on the platform, with no
+// elevation asserted and no genuine grant required.
+//
+// Why a knowledge doc is not "one more un-gated write":
+//
+//   * It is RETRIEVED CONTENT, not a setting. The text lands in
+//     knowledge_docs.extracted_text and comes back out through searchKnowledge
+//     and the section-tree reads, and extractStyleRulesFromDoc
+//     (src/lib/rules/style-rule-extractor.ts) feeds those sections to a
+//     completion that proposes the project's own style rules.
+//   * It REPLICATES ACROSS TENANTS. Both writes call propagateKnowledgeDocs
+//     (db/shared/inherited-settings.ts), whose listLiveDownstreams has no org
+//     predicate, so the row and its R2 blob are copied into every receiving
+//     downstream, transitively to MAX_CHAIN. The artefact outlives the
+//     authority that created it — OPS-44/49/51/53/56 a sixth time, and the
+//     first where the artefact makes copies of itself.
+//   * The DELETE is irreversible: it drops the row and then the R2 original,
+//     which is the tenant's only copy.
+//
+// So: strip platform power unless the session is elevated, then re-apply this
+// route's own floor to what genuinely remains (the OPS-53 / OPS-56 shape). An
+// operator who genuinely leads the project is unaffected.
+//
+// The READS deliberately keep using `requireRole`: AQU-2003 priced un-elevated
+// platform access as read-only on our own content, not refused, and 11-09 and
+// 11-16 left their reads open on the same grounds.
+async function requireWriteRole(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  floor: number,
+  /** Spliced into the 403 as "elevation required to ${action} with …". */
+  action: string,
+): Promise<{ ok: true } | { ok: false; res: Response }> {
+  const user = c.get("user")
+  const role = await resolveProjectRole(c.env, user, projectId)
+  // The genuine floor is checked first so a contributor's refusal stays
+  // byte-identical to the pre-OPS-58 wording.
+  if (!role || role.level < floor) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      "you do not have sufficient access on this project",
+      403,
+    )
+    return { ok: false, res: c.json(body, status) }
+  }
+  const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role)
+  if (!effective || effective.level < floor) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      `elevation required to ${action} with platform-admin access`,
+      403,
+    )
+    return { ok: false, res: c.json(body, status) }
+  }
+  return { ok: true }
+}
+
 /** A doc is visible from a project when it belongs to it or to its org. */
 async function projectVisibleDoc(
   c: Context<AuthHonoEnv>,
@@ -643,7 +758,8 @@ projectKnowledge.get("/:projectId/knowledge/search", authMiddleware, async (c) =
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
   const q = c.req.query("q") ?? ""
-  const limit = Math.min(Number.parseInt(c.req.query("limit") ?? "5", 10) || 5, 20)
+  // Clamped both ways: a negative `limit` reached Postgres `LIMIT` and 500'd.
+  const limit = Math.max(1, Math.min(Number.parseInt(c.req.query("limit") ?? "5", 10) || 5, 20))
   return c.json({ snippets: await searchKnowledge(c.env.AQUILLA_PG, projectId, q, limit) })
 })
 
@@ -698,7 +814,12 @@ projectKnowledge.get("/:projectId/knowledge/:docId/original", authMiddleware, as
 
 projectKnowledge.post("/:projectId/knowledge", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
-  const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+  const gate = await requireWriteRole(
+    c,
+    projectId,
+    ROLE.PROJECT_LEAD,
+    "upload a knowledge document to a project",
+  )
   if (!gate.ok) return gate.res
   const user = c.get("user")
   return handleUpload(c, { projectId }, user.username ?? String(user.id))
@@ -707,7 +828,12 @@ projectKnowledge.post("/:projectId/knowledge", authMiddleware, async (c) => {
 projectKnowledge.delete("/:projectId/knowledge/:docId", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const docId = c.req.param("docId") ?? ""
-  const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+  const gate = await requireWriteRole(
+    c,
+    projectId,
+    ROLE.PROJECT_LEAD,
+    "delete a project's knowledge document",
+  )
   if (!gate.ok) return gate.res
 
   return handleDelete(c, docId, (meta) => {
@@ -726,7 +852,12 @@ projectKnowledge.delete("/:projectId/knowledge/:docId", authMiddleware, async (c
 projectKnowledge.post("/:projectId/knowledge/:docId/reindex", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const docId = c.req.param("docId") ?? ""
-  const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+  const gate = await requireWriteRole(
+    c,
+    projectId,
+    ROLE.PROJECT_LEAD,
+    "reindex a project's knowledge document",
+  )
   if (!gate.ok) return gate.res
 
   const meta = await getDocMeta(c.env.AQUILLA_PG, docId)
@@ -774,6 +905,35 @@ async function requireOrgRole(
     return { ok: false, res: c.json(body, status) }
   }
   return { ok: true, role }
+}
+
+/**
+ * OPS-58, org twin of {@link requireWriteRole}. `getEffectiveOrgRole` returns
+ * Math.max(membership ?? 0, 700) for a platform operator and this router's
+ * write floor is ROLE.MAINTAINER (600), so the floor was cleared by platform
+ * power alone on every org on the platform. Strip it unless elevated, then
+ * re-apply the floor to the genuine membership row.
+ */
+async function requireOrgWriteRole(
+  c: Context<AuthHonoEnv>,
+  orgId: number,
+  floor: number,
+  /** Spliced into the 403 as "elevation required to ${action} with …". */
+  action: string,
+): Promise<{ ok: true; role: number } | { ok: false; res: Response }> {
+  const gate = await requireOrgRole(c, orgId, floor)
+  if (!gate.ok) return gate
+  const user = c.get("user")
+  const effective = await orgLevelWithoutUnelevatedAdmin(c, orgId, user, gate.role)
+  if (effective == null || effective < floor) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      `elevation required to ${action} with platform-admin access`,
+      403,
+    )
+    return { ok: false, res: c.json(body, status) }
+  }
+  return { ok: true, role: effective }
 }
 
 orgKnowledge.get("/:orgId/knowledge", authMiddleware, async (c) => {
@@ -851,7 +1011,12 @@ orgKnowledge.post("/:orgId/knowledge", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", "invalid org id", 400)
     return c.json(body, status)
   }
-  const gate = await requireOrgRole(c, orgId, ROLE.MAINTAINER)
+  const gate = await requireOrgWriteRole(
+    c,
+    orgId,
+    ROLE.MAINTAINER,
+    "upload a knowledge document to an organization",
+  )
   if (!gate.ok) return gate.res
   const user = c.get("user")
   return handleUpload(c, { orgId }, user.username ?? String(user.id))
@@ -863,7 +1028,12 @@ orgKnowledge.delete("/:orgId/knowledge/:docId", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", "invalid org id", 400)
     return c.json(body, status)
   }
-  const gate = await requireOrgRole(c, orgId, ROLE.MAINTAINER)
+  const gate = await requireOrgWriteRole(
+    c,
+    orgId,
+    ROLE.MAINTAINER,
+    "delete an organization's knowledge document",
+  )
   if (!gate.ok) return gate.res
   const docId = c.req.param("docId") ?? ""
 
@@ -882,7 +1052,12 @@ orgKnowledge.post("/:orgId/knowledge/:docId/reindex", authMiddleware, async (c) 
     const { body, status } = errorJson("validation_failed", "invalid org id", 400)
     return c.json(body, status)
   }
-  const gate = await requireOrgRole(c, orgId, ROLE.MAINTAINER)
+  const gate = await requireOrgWriteRole(
+    c,
+    orgId,
+    ROLE.MAINTAINER,
+    "reindex an organization's knowledge document",
+  )
   if (!gate.ok) return gate.res
   const docId = c.req.param("docId") ?? ""
   const meta = await getDocMeta(c.env.AQUILLA_PG, docId)

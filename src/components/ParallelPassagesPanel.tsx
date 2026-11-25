@@ -34,6 +34,7 @@ import {
 } from "../../db/shared/find-pattern"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatCount } from "@/lib/i18n/format"
+import { SEARCH_FULL_LIMIT } from "@/lib/sync/search-read-types"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { Replace, Search } from "lucide-react"
 import { toast } from "@/components/ui/toast"
@@ -87,10 +88,17 @@ interface ParallelPassagesPanelProps {
   loading?: boolean
   ready?: boolean
   results?: WorkspaceSearchResult[]
+  /**
+   * How many the search matched before the list was cut at the most one
+   * search returns (AQU-2732). Omitted reads as "the list is all of them".
+   */
+  total?: number
+  /** `total` is a floor: there are at least that many, and may be more. */
+  totalIsLowerBound?: boolean
   onReady?: () => void | Promise<void>
   onSearch?: (query: string, options: SearchOptions) => void | Promise<void>
   /** Called when in "passages" mode — routes to searchParallelPassages. */
-  onSearchPassages?: (query: string) => void
+  onSearchPassages?: (query: string, options?: { limit?: number }) => void
   onClear?: () => void
   /** Called by ProjectWorkspace to clear results (synonym for onClear). */
   onClearResults?: () => void
@@ -273,7 +281,7 @@ function SearchResultContent({
         <div className={showBothSides ? "mt-1 flex w-full flex-col gap-2 p-0" : "mt-1"}>
           {(!isSourceHit || showBothSides) && (
             <div className="min-w-0 p-0">
-              <div className="text-xs text-muted-foreground">{t("editor.column.target")}</div>
+              <div className="text-xs text-muted-foreground">{t("search.side.translation")}</div>
               <div className="mt-0.5 text-sm leading-snug">
                 {showInlineDiff ? (
                   <InlineReplacePreview
@@ -299,7 +307,7 @@ function SearchResultContent({
           )}
           {(isSourceHit || showBothSides) && (
             <div className="min-w-0 p-0">
-              <div className="text-xs text-muted-foreground">{t("editor.column.source")}</div>
+              <div className="text-xs text-muted-foreground">{t("search.side.sourceText")}</div>
               <div className="mt-0.5 text-sm leading-snug">
                 {sourceBody ? (
                   isSourceHit ? (
@@ -526,6 +534,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     activeFileName,
     loading = false,
     results = [],
+    total: totalProp,
+    totalIsLowerBound = false,
     onSearch,
     onSearchPassages,
     onClear,
@@ -585,11 +595,20 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         clearResults?.()
         return
       }
+      // This is the surface the side panel sends people to "for all results",
+      // and the list Replace works from: it asks for the most one search
+      // returns, and says so below when even that is not all of them.
       if (currentMode === "passages") {
-        onSearchPassages?.(q)
+        onSearchPassages?.(q, { limit: SEARCH_FULL_LIMIT })
         return
       }
-      if (findPatternError(q, { matchCase: flags.caseSensitive, wholeWord: flags.matchWord, useRegexp: flags.useRegexp })) {
+      // Match case, whole word, and regular expression are a Replace control.
+      // Search keeps a plain query even when those flags are still set from
+      // Replace or were seeded by the dock.
+      const effectiveFlags = currentMode === "replace"
+        ? flags
+        : { caseSensitive: false, matchWord: false, useRegexp: false }
+      if (findPatternError(q, { matchCase: effectiveFlags.caseSensitive, wholeWord: effectiveFlags.matchWord, useRegexp: effectiveFlags.useRegexp })) {
         clearResults?.()
         return
       }
@@ -598,9 +617,10 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         scope: currentScope === "file" ? "file" : "project",
         fileId: currentScope === "file" ? (activeFileId ?? undefined) : undefined,
         side: searchSide === "both" ? undefined : searchSide,
-        ...(flags.caseSensitive ? { caseSensitive: true } : {}),
-        ...(flags.matchWord ? { matchWord: true } : {}),
-        ...(flags.useRegexp ? { useRegexp: true } : {}),
+        limit: SEARCH_FULL_LIMIT,
+        ...(effectiveFlags.caseSensitive ? { caseSensitive: true } : {}),
+        ...(effectiveFlags.matchWord ? { matchWord: true } : {}),
+        ...(effectiveFlags.useRegexp ? { useRegexp: true } : {}),
       }
       return onSearch?.(q, opts)
     },
@@ -683,12 +703,19 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       : t("search.dialog.scopeEntireProject")
 
   const patternError =
-    mode !== "passages" && query.trim() !== ""
+    mode === "replace" && query.trim() !== ""
       ? findPatternError(query, replaceOptions)
       : null
 
   const isEmpty = !loading && results.length === 0 && query.trim() !== "" && !patternError
   const isIdle = !loading && results.length === 0 && query.trim() === ""
+
+  // The list is cut at the most one search returns. `total` is what matched
+  // before the cut; past it nothing here can be seen, or replaced.
+  const total = Math.max(totalProp ?? results.length, results.length)
+  const notListed = total - results.length
+  const cut = !loading && results.length > 0 && (notListed > 0 || totalIsLowerBound)
+  const listedCount = formatCount(results.length, locale)
 
   const replaceDraft = useCellReplaceDraft({
     query,
@@ -781,8 +808,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             aria-label={t("search.dialog.contentSideLabel")}
             options={[
               { label: t("search.side.both"), value: "both", disabled: mode === "replace" },
-              { label: t("editor.column.source"), value: "source", disabled: mode === "replace" },
-              { label: t("editor.column.target"), value: "target" },
+              { label: t("search.side.sourceText"), value: "source", disabled: mode === "replace" },
+              { label: t("search.side.translation"), value: "target" },
             ]}
             onValueChange={handleSideChange}
           />
@@ -799,7 +826,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               aria-busy={loading}
               aria-invalid={patternError ? true : undefined}
               trailing={
-                mode === "passages" ? undefined : (
+                mode === "replace" ? (
                   <FindOptionToggles
                     matchCase={matchCase}
                     wholeWord={wholeWord}
@@ -808,7 +835,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                     onWholeWordChange={(next) => handleFindChange({ ...find, matchWord: next })}
                     onUseRegexpChange={(next) => handleFindChange({ ...find, useRegexp: next })}
                   />
-                )
+                ) : undefined
               }
             />
           </div>
@@ -848,6 +875,20 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             {replaceDraft.totalSkipped > 0 && (
               <p className="text-sm text-amber-600 dark:text-amber-400" role="note">
                 {t("search.replace.skippedNotice", { count: replaceDraft.totalSkipped })}
+              </p>
+            )}
+            {/* Said before the button is pressed: Replace reaches the list,
+                and the list is not every match (AQU-2732). How many cells it
+                changes is the button's own label. */}
+            {cut && (
+              <p className="text-sm text-amber-600 dark:text-amber-400" role="status">
+                {totalIsLowerBound
+                  ? t("search.replace.cutNoticeUncounted", { shown: listedCount })
+                  : t("search.replace.cutNotice", {
+                      shown: listedCount,
+                      total: formatCount(total, locale),
+                      remaining: formatCount(notListed, locale),
+                    })}
               </p>
             )}
             <div className="flex items-center justify-between gap-2">
@@ -896,6 +937,14 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           </div>
         )}
 
+        {cut && mode !== "replace" && (
+          <p className="shrink-0 text-sm text-muted-foreground" role="status">
+            {totalIsLowerBound
+              ? t("search.cap.showingFirst", { shown: listedCount })
+              : t("search.cap.showingFirstOf", { shown: listedCount, total: formatCount(total, locale) })}
+          </p>
+        )}
+
         <div className="-ms-2 -me-4 flex min-h-0 flex-1 flex-col overflow-hidden">
         <CommandList className="max-h-none min-h-0 flex-1 overflow-y-auto overscroll-contain pe-4 scrollbar-thin">
           {loading && <ResultsLoadingSkeleton t={t} />}
@@ -928,8 +977,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               {assignMatchPlaces(results).map((place, index) => {
                 const r = results[index]
                 const columnLabel = r.original
-                  ? t("editor.column.source")
-                  : t("editor.column.target")
+                  ? t("search.side.sourceText")
+                  : t("search.side.translation")
                 const itemKey = `${r.fileId}:${r.cellId}:${r.original ? "src" : "tgt"}`
                 const location = formatMatchPlace(place, t)
                 return (
@@ -967,9 +1016,14 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
 
         <div className="-mb-4 flex shrink-0 items-center justify-between ps-2 pe-4 py-4">
           <span className="text-[11px] tabular-nums text-muted-foreground">
-            {(results.length > 0 || (query.trim() !== "" && !loading))
-              ? t("search.resultCount", { count: formatCount(results.length, locale) })
-              : null}
+            {cut
+              ? t(totalIsLowerBound ? "search.resultCountOfAtLeast" : "search.resultCountOf", {
+                  shown: listedCount,
+                  total: formatCount(total, locale),
+                })
+              : (results.length > 0 || (query.trim() !== "" && !loading))
+                ? t("search.resultCount", { count: formatCount(results.length, locale) })
+                : null}
           </span>
           <span className="max-w-[60%] truncate text-end text-[11px] text-muted-foreground">
             {scopeLabel}

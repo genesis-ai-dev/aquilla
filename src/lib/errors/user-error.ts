@@ -9,6 +9,7 @@
 // This module runs outside React (plain fetch-helper code, no hooks), so it
 // can't call useT(); it uses the standalone `t()` instead — see AQU-832.
 
+import { formatDenialScope } from "../access/scope-path"
 import { t, tIfLocalized } from "../i18n/standalone"
 import type { MessageKey } from "../i18n/messages/en"
 import { resolveRoleName } from "../frontier/roles"
@@ -87,6 +88,20 @@ export interface UserFacingError {
 }
 
 /**
+ * AQU-2357: removing the last project Owner is a 409 with `error: "last_owner"`.
+ * Org leave uses the same code and handles it before this mapper.
+ */
+function lastProjectOwnerMessage(raw: string): string | null {
+  try {
+    const body = JSON.parse(raw) as { error?: unknown }
+    if (body.error === "last_owner") return t("error.network.lastProjectOwner")
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
  * Map an HTTP status code to a human-readable message.
  *
  * The optional `context` names what failed (e.g. `"project"`, `"invite"`) and is
@@ -133,13 +148,15 @@ export function messageForStatus(
         category: "not-found",
         status,
       }
-    case 409:
+    case 409: {
+      const lastOwner = lastProjectOwnerMessage(raw)
       return {
-        message: t("error.network.conflict", { contextSuffix }),
+        message: lastOwner ?? t("error.network.conflict", { contextSuffix }),
         raw,
         category: "conflict",
         status,
       }
+    }
     case 410:
       return {
         message: t("error.network.gone", { contextSuffix }),
@@ -185,6 +202,16 @@ export function isElevationRequiredBody(raw: string): boolean {
   }
 }
 
+/**
+ * AQU-2728: true when a 403 means the caller lacks the role, so a dialog may
+ * swap the message for its own "only owners can…" line. The admin step-up 403
+ * shares the `forbidden` category but is not a denial: the admin may make the
+ * change once verified, and its own message says so.
+ */
+export function isRoleDenial(error: UserFacingError): boolean {
+  return error.category === "forbidden" && !isElevationRequiredBody(error.raw)
+}
+
 // AQU-1352 §3.9 rule 2: badge labels reused from the access-model legend so the
 // denial names the same origin the members table shows.
 const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
@@ -219,9 +246,7 @@ export function roleRequiredMessage(raw: string): string | null {
   const actualLevel = b.actual?.roleLevel
   if (typeof actualLevel !== "number") return t("error.network.roleRequiredNoRole", { required })
   const role = resolveRoleName(t, actualLevel)
-  const path = Array.isArray(b.actual?.scopePath)
-    ? b.actual.scopePath.filter((s): s is string => typeof s === "string").join(" › ")
-    : ""
+  const path = formatDenialScope(b.actual?.scopePath)
   const sourceKey = typeof b.actual?.source === "string" ? SOURCE_LABEL_KEYS[b.actual.source] : undefined
   const origin = [sourceKey ? t(sourceKey) : "", path].filter(Boolean).join(" · ")
   return origin

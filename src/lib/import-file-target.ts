@@ -1877,15 +1877,15 @@ function skippedCueCount(cueLines: number, rows: TargetRow[]): number {
  *  source-import path (usfmSectionToStrings in lib/import.ts) so refs match
  *  cells that were originally imported from USFM.
  *
- *  Text is projected content-only (AQU-1363). `parseUsfmLossless` keeps
- *  intra-verse markers verbatim, which is right for the SOURCE column: the
- *  source is a faithful copy of someone else's file, and the read-only render
- *  strips the markup at display time (usfm-display.ts / EditorCellContent).
- *  The TARGET column is not a copy — it is the text a translator owns and
- *  edits, and the editor hydrates TipTap from the stored string rather than
- *  running the display transform. Committing raw USFM there made a cell read
- *  cleanly until it was clicked and then spill `\nd`/`\w`/`\f` codes into the
- *  editor, and re-save whatever the translator did to those codes.
+ *  Text is projected content-only (AQU-1363). The editor hydrates TipTap from
+ *  the stored string rather than running the display transform, so committing
+ *  raw USFM here made a cell read cleanly until it was clicked and then spill
+ *  `\nd`/`\w`/`\f` codes into the editor, and re-save whatever the translator
+ *  did to those codes. AQU-1363 fixed the TARGET column; AQU-2743 did the same
+ *  for the SOURCE column, in `usfmSectionToStrings`, after the same leak was
+ *  reported against the in-app "Upload files" importer. Both columns are now
+ *  the same projection of the same bytes, which is also what makes a target
+ *  row's text comparable to the source cell it matches.
  *
  *  So markers are resolved on the way in, the same projection the Agent API's
  *  `content-only` USFM import uses (AQU-1283) and off the same segmenter the

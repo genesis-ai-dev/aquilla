@@ -63,7 +63,7 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     // Slice 3A (Oct 29): the take says how many of its pieces are approved,
     // which says how many pieces there are, so no "· split in 2" beside it.
     expect(screen.queryByTestId("cell-take-split")).toBeNull()
-    expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces approved")
+    expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces validated")
     expect(screen.getByTestId("cell-take-length")).toHaveTextContent("4.0s")
     expect(screen.queryByTestId("tab-other-takes")).toBeNull()
     const pieces = screen.getByTestId("tab-take-pieces")
@@ -170,9 +170,9 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
         [P2]: audio({ label: "Take 1 · 2", trimStartMs: 1500, pieceOf: T1, validatorCount: 1, validators: ["rita"] }),
       })
       const head = screen.getByTestId("cell-take-head")
-      expect(within(head).getByTestId("cell-take-pieces-approved")).toHaveTextContent("1 of 2 pieces approved")
+      expect(within(head).getByTestId("cell-take-pieces-approved")).toHaveTextContent("1 of 2 pieces validated")
       expect(within(head).queryByTestId("audio-validation-button")).toBeNull()
-      expect(within(head).queryByRole("button", { name: /pieces approved/i })).toBeNull()
+      expect(within(head).queryByRole("button", { name: /pieces validated/i })).toBeNull()
     })
 
     it("counts a piece approved only once it has the approvals the project requires", () => {
@@ -182,13 +182,13 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
         [P2]: audio({ label: "Take 1 · 2", trimStartMs: 1000, trimEndMs: 2000, pieceOf: T1, validatorCount: 2, validators: ["rita", "ravi"] }),
         [T2]: audio({ label: "Take 1 · 3", trimStartMs: 2000, pieceOf: T1, validatorCount: 1, validators: ["rita"] }),
       }, T1, {}, true, twoNeeded)
-      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("2 of 3 pieces approved")
+      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("2 of 3 pieces validated")
       expect(screen.getByTestId("cell-take-pieces-approved")).toHaveAttribute("data-all-approved", "false")
     })
 
     it("shows the count to someone who may not edit the takes too", () => {
       draw(splitTake, T1, {}, false)
-      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces approved")
+      expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces validated")
     })
 
     it("says another split take's count on its row, with no vote there", () => {
@@ -198,7 +198,7 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
         [Q2]: audio({ url: "frontier-audio://audio-c1-3.webm", label: "Take 2 · 2", trimStartMs: 1000, pieceOf: T2 }),
       })
       const row = within(screen.getByTestId("tab-other-takes")).getByTestId(`take-row-${T2}`)
-      expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("1 of 2 pieces approved")
+      expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("1 of 2 pieces validated")
       expect(within(row).queryByTestId("audio-validation-button")).toBeNull()
     })
 
@@ -292,7 +292,7 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     expect(within(others).queryByTestId(`take-row-${Q2}`)).toBeNull()
     expect(within(row).getByTestId(`take-label-${T2}`)).toHaveTextContent(/^Take 2$/)
     expect(within(row).queryByTestId(`take-split-${T2}`)).toBeNull()
-    expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("0 of 2 pieces approved")
+    expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("0 of 2 pieces validated")
     expect(within(row).getByTestId(`take-length-${T2}`)).toHaveTextContent("3.5s")
     fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
     await vi.waitFor(() => expect(queued.removes).toEqual([T2, Q2]))

@@ -13,6 +13,7 @@ import {
     collapseRedundantProseInBlockXml,
     extractSliceByVerseRange,
 } from "../chapterBlocks";
+import { stripStaleBookEndMarkers } from "../structureSwap";
 import { buildBibleVerseIndex } from "../surgicalSwap";
 // `chapterVerse` and `introNote` are declared locally below and shadow the
 // helper module's versions; importing them too would be a redeclaration.
@@ -980,6 +981,117 @@ describe("structureSwap", () => {
         // A whole paragraph already carries its own return; do not add a second.
         const whole = extractSliceByVerseRange(block, 6, 15);
         expect((whole.match(/<Br\b/g) ?? []).length).toBe(1);
+    });
+
+    it("drops a previous book's closing marker but keeps the book-opening page break", () => {
+        const cases = [
+            { chapter: "50:", verse: "26", keepClosingMarker: false, dropCap: "text%3ali4_dc1" },
+            { chapter: "40:", verse: "38", keepClosingMarker: false, dropCap: "text%3alh_dc1" },
+            { chapter: "1.", verse: "1", keepClosingMarker: true, dropCap: "text%3ap_dc1" },
+        ];
+        for (const row of cases) {
+            const study = `<?xml version="1.0"?><Story>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aie">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>${row.chapter}</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>${row.verse}</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/${row.dropCap}">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>1.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>English 1:1.</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+</Story>`;
+            const bible = `<?xml version="1.0"?><Story>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/meta%3abk">
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>EXO</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>1.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 1:1.</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+</Story>`;
+            const { xml } = applyStructureSwapToStudyXml(
+                study,
+                buildBibleChapterBlockIndex(bible),
+                { bibleStoryXml: bible }
+            );
+            // intro:ie is the Next Page break. The opening page's running head
+            // is covered on both edges; the center folio stays outside the bands.
+            expect(xml).toContain("intro%3aie");
+            expect(xml.includes(`>${row.chapter}<`)).toBe(row.keepClosingMarker);
+            expect(xml).toContain(">1.<");
+            expect(xml).toContain('AnchoredPosition="Anchored"');
+            expect(xml).not.toContain('AnchoredPosition="Custom"');
+            expect(xml).toContain('Anchor="-150 0"');
+            expect(xml).toContain('Anchor="150 33"');
+            const coverAt = xml.indexOf('Name="book-open-cover"');
+            const dropCapAt = xml.indexOf(row.dropCap);
+            expect(coverAt).toBeGreaterThan(-1);
+            expect(coverAt).toBeLessThan(dropCapAt);
+            expect(xml.split('Name="book-open-cover"').length - 1).toBe(2);
+        }
+
+        const introAndText = `<?xml version="1.0"?><Story>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/meta%3aid">
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>LEV</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aie">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>40:</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>38</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_dc1">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 1:1.</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+</Story>`;
+        const openingBible = `<?xml version="1.0"?><Story>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/meta%3abk">
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>EXO</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>1.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 1:1.</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+</Story>`;
+        const covered = applyStructureSwapToStudyXml(
+            introAndText,
+            buildBibleChapterBlockIndex(openingBible),
+            { bibleStoryXml: openingBible }
+        ).xml;
+        // The intro page and the first scripture page each get both bands.
+        expect(covered.split('Name="book-open-cover"').length - 1).toBe(4);
+        const idAt = covered.indexOf("meta%3aid");
+        const ieAt = covered.indexOf("intro%3aie");
+        const firstCover = covered.indexOf('Name="book-open-cover"');
+        const textCover = covered.indexOf('Name="book-open-cover"', ieAt);
+        expect(firstCover).toBeGreaterThan(idAt);
+        expect(firstCover).toBeLessThan(ieAt);
+        expect(textCover).toBeGreaterThan(ieAt);
+        expect(textCover).toBeLessThan(covered.indexOf("text%3ap_dc1"));
+
+        const withHeading = `<?xml version="1.0"?><Story>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aie">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>50:</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>26</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Br /></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>A opressão no Egito</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3alh_dc1">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>1.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 1:1.</Content></CharacterStyleRange>
+</ParagraphStyleRange>
+</Story>`;
+        const stripped = stripStaleBookEndMarkers(withHeading);
+        expect(stripped).toContain("intro%3aie");
+        expect(stripped).not.toContain(">50:<");
+        expect(stripped).not.toContain(">26<");
+        expect(stripped).toContain("A opressão no Egito");
+        expect(stripped).toContain(">1.<");
     });
 
     it("extractSliceByVerseRange can start mid-paragraph at firstVerse", () => {

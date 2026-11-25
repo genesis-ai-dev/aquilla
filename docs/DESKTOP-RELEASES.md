@@ -62,7 +62,12 @@ The bump pull request is the one pull request Actions merges by itself.
 AGENTS.md says Actions does not click merge because auto-merge cannot read
 `on hold` or a stacked parent; neither can apply to a pull request the
 workflow opened a minute earlier, and the workflow refuses to merge unless the
-diff is the four version files and nothing else.
+diff is the four version files and nothing else, and unless the pull request's
+head is still the one commit the workflow pushed. The second rule matters
+because those four files also hold the scripts, the Rust dependencies and the
+updater's endpoint and key: a commit someone else adds to the bump branch while
+its checks run would pass the first rule. If that happens the run fails and
+says so; look at the branch before merging or deleting it.
 
 **The version is also the hot bundle's `minShellVersion`.** From the moment
 the bump merges, new web bundles are not offered to older shells. That window

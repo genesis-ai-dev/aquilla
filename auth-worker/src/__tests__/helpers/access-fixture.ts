@@ -74,17 +74,17 @@ const r = (level: number, source: RoleSource): ExpectedRole => ({ level, source 
  * projects resolve to null for everyone via resolveProjectRole (the Trash
  * path uses resolveProjectRoleIncludingArchived and is out of scope here).
  * Why each non-obvious cell is what it is:
- *   - owner p1/p2: org 700 ties creator 700; attribution priority says org.
+ *   - owner p1/p2: org 700. created_by is history (AQU-2357) and adds no role.
  *   - org_lead / org_contrib: sub-600 org role with no team/direct → null (AQU-435).
  *   - team_only p1/p2: team 400 beats org 300 (org contributes only because a
  *     team opens the project and there is no direct row — AQU-1274).
  *   - direct_below p1: direct 300 suppresses the org path but does NOT beat
  *     team 400 (AD-12 max-wins between explicit paths).
  *   - direct_above p1: direct 600 wins outright.
- *   - creator p3: creator 700; org 400 opens nothing without a team.
+ *   - creator p3: created_by alone grants nothing (AQU-2357); org 400 opens nothing.
  *   - tim p3: team 700 on a guest-org user → owner via group (the "Tim" case
  *     the spec calls out: a 100 org role reaches 700 through a team).
- *   - personal p_personal: personal-org owner (org 700) ties creator; org wins.
+ *   - personal p_personal: personal-org owner (org 700).
  */
 export const EXPECTED_ROLES: Record<FixtureUser, Record<FixtureProject, ExpectedRole>> = {
   owner:        { p1: r(700, "org"), p2: r(700, "org"), p3: r(700, "org"), p_archived: null, p_personal: null },
@@ -94,7 +94,7 @@ export const EXPECTED_ROLES: Record<FixtureUser, Record<FixtureProject, Expected
   team_only:    { p1: r(400, "group"), p2: r(400, "group"), p3: null, p_archived: null, p_personal: null },
   direct_below: { p1: r(400, "group"), p2: r(400, "group"), p3: null, p_archived: null, p_personal: null },
   direct_above: { p1: r(600, "override"), p2: r(400, "group"), p3: null, p_archived: null, p_personal: null },
-  creator:      { p1: null, p2: null, p3: r(700, "creator"), p_archived: null, p_personal: null },
+  creator:      { p1: null, p2: null, p3: null, p_archived: null, p_personal: null },
   external:     { p1: null, p2: r(300, "override"), p3: null, p_archived: null, p_personal: null },
   tim:          { p1: null, p2: null, p3: r(700, "group"), p_archived: null, p_personal: null },
   personal:     { p1: null, p2: null, p3: null, p_archived: null, p_personal: r(700, "org") },

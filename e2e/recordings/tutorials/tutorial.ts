@@ -140,7 +140,12 @@ export class Tutorial {
  * Unlike the older showcase takes, a tutorial that cannot finish fails: a
  * video that stops half way is not published, and the last good film stays up.
  */
-export function tutorial(id: TutorialId, body: (t: Tutorial) => Promise<void>): void {
+export interface TutorialOptions {
+  /** Gets the project ready before the take starts (recordings, say). Not filmed. */
+  setup?: (page: Page) => Promise<void>
+}
+
+export function tutorial(id: TutorialId, body: (t: Tutorial) => Promise<void>, options: TutorialOptions = {}): void {
   const def = tutorialById(id)
   test(`Tutorial · ${def.title}`, async ({ page, baseURL }, testInfo) => {
     const pageOpenedAt = Date.now()
@@ -153,6 +158,16 @@ export function tutorial(id: TutorialId, body: (t: Tutorial) => Promise<void>): 
     await page.goto("/__marketing/login")
     await page.waitForURL(new RegExp(`/project/${DEMO_PROJECT}`), { timeout: 45_000 })
     await page.locator('[data-showcase="editor.source"]').first().waitFor({ state: "visible", timeout: 30_000 })
+
+    // The rename suggestion for the demo's Bible book is not what any video
+    // is about; it comes a moment after the editor does, if at all.
+    const rename = page.getByText(/apply friendly names\?/)
+    if (await rename.waitFor({ state: "visible", timeout: 4_000 }).then(() => true, () => false)) {
+      await page.getByRole("button", { name: "Dismiss" }).filter({ visible: true }).first().click()
+      await rename.waitFor({ state: "hidden" })
+    }
+
+    await options.setup?.(page)
 
     const t = new Tutorial(page, def)
     const preludeMs = Date.now() - pageOpenedAt

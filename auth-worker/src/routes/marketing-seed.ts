@@ -145,14 +145,21 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .first<{ m: number }>()
   let seq = Number(seqRow?.m ?? 0)
 
-  // Idempotent content reseed: drop any prior demo file/cells/events first.
+  // Idempotent content reseed: drop every prior file in the demo project, with
+  // its cells, events, comments and recordings, not only the demo file. A take
+  // that imports a file or uploads recordings would otherwise leave them for the
+  // next sign-in, which then opens on "No file selected" instead of John 1.
   // Order matters: cells.event_id FKs events(id), so cells before events.
-  // The file's comments go with it: they name cell ids that are about to be
-  // replaced, and one left behind shows as a count in the next sign-in's sidebar.
-  await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM cells WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id = ?").bind(M_PROJECT_ID, M_FILE_ID).run()
-  await db.prepare("DELETE FROM files WHERE id = ? AND project_id = ?").bind(M_FILE_ID, M_PROJECT_ID).run()
+  // Project-level events (no file) stay.
+  await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id IS NOT NULL").bind(M_PROJECT_ID).run()
+  await db.prepare("DELETE FROM cell_audio WHERE project_id = ?").bind(M_PROJECT_ID).run()
+  await db.prepare("DELETE FROM cells WHERE project_id = ?").bind(M_PROJECT_ID).run()
+  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id IS NOT NULL").bind(M_PROJECT_ID).run()
+  await db.prepare("DELETE FROM files WHERE project_id = ?").bind(M_PROJECT_ID).run()
+  // The project's own rules (settings.rules) and terms: a take that adds a
+  // rule or a term would otherwise mark the next take's verses with it.
+  await db.prepare("DELETE FROM project_settings WHERE project_id = ?").bind(M_PROJECT_ID).run()
+  await db.prepare("DELETE FROM concepts WHERE project_id = ?").bind(M_PROJECT_ID).run()
 
   const now = Date.now()
 
@@ -210,6 +217,10 @@ async function seedMarketing(db: AquillaDb): Promise<{
     prevCellId = cellId
   }
 
+  // role and kind as a USFM import writes them (src/lib/import.ts). The
+  // recordings upload only offers files whose role is "source"
+  // (src/lib/audio/bulk-upload/load-targets.ts), so a demo file seeded as
+  // "target" could not take a recording.
   // files: 0012 shape — no file_type/source_language columns (those live in
   // `meta`); event_id NOT NULL; meta NOT NULL. fileType is derived by the
   // read route as kind ?? role ?? 'codex'.
@@ -218,7 +229,7 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .prepare(
       `INSERT INTO files (id, project_id, name, role, kind, book_code, event_id,
          cell_count, approved_count, word_count, last_edit_at, created_by, created_at, updated_at, meta, filled_count)
-       VALUES (?, ?, ?, 'target', 'scripture', 'JHN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, 'source', 'usfm', 'JHN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(M_FILE_ID, M_PROJECT_ID, M_FILE_NAME, fileEventId, VERSES.length, approved, totalWords, now, M_USERNAME, now, now, meta, filled)
     .run()

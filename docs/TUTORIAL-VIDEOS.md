@@ -22,6 +22,26 @@ finish.
 | Comment on a verse | everyone | `comment-on-a-verse` |
 | Export your work | leads | `export-your-work` |
 | Find help when you're stuck | everyone | `find-help` |
+| Set up Living Memory | leads | `living-memory` |
+| Catch mistakes with built-in checks | everyone | `built-in-checks` |
+| Add a rule and fix what it flags | leads | `add-a-rule` |
+| Keep key terms consistent | everyone | `terminology` |
+| Import a file | leads | `import-a-file` |
+| Find your way around the Media view | translators | `media-view` |
+| Trim and cut a recording | translators | `trim-and-cut` |
+| Set a recording's volume and fades | translators | `volume-and-fades` |
+
+Every take starts from the same demo project. The demo sign-in
+(`auth-worker/src/routes/marketing-seed.ts`) drops whatever an earlier take
+added to it — files, recordings, comments, rules and terms — before seeding
+John 1 again. A video that needs more than that gets it in its `setup`
+(`e2e/recordings/tutorials/setup.ts`): the audio videos upload six sample
+recordings from `e2e/recordings/tutorials/fixtures/` there, off camera.
+No audio is played in any video: the audio videos show the Station's controls
+and what they change, with the voice explaining.
+
+Not filmed yet, because they need production: linking a source project to a
+target, making AI voices, and dubbing.
 
 ## Making them
 

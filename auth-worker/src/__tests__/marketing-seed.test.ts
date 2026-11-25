@@ -50,5 +50,36 @@ describe("marketing seed", () => {
       .prepare("SELECT COUNT(*) AS n FROM comments WHERE project_id = 'demo-john'")
       .first<{ n: number }>()
     expect(Number(comments?.n)).toBe(0)
+
+    // Seeded as a USFM import seeds it, so it takes recordings like one.
+    const file = await env.AQUILLA_PG
+      .prepare("SELECT role, kind, book_code FROM files WHERE project_id = 'demo-john' AND id = 'demo-john-1'")
+      .first<{ role: string; kind: string; book_code: string }>()
+    expect(file).toEqual({ role: "source", kind: "usfm", book_code: "JHN" })
+  })
+
+  it("a re-seed drops a file and a rule a take added to the demo project", async () => {
+    await seed()
+    await env.AQUILLA_PG
+      .prepare(
+        `INSERT INTO files (id, project_id, name, role, kind, event_id, created_at, updated_at)
+         VALUES ('psalm-23', 'demo-john', 'psalm-23.usfm', 'source', 'usfm', 'e-psalm', 1, 1)`,
+      )
+      .run()
+
+    await env.AQUILLA_PG
+      .prepare(`INSERT INTO project_settings (project_id, settings) VALUES ('demo-john', '{"rules":[{"id":"r1"}]}')`)
+      .run()
+
+    await seed()
+
+    const settings = await env.AQUILLA_PG
+      .prepare("SELECT COUNT(*) AS n FROM project_settings WHERE project_id = 'demo-john'")
+      .first<{ n: number }>()
+    expect(Number(settings?.n)).toBe(0)
+    const files = await env.AQUILLA_PG
+      .prepare("SELECT id FROM files WHERE project_id = 'demo-john' ORDER BY id")
+      .all<{ id: string }>()
+    expect(files.results.map((row) => row.id)).toEqual(["demo-john-1"])
   })
 })

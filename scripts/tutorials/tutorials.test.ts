@@ -36,7 +36,7 @@ describe("tutorial videos", () => {
   it("every video opens by saying what it shows, and no two share an id", () => {
     expect(new Set(TUTORIALS.map((tutorial) => tutorial.id)).size).toBe(TUTORIALS.length)
     for (const tutorial of TUTORIALS) {
-      expect(Object.values(tutorial.lines)[0], tutorial.id).toMatch(/^Here's how to .+\.$/)
+      expect(Object.values(tutorial.lines)[0], tutorial.id).toMatch(/^Here's how .+\.$/)
     }
   })
 

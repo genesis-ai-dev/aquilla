@@ -42,19 +42,6 @@ export interface CreateProjectInput {
   /** Creator's user id (numeric, or its string form). */
   createdBy: number | string
   /**
-   * When true, also INSERT a `project_members` row at owner level (700) for the
-   * creator.
-   *
-   * The auth-worker HTTP route leaves this false: a project's creator already
-   * resolves to 700 via the resolver's implicit "creator" path
-   * (created_by = user), so writing an explicit override row would flip that
-   * attribution from source "creator" to source "override" — a behavior change
-   * the internal route must not make. The sync-worker `CreateProject` command
-   * (spec §2), whose receipt-only apply step confers the creator role through
-   * this row rather than a live resolver, passes true.
-   */
-  writeCreatorMembership?: boolean
-  /**
    * AQU-1594: the language pair becomes lane rows in the same batch as the
    * project. It is NOT written into `project_settings` — new projects have no
    * project-level language keys. Omit both and the project still gets its
@@ -78,57 +65,63 @@ export interface CreateProjectInput {
 }
 
 /**
- * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
- * optionally, the creator's owner-level membership row. Returns whether the
- * project row was newly inserted (false on an id collision — the caller decides
- * whether that is a conflict or a benign retry).
+ * Insert a project row and, only when THIS call inserted it, the creator's
+ * Owner grant (AQU-2357) and the project's lanes. `created_by` is history only.
+ * Returns whether the project row was newly inserted (false on an id collision
+ * — the caller decides whether that is a conflict or a benign retry).
+ *
+ * The project id is client-chosen and not secret, so on a collision nothing at
+ * all is written: an Owner grant or lane written into an existing project would
+ * hand that project to whoever guessed its id. A genuine retry by the creator
+ * needs nothing written either — the first attempt's grant and lanes committed
+ * with its project row, or none of them did and this call inserts afresh. The
+ * guard is "inserted by this call", not "created_by = caller": a creator an
+ * Owner later demoted must not get Owner back by re-posting the create.
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
  *
- * AQU-1594: the same batch writes the source lane and each requested target
- * lane. No project-level language keys are written.
+ * AQU-1594: the same transaction writes the source lane and each requested
+ * target lane. No project-level language keys are written.
  */
 export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
+  const transaction = db.transaction?.bind(db)
+  if (!transaction) throw new Error("createProjectShared needs a database handle with transactions")
   // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
-  // whole batch back, so repeating it does not insert the project twice.
-  return retryingLaneIdCollision(async () => {
-    const projectStmt = db
-      .prepare(
-        `INSERT INTO projects (id, name, org_id, created_by)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-      .bind(input.projectId, input.name, input.orgId, input.createdBy)
+  // whole transaction back, so repeating it does not insert the project twice.
+  return retryingLaneIdCollision(() =>
+    transaction(async (tx) => {
+      const created = await tx
+        .prepare(
+          `INSERT INTO projects (id, name, org_id, created_by)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING
+           RETURNING id`,
+        )
+        .bind(input.projectId, input.name, input.orgId, input.createdBy)
+        .first<{ id: string }>()
+      if (!created) return { inserted: false }
 
-    // The project insert stays FIRST in the batch — `inserted` is read off index 0.
-    const stmts: AquillaStatement[] = [projectStmt]
-
-    if (input.writeCreatorMembership) {
-      // Atomic with the project insert so a caller relying on the membership row
-      // for its role never observes a project without its creator's grant.
-      stmts.push(
-        db
+      const stmts: AquillaStatement[] = [
+        tx
           .prepare(
             `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
              VALUES (?, ?, 700, ?)
-             ON CONFLICT(project_id, user_id) DO NOTHING`,
+             ON CONFLICT(project_id, user_id) DO UPDATE
+               SET role_level = 700
+               WHERE project_members.role_level < 700`,
           )
           .bind(input.projectId, input.createdBy, input.createdBy),
-      )
-    }
-
-    const lanes = lanesForNewProject(input)
-    stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { lanes }),
-    )
-
-    const [projectResult] = await db.batch(stmts)
-    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-  })
+        ...ensureProjectLaneStmts(tx, input.projectId, { lanes: lanesForNewProject(input) }),
+      ]
+      // Sequential: a batch inside db.transaction() cannot open its own.
+      for (const stmt of stmts) await stmt.run()
+      return { inserted: true }
+    }),
+  )
 }
 
 /** Source lane plus each requested target. The first target's tag is its language. */
@@ -328,8 +321,13 @@ export interface UpdateProjectSettingsInput {
   settings: Record<string, unknown>
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
   /**
    * AQU-1075: this write is the link copying a field into a downstream.
    * Skip the inherit prepare (it would detach the field being copied) and
@@ -383,8 +381,13 @@ export interface PatchProjectSettingsInput {
   ops: { key: string; value: unknown }[]
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
 }
 
 /**

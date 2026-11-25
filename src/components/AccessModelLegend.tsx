@@ -1,5 +1,5 @@
 /**
- * AccessModelLegend — collapsible legend explaining the four grant paths
+ * AccessModelLegend — collapsible legend explaining the grant paths
  * and the max-wins effective-role rule.
  *
  * Shown below the matrix header on demand (controlled by MembersMatrixView).
@@ -45,12 +45,6 @@ const GRANT_PATHS: ReadonlyArray<{
     labelKey: "org.accessModelLegend.orgWide.label",
     badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
     descriptionKey: "org.accessModelLegend.orgWide.description",
-  },
-  {
-    badge: "C",
-    labelKey: "org.accessModelLegend.creator.label",
-    badgeClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    descriptionKey: "org.accessModelLegend.creator.description",
   },
 ]
 

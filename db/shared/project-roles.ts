@@ -266,7 +266,7 @@ async function resolveProjectRoleSharedInternal(
   if (!project) return null
   if (project.archived_at && !includeArchived) return null
 
-  // All four grant-path queries run in parallel — independent reads. Each is
+  // The three grant-path queries run in parallel — independent reads. Each is
   // wrapped so a single missing/pending-migration table degrades that path to
   // "no contribution" rather than 500'ing the whole request.
   const [override, group, org] = await Promise.all([
@@ -320,8 +320,6 @@ async function resolveProjectRoleSharedInternal(
   })
   if (orgContribution != null)
     contributions.push({ source: "org", level: orgContribution })
-  if (String(project.created_by) === String(user.id))
-    contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every
   // project — the cross-tenant support/oversight path. Lowest tie priority so a
   // genuine grant keeps attribution when the admin is also a real member.

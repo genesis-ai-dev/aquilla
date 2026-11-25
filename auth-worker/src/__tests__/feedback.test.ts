@@ -225,6 +225,11 @@ describe("POST /api/v2/feedback", () => {
     )
       .bind("fb-ctx-proj", "Burmese NT", 9101, userId)
       .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('fb-ctx-proj', ?, 700, ?)",
+    )
+      .bind(userId, userId)
+      .run()
     const discord = mockDiscord()
 
     const res = await submit({
@@ -253,6 +258,11 @@ describe("POST /api/v2/feedback", () => {
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, ?)",
     )
       .bind("fb-file-proj", "Burmese NT", 9105, userId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('fb-file-proj', ?, 700, ?)",
+    )
+      .bind(userId, userId)
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO files (id, project_id, name, event_id) VALUES (?, ?, ?, ?)",
@@ -290,9 +300,19 @@ describe("POST /api/v2/feedback", () => {
       .bind("fb-mine", "Mine", userId)
       .run()
     await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('fb-mine', ?, 700, ?)",
+    )
+      .bind(userId, userId)
+      .run()
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
     )
       .bind("fb-theirs", "Theirs", ownerId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('fb-theirs', ?, 700, ?)",
+    )
+      .bind(ownerId, ownerId)
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO files (id, project_id, name, event_id) VALUES (?, ?, ?, ?)",
@@ -350,6 +370,11 @@ describe("POST /api/v2/feedback", () => {
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, ?)",
     )
       .bind("fb-secret-proj", "Secret Project", 9102, ownerId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('fb-secret-proj', ?, 700, ?)",
+    )
+      .bind(ownerId, ownerId)
       .run()
     const discord = mockDiscord()
 

@@ -75,11 +75,19 @@ export function MemberAccessRow({
 export function MemberAccessSubRow({
   orgId,
   userId,
+  orgRoleLevel,
   callerOrgRoleLevel,
   colSpan,
 }: {
   orgId: number
   userId: number
+  /**
+   * AQU-2729: the member's org role as the roster row shows it. The panel
+   * loads its own copy of the member's access once, so it is keyed on this:
+   * a role change on the row loads the panel again instead of leaving the old
+   * role beside the new one.
+   */
+  orgRoleLevel: number | null
   callerOrgRoleLevel?: number | null
   colSpan: number
 }) {
@@ -87,6 +95,7 @@ export function MemberAccessSubRow({
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={colSpan} className="bg-muted/20 px-4 py-3">
         <MemberAccessDetails
+          key={orgRoleLevel ?? "none"}
           orgId={orgId}
           userId={userId}
           callerOrgRoleLevel={callerOrgRoleLevel}
@@ -214,7 +223,6 @@ function AccessProjectRow({
   const otherPaths = [
     ...p.groups.map((g) => t("org.memberAccessPanel.viaTeamLabel", { name: g.name })),
     ...(p.org != null ? [t("org.memberAccessPanel.viaOrgRoleLabel")] : []),
-    ...(p.creator ? [t("org.membersPage.sourceProjectCreator")] : []),
   ]
   return (
     <li className="rounded border bg-background p-2">
@@ -241,9 +249,9 @@ function AccessProjectRow({
           </Badge>
         )}
         {p.creator && (
-          <Badge variant="secondary" className="text-[10px]">
-            {t("org.memberAccessPanel.creatorGrantLabel")}
-          </Badge>
+          <span className="text-[10px] text-muted-foreground">
+            {t("org.membersPage.createdThisProject")}
+          </span>
         )}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">

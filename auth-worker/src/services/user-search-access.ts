@@ -44,7 +44,7 @@ function settingsObject(raw: string | null): Record<string, unknown> {
  *
  * An org member at or above that org's `rosterViewMinRole` can see the org
  * roster. Anyone else can search only when a project they can actually open
- * (direct grant, team grant, or creator) meets that project's member-list
+ * (direct grant or team grant) meets that project's member-list
  * floor — the floor `GET /projects/:id/members` uses, assignment carve-out
  * included. A sub-maintainer org role does not open projects by itself, so it
  * does not open search either.
@@ -72,14 +72,10 @@ export async function callerCanSearchUsers(env: Env, userId: number): Promise<bo
              JOIN group_project_grants gpg ON gpg.group_id = gm.group_id
              JOIN projects p ON p.id = gpg.project_id
             WHERE gm.user_id = ? AND p.archived_at IS NULL
-           UNION ALL
-           SELECT p.id, p.org_id, 700
-             FROM projects p
-            WHERE p.created_by = ? AND p.archived_at IS NULL
          ) grants
         GROUP BY project_id, org_id`,
     )
-      .bind(userId, userId, userId)
+      .bind(userId, userId)
       .all<ProjectGrant>(),
   ])
 

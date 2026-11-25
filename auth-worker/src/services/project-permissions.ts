@@ -8,7 +8,8 @@
 //      when `project.org_id IS NOT NULL` (`org`). AQU-435: sub-maintainer
 //      org membership is NOT a grant path — a Contributor reaches a project
 //      only via direct membership or a group grant.
-//   4. Creator fallback: `projects.created_by = user.id` → owner (`creator`).
+//   created_by is history (AQU-2357). It is not a grant path. Creation writes
+//   an ordinary Owner row in project_members.
 //
 // **Effective role = max(role_level) over every path that grants something.**
 // Per spec 02-foundations.md AD-12, adding an explicit override at a lower
@@ -316,8 +317,6 @@ async function resolveGrantPaths(
   ])
   return roleFromGrantPaths(
     forcePlatformAdmin ?? (await isPlatformAdminEmail(env, user.email)),
-    user,
-    project,
     { override, group, org },
   )
 }
@@ -336,8 +335,6 @@ interface GrantPaths {
  */
 function roleFromGrantPaths(
   isPlatformAdmin: boolean,
-  user: AuthUser,
-  project: ProjectRow,
   { override, group, org }: GrantPaths,
 ): ResolvedRole | null {
   const contributions: PathContribution[] = []
@@ -356,8 +353,6 @@ function roleFromGrantPaths(
   })
   if (orgContribution != null)
     contributions.push({ source: "org", level: orgContribution })
-  if (project.created_by === user.id)
-    contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every
   // project — the cross-tenant support/oversight path. Lowest tie priority so
   // a genuine grant keeps attribution when the admin is also a real member.
@@ -549,8 +544,6 @@ export async function resolveProjectRoles(
           return paths
             ? roleFromGrantPaths(
                 (await (admins ??= loadPlatformAdminEmails(env))).has(user.email.trim().toLowerCase()),
-                user,
-                project,
                 paths,
               )
             : null

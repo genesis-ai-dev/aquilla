@@ -32,7 +32,11 @@ login() {
     ab fill "#login-pass" "$AQUILLA_QA_PASSWORD" >/dev/null || return 1
     ab press Enter >/dev/null
     ab wait --load networkidle >/dev/null
-    case "$(ab get url)" in *"/login"*) return 1;; esac
+    # Redirect can land ~3 s after submit; poll every 500 ms for up to 20 s.
+    i=0
+    while case "$(ab get url 2>/dev/null)" in *"/login"*) true;; *) false;; esac; do
+      i=$((i+1)); [ "$i" -ge 40 ] && return 1; sleep 0.5
+    done
   else
     ab open "$BASE/__dev/login?as=$user" >/dev/null || { sleep 2; ab open "$BASE/__dev/login?as=$user" >/dev/null || return 1; }
     ab wait --load networkidle >/dev/null

@@ -74,9 +74,10 @@ export async function hashQueryParams(parts: {
     .join("")
 }
 
-/** Cache key version prefix — bump if the response shape changes so old
- *  entries get ignored without manual KV cleanup. */
-const CACHE_KEY_VERSION = "v1"
+/** Cache key version prefix — bump if the response shape or the ranking
+ *  changes so old entries get ignored without manual KV cleanup. v2: the
+ *  search covers the query by character n-grams, not words (AQU-2727). */
+const CACHE_KEY_VERSION = "v2"
 
 export function buildCacheKey(
   projectId: string,

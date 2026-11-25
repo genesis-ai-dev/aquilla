@@ -16245,14 +16245,27 @@ export function ProjectWorkspace() {
     // AQU-1704: the same answer the playback bar gets through `freeTiming`.
     timingMode === "audioFirst",
   )
+  // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, a
+  // subtitle file's heard lines are the milestone's (`timelineHeardCells`),
+  // still on the file's own time. Play and Space from the start begin at the
+  // milestone's first heard line, not with silence from 0:00 up to it; a
+  // chosen line plays from that line as before. The split off: 0:00.
+  const timelineClockStartSec = useMemo(() => {
+    if (!timelineHeardCells || timelineHeardCells === audioCueCells) return 0
+    let first = Infinity
+    for (const c of timelineHeardCells) {
+      if (typeof c.startTime === "number" && Number.isFinite(c.startTime)) first = Math.min(first, c.startTime)
+    }
+    return Number.isFinite(first) ? first : 0
+  }, [timelineHeardCells, audioCueCells])
   useEffect(() => {
     if (!virtualIsTransport) {
       stopVirtualClock()
       return
     }
-    startVirtualClock(timelineDurationSec)
+    startVirtualClock(timelineDurationSec, timelineClockStartSec)
     return () => stopVirtualClock()
-  }, [virtualIsTransport, timelineDurationSec])
+  }, [virtualIsTransport, timelineDurationSec, timelineClockStartSec])
   // REGISTERED AS THE CONTROLLER, which is what keeps the playback bar's six
   // `drivesVideo ? controller : queue` branches two-way instead of three. That
   // store already means "the non-queue transport currently driving" — see

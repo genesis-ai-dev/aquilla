@@ -72,6 +72,11 @@ let rate = 1
 let volume = 1
 /** End of the last cue. Playback stops here (Sam: no looping). 0 = unknown. */
 let durationSec = 0
+/** AQU-2711 x AQU-2253 (review, Nov 25): where Play from the start begins. 0
+ *  for a whole file; with Split into milestones on, a subtitle file's audio
+ *  cue file starts at the milestone's first heard line, so Play does not run
+ *  silence from 0:00 up to it. */
+let startSec = 0
 /** Null when nothing is driving — the file has a master of its own, or none of
  *  this applies. Mirrors `video-clock`'s "cleared" state exactly. */
 let driving = false
@@ -221,16 +226,22 @@ function startTimer(): void {
   timer = setInterval(tickVirtualClock, TICK_MS)
 }
 
-/** Take the transport. Idempotent; refreshes the duration. */
-export function startVirtualClock(duration: number): void {
+/** Take the transport. Idempotent; refreshes the duration. `start` is where
+ *  Play from the start begins (`startSec`); a new one moves a paused clock
+ *  there and leaves a running one playing. */
+export function startVirtualClock(duration: number, start = 0): void {
   durationSec = Number.isFinite(duration) && duration > 0 ? duration : 0
+  const nextStart = Number.isFinite(start) && start > 0 ? start : 0
+  const startMoved = nextStart !== startSec
+  startSec = nextStart
   if (driving) {
+    if (startMoved && !playing) reanchor(startSec)
     notify()
     return
   }
   driving = true
   playing = false
-  reanchor(0)
+  reanchor(startSec)
   notify()
 }
 
@@ -241,6 +252,7 @@ export function stopVirtualClock(): void {
   driving = false
   playing = false
   anchorSec = 0
+  startSec = 0
   jumps = []
   clearActiveAudioIf(clockAudio)
   notify()
@@ -250,7 +262,9 @@ export function virtualClockPlay(): void {
   if (!driving || playing) return
   // Pressing play at the very end restarts, which is what a media element does
   // and what the button plainly means there.
-  if (durationSec > 0 && anchorSec >= durationSec) anchorSec = 0
+  if (durationSec > 0 && anchorSec >= durationSec) anchorSec = startSec
+  // Play from before the start (the milestone's first heard line) starts there.
+  if (anchorSec < startSec) anchorSec = startSec
   playing = true
   reanchor(anchorSec)
   startTimer()
@@ -387,6 +401,7 @@ export function resetVirtualClockForTests(): void {
   rate = 1
   volume = 1
   durationSec = 0
+  startSec = 0
   jumps = []
   clearActiveAudioIf(clockAudio)
   notify()

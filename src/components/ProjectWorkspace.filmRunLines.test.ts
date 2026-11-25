@@ -246,6 +246,10 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(workspace).not.toContain("const dubDriverCells = audioCueCells")
     expect(workspace).toContain("cells={timelineHeardCells ?? legacyCells}")
     expect(workspace).toContain("useSkipSilentLinesOnVirtualClock(dubDriverCells,")
+    // …and the line-by-line clock's Play from the start begins at the
+    // milestone's first heard line, never at 0:00 (the split off: 0:00).
+    expect(workspace).toContain("startVirtualClock(timelineDurationSec, timelineClockStartSec)")
+    expect(workspace).toContain("const timelineClockStartSec = useMemo(")
   })
 
   it("Space and a click on the timeline start the queue with those lines, and no others", () => {

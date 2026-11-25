@@ -52,6 +52,13 @@ async function seedOrg(opts: { attach?: boolean; lanes?: boolean; carolOrgRole?:
     )
       .bind(CONTRIBUTOR)
       .run()
+    // AQU-2355: an attachment lists its lanes; this one covers both.
+    if (opts.lanes !== false) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+         VALUES (1, 'p1', 'lane0001'), (1, 'p1', 'lane0002')`,
+      ).run()
+    }
   }
 }
 
@@ -274,6 +281,121 @@ describe("team writes — lane grants (AQU-1801)", () => {
 // AQU-1809: PATCH .../groups/:groupId/members/:userId wrote group_members.role_level
 // and left project_member_lane_roles at the old level. A promotion stayed
 // read-only; a demotion could still edit. The lane set does not move.
+describe("AQU-2355 unticking a lane from a team takes exactly that lane away", () => {
+  it("removes the lane's grant and scope row from a team-only member, and keeps the rest", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    const scopes = async () =>
+      ((
+        await env.AQUILLA_PG.prepare(
+          "SELECT value FROM project_member_scopes WHERE project_id = 'p1' AND user_id = 3 AND kind = 'lane' ORDER BY value",
+        ).all<{ value: string }>()
+      ).results ?? []).map((r) => r.value)
+    expect(await scopes()).toEqual(["lane0001", "lane0002"])
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1/projects/p1",
+      { method: "PATCH", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ laneIds: ["lane0002"] }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+    expect(await scopes()).toEqual(["lane0002"])
+  })
+})
+
+// AQU-2355 / AQU-2354 (Luke, 2026-11-20): taking a team away removes exactly
+// the access the team gave, and nothing a direct grant gave.
+describe("AQU-2355 leaving a team takes exactly the team's lanes", () => {
+  const REVIEWER = 300
+  async function removeFromTeam() {
+    return app.request(
+      "/api/v2/orgs/1/groups/1/members/3",
+      { method: "DELETE", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+  }
+  async function scopes(): Promise<string[]> {
+    return ((
+      await env.AQUILLA_PG.prepare(
+        "SELECT value FROM project_member_scopes WHERE project_id = 'p1' AND user_id = 3 AND kind = 'lane' ORDER BY value",
+      ).all<{ value: string }>()
+    ).results ?? []).map((r) => r.value)
+  }
+  /** carol: a direct Reviewer on lane0001 only (a direct grant, no scope row). */
+  async function directReviewer() {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1', 3, ?, 1)",
+    )
+      .bind(REVIEWER)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by) VALUES ('p1', 3, 'lane0001', ?, 1)",
+    )
+      .bind(REVIEWER)
+      .run()
+  }
+
+  it("(a) a team-only member removed from the team loses the team's lanes and the scope rows copied with them", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([
+      { lane: "lane0001", level: CONTRIBUTOR },
+      { lane: "lane0002", level: CONTRIBUTOR },
+    ])
+    expect(await scopes()).toEqual(["lane0001", "lane0002"])
+    expect((await removeFromTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopes()).toEqual([])
+  })
+
+  it("(b) a direct Reviewer who was also on a Contributor team keeps Reviewer, and only that", async () => {
+    await seedOrg()
+    await directReviewer()
+    expect((await addToTeam()).status).toBe(200)
+    // The team adds the lane it covers that she did not have; her direct row is hers.
+    expect(await grantsFor(3)).toEqual([
+      { lane: "lane0001", level: REVIEWER },
+      { lane: "lane0002", level: CONTRIBUTOR },
+    ])
+    // A team role change re-levels the team's rows, never her direct one.
+    expect((await setAttachmentRole(PROJECT_LEAD)).status).toBe(200)
+    expect((await grantsFor(3)).find((g) => g.lane === "lane0001")).toEqual({ lane: "lane0001", level: REVIEWER })
+
+    expect((await removeFromTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0001", level: REVIEWER }])
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = 'p1' AND user_id = 3",
+    ).first<{ role_level: number }>()
+    expect(member?.role_level).toBe(REVIEWER)
+  })
+
+  it("unlinking a team from a lane takes that lane from a direct member too, and keeps her direct lane", async () => {
+    await seedOrg()
+    await directReviewer()
+    expect((await addToTeam()).status).toBe(200)
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1/projects/p1",
+      { method: "PATCH", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ laneIds: ["lane0001"] }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0001", level: REVIEWER }])
+  })
+
+  it("deleting the team takes its lanes from a team-only member", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    const res = await app.request(
+      "/api/v2/orgs/1/groups/1",
+      { method: "DELETE", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopes()).toEqual([])
+  })
+})
+
 describe("PATCH team-scope role — lane grants (AQU-1809)", () => {
   async function seedAttached(opts: { carolOrgRole?: number } = {}) {
     await seedUser(1, "alice")
@@ -464,7 +586,7 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
     { lane: "lane0002", level: CONTRIBUTOR },
   ]
 
-  it("revoke then attach grants every current lane and leaves no scope", async () => {
+  it("revoke then attach grants every current lane, scoped to the team's lanes", async () => {
     await seedOrg({ attach: false })
     await onTeam(3)
     expect((await addScoped()).status).toBe(200)
@@ -476,10 +598,12 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await attachProject(CONTRIBUTOR)).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
-  it("revoke then add-to-team grants every current lane and leaves no scope", async () => {
+  it("revoke then add-to-team grants every current lane, scoped to the team's lanes", async () => {
     await seedOrg()
     expect((await addScoped()).status).toBe(200)
     expect((await revokeAll()).status).toBe(200)
@@ -488,7 +612,9 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await addToTeam()).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
   it("revoking only the direct membership leaves the team's lanes in place", async () => {
@@ -502,7 +628,9 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
 
     expect((await revokeAll()).status).toBe(200)
     expect(await grantsFor(3)).toEqual(bothLanes)
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the team lists its lanes, and a team-only member's stored
+    // scopes are exactly those lanes (no "every lane, forever" left).
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 
   it("a current lane-scoped member who also joins the team keeps those lanes", async () => {
@@ -532,6 +660,7 @@ describe("a removed member who returns through a team (AQU-1818)", () => {
       { lane: "lane0001", level: VIEWER },
       { lane: "lane0002", level: VIEWER },
     ])
-    expect(await scopesFor()).toEqual([])
+    // AQU-2355: the ended membership's scope is replaced by the team's lanes.
+    expect(await scopesFor()).toEqual(["lane0001", "lane0002"])
   })
 })

@@ -1259,8 +1259,10 @@ export async function attachGroupProject(env: Env, orgId: number, groupId: numbe
   if (!proj) return "no-project"
   if (proj.org_id !== orgId) return "cross-org"
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, ?, ?, ?)
-     ON CONFLICT(group_id, project_id) DO UPDATE SET role_level = excluded.role_level, granted_by = excluded.granted_by`,
+    // AQU-2355: an attachment lists its lanes (`group_project_lanes`); there is
+    // no "every lane, forever" attachment, so the flag is always true.
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES (?, ?, ?, ?, TRUE)
+     ON CONFLICT(group_id, project_id) DO UPDATE SET role_level = excluded.role_level, granted_by = excluded.granted_by, lanes_explicit = TRUE`,
   ).bind(groupId, projectId, roleLevel, grantedBy).run()
   return "ok"
 }

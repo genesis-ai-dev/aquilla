@@ -1867,7 +1867,6 @@
     "org.memberAccessDrillDown.orgLevelBaseline": "9b7b580d60e55e49",
     "org.memberAccessDrillDown.projectsAccessibleCount": "f37552ecf8a72734",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -4991,7 +4990,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -6856,7 +6861,6 @@
     "org.memberAccessDrillDown.orgLevelBaseline": "9b7b580d60e55e49",
     "org.memberAccessDrillDown.projectsAccessibleCount": "f37552ecf8a72734",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -9967,7 +9971,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -11823,7 +11833,6 @@
     "org.memberAccessDrillDown.orgLevelBaseline": "9b7b580d60e55e49",
     "org.memberAccessDrillDown.projectsAccessibleCount": "f37552ecf8a72734",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -14930,7 +14939,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -16801,7 +16816,6 @@
     "org.memberAccessDrillDown.orgLevelBaseline": "9b7b580d60e55e49",
     "org.memberAccessDrillDown.projectsAccessibleCount": "f37552ecf8a72734",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -19919,7 +19933,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -22248,7 +22268,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -26182,7 +26201,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -28511,7 +28536,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -32447,7 +32471,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -35127,7 +35157,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -38784,7 +38813,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -41533,7 +41568,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -45168,7 +45202,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -47867,7 +47907,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.laneCodePlaceholder": "67cdaff70d057eb6",
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "4fc47ef2dbb08d73",
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
@@ -51467,7 +51506,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -54881,7 +54926,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -54890,7 +54934,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -59713,7 +59756,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -63127,7 +63176,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -63136,7 +63184,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -67964,7 +68011,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -71489,7 +71542,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -71498,7 +71550,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -76620,7 +76671,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -80062,7 +80119,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -80071,7 +80127,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -84925,7 +84980,13 @@
     "error.airtable.connect": "69c73eddb65a80a7",
     "error.airtable.disconnect": "533b260cb0e23bc1",
     "error.airtable.loadBases": "f1d9f8941f5dda51",
-    "error.airtable.loadTables": "07510084c77520cc"
+    "error.airtable.loadTables": "07510084c77520cc",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -88472,7 +88533,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -88481,7 +88541,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -93600,7 +93659,13 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -97147,7 +97212,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -97156,7 +97220,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -102269,7 +102332,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -105823,7 +105892,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -105832,7 +105900,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -110973,7 +111040,13 @@
     "editor.completion.done": "6dcb3812586c6645",
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
-    "editor.completion.failedCellsMore": "8cc346096a28278c"
+    "editor.completion.failedCellsMore": "8cc346096a28278c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -114522,7 +114595,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -114531,7 +114603,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -119664,7 +119735,13 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -123211,7 +123288,6 @@
     "org.memberAccessDrillDown.pathOrgLevel": "066a19d8685f6f9a",
     "org.memberLaneScopeEditor.editScopesAriaLabel": "58017c9eb3c08e1b",
     "org.memberLaneScopeEditor.scopesHeading": "4dc463f2e24dbdba",
-    "org.memberLaneScopeEditor.unscopedFullAccess": "bd0e26162875a3ab",
     "org.memberLaneScopeEditor.languagesLegend": "aa668129b7191694",
     "org.memberLaneScopeEditor.mainLanguageFallback": "d8428119b571d9fc",
     "org.memberLaneScopeEditor.unknownLane": "9df0d597421fe30c",
@@ -123220,7 +123296,6 @@
     "org.memberLaneScopeEditor.saveScopesButton": "1d8c2d04dd035e20",
     "org.memberLaneScopeEditor.grantsLegend": "630e18a22b25f846",
     "org.memberLaneScopeEditor.laneNoAccess": "e7a76c84d135f458",
-    "org.memberLaneScopeEditor.grantGapWarning": "fc3eafba98354fd5",
     "org.memberLaneScopeEditor.grantAllButton": "d575df09b0e7a5d6",
     "org.memberLaneScopeEditor.grantAllHint": "a291aa4f2acbafa5",
     "org.memberLaneScopeEditor.visibleByRole": "d7628f12f620242e",
@@ -128347,6 +128422,12 @@
     "editor.completion.stopped": "47a7a877f39148de",
     "editor.completion.interrupted": "c23606cb7b632b32",
     "editor.completion.failedCellsMore": "8cc346096a28278c",
-    "common.breadcrumbNav": "d6dc6b5ebe192c2c"
+    "common.breadcrumbNav": "d6dc6b5ebe192c2c",
+    "projectSettings.languages.grantLegend": "0edec14f0115d7e5",
+    "projectSettings.languages.grantHint": "47f3eb1a2787f4a7",
+    "projectSettings.languages.grantSelectAll": "1fc9a387654d410f",
+    "projectSettings.languages.grantTeamLine": "f7074701417f8c20",
+    "projectSettings.languages.grantLoading": "1aa4fcebd0b211fc",
+    "projectSettings.languages.grantNoLanes": "3bd6c877dfc63b5d"
   }
 }

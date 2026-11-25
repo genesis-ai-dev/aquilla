@@ -178,6 +178,8 @@
     "neon:backfill:lanes:prod": "tsx scripts/neon-target.ts production backfill-lanes",
     "neon:repair-lane-grants:dev": "tsx scripts/neon-target.ts dev repair-lane-grants",
     "neon:repair-lane-grants:prod": "tsx scripts/neon-target.ts production repair-lane-grants",
+    "neon:explicit-lane-grants:dev": "tsx scripts/neon-target.ts dev explicit-lane-grants",
+    "neon:explicit-lane-grants:prod": "tsx scripts/neon-target.ts production explicit-lane-grants",
     "neon:repair-creator-owner-grants:dev": "tsx scripts/neon-target.ts dev repair-creator-owner-grants",
     "neon:repair-creator-owner-grants:prod": "tsx scripts/neon-target.ts production repair-creator-owner-grants",
     "neon:repair-cell-metadata:local": "tsx scripts/neon-target.ts local repair-cell-metadata",

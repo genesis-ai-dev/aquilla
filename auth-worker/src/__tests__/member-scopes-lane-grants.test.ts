@@ -14,10 +14,9 @@
 //     AQU-1421 closes.
 //   * A project with no target lane rows keeps the plain `{ scopes }` shape.
 //   * The regrant (an empty lane-scope PUT) grants every target lane, the
-//     archived one included, and the PUT reports them back. Archived lanes
-//     count because AQU-1781 grants a lane created later only to members who
-//     already hold every other lane — so a lane created after the regrant
-//     still reaches the member.
+//     archived one included (a restored lane is still theirs), and the PUT
+//     reports them back. AQU-2355: it is every CURRENT lane — a lane created
+//     after the regrant does not reach the member unless they are picked.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -166,8 +165,8 @@ describe("AQU-1783 member-scopes PUT — the one-click regrant", () => {
       env,
     )
     expect(res.status).toBe(200)
-    // Every lane is granted, archived Tagalog too: without it, AQU-1781 would
-    // treat the member as limited and skip them for every lane created later.
+    // Every lane is granted, archived Tagalog too, so restoring it keeps the
+    // member's access whole.
     expect(await laneRolesFor(2)).toEqual(["lane-es", "lane-fr", "lane-tl"])
     // The response carries the refreshed grants, so the inspector's list can
     // update without a page reload. The inspector itself lists current lanes
@@ -183,7 +182,7 @@ describe("AQU-1783 member-scopes PUT — the one-click regrant", () => {
     expect(body.scopes).toEqual([{ kind: "file", value: "f1" }])
   })
 
-  it("a lane created after the regrant still reaches the member", async () => {
+  it("a lane created after the regrant does not reach the member (AQU-2355)", async () => {
     await seedLanes()
     const regrant = await app.request(
       "/api/v2/projects/proj-g/members/2/scopes",
@@ -205,7 +204,7 @@ describe("AQU-1783 member-scopes PUT — the one-click regrant", () => {
       "SELECT id FROM lanes WHERE project_id = 'proj-g' AND role = 'target' AND language = 'German'",
     ).first<{ id: string }>()
     expect(german).not.toBeNull()
-    expect(await laneRolesFor(2)).toContain(german?.id)
+    expect(await laneRolesFor(2)).not.toContain(german?.id)
   })
 
   it("a lane-scoped save still grants only that lane", async () => {

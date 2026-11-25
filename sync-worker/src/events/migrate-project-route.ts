@@ -139,8 +139,8 @@ export async function handleMigrateProjectRequest(
         stmts.push(
           db
             .prepare(
-              `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, granted_at)
-               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+              `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, granted_at, lanes_explicit)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, TRUE)
                ON CONFLICT(group_id, project_id) DO NOTHING`,
             )
             .bind(body.teamId, body.projectId, body.roleLevel ?? 400, body.ownerUserId),
@@ -150,9 +150,29 @@ export async function handleMigrateProjectRequest(
       // AQU-1800: attaching the project to its team is what gives the team's
       // members access to it, and under the lane read wall access without a
       // lane grant shows them source text only. Last in the batch, so it sees
-      // the grant row and the lanes the statements above just wrote. Lanes the
-      // content sweep creates later are covered by grantNewLaneStmt.
+      // the grant row and the lanes the statements above just wrote.
+      // AQU-2355: the attachment lists its lanes. When THIS request created
+      // the attachment (its `granted_at` is this transaction's `now()`), it is
+      // linked to the project's current target lanes. An attachment that was
+      // already there keeps the lanes it lists — none included (AQU-2563): a
+      // re-run must not re-add a lane a lead unticked. The lanes the content
+      // sweep creates later are linked by the ingest (migrate-ingest-route.ts,
+      // `linkTeamsToLaneStmts`).
       if (typeof body.teamId === 'number') {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO group_project_lanes (group_id, project_id, lane_id)
+               SELECT gpg.group_id, gpg.project_id, l.id
+                 FROM group_project_grants gpg
+                 JOIN lanes l ON l.project_id = gpg.project_id
+                             AND l.role = 'target' AND l.archived_at IS NULL
+                WHERE gpg.group_id = ? AND gpg.project_id = ?
+                  AND gpg.granted_at = now()
+               ON CONFLICT DO NOTHING`,
+            )
+            .bind(body.teamId, body.projectId),
+        )
         stmts.push(grantTeamLaneAccessStmt(db, body.teamId, body.ownerUserId))
       }
       await db.batch(stmts)

@@ -1,19 +1,16 @@
-// AQU-1781: creating a target lane grants it to the members who already read
-// every lane.
+// AQU-2355: a lane grant grants only the lanes it lists.
 //
-// Under the lane read wall a member below Maintainer reads only the lanes they
-// hold a `project_member_lane_roles` row for. Lane creation wrote none, so a
-// lane added after a member joined was invisible to them — while the member
-// inspector still called them "Unscoped — full access".
+// AQU-1781 made lane creation hand each new lane to every member below
+// Maintainer who already held every other lane ("every lane, forever").
+// AQU-2351 rule 2 retired that. A lane created later now reaches Maintainers
+// and Owners (by role), its creator, and the people and teams picked in the
+// same step — nobody else. A lane-less project's FIRST lane still goes to the
+// members it already has.
 //
-// Pins the rule at every writer that can create a target lane:
-//   * the POST /lanes route (Project Settings → Languages, and every client
-//     "add a language" entry point, which all funnel through it)
-//   * `ensureProjectLaneStmts` — the registry/settings/import-tag writer
-//   * `ensureTargetLaneStmt` — ensure-lane-for-tag, for a server-side writer
-//     about to put rows under a tag the project does not have yet
-// and pins who does NOT gain the lane: a lane-scoped member, a Maintainer, and
-// a role below Viewer.
+// Pins it at every writer that can create a target lane:
+//   * the POST /lanes route, with and without `grants`, and its candidates read
+//   * `ensureProjectLaneStmts` and `ensureTargetLaneStmt` + `firstTargetLaneStmts`
+//   * `linkTeamsToLaneStmts`, which the Codex ingest uses for each lane it creates
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach } from "vitest"
@@ -24,15 +21,16 @@ import {
   ensureTargetLaneStmt,
   listProjectLanes,
 } from "../../../db/shared/lanes"
-import { grantNewLaneStmt } from "../../../db/shared/lane-grants"
+import { firstTargetLaneStmts, linkTeamsToLaneStmts } from "../../../db/shared/lane-grants"
 
 const PROJECT = "p-grant"
 
 /**
  * user 1 = owner (project creator, 700). The members below are the people the
  * read wall applies to:
- *   2 = contributor (400), unscoped — should gain every new lane
- *   3 = contributor (400), scoped to the French lane — should gain none
+ *   2 = contributor (400), unscoped, holds French — AQU-1781 gave them every
+ *       new lane; AQU-2355 gives them none unless picked
+ *   3 = contributor (400), scoped to the French lane
  *   4 = maintainer (600) — above the wall, never granted
  *   5 = role 50, below Viewer — reads nothing, granted or not
  */
@@ -103,16 +101,48 @@ async function laneIdForTag(tag: string): Promise<string> {
   return lane.id
 }
 
-async function createLane(language: string): Promise<Response> {
+async function createLane(language: string, grants?: { userIds?: number[]; teamIds?: number[] }): Promise<Response> {
   return app.request(
     `/api/v2/projects/${PROJECT}/lanes`,
     {
       method: "POST",
       headers: authHeader(await jwtFor("owner")),
-      body: JSON.stringify({ name: "", language }),
+      body: JSON.stringify({ name: "", language, ...(grants ? { grants } : {}) }),
     },
     env,
   )
+}
+
+async function sql(text: string, ...params: unknown[]): Promise<void> {
+  await env.AQUILLA_PG.prepare(text).bind(...params).run()
+}
+
+/** Team 9 ("crew"), attached at Contributor and listing French; user 7 is on it only. */
+async function seedTeam(opts: { codex?: boolean } = {}): Promise<void> {
+  await seedUser(7, "crew-member")
+  await sql(
+    "INSERT INTO groups (id, org_id, name, created_by, legacy_uuid) VALUES (9, 1, 'crew', 1, ?)",
+    opts.codex ? "gitlab-uuid" : null,
+  )
+  await sql("INSERT INTO group_members (group_id, user_id) VALUES (9, 7)")
+  await sql(
+    "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, lanes_explicit) VALUES (9, ?, 400, 1, TRUE)",
+    PROJECT,
+  )
+  await sql("INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES (9, ?, 'ln-fr')", PROJECT)
+  await sql(
+    "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by) VALUES (?, 7, 'ln-fr', 400, 1)",
+    PROJECT,
+  )
+}
+
+async function teamLanes(): Promise<string[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    "SELECT lane_id FROM group_project_lanes WHERE group_id = 9 AND project_id = ? ORDER BY lane_id",
+  )
+    .bind(PROJECT)
+    .all<{ lane_id: string }>()
+  return (rows.results ?? []).map((r) => r.lane_id)
 }
 
 beforeEach(async () => {
@@ -128,36 +158,29 @@ beforeEach(async () => {
   await seedProject()
 })
 
-describe("AQU-1781 POST /lanes grants the new lane", () => {
-  it("grants an unscoped member below Maintainer, at their project role level", async () => {
+describe("AQU-2355 POST /lanes grants the new lane to nobody below Maintainer", () => {
+  it("leaves every member below Maintainer as they were, and Maintainers need no row", async () => {
     const res = await createLane("Spanish")
     expect(res.status).toBe(201)
-    const laneId = await laneIdForTag("Spanish")
-    expect(await grantsFor(2)).toEqual([
-      { lane: laneId, level: 400 },
-      { lane: "ln-fr", level: 400 },
-    ])
+    expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
+    expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])
+    expect(await grantsFor(4)).toEqual([])
+    expect(await grantsFor(5)).toEqual([])
   })
 
-  it("grants the new lane to the project lead who created it", async () => {
+  it("grants the new lane to the project lead who created it, and to nobody else", async () => {
     await seedUser(6, "lead")
-    await env.AQUILLA_PG.prepare(
-      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 6, 500, 1)",
-    )
-      .bind(PROJECT)
-      .run()
-    await env.AQUILLA_PG.prepare(
+    await sql("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 6, 500, 1)", PROJECT)
+    await sql(
       `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
        VALUES (?, 6, 'lane', 'ln-fr', '1', 0)`,
+      PROJECT,
     )
-      .bind(PROJECT)
-      .run()
-    await env.AQUILLA_PG.prepare(
+    await sql(
       `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
        VALUES (?, 6, 'ln-fr', 400, 1)`,
+      PROJECT,
     )
-      .bind(PROJECT)
-      .run()
     const res = await app.request(
       `/api/v2/projects/${PROJECT}/lanes`,
       {
@@ -169,112 +192,176 @@ describe("AQU-1781 POST /lanes grants the new lane", () => {
     )
     expect(res.status).toBe(201)
     const laneId = await laneIdForTag("Spanish")
-    expect(await grantsFor(6)).toEqual(
+    expect((await grantsFor(6)).map((g) => g.lane).sort()).toEqual([laneId, "ln-fr"].sort())
+    expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
+  })
+
+  it("gives a lane-less project's first lane to its unscoped direct members, and a team only when picked", async () => {
+    await seedTeam()
+    await sql("DELETE FROM project_member_lane_roles WHERE project_id = ?", PROJECT)
+    await sql("DELETE FROM group_project_lanes WHERE project_id = ?", PROJECT)
+    await sql("DELETE FROM lanes WHERE project_id = ? AND role = 'target'", PROJECT)
+    expect((await createLane("Spanish")).status).toBe(201)
+    const laneId = await laneIdForTag("Spanish")
+    expect((await grantsFor(2)).map((g) => g.lane)).toEqual([laneId])
+    // AQU-2563: a team reaches a lane only through its attachment, which lists none.
+    expect(await grantsFor(7)).toEqual([])
+    expect(await teamLanes()).toEqual([])
+    expect(await grantsFor(3)).toEqual([])
+    expect(await grantsFor(4)).toEqual([])
+
+    // A team on no lane yet is offered to the owner, and picking it links it.
+    await sql("DELETE FROM project_member_lane_roles WHERE project_id = ?", PROJECT)
+    await sql("DELETE FROM lanes WHERE project_id = ? AND role = 'target'", PROJECT)
+    const offer = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    const body = (await offer.json()) as { teams: Array<{ groupId: number; laneNames: string[] }> }
+    expect(body.teams).toEqual([expect.objectContaining({ groupId: 9, laneNames: [] })])
+    expect((await createLane("Twi", { teamIds: [9] })).status).toBe(201)
+    const twi = await laneIdForTag("Twi")
+    expect(await teamLanes()).toEqual([twi])
+    expect((await grantsFor(7)).map((g) => g.lane)).toEqual([twi])
+  })
+
+  it("offers the people and teams on the other lanes, with their role, and nobody at Maintainer+", async () => {
+    await seedTeam()
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      people: Array<{ userId: number; roleLevel: number; laneNames: string[] }>
+      teams: Array<{ groupId: number; name: string; roleLevel: number; laneNames: string[] }>
+    }
+    // 7 reaches the project only through the team, so the team is offered instead.
+    // Sorted by name: "scoped" (3) before "unscoped" (2).
+    expect(body.people.map((p) => [p.userId, p.roleLevel, p.laneNames])).toEqual([
+      [3, 400, ["French"]],
+      [2, 400, ["French"]],
+    ])
+    expect(body.teams.map((t) => [t.groupId, t.name, t.roleLevel, t.laneNames])).toEqual([[9, "crew", 400, ["French"]]])
+  })
+
+  it("grants exactly the people and teams picked, at the role they hold, and nothing else", async () => {
+    await seedTeam()
+    expect((await createLane("Spanish", { userIds: [2], teamIds: [9] })).status).toBe(201)
+    const laneId = await laneIdForTag("Spanish")
+    expect(await grantsFor(2)).toEqual(
       [
         { lane: laneId, level: 400 },
         { lane: "ln-fr", level: 400 },
       ].sort((a, b) => a.lane.localeCompare(b.lane)),
     )
     expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])
+    expect((await grantsFor(7)).map((g) => g.lane).sort()).toEqual([laneId, "ln-fr"].sort())
+    expect(await teamLanes()).toEqual([laneId, "ln-fr"].sort())
   })
 
-  it("does not grant a lane-scoped member", async () => {
-    expect((await createLane("Spanish")).status).toBe(201)
-    expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])
-  })
-
-  it("grants nobody at or above Maintainer, or below Viewer", async () => {
-    expect((await createLane("Spanish")).status).toBe(201)
-    expect(await grantsFor(4)).toEqual([])
-    expect(await grantsFor(5)).toEqual([])
-  })
-
-  it("grants only the lane being created, leaving an archived lane elsewhere as it was", async () => {
-    // An archived lane an unscoped member already holds. Creating a lane must
-    // neither re-grant it nor drop it — only the new lane moves.
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-       VALUES ('ln-old', ?, 'target', 'Dutch', NULL, NULL, 'Dutch', 9)`,
+  it("offers and grants the lane role someone holds, not their project role (a Viewer stays a Viewer)", async () => {
+    // Project role Contributor (400), lowered by a lead to Viewer on French.
+    await sql("UPDATE project_member_lane_roles SET role_level = 100 WHERE project_id = ? AND user_id = 2", PROJECT)
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
     )
-      .bind(PROJECT)
-      .run()
-    await env.AQUILLA_PG.prepare("UPDATE lanes SET archived_at = now() WHERE id = 'ln-old'").run()
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
-       VALUES (?, 2, 'ln-old', 400, 1)`,
-    )
-      .bind(PROJECT)
-      .run()
-    expect((await createLane("Spanish")).status).toBe(201)
+    const body = (await res.json()) as { people: Array<{ userId: number; roleLevel: number }> }
+    expect(body.people.find((p) => p.userId === 2)?.roleLevel).toBe(100)
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
     const laneId = await laneIdForTag("Spanish")
-    expect((await grantsFor(2)).map((g) => g.lane).sort()).toEqual(
-      [laneId, "ln-fr", "ln-old"].sort(),
-    )
+    expect((await grantsFor(2)).find((g) => g.lane === laneId)?.level).toBe(100)
   })
 
-  it("does not widen a member staffed onto one lane by grants alone (no scope row)", async () => {
-    // AQU-730's leveled grants REPLACED kind='lane' scope rows, so a member
-    // limited to one lane can hold a single grant and no scope row. Reading
-    // "unscoped" off the scopes table alone would hand them every later lane.
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-       VALUES ('ln-pt', ?, 'target', 'Portuguese', NULL, NULL, 'Portuguese', 9)`,
+  it("offers the project's creator like anyone else below Maintainer (AQU-2357)", async () => {
+    // created_by is history, not a role: 2 made the project and is a Contributor on it.
+    await sql("UPDATE projects SET created_by = 2 WHERE id = ?", PROJECT)
+    const res = await app.request(
+      `/api/v2/projects/${PROJECT}/lanes/grant-candidates`,
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
     )
-      .bind(PROJECT)
-      .run()
-    // user 2 now holds French but not Portuguese: they are lane-limited.
-    expect((await createLane("Spanish")).status).toBe(201)
-    expect((await grantsFor(2)).map((g) => g.lane)).toEqual(["ln-fr"])
-  })
-
-  it("grants a member who holds no grants on a project that has no target lane yet", async () => {
-    await env.AQUILLA_PG.prepare("DELETE FROM project_member_lane_roles WHERE project_id = ?")
-      .bind(PROJECT)
-      .run()
-    await env.AQUILLA_PG.prepare(
-      "DELETE FROM lanes WHERE project_id = ? AND role = 'target'",
-    )
-      .bind(PROJECT)
-      .run()
-    expect((await createLane("Spanish")).status).toBe(201)
+    const body = (await res.json()) as { people: Array<{ userId: number }> }
+    expect(body.people.map((p) => p.userId)).toContain(2)
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
     const laneId = await laneIdForTag("Spanish")
-    expect((await grantsFor(2)).map((g) => g.lane)).toEqual([laneId])
+    expect((await grantsFor(2)).map((g) => g.lane)).toContain(laneId)
+  })
+
+  it("refuses a pick that is not on the offer, and creates no lane", async () => {
+    // 4 is a Maintainer (sees every lane by role); 5 holds no lane.
+    for (const userId of [4, 5]) {
+      expect((await createLane("Spanish", { userIds: [userId] })).status).toBe(400)
+    }
+    const lanes = await listProjectLanes(env.AQUILLA_PG, PROJECT)
+    expect(lanes.some((lane) => lane.legacyTag === "Spanish")).toBe(false)
   })
 
   it("writes no duplicate rows when the same language is asked for twice", async () => {
-    expect((await createLane("Spanish")).status).toBe(201)
-    // Same display name — refused as a duplicate, and nothing further is written.
-    expect((await createLane("Spanish")).status).toBe(409)
-    const laneId = await laneIdForTag("Spanish")
-    expect(await grantsFor(2)).toEqual([
-      { lane: laneId, level: 400 },
-      { lane: "ln-fr", level: 400 },
-    ])
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(201)
+    expect((await createLane("Spanish", { userIds: [2] })).status).toBe(409)
+    expect((await grantsFor(2)).length).toBe(2)
   })
 })
 
-describe("AQU-1781 the server-side lane writers grant too", () => {
-  it("ensureProjectLaneStmts grants a lane created for a tag found in the data", async () => {
+describe("AQU-2355 the server-side lane writers", () => {
+  it("ensureProjectLaneStmts grants a later lane to nobody", async () => {
     const stmts = ensureProjectLaneStmts(env.AQUILLA_PG, PROJECT, {
       lanes: [{ role: "target", language: "Swahili", legacyTag: "Swahili" }],
     })
     await env.AQUILLA_PG.batch(stmts)
-    const laneId = await laneIdForTag("Swahili")
-    expect((await grantsFor(2)).map((g) => g.lane).sort()).toEqual([laneId, "ln-fr"].sort())
-    expect(await grantsFor(3)).toEqual([{ lane: "ln-fr", level: 400 }])
+    await laneIdForTag("Swahili")
+    expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
   })
 
-  it("ensureTargetLaneStmt grants the lane it ensures, and re-running adds no rows", async () => {
+  it("ensureTargetLaneStmt + firstTargetLaneStmts grant only a project's first lane, and re-running adds no rows", async () => {
     const run = () =>
       env.AQUILLA_PG.batch([
         ensureTargetLaneStmt(env.AQUILLA_PG, PROJECT, "Tshangla"),
-        grantNewLaneStmt(env.AQUILLA_PG, PROJECT, { legacyTag: "Tshangla" }, null),
+        ...firstTargetLaneStmts(env.AQUILLA_PG, PROJECT, { legacyTag: "Tshangla" }, null),
       ])
     await run()
-    const laneId = await laneIdForTag("Tshangla")
-    expect((await grantsFor(2)).map((g) => g.lane)).toContain(laneId)
-    const before = await grantsFor(2)
+    await laneIdForTag("Tshangla")
+    expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
+    await sql("DELETE FROM project_member_lane_roles WHERE project_id = ?", PROJECT)
+    await sql("DELETE FROM lanes WHERE project_id = ? AND role = 'target'", PROJECT)
     await run()
-    expect(await grantsFor(2)).toEqual(before)
+    const first = await laneIdForTag("Tshangla")
+    expect(await grantsFor(2)).toEqual([{ lane: first, level: 400 }])
+    await run()
+    expect(await grantsFor(2)).toEqual([{ lane: first, level: 400 }])
+  })
+
+  it("linkTeamsToLaneStmts (Codex) links the Codex team to a lane it created and grants its members", async () => {
+    await seedTeam({ codex: true })
+    await env.AQUILLA_PG.batch(
+      ensureProjectLaneStmts(env.AQUILLA_PG, PROJECT, {
+        lanes: [{ role: "target", language: "Swahili", legacyTag: "Swahili" }],
+      }),
+    )
+    const laneId = await laneIdForTag("Swahili")
+    expect(await teamLanes()).toEqual(["ln-fr"])
+    await env.AQUILLA_PG.batch(linkTeamsToLaneStmts(env.AQUILLA_PG, PROJECT, laneId, { codex: true }, null))
+    expect(await teamLanes()).toEqual([laneId, "ln-fr"].sort())
+    expect((await grantsFor(7)).map((g) => g.lane).sort()).toEqual([laneId, "ln-fr"].sort())
+    // A direct member is not on the team, so the team link gives them nothing.
+    expect(await grantsFor(2)).toEqual([{ lane: "ln-fr", level: 400 }])
+  })
+
+  it("linkTeamsToLaneStmts (Codex) leaves a team the Codex sync did not make alone", async () => {
+    await seedTeam({ codex: false })
+    await env.AQUILLA_PG.batch(
+      ensureProjectLaneStmts(env.AQUILLA_PG, PROJECT, {
+        lanes: [{ role: "target", language: "Swahili", legacyTag: "Swahili" }],
+      }),
+    )
+    const laneId = await laneIdForTag("Swahili")
+    await env.AQUILLA_PG.batch(linkTeamsToLaneStmts(env.AQUILLA_PG, PROJECT, laneId, { codex: true }, null))
+    expect(await teamLanes()).toEqual(["ln-fr"])
+    expect(await grantsFor(7)).toEqual([{ lane: "ln-fr", level: 400 }])
   })
 })

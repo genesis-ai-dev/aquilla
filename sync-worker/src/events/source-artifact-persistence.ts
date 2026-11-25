@@ -1,6 +1,6 @@
 import { artifactBindingConflictColumn, laneIdResolveBindingBinds, laneIdResolveBindingSql } from "./lane-id-sql"
 import { ensureBlankTargetBridgeStmt } from "../../../db/shared/lanes"
-import { grantNewLaneStmt } from "../../../db/shared/lane-grants"
+import { firstTargetLaneStmts } from "../../../db/shared/lane-grants"
 
 export interface SourceArtifactPersistenceInput {
   projectId: string
@@ -32,8 +32,9 @@ export interface SourceArtifactPersistenceInput {
  * `''` lane. On a project with no target lane yet that lane does not exist, so
  * it is created here, with its grant, in the same batch, before the binding
  * resolves lane_id: the same rule a translation write follows
- * (handlers/cell-events.ts, AQU-1594 / AQU-1781). A project that already has
- * any target lane inserts nothing.
+ * (handlers/cell-events.ts, AQU-1594; AQU-2355: the project's first lane goes
+ * to its direct members, a team's only through its attachment). A project
+ * that already has any target lane inserts nothing.
  */
 export function blankTargetBridgeStmts(
   db: AquillaDb,
@@ -44,7 +45,7 @@ export function blankTargetBridgeStmts(
   if (bindingRole !== 'target' || targetLang !== '') return []
   return [
     ensureBlankTargetBridgeStmt(db, projectId),
-    grantNewLaneStmt(db, projectId, { legacyTag: '' }, null),
+    ...firstTargetLaneStmts(db, projectId, { legacyTag: '' }, null),
   ]
 }
 

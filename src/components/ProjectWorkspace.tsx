@@ -238,7 +238,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
-  chapterOfCell, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  chapterOfCell, heardLinesOfMilestone, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -16326,13 +16326,22 @@ export function ProjectWorkspace() {
     }),
     [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
   )
+  // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an
+  // audio cue file, split into milestones: the heard lines of the milestone
+  // on the timeline (paired with its lines, or inside its time range), cut
+  // once so the timeline and Play show the same page as the subtitle cards.
+  // The split off, `audioCueCells` itself.
+  const timelineHeardCells = useMemo(
+    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, cueLinks.textForCue),
+    [audioCueCells, timelineCells, timelineLines, cueLinks],
+  )
   // Group D (Nov 5): what Play all, Space and a timeline seek play. Following
   // the recordings, a file with an audio cue file plays its heard lines — its
   // takes live on them, never on its subtitle lines — laid out as the
   // timeline draws them (`recordingsLines`). Every other file: its own lines.
   const playbackCells = useMemo(
-    () => recordingsLines(timelineCells, audioCueCells, timingMode === "audioFirst"),
-    [timelineCells, audioCueCells, timingMode],
+    () => recordingsLines(timelineCells, timelineHeardCells, timingMode === "audioFirst"),
+    [timelineCells, timelineHeardCells, timingMode],
   )
   // AQU-2253 (Nov 13): the line Space and the strip's Play start from with a
   // line selected. Playing the heard lines, a subtitle row has no place in
@@ -16342,9 +16351,9 @@ export function ProjectWorkspace() {
     if (!timelineSelectedCellId) return null
     const row = timelineCells.find((c) => c.id === timelineSelectedCellId)
     return row
-      ? playStartLineId(row, audioCueCells, timingMode === "audioFirst", cueLinks.cuesForText)
+      ? playStartLineId(row, timelineHeardCells, timingMode === "audioFirst", cueLinks.cuesForText)
       : timelineSelectedCellId
-  }, [timelineSelectedCellId, timelineCells, audioCueCells, timingMode, cueLinks])
+  }, [timelineSelectedCellId, timelineCells, timelineHeardCells, timingMode, cueLinks])
   // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
   // own clock, so Play runs to whichever ends later: the lines or the film.
   // The queue is told how long the film is and which lines are this file's,
@@ -16354,6 +16363,11 @@ export function ProjectWorkspace() {
   // plays behind is played, never skipped. Null wherever no film plays behind
   // the lines (`linkedFilmBehindLines`): following the source, an imported
   // film, a film that could not be loaded.
+  // AQU-2711 x AQU-2253 (review, Nov 25): with Split into milestones on, Play
+  // ends at the milestone's last line and the film does not run on: the
+  // milestone is laid out from 0:00, so the film's rest would play over an
+  // empty timeline. (Its picture is not yet at the milestone's place in the
+  // film: the programme clock starts at 0:00 for any list of lines.)
   const filmBehind = useMemo(
     () => linkedFilmBehindLines({
       kind: filmKind,
@@ -16361,8 +16375,9 @@ export function ProjectWorkspace() {
       followsRecordings: timingMode === "audioFirst",
       filmFailed,
       durationSec: videoDurationForTable,
+      oneMilestone: splitByMilestone,
     }),
-    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable],
+    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, splitByMilestone],
   )
   // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
   // the timeline and the bottom strip start the queue with must be the same
@@ -16372,8 +16387,8 @@ export function ProjectWorkspace() {
   // (`playbackCells`) on any other file.
   // Since the whole-book timeline (dev, Nov 13) the timeline's lines ARE every
   // chapter's, so these are `playbackCells` themselves. With Split into
-  // milestones on (AQU-2711) they are the milestone on screen, which is also
-  // all Play plays.
+  // milestones on (AQU-2711) they are the milestone's: its own lines, or the
+  // heard lines cut to it (`timelineHeardCells`), and Play stops at its end.
   const filmLines = playbackCells
   const programmeFilm = useMemo(
     () => programmeFilmFor(filmBehind, filmLines),
@@ -20839,7 +20854,7 @@ export function ProjectWorkspace() {
                     onReviewCharacterDisagreements={openCharacterCheck}
                     hasAudioCueTrack={audioCueSibling !== null}
                     audioCues={audioCues}
-                    targetCells={audioCueCells}
+                    targetCells={timelineHeardCells}
                     cueLinks={cueLinks}
                     cueLinksFailed={Boolean(cueLinksError)}
                     cueLinksPending={cueLinksPending}

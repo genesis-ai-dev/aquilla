@@ -149,6 +149,36 @@ export function timelineCellsForMilestoneSplit<T extends { id: string }>(
   return dropped ? kept : cells as T[]
 }
 
+/**
+ * AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file's heard lines (its
+ * audio cue file's) for the milestone on the timeline, with Split into
+ * milestones on. A heard line paired with subtitle lines is on the page when
+ * one of them is; one paired with none is on it when it starts inside the
+ * milestone's time range. With the whole file on the timeline (`milestone`
+ * is `all`, the split off), the heard lines come back as they are.
+ */
+export function heardLinesOfMilestone<T extends { id: string; startTime?: number | null; endTime?: number | null }>(
+  heard: T[] | null,
+  milestone: readonly { id: string; startTime?: number | null; endTime?: number | null }[],
+  all: readonly { id: string }[],
+  textForCue: ReadonlyMap<string, readonly string[]>,
+): T[] | null {
+  if (!heard || milestone === all) return heard
+  const onPage = new Set(milestone.map((c) => c.id))
+  let fromSec = Infinity
+  let toSec = -Infinity
+  for (const line of milestone) {
+    if (typeof line.startTime === "number" && Number.isFinite(line.startTime)) fromSec = Math.min(fromSec, line.startTime)
+    if (typeof line.endTime === "number" && Number.isFinite(line.endTime)) toSec = Math.max(toSec, line.endTime)
+  }
+  return heard.filter((cue) => {
+    const paired = textForCue.get(cue.id)
+    if (paired && paired.length > 0) return paired.some((id) => onPage.has(id))
+    const at = cue.startTime
+    return typeof at === "number" && Number.isFinite(at) && at >= fromSec && at < toSec
+  })
+}
+
 /** The lines of one chapter (the whole list when null), in order. */
 export function scopeCells<T extends CellData>(cells: readonly T[], scope: TimelineChapter | null): T[] {
   if (!scope) return cells as T[]

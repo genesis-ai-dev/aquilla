@@ -135,6 +135,14 @@ describe("linkedFilmBehindLines: the film behind the lines, following the record
     expect(linkedFilmBehindLines(linked)).toEqual({ endSec: 2700, runsOn: true })
   })
 
+  // AQU-2711 x AQU-2253 (review, Nov 25): Split into milestones plays the
+  // milestone on screen and stops at its last line. Its lines are laid out
+  // from 0:00, so running on would play the film's rest over an empty timeline.
+  it("one milestone of the file on screen: the film is behind its lines, but Play ends with them", () => {
+    expect(linkedFilmBehindLines({ ...linked, oneMilestone: true })).toEqual({ endSec: 2700, runsOn: false })
+    expect(linkedFilmBehindLines({ ...linked, oneMilestone: false })).toEqual({ endSec: 2700, runsOn: true })
+  })
+
   it("following the source: nothing, the film or the recording is the transport there", () => {
     expect(linkedFilmBehindLines({ ...linked, followsRecordings: false })).toBeNull()
   })

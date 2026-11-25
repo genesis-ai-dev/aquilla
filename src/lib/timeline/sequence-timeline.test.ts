@@ -5,6 +5,7 @@ import type { CellData } from "@/hooks/useCells"
 import {
   chapterOfCell,
   hasRealChapters,
+  heardLinesOfMilestone,
   nextPlayableChapter,
   resolveTimelineChapter,
   scopeCells,
@@ -228,5 +229,36 @@ describe("a file with no chapters, however long", () => {
     ])
     expect(chapters.map((c) => c.key)).toEqual(["RUT 1", "RUT 2"])
     expect(resolveTimelineChapter({ chapters, chosenKey: "RUT 2", queueCellId: null })?.key).toBe("RUT 2")
+  })
+})
+
+// AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an audio
+// cue file, split into milestones. The heard lines are cut to the milestone
+// once, so the timeline and Play show the same page as the subtitle cards.
+describe("heardLinesOfMilestone", () => {
+  const timed = (id: string, startTime?: number, endTime?: number): CellData =>
+    ({ id, value: id, startTime, endTime } as unknown as CellData)
+  const all = [timed("s1", 0, 4), timed("s2", 4, 8), timed("s3", 8, 12), timed("s4", 12, 16)]
+  const milestone = [all[1], all[2]]
+  const heard = [timed("c1", 1, 3), timed("c2", 5, 7), timed("c3", 9, 11), timed("c4", 13, 15), timed("c5"), timed("c6", 20, 22)]
+
+  it("keeps the heard lines paired with the milestone's lines or inside its time range", () => {
+    // c6 sits outside the range but is paired with s2; c1 sits outside and is
+    // paired with nothing on the page; c5 has no times and no pair.
+    const textForCue = new Map<string, readonly string[]>([["c6", ["s2"]], ["c1", ["s1"]]])
+    expect(heardLinesOfMilestone(heard, milestone, all, textForCue)?.map((c) => c.id)).toEqual(["c2", "c3", "c6"])
+  })
+
+  it("a cue paired only with lines off the page stays off it, even inside the range", () => {
+    const textForCue = new Map<string, readonly string[]>([["c2", ["s4"]]])
+    expect(heardLinesOfMilestone(heard, milestone, all, textForCue)?.map((c) => c.id)).toEqual(["c3"])
+  })
+
+  it("the whole file on the timeline (split off): the heard lines, unchanged", () => {
+    expect(heardLinesOfMilestone(heard, all, all, new Map())).toBe(heard)
+  })
+
+  it("no heard lines: none", () => {
+    expect(heardLinesOfMilestone(null, milestone, all, new Map())).toBeNull()
   })
 })

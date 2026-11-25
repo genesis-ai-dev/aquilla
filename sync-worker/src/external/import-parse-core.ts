@@ -13,12 +13,15 @@
 // dialog calls, an agent import and a browser import of one file produce
 // identical cells by construction.
 //
-// USFM is the one format where agent and browser imports deliberately differ
-// (AQU-1283): the in-app importer is lossless (markers stay in `value`, the
-// editor strips them at render), while the `agent:usfm` profile declares
-// `fidelity: 'content-only'`. So USFM cells are run through usfmContentOnly —
-// footnotes move to `metadata.usfmNotes`, character markers unwrap, `~` becomes
-// a space — and the preview shows exactly what commits.
+// USFM is content-only on BOTH paths. `fidelity: 'content-only'` is what the
+// `agent:usfm` profile declares (AQU-1283) and, since AQU-2743, what the in-app
+// importer does too: the projection lives in `usfmSectionToStrings` inside the
+// shared parse core, so footnotes are already in `metadata.usfmNotes` and the
+// markers already unwrapped by the time the strings reach this module. The
+// `contentOnly` pass below therefore finds nothing left to clean on a USFM
+// parse — it is kept because it is idempotent, it still covers cells reaching
+// `stringsToPlanImportCells` from somewhere other than that core, and its
+// `residual-markup` warning is the guard that says so.
 
 import { errorResponse } from './errors'
 import { laneIdRequiredMessage } from './external-lane'

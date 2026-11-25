@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
+import { render, screen, within, waitFor, act, fireEvent } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSwitcher } from "./OrgSwitcher"
@@ -282,6 +282,21 @@ describe("OrgSwitcher", () => {
     await act(async () => { screen.getByRole("combobox", { name: /guest org/i }).click() })
     const guestSection = screen.getByTestId("guest-orgs")
     expect(guestSection.querySelector(".lucide-check")).not.toBeNull()
+  })
+
+  it("ranks exact and prefix matches above substring matches and restores browsing order on clear", async () => {
+    const names = ["A personal project", "Personal", "Personal Projects"]
+    listMyOrgs.mockResolvedValue(names.map((name, i) => ({ id: i + 1, name, role: { level: 700, name: "owner" } })))
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("combobox", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+    const input = await screen.findByLabelText(/find an organization/i)
+    const order = () => screen.getAllByRole("option").flatMap(row =>
+      names.filter(name => within(row).queryByText(name, { exact: true })))
+    fireEvent.change(input, { target: { value: " PERSONAL " } })
+    expect(order()).toEqual(["Personal", "Personal Projects", "A personal project"])
+    fireEvent.change(input, { target: { value: "" } })
+    expect(order()).toEqual(names)
   })
 
   // AQU-759: the search box filters the list as you type, and the list stays

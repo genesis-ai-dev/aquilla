@@ -3541,7 +3541,7 @@ export function ExportDialog({
             </ul>
           </div>
         ))}
-        <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} />
+        <ExtensionExports projectId={projectId} fileId={activeFileId} lane={targetLang ?? ""} getToken={getToken} onBeforeNavigate={() => handleOpenChange(false)} />
         </>
         )}
         </DialogBody>

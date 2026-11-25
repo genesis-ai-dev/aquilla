@@ -19739,7 +19739,7 @@ export function ProjectWorkspace() {
             className="relative flex h-full w-full flex-col"
             {...(timelineStacked ? { "data-media-editor": "" } : {})}
           >
-            <ExtensionsBar choice={extensionEditorChoice} />
+            <ExtensionsBar choice={extensionEditorChoice} fileId={activeFile?.id ?? null} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">

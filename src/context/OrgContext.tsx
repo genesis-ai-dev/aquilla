@@ -63,7 +63,26 @@ interface OrgContextValue {
    * Retry instead of forcing a full page reload.
    */
   retryOrgLoad: () => Promise<void>
+  /**
+   * An org the caller can open without belonging to it — one a platform admin
+   * reaches through the switcher catalog — is in neither `orgs` (memberships)
+   * nor `guestOrgs` (project grants), so it is fetched by id. This is the
+   * answer so far: `undefined` while it is not in, `null` when the server
+   * refused or has no such org. Chrome that names an org by id goes through
+   * `useOrgLookup`, which also asks.
+   */
+  lookedUpOrg: (id: number) => OrgSummary | null | undefined
+  /** Ask for one such org. Repeat calls cost one request per id per load of the org list. */
+  requestOrgLookup: (id: number) => void
 }
+
+/** Orgs fetched one id at a time (see `lookedUpOrg`), for the account that asked. */
+interface OrgLookups {
+  jwt: string | null
+  byId: ReadonlyMap<number, OrgSummary | null>
+}
+
+const NO_ORG_LOOKUPS: OrgLookups = { jwt: null, byId: new Map() }
 
 const OrgContext = createContext<OrgContextValue | null>(null)
 
@@ -89,7 +108,15 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [accessibleProjectsLoading, setAccessibleProjectsLoading] = useState(true)
   const [accessibleProjectsError, setAccessibleProjectsError] = useState<string | null>(null)
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
-  const [hydratedOrg, setHydratedOrg] = useState<OrgSummary | null>(null)
+  // Keyed by org id, so a name can never be shown under another org's id.
+  const [orgLookups, setOrgLookups] = useState<OrgLookups>(NO_ORG_LOOKUPS)
+  // Bumped by every load of the org list. That list cannot say anything about
+  // a looked-up org (renamed, access taken away), so each one still on screen
+  // is asked for again — while its last answer stays up.
+  const [orgLookupEpoch, setOrgLookupEpoch] = useState(0)
+  const orgLookupAskedRef = useRef(new Map<number, string>())
+  const currentJwtRef = useRef(jwt)
+  useEffect(() => { currentJwtRef.current = jwt }, [jwt])
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
   // Route changes update org scope in the dedicated effect below; they must
@@ -135,6 +162,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       const list = await listMyOrgs(jwt)
       if (orgRequestRef.current !== requestId) return []
       setOrgs(list)
+      setOrgLookupEpoch((epoch) => epoch + 1)
       // When the URL already names an org, don't clamp away from it here —
       // OrgRouteGate owns unauthorized/missing UX. Only auto-pick when the
       // path isn't driving org context (project routes, etc.).
@@ -270,37 +298,45 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     return Array.from(seen.values())
   }, [accessibleProjects, orgs])
 
-  // When the URL names an org that is not a membership (platform-admin
-  // catalog), hydrate its summary so the switcher trigger can show the name
-  // without pulling the whole tenancy into `orgs`. Wait for the project
+  const requestOrgLookup = useCallback((id: number) => {
+    if (!jwt) return
+    const asked = orgLookupAskedRef.current
+    const ask = `${orgLookupEpoch}\0${jwt}`
+    if (asked.get(id) === ask) return
+    asked.set(id, ask)
+    const settle = (org: OrgSummary | null | undefined) => {
+      // Superseded by a later ask for this org, or the account changed while
+      // the request was out.
+      if (asked.get(id) !== ask || currentJwtRef.current !== jwt) return
+      setOrgLookups((prev) => {
+        const known = prev.jwt === jwt ? prev.byId : NO_ORG_LOOKUPS.byId
+        // A re-check that failed outright says nothing new: keep the last answer.
+        const answer = org === undefined ? known.get(id) ?? null : org
+        const byId = new Map(known)
+        byId.set(id, answer)
+        return { jwt, byId }
+      })
+    }
+    void getOrg(jwt, id).then(settle, () => settle(undefined))
+  }, [jwt, orgLookupEpoch])
+
+  const lookedUpOrg = useCallback((id: number): OrgSummary | null | undefined => {
+    // Signed out there is nobody to ask, so nothing is ever pending.
+    if (!jwt) return null
+    return orgLookups.jwt === jwt ? orgLookups.byId.get(id) : undefined
+  }, [jwt, orgLookups])
+
+  // When the URL names an org that is neither a membership nor a guest org
+  // (platform-admin catalog), look it up so the switcher trigger can show the
+  // name without pulling the whole tenancy into `orgs`. Wait for the project
   // directory so a guest org is not probed as a catalog row.
   useEffect(() => {
     if (!jwt || isLoading || accessibleProjectsLoading) return
-    if (activeOrgId == null) {
-      setHydratedOrg(null)
-      return
-    }
-    if (orgs.some((o) => o.id === activeOrgId)) {
-      setHydratedOrg(null)
-      return
-    }
-    if (guestOrgs.some((o) => o.id === activeOrgId)) {
-      setHydratedOrg(null)
-      return
-    }
-    let cancelled = false
-    void getOrg(jwt, activeOrgId).then(
-      (org) => {
-        if (!cancelled) setHydratedOrg(org)
-      },
-      () => {
-        if (!cancelled) setHydratedOrg(null)
-      },
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [jwt, isLoading, accessibleProjectsLoading, activeOrgId, orgs, guestOrgs])
+    if (activeOrgId == null) return
+    if (orgs.some((o) => o.id === activeOrgId)) return
+    if (guestOrgs.some((o) => o.id === activeOrgId)) return
+    requestOrgLookup(activeOrgId)
+  }, [jwt, isLoading, accessibleProjectsLoading, activeOrgId, orgs, guestOrgs, requestOrgLookup])
 
   // Path is authoritative on `/orgs/...`. localStorage only resumes `/`.
   useEffect(() => {
@@ -327,7 +363,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       const known =
         orgs.some((o) => o.id === parsed.orgKey) ||
         guestOrgs.some((o) => o.id === parsed.orgKey) ||
-        hydratedOrg?.id === parsed.orgKey
+        lookedUpOrg(parsed.orgKey) != null
       // Still loading membership — don't clobber storage yet.
       if (isLoading) return
       if (!known) return
@@ -340,7 +376,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // which is a default, not a choice — persisting it would keep a user
     // scoped to their original org after they join a second one.
     if (activeOrgId == null) localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
-  }, [activeOrgId, guestOrgs, hydratedOrg, isLoading, location.pathname, orgs])
+  }, [activeOrgId, guestOrgs, lookedUpOrg, isLoading, location.pathname, orgs])
 
   const setActiveOrg = useCallback((id: number) => {
     setActiveOrgId(id)
@@ -376,7 +412,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     ? activeOrgId
     : null
   const isAllOrgs = visibleOrgs.length > 1 && visibleActiveOrgId == null
-  const activeOrg = visibleActiveOrgId == null ? null : resolvedMemberOrg ?? hydratedOrg
+  // A membership wins, then a guest org (below — never presented as
+  // `activeOrg`); only an org that is neither is named by its lookup.
+  const activeOrg = visibleActiveOrgId == null
+    ? null
+    : resolvedMemberOrg ??
+      (visibleGuestOrgs.some((g) => g.id === visibleActiveOrgId) ? null : lookedUpOrg(visibleActiveOrgId) ?? null)
   // AQU-790: only a guest org when the active id is not one of the caller's
   // memberships — a membership always wins (never misrepresent role).
   const activeGuestOrg =
@@ -402,6 +443,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       refresh,
       refreshAccessibleProjects,
       retryOrgLoad,
+      lookedUpOrg,
+      requestOrgLookup,
     }}>
       {children}
     </OrgContext.Provider>

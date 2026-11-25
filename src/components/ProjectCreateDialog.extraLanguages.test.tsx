@@ -554,13 +554,13 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByText(/import a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
     // Corpus choice stays hidden until an upstream is picked on self-contained.
-    expect(screen.queryByText(/Which corpus should become/i)).toBeNull()
+    expect(screen.queryByText(/What should become this project's source/i)).toBeNull()
 
     fireEvent.click(screen.getByText(/Linked target/i))
     expect(linkedTarget().getAttribute("data-checked")).toBe("")
     expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
-    expect(screen.getByText(/Which corpus should become/i)).toBeTruthy()
+    expect(screen.getByText(/What should become this project's source/i)).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
     fireEvent.click(screen.getByText(/Self-contained/i))

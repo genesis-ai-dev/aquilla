@@ -277,7 +277,7 @@ describe("EditorTable — source-edit affordance", () => {
     fireEvent.click(await openCellMenu())
     const warning = screen.getByTestId("source-edit-lane-warning")
     expect(warning).toHaveTextContent(/all language lanes/i)
-    expect(warning).toHaveTextContent(/approval/i)
+    expect(warning).toHaveTextContent(/validation/i)
     expect(warning.textContent ?? "").not.toMatch(/\d/)
     expect(warning.textContent ?? "").not.toMatch(/done again/i)
     expect(screen.queryByRole("textbox", { name: "Edit source text" })).not.toBeInTheDocument()

@@ -196,7 +196,7 @@ export const bibleData = defineNamespace({
     "bibleData.voices.popoverTitle": "Who is speaking",
     "bibleData.voices.type.dialogue": "Conversation",
     "bibleData.voices.type.normal": "Speech",
-    "bibleData.voices.type.quotation": "Quotation (of scripture or a source)",
+    "bibleData.voices.type.quotation": "Quotation (of Scripture or a source)",
     "bibleData.voices.type.hypothetical": "Imagined speech",
     "bibleData.voices.type.implicit": "Implied speech",
     "bibleData.voices.delivery": "Delivery: {delivery}",

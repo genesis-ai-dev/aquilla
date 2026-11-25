@@ -556,7 +556,7 @@ describe("AQU-1365: the translation-only importers live under A translation", ()
 
   it("leaves Paired translation out of the source importers", () => {
     const { unmount } = renderDialog()
-    expect(screen.getByText("Translation Memory")).toBeInTheDocument()
+    expect(screen.getByText("Translation memory")).toBeInTheDocument()
     expect(screen.queryByText("Paired translation")).not.toBeInTheDocument()
     unmount()
     renderDialog({ translation: undefined })

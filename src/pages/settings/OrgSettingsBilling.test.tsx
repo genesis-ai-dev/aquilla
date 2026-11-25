@@ -278,7 +278,7 @@ it('explains a portal failure that carries no message in catalog copy', async ()
   vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce('network down')
   renderBilling()
   fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't start Stripe.")
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't open Stripe billing.")
   expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
 })
 

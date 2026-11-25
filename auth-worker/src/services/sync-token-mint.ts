@@ -198,6 +198,18 @@ export async function mintSyncTokenForUser(
   // AQU-285: is_active is a BOOLEAN NOT NULL DEFAULT TRUE column (migration 0033).
   if (!project.is_active) return { ok: false, reason: "project_frozen" }
 
+  // [Pen test] Authorization & access control: the sync-worker's file role
+  // lookup is keyed on (fileId, projectId) and falls back to the normal floor
+  // when the file is foreign, so a token minted for (A, fileOfB) would still
+  // write cells against B's file. `files.id` is globally unique, so a row
+  // with this id in another project is a cross-tenant reference: refuse it.
+  // A file that does not exist yet (file.create in flight) and the
+  // project-level sentinel both pass through unchanged.
+  const fileRow = await env.AQUILLA_PG.prepare("SELECT project_id FROM files WHERE id = ?")
+    .bind(fileId)
+    .first<{ project_id: string }>()
+  if (fileRow && fileRow.project_id !== projectId) return { ok: false, reason: "no_access" }
+
   let resolved: RoleResolution | null
   try {
     resolved = await resolveProjectRole(env, user, projectId)

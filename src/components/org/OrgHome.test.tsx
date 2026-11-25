@@ -648,9 +648,11 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // Projects page uses OrgProjectsDataTable sortable headers (not ProjectTable's icon headers).
-    for (const name of [/^Translated$/i, /^Validated$/i, /^Audio$/i]) {
+    for (const name of [/^Text$/i, /^Audio$/i]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument()
     }
+    const legacyRow = screen.getByText("Legacy Translation").closest("tr")!
+    expect(within(legacyRow).getByRole("button", { name: "10% translated, 10% validated" })).toBeInTheDocument()
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {

@@ -1,26 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { tokenizeForConfidence, lexicalConfidence, lexicalSimilarity } from './lexical-confidence'
+import { confidenceTerms, lexicalConfidence, lexicalSimilarity } from './lexical-confidence'
 
-describe('tokenizeForConfidence', () => {
-  it('lowercases and splits on punctuation/whitespace', () => {
-    expect(tokenizeForConfidence('Abraham, Isaac; Jacob.')).toEqual([
-      'abraham',
-      'isaac',
-      'jacob',
-    ])
+describe('confidenceTerms (character n-grams, AQU-2727)', () => {
+  it('ignores case and punctuation', () => {
+    expect(confidenceTerms('Abraham, Isaac; Jacob.')).toEqual(confidenceTerms('abraham isaac jacob'))
   })
 
-  it('returns [] for empty / punctuation-only input', () => {
-    expect(tokenizeForConfidence('')).toEqual([])
-    expect(tokenizeForConfidence('  ;; .. ')).toEqual([])
-  })
-
-  it('tokenizes non-Latin (Devanagari) script', () => {
-    // Two Devanagari words separated by a space and a danda.
-    expect(tokenizeForConfidence('अब्राहामले इसहाक॥')).toEqual([
-      'अब्राहामले',
-      'इसहाक',
-    ])
+  it('is empty for empty / punctuation-only input', () => {
+    expect(confidenceTerms('').size).toBe(0)
+    expect(confidenceTerms('  ;; .. ').size).toBe(0)
   })
 })
 
@@ -39,17 +27,16 @@ describe('lexicalConfidence (one-hop, term coverage)', () => {
   })
 
   it('is the fraction of query terms a neighbor covers', () => {
-    // query has 4 distinct terms; neighbor covers 2 of them.
-    expect(lexicalConfidence('alpha beta gamma delta', ['alpha beta'])).toBeCloseTo(0.5)
+    // " ab", "abc", "bc ", "c x", " xy", "xyz", "yz " — the neighbor has 3 of 7.
+    expect(lexicalConfidence('abc xyz', ['abc'])).toBeCloseTo(3 / 7)
   })
 
   it('takes the best (max) coverage across neighbors — one hop', () => {
-    const conf = lexicalConfidence('alpha beta gamma delta', [
-      'alpha', // 0.25
-      'alpha beta gamma', // 0.75
-      'zeta', // 0
-    ])
-    expect(conf).toBeCloseTo(0.75)
+    const query = 'alpha beta gamma delta'
+    const conf = lexicalConfidence(query, ['alpha', 'alpha beta gamma', 'zeta'])
+    expect(conf).toBeCloseTo(lexicalConfidence(query, ['alpha beta gamma']))
+    expect(conf).toBeGreaterThan(lexicalConfidence(query, ['alpha']))
+    expect(conf).toBeLessThan(1)
   })
 
   it('is case- and punctuation-insensitive', () => {
@@ -57,8 +44,14 @@ describe('lexicalConfidence (one-hop, term coverage)', () => {
   })
 
   it('dedupes repeated query terms (coverage is over distinct terms)', () => {
-    // 2 distinct terms; neighbor has one of them → 0.5, not skewed by the repeat.
-    expect(lexicalConfidence('name name other', ['name'])).toBeCloseTo(0.5)
+    // " ab","abc","bc ","c a" — each counted once, however often it repeats.
+    expect(lexicalConfidence('abc abc abc', ['abc'])).toBeCloseTo(3 / 4)
+  })
+
+  it('scores unspaced scripts by shared text, not whole verses (AQU-2727)', () => {
+    // One "word" per verse under the old tokenizer, so this was 0.
+    expect(lexicalConfidence('銅器皿', ['金器皿和銀器皿'])).toBeGreaterThan(0)
+    expect(lexicalConfidence('พระเจ้าทรงสร้าง', ['ในเริ่มแรกนั้นพระเจ้าทรงสร้างฟ้า'])).toBeGreaterThan(0.5)
   })
 
   it('scores a Devanagari genealogy cell against its validated neighbors', () => {
@@ -76,7 +69,7 @@ describe('lexicalConfidence (one-hop, term coverage)', () => {
 describe('lexicalSimilarity (AQU-1232)', () => {
   it('is 1 for identical term sets and 0 for disjoint ones', () => {
     expect(lexicalSimilarity('In the beginning', 'in, the BEGINNING!')).toBe(1)
-    expect(lexicalSimilarity('In the beginning', 'peace be with you')).toBe(0)
+    expect(lexicalSimilarity('In the beginning', 'peace unto you')).toBe(0)
   })
 
   it('is symmetric', () => {
@@ -96,10 +89,10 @@ describe('lexicalSimilarity (AQU-1232)', () => {
   })
 
   it('computes Jaccard over distinct terms', () => {
-    // A = {a,b,c}, B = {b,c,d} → |∩| = 2, |∪| = 4.
-    expect(lexicalSimilarity('a b c', 'b c d')).toBeCloseTo(0.5)
-    // Repeats do not skew it: A = {name}, B = {name, other} → 1/2.
-    expect(lexicalSimilarity('name name name', 'name other')).toBeCloseTo(0.5)
+    // A = {" ab","abc","bc "}, B = A + {"c x"," xy","xyz","yz "} → 3 / 7.
+    expect(lexicalSimilarity('abc', 'abc xyz')).toBeCloseTo(3 / 7)
+    // Repeats do not skew it: {" ab","abc","bc ","c a"} vs {" ab","abc","bc "} → 3 / 4.
+    expect(lexicalSimilarity('abc abc abc', 'abc')).toBeCloseTo(3 / 4)
   })
 
   it('is 0 when either side has no terms', () => {

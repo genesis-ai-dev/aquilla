@@ -13,9 +13,11 @@
  *   host → tool  { channel: "aquilla-host", type: "result", requestId, ok, value | error }
  *                { channel: "aquilla-host", type: "event", event: { type, ... } }
  *
- * The runtime only accepts messages whose `source` is its parent window; the
- * host only accepts messages whose `source` is this frame's contentWindow (and
- * origin "null", since the frame has an opaque origin).
+ * The tool document sits inside a shell frame (srcdoc.ts, TOOL_SHELL_CSP), so
+ * the host is the tool's GRANDPARENT. The runtime only accepts messages whose
+ * `source` is that window; the host only accepts messages whose `source` is
+ * the tool's own window (`toolWindowOf`, origin "null": the frame has an
+ * opaque origin). The shell relays nothing and runs no script.
  *
  * Expects `window.__AQUILLA_BOOT__` to be set by the host before this runs.
  */
@@ -24,7 +26,10 @@ import { TOOLS_API_REV } from "../../../shared/tools/manifest"
 import { BRIDGE_CALL_TIMEOUT_MS, BRIDGE_WEB_FETCH_TIMEOUT_MS } from "../../../shared/tools/timeouts"
 export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   "use strict";
-  var host = window.parent;
+  // The app, past the shell frame. (A window with no parent is its own parent,
+  // so this is also the host when a tool document is mounted directly in a top
+  // window, as the in-process test frame does.)
+  var host = window.parent.parent;
   var boot = window.__AQUILLA_BOOT__ || {};
   var pending = Object.create(null);
   var listeners = Object.create(null);

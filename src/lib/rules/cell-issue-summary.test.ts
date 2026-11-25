@@ -85,7 +85,7 @@ describe("summarizeCellIssues", () => {
       {
         ruleId: "user:no-foo",
         name: "No foo",
-        reason: "target contains forbidden pattern",
+        reason: "Translation contains a forbidden pattern",
       },
     ])
   })

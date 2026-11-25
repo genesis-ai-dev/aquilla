@@ -720,12 +720,12 @@ describe("POST /api/v2/orgs/portfolio", () => {
 
     // AQU-745: the aggregate carries the org binds for each IN clause plus the
     // per-caller visibility binds appended by PORTFOLIO_VISIBILITY_PREDICATE:
-    // <isAdmin 0/1>, then userId ×4.
+    // <isAdmin 0/1>, then userId ×3.
     //
     // Four org scopes, in order: the AQU-1083 policy CTE, the audio scope, the
     // AQU-1097 plan-unit counts (preceded by the Anywhere-on-Earth cutoff date
     // those counts compare target dates to), then the outer WHERE.
-    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
+    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99]])
     // Driven FROM projects and left-joined to its settings, so a project with
     // no settings row still inherits the org's structural-cell answer.
     const settingsQuery = preparedQueries.find((query) => query.includes("AS validation_count,"))

@@ -4449,7 +4449,11 @@ function CellSourceMenu({
 }) {
   const t = useT()
   const [timesOpen, setTimesOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
+  // `anchored` rides with `open` so the button anchor does not add a state
+  // call. The editor table is at its state ceiling.
+  const [menu, setMenu] = useState({ open: false, anchored: false })
+  const menuOpen = menu.open
+  const anchoredToButton = menu.anchored
   // Was the menu open when this press began? Pressing the button while its
   // menu is open dismisses the menu first (an outside press), so the click
   // that follows must not open it again — the button toggles, as it used to.
@@ -4458,7 +4462,6 @@ function CellSourceMenu({
   // Set before the synthetic contextmenu event, which opens the menu in the
   // same turn. A right-click leaves it false, so that path stays on the pointer.
   const openedFromButtonRef = useRef(false)
-  const [anchoredToButton, setAnchoredToButton] = useState(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
   // AQU-1422: the park entry sits with the structural block below (it changes
@@ -4503,7 +4506,7 @@ function CellSourceMenu({
     openedFromButtonRef.current = true
     // Schedule before the event. The trigger opens the menu synchronously, and
     // a flush during that open must already see the button anchor.
-    setAnchoredToButton(true)
+    setMenu((cur) => ({ ...cur, anchored: true }))
     const rect = event.currentTarget.getBoundingClientRect()
     event.currentTarget.dispatchEvent(
       new MouseEvent("contextmenu", {
@@ -4571,9 +4574,10 @@ function CellSourceMenu({
     <CellMenuAnchorContext.Provider value={anchor}>
       <ContextMenu
         onOpenChange={(open) => {
-          setMenuOpen(open)
-          if (open) setAnchoredToButton(openedFromButtonRef.current)
+          // Read the ref now. The state update runs later, after this reset.
+          const anchored = openedFromButtonRef.current
           openedFromButtonRef.current = false
+          setMenu((cur) => ({ open, anchored: open ? anchored : cur.anchored }))
         }}
       >
         <ContextMenuTrigger

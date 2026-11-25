@@ -241,11 +241,14 @@ function logSanitizedApplyFailure(
   })
 }
 
+type OnUserCreated = (tx: AquillaDb, userId: number) => Promise<void>
+
 export async function applyLegacyUserMigration(
   db: AquillaDb,
   source: LegacyUserRow,
   access: CanonicalUserAccessPlan,
   importedVia: "jit" | "scheduled",
+  onUserCreated?: OnUserCreated,
 ): Promise<LegacyMigrationResult> {
   assertSupportedLegacyHash(source.password_hash)
   if (!source.username.trim() || !source.email.trim() || source.gitlab_user_id == null) {
@@ -395,6 +398,7 @@ export async function applyLegacyUserMigration(
          VALUES (?, 'legacy_user_migrated', 'Imported from frontier-db-v2')`,
       ).bind(userId).run()
 
+      await onUserCreated?.(tx, userId)
       return { userId, username: source.username, created: true }
     })
   } catch (error) {
@@ -421,6 +425,7 @@ export async function migrateLegacyUserCandidate(
   runtime: LegacyMigrationRuntime,
   importedVia: "jit" | "scheduled",
   context?: LegacyMigrationContext,
+  onUserCreated?: OnUserCreated,
 ): Promise<LegacyMigrationResult> {
   const resolvedContext = context ?? {
     topology: await loadGitLabAccessTopology(runtime.gitlab),
@@ -431,7 +436,7 @@ export async function migrateLegacyUserCandidate(
     runtime.gitlab,
     resolvedContext,
   )
-  return applyLegacyUserMigration(db, source, access, importedVia)
+  return applyLegacyUserMigration(db, source, access, importedVia, onUserCreated)
 }
 
 export async function migrateLegacyUserForLogin(

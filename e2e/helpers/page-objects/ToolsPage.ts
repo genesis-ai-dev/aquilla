@@ -1,4 +1,5 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
+import { EXTENSION_DOCUMENT } from "../editor-mode"
 
 /** The first-party editor extension's name (manifest name, also its "Edit with" label). */
 export const DEFAULT_EDITOR = "Aquilla editor (Smart Extension)"
@@ -124,7 +125,7 @@ export class ToolsPage {
 
   /** The running tool's document (an opaque-origin sandboxed frame). */
   toolFrame(name: string): FrameLocator {
-    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`)
+    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`).frameLocator(EXTENSION_DOCUMENT)
   }
 
   permissionPrompt(): Locator {

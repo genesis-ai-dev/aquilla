@@ -802,6 +802,92 @@ describe("useProjectSettings — write path", () => {
     expect(result.current.version).toBe(2)
   })
 
+  // A change must go from "what I chose" straight to "what the server holds".
+  // These three pin the ways it used to show, fall back to the old value, and
+  // show again.
+  describe("a change stays on screen until its own answer arrives", () => {
+    const row = (version: number, sourceLanguage: string): restClient.ProjectSettingsResponse => ({
+      version, updatedAt: `t${version}`, updatedBy: null,
+      settings: { sourceLanguage, targetLanguage: "swh" },
+    })
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>((res) => { resolve = res })
+      return { promise, resolve }
+    }
+
+    it("shows the new value before the server has said anything", async () => {
+      const fetchSpy = mockSettingsFetch(row(1, "en"))
+      const { result } = renderHook(() => useProjectSettings("p1", 700))
+      await waitFor(() => expect(result.current.version).toBe(1))
+
+      // The pre-write probe never answers: the value must not wait for it.
+      fetchSpy.mockImplementation(() => new Promise(() => {}))
+      act(() => {
+        void result.current.patch({ sourceLanguage: "fr" })
+      })
+      expect(result.current.settings.sourceLanguage).toBe("fr")
+    })
+
+    it("keeps the new value when a read from before the write lands during it", async () => {
+      const fetchSpy = mockSettingsFetch(row(1, "en"))
+      const write = deferred<restClient.PatchResult>()
+      vi.spyOn(restClient, "patchProjectSettings").mockReturnValue(write.promise)
+      const { result } = renderHook(() => useProjectSettings("p1", 700))
+      await waitFor(() => expect(result.current.version).toBe(1))
+
+      let outcome!: Promise<PatchOutcome>
+      act(() => {
+        outcome = result.current.patch({ sourceLanguage: "fr" })
+      })
+      await waitFor(() => expect(restClient.patchProjectSettings).toHaveBeenCalled())
+      // A re-read (focus, a relayed frame) answers with the row as it was.
+      await act(async () => {
+        await result.current.refresh()
+      })
+      expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(3)
+      expect(result.current.settings.sourceLanguage).toBe("fr")
+
+      await act(async () => {
+        write.resolve({ kind: "ok", value: row(2, "fr") })
+        await outcome
+      })
+      expect(result.current.settings.sourceLanguage).toBe("fr")
+      expect(result.current.version).toBe(2)
+    })
+
+    it("drops a read older than the row it already holds", async () => {
+      const fetchSpy = mockSettingsFetch(row(1, "en"))
+      vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({ kind: "ok", value: row(2, "fr") })
+      const { result } = renderHook(() => useProjectSettings("p1", 700))
+      await waitFor(() => expect(result.current.version).toBe(1))
+      await act(async () => {
+        await result.current.patch({ sourceLanguage: "fr" })
+      })
+      expect(result.current.version).toBe(2)
+
+      // Still answering with version 1: a request that left before the write.
+      const before = fetchSpy.mock.calls.length
+      await act(async () => {
+        await result.current.refresh()
+      })
+      expect(fetchSpy.mock.calls.length).toBe(before + 1)
+      expect(result.current.settings.sourceLanguage).toBe("fr")
+      expect(result.current.version).toBe(2)
+    })
+
+    it("falls back to the server's value once, when the write is refused", async () => {
+      mockSettingsFetch(row(1, "en"))
+      vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({ kind: "error", status: 500, message: "boom" })
+      const { result } = renderHook(() => useProjectSettings("p1", 700))
+      await waitFor(() => expect(result.current.version).toBe(1))
+      await act(async () => {
+        await result.current.patch({ sourceLanguage: "fr" })
+      })
+      expect(result.current.settings.sourceLanguage).toBe("en")
+    })
+  })
+
   it("snaps to server on conflict (including local state + IDB)", async () => {
     mockSettingsFetch({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
@@ -1165,6 +1251,22 @@ describe("useProjectSettings — same-tab propagation after a write (AQU-979)", 
       broadcastProjectSettingsUpdated({ projectId: "p1", version: 2 })
     })
     await waitFor(() => expect(result.current.settings.targetLanguage).toBe("zh-Hant-x-test"))
+  })
+
+  it("does not re-GET for the relayed frame of a version it already holds", async () => {
+    // The project DO relays every settings write back to the tab that made it,
+    // without an origin. Re-reading for it is what put a pre-write row over the
+    // NEXT change a person made.
+    const fetchSpy = mockSettingsFetch({
+      version: 3, updatedAt: "x", updatedBy: null, settings: { targetLanguage: "swh" },
+    })
+    renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    act(() => {
+      broadcastProjectSettingsUpdated({ projectId: "p1", version: 3 })
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it("ignores a broadcast for a different project", async () => {

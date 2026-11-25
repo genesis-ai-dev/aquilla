@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { peekOutboxBatch, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
 
 /** A file-scoped outbox event the server will never accept. */
 export interface RefusedFileEvent {
@@ -41,7 +41,7 @@ export function useRefusedFileEvents(
     let cancelled = false
 
     async function refresh() {
-      const all = await peekOutboxBatch(1000)
+      const all = await peekOutboxShared(1000)
       if (cancelled) return
       const next = all
         .filter(

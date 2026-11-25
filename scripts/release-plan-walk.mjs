@@ -2,7 +2,7 @@
 // Kept apart from release-plan.mjs on purpose: this is the only part of the
 // planner that calls the GitHub API, so a lookup bug can't hide inside the
 // slicing logic, and the slicing logic stays testable with no network.
-import { APPROVED_LABEL, AREA_GATES } from "./release-risk.mjs"
+import { APPROVED_LABEL, AREA_GATES, gateEnabled } from "./release-risk.mjs"
 
 const REPO = "genesis-ai-dev/aquilla"
 
@@ -158,21 +158,35 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
   const labels = Array.isArray(pr.labels) ? pr.labels.map((label) => label?.name) : []
   const approved = labels.includes(APPROVED_LABEL)
 
+  const walk = walkFromComments(await listComments(pr.number, opts), { number: pr.number, headSha: pr.head.sha, trustedLogins })
+  const gates = await passedGates(pr.head.sha, opts)
+  return { walk, approved, gates }
+}
+
+// The planner's walk value for one PR at one head, from its comments in the
+// order GitHub lists them (oldest first). Shared with release-walk-status.mjs,
+// which reports the same value on the PR as the `qa-walk` commit status, so
+// what a PR shows before it merges is what the planner will read after.
+export function walkFromComments(comments, { number, headSha, trustedLogins = [] }) {
   let latest = null
-  for (const comment of await listComments(pr.number, opts)) {
+  for (const comment of comments) {
     // Read nothing from an author who may not decide: not a PASS, not a FAIL.
     if (!isTrustedWalkAuthor(comment, trustedLogins)) continue
     const parsed = parseWalkComment(comment.body)
-    if (!parsed || !pr.head.sha.startsWith(parsed.sha)) continue
-    if (parsed.prNumber !== null && parsed.prNumber !== pr.number) continue
+    if (!parsed || !headSha.startsWith(parsed.sha)) continue
+    if (parsed.prNumber !== null && parsed.prNumber !== number) continue
     // A qualified PASS saw no browser, so it says nothing a plain verdict on
     // the same head did not: a later test-only pass never undoes a live
     // PASS, and never softens a FAIL.
     if (parsed.qualifier && latest && !latest.qualifier) continue
     latest = parsed
   }
-  const gates = await passedGates(pr.head.sha, opts)
-  return { walk: latest ? walkOf(latest) : "unknown", approved, gates }
+  return latest ? walkOf(latest) : "unknown"
+}
+
+/** Every comment on a PR, oldest first (20 pages at most). */
+export function prComments(prNumber, { repo = REPO, token, fetchImpl = fetch }) {
+  return listComments(prNumber, { repo, token, fetchImpl })
 }
 
 // The areas whose gate check (release-risk.mjs AREA_GATES) concluded
@@ -201,8 +215,10 @@ export async function passedGates(headSha, opts) {
     }
     if (runs.length < 100) break
   }
+  // A gate behind a switch (release-risk.mjs GATE_SWITCHES) counts only while
+  // its repository variable is `on` in the planner's environment.
   const passed = []
-  for (const [name, area] of names) if (latest.get(name) === "success") passed.push(area)
+  for (const [name, area] of names) if (latest.get(name) === "success" && gateEnabled(area, opts.env)) passed.push(area)
   return passed
 }
 
@@ -215,8 +231,16 @@ export async function lookupWalk(options) {
 // person can approve anything), so every PR gets the one lookup. One PR's
 // lookup failing never blocks the others; it just stays "unknown", which
 // holds.
+//
+// A direct commit (`direct: true`, pushed to dev with no PR) is passed
+// through with no lookup: it has no walk comment and no label to find.
+// GitHub answers the commit → PR question with an empty list for one today
+// (checked 2026-11-20), and should it ever name a PR that merely contains
+// the sha, that PR's walk and `release:approved` label are not the
+// commit's own. prHolds reads neither for a direct commit.
 export async function fillWalks(prs, opts) {
   return Promise.all(prs.map(async (pr) => {
+    if (pr.direct) return pr
     try {
       const { walk, approved, gates } = await lookupPr({ ...opts, mergeSha: pr.sha })
       return { ...pr, walk: pr.walk === "none" ? "none" : walk, approved, gates }

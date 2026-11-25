@@ -3,8 +3,10 @@ import {
   getAdminMe,
   getAdminOverview,
   getAdminOrgs,
+  getAdminOrgsPage,
   getAdminUsers,
   getAdminProjects,
+  getAdminProjectsPage,
   getAdminActivity,
   verifyAdminElevation,
 } from "./admin"
@@ -67,6 +69,35 @@ describe("admin list endpoints unwrap their envelope", () => {
   it("getAdminProjects unwraps { projects }", async () => {
     mockJson({ projects: [{ id: "p", name: "John" }] })
     expect((await getAdminProjects("jwt"))[0].id).toBe("p")
+  })
+
+  it("pages projects with search, lens, and sort on the query string", async () => {
+    let url = ""
+    global.fetch = vi.fn(async (i: unknown) => {
+      url = typeof i === "string" ? i : (i as Request).url
+      return new Response(JSON.stringify({ projects: [{ id: "p" }], total: 4, limit: 50, offset: 50 }), {
+        status: 200,
+      })
+    }) as unknown as typeof fetch
+    const page = await getAdminProjectsPage("jwt", {
+      q: "john",
+      limit: 50,
+      offset: 50,
+      sort: "name",
+      dir: "asc",
+      lens: "active",
+      orgId: 3,
+    })
+    expect(page).toMatchObject({ total: 4, offset: 50, rows: [{ id: "p" }] })
+    const params = new URL(url).searchParams
+    expect(params.get("q")).toBe("john")
+    expect(params.get("limit")).toBe("50")
+    expect(params.get("offset")).toBe("50")
+    expect(params.get("sort")).toBe("name")
+    expect(params.get("lens")).toBe("active")
+    expect(params.get("orgId")).toBe("3")
+    mockJson({ orgs: [{ id: 1 }], total: 2, limit: 1, offset: 0 })
+    expect(await getAdminOrgsPage("jwt", { limit: 1, offset: 0 })).toMatchObject({ total: 2 })
   })
 
   it("getAdminActivity passes the limit and unwraps { activity }", async () => {

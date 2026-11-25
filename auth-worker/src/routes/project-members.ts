@@ -11,7 +11,7 @@
 //
 // Revoke-all semantics:
 //   - Only works for the caller's direct project_members row (source=override).
-//   - Org/group/creator paths confer access server-side and cannot be removed
+//   - Org and team paths confer access server-side and cannot be removed
 //     from this surface; the response body lists them so the UI can explain.
 //   - Requires MAINTAINER (600) or OWNER (700) on the project.
 //   - The endpoint is idempotent: if there is no direct row it returns
@@ -25,6 +25,10 @@ import { roleRequiredBody } from "../lib/role-denial"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import {
+  LAST_PROJECT_OWNER_MESSAGE,
+  removingDirectOwnerLeavesNone,
+} from "../services/last-project-owner"
 import { auditMembershipChange } from "../services/admin-audit"
 import { reconcileMemberProjectLanes } from "../services/lane-grants"
 import { projectElevationDenial } from "../services/elevation-gate"
@@ -104,6 +108,12 @@ projectMembers.post(
           403,
         )
       }
+      if (
+        targetCurrentLevel >= 700 &&
+        (await removingDirectOwnerLeavesNone(c.env.AQUILLA_PG, projectId, targetUserId))
+      ) {
+        return c.json({ error: "last_owner", message: LAST_PROJECT_OWNER_MESSAGE }, 409)
+      }
     }
 
     // Load the project's owner/org context so we can enumerate grant paths.
@@ -152,9 +162,7 @@ projectMembers.post(
               ? "Remove from org to revoke org-level access"
               : src.source === "group"
                 ? "Remove from the group that grants this access"
-                : src.source === "creator"
-                  ? "Project creator — cannot be removed"
-                  : undefined,
+                : undefined,
         })
       }
     }

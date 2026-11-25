@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { createChangeSignal, type ChangeSignal } from "./useStableCallback"
 
 /**
  * Returns a trailing-debounced copy of `value` that only updates after `value`
@@ -34,4 +35,46 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [value, delayMs])
 
   return debounced
+}
+
+/** A debounced value that is read on demand. See `useDebouncedSource`. */
+export interface DebouncedSource<T> {
+  /** The value as of the last debounce window. */
+  get: () => T
+  /** Bumps when `get()` starts returning a new value. */
+  signal: ChangeSignal
+}
+
+/**
+ * `useDebouncedValue` without the render (AQU-2655).
+ *
+ * `useDebouncedValue` keeps the debounced copy in state, so the component that
+ * calls it renders once more when the debounce fires. When that component is
+ * the workspace and the copy only feeds getters and effects, that render is
+ * the whole tree for nothing. This keeps the copy outside React state: callers
+ * read `get()` when they need the value, and a consumer that shows a result
+ * derived from it subscribes to `signal` (`useChangeSignalVersion`).
+ *
+ * The returned object is stable for the component's lifetime. The first value
+ * is available at once; later changes land after `delayMs` of quiet.
+ */
+export function useDebouncedSource<T>(value: T, delayMs: number): DebouncedSource<T> {
+  const [source] = useState(() => {
+    let current = value
+    const signal = createChangeSignal()
+    return {
+      get: () => current,
+      signal: signal as ChangeSignal,
+      set(next: T) {
+        if (Object.is(next, current)) return
+        current = next
+        signal.bump()
+      },
+    }
+  })
+  useEffect(() => {
+    const id = setTimeout(() => source.set(value), delayMs)
+    return () => clearTimeout(id)
+  }, [source, value, delayMs])
+  return source
 }

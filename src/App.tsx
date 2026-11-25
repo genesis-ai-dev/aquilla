@@ -1,6 +1,6 @@
 import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
+import { Navigate, Routes, Route, useParams, useLocation, matchPath, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgOverview } from "@/components/org/OrgOverview"
@@ -490,6 +490,10 @@ export default function App() {
 function AppRoutes() {
   const location = useLocation()
   const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)?.backgroundLocation
+  // A bookmark or OAuth return has no background page. Mount just the dialog
+  // so a second settings screen or a background redirect cannot take over.
+  const directLoginMethods = !backgroundLocation && !!matchPath("/preferences/login-methods", location.pathname)
+  const showMainRoute = !directLoginMethods && !(backgroundLocation && matchPath("/preferences/login-methods", backgroundLocation.pathname))
 
   return (
     <>
@@ -502,7 +506,7 @@ function AppRoutes() {
           project overview mounted so its blocking "Opening project" overlay
           remains observable. Org lazy routes catch suspension locally below. */}
       <Suspense fallback={<SuspenseRouteFallback />}>
-        <Routes location={backgroundLocation ?? location}>
+        {showMainRoute && <Routes location={backgroundLocation ?? location}>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
@@ -628,9 +632,9 @@ function AppRoutes() {
 
         {/* AQU-270: catch-all 404 — must be last (audit finding F-IA3) */}
         <Route path="*" element={<NotFound />} />
-        </Routes>
+        </Routes>}
       </Suspense>
-      {backgroundLocation ? (
+      {backgroundLocation || directLoginMethods ? (
         <Routes>
           <Route path="/preferences" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
           <Route path="/preferences/:section" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />

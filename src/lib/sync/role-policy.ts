@@ -617,3 +617,47 @@ export function importDenialFloor(
     resolveImportFloor(importMinRole),
   )
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2476: the org-configurable export floor, for server-only downloads.
+//
+// CLIENT MIRROR of sync-worker/src/events/export-floor.ts. The server
+// re-resolves the floor on every original download, so this is an affordance
+// value — never authority.
+//
+// An unset, non-numeric, or off-ladder value is MAINTAINER (600), the same
+// reading as the route. That is the opposite of `canExport`, which treats an
+// unset floor as "no client gate" because the Export dialog's client-side
+// formats really do work below it. Download original has no client-side half,
+// so it has to use this resolver. Unknown-and-not-read-yet resolves like
+// unset: the only answer that changes once the org's settings land is an org
+// that lowered the floor.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for downloading an imported original when the org hasn't configured one. */
+export const DEFAULT_EXPORT_MIN_ROLE = ROLE.MAINTAINER
+
+/** Clamp an org-configured export floor to the role ladder, else Maintainer. */
+export function resolveExportFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_EXPORT_MIN_ROLE
+  }
+  if (minRole < ROLE.VIEWER || minRole > ROLE.OWNER) return DEFAULT_EXPORT_MIN_ROLE
+  return minRole
+}
+
+/**
+ * Whether `roleLevel` may download an imported original. The org's floor,
+ * defaulting to Maintainer — there is no separate static bar, and the org
+ * may lower it.
+ *
+ * Fail-open on an unknown role, exactly as `canPerform`: a local project
+ * has no sync role and no org floor to apply.
+ */
+export function canDownloadOriginals(
+  roleLevel: number | null | undefined,
+  exportMinRole?: number | null,
+): boolean {
+  if (roleLevel == null) return true
+  return roleLevel >= resolveExportFloor(exportMinRole)
+}

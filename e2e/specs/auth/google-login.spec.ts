@@ -135,10 +135,10 @@ test("first-party availability retry recovers without contacting Google", async 
     return route.fulfill(!available ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
   })
   await page.goto("/login")
-  await expect(page.getByRole("button",{name:"Retry Google login availability"})).toBeVisible()
+  await expect(page.getByRole("button",{name:"Check Google login again"})).toBeVisible()
   const failedChecks = checks
   available = true
-  await page.getByRole("button",{name:"Retry Google login availability"}).click()
+  await page.getByRole("button",{name:"Check Google login again"}).click()
   await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
   expect(checks).toBeGreaterThan(failedChecks)
   expect(providerRequests).toEqual([])
@@ -155,7 +155,8 @@ test("Google-only email change opens password setup directly without provider co
   await expect(page.getByRole("status")).toContainText("Set an Aquilla password first")
   await expect(page.getByRole("button", { name: "Back to login methods", exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Set an Aquilla password", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Send reset link", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Verify with Google", exact: true })).toBeVisible()
+  await expect(page.getByLabel("New Aquilla password", { exact: true })).toBeVisible()
   await expect(page.getByText("Set an Aquilla password first", { exact: false })).toHaveCount(0)
   await expect(page).toHaveURL(/preferences\/login-methods$/)
   expect(googleRequests).toEqual([])

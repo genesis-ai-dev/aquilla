@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
+import { EXTENSION_DOCUMENT } from "../../helpers/editor-mode"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
@@ -63,7 +64,7 @@ test("SDK extensions: verse cards edit and validate; a word-count panel follows 
   const ws = new Workspace(alice)
   await ws.waitForEditor()
   await tools.openInSidePanelFromPalette("Words")
-  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Words (sandboxed extension)"]')
+  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Words (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator(".k-stat-v")).toHaveText("6", { timeout: 30_000 })
   await ws.editCell(await ws.cellIndexWithSource("Abraham was the father of Isaac"), "Abrahamu akamzaa Isaka")
   await expect(panel.locator(".k-stat-v")).toHaveText("9", { timeout: 15_000 })

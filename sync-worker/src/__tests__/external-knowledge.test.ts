@@ -257,6 +257,32 @@ describe('POST /api/v1/external/projects/:projectId/knowledge', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('refuses a chunked body over the cap, reading no further than the cap (AQU-2594)', async () => {
+    // No Content-Length, so only the read itself can stop it.
+    const token = await credToken({ credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const chunk = new Uint8Array(1024 * 1024)
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === 60) return controller.close()
+        pulled++
+        controller.enqueue(chunk.slice())
+      },
+    })
+    const req = new Request(`https://w/api/v1/external/projects/${PROJECT}/knowledge`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'x-doc-name': 'big.pdf' },
+      body,
+      duplex: 'half',
+    } as RequestInit)
+    const res = (await handleExternalKnowledgeRequest(req, makeEnv()))!
+    expect(res.status).toBe(400)
+    const resBody = (await res.json()) as { error: { details: { maxBytes: number } } }
+    expect(resBody.error.details.maxBytes).toBe(MAX_KB_ORIGINAL_BYTES)
+    expect(pulled * chunk.length).toBeLessThan(MAX_KB_ORIGINAL_BYTES + 4 * chunk.length)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("carries an upstream extraction refusal through with its own message (AQU-1499)", async () => {
     stubAuthWorker(() =>
       Response.json(

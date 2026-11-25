@@ -497,6 +497,84 @@ describe("createProjectShared seeds lanes atomically", () => {
   })
 })
 
+// The project id is client-chosen and not secret (it is in every URL and
+// invite). A create that collides with an existing project must write NOTHING
+// into it: an Owner grant there hands the project to whoever reused the id, and
+// lanes there change someone else's project. Both callers (auth-worker POST
+// /projects and the external CreateProject command) rely on this.
+describe("createProjectShared on an id that already exists", () => {
+  async function seedVictim() {
+    await createProjectShared(t.db, {
+      projectId: PROJECT,
+      name: "Victim",
+      orgId: null,
+      createdBy: 1,
+      settingsSeed: { sourceLanguage: "", targetLanguage: "Spanish" },
+    })
+    // User 2 already holds a Contributor grant on the victim project.
+    await t.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 2, 300, 1)`,
+      [PROJECT],
+    )
+  }
+  async function members() {
+    const r = await t.pg.query<{ user_id: string; role_level: number }>(
+      `SELECT user_id::text AS user_id, role_level FROM project_members WHERE project_id = $1 ORDER BY user_id`,
+      [PROJECT],
+    )
+    return r.rows
+  }
+  async function laneGrantCount() {
+    const r = await t.pg.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM project_member_lane_roles WHERE project_id = $1`,
+      [PROJECT],
+    )
+    return r.rows[0].n
+  }
+
+  it("grants a stranger nothing, raises no lower grant, and adds no lane", async () => {
+    await seedVictim()
+    const membersBefore = await members()
+    const lanesBefore = await lanes(t)
+    const laneGrantsBefore = await laneGrantCount()
+
+    for (const createdBy of [3, 2]) {
+      const { inserted } = await createProjectShared(t.db, {
+        projectId: PROJECT,
+        name: "Hijack",
+        orgId: null,
+        createdBy,
+        // The external API path: explicit lanes, including a new target and a
+        // source language the victim left blank.
+        lanes: [
+          { role: "source", language: "German" },
+          { role: "target", language: "French" },
+        ],
+      })
+      expect(inserted).toBe(false)
+    }
+
+    expect(await members()).toEqual(membersBefore)
+    expect(await lanes(t)).toEqual(lanesBefore)
+    expect(await laneGrantCount()).toBe(laneGrantsBefore)
+    const name = await t.pg.query<{ name: string }>(`SELECT name FROM projects WHERE id = $1`, [PROJECT])
+    expect(name.rows).toEqual([{ name: "Victim" }])
+  })
+
+  it("does not give a demoted creator Owner back when the create is repeated", async () => {
+    await seedVictim()
+    await t.pg.query(`UPDATE project_members SET role_level = 300 WHERE project_id = $1 AND user_id = 1`, [PROJECT])
+    const { inserted } = await createProjectShared(t.db, {
+      projectId: PROJECT,
+      name: "Victim",
+      orgId: null,
+      createdBy: 1,
+    })
+    expect(inserted).toBe(false)
+    expect((await members()).find((m) => m.user_id === "1")?.role_level).toBe(300)
+  })
+})
+
 // AQU-2223: a settings write never creates a lane, whatever language keys an
 // old blob still carries. Lanes come from the lane routes and from create /
 // import / migrate, which pass their languages in.

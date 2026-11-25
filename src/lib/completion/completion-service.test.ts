@@ -744,6 +744,30 @@ describe("complete", () => {
       expect(body).not.toHaveProperty("projectId")
     })
 
+    it("frontier: an explicit projectId wins over the URL — on another project's route and off project routes", async () => {
+      for (const path of ["/project/other-project/editor", "/preferences"]) {
+        window.history.pushState({}, "", path)
+        fetchMock.mockClear()
+        fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+        await complete({
+          settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg,
+          projectId: "proj-explicit",
+        })
+        const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+        expect(body.projectId).toBe("proj-explicit")
+      }
+    })
+
+    it("custom: never sends an explicit projectId either", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "gemma" },
+        session: null, messages: msg, projectId: "proj-explicit",
+      })
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+    })
+
     it("custom: never sends projectId — third-party OpenAI-compatible endpoints may reject unknown fields", async () => {
       window.history.pushState({}, "", "/project/proj-uuid-1/editor")
       fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))

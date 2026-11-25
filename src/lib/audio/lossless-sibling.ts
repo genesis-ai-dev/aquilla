@@ -10,10 +10,10 @@
  * for "wav" — and consumed by the playback-quality preference (play "original"
  * when the listener asks for it) and by exports (always prefer lossless).
  *
- * Lifecycle: the sibling lives exactly as long as the compressed object.
- * There is no user-facing R2 delete for generated voices (take "delete" is a
- * soft projection remove), and the admin file-delete sweeps the whole
- * `.../audio/` prefix, which wipes both. No delete pairing is needed.
+ * Lifecycle: the sibling lives exactly as long as the compressed object. The
+ * nightly R2 sweep keeps it through `losslessSiblingRef` in
+ * db/shared/media-refs.ts (AQU-2671); renaming the sibling means changing that
+ * too. The admin file-delete sweeps the whole `.../audio/` prefix, wiping both.
  *
  * Presence is memoized per audioId. "present" is true forever (ids are
  * immutable and the mark follows a completed upload). "missing" is true

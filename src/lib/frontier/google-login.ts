@@ -6,8 +6,8 @@ import { safeLoginNext } from "../navigation/login-path"
 import { readSignupAnalyticsChoice, type SignupAnalyticsChoice } from "../signup-analytics-choice"
 const KEY = `aquilla:google-login:${AUTH_BASE}`
 export const GOOGLE_ATTEMPT_LIFETIME_MS = 10 * 60_000
-export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; desktopChallenge?: string; desktopReturned?: boolean; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
-export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
+export interface GoogleAttempt { verifier: string; next: string; expires: number; choice: SignupAnalyticsChoice | null; reauthenticate?: boolean; desktopChallenge?: string; desktopReturned?: boolean; connectUsername?: string; emailChange?: boolean; pending?: GooglePending; connectCode?: string }
+export interface GooglePending { continuation: string; step: "signup" | "link" | "legacy"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
 export async function googleRequest<T>(path: string, body?: object, jwt?: string): Promise<T> {
   let response: Response
@@ -32,7 +32,7 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
   if (!response.ok) throw new Error(data.code === "dev_access_restricted" ? data.code : typeof data.error === "string" ? data.error : "unavailable")
   return data as T
 }
-export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false, signal?: AbortSignal, privateSession = false): Promise<void> {
+export async function startGoogleLogin(next: string, signup: boolean, connectUsername?: string, emailChange = false, signal?: AbortSignal, privateSession = false, reauthenticate = false): Promise<void> {
   const desktop = isTauriRuntime()
   if (desktop) {
     const { invoke } = await import("@tauri-apps/api/core")
@@ -45,7 +45,7 @@ export async function startGoogleLogin(next: string, signup: boolean, connectUse
   if (signal?.aborted) return
   // Storage must survive the redirect. If unavailable, stay here without ever
   // contacting Google; password login remains usable.
-  const attempt: GoogleAttempt = { ...(desktop ? { desktopChallenge: challenge } : {}), verifier, next: safeLoginNext(next), expires: Date.now() + GOOGLE_ATTEMPT_LIFETIME_MS, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange } : {}) }
+  const attempt: GoogleAttempt = { ...(desktop ? { desktopChallenge: challenge } : {}), verifier, next: safeLoginNext(next), expires: Date.now() + GOOGLE_ATTEMPT_LIFETIME_MS, choice: signup ? readSignupAnalyticsChoice() : null, ...(connectUsername ? { connectUsername, emailChange, reauthenticate } : {}) }
   try { sessionStorage.setItem(KEY, JSON.stringify(attempt)) }
   catch { throw new Error("storage_unavailable") }
   if (desktop) signal?.addEventListener("abort", () => {
@@ -75,7 +75,7 @@ export function readGoogleAttempt(): GoogleAttempt | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(KEY) ?? "null") as GoogleAttempt | null
     if (!value || !/^[a-f0-9]{64}$/.test(value.verifier) || !Number.isFinite(value.expires) || value.expires <= Date.now()) { clearGoogleAttempt(); return null }
-    if (value.pending && (!/^[a-f0-9]{64}$/.test(value.pending.continuation) || !["signup","link"].includes(value.pending.step) || typeof value.pending.email !== "string")) { clearGoogleAttempt(); return null }
+    if (value.pending && (!/^[a-f0-9]{64}$/.test(value.pending.continuation) || !["signup","link","legacy"].includes(value.pending.step) || typeof value.pending.email !== "string")) { clearGoogleAttempt(); return null }
     if (value.connectCode && !/^[a-f0-9]{64}$/.test(value.connectCode)) { clearGoogleAttempt(); return null }
     const choice = value.choice?.version === ANALYTICS_DISCLOSURE_VERSION && typeof value.choice.allowed === "boolean" && typeof value.choice.revision === "string" ? value.choice : null
     return { ...value, choice, next: safeLoginNext(value.next) }

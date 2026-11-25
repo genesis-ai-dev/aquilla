@@ -5,6 +5,7 @@ import {
   getPortfoliosPage,
   PORTFOLIO_PAGE_SIZE,
   type PortfolioProject,
+  type PortfolioDirectoryPage,
 } from "@/lib/frontier/portfolio"
 import { readDirectoryPageSeed, rememberDirectoryPage } from "@/lib/frontier/portfolio-seed"
 
@@ -45,26 +46,23 @@ export function useProjectDirectory(opts: {
   )
   const debouncedQuery = useDebouncedValue(query, PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS)
   const fetchKey = `${enabled}:${jwt}:${orgKey}:${debouncedQuery}:${refreshKey}`
-  // The unfiltered first page this tab last saw for these orgs: coming back
-  // from a project paints the list at once and replaces it when the read lands.
-  const seedKey = enabled && jwt && orgKey && debouncedQuery.trim() === "" ? `${jwt}:${orgKey}` : null
-  const [seed] = useState(() => (seedKey ? readDirectoryPageSeed(jwt, orgKey) : null))
-  const [projects, setProjects] = useState<DirectoryProject[]>(() => seed?.projects ?? [])
-  const [settledKey, setSettledKey] = useState<string | null>(seed ? fetchKey : null)
-  // Once per scope: a refresh of the same list must not repaint an older page.
-  const seededKeyRef = useRef<string | null>(seed ? seedKey : null)
+  const seedKey = enabled && jwt && orgKey && debouncedQuery.trim() === "" ? orgKey : null
+  const [projects, setProjects] = useState<DirectoryProject[]>([])
+  const [settledKey, setSettledKey] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [nextCursor, setNextCursor] = useState<string | null>(seed?.nextCursor ?? null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
   const requestIdRef = useRef(0)
   const nextCursorRef = useRef<string | null>(null)
   const loadingMoreRef = useRef(false)
   nextCursorRef.current = nextCursor
+  const previousScope = useRef(JSON.stringify([jwt, orgKey]))
   const needsFetch = Boolean(enabled && jwt && scopedIds.length > 0)
   const loading = needsFetch && settledKey !== fetchKey
 
   useLayoutEffect(() => {
     if (!enabled || !jwt || scopedIds.length === 0) {
+      requestIdRef.current++
       setProjects([])
       setNextCursor(null)
       setError(null)
@@ -73,26 +71,23 @@ export function useProjectDirectory(opts: {
       return
     }
 
+    const scope = JSON.stringify([jwt, orgKey])
+    if (previousScope.current !== scope) {
+      previousScope.current = scope
+      setProjects([])
+      setNextCursor(null)
+    }
     const controller = new AbortController()
     const requestId = ++requestIdRef.current
     setError(null)
     setLoadingMore(false)
     loadingMoreRef.current = false
-    // An org switch keeps this hook mounted: paint the new scope's last page.
-    if (seedKey && seededKeyRef.current !== seedKey) {
-      const switched = readDirectoryPageSeed(jwt, orgKey)
-      if (switched) {
-        setProjects(switched.projects)
-        setNextCursor(switched.nextCursor)
-        setSettledKey(fetchKey)
-      }
-    }
-    seededKeyRef.current = seedKey
-
     void (async () => {
       try {
         const page = await fetchDirectoryPage(jwt, scopedIds, {
           q: debouncedQuery,
+          validate: Boolean(seedKey),
+          cached: seedKey ? readDirectoryPageSeed(jwt, orgKey) ?? undefined : undefined,
           signal: controller.signal,
         })
         if (requestIdRef.current !== requestId) return
@@ -157,13 +152,11 @@ export function useProjectDirectory(opts: {
 function fetchDirectoryPage(
   jwt: string,
   orgIds: number[],
-  opts: { q: string; cursor?: string | null; signal?: AbortSignal },
+  opts: { q: string; validate?: boolean; cached?: PortfolioDirectoryPage; cursor?: string | null; signal?: AbortSignal },
 ) {
   const pageOpts = {
-    q: opts.q,
+    ...opts,
     limit: PORTFOLIO_PAGE_SIZE,
-    cursor: opts.cursor,
-    signal: opts.signal,
   }
   if (orgIds.length === 1) {
     return getPortfolioPage(jwt, orgIds[0], pageOpts)

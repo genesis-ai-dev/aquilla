@@ -61,22 +61,20 @@ export async function listProjectsForCredential(
   const support = cred.supportAccess === true
   // The support branch binds nothing of its own — there is no membership to
   // match — so the scope clauses below append to either shape unchanged.
-  const binds: unknown[] = support ? [] : [uid, uid, uid, uid, uid]
+  const binds: unknown[] = support ? [] : [uid, uid, uid]
   let sql = support
     ? `SELECT p.id, p.name, p.org_id, 'platform' AS role_source
      FROM projects p
      WHERE p.archived_at IS NULL`
     : `SELECT p.id, p.name, p.org_id,
        CASE
-         WHEN p.created_by::text = ? THEN 'creator'
          WHEN EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?) THEN 'member'
          ELSE 'org'
        END AS role_source
      FROM projects p
      WHERE p.archived_at IS NULL
        AND (
-         p.created_by::text = ?
-         OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?)
+         EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?)
          OR (p.org_id IS NOT NULL AND EXISTS (
            SELECT 1 FROM org_members om
            WHERE om.org_id = p.org_id AND om.user_id::text = ? AND om.role_level >= ${ROLE.MAINTAINER}

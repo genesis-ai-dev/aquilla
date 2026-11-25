@@ -16,6 +16,7 @@ import {
   MenuSubContent,
   MenuSubTrigger,
 } from "@/components/ui/menu-parts"
+import { PlainUntilKeyboard } from "@/components/ui/plain-until-keyboard"
 
 type ContextMenuOpenChange = NonNullable<ContextMenuPrimitive.Root.Props["onOpenChange"]>
 type ContextMenuOpenChangeDetails = Parameters<ContextMenuOpenChange>[1]
@@ -52,7 +53,11 @@ function isRepositionDismissal(details: ContextMenuOpenChangeDetails) {
 
 const ContextMenuInstantContext = React.createContext<string | undefined>(undefined)
 
-function ContextMenu({ onOpenChange, ...props }: ContextMenuPrimitive.Root.Props) {
+function ContextMenu({
+  onOpenChange,
+  highlightItemOnHover = false,
+  ...props
+}: ContextMenuPrimitive.Root.Props) {
   const [instant, setInstant] = React.useState<string | undefined>(undefined)
 
   const handleOpenChange: ContextMenuOpenChange = (open, details) => {
@@ -79,6 +84,7 @@ function ContextMenu({ onOpenChange, ...props }: ContextMenuPrimitive.Root.Props
         data-slot="context-menu"
         onOpenChange={handleOpenChange}
         {...props}
+        highlightItemOnHover={highlightItemOnHover}
       />
     </ContextMenuInstantContext.Provider>
   )
@@ -124,6 +130,7 @@ function ContextMenuContent({
   sideOffset = 4,
   anchor,
   collisionAvoidance = CONTEXT_MENU_COLLISION,
+  children,
   ...props
 }: ContextMenuPrimitive.Popup.Props &
   Pick<
@@ -159,7 +166,10 @@ function ContextMenuContent({
             className,
           )}
           {...props}
-        />
+        >
+          {children}
+          <PlainUntilKeyboard />
+        </ContextMenuPrimitive.Popup>
       </ContextMenuPrimitive.Positioner>
     </ContextMenuPrimitive.Portal>
   )

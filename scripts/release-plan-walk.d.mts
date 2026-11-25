@@ -65,8 +65,25 @@ export function passedGates(headSha: string, opts: Omit<LookupWalkOptions, "merg
 export function lookupWalk(options: LookupWalkOptions): Promise<"PASS" | "fail" | "none" | "partial" | "unknown">
 
 // Fills `walk` and `approved` for every PR. One PR's lookup failing never
-// blocks the others; it just stays "unknown", which holds.
-export function fillWalks<T extends { sha: string; walk: string }>(
+// blocks the others; it just stays "unknown", which holds. A direct commit
+// (`direct: true`) is returned as it came, with no lookup.
+export function fillWalks<T extends { sha: string; walk: string; direct?: boolean }>(
   prs: T[],
   opts: Omit<LookupWalkOptions, "mergeSha">,
 ): Promise<(T & { approved?: boolean; gates?: string[] })[]>
+
+/**
+ * The planner's walk value for one PR at one head, from its comments oldest
+ * first: only trusted authors, only walks naming this head, newest wins, and
+ * a test-level PASS never replaces a plain verdict.
+ */
+export function walkFromComments(
+  comments: Array<{ body?: unknown; author_association?: string; user?: { login?: string } | null }>,
+  pr: { number: number; headSha: string; trustedLogins?: string[] },
+): "PASS" | "fail" | "none" | "partial" | "unknown"
+
+/** Every comment on a PR, oldest first. */
+export function prComments(
+  prNumber: number,
+  opts: { repo?: string; token: string; fetchImpl?: FetchImpl },
+): Promise<Array<{ body?: unknown; author_association?: string; user?: { login?: string } | null }>>

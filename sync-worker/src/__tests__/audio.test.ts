@@ -3,6 +3,7 @@
 // spinning up partyserver/miniflare so we can iterate fast.
 
 import { describe, it, expect } from "vitest"
+import { createHash } from "node:crypto"
 import { sign } from "hono/jwt"
 import {
   handleAudioRequest,
@@ -21,6 +22,7 @@ interface StoredObject {
   key: string
   body: ArrayBuffer
   httpMetadata?: { contentType?: string }
+  customMetadata?: Record<string, string>
 }
 
 function makeStubBucket() {
@@ -70,15 +72,21 @@ function makeStubBucket() {
         httpMetadata: obj.httpMetadata,
       }
     },
+    // As R2 does: a single-part etag is the bytes' MD5, and custom metadata
+    // written with the object comes back on head (AQU-2682 compares both).
     async head(key: string) {
       const obj = store.get(key)
       if (!obj) return null
-      return { size: obj.body.byteLength }
+      return {
+        size: obj.body.byteLength,
+        etag: createHash("md5").update(new Uint8Array(obj.body)).digest("hex"),
+        customMetadata: obj.customMetadata ?? {},
+      }
     },
     async put(
       key: string,
       value: ArrayBuffer | Uint8Array | string,
-      opts?: { httpMetadata?: { contentType?: string } },
+      opts?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
     ) {
       const body =
         typeof value === "string"
@@ -86,7 +94,7 @@ function makeStubBucket() {
           : value instanceof Uint8Array
             ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
             : value
-      store.set(key, { key, body: body as ArrayBuffer, httpMetadata: opts?.httpMetadata })
+      store.set(key, { key, body: body as ArrayBuffer, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata })
     },
     async delete(keys: string | string[]) {
       const list = Array.isArray(keys) ? keys : [keys]
@@ -108,16 +116,26 @@ function makeStubBucket() {
   return bucket
 }
 
+/** A project with no takes in it yet, for the rules that ask the database
+ *  whether any take has named a recording (AQU-2682). */
+const emptyProjectDb = () => ({
+  prepare: () => ({
+    bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }),
+  }),
+}) as unknown as AquillaDb
+
 type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeStubBucket>
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
+  AQUILLA_PG?: AquillaDb
 }
 
 function makeEnv(secret: string | undefined = SECRET): StubEnv {
   return {
     SNAPSHOTS: makeStubBucket(),
     SYNC_SECRET_KEY: secret,
+    AQUILLA_PG: emptyProjectDb(),
   }
 }
 
@@ -679,7 +697,13 @@ describe("audio R2 endpoints", () => {
     expect(adminOk.status).toBe(200)
     expect(env.SNAPSHOTS._size()).toBe(0)
 
-    // A valid sync-token scoped to the correct (project, file) is also accepted (F8).
+    // A valid sync-token scoped to the correct (project, file) is also accepted
+    // (F8) for bytes no live take plays — AQU-2682 reads that from the database.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Interview", event_id: "ev1" }],
+    })
+    Object.assign(env, { AQUILLA_PG: db })
     env.SNAPSHOTS._seed(
       audioObjectKey(env, "p1", "f1", "clip2.webm"),
       new Uint8Array([7]),

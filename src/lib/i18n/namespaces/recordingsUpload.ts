@@ -203,7 +203,7 @@ const KEYS = {
     "recordingsUpload.reason.rangeOnTimedFile": "A timed file needs one recording per line.",
     "recordingsUpload.reason.rangeBackwards": "Its name runs backwards, from {from} to {to}.",
     "recordingsUpload.reason.chapterOrVerse": plural({
-      one: "Can't tell whether these numbers are chapters or verses. {count} file here is named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
+      one: "Can't tell whether this number is a chapter or a verse. {count} file here is named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
       other: "Can't tell whether these numbers are chapters or verses. {count} files here are named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
     }),
     "recordingsUpload.reason.chapterOrVerseLength": plural({

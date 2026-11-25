@@ -10,7 +10,11 @@
 //                                               attach whose best-effort DELETE
 //                                               never ran) strands them. Every
 //                                               regenerated take strands the one
-//                                               it replaced.
+//                                               it replaced. A clip's `.peaks`
+//                                               waveform and an AI voice's
+//                                               `<base>.wav` full-quality copy
+//                                               are kept with the take they
+//                                               belong to (media-refs.ts).
 //   projects/{pid}/voices/{refId}               project voice clips: voice-design
 //                                               previews, custom-voice training
 //                                               recordings (kept while their

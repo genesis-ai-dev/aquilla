@@ -28,6 +28,10 @@ function testEnv(overrides: Record<string, unknown> = {}): typeof env {
 async function seedMember(): Promise<string> {
   await seedUser(1, "lead")
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, 'Smart', 1)").bind(PROJECT_ID).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT_ID).run()
   for (const [id, role, pos] of [["lane-src", "source", 0], ["lane-default", "target", 1]] as const) {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position) VALUES (?, ?, ?, ?, NULL, '', ?)",
@@ -190,6 +194,39 @@ describe("POST /api/v1/ai/smart-edits/suggest", () => {
     await seedTwoCorrections()
     const out = (await (await suggest(jwt, { cells: [SHEPHERD] }, testEnv({ SMART_EDITS: "off" }))).json()) as SuggestBody
     expect(out).toEqual({ suggestions: [], disabled: true })
+  })
+
+  it("suggests only for the cells the editor asked about; the rest are context", async () => {
+    const jwt = await seedMember()
+    await seedTwoCorrections()
+    const king = { fileId: FILE, cellId: "c4", source: `${YHWH} מֶלֶךְ`, target: "the Lord is king" }
+    const all = (await (await suggest(jwt, { cells: [SHEPHERD, king], verify: false })).json()) as SuggestBody
+    expect(all.suggestions.map((s) => s.cellId).sort()).toEqual(["c3", "c4"])
+    // Moving one cell on must not re-score (or re-verify) the cells either side.
+    const one = (await (await suggest(jwt, { cells: [SHEPHERD, king], only: ["c4"], verify: false })).json()) as SuggestBody
+    expect(one.suggestions.map((s) => s.cellId)).toEqual(["c4"])
+  })
+
+  it("mines a project once a minute, after the response, however many people are reading it", async () => {
+    const jwt = await seedMember()
+    const observations = async () =>
+      Number((await env.AQUILLA_PG.prepare("SELECT COUNT(*)::int AS n FROM smart_edit_observations WHERE project_id = ?").bind(PROJECT_ID).first<{ n: number }>())?.n)
+    // The project's first reader takes the first claim; there is nothing to learn yet.
+    expect(((await (await suggest(jwt, { cells: [SHEPHERD], verify: false })).json()) as SuggestBody).suggestions).toEqual([])
+    // Corrections settle beyond the watermark (rewound: the seed's commits are hours old).
+    await seedTwoCorrections()
+    await env.AQUILLA_PG.prepare("UPDATE smart_edit_state SET mined_through = 0 WHERE project_id = ?").bind(PROJECT_ID).run()
+
+    // Inside the minute, a whole team asking mines nothing: each request is a read.
+    await Promise.all([1, 2, 3].map(() => suggest(jwt, { cells: [SHEPHERD], verify: false })))
+    expect(await observations()).toBe(0)
+
+    // Once the claim is stale, one request takes it and the mining follows the response.
+    await env.AQUILLA_PG.prepare("UPDATE smart_edit_state SET updated_at = clock_timestamp() - interval '2 minutes' WHERE project_id = ?").bind(PROJECT_ID).run()
+    await suggest(jwt, { cells: [SHEPHERD], verify: false })
+    await vi.waitFor(async () => expect(await observations()).toBeGreaterThan(0), { timeout: 10_000 })
+    const out = (await (await suggest(jwt, { cells: [SHEPHERD], verify: false })).json()) as SuggestBody
+    expect(out.suggestions).toEqual([expect.objectContaining({ cellId: "c3", new: "Yahweh" })])
   })
 })
 

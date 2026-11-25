@@ -186,10 +186,11 @@ describe("ExportDialog — Web page export by file type (AQU-2210)", () => {
     ["srt", "episode.srt"],
     ["txt", "notes.txt"],
     ["source", "untyped"],
-  ])("does not offer Web page for a %s file", (type, fileName) => {
+  ])("does not offer Web page for a %s file whose lines are not verses", (type, fileName) => {
     render(
       <ExportDialog
         {...BASE_PROPS}
+        cells={UNREFERENCED}
         activeFileName={fileName}
         activeFileType={type}
         projectFiles={[{ id: "f-book", name: fileName, type }]}
@@ -199,6 +200,25 @@ describe("ExportDialog — Web page export by file type (AQU-2210)", () => {
     // The fold is open: the other formats are there, Web page is not.
     expect(screen.getByRole("radio", { name: /^Markdown/ })).toBeInTheDocument()
     expect(webPageRadio()).toBeNull()
+  })
+
+  // AQU-2559: a Bible imported from Word or InDesign is a book too — the
+  // workspace offers it the document layout and its reading preview, which is
+  // this page, so the page must be exportable as well.
+  it.each([
+    ["docx", "genesis.docx"],
+    ["idml", "genesis.idml"],
+  ])("offers Web page for a %s file whose lines are Bible verses", (type, fileName) => {
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        activeFileName={fileName}
+        activeFileType={type}
+        projectFiles={[{ id: "f-book", name: fileName, type }]}
+      />,
+    )
+    openFoldIfClosed()
+    expect(webPageRadio()).not.toBeNull()
   })
 
   it.each([

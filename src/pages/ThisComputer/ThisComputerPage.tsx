@@ -17,6 +17,7 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { paratextTauri, pickFolder, type RootSource } from "@/lib/paratext-bridge/tauri"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
+import { groupCopies, otherCopies } from "@/lib/paratext-bridge/copies"
 import { setParatextScanReady, useParatextScanReady } from "@/lib/store/paratext-scan-pref"
 
 const PARATEXT_DOCS_URL =
@@ -109,9 +110,17 @@ export function ThisComputerPage() {
     linked.reload()
   }
 
-  const projectRow = (p: BridgeProject) => (
-    <ParatextProjectRow key={p.path} project={p} linked={linkedProjects.has(p.stateId)} testId="paratext-found-project" />
-  )
+  // A project can sit in two folders (Paratext 9 and 10, say); each row names
+  // the other copies and says whether one of them is the copy Aquilla writes to.
+  const projectRow = (p: BridgeProject) => {
+    const others = otherCopies(p, d.projects)
+    return (
+      <ParatextProjectRow
+        key={p.path} project={p} linked={linkedProjects.has(p.stateId)} testId="paratext-found-project"
+        others={others} copyLinked={others.some((o) => linkedProjects.has(o.stateId))}
+      />
+    )
+  }
 
   return (
     <AppShell
@@ -173,7 +182,7 @@ export function ThisComputerPage() {
                 {d.error && d.discovery ? <p className="mb-2 text-sm text-destructive">{t("paratextBridge.thisComputer.scanFailed", { error: d.error })}</p> : null}
                 {d.discovery ? (
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="paratext-scan-results">
-                    <span>{t("paratextBridge.thisComputer.found", { count: d.projects.length })}</span>
+                    <span>{t("paratextBridge.thisComputer.found", { count: groupCopies(d.projects).length })}</span>
                     <Badge variant={d.discovery.paratextRunning ? "default" : "outline"}>
                       {d.discovery.paratextRunning ? t("paratextBridge.paratextRunning") : t("paratextBridge.paratextNotRunning")}
                     </Badge>

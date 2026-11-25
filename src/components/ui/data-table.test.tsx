@@ -2,7 +2,7 @@
  * DataTable — docs shell from ui.shadcn.com/docs/components/base/data-table.
  * Verifies search, sort via DataTableColumnHeader, and empty results.
  */
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
@@ -239,6 +239,158 @@ describe("DataTable", () => {
     const fitted = allocateColumnWidths(hints, 1168)
     expect(fitted.reduce((sum, w) => sum + w, 0)).toBeLessThanOrEqual(1168)
     expect(fitted[0]).toBeGreaterThan(200)
+  })
+
+  // AQU-2708: admin lists have no page cap, so a plain table painted every
+  // row it was given. With a bounded scroll parent the body is windowed with
+  // TanStack Virtual — still one real <table>, just a screenful of <tr>s.
+  describe("row windowing", () => {
+    const ROW_PX = 40
+    const SCROLLPORT_PX = 400
+    /** The page header and toolbar above the first row (the scroll margin). */
+    const ROWS_TOP_PX = 240
+    const manyRows: Row[] = Array.from({ length: 200 }, (_, i) => ({
+      id: i + 1,
+      name: `Project ${String(i + 1).padStart(3, "0")}`,
+      count: i,
+    }))
+
+    /**
+     * happy-dom has no layout. Give the scrollport a height (the virtualizer
+     * reads `clientHeight`) and the rows one (the window measures a `<tr>`).
+     */
+    const stubLayout = () => {
+      const isScrollport = (el: HTMLElement) => el.dataset.scrollport != null
+      // Scrolls, per CSS, but is as tall as the rows it holds — what an
+      // `overflow-x-auto` table wrapper looks like to this search.
+      const isGrowing = (el: HTMLElement) => el.dataset.growing != null
+      const LIST_PX = SCROLLPORT_PX * 20
+      vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+        function (this: HTMLElement) {
+          if (isScrollport(this)) return SCROLLPORT_PX
+          return isGrowing(this) ? LIST_PX : 0
+        },
+      )
+      // A pane only counts as a scrollport once its content overflows it.
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+        function (this: HTMLElement) {
+          if (isScrollport(this)) return LIST_PX
+          return isGrowing(this) ? LIST_PX : 0
+        },
+      )
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: HTMLElement) {
+          const height = isScrollport(this)
+            ? SCROLLPORT_PX
+            : this.tagName === "TR"
+              ? ROW_PX
+              : 0
+          // The rows start below a header and a toolbar, so the window has a
+          // real scroll margin to subtract (AQU-2708).
+          const top = this.tagName === "TBODY" ? ROWS_TOP_PX : 0
+          return {
+            x: 0,
+            y: top,
+            top,
+            left: 0,
+            right: 600,
+            bottom: top + height,
+            width: 600,
+            height,
+            toJSON: () => ({}),
+          } as DOMRect
+        },
+      )
+    }
+
+    const renderInPane = (
+      props: { plainRows?: boolean } = {},
+      scrolls = true,
+      /** A wrapper between the pane and the table that grows with its rows. */
+      growingWrapper = false,
+    ) => {
+      const table = (
+        <DataTable
+          columns={columns}
+          data={manyRows}
+          getRowId={(r) => String(r.id)}
+          {...props}
+        />
+      )
+      return render(
+        <div
+          data-scrollport=""
+          style={scrolls ? { overflowY: "auto", height: SCROLLPORT_PX } : undefined}
+        >
+          {growingWrapper ? (
+            <div data-growing="" style={{ overflowY: "auto" }}>
+              {table}
+            </div>
+          ) : (
+            table
+          )}
+        </div>,
+      )
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it("mounts only the rows near the scrollport, in one HTML table", () => {
+      stubLayout()
+      renderInPane()
+
+      const mounted = bodyNames()
+      expect(mounted.length).toBeLessThan(manyRows.length / 2)
+      expect(mounted.length).toBeGreaterThanOrEqual(SCROLLPORT_PX / ROW_PX)
+      // The window starts at the top of the sorted list.
+      expect(mounted[0]).toBe("Project 001")
+      expect(screen.getAllByRole("table")).toHaveLength(1)
+      expect(screen.queryByTestId("legend-list-mock")).not.toBeInTheDocument()
+    })
+
+    it("stands the skipped rows up as a spacer so the table keeps its height", () => {
+      stubLayout()
+      const { container } = renderInPane()
+
+      const spacers = container.querySelectorAll<HTMLElement>(
+        '[data-slot="row-window-spacer"]',
+      )
+      // Scrolled to the top: nothing above, everything below.
+      expect(spacers).toHaveLength(1)
+      const skipped = manyRows.length - bodyNames().length
+      expect(parseInt(spacers[0].style.height, 10)).toBe(skipped * ROW_PX)
+      // A measurement, not a row — it stays out of the row queries above.
+      expect(spacers[0]).toHaveAttribute("aria-hidden", "true")
+    })
+
+    it("keeps every row when nothing between the table and the page scrolls", () => {
+      stubLayout()
+      renderInPane({}, false)
+
+      expect(bodyNames()).toHaveLength(manyRows.length)
+    })
+
+    // A wrapper that scrolls but grows with its rows is not a scrollport:
+    // windowing against it would window nothing. CSS makes every
+    // `overflow-x-auto` wrapper look like one.
+    it("skips a scrollable ancestor that is as tall as the list itself", () => {
+      stubLayout()
+      renderInPane({}, true, true)
+
+      // Windowed against the 400px pane, not the full-height wrapper.
+      const mounted = bodyNames()
+      expect(mounted.length).toBeLessThan(manyRows.length / 2)
+      expect(mounted[0]).toBe("Project 001")
+    })
+
+    it("keeps every row when the call site asks for a plain table", () => {
+      stubLayout()
+      renderInPane({ plainRows: true })
+
+      expect(bodyNames()).toHaveLength(manyRows.length)
+    })
   })
 
   it("keeps a non-fillHeight table as a single HTML table", () => {

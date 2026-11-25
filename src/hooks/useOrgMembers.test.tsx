@@ -52,7 +52,8 @@ describe("useOrgMembers roster states", () => {
 
     const { result } = renderHook(() => useOrgMembers(1))
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.hasReadableRoster).toBe(false)
+    await waitFor(() => expect(result.current.hasReadableRoster).toBe(true))
     expect(result.current.members).toHaveLength(1)
     expect(result.current.rosterHidden).toBe(false)
     expect(result.current.rosterAccessDenied).toBe(false)
@@ -65,6 +66,7 @@ describe("useOrgMembers roster states", () => {
     const { result } = renderHook(() => useOrgMembers(1))
 
     await waitFor(() => expect(result.current.rosterHidden).toBe(true))
+    expect(result.current.hasReadableRoster).toBe(false)
     expect(result.current.members).toEqual([])
     expect(result.current.rosterAccessDenied).toBe(false)
   })
@@ -75,6 +77,7 @@ describe("useOrgMembers roster states", () => {
     const { result } = renderHook(() => useOrgMembers(1))
 
     await waitFor(() => expect(result.current.rosterAccessDenied).toBe(true))
+    expect(result.current.hasReadableRoster).toBe(false)
     expect(result.current.members).toEqual([])
     expect(result.current.rosterHidden).toBe(false)
     // Deliberately not an `error`: the caller is meant to explain the

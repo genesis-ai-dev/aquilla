@@ -83,7 +83,7 @@ describe("CompletionBulkProgressBanner", () => {
     renderToast()
 
     expect(screen.getByText(/30 of 90 cells failed/)).toBeInTheDocument()
-    expect(screen.getByText(/60 completed/)).toBeInTheDocument()
+    expect(screen.getByText(/60 drafted/)).toBeInTheDocument()
     // Must NOT silently render nothing / a stale progress bar.
     expect(screen.queryByText("Translating")).not.toBeInTheDocument()
   })
@@ -203,7 +203,7 @@ describe("CompletionBulkProgressBanner — an honest run (AQU-2654)", () => {
     finishBatchCompletion(runId, { error: new Error("Failed to fetch") })
     renderToast()
 
-    expect(screen.getByText(/8 of 12 cells failed — 4 completed/)).toBeInTheDocument()
+    expect(screen.getByText(/8 of 12 cells failed — 4 drafted/)).toBeInTheDocument()
     expect(screen.getByText("Drafting stopped unexpectedly: Failed to fetch")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry 8 cells" })).toBeInTheDocument()
   })

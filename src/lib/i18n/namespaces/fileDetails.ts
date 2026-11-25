@@ -18,7 +18,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
     // Media redesign slice 2: a language that counts its recordings.
-    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} approved",
+    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} validated",
     "fileDetails.bothProgressValue": "{done} of {total} lines done on text and audio",
     "fileDetails.rename": "Rename",
     "fileDetails.reimport": "Re-import",

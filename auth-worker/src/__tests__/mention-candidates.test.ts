@@ -84,8 +84,9 @@ async function seedPersonalProject() {
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('solo1', 'Olive Notes', NULL, 1)",
   ).run()
+  // AQU-2357: creation writes olive's Owner row. created_by grants nothing.
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('solo1', 4, 400, 1)",
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('solo1', 1, 700, 1), ('solo1', 4, 400, 1)",
   ).run()
 }
 

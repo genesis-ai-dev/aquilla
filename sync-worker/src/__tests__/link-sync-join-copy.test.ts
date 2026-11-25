@@ -126,6 +126,11 @@ async function setup() {
     ],
   })
   await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+  // AQU-2357: creation writes these Owner rows. created_by grants nothing.
+  await t.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1), ($2, 1, 700, 1)`,
+    [BSB, LANG],
+  )
   const store = new Map<string, string>()
   const bucket = {
     async put(key: string, value: string) { store.set(key, value) },

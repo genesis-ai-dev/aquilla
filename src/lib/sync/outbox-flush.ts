@@ -17,6 +17,7 @@ import {
 } from "./outbox"
 import { sanitizeStoredEvents } from "./outbox-sanitize"
 import { dependencyIds, offlineQueueWaitingIds } from "./offline-routing"
+import { noteRescuedOutcomes } from "./offline-stall-rescue"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { parseAppliedEventFrame } from "./ws-reconciler"
@@ -831,7 +832,17 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       }
     }
 
-    const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
+    // A copy rescued from the desktop offline queue goes back to it when
+    // refused, where the user retries or discards it; the offline adapter
+    // also needs to know it was stale (offline-stall-rescue.ts). Noted
+    // before the removal, which is what wakes the adapter.
+    const handedBack = noteRescuedOutcomes({
+      stale: (body.stale ?? []).map((s) => s.id),
+      refused: (body.rejected ?? [])
+        .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && !acceptedIds.has(r.id))
+        .map((r) => r.id),
+    })
+    const removableIds = [...new Set([...acceptedIds, ...permanentlyRejectedIds, ...handedBack])]
     if (removableIds.length > 0) {
       await removeOutboxEvents(removableIds, outboxScope)
     }
@@ -847,7 +858,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       rejectionByid.set(r.id, { status: r.status, reason: r.reason })
     }
     const forbiddenIds = (body.rejected ?? [])
-      .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
+      .filter((r) => r.status === 403 && !acceptedIds.has(r.id) && !handedBack.has(r.id))
       .map((r) => r.id)
     if (forbiddenIds.length > 0) {
       if (shouldSurface()) {

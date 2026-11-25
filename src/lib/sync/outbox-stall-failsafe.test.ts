@@ -15,6 +15,8 @@ import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 // confirmation is what this switches off.
 // `reviveLeader` confirms everything a dead leader was sitting on.
 let leaderDead = false
+// A store shutting down: it can't confirm anything, and says so.
+let storeCannotConfirm = false
 let deadLeaderWaiters: Array<() => void> = []
 const reviveLeader = () => {
   leaderDead = false
@@ -27,6 +29,10 @@ vi.mock("@/lib/offline/leader-watchdog", async (importOriginal) => {
   return {
     ...actual,
     watchLeaderPersisted: (...args: Parameters<typeof actual.watchLeaderPersisted>) => {
+      if (storeCannotConfirm) {
+        args[3]?.()
+        return () => {}
+      }
       if (!leaderDead) return actual.watchLeaderPersisted(...args)
       const onPersisted = args[2]
       deadLeaderWaiters.push(onPersisted)
@@ -38,12 +44,15 @@ vi.mock("@/lib/offline/leader-watchdog", async (importOriginal) => {
 })
 
 let failIndexedDbWrites = false
+// When set, IndexedDB writes wait on it (a slow copy, e.g. a quota purge).
+let indexedDbWritesGate: Promise<void> | null = null
 vi.mock("./outbox-recovery", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./outbox-recovery")>()
   return {
     ...actual,
     addOutboxRecords: async (...args: Parameters<typeof actual.addOutboxRecords>) => {
       if (failIndexedDbWrites) throw new Error("test: IndexedDB write failed")
+      if (indexedDbWritesGate) await indexedDbWritesGate
       return actual.addOutboxRecords(...args)
     },
   }
@@ -116,8 +125,10 @@ describe("offline queue fail-safe when the leader stalls", () => {
 
   afterEach(() => {
     leaderDead = false
+    storeCannotConfirm = false
     deadLeaderWaiters = []
     failIndexedDbWrites = false
+    indexedDbWritesGate = null
     onGetOfflineStore = undefined
     forgetStallRescueForTests()
     __resetLeaderStalledForTests()
@@ -159,6 +170,34 @@ describe("offline queue fail-safe when the leader stalls", () => {
     // Nothing left to rescue a second time.
     expect(await rescueUnpersistedOfflineWrites()).toBe(true)
     expect(await inIndexedDb()).toEqual(["tc1", "tc2", "tc3"])
+  })
+
+  it("keeps holding children back on a rescued edit until its IndexedDB copy has landed", async () => {
+    leaderDead = true
+    await enqueueOutboxEvent(commit("tc1", "p0"))
+    setLeaderStalled(true)
+
+    let landCopy = () => {}
+    indexedDbWritesGate = new Promise<void>((resolve) => {
+      landCopy = resolve
+    })
+    const rescue = rescueUnpersistedOfflineWrites()
+    await vi.waitFor(() => expect(isRescuedFromOfflineQueue("tc1")).toBe(true))
+    // In neither queue yet: a child in IndexedDB must still wait for it.
+    expect(await offlineQueueWaitingIds()).toEqual(new Set(["tc1"]))
+
+    landCopy()
+    expect(await rescue).toBe(true)
+    expect(await offlineQueueWaitingIds()).toEqual(new Set())
+  })
+
+  it("copies an edit to IndexedDB at once when its store can't confirm the commit", async () => {
+    storeCannotConfirm = true
+    await enqueueOutboxEvent(commit("tc1", "p0"))
+
+    // No stall is ever reported for a store that shut down: nothing else would save it.
+    await vi.waitFor(async () => expect(await inIndexedDb()).toEqual(["tc1"]))
+    await vi.waitFor(() => expect(journalLeft()).toEqual([]))
   })
 
   it("sends new edits to IndexedDB while the leader is stalled", async () => {

@@ -4,7 +4,7 @@
 // project's queued or refused edits read as "Synced".
 import { useEffect, useState } from "react"
 import type { Store } from "@livestore/livestore"
-import { isRescuedFromOfflineQueue, subscribeRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
+import { isInOutboxInstead, subscribeRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
 import { tables, type schema } from "./schema"
 
 export interface OfflineQueueCounts {
@@ -25,7 +25,7 @@ export function countOfflineQueue(rows: readonly { id: string; status: string }[
   let pending = 0
   let failed = 0
   for (const row of rows) {
-    if (isRescuedFromOfflineQueue(row.id)) continue
+    if (isInOutboxInstead(row.id)) continue
     if (row.status === "failed") failed += 1
     else pending += 1
   }

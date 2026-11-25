@@ -61,6 +61,8 @@ export type LeaderWatchdogOptions = {
   onStall: (stall: LeaderStall) => void
   /** Fires once the leader catches up after a reported stall. */
   onRecover?: () => void
+  /** A stall an earlier watcher already reported: don't report it again, but do report its recovery. */
+  alreadyStalled?: boolean
   now?: () => number
 }
 
@@ -151,10 +153,15 @@ function stopPersistFeed(store: SyncStatusFeed, queue: PersistQueue): void {
 /**
  * Calls `onPersisted` once the leader has persisted the commit that left the
  * session at `head` (its `localHead` right after committing); returns a
- * function that stops waiting. A dead leader never calls back, and neither
- * does a store that has shut down — the stall watchdog covers that.
+ * function that stops waiting. A dead leader never calls back (the stall
+ * watchdog covers that); a store already shut down calls `onCannotConfirm`.
  */
-export function watchLeaderPersisted(store: SyncStatusFeed, head: string, onPersisted: () => void): () => void {
+export function watchLeaderPersisted(
+  store: SyncStatusFeed,
+  head: string,
+  onPersisted: () => void,
+  onCannotConfirm: () => void = () => {},
+): () => void {
   const waiter: PersistWaiter = { head, onPersisted }
   let queue = persistQueues.get(store)
   try {
@@ -174,9 +181,11 @@ export function watchLeaderPersisted(store: SyncStatusFeed, head: string, onPers
       settlePersisted(store, queue, store.syncStatus())
     }
   } catch (error) {
-    // A store that shut down can't confirm anything; the caller's backup stays.
+    // A store that shut down can't confirm anything; the caller's backup
+    // stays, and the caller saves the commit some other way.
     console.warn("[offline] Couldn't watch the leader persist a commit", error)
     stopWaiting(store, waiter)
+    onCannotConfirm()
     return () => {}
   }
   return () => stopWaiting(store, waiter)
@@ -204,7 +213,7 @@ export function watchLeaderLiveness(store: SyncStatusSource, options: LeaderWatc
 
   let stalledSince: number | undefined
   let lastUpstreamHead: string | undefined
-  let reported = false
+  let reported = options.alreadyStalled ?? false
 
   const check = () => {
     const status = store.syncStatus()

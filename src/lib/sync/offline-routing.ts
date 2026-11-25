@@ -15,7 +15,12 @@
 
 import { isLeaderStalled, watchLeaderPersisted } from "@/lib/offline/leader-watchdog"
 import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
-import { isRescuedFromOfflineQueue, nothingToPersist, type WhenPersisted } from "./offline-stall-rescue"
+import {
+  cannotConfirmPersist,
+  isInOutboxInstead,
+  nothingToPersist,
+  type WhenPersisted,
+} from "./offline-stall-rescue"
 
 /**
  * The three event kinds that make sense to keep working entirely offline.
@@ -89,8 +94,10 @@ async function openOfflineQueue() {
     waitingIds: (): ReadonlySet<string> => new Set([
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "pending" })),
       ...liveStore.query(offlineTables.eventQueue.select("id").where({ status: "flushing" })),
-    // A rescued edit is IndexedDB's to send now (offline-stall-rescue.ts).
-    ].filter((id) => !isRescuedFromOfflineQueue(id))),
+    // A rescued edit is IndexedDB's to send now (offline-stall-rescue.ts),
+    // but not until its copy has landed there: until then it is in neither
+    // queue, and its children must still be held back.
+    ].filter((id) => !isInOutboxInstead(id))),
     commit: (run: (booted: typeof liveStore) => void): WhenPersisted => {
       // The stall may have been reported while routing waited on the store:
       // refuse, and the caller sends the batch to IndexedDB instead.
@@ -104,12 +111,13 @@ async function openOfflineQueue() {
       try {
         head = String(liveStore.syncStatus().localHead)
       } catch (error) {
-        // A store shutting down can't confirm anything: the journal entry
-        // stays for the next launch, which replays it (idempotent on id).
+        // A store shutting down can't confirm anything, or report a stall:
+        // the edit is copied to IndexedDB now (its journal entry stays until
+        // that copy lands).
         console.warn("[offline] Couldn't read the offline store's head after a commit", error)
-        return () => () => {}
+        return cannotConfirmPersist
       }
-      return (onPersisted) => watchLeaderPersisted(liveStore, head, onPersisted)
+      return (onPersisted, onCannotConfirm) => watchLeaderPersisted(liveStore, head, onPersisted, onCannotConfirm)
     },
   }
 }

@@ -10,6 +10,7 @@ import {
   forgetStallRescueForTests,
   isRescuedFromOfflineQueue,
   holdJournalUntilPersisted,
+  noteRescuedOutcomes,
   rescueUnpersistedOfflineWrites,
 } from "@/lib/sync/offline-stall-rescue"
 import type { OutboxRecord } from "@/lib/sync/outbox"
@@ -570,7 +571,7 @@ describe("flush triggering", () => {
     queueCommit("q1")
     queueCommit("q2")
     // The leader stalled before persisting q1, so it was copied to IndexedDB.
-    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
     expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
 
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [{ id: "q2" }] }), { status: 200 }))
@@ -604,7 +605,7 @@ describe("flush triggering", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     queueCommit("q1")
-    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
     expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
 
     // A fake outbox: q1 sits in IndexedDB until the HTTP flusher "uploads" it.
@@ -647,11 +648,116 @@ describe("flush triggering", () => {
     }
   })
 
+  it.each([
+    ["stale", { stale: ["q1"], refused: [] }],
+    ["refused", { stale: [], refused: ["q1"] }],
+  ] as const)("settles a rescued row whose IndexedDB copy came back %s as its own POST would have", async (outcome, outcomes) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    const inOutbox = new Set(["q1"])
+    const listeners = new Set<() => void>()
+    const outbox = {
+      has: vi.fn(async (ids: readonly string[]) => new Set(ids.filter((id) => inOutbox.has(id)))),
+      subscribe: (cb: () => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    }
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ accepted: [] }), { status: 200 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox,
+    })
+    try {
+      await waitFor(() => outbox.has.mock.calls.length > 0)
+      // The HTTP flusher records the outcome, then removes the copy.
+      const handedBack = noteRescuedOutcomes(outcomes)
+      expect(handedBack.has("q1")).toBe(outcome === "refused")
+      inOutbox.delete("q1")
+      for (const cb of listeners) cb()
+      await waitFor(() => !isRescuedFromOfflineQueue("q1"))
+
+      const conflicted = getConflicts().has(cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY))
+      if (outcome === "stale") {
+        expect(store.query(tables.eventQueue.select("id"))).toEqual([])
+        expect(conflicted).toBe(true)
+      } else {
+        // Back in the offline queue as refused, where Retry and Discard are.
+        expect(store.query(tables.eventQueue.select("id", "status"))).toEqual([{ id: "q1", status: "failed" }])
+        expect(conflicted).toBe(false)
+      }
+      expect(fetchImpl).not.toHaveBeenCalled()
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
+  it("leaves a rescued row's refusal to its IndexedDB copy when a POST from before the rescue is refused", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+
+    let answer: () => void = () => {}
+    const fetchImpl = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = () =>
+            resolve(
+              new Response(
+                JSON.stringify({ accepted: [], rejected: [{ id: "q1", status: 403, reason: "forbidden" }], stale: [] }),
+                { status: 200 },
+              ),
+            )
+        }),
+    )
+    // In IndexedDB only once rescued.
+    let rescued = false
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox: { has: async (ids) => new Set(rescued ? ids : []), subscribe: () => () => {} },
+    })
+    try {
+      await waitFor(() => fetchImpl.mock.calls.length > 0)
+      holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
+      expect(
+        await rescueUnpersistedOfflineWrites(async () => {
+          rescued = true
+        }),
+      ).toBe(true)
+
+      answer()
+      await new Promise((r) => setTimeout(r, 30))
+      // Not "failed": that would list it as refused while counts and Retry skip it.
+      expect(store.query(tables.eventQueue.select("status").where({ id: "q1" }))).not.toContain("failed")
+      expect(isRescuedFromOfflineQueue("q1")).toBe(true)
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
   it("doesn't dequeue a rescued row while its IndexedDB copy is still being written", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     queueCommit("q1")
-    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+    holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
 
     const inOutbox = new Set<string>()
     const listeners = new Set<() => void>()
@@ -759,7 +865,7 @@ describe("flush triggering", () => {
     try {
       await waitFor(() => fetchImpl.mock.calls.length > 0)
       // The leader stalls mid-POST, and the rescue copies q1.
-      holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+      holdJournalUntilPersisted([{ id: "q1", event: { projectId: "proj1" } } as OutboxRecord], () => () => {}, () => {}, () => {})
       expect(
         await rescueUnpersistedOfflineWrites(async () => {
           rescued = true

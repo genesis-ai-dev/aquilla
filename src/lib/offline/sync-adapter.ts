@@ -170,7 +170,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const frameCoalesceMs = options.frameCoalesceMs ?? 100
   // Rows rescued into IndexedDB when the leader stalled (rescued-rows.ts).
   const outbox = options.outbox ?? indexedDbOutbox
-  const rescuedRows = createRescuedRows(store, projectId, outbox)
+  const rescuedRows = createRescuedRows(store, projectId, outbox, (rows) => {
+    for (const row of rows) markRowConflict(row)
+  })
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -249,6 +251,12 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return existing?.laneKey ?? localLaneKey(null, targetLang)
   }
 
+  /** A queued write the server logged stale: badge its cell (conflicts.ts). */
+  function markRowConflict(row: { fileId: string | null; cellId: string | null; payload: unknown }): void {
+    if (!row.fileId || !row.cellId) return
+    markConflict(cellRowId(projectId, row.fileId, row.cellId, "target", queuedTargetLaneKey(row.fileId, row.cellId, row.payload)))
+  }
+
   /**
    * Whether any frame reports a change its rows don't carry, which a catch-up
    * then fetches (dropped, it left the local copy stale until the next
@@ -314,17 +322,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       const queued = store.query(tables.eventQueue.select().where({ id: msg.id }).first())
       if (!queued) return
       store.commit(events.eventDequeued({ id: msg.id }))
-      if (queued.fileId && queued.cellId) {
-        markConflict(
-          cellRowId(
-            projectId,
-            queued.fileId,
-            queued.cellId,
-            "target",
-            queuedTargetLaneKey(queued.fileId, queued.cellId, queued.payload),
-          ),
-        )
-      }
+      markRowConflict(queued)
     }
   }
 
@@ -473,11 +471,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       if (stale) {
         dequeued.push(id)
         const row = rowById.get(id)
-        if (row?.fileId && row.cellId) {
-          markConflict(
-            cellRowId(projectId, row.fileId, row.cellId, "target", queuedTargetLaneKey(row.fileId, row.cellId, row.payload)),
-          )
-        }
+        if (row) markRowConflict(row)
         continue
       }
       if (acceptedIds.has(id)) {
@@ -491,7 +485,10 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         // stuck ("failed") rather than dequeuing (silent data loss) or
         // retrying forever (head-of-line blocking every future flush).
         console.warn(`[offline] server refused queued write ${id}: ${refusal.status} ${refusal.reason}`)
-        failed.push(id)
+        // Rescued while this POST was out: IndexedDB's copy is sent too, gets
+        // the same refusal, and hands the row back as failed then. Marking it
+        // now would list it as refused while counts and Retry skip it.
+        if (!isRescuedFromOfflineQueue(id)) failed.push(id)
         continue
       }
       // 401 / 5xx / unacknowledged — transient: still "pending", so the next

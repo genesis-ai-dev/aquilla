@@ -21,11 +21,21 @@
 import { isLeaderStalled, subscribeLeaderStalled } from "@/lib/offline/leader-watchdog"
 import type { OutboxRecord } from "./outbox"
 
-/** Calls back once the leader has written a commit to disk; returns a stop function. */
-export type WhenPersisted = (onPersisted: () => void) => () => void
+/**
+ * Calls `onPersisted` once the leader has written a commit to disk, or
+ * `onCannotConfirm` if the store can't say (it is shutting down); returns a
+ * stop function.
+ */
+export type WhenPersisted = (onPersisted: () => void, onCannotConfirm: () => void) => () => void
 
 export const nothingToPersist: WhenPersisted = (onPersisted) => {
   onPersisted()
+  return () => {}
+}
+
+/** For a commit whose store can't confirm anything: rescue it now. */
+export const cannotConfirmPersist: WhenPersisted = (_onPersisted, onCannotConfirm) => {
+  onCannotConfirm()
   return () => {}
 }
 
@@ -36,8 +46,17 @@ interface AwaitingPersist {
 }
 const awaitingPersist = new Set<AwaitingPersist>()
 
-/** Ids IndexedDB owns now. Their offline-queue copies are left alone. */
-const rescuedIds = new Set<string>()
+/** Ids IndexedDB owns now, with their project. Their offline-queue copies are left alone. */
+const rescuedIds = new Map<string, string>()
+
+/**
+ * What the server said to a rescued row's IndexedDB copy, when it was more
+ * than "accepted": the adapter needs it once the copy has left the outbox,
+ * to mark a conflict (stale) or keep the row as refused, as it would have for
+ * its own POST.
+ */
+export type RescuedOutcome = "stale" | "refused"
+const rescuedOutcomes = new Map<string, RescuedOutcome>()
 
 /**
  * Rescued ids whose IndexedDB copy is still being written. Not in the outbox
@@ -53,6 +72,15 @@ export function isRescueCopyInFlight(id: string): boolean {
 
 export function isRescuedFromOfflineQueue(id: string): boolean {
   return rescuedIds.has(id)
+}
+
+/**
+ * Rescued and its IndexedDB copy has landed: counted there, not in the offline
+ * queue. Until the copy lands it is in neither, so it still counts (and holds
+ * its children back) here.
+ */
+export function isInOutboxInstead(id: string): boolean {
+  return rescuedIds.has(id) && !copyingIds.has(id)
 }
 
 // Anything that counts the offline queue (the outbox chip) re-counts when the
@@ -71,27 +99,57 @@ export function subscribeRescuedFromOfflineQueue(cb: () => void): () => void {
   }
 }
 
-/** The offline queue's copies of `ids` are gone (offline sync adapter): nothing left to leave alone. */
+/** The offline queue's copies of `ids` are gone, or handed back (offline sync adapter): nothing left to leave alone. */
 export function forgetRescuedFromOfflineQueue(ids: Iterable<string>): void {
   let changed = false
-  for (const id of ids) changed = rescuedIds.delete(id) || changed
+  for (const id of ids) {
+    rescuedOutcomes.delete(id)
+    changed = rescuedIds.delete(id) || changed
+  }
   if (changed) notifyRescuedChanged()
 }
 
 /**
- * Marks `ids` as IndexedDB's. A rescue does this itself; the offline sync
+ * Marks rows as IndexedDB's. A rescue does this itself; the offline sync
  * adapter does it on launch for queued rows that also have an IndexedDB copy,
  * since this set doesn't survive a restart.
  */
-export function markRescuedFromOfflineQueue(ids: Iterable<string>): void {
+export function markRescuedFromOfflineQueue(rows: Iterable<{ id: string; projectId: string }>): void {
   const before = rescuedIds.size
-  for (const id of ids) rescuedIds.add(id)
+  for (const { id, projectId } of rows) if (!rescuedIds.has(id)) rescuedIds.set(id, projectId)
   if (rescuedIds.size !== before) notifyRescuedChanged()
 }
 
-/** Every id currently marked rescued, in no particular order. */
-export function rescuedFromOfflineQueue(): readonly string[] {
-  return [...rescuedIds]
+/** The ids marked rescued for `projectId`, in no particular order. */
+export function rescuedFromOfflineQueue(projectId: string): readonly string[] {
+  const ids: string[] = []
+  for (const [id, project] of rescuedIds) if (project === projectId) ids.push(id)
+  return ids
+}
+
+/**
+ * The HTTP flusher's results for rescued copies (outbox-flush.ts), recorded
+ * before it removes them. Returns the refused ids that are rescued: the
+ * flusher removes those rather than quarantining them, and the offline
+ * adapter keeps the row as refused, where Retry and Discard live.
+ */
+export function noteRescuedOutcomes(outcomes: {
+  stale: Iterable<string>
+  refused: Iterable<string>
+}): ReadonlySet<string> {
+  for (const id of outcomes.stale) if (rescuedIds.has(id)) rescuedOutcomes.set(id, "stale")
+  const refused = new Set<string>()
+  for (const id of outcomes.refused) {
+    if (!rescuedIds.has(id)) continue
+    rescuedOutcomes.set(id, "refused")
+    refused.add(id)
+  }
+  return refused
+}
+
+/** What the server said to a rescued copy that left the outbox, if more than "accepted". */
+export function rescuedOutcome(id: string): RescuedOutcome | undefined {
+  return rescuedOutcomes.get(id)
 }
 
 /** Cheap check before scanning a queue for rescued ids. */
@@ -103,17 +161,25 @@ export function anyRescuedFromOfflineQueue(): boolean {
  * Keeps `records`' journal entry until the leader has persisted their commit
  * (or a rescue has copied them to IndexedDB). Call it straight after the
  * commit, with no await in between, so a stall can't be reported in the gap.
+ * A store that can't confirm the commit (shutting down) will never persist
+ * it or report a stall, so `rescue` is called to copy it to IndexedDB now.
  */
 export function holdJournalUntilPersisted(
   records: readonly OutboxRecord[],
   whenPersisted: WhenPersisted,
   clearJournal: () => void,
+  rescue: () => void,
 ): void {
   const entry: AwaitingPersist = { records, clearJournal, stopWatching: () => {} }
   awaitingPersist.add(entry)
-  entry.stopWatching = whenPersisted(() => {
-    if (awaitingPersist.delete(entry)) entry.clearJournal()
-  })
+  entry.stopWatching = whenPersisted(
+    () => {
+      if (awaitingPersist.delete(entry)) entry.clearJournal()
+    },
+    () => {
+      if (awaitingPersist.has(entry)) rescue()
+    },
+  )
 }
 
 // Backstop for a store that shut down: its commits never confirm, and their
@@ -177,8 +243,15 @@ async function rescueOnce(copy: CopyToOutbox): Promise<boolean> {
   // adapter doesn't take "not in the outbox yet" for "uploaded" and dequeue it.
   const marked = records.map((record) => record.id).filter((id) => !rescuedIds.has(id))
   const copying = records.map((record) => record.id).filter((id) => !copyingIds.has(id))
-  markRescuedFromOfflineQueue(marked)
+  const markedSet = new Set(marked)
+  // Copying first: marking notifies, and a listener must see the row as
+  // still on its way, not already in the outbox.
   for (const id of copying) copyingIds.add(id)
+  markRescuedFromOfflineQueue(
+    records
+      .filter((record) => markedSet.has(record.id))
+      .map((record) => ({ id: record.id, projectId: record.event.projectId })),
+  )
   try {
     await copy(records)
   } catch (error) {
@@ -187,6 +260,8 @@ async function rescueOnce(copy: CopyToOutbox): Promise<boolean> {
     return false
   } finally {
     for (const id of copying) copyingIds.delete(id)
+    // Counts that left a copying row in the offline queue move it to the outbox.
+    if (copying.length > 0) notifyRescuedChanged()
   }
   // Every copy is in IndexedDB now, including any the leader confirmed during
   // the write (their journal entries have already gone).
@@ -210,6 +285,7 @@ export function forgetStallRescueForTests(): void {
   for (const entry of awaitingPersist) entry.stopWatching()
   awaitingPersist.clear()
   rescuedIds.clear()
+  rescuedOutcomes.clear()
   copyingIds.clear()
   rescuedListeners.clear()
   rescueChain = Promise.resolve(true)

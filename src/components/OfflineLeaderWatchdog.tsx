@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent } from "react"
+import { useEffect, useEffectEvent, useRef } from "react"
 import { toast } from "@/components/ui/toast"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -201,9 +201,35 @@ export function OfflineLeaderWatchdog({
     })
   })
 
+  // The store whose stall this mount has reported, and whether its edits
+  // were saved since. Outlives a re-run of the watch effect: a stall on the
+  // same store carries over to the next watcher rather than being cleared
+  // for the ~stallMs it takes to see it again, with edits routed back into
+  // the dead queue meanwhile.
+  const stallRef = useRef<{ store: NonNullable<typeof store>; safe: boolean } | null>(null)
+
+  useEffect(
+    () => () => {
+      // Unmounted: nothing will report this stall's recovery.
+      if (stallRef.current) {
+        stallRef.current = null
+        setLeaderStalled(false)
+        toast.close(LEADER_STALLED_TOAST_ID)
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
+    // A stall reported on another store doesn't apply to this one.
+    if (stallRef.current && stallRef.current.store !== store) {
+      stallRef.current = null
+      setLeaderStalled(false)
+      toast.close(LEADER_STALLED_TOAST_ID)
+    }
     if (!store) return
-    let stalled = false
+    const carried = stallRef.current
+    let stalled = carried !== null
     // Bumped on every stall and recovery: a rescue started for an earlier
     // stall can resolve after the leader recovered and stalled again, and must
     // not start a second retry loop (or overwrite this one's timer).
@@ -218,6 +244,7 @@ export function OfflineLeaderWatchdog({
       const settle = (safe: boolean) => {
         if (!stalled || epoch !== stallEpoch) return
         if (safe) {
+          if (stallRef.current) stallRef.current.safe = true
           showStalledToast(true)
         } else {
           retryTimer = setTimeout(rescueUntilSafe, rescueRetryMs)
@@ -231,8 +258,10 @@ export function OfflineLeaderWatchdog({
     const stopWatching = watchLeaderLiveness(store, {
       stallMs,
       checkEveryMs,
+      alreadyStalled: stalled,
       onStall: (stall) => {
         stalled = true
+        stallRef.current = { store, safe: false }
         stallEpoch += 1
         clearTimeout(retryTimer)
         // First, so edits made from here on go to IndexedDB, not the dead queue.
@@ -247,25 +276,22 @@ export function OfflineLeaderWatchdog({
       },
       onRecover: () => {
         stalled = false
+        stallRef.current = null
         stallEpoch += 1
         clearTimeout(retryTimer)
         setLeaderStalled(false)
         toast.close(LEADER_STALLED_TOAST_ID)
       },
     })
+    // Carried over from the previous watcher: finish saving its edits if
+    // that hadn't succeeded yet (its retry loop stopped with it).
+    if (carried && !carried.safe) rescueUntilSafe()
     return () => {
+      // The stall flag stays: the next run either carries it on (same store,
+      // reporting its recovery) or clears it (another store, or unmount).
       stallEpoch += 1
       clearTimeout(retryTimer)
       stopWatching()
-      // The next watcher starts unaware of this stall, so it would never
-      // report a recovery: the flag would stay set, and every offline edit
-      // would go to IndexedDB for the rest of the session. A store that is
-      // still stalled is reported again by the next watcher.
-      if (stalled) {
-        stalled = false
-        setLeaderStalled(false)
-        toast.close(LEADER_STALLED_TOAST_ID)
-      }
     }
   }, [store, stallMs, checkEveryMs, rescue, rescueRetryMs])
 

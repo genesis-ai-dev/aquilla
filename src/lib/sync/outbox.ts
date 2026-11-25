@@ -276,7 +276,6 @@ async function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
-/** Which of `ids` are in the outbox, in any status and for any account. */
 /** Which of `ids` are in the IndexedDB outbox, in any status (any owner). */
 export async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
   if (ids.length === 0) return new Set()
@@ -354,7 +353,7 @@ async function recoverIntoQueues(db: IDBDatabase, { records, keys }: JournalCont
       }
     }
     if (whenPersisted) {
-      holdJournalUntilPersisted(pending.filter((record) => routedIds.has(record.id)), whenPersisted, () => clearJournal(keys))
+      holdJournalUntilPersisted(pending.filter((record) => routedIds.has(record.id)), whenPersisted, () => clearJournal(keys), rescueNow)
     } else {
       clearJournal(keys)
     }
@@ -380,6 +379,11 @@ export async function rescueUnpersistedOfflineWrites(): Promise<boolean> {
   })
   if (copied) notifyOutboxChanged()
   return safe
+}
+
+/** For a commit its store can't confirm; failures are logged and left to the journal. */
+const rescueNow = (): void => {
+  void rescueUnpersistedOfflineWrites()
 }
 
 /**
@@ -607,7 +611,7 @@ async function writeOutboxRecords(
       if (writeDestinations.get(rec.id) === destination) writeDestinations.delete(rec.id)
     }
   }
-  if (offlineCommit) holdJournalUntilPersisted(offlineCommit.routed, offlineCommit.whenPersisted, clearJournal)
+  if (offlineCommit) holdJournalUntilPersisted(offlineCommit.routed, offlineCommit.whenPersisted, clearJournal, rescueNow)
   else clearJournal()
   if (wrote) notifyOutboxChanged()
 }

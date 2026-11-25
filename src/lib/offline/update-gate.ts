@@ -1,7 +1,7 @@
 // Install only after the queues drain, so an update can never cost unsent edits.
 import type { Store } from "@livestore/livestore"
 import { readOutboxCounts } from "@/lib/sync/outbox"
-import { isRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
+import { isInOutboxInstead } from "@/lib/sync/offline-stall-rescue"
 import { tables, type schema } from "./schema"
 
 /** A queue still non-empty after this is stuck; holding the update forever would block its fix too. */
@@ -27,7 +27,7 @@ export function readOfflineQueue(store: Store<typeof schema>): OfflineQueueSnaps
   // A row rescued to IndexedDB is counted there (readOutboxQueue), not twice.
   const rows = store
     .query(tables.eventQueue.select("id", "status"))
-    .filter((row) => !isRescuedFromOfflineQueue(row.id))
+    .filter((row) => !isInOutboxInstead(row.id))
   return { count: rows.length, failed: rows.filter((row) => row.status === "failed").length }
 }
 

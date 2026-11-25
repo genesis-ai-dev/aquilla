@@ -8,6 +8,7 @@ import { useConnectivity } from "@/lib/offline/connectivity"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { tables } from "@/lib/offline/schema"
 import { subscribeToOutbox } from "@/lib/sync/outbox"
+import { subscribeRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
 import {
   addQueues,
   EMPTY_QUEUE,
@@ -124,7 +125,13 @@ export function DesktopUpdatePrompt({
     const recheck = () => setQueue(readOfflineQueue(store))
     recheck()
     // Statuses only — all readOfflineQueue reads; whole rows would decode every payload per commit.
-    return store.subscribe(tables.eventQueue.select("status"), recheck)
+    const unsubscribeQueue = store.subscribe(tables.eventQueue.select("status"), recheck)
+    // A row rescued to IndexedDB (or handed back) changes the count with no queue commit.
+    const unsubscribeRescued = subscribeRescuedFromOfflineQueue(recheck)
+    return () => {
+      unsubscribeQueue()
+      unsubscribeRescued()
+    }
   }, [store])
 
   useEffect(() => {

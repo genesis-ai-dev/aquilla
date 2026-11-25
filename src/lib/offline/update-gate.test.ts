@@ -49,7 +49,7 @@ describe("readOfflineQueue", () => {
   it("leaves out rows rescued to IndexedDB, which the outbox already counts", async () => {
     const store = await makeStore()
     store.commit(queued("q1"), queued("q2"))
-    markRescuedFromOfflineQueue(["q2"])
+    markRescuedFromOfflineQueue([{ id: "q2", projectId: "proj1" }])
     expect(readOfflineQueue(store)).toEqual({ count: 1, failed: 0 })
   })
 })

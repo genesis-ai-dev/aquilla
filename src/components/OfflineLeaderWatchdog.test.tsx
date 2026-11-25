@@ -146,7 +146,7 @@ describe("OfflineLeaderWatchdog", () => {
     expect(await screen.findByText(/kept in the upload queue/)).toBeInTheDocument()
   })
 
-  it("clears the stall when the watch restarts, so a healthy store isn't bypassed for the session", async () => {
+  it("carries a stall across a watch restart, and still reports its recovery", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     status = stuck
     const restart = vi.fn()
@@ -159,16 +159,36 @@ describe("OfflineLeaderWatchdog", () => {
     )
     await waitFor(() => expect(isLeaderStalled()).toBe(true))
 
-    // The leader recovers just as the watch restarts with new settings.
-    status = synced
+    // Still stalled as the watch restarts with new settings: edits must keep
+    // going to IndexedDB, not back to the dead queue until it's seen again.
     rerender(
       <>
         <Toaster />
-        <OfflineLeaderWatchdog stallMs={50} checkEveryMs={10} restart={restart} rescue={rescue} />
+        <OfflineLeaderWatchdog stallMs={5_000} checkEveryMs={10} restart={restart} rescue={rescue} />
       </>,
     )
-    expect(isLeaderStalled()).toBe(false)
+    expect(isLeaderStalled()).toBe(true)
     await act(() => new Promise((r) => setTimeout(r, 60)))
+    expect(isLeaderStalled()).toBe(true)
+    // The first rescue never settled, so the new watch carries it on.
+    expect(rescue).toHaveBeenCalledTimes(2)
+
+    // The new watcher reports the recovery the old one would have.
+    status = synced
+    await waitFor(() => expect(isLeaderStalled()).toBe(false))
+  })
+
+  it("clears the stall when the watchdog unmounts", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    status = stuck
+    const { unmount } = render(
+      <>
+        <Toaster />
+        <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} restart={vi.fn()} rescue={() => new Promise<boolean>(() => {})} />
+      </>,
+    )
+    await waitFor(() => expect(isLeaderStalled()).toBe(true))
+    unmount()
     expect(isLeaderStalled()).toBe(false)
   })
 

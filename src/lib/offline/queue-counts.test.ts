@@ -29,7 +29,7 @@ const queued = (id: string) =>
 
 describe("countOfflineQueue", () => {
   it("counts pending and failed rows, skipping rows rescued to IndexedDB", () => {
-    markRescuedFromOfflineQueue(["r1"])
+    markRescuedFromOfflineQueue([{ id: "r1", projectId: "proj1" }])
     expect(
       countOfflineQueue([
         { id: "a", status: "pending" },
@@ -54,7 +54,7 @@ describe("useOfflineQueueCounts", () => {
     const { result } = renderHook(() => useOfflineQueueCounts(store, "proj1"))
     expect(result.current).toEqual({ pending: 2, failed: 0 })
 
-    act(() => markRescuedFromOfflineQueue(["q2"]))
+    act(() => markRescuedFromOfflineQueue([{ id: "q2", projectId: "proj1" }]))
     expect(result.current).toEqual({ pending: 1, failed: 0 })
 
     act(() => forgetRescuedFromOfflineQueue(["q2"]))

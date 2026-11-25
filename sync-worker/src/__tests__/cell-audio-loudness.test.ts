@@ -1,6 +1,6 @@
 // AQU-2664: evening out the loudness of takes, non-destructively.
 //
-// Two facts are stored on the take (cell_audio, migration 0207):
+// Two facts are stored on the take (cell_audio, migration 0211):
 //   - its recording's loudness and true peak, measured once in the browser and
 //     sent on `cell.audio.measure` (fill-only, like its duration: the bytes of
 //     an audio id never change, so a second reading has nothing to add);

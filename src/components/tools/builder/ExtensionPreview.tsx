@@ -7,7 +7,7 @@ import { primaryMount } from "@/lib/tools/builder-model"
 import { createBridgeHost } from "@/lib/tools/host-bridge"
 import { createToolHandlers } from "@/lib/tools/host-handlers"
 import { defaultSmokeFixtures } from "@/lib/tools/smoke"
-import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
+import { TOOL_SANDBOX, buildToolShellSrcdoc, buildToolSrcdoc, readThemeVars, toolWindowOf } from "@/lib/tools/srcdoc"
 import { cn } from "@/lib/utils"
 import { ExtensionFrame } from "../ExtensionFrame"
 import type { ToolManifest } from "../../../../shared/tools/manifest"
@@ -45,13 +45,16 @@ export function ExtensionPreview({ source, manifest }: { source: string; manifes
       ),
     [source, manifest, mount, t],
   )
+  const frameTitle = t("extensions.frame.title", { name: manifest.name })
+  // The candidate never mounts directly: the shell is what stops it navigating itself (srcdoc.ts).
+  const shellSrcdoc = useMemo(() => buildToolShellSrcdoc(srcdoc, frameTitle), [srcdoc, frameTitle])
 
   useEffect(() => {
     const fixtures = defaultSmokeFixtures(manifest)
     const sample = fixtures.find((f) => f.mount === mount) ?? fixtures[1]
     if (!sample) return
     const host = createBridgeHost({
-      getFrameWindow: () => frameRef.current?.contentWindow ?? null,
+      getFrameWindow: () => toolWindowOf(frameRef.current),
       handlers: createToolHandlers(sample.data),
       authorize: async () => {},
       onReady: () => setReadyFor(srcdoc),
@@ -64,9 +67,10 @@ export function ExtensionPreview({ source, manifest }: { source: string; manifes
     <div className="relative min-h-0 flex-1">
       <iframe
         ref={frameRef}
-        title={t("extensions.frame.title", { name: manifest.name })}
+        title={frameTitle}
         sandbox={TOOL_SANDBOX}
-        srcDoc={srcdoc}
+        referrerPolicy="no-referrer"
+        srcDoc={shellSrcdoc}
         className="size-full bg-background"
         data-testid="extension-preview-frame"
       />

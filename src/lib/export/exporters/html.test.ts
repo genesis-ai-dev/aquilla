@@ -547,30 +547,63 @@ describe("buildHtmlPage — a USFM book through the real import path", () => {
         translated: cell.value,
         ...(cell.metadata?.paragraphStart === true ? { paragraphStart: true } : {}),
         ...(typeof cell.metadata?.paragraphMarker === "string" ? { paragraphMarker: cell.metadata.paragraphMarker } : {}),
+        ...(cell.metadata ? { metadata: cell.metadata } : {}),
       }),
     )
   }
 
-  it("lays the book out from what import stored: poetry, paragraphs, notes and styles", () => {
+  it("lays the book out from what import stored: poetry, paragraphs and notes", () => {
     const html = buildHtmlPage(importedCells(), { fileName: "psa.usfm", now: NOW })
 
     expect(html).toContain('<p class="psalm-title">A Psalm of David.</p>')
     expect(html).toContain("<sup class=\"verse-number\">1</sup> Blessed is the man who doesn&#39;t walk in the counsel of the wicked,")
-    expect(html).toContain('<p class="poetry poetry-2">nor stand on the path of sinners,</p>')
+    // AQU-2743: a verse cell holds the reading, so the `\\q2` line inside verse
+    // 1 reaches the page as a line of its own — the break survives the
+    // projection — but its poetry LEVEL does not, and the line renders at the
+    // level the verse opened in. Levels inside a verse, and the `\\b` blank
+    // line, are what AQU-2746 is about.
+    expect(html).toContain(
+      '<p class="poetry poetry-1"><sup class="verse-number">1</sup> ' +
+        "Blessed is the man who doesn&#39;t walk in the counsel of the wicked,<br>\n" +
+        "nor stand on the path of sinners,</p>",
+    )
     expect(html).toContain('<p class="poetry poetry-1"><sup class="verse-number">2</sup> but his delight is in the law')
     // Verses 3 and 4 share the \\p paragraph; verse 5 opens a new one.
     expect(untitled(html)).toContain(
-      '<sup class="verse-number">3</sup> He will be like a tree<sup class="note-marker xref">' +
-        '<a id="ch-PSA-1-x1-ref" href="#ch-PSA-1-x1">a</a></sup> planted by the water, ' +
+      '<sup class="verse-number">3</sup> He will be like a tree planted by the water,' +
+        '<sup class="note-marker xref"><a id="ch-PSA-1-x1-ref" href="#ch-PSA-1-x1">a</a></sup> ' +
         '<sup class="verse-number">4</sup> that produces its fruit in its season.',
     )
     expect(html).toContain('<h3 class="section-heading">The way of the wicked</h3>')
-    expect(html).toContain('<p class="para"><sup class="verse-number">5</sup> The wicked are like the <span class="small-caps">chaff</span> which the wind drives away.</p>')
+    // `\\nd` keeps its words and loses its small caps — the styling trade
+    // AQU-2743 records as acceptable for v1.
+    expect(html).toContain('<p class="para"><sup class="verse-number">5</sup> The wicked are like the chaff which the wind drives away.</p>')
+    // The apparatus is NOT lost with the markup: the notes parked in
+    // `metadata.usfmNotes` at import come back as markers at the end of their
+    // own verse, and as the chapter's notes list (AQU-2743).
     expect(html).toContain('<span class="note-ref">1:2</span> <span class="note-text">Hebrew: torah</span>')
     expect(html).toContain('<li class="note xref" id="ch-PSA-1-x1">')
-    // The \\b between verses 2 and 3 is a blank line, not a lost marker.
-    expect(html).toContain('<div class="blank-line"></div>')
+    expect(untitled(html)).toContain(
+      'but his delight is in the law of Yahweh.<sup class="note-marker footnote">',
+    )
     // Nothing raw survives anywhere on the page.
     expect(html).not.toMatch(/\\[a-z]+\d*\*?/)
+  })
+
+  it("renders a cell that still carries its own markers, and never twice", () => {
+    // A book imported before AQU-2743 has the markers in the cell and no
+    // parked notes; one imported after has the reading and the parked notes.
+    // Both must show the footnote exactly once.
+    const legacy = makeCell({
+      id: "legacy",
+      group: "PSA 1:2",
+      type: "verse",
+      original: "but his delight is in the law\\f + \\fr 1:2 \\ft Hebrew: torah\\f* of Yahweh.",
+      translated: "but his delight is in the law\\f + \\fr 1:2 \\ft Hebrew: torah\\f* of Yahweh.",
+      metadata: { usfmNotes: [{ kind: "footnote", caller: "+", ref: "1:2", text: "Hebrew: torah" }] },
+    })
+    const html = buildHtmlPage([legacy], { fileName: "psa.usfm", now: NOW })
+    expect(html.match(/class="note-marker footnote"/g)).toHaveLength(1)
+    expect(html).toContain('<span class="note-text">Hebrew: torah</span>')
   })
 })

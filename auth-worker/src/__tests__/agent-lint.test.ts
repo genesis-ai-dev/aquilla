@@ -44,4 +44,19 @@ describe("rule pattern ReDoS guard", () => {
     expect(lintDraft([rule], "src", "a".repeat(40) + "!")).toEqual([])
     expect(Date.now() - t0).toBeLessThan(500)
   })
+
+  // Pen test 2026-11-25: the old screen skipped every rule whose id starts
+  // with `term:` and only caught single-level groups. Rule ids are stored
+  // settings text, so an authored rule could claim the prefix.
+  it.each([
+    ["term:evil", "(a+)+$"],
+    ["r-nested", "((a+))+$"],
+    ["r-brace", "(a{1,})+$"],
+    ["r-alt", "(?:a|a)+$"],
+  ])("skips %s %s without running it", (id, targetPattern) => {
+    const rule: LintRule = { id, name: id, enabled: true, check: { type: "target-forbids", targetPattern } }
+    const t0 = Date.now()
+    expect(lintDraft([rule], "src", "a".repeat(40) + "!")).toEqual([])
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
 })

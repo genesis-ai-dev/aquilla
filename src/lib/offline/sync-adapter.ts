@@ -169,7 +169,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
   const frameCoalesceMs = options.frameCoalesceMs ?? 100
   // Rows rescued into IndexedDB when the leader stalled (rescued-rows.ts).
-  const rescuedRows = createRescuedRows(store, projectId, options.outbox ?? indexedDbOutbox)
+  const outbox = options.outbox ?? indexedDbOutbox
+  const rescuedRows = createRescuedRows(store, projectId, outbox)
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -522,6 +523,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   // Rescued rows don't count: flushQueue skips them, and counting them would
   // re-arm an "idle" flush forever.
   function hasPending(): boolean {
+    // Fast path: a week offline can queue thousands; stop at the first.
     if (!anyRescuedFromOfflineQueue()) {
       return store.query(tables.eventQueue.select().where({ projectId, status: "pending" }).first()) != null
     }
@@ -654,7 +656,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
 
   // IndexedDB's copy of a rescued row uploading (or being discarded) is what
   // lets the row go.
-  const unsubscribeOutbox = (options.outbox ?? indexedDbOutbox).subscribe(rescuedRows.release)
+  const unsubscribeOutbox = outbox.subscribe(rescuedRows.release)
 
   // Anything already queued from a previous session (the app was closed with
   // unsynced work) goes out without waiting for the socket.

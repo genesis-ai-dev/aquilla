@@ -14,17 +14,17 @@ import {
   anyRescuedFromOfflineQueue,
   forgetRescuedFromOfflineQueue,
   isRescueCopyInFlight,
-  isRescuedFromOfflineQueue,
   markRescuedFromOfflineQueue,
   rescuedFromOfflineQueue,
 } from "@/lib/sync/offline-stall-rescue"
-import { outboxHasIds, subscribeToOutbox } from "@/lib/sync/outbox"
+import type { OutboxLookup } from "@/lib/sync/offline-routing"
+import { lookupOutboxIds, subscribeToOutbox } from "@/lib/sync/outbox"
 import { events, tables, type schema } from "./schema"
 
 /** The slice of the IndexedDB outbox (src/lib/sync/outbox.ts) the adapter reads. */
 export interface RescueOutbox {
   /** Which of `ids` are still in the outbox, in any status. */
-  has(ids: readonly string[]): Promise<ReadonlySet<string>>
+  has: OutboxLookup
   /** Called after any outbox change; returns an unsubscribe. */
   subscribe(cb: () => void): () => void
 }
@@ -32,7 +32,7 @@ export interface RescueOutbox {
 // Well under SQLite's bound-parameter limit.
 const ID_LOOKUP_CHUNK = 500
 
-export const indexedDbOutbox: RescueOutbox = { has: outboxHasIds, subscribe: subscribeToOutbox }
+export const indexedDbOutbox: RescueOutbox = { has: lookupOutboxIds, subscribe: subscribeToOutbox }
 
 export interface RescuedRows {
   /**
@@ -92,7 +92,7 @@ export function createRescuedRows(
     const rescued = [...queuedAmong(rescuedFromOfflineQueue(), { projectId })]
       // A copy still being written isn't in the outbox yet, which would read
       // as "uploaded". Its outbox notification runs this again once it lands.
-      .filter((id) => isRescuedFromOfflineQueue(id) && !isRescueCopyInFlight(id))
+      .filter((id) => !isRescueCopyInFlight(id))
     if (rescued.length === 0) return
     const stillInOutbox = await outbox.has(rescued)
     if (stopped) return

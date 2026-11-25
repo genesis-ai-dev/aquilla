@@ -55,9 +55,27 @@ export function isRescuedFromOfflineQueue(id: string): boolean {
   return rescuedIds.has(id)
 }
 
+// Anything that counts the offline queue (the outbox chip) re-counts when the
+// set changes: a rescued row is counted once, as IndexedDB's.
+const rescuedListeners = new Set<() => void>()
+
+function notifyRescuedChanged(): void {
+  for (const cb of rescuedListeners) cb()
+}
+
+/** Called whenever the rescued set changes; returns an unsubscribe. */
+export function subscribeRescuedFromOfflineQueue(cb: () => void): () => void {
+  rescuedListeners.add(cb)
+  return () => {
+    rescuedListeners.delete(cb)
+  }
+}
+
 /** The offline queue's copies of `ids` are gone (offline sync adapter): nothing left to leave alone. */
 export function forgetRescuedFromOfflineQueue(ids: Iterable<string>): void {
-  for (const id of ids) rescuedIds.delete(id)
+  let changed = false
+  for (const id of ids) changed = rescuedIds.delete(id) || changed
+  if (changed) notifyRescuedChanged()
 }
 
 /**
@@ -66,7 +84,9 @@ export function forgetRescuedFromOfflineQueue(ids: Iterable<string>): void {
  * since this set doesn't survive a restart.
  */
 export function markRescuedFromOfflineQueue(ids: Iterable<string>): void {
+  const before = rescuedIds.size
   for (const id of ids) rescuedIds.add(id)
+  if (rescuedIds.size !== before) notifyRescuedChanged()
 }
 
 /** Every id currently marked rescued, in no particular order. */
@@ -191,5 +211,6 @@ export function forgetStallRescueForTests(): void {
   awaitingPersist.clear()
   rescuedIds.clear()
   copyingIds.clear()
+  rescuedListeners.clear()
   rescueChain = Promise.resolve(true)
 }

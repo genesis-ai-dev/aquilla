@@ -277,7 +277,8 @@ async function openDb(): Promise<IDBDatabase> {
 }
 
 /** Which of `ids` are in the outbox, in any status and for any account. */
-async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
+/** Which of `ids` are in the IndexedDB outbox, in any status (any owner). */
+export async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
   if (ids.length === 0) return new Set()
   // An id whose write is still running may be on its way into IndexedDB:
   // wait for where it went rather than miss it (a write only ever waits on
@@ -291,11 +292,6 @@ async function lookupOutboxIds(ids: readonly string[]): Promise<ReadonlySet<stri
   }))
   for (const id of await lookupOutboxIdsIn(await openDb(), unsettled)) found.add(id)
   return found
-}
-
-/** Which of `ids` are in the IndexedDB outbox, in any status (any owner). */
-export function outboxHasIds(ids: readonly string[]): Promise<ReadonlySet<string>> {
-  return lookupOutboxIds(ids)
 }
 
 /**

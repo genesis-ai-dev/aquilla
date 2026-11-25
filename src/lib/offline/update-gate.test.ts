@@ -1,6 +1,7 @@
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
+import { forgetStallRescueForTests, markRescuedFromOfflineQueue } from "@/lib/sync/offline-stall-rescue"
 import { events, schema } from "./schema"
 import { addQueues, evaluateUpdateGate, readOfflineQueue } from "./update-gate"
 
@@ -41,6 +42,15 @@ describe("readOfflineQueue", () => {
     store.commit(events.eventQueueStatusSet({ id: "q2", status: "flushing" }))
     store.commit(events.eventQueueStatusSet({ id: "q3", status: "failed" }))
     expect(readOfflineQueue(store)).toEqual({ count: 3, failed: 1 })
+  })
+
+  afterEach(() => forgetStallRescueForTests())
+
+  it("leaves out rows rescued to IndexedDB, which the outbox already counts", async () => {
+    const store = await makeStore()
+    store.commit(queued("q1"), queued("q2"))
+    markRescuedFromOfflineQueue(["q2"])
+    expect(readOfflineQueue(store)).toEqual({ count: 1, failed: 0 })
   })
 })
 

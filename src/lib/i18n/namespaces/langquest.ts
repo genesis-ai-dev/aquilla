@@ -28,7 +28,7 @@ export const langquest = defineNamespace({
     "langquest.wizard.sourceScratch": "Start from scratch",
     "langquest.wizard.sourceScratchHint": "A new project with its own source and target languages.",
     "langquest.wizard.sourceLinked": "From another Aquilla project",
-    "langquest.wizard.sourceLinkedHint": "Read the source text from a project you already have, and keep it in step.",
+    "langquest.wizard.sourceLinkedHint": "Read the source text from a project you already have, and keep it up to date.",
     "langquest.wizard.connectionsLoading": "Looking up your LangQuest organizations…",
     "langquest.wizard.orgTitle": "Which LangQuest organization?",
     "langquest.wizard.orgHint": "Organizations your account is connected to. Pick one, or connect another.",
@@ -49,7 +49,7 @@ export const langquest = defineNamespace({
     "langquest.list.ariaLabel": "Follows {language} on LangQuest: {state}",
     "langquest.list.synced": "Synced",
     "langquest.list.stalled": "Sync stalled",
-    "langquest.list.broken": "Sync broken, reconnect LangQuest",
+    "langquest.list.broken": "Sync broken — reconnect LangQuest",
     // Connection health (one word the UI acts on)
     "langquest.health.ok": "Connected",
     "langquest.health.needs_reauth": "Needs reconnecting",

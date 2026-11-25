@@ -470,13 +470,13 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     renderSection(700)
 
     // Nothing to ask about before an upstream is on the table.
-    expect(screen.queryByText("Which corpus should become this project's source?")).toBeNull()
+    expect(screen.queryByText("What should become this project's source?")).toBeNull()
 
     await user.click(screen.getByRole("combobox", { name: "Source project" }))
     await user.click(await screen.findByRole("option", { name: "English Source" }))
 
     expect(
-      screen.getByText("Which corpus should become this project's source?"),
+      screen.getByText("What should become this project's source?"),
     ).toBeTruthy()
     // Both offered, neither preselected.
     expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")

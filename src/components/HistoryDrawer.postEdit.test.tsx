@@ -134,7 +134,7 @@ describe("HistoryDrawer — the card's marks explain themselves on click", () =>
 
   it("says what a stale branch is", async () => {
     renderWith([entry("llm", "abcdefghij"), entry("human", "totally different text", { isStale: true })])
-    await expectClickNote(screen.getByText("stale branch"), "never applied to the cell's current value")
+    await expectClickNote(screen.getByText("stale branch"), "not applied as the cell's current value")
   })
 
   it("says an edit that could not sync is still safe in this browser", async () => {

@@ -161,7 +161,7 @@ describe("YouTubeImportPanel", () => {
     const onImported = vi.fn()
     renderPanel({ onImported })
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), {
+    fireEvent.change(screen.getByLabelText("Film name"), {
       target: { value: "My video" },
     })
     expect(screen.queryByLabelText("Your caption export")).not.toBeInTheDocument()
@@ -227,7 +227,7 @@ describe("YouTubeImportPanel", () => {
   it("invalidates a prepared picture when the caption source changes", async () => {
     renderPanel()
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
-    fireEvent.change(screen.getByLabelText("Video name"), { target: { value: "My picture" } })
+    fireEvent.change(screen.getByLabelText("Film name"), { target: { value: "My picture" } })
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("button", { name: "Link film" })
     fireEvent.click(screen.getByLabelText("Import a caption export"))

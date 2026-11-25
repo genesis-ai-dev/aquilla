@@ -155,6 +155,10 @@ jobs:
       # `pnpm desktop:bundle:keygen`). Unset, the publish is a ::warning::, not
       # a failure — docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md.
       DESKTOP_BUNDLE_SIGNING_KEY: ${{ secrets.DESKTOP_BUNDLE_SIGNING_KEY }}
+      # Public build-time values for the Google Drive import (Picker). Vite
+      # inlines them into the SPA; without them the panel shows "not configured".
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_API_KEY: ${{ vars.VITE_GOOGLE_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

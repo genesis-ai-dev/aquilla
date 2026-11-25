@@ -29,12 +29,11 @@ function unitsFor(link: Link): CheckingUnit[] {
 async function canShare(db: AquillaDb, projectId: string, userId: number): Promise<boolean> {
   const row = await db.prepare(`SELECT p.id FROM projects p
     WHERE p.id = ? AND p.archived_at IS NULL AND p.is_active = TRUE AND (
-      p.created_by = ? OR
       EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.user_id = ? AND m.role_level >= 500) OR
       EXISTS (SELECT 1 FROM org_members m WHERE m.org_id = p.org_id AND m.user_id = ? AND m.role_level >= 600) OR
       EXISTS (SELECT 1 FROM group_members m JOIN group_project_grants g ON g.group_id = m.group_id
         WHERE g.project_id = p.id AND m.user_id = ? AND g.role_level >= 500))`)
-    .bind(projectId, userId, userId, userId, userId).first()
+    .bind(projectId, userId, userId, userId).first()
   return !!row
 }
 async function takeBudget(db: AquillaDb, token: string, kind: "join" | "feedback", max: number) {

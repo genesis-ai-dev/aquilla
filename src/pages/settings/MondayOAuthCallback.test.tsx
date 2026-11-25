@@ -43,7 +43,7 @@ describe("MondayOAuthCallback", () => {
   it("a connect cancelled in Monday says so plainly and goes back to the org's Monday settings", async () => {
     renderAt(`?error=access_denied&state=${STATE}`)
 
-    expect(await screen.findByText(/cancelled in Monday\.com/i)).toBeTruthy()
+    expect(await screen.findByText(/canceled in Monday\.com/i)).toBeTruthy()
     expect(screen.queryByText(/missing code or state/i)).toBeNull()
     expect(screen.getByRole("link", { name: /back to aquilla/i }).getAttribute("href")).toBe(
       "/orgs/7/settings/monday?monday=error&reason=cancelled",

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
+import { TOOL_SANDBOX, buildToolShellSrcdoc, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { PermissionPrompt } from "./PermissionPrompt"
@@ -95,6 +95,10 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on a new version, not on role/theme changes (pushed live)
     [tool.id, tool.currentVersion, tool.source, tool.manifest.sdk, project.id, cell?.fileId, cell?.cellId, file?.fileId],
   )
+  const frameTitle = t("extensions.frame.title", { name: tool.name })
+  // The tool never mounts directly: the shell is what stops it navigating itself (srcdoc.ts).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new title (locale, rename) must not reload the tool
+  const shellSrcdoc = useMemo(() => buildToolShellSrcdoc(srcdoc, frameTitle), [srcdoc])
 
   return (
     <ExtensionFrame name={tool.name} href={`/project/${project.id}/extensions/${tool.id}`} variant={frameVariant} className={className ?? "h-full"}>
@@ -158,10 +162,10 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
       <div className="relative flex min-h-0 w-full flex-1 flex-col">
         <iframe
           ref={frameRef}
-          title={t("extensions.frame.title", { name: tool.name })}
+          title={frameTitle}
           sandbox={TOOL_SANDBOX}
           referrerPolicy="no-referrer"
-          srcDoc={srcdoc}
+          srcDoc={shellSrcdoc}
           className="min-h-0 w-full flex-1 border-0 bg-background"
         />
         {frameOverlay && (

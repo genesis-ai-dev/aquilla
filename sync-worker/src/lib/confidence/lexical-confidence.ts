@@ -10,34 +10,33 @@
 // never against other cells' (predicted) confidence — so there is no recursion
 // and the score is cheap and well-defined.
 
+import { ngramSet } from "../text/char-ngrams"
+
 /**
- * Split text into comparable terms: lowercased maximal runs of Unicode letters
- * or digits. Drops punctuation (incl. the Devanagari danda ॥ / ।) and folds
- * case, approximating the retrieval tokenizer closely enough for coverage
- * scoring (full-text only does candidate retrieval; the score is computed
- * here).
+ * The comparable terms of a text: its distinct character n-grams
+ * (`../text/char-ngrams`), the same unit example retrieval covers a verse
+ * by. Words were the unit until AQU-2727, which left Chinese, Thai and Burmese
+ * with one "term" per verse and Korean with forms nobody repeats; n-grams
+ * know nothing about spaces, so every script scores the same way.
  */
-export function tokenizeForConfidence(raw: string): string[] {
-  if (!raw) return []
-  // Include \p{M} (combining marks): Indic/Brahmic scripts attach vowel signs
-  // and viramas as marks, so excluding them shatters words like "अब्राहामले"
-  // into fragments. Letters + marks + digits keeps whole words intact.
-  return raw.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []
+export function confidenceTerms(raw: string): Set<number> {
+  return ngramSet(raw)
 }
 
 /**
  * One-hop lexical confidence in [0, 1]: the largest fraction of the query
- * cell's distinct terms that any single validated neighbor covers. Intuition —
+ * cell's distinct terms (character n-grams) that any single validated
+ * neighbor covers. Intuition —
  * "is there a validated cell that looks like most of what I say?" Returns 0
  * when the query has no terms or there are no neighbors.
  */
 export function lexicalConfidence(queryText: string, neighborTexts: string[]): number {
-  const queryTerms = new Set(tokenizeForConfidence(queryText))
+  const queryTerms = confidenceTerms(queryText)
   if (queryTerms.size === 0) return 0
 
   let best = 0
   for (const neighbor of neighborTexts) {
-    const neighborTerms = new Set(tokenizeForConfidence(neighbor))
+    const neighborTerms = confidenceTerms(neighbor)
     let overlap = 0
     for (const term of queryTerms) {
       if (neighborTerms.has(term)) overlap++
@@ -61,8 +60,8 @@ export function lexicalConfidence(queryText: string, neighborTexts: string[]): n
  * near-duplicate line outranks a long line that merely contains it.
  */
 export function lexicalSimilarity(a: string, b: string): number {
-  const aTerms = new Set(tokenizeForConfidence(a))
-  const bTerms = new Set(tokenizeForConfidence(b))
+  const aTerms = confidenceTerms(a)
+  const bTerms = confidenceTerms(b)
   if (aTerms.size === 0 || bTerms.size === 0) return 0
 
   let intersection = 0

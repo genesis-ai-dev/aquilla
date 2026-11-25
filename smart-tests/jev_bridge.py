@@ -15,7 +15,7 @@ import jev_ultrafast.agent as agent_module
 import jev_ultrafast.browser as browser_module
 import jev_ultrafast.model as model_module
 
-from text_fallback import post_text
+from text_fallback import post_valid_text
 
 
 def exchange(message):
@@ -69,8 +69,8 @@ def main():
         kind = "decision" if url == "https://api.typesafe.ai/v1/systemone" else "text"
         if url == "https://api.typesafe.ai/v1/systemone":
             url = os.environ.get("TYPESAFE_URL", url)
-        # Only the text helper has fallback models (see text_fallback.py).
-        send = original_post if kind == "decision" else (lambda *request: post_text(original_post, *request))
+        # Only the text helper has fallback models and a second ask (see text_fallback.py).
+        send = original_post if kind == "decision" else (lambda *request: post_valid_text(original_post, *request))
         started = time.monotonic()
         try:
             result = send(url, key, body)

@@ -387,7 +387,7 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findApprovedRenderingMatches } from "@/lib/richtext/terminology-chip-plugin"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isFlagEnabled, isSmartEditsEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import { readLanguageProfile } from "../../db/shared/language-profile"
 import {
@@ -1494,12 +1494,14 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const styleSegmentBold = t("editor.format.bold")
   const styleSegmentItalic = t("editor.format.italic")
   const styleSegmentBoldItalic = t("editor.idml.segmentBoldItalic")
+  const styleSegmentSmallCaps = t("editor.idml.segmentSmallCaps")
   useEffect(() => {
     applyVisibleStyleSegmentChrome(visibleStyleSegments, {
       regular: styleSegmentRegular,
       bold: styleSegmentBold,
       italic: styleSegmentItalic,
       boldItalic: styleSegmentBoldItalic,
+      smallCaps: styleSegmentSmallCaps,
     })
   }, [
     visibleStyleSegments,
@@ -1507,6 +1509,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     styleSegmentBold,
     styleSegmentItalic,
     styleSegmentBoldItalic,
+    styleSegmentSmallCaps,
   ])
   useEffect(() => () => {
     applyVisibleStyleSegmentChrome(false, {
@@ -1514,6 +1517,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       bold: "",
       italic: "",
       boldItalic: "",
+      smallCaps: "",
     })
   }, [])
   // The switcher trigger and the closed pill name the lane the same way.
@@ -3745,10 +3749,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
 
-  // Smart edits (flag `smartEdits`): one passage request around the active
-  // cell; rows read their own suggestions through SmartEditsProvider.
+  // Smart edits (project-wide, on by default): one passage request around the
+  // active cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
-    enabled: isFlagEnabled(project, "smartEdits"),
+    enabled: isSmartEditsEnabled(project),
     llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
     harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
     projectId: project.id,
@@ -8067,7 +8071,13 @@ function EditorRow({
         return
       }
       if (document.activeElement !== pm) {
-        pm.focus()
+        // The activation window made the row an editing host with the caret
+        // parked inside it. Left open, the browser hands focus straight back
+        // to the row: an IDML editor, which keeps the caret where it is below,
+        // never focused and its typing went to the row. The buffered text is
+        // already in pendingActivationInputRef; the editor drains it on focus.
+        closeActivationCapture()
+        pm.focus({ preventScroll: true })
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
         if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
@@ -8091,7 +8101,7 @@ function EditorRow({
       // unmounts, another row takes over) — that settles the edit too.
       settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
+  }, [isEditorActive, cell.id, closeActivationCapture, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -9792,6 +9802,7 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
+                    sanitizeEntryWhitespace={idmlPreview}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null

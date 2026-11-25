@@ -122,7 +122,7 @@ describe("AirtableIntegrationSection", () => {
     fireEvent.click(await screen.findByTestId("airtable-setup-with-ai"))
     fireEvent.click(screen.getByRole("button", { name: "close wizard" }))
     await waitFor(() =>
-      expect(document.querySelector("#section-airtable")?.textContent).toMatch(/Last push .* — ok\./),
+      expect(document.querySelector("#section-airtable")?.textContent).toMatch(/Last push .* — OK\./),
     )
   })
 

@@ -30,7 +30,14 @@ export interface CommitOnPauseOptions<T> {
   /** The value typed, or null while it is not a whole value yet. `final` is
    *  set when the person has left the field. */
   parse: (text: string, final: boolean) => T | null
-  commit: (next: T, info: CommitInfo<T>) => void
+  /**
+   * May hand back the write. While it is on its way the field keeps showing
+   * what was typed, and after it is saved it goes on showing it until the
+   * saved value itself moves: a `value` that only catches up a moment later
+   * (a name re-read after a rename) never shows the old text in between. A
+   * write that resolves `{ kind: "failed" }`, or rejects, shows `value` again.
+   */
+  commit: (next: T, info: CommitInfo<T>) => void | Promise<{ kind: string } | void>
   same?: (a: T, b: T) => boolean
   /** How long a pause in typing saves after (ms). */
   delay?: number
@@ -73,8 +80,12 @@ export function useCommitOnPause<T>({
   const session = useRef<{ from: T; last: T; text: string } | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The latest callbacks, for a timer or an unmount that outlives a render.
-  const live = useRef({ parse, commit, same, value })
-  live.current = { parse, commit, same, value }
+  const live = useRef({ parse, commit, same, value, toText })
+  live.current = { parse, commit, same, value, toText }
+  // The last committed text, while its write is on its way and until the saved
+  // value moves on from where it stood when the write was answered.
+  const [held, setHeld] = useState<{ token: number; text: string; settledAt?: { value: T } } | null>(null)
+  const holdSeq = useRef(0)
 
   const clearTimer = () => {
     if (timer.current) clearTimeout(timer.current)
@@ -103,18 +114,33 @@ export function useCommitOnPause<T>({
     // already wrote (it was a whole value, and it is the one on screen).
     const next = typed === null ? s.last : typed
     if (eq(next, s.from) && eq(next, s.last)) return
-    c(next, { from: s.from, final: true })
+    const write = c(next, { from: s.from, final: true })
+    if (!(write instanceof Promise)) return
+    const token = ++holdSeq.current
+    setHeld({ token, text: live.current.toText(next) })
+    const answered = (saved: boolean) =>
+      setHeld((cur) => {
+        if (cur?.token !== token) return cur
+        return saved ? { ...cur, settledAt: { value: live.current.value } } : null
+      })
+    write.then(
+      (result) => answered(result?.kind !== "failed"),
+      () => answered(false),
+    )
   }, [])
 
   // Leaving the page while typing still ends the change.
   useEffect(() => () => finish(), [finish])
 
+  const heldText = held && (!held.settledAt || same(value, held.settledAt.value)) ? held.text : null
+
   return {
-    value: draft ?? toText(value),
+    value: draft ?? heldText ?? toText(value),
     onChange: (e) => {
       const text = e.target.value
       if (!session.current) session.current = { from: live.current.value, last: live.current.value, text }
       session.current.text = text
+      setHeld(null)
       setDraft(text)
       clearTimer()
       timer.current = setTimeout(pause, delay)

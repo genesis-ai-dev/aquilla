@@ -285,7 +285,9 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLinesOf, recordingSharedBy } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { plainTextHtml, runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { setTimelineSelection } from "@/lib/audio/timeline-selection"
+import type { MakeSpeechTextActions } from "@/components/voice/inspector/MakeSpeechPanel"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
@@ -462,6 +464,8 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { documentPreviewKind } from "@/lib/document-preview/build"
+import { useDocumentPreviewOpen, writeDocumentPreviewOpen } from "@/lib/document-preview/open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -479,6 +483,7 @@ import { ParatextBridgeBadge as ParatextBridgeBadgeImpl } from "@/components/par
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { EditorLayoutSwitch as EditorLayoutSwitchImpl } from "@/components/bible-document/EditorLayoutSwitch"
 import { setBibleDocumentViewForFile, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
+import { isBibleBookFile } from "@/lib/export/bible-book"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import type { TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
 import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
@@ -761,6 +766,9 @@ const ImportTimelineTextDialog = lazy(() =>
 )
 const WhosWhoSidebar = lazy(() =>
   import("./bible-data/WhosWhoSidebar").then((m) => ({ default: m.WhosWhoSidebar })),
+)
+const DocumentPreviewSidebar = lazy(() =>
+  import("./document-preview/DocumentPreviewSidebar").then((m) => ({ default: m.DocumentPreviewSidebar })),
 )
 const CharacterCheckDrawer = lazy(() =>
   import("./timeline/CharacterCheckDrawer").then((m) => ({ default: m.CharacterCheckDrawer })),
@@ -1861,6 +1869,7 @@ export function ProjectWorkspace() {
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
+  /** Every line selected on the timeline (Shift/⌘-click adds more): what Make speech runs on. */
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
@@ -3021,10 +3030,16 @@ export function ProjectWorkspace() {
     if (next >= 0) editorRef.current?.focusCellEditorIndex(next)
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
-  // AQU-2559: a USFM book can open as one continuous document instead of the
-  // table. Chosen per file on this device; only the Text view has it.
+  // AQU-2559: a Bible book can open as one continuous document instead of the
+  // table. Chosen per file on this device; only the Text view has it. A book
+  // is whatever the Web page export calls one, so a book from any format —
+  // not only USFM — gets the document and its reading preview.
   const bibleDocumentPref = useBibleDocumentViewPref()
-  const documentLayoutOffered = activeFile?.type === "usfm" && lens === "text" && !extensionEditorActive
+  const activeFileIsBibleBook = useMemo(
+    () => isBibleBookFile(activeFile?.type, cellSummaries.filter((c) => c.fileId === activeFileId)),
+    [activeFile?.type, activeFileId, cellSummaries],
+  )
+  const documentLayoutOffered = activeFileIsBibleBook && lens === "text" && !extensionEditorActive
   const documentLayoutActive = documentLayoutOffered && Boolean(activeFileId && bibleDocumentPref.files[activeFileId])
   // AQU-1767 phase 2: history steps carry the file's name so a step made in
   // another file can say which one to open. Read through a ref by the many
@@ -9741,6 +9756,11 @@ export function ProjectWorkspace() {
   const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
     projectId ? readWhosWhoOpen(projectId) : false,
   )
+  // The document preview: a Word or PowerPoint file drawn as the document it
+  // is, in the same rail. Offered on the editor for a file it can render.
+  const documentPreviewOpen = useDocumentPreviewOpen(projectId)
+  const activeDocumentPreviewKind = centerSurface === "editor" ? documentPreviewKind(activeFile?.type) : null
+  const documentPreviewShown = activeDocumentPreviewKind !== null && documentPreviewOpen
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -14219,7 +14239,8 @@ export function ProjectWorkspace() {
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
-    checkOpen
+    checkOpen ||
+    documentPreviewShown
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -14377,8 +14398,20 @@ export function ProjectWorkspace() {
    * change the take into another voice. Run quietly — the panel shows each
    * line's progress itself.
    */
-  const makeSpeechActions = useMemo<MakeSpeechActions>(() => ({
+  // Read after an await, so through refs: the closure's copies are a render old.
+  const completionErrorsRef = useRef(errors)
+  completionErrorsRef.current = errors
+  const translateReadyRef = useRef(false)
+  translateReadyRef.current = isConfigured && isCompletionAvailable
+  /** Save a line's text as the person typed it (the Make speech review). Set below, once the commit path exists. */
+  const saveLineTextRef = useRef<((cellId: string, text: string) => Promise<void>) | null>(null)
+  const makeSpeechActions = useMemo<MakeSpeechActions & MakeSpeechTextActions>(() => ({
     hasText: (cellId) => Boolean(resolveTakeCellRef.current(cellId)?.cell.translated?.trim()),
+    textOf: (cellId) => resolveTakeCellRef.current(cellId)?.cell.translated?.trim() ?? "",
+    saveText: async (cellId, text) => {
+      if (!saveLineTextRef.current) throw new Error(t("audio.makeSpeech.saveUnavailable"))
+      await saveLineTextRef.current(cellId, text)
+    },
     translate: async (cellId) => {
       const owner = resolveTakeCellRef.current(cellId)
       return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
@@ -14391,9 +14424,33 @@ export function ProjectWorkspace() {
       }),
     revoice: async (cellId, characterVoiceId) => {
       const voice = findVoice(tts.laneSettings, characterVoiceId)
-      return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
+      if (!voice) throw new Error(t("audio.makeSpeech.cloneVoiceGone"))
+      // The take just spoken reaches the line on the next read of its takes,
+      // not at once: wait for it, or the clone finds no take (or the old one).
+      const deadline = Date.now() + 15_000
+      for (;;) {
+        const cell = resolveTakeCellRef.current(cellId)?.cell
+        const take = cell ? changeVoiceSourceTake(cell) : null
+        if (take && take.attachment.voiceId !== characterVoiceId) break
+        if (Date.now() > deadline) throw new Error(t("audio.makeSpeech.cloneNoTake"))
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      const blocker = cell ? changeVoiceBlocker(cell, voice) : "no-take"
+      if (blocker === "not-trained") throw new Error(t("audio.makeSpeech.cloneNotCloneable", { name: voice.name }))
+      if (blocker === "no-take") throw new Error(t("audio.makeSpeech.cloneNoTake"))
+      return handleChangeTimelineVoice(cellId, { voice, quiet: true })
     },
-  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings])
+    failureReason: (cellId, step) => {
+      if (step === "translate") {
+        return completionErrorsRef.current.get(cellId)
+          ?? (translateReadyRef.current ? undefined : t("audio.makeSpeech.translateUnavailable"))
+      }
+      // Speaking and cloning both write their failure to the line's voice status.
+      const status = getTtsStatus(ttsStatusKey(cellId))
+      return status.kind === "error" && status.message ? status.message : undefined
+    },
+  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings, t])
   const loadInspectedTake = useCallback(async (att: CodexCellAttachment): Promise<Blob> => {
     const ref = parseFrontierAudioUrl(att.url)
     if (!project || !inspectedTake || !ref || !frontierSession) throw new Error("audio fetch: this clip has no stored audio")
@@ -14412,7 +14469,7 @@ export function ProjectWorkspace() {
     toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
     void runMakeSpeech(
       [inspectedTake.cellId],
-      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+      { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
       makeSpeechActions,
       () => {},
     ).then((result) => {
@@ -14483,6 +14540,7 @@ export function ProjectWorkspace() {
       .map((c) => ({
         cellId: c.id,
         label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        source: effectiveSourceText(c).trim(),
         hasText: Boolean(c.translated?.trim()),
         hasSpeech: lineTake(c).audioId != null,
         voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
@@ -14493,7 +14551,8 @@ export function ProjectWorkspace() {
     () => (lens === "audio" && activeLaneDelivers !== "audio"
       ? {
           lines: makeSpeechLines,
-          selectedCellId: timelineSelectedCellId,
+          // The sidebar prefers the timeline's whole selection (timeline-selection.ts).
+          selectedCellIds: timelineSelectedCellId ? [timelineSelectedCellId] : [],
           actions: makeSpeechActions,
           picked: pickedGhostIds,
           onClearPicked: clearPickedGhosts,
@@ -17844,6 +17903,9 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit,
     resolveTargetCommitParentId,
   ])
+  saveLineTextRef.current = async (cellId, text) => {
+    await handleAgentTargetCommit(cellId, { value: text, valueHtml: plainTextHtml(text) })
+  }
 
   const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean, toolOrigin?: ToolOrigin) => {
     const action = validated ? "cell.validate" : "cell.unvalidate"
@@ -18990,6 +19052,8 @@ export function ProjectWorkspace() {
     parallelBiblesOpen,
     verseResourcesOpen,
     whosWhoOpen,
+    documentPreviewAvailable: activeDocumentPreviewKind !== null,
+    documentPreviewOpen,
   })
   // The rail's buttons act like tabs: opening one panel closes the other two,
   // and `null` closes whichever is open.
@@ -18998,6 +19062,7 @@ export function ProjectWorkspace() {
       bibles: panel === "bibles",
       resources: panel === "resources",
       people: panel === "people",
+      preview: panel === "preview",
     }
     setParallelBiblesOpen(next.bibles)
     setVerseResourcesOpen(next.resources)
@@ -19006,6 +19071,7 @@ export function ProjectWorkspace() {
       writeParallelBiblesOpen(projectId, next.bibles)
       writeVerseResourcesOpen(projectId, next.resources)
       writeWhosWhoOpen(projectId, next.people)
+      writeDocumentPreviewOpen(projectId, next.preview)
     }
   }
 
@@ -19200,13 +19266,15 @@ export function ProjectWorkspace() {
               />
             }
             searchPanel={
-              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+              <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
               <SearchDockPanel
                 activeFileId={activeFileId}
                 activeFileName={activeFileId ? (() => { const f = project.files.find((x) => x.id === activeFileId); return f ? fileDisplayName(f) : null })() : null}
                 loading={searchLoading}
                 ready={searchReady}
                 results={searchResults}
+                total={searchTotal}
+                totalIsLowerBound={searchTotalIsLowerBound}
                 onReady={buildIndex}
                 onSearch={(q, opts) => void runSearch(q, opts)}
                 onSearchPassages={runSearchPassages}
@@ -19223,6 +19291,7 @@ export function ProjectWorkspace() {
                   setParallelOpen(true)
                 }}
                 onExpandResults={(q) => setSearchExpandedQuery(q)}
+                resultsExpanded={searchExpandedQuery !== null}
                 bibleResourcesEnabled={resolveBibleResourcesEnabled(
                   project.bibleResourcesEnabled,
                   projectHasScriptureFiles(project.files),
@@ -19674,10 +19743,12 @@ export function ProjectWorkspace() {
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
-                <WorkspaceSearchState store={searchStore}>{({ results: searchResults }) => (
+                <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound }) => (
                 <SearchResultsView
                   query={searchExpandedQuery}
                   results={searchResults}
+                  total={searchTotal}
+                  totalIsLowerBound={searchTotalIsLowerBound}
                   onJumpToResult={(result) => {
                     setSearchExpandedQuery(null)
                     void handleSearchSelect(result, searchExpandedQuery)
@@ -19967,6 +20038,7 @@ export function ProjectWorkspace() {
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
+                    onSelectionChange={setTimelineSelection}
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
@@ -20156,6 +20228,9 @@ export function ProjectWorkspace() {
                     fileId={activeFileId}
                     lane={activeLane}
                     store={cellStore}
+                    usfm={activeFile?.type === "usfm"}
+                    fileName={activeFile?.name ?? null}
+                    lang={activeLaneTargetLanguage}
                     loading={cellsLoading}
                     editable={!laneWriteFrozen && canPerform("target.cell.commit", project.syncRole?.level ?? null)}
                     lockedBy={checkLockHolder}
@@ -20467,6 +20542,24 @@ export function ProjectWorkspace() {
                     setWhosWhoOpen(next)
                     if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
+                />
+                </Suspense>
+              )}
+              {/* The document preview: the open Word or PowerPoint file as the
+                  document an export writes now — open panel only. */}
+              {rightRail.openPanel === "preview" && activeDocumentPreviewKind && activeFileId && project && (
+                <Suspense fallback={null}>
+                <DocumentPreviewSidebar
+                  key={`${activeFileId}:${activeLane ?? ""}`}
+                  kind={activeDocumentPreviewKind}
+                  projectId={project.id}
+                  fileId={activeFileId}
+                  lane={activeLane}
+                  targetLanguage={laneLanguageCodeForTag(activeLane, laneRows)}
+                  cells={legacyCells}
+                  cellsLoading={cellsLoading}
+                  getToken={getTokenForFile}
+                  onClose={() => selectRightRailPanel(null)}
                 />
                 </Suspense>
               )}
@@ -21170,7 +21263,7 @@ export function ProjectWorkspace() {
           onAcknowledge={acknowledgeLaneArchived}
         />
       )}
-      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, loading: searchLoading, ready: searchReady }) => (
+      <WorkspaceSearchState store={searchStore}>{({ results: searchResults, total: searchTotal, totalIsLowerBound: searchTotalIsLowerBound, loading: searchLoading, ready: searchReady }) => (
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -21184,6 +21277,8 @@ export function ProjectWorkspace() {
         loading={searchLoading}
         ready={searchReady}
         results={searchResults}
+        total={searchTotal}
+        totalIsLowerBound={searchTotalIsLowerBound}
         onReady={buildIndex}
         onSearch={runSearch}
         onSearchPassages={runSearchPassages}

@@ -30,12 +30,12 @@ export const rules = defineNamespace({
   keys: {
     // ── Infraction messages (rule-engine reason codes → predicate text) ────
     "rules.infraction.withRuleName": '"{ruleName}": {message}',
-    "rules.infraction.targetForbids": "target contains forbidden pattern",
+    "rules.infraction.targetForbids": "Translation contains a forbidden pattern",
     "rules.infraction.sourceRequiresTarget":
       "This term is in the source, but the translation doesn't use a required rendering",
     "rules.infraction.sourceRequiresTargetCount":
       "This term doesn't add up: {sourceCount} in the source, {targetCount} in the translation",
-    "rules.infraction.sourceTargetMatch": "pattern found in source but missing in target",
+    "rules.infraction.sourceTargetMatch": "Pattern found in source but missing in translation",
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
     "rules.infraction.builtin.numberIntegrity": "Number from source missing in translation",
@@ -62,9 +62,9 @@ export const rules = defineNamespace({
     // AQU-2628: `word` and `suggestion` are raw cell content and the
     // converter's answer for it — interpolated, never translated.
     "rules.infraction.builtin.oldOrthography":
-      "Old spelling — this Language lane writes “{word}” as “{suggestion}”",
+      "Old spelling — this language lane writes “{word}” as “{suggestion}”",
     "rules.infraction.builtin.oldOrthographyPlain":
-      "Old spelling — this word uses letters the Language lane's orthography replaced",
+      "Old spelling — this word uses letters the language lane's orthography replaced",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -132,7 +132,7 @@ export const rules = defineNamespace({
       "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
     "rules.builtin.oldOrthography.name": "Old orthography",
     "rules.builtin.oldOrthography.description":
-      "Words in the translation are spelled in the Language lane's own orthography. Dormant until the Language profile records one; approved exceptions are never flagged.",
+      "Words in the translation are spelled in the language lane's own orthography. Dormant until the Language profile records one; approved exceptions are never flagged.",
     "rules.builtinChecks.orthography.needsProfile":
       "Needs the Language profile's spelling rules",
 
@@ -227,8 +227,8 @@ export const rules = defineNamespace({
     "rules.checkDrawer.scopeTerms": plural({ one: "{count} term", other: "{count} terms" }),
     "rules.checkDrawer.termHeadline.noneApproved": plural(
       {
-        one: "none of {total} occurrence use an approved rendering",
-        other: "none of {total} occurrences use an approved rendering",
+        one: "{total} occurrence doesn't use an approved rendering",
+        other: "none of the {total} occurrences use an approved rendering",
       },
       "total",
     ),
@@ -253,15 +253,15 @@ export const rules = defineNamespace({
       "Rules every project in this organization is checked against. Project Leads can promote a project rule up to here.",
 
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
-    "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
+    "rules.usageSummary": "{fixes} fixes applied · {calls} AI calls in this project",
     "rules.promotion.requested": "Requested ✓",
     "rules.promotion.alreadyRequested": "Already requested",
     "rules.promotion.requestFailed": "Failed — try again",
     "rules.surface.createRuleDialog.title": "Create translation rule",
     "rules.surface.createRuleDialog.description": "Create a project translation rule.",
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
-    "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
-    "rules.surface.usageTooltip": "LLM usage on this project",
+    "rules.surface.createOrgRuleDialog.description": "Create an organization-wide translation rule.",
+    "rules.surface.usageTooltip": "AI usage in this project",
     "rules.surface.laneScope.ariaLabel": "Language lane scope",
     "rules.surface.laneScope.viewingLabel": "Viewing language lane",
     "rules.surface.laneScope.chooseLaneAriaLabel":
@@ -298,7 +298,7 @@ export const rules = defineNamespace({
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
     "rules.surface.promoteDialog.promoting": "Promoting…",
-    "rules.surface.autofixBadge": "autofix",
+    "rules.surface.autofixBadge": "Autofix",
     "rules.surface.tryToFixAllButton": "Try to fix all",
     "rules.surface.promoteToOrgButton": "Promote to org",
     "rules.surface.requestedBadge": "Requested",
@@ -369,7 +369,7 @@ export const rules = defineNamespace({
       "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
     "rules.editor.lane.allLanes": "All language lanes",
-    "rules.editor.lane.defaultLane": "Default language",
+    "rules.editor.lane.defaultLane": "Default language lane",
     "rules.editor.lane.summaryAll": "This rule will apply in every language lane.",
     "rules.editor.lane.summaryOne":
       "This rule will apply only in {lane}. Other language lanes ignore it.",
@@ -377,10 +377,10 @@ export const rules = defineNamespace({
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
     "rules.editor.patternLabel": "Pattern",
-    "rules.editor.textToMatchPlaceholder": "text to match",
+    "rules.editor.textToMatchPlaceholder": "Text to match",
     "rules.editor.switchToRegex": "Switch to regex",
     "rules.editor.switchToLiteral": "Switch to literal text",
-    "rules.editor.exactTextPlaceholder": "exact text to match",
+    "rules.editor.exactTextPlaceholder": "Exact text to match",
     "rules.editor.literalTextNote": "Treated as literal text (auto-escaped)",
     "rules.editor.regexNote": "Interpreted as regular expression",
     "rules.editor.livePreviewHeading": "Live preview — current file",
@@ -389,8 +389,8 @@ export const rules = defineNamespace({
       { one: "{label} cell would be flagged", other: "{label} cells would be flagged" },
       "count",
     ),
-    "rules.editor.srcLabel": "src:",
-    "rules.editor.tgtLabel": "tgt:",
+    "rules.editor.srcLabel": "Source:",
+    "rules.editor.tgtLabel": "Target:",
     "rules.editor.hideAutofix": "Hide autofix",
     "rules.editor.addAutofix": "Add autofix (optional)",
     "rules.editor.autofixRegexReplaceHeading": "Autofix — regex replace",
@@ -404,7 +404,7 @@ export const rules = defineNamespace({
     "rules.editor.createRuleButton": "Create rule",
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
-    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
+    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology document.",
     "rules.importDialog.extractionIncomplete":
       "Extraction was cut off before a single complete rule came back, so nothing could be imported — this does not mean the document has no rules. Import one section at a time to get through it.",
     "rules.importDialog.extractionPartial":
@@ -426,7 +426,7 @@ export const rules = defineNamespace({
     }),
     "rules.importDialog.title": "Import rules from document",
     "rules.importDialog.description":
-      "Drop a style guide, terminology, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
+      "Drop a style guide, terminology, or translation guidelines document and the AI will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
@@ -459,10 +459,10 @@ export const rules = defineNamespace({
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
     "rules.completion.frontierLimitReached": "Aquilla AI limit reached: {detail}",
     "rules.completion.outOfCredits": "Out of credits.",
-    "rules.completion.completionFailed": "Completion failed: {status} {text}",
+    "rules.completion.completionFailed": "AI request failed: {status} {text}",
     "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
-    "rules.completion.streamError": "Completion stream error",
-    "rules.completion.completionAborted": "Completion aborted",
+    "rules.completion.streamError": "AI request stream error",
+    "rules.completion.completionAborted": "AI request canceled",
     "rules.completion.signInRequired": "Sign in to use Aquilla AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
 
@@ -480,7 +480,7 @@ export const rules = defineNamespace({
       "Terminology rules could not be loaded, so they are missing from this list.",
 
     // ── FixReviewPanel (harmonize / bulk-fix review sheet) ──────────────────
-    "rules.fixReview.modeCachedRegex": "Cached regex",
+    "rules.fixReview.modeCachedRegex": "Saved regex",
     "rules.fixReview.modeBatchRegex": "Batch regex",
     "rules.fixReview.modePerCellRewrite": "Per-cell rewrite",
     "rules.fixReview.previewsReady": plural({
@@ -515,7 +515,7 @@ export const rules = defineNamespace({
     "rules.checks.add.description": "Choose how to start. Every check ends up in the same list.",
     "rules.checks.add.pattern.title": "Write a check",
     "rules.checks.add.pattern.description":
-      "Words the translation must or must not contain, for the whole project or one language.",
+      "Words the translation must or must not contain, for the whole project or one language lane.",
     "rules.checks.add.import.title": "Import from a style guide",
     "rules.checks.add.import.description": "Upload a document. The AI suggests checks for you to review.",
     "rules.checks.add.extract.title": "Draw style rules from source documents",

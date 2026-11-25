@@ -211,9 +211,33 @@ export async function attachMediaUrlToTimeline(
  * the backstop for any other caller.
  */
 function assertMayAttachSourceAudio(): void {
-  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  const bridge = getCqrsOutboxBridge()
+  const roleLevel = bridge?.roleLevel ?? null
   if (!canAttachSourceAudio(roleLevel)) {
     throw new InsufficientRoleError("cell.audio.attach", roleLevel ?? 0, SOURCE_AUDIO_ATTACH_FLOOR)
+  }
+  // AQU-2682: the server also needs access to every language. Only its yes
+  // lets the attach start; "not answered yet" is refused like a no.
+  if (bridge && bridge.sourceAudioCoversEveryLanguage !== undefined && bridge.sourceAudioCoversEveryLanguage !== true) {
+    throw new SourceAudioLanguageError(bridge.sourceAudioCoversEveryLanguage === null)
+  }
+}
+
+/**
+ * AQU-2682: source audio refused because the person's access does not cover
+ * every language (or the server has not said yet). The workspace withholds
+ * the actions in that case, so this is the backstop for any other caller.
+ */
+export class SourceAudioLanguageError extends Error {
+  readonly pending: boolean
+  constructor(pending: boolean) {
+    super(
+      pending
+        ? "Still checking your access. Try again in a moment."
+        : "Adding this file's recording needs access to every language in this project.",
+    )
+    this.name = "SourceAudioLanguageError"
+    this.pending = pending
   }
 }
 

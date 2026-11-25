@@ -24,9 +24,11 @@ vi.mock("@/lib/offline/launch-resume", () => ({
 }))
 
 // Desktop connectivity: null outside the app / before the first probe.
+let desktop = false
 let connectivity: boolean | null = null
+vi.mock("@/lib/offline/is-tauri", () => ({ isTauriRuntime: () => desktop }))
 vi.mock("@/lib/offline/connectivity", () => ({
-  useConnectivity: () => connectivity,
+  useDesktopConnectivity: () => connectivity,
 }))
 
 /** Fake JWT with an `exp` claim `secondsFromNow` out. */
@@ -60,6 +62,7 @@ function renderAt(path: string) {
 beforeEach(() => {
   accountsValue = { active: null, loading: false }
   offlineResume = null
+  desktop = false
   connectivity = null
 })
 
@@ -131,6 +134,7 @@ describe("ExpiredSessionGate (AQU-885)", () => {
 
   it("holds sign-in on the org pages while the desktop app is offline", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    desktop = true
     connectivity = false
     renderAt("/orgs/3/projects")
     await new Promise((r) => setTimeout(r, 20))
@@ -140,9 +144,21 @@ describe("ExpiredSessionGate (AQU-885)", () => {
 
   it("sends the desktop app to sign-in once it is back online", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    desktop = true
     connectivity = true
     renderAt("/orgs/3/projects")
     expect(await screen.findByText(/^login page/)).toBeInTheDocument()
+  })
+
+  it("holds sign-in on desktop until the first connectivity probe has answered", async () => {
+    // An offline launch: the session check settles long before the probe.
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    desktop = true
+    connectivity = null
+    renderAt("/orgs/all")
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText("app shell")).toBeInTheDocument()
+    expect(screen.queryByText(/^login page/)).not.toBeInTheDocument()
   })
 
   it("sends a later visit to the org page to sign-in after the launch already resumed", async () => {

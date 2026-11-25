@@ -26,9 +26,10 @@ if (typeof globalThis.localStorage === "undefined") {
 vi.mock("@/lib/offline/is-tauri", () => ({ isTauriRuntime: () => true }))
 
 const connectivityListeners = new Set<(online: boolean | null) => void>()
+let currentConnectivity: boolean | null = null
 vi.mock("@/lib/offline/connectivity", () => ({
   desktopConnectivity: {
-    current: () => null,
+    current: () => currentConnectivity,
     subscribe: (listener: (online: boolean | null) => void) => {
       connectivityListeners.add(listener)
       return () => connectivityListeners.delete(listener)
@@ -81,6 +82,8 @@ beforeEach(() => {
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   connectivityListeners.clear()
+  currentConnectivity = null
+  vi.useRealTimers()
 })
 
 describe("OrgProvider offline fallback (desktop)", () => {
@@ -138,5 +141,54 @@ describe("OrgProvider offline fallback (desktop)", () => {
     await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("no"))
     await waitFor(() => expect(screen.getByTestId("orgs").textContent).toBe("Acme Translation"))
     await waitFor(() => expect(readOrgDirectory("anna")?.orgs).toEqual([renamed]))
+  })
+
+  it("keeps the offline view while a retry is in flight", async () => {
+    rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [{ id: 9, name: "Guesthouse" }] })
+    listMyOrgs.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    fetchAccessibleProjects.mockResolvedValueOnce({ ok: false, reason: "unreachable" })
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+
+    let failOrgs: (e: Error) => void = () => {}
+    listMyOrgs.mockReturnValue(new Promise((_, reject) => { failOrgs = reject }))
+    fetchAccessibleProjects.mockReturnValue(new Promise(() => {}))
+    act(() => { for (const listener of connectivityListeners) listener(true) })
+    await waitFor(() => expect(listMyOrgs).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId("offline").textContent).toBe("yes")
+    expect(screen.getByTestId("guests").textContent).toBe("Guesthouse")
+
+    await act(async () => { failOrgs(new TypeError("Failed to fetch")) })
+    expect(screen.getByTestId("offline").textContent).toBe("yes")
+  })
+
+  it("retries on a timer when the probe never reports a change", async () => {
+    // The probe already reads online, so no change event will ever come.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    currentConnectivity = true
+    rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [] })
+    listMyOrgs.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    fetchAccessibleProjects.mockResolvedValueOnce({ ok: false, reason: "unreachable" })
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+
+    listMyOrgs.mockResolvedValue([memberOrg])
+    fetchAccessibleProjects.mockResolvedValue({ ok: true, projects: [] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("no"))
+  })
+
+  it("doesn't retry on the timer while the probe reads offline", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    currentConnectivity = false
+    rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [] })
+    listMyOrgs.mockRejectedValue(new TypeError("Failed to fetch"))
+    fetchAccessibleProjects.mockResolvedValue({ ok: false, reason: "unreachable" })
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+    const calls = listMyOrgs.mock.calls.length
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000) })
+    expect(listMyOrgs).toHaveBeenCalledTimes(calls)
   })
 })

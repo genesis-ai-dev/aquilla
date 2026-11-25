@@ -76,6 +76,9 @@ interface OrgContextValue {
 
 const OrgContext = createContext<OrgContextValue | null>(null)
 
+/** Desktop: how often the cached (offline) lists retry the server. */
+const OFFLINE_RETRY_MS = 30_000
+
 export function OrgProvider({ children }: { children: ReactNode }) {
   const { session, loading: sessionLoading } = useFrontierSession()
   const location = useLocation()
@@ -135,7 +138,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     }
     // Desktop only: the lists last loaded online, used when the server can't be.
     const cached = isTauriRuntime() && username ? readOrgDirectory(username) : null
-    setOrgsFromCache(false)
+    // `orgsFromCache` is cleared only once the server answers: a retry while
+    // still unreachable must not flash the online pages for its duration.
     if (sessionLoading) {
       setLoading(true)
       return []
@@ -143,6 +147,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (!jwt) {
       setOrgs([])
       setActiveOrgId(null)
+      setOrgsFromCache(false)
       setResolvedOrgJwt(null)
       setLoading(false)
       return []
@@ -161,6 +166,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       } else {
         setOrgs([])
         setActiveOrgId(null)
+        setOrgsFromCache(false)
       }
       setResolvedOrgJwt(jwt)
       setLoading(false)
@@ -172,6 +178,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       const list = await listMyOrgs(jwt)
       if (orgRequestRef.current !== requestId) return []
       applyOrgs(list)
+      setOrgsFromCache(false)
       return list
     } catch (e) {
       if (orgRequestRef.current !== requestId) return []
@@ -184,6 +191,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       }
       setOrgs([])
       setActiveOrgId(null)
+      setOrgsFromCache(false)
       if (e instanceof UserError && e.category === "session-expired") {
         // Guarded: a 401 from a JWT that re-login has since replaced must not
         // re-raise the banner (see lib/frontier/session-expiry.ts).
@@ -241,7 +249,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (pending?.jwt === jwt) return pending.promise
 
     const requestId = ++projectsRequestRef.current
-    setCachedGuestOrgs(null)
+    // `cachedGuestOrgs` stays until the server answers (see `orgsFromCache`).
     setAccessibleProjectsLoading(true)
     // AQU-883: clear the previous failure up front so a retry drops consumers
     // back through their loading state instead of leaving a stale error card
@@ -262,6 +270,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         const projects = result.projects
         if (projectsRequestRef.current !== requestId) return []
         setAccessibleProjects(projects)
+        setCachedGuestOrgs(null)
         return projects
       } catch (e) {
         // AQU-883: this used to swallow every failure into an empty list, so a
@@ -269,8 +278,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         // no shared projects" — guest orgs and shared projects just vanished.
         if (projectsRequestRef.current === requestId) {
           setAccessibleProjects([])
-          if (cached && !(e instanceof UserError)) setCachedGuestOrgs(cached.guestOrgs)
-          else setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
+          if (cached && !(e instanceof UserError)) {
+            setCachedGuestOrgs(cached.guestOrgs)
+          } else {
+            setCachedGuestOrgs(null)
+            setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
+          }
         }
         return []
       } finally {
@@ -320,12 +333,23 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     rememberOrgDirectory(username, { orgs, guestOrgs })
   }, [username, jwt, offline, isLoading, accessibleProjectsLoading, error, accessibleProjectsError, resolvedOrgJwt, resolvedProjectsJwt, orgs, guestOrgs])
 
+  // Leave the cached lists once the server answers again. The change event
+  // covers a reconnect; the timer covers a failure the probe never saw (a blip
+  // between its polls, a timeout, a captive portal) — or a reconnect retry
+  // that failed — after which no change event will come.
   useEffect(() => {
-    if (!offline) return
-    return desktopConnectivity.subscribe((online) => {
+    if (!offline || !jwt || isJwtExpired(jwt)) return
+    const unsubscribe = desktopConnectivity.subscribe((online) => {
       if (online) void retryOrgLoad()
     })
-  }, [offline, retryOrgLoad])
+    const timer = setInterval(() => {
+      if (desktopConnectivity.current() !== false) void retryOrgLoad()
+    }, OFFLINE_RETRY_MS)
+    return () => {
+      unsubscribe()
+      clearInterval(timer)
+    }
+  }, [offline, jwt, retryOrgLoad])
 
   // When the URL names an org that is not a membership (platform-admin
   // catalog), hydrate its summary so the switcher trigger can show the name

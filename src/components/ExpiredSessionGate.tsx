@@ -26,7 +26,9 @@
  *    downloaded project instead; their edits queue until they sign in again.
  *  - Desktop, offline: no redirect at all. The org pages list the downloaded
  *    projects from cached org lists (OrgContext `offline`); sign-in follows
- *    once the connection is back.
+ *    once the connection is back. Until the first probe has answered,
+ *    connectivity is unknown and the redirect waits too: an offline launch
+ *    would otherwise reach sign-in before the probe could say offline.
  */
 
 import { useEffect, useState } from "react"
@@ -37,7 +39,8 @@ import { loadActiveSession } from "@/lib/frontier/session-store"
 import { loginPath } from "@/lib/navigation/login-path"
 import { isLaunchLandingPath } from "@/lib/offline/last-workspace"
 import { pendingOfflineLaunchResume } from "@/lib/offline/launch-resume"
-import { useConnectivity } from "@/lib/offline/connectivity"
+import { useDesktopConnectivity } from "@/lib/offline/connectivity"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 
 /**
  * How long a desktop launch holds the redirect for OfflineLaunchResume. Past
@@ -76,8 +79,10 @@ export function ExpiredSessionGate() {
 
 function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathname: string; next: string }) {
   const [confirmed, setConfirmed] = useState(false)
-  // Null outside the desktop app and before its first probe.
-  const offline = useConnectivity() === false
+  // Null outside the desktop app and before its first probe. On desktop only
+  // a measured "online" lets the redirect through.
+  const online = useDesktopConnectivity()
+  const holdForConnectivity = isTauriRuntime() && online !== true
 
   useEffect(() => {
     let cancelled = false
@@ -95,7 +100,7 @@ function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathna
     return () => { cancelled = true }
   }, [jwt, pathname])
 
-  if (!confirmed || offline) return null
+  if (!confirmed || holdForConnectivity) return null
   // A locally expired JWT does not need an explicit reauth override: Login
   // already shows the form for it. Omitting the flag lets a token refreshed by
   // another tab between confirmation and navigation recover automatically.

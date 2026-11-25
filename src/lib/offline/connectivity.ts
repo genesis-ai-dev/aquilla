@@ -10,7 +10,7 @@
  * host there meant a dev build reported PRODUCTION's reachability — it would
  * say "online" while its own API was unreachable and nothing was syncing.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { isTauriRuntime } from "./is-tauri"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 
@@ -150,6 +150,15 @@ export const desktopConnectivity: ConnectivitySource = {
       connectivityListeners.delete(listener)
     }
   },
+}
+
+/**
+ * {@link desktopConnectivity} as a hook. Unlike {@link useConnectivity} it
+ * starts from the app-wide last known value instead of `null` on every mount,
+ * so a component mounted mid-session doesn't spend its first renders "unknown".
+ */
+export function useDesktopConnectivity(): boolean | null {
+  return useSyncExternalStore(desktopConnectivity.subscribe, desktopConnectivity.current, () => null)
 }
 
 /** Desktop-only: begin probing the backend this build talks to. No-op on web. */

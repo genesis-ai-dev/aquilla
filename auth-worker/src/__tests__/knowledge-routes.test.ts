@@ -479,7 +479,7 @@ describe("knowledge routes — validation", () => {
     })
     const res = await app.request(
       `/api/v2/projects/${PROJECT}/knowledge`,
-      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.pdf" }, body, duplex: "half" } as RequestInit,
+      { method: "POST", headers: { ...authHeader(jwt), "x-doc-name": "big.md" }, body, duplex: "half" } as RequestInit,
       testEnvWith(new FakeBucket()),
     )
     expect(res.status).toBe(400)

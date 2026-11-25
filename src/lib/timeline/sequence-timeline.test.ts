@@ -6,6 +6,8 @@ import {
   chapterOfCell,
   hasRealChapters,
   heardLinesOfMilestone,
+  recorderLinesFor,
+  showsPartOfFile,
   nextPlayableChapter,
   resolveTimelineChapter,
   scopeCells,
@@ -234,31 +236,93 @@ describe("a file with no chapters, however long", () => {
 
 // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an audio
 // cue file, split into milestones. The heard lines are cut to the milestone
-// once, so the timeline and Play show the same page as the subtitle cards.
+// once, so the timeline, Play and the recorder show the same page as the
+// subtitle cards. Every heard line belongs to exactly one milestone.
 describe("heardLinesOfMilestone", () => {
   const timed = (id: string, startTime?: number, endTime?: number): CellData =>
     ({ id, value: id, startTime, endTime } as unknown as CellData)
-  const all = [timed("s1", 0, 4), timed("s2", 4, 8), timed("s3", 8, 12), timed("s4", 12, 16)]
-  const milestone = [all[1], all[2]]
-  const heard = [timed("c1", 1, 3), timed("c2", 5, 7), timed("c3", 9, 11), timed("c4", 13, 15), timed("c5"), timed("c6", 20, 22)]
+  // Three milestones: 0–8, 10–12 (a gap 8–10 before it), 14–16.
+  const s1 = timed("s1", 0, 4), s2 = timed("s2", 4, 8), s3 = timed("s3", 10, 12), s4 = timed("s4", 14, 16)
+  const all = [s1, s2, s3, s4]
+  const pages = [[s1, s2], [s3], [s4]]
+  const heard = [
+    timed("c1", 1, 3), // inside the first
+    timed("c2", 8.5, 9.5), // in the gap before the second: the second's
+    timed("c3", 10.5, 11.5), // inside the second
+    timed("c4", 20, 22), // after the last: the last's
+    timed("c5"), // no times, no pair: the first's
+    timed("c6", 1, 2), // inside the first by time, paired with s4: the third's
+    timed("c7", 14.5, 15), // paired with s2 and s4: its earliest pair's, the first
+  ]
+  const textForCue = new Map<string, readonly string[]>([["c6", ["s4"]], ["c7", ["s4", "s2"]]])
+  const ids = (cells: CellData[] | null) => cells?.map((c) => c.id) ?? null
 
-  it("keeps the heard lines paired with the milestone's lines or inside its time range", () => {
-    // c6 sits outside the range but is paired with s2; c1 sits outside and is
-    // paired with nothing on the page; c5 has no times and no pair.
-    const textForCue = new Map<string, readonly string[]>([["c6", ["s2"]], ["c1", ["s1"]]])
-    expect(heardLinesOfMilestone(heard, milestone, all, textForCue)?.map((c) => c.id)).toEqual(["c2", "c3", "c6"])
+  it("a paired heard line goes with its earliest paired line's milestone", () => {
+    expect(ids(heardLinesOfMilestone(heard, pages[2], all, pages, textForCue))).toEqual(["c4", "c6"])
+    expect(ids(heardLinesOfMilestone(heard, pages[0], all, pages, textForCue))).toEqual(["c1", "c5", "c7"])
   })
 
-  it("a cue paired only with lines off the page stays off it, even inside the range", () => {
-    const textForCue = new Map<string, readonly string[]>([["c2", ["s4"]]])
-    expect(heardLinesOfMilestone(heard, milestone, all, textForCue)?.map((c) => c.id)).toEqual(["c3"])
+  it("an unpaired one in a gap goes to the next milestone, one after the last to the last", () => {
+    expect(ids(heardLinesOfMilestone(heard, pages[1], all, pages, textForCue))).toEqual(["c2", "c3"])
   })
 
-  it("the whole file on the timeline (split off): the heard lines, unchanged", () => {
-    expect(heardLinesOfMilestone(heard, all, all, new Map())).toBe(heard)
+  it("every heard line belongs to exactly one milestone", () => {
+    const seen = pages.flatMap((page) => ids(heardLinesOfMilestone(heard, page, all, pages, textForCue)) ?? [])
+    expect([...seen].sort()).toEqual(heard.map((c) => c.id).sort())
+  })
+
+  it("while the pairs load, every heard line is placed by time with the same rule", () => {
+    const placed = pages.map((page) => ids(heardLinesOfMilestone(heard, page, all, pages, textForCue, true)))
+    expect(placed).toEqual([["c1", "c5", "c6"], ["c2", "c3"], ["c4", "c7"]])
+  })
+
+  it("the whole file on the timeline (split off, or one milestone holding it all): unchanged", () => {
+    expect(heardLinesOfMilestone(heard, all, all, [all], textForCue)).toBe(heard)
   })
 
   it("no heard lines: none", () => {
-    expect(heardLinesOfMilestone(null, milestone, all, new Map())).toBeNull()
+    expect(heardLinesOfMilestone(null, pages[0], all, pages, textForCue)).toBeNull()
+  })
+})
+
+// AQU-2711 x AQU-2253 (review, Nov 25): "one milestone" means only part of the
+// file is on the timeline, not the bare preference. A file with no
+// milestones, or with one milestone holding everything, is the whole file.
+describe("showsPartOfFile", () => {
+  const l = (id: string) => ({ id } as unknown as CellData)
+  const lines = [l("a"), l("b"), l("c")]
+  it("the split on but no milestones: the whole file", () => {
+    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [], milestoneKey: null })
+    expect(showsPartOfFile(shown, lines)).toBe(false)
+  })
+  it("one milestone holding every line: the whole file", () => {
+    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [{ key: "m1", cellIds: ["a", "b", "c"] }], milestoneKey: "m1" })
+    expect(showsPartOfFile(shown, lines)).toBe(false)
+  })
+  it("one milestone of two: part of it", () => {
+    const shown = timelineCellsForMilestoneSplit(lines, { split: true, milestones: [{ key: "m1", cellIds: ["a"] }, { key: "m2", cellIds: ["b", "c"] }], milestoneKey: "m2" })
+    expect(showsPartOfFile(shown, lines)).toBe(true)
+  })
+})
+
+// AQU-2711 x AQU-2253 (review, Nov 25): what the recorder walks.
+describe("recorderLinesFor", () => {
+  const l = (id: string) => ({ id } as unknown as CellData)
+  const whole = [l("c1"), l("c2"), l("c3")]
+  const plain = [l("s1"), l("s2")]
+  it("the milestone's heard lines, opened on one of them", () => {
+    const cut = [whole[1]]
+    expect(recorderLinesFor(cut, whole, plain, "c2")).toBe(cut)
+  })
+  it("a milestone with no heard lines, or opened on a line it does not hold: the whole cue file", () => {
+    expect(recorderLinesFor([], whole, plain, "c3")).toBe(whole)
+    expect(recorderLinesFor([whole[0]], whole, plain, "c3")).toBe(whole)
+  })
+  it("no cue file: the file's own lines", () => {
+    expect(recorderLinesFor(null, null, plain, "s1")).toBe(plain)
+  })
+  it("closed: the cut", () => {
+    const cut = [whole[0]]
+    expect(recorderLinesFor(cut, whole, plain, null)).toBe(cut)
   })
 })

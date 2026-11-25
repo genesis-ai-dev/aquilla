@@ -224,12 +224,12 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(workspace).toContain("() => timelineCellsForMilestoneSplit(timelineLines, {")
     // Split into milestones on: the heard lines are the milestone's, cut once
     // (`heardLinesOfMilestone`), for the timeline and Play alike.
-    expect(workspace).toContain("() => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, cueLinks.textForCue),")
+    expect(workspace).toContain("() => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue, cueLinksPending),")
     expect(workspace).toContain("() => recordingsLines(timelineCells, timelineHeardCells, timingMode === \"audioFirst\"),")
     expect(workspace).toContain("playStartLineId(row, timelineHeardCells,")
     expect(workspace).toContain("targetCells={timelineHeardCells}")
     // …and Play ends at the milestone's last line: no run on to the film's end.
-    expect(workspace).toContain("oneMilestone: splitByMilestone,")
+    expect(workspace).toContain("oneMilestone: showsPartOfFile(timelineCells, timelineLines),")
     expect(workspace).toContain("const filmLines = playbackCells")
     expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")
@@ -244,7 +244,9 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(cut).toBeGreaterThan(-1)
     expect(driver).toBeGreaterThan(cut)
     expect(workspace).not.toContain("const dubDriverCells = audioCueCells")
-    expect(workspace).toContain("cells={timelineHeardCells ?? legacyCells}")
+    expect(workspace).toContain("cells={recorderCells}")
+    expect(workspace).toContain("const recorderCells = recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId)")
+    expect(workspace).toContain("const heardLinesPlay = playsHeardLines(timelineHeardCells,")
     expect(workspace).toContain("useSkipSilentLinesOnVirtualClock(dubDriverCells,")
     // …and the line-by-line clock's Play from the start begins at the
     // milestone's first heard line, never at 0:00 (the split off: 0:00).

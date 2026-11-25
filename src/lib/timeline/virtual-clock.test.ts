@@ -351,14 +351,26 @@ describe("a clock that starts later than 0:00 (one milestone of the file)", () =
     expect(getVirtualClockSec()).toBe(600)
   })
 
-  it("a new start (another milestone) moves a paused clock there; a running one plays on", () => {
+  // The workspace hands the clock back and takes it again when the milestone
+  // changes (its effect's cleanup), so a new start always meets a clock that
+  // has just started.
+  it("taken again for another milestone, it sits at that milestone's start", () => {
     startVirtualClock(660, 600)
-    startVirtualClock(900, 700)
-    expect(getVirtualClockSec()).toBe(700)
     virtualClockPlay()
     advance(1000)
-    startVirtualClock(900, 800)
-    expect(getVirtualClockSec()).toBeCloseTo(701, 3)
+    stopVirtualClock()
+    startVirtualClock(900, 700)
+    expect(getVirtualClockSec()).toBe(700)
+    expect(getVirtualClockPlaying()).toBe(false)
+  })
+
+  it("a seek while playing never goes before the start", () => {
+    startVirtualClock(660, 600)
+    virtualClockPlay()
+    virtualClockSeek(0)
+    expect(getVirtualClockSec()).toBe(600)
+    virtualClockSeek(640)
+    expect(getVirtualClockSec()).toBeCloseTo(640, 3)
   })
 
   it("no start given: 0:00, as before", () => {

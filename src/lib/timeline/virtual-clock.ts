@@ -227,15 +227,12 @@ function startTimer(): void {
 }
 
 /** Take the transport. Idempotent; refreshes the duration. `start` is where
- *  Play from the start begins (`startSec`); a new one moves a paused clock
- *  there and leaves a running one playing. */
+ *  Play from the start begins (`startSec`). The workspace hands the clock back
+ *  before a new start, so a new one meets a clock that has just started. */
 export function startVirtualClock(duration: number, start = 0): void {
   durationSec = Number.isFinite(duration) && duration > 0 ? duration : 0
-  const nextStart = Number.isFinite(start) && start > 0 ? start : 0
-  const startMoved = nextStart !== startSec
-  startSec = nextStart
+  startSec = Number.isFinite(start) && start > 0 ? start : 0
   if (driving) {
-    if (startMoved && !playing) reanchor(startSec)
     notify()
     return
   }
@@ -283,7 +280,10 @@ export function virtualClockPause(): void {
 
 export function virtualClockSeek(sec: number): void {
   if (!driving) return
-  const clamped = Number.isFinite(sec) ? Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec) : 0
+  let clamped = Number.isFinite(sec) ? Math.max(0, durationSec > 0 ? Math.min(sec, durationSec) : sec) : 0
+  // Playing, it never goes before the start: it would play the silence from
+  // 0:00 up to the milestone's first heard line. Paused, Play moves it there.
+  if (playing) clamped = Math.max(clamped, startSec)
   reanchor(clamped)
   notify()
 }

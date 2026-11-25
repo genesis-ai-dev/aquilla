@@ -4,6 +4,7 @@
 // volume. It mirrors ElevenLabs' bottom player — the per-line buttons stay for
 // voicing a single line, but listening to the take in sequence happens here.
 
+import { progressSpanFraction, progressSpanSec } from "@/lib/audio/transport"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ChevronDown, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
@@ -345,7 +346,9 @@ export function VoicePlaybackBar({
     [drivesVideo, videoController, currentTime, duration, lineStarts, transport.kind, startCellId, cells, startAt, freeTiming, programmeTracks, film, skipSilent],
   )
 
-  const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
+  // AQU-2711 x AQU-2253 (review, Nov 25): over the clock's span, which starts
+  // at a milestone's first heard line where the line-by-line clock does.
+  const progressFraction = progressSpanFraction(transport.progress)
 
   if (variant === "strip") {
     // The same controls as the bar below, wired identically (the comments on
@@ -418,7 +421,7 @@ export function VoicePlaybackBar({
       <BarScrubber
         fraction={progressFraction}
         disabled={!audioLoaded || !transport.active || duration <= 0}
-        onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
+        onSeek={(f) => (drivesVideo ? videoController?.seek(progressSpanSec(transport.progress, f)) : seekQueueToTime(progressSpanSec(transport.progress, f)))}
       />
 
       {/* Equal flex side columns keep the transport truly centered; stretch +

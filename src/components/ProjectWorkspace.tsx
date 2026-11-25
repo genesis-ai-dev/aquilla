@@ -238,7 +238,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
-  chapterOfCell, heardLinesOfMilestone, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  chapterOfCell, heardLinesOfMilestone, recorderLinesFor, resolveTimelineChapter, scopeCells, sequenceTimelineCells, showsPartOfFile,
   timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -847,6 +847,7 @@ const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_BT_QUEUE_STATE: { waiting: ReadonlySet<string>; pending: number } = { waiting: new Set<string>(), pending: 0 }
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
 const EMPTY_MILESTONE_PAGES: readonly { key: string; cellIds: readonly string[] }[] = []
+const EMPTY_MILESTONE_LINES: readonly (readonly CellData[])[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 /** AQU-2507: the "no cell carries a check flag" answer, allocated once. */
@@ -16125,21 +16126,6 @@ export function ProjectWorkspace() {
   // as the sound is heard on its lines, and a film that cannot play leaves
   // the lines' original audible.
   const [filmFailed, setFilmFailed] = useState(false)
-  // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
-  // live on them) does not play its own recording lines, so the recording
-  // cannot be the sound there: the film's own sound is the original.
-  const heardLinesPlay = playsHeardLines(audioCueCells, timingMode === "audioFirst")
-  const filmVoicesTheProgramme = filmVoicesProgramme({
-    kind: filmKind,
-    paneOnScreen: showVideoPane,
-    followsRecordings: timingMode === "audioFirst",
-    recordingIsTheSound: !heardLinesPlay && recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
-    filmFailed,
-  })
-  useEffect(() => {
-    setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
-    return () => setProgrammeSourceVoicedByFilm(false)
-  }, [filmVoicesTheProgramme])
   // ── A book or document on the timeline ──
   //
   // Split into milestones off: a book's timeline lays out EVERY chapter, end
@@ -16179,13 +16165,41 @@ export function ProjectWorkspace() {
   )
   // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an
   // audio cue file, split into milestones: the heard lines of the milestone
-  // on the timeline (paired with its lines, or inside its time range), cut
-  // once so the timeline and Play show the same page as the subtitle cards.
-  // The split off, `audioCueCells` itself.
+  // on the timeline, cut once so the timeline, Play, the recorder and the
+  // line-by-line clock show the same page as the subtitle cards. Every heard
+  // line belongs to exactly one milestone (`heardLinesOfMilestone`): by its
+  // pair, or by where it starts (while the pairs load, by where it starts).
+  // The whole file on the timeline: `audioCueCells` itself.
+  const timelineMilestoneLines = useMemo(() => {
+    if (milestonePages.length === 0) return EMPTY_MILESTONE_LINES
+    const byId = new Map(timelineLines.map((c) => [c.id, c]))
+    return milestonePages.map((page) => page.cellIds.flatMap((id) => byId.get(id) ?? []))
+  }, [milestonePages, timelineLines])
   const timelineHeardCells = useMemo(
-    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, cueLinks.textForCue),
-    [audioCueCells, timelineCells, timelineLines, cueLinks],
+    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks.textForCue, cueLinksPending),
+    [audioCueCells, timelineCells, timelineLines, timelineMilestoneLines, cueLinks, cueLinksPending],
   )
+  // The recorder walks the milestone's heard lines. Opened on a line the cut
+  // does not hold, it walks the whole cue file, so the line it was opened on
+  // is there to record.
+  const recorderCells = recorderLinesFor(timelineHeardCells, audioCueCells, legacyCells, recordingCellId)
+  // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
+  // live on them) does not play its own recording lines, so the recording
+  // cannot be the sound there: the film's own sound is the original.
+  // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines of the milestone on
+  // the timeline: a milestone with none plays as a file with none.
+  const heardLinesPlay = playsHeardLines(timelineHeardCells, timingMode === "audioFirst")
+  const filmVoicesTheProgramme = filmVoicesProgramme({
+    kind: filmKind,
+    paneOnScreen: showVideoPane,
+    followsRecordings: timingMode === "audioFirst",
+    recordingIsTheSound: !heardLinesPlay && recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
+    filmFailed,
+  })
+  useEffect(() => {
+    setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
+    return () => setProgrammeSourceVoicedByFilm(false)
+  }, [filmVoicesTheProgramme])
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change
@@ -16325,6 +16339,7 @@ export function ProjectWorkspace() {
     anyCellClockIsFileTime: anyFileCellClockIsFileTime,
     paneOnScreen: showVideoPane,
     timelineDurationSec,
+    timelineStartSec: timelineClockStartSec,
     virtualSoundingCellId,
     freeTiming: timingMode === "audioFirst",
   }
@@ -16392,9 +16407,11 @@ export function ProjectWorkspace() {
       followsRecordings: timingMode === "audioFirst",
       filmFailed,
       durationSec: videoDurationForTable,
-      oneMilestone: splitByMilestone,
+      // Only part of the file is on the timeline. A file with no milestones,
+      // or one milestone holding it all, still runs on to the film's end.
+      oneMilestone: showsPartOfFile(timelineCells, timelineLines),
     }),
-    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, splitByMilestone],
+    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, timelineCells, timelineLines],
   )
   // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
   // the timeline and the bottom strip start the queue with must be the same
@@ -21809,7 +21826,9 @@ export function ProjectWorkspace() {
           // and the take's window all follow the cue's own timing.
           // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines of the
           // milestone on the timeline, with Split into milestones on.
-          cells={timelineHeardCells ?? legacyCells}
+          // A line opened from outside the milestone (the table's own record
+          // button) still finds its line: the whole cue file then.
+          cells={recorderCells}
           activeCellId={recordingCellId}
           // Where the take lands. "recording" for the default dub row, so its
           // behaviour is byte-for-byte unchanged; an added track's own id when

@@ -16140,11 +16140,60 @@ export function ProjectWorkspace() {
     setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
     return () => setProgrammeSourceVoicedByFilm(false)
   }, [filmVoicesTheProgramme])
+  // ── A book or document on the timeline ──
+  //
+  // Split into milestones off: a book's timeline lays out EVERY chapter, end
+  // to end, on one clock. The chapter the table is on (`chosenScopeKey`) only
+  // names where the reader is; scrolling the table does not swap the timeline
+  // for that chapter. A file with no chapters is the same list (Sam, Oct 28:
+  // the long-file parts are dropped — the timeline draws the clips in view, so
+  // length costs nothing).
+  // Split into milestones on: the timeline draws only the milestone the table
+  // is on, including a part or a time range the continuous timeline ignores.
+  // The timeline, the bottom strip's Play all and every timeline seek share
+  // ONE list of lines (`timelineCells`), so the programme they each lay out
+  // is the same one. On a book, headings follow "Count headings as translatable
+  // content" and hidden lines stay off unless recorded
+  // (lib/timeline/sequence-timeline.ts).
+  const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
+  const splitByMilestone = useMilestoneSplit()
+  const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
+  // The lines a book's timeline may draw at all, before any chapter.
+  const timelineLines = useMemo(
+    () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, null, countStructuralCells) : audioMergedCells),
+    [sequenceTimeline, audioMergedCells, countStructuralCells],
+  )
+  const milestonePages = useMemo(
+    () => (splitByMilestone
+      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
+      : EMPTY_MILESTONE_PAGES),
+    [splitByMilestone, cellStore, cellStoreVersion],
+  )
+  const timelineCells = useMemo(
+    () => timelineCellsForMilestoneSplit(timelineLines, {
+      split: splitByMilestone,
+      milestones: milestonePages,
+      milestoneKey: chosenScopeKey,
+    }),
+    [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
+  )
+  // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an
+  // audio cue file, split into milestones: the heard lines of the milestone
+  // on the timeline (paired with its lines, or inside its time range), cut
+  // once so the timeline and Play show the same page as the subtitle cards.
+  // The split off, `audioCueCells` itself.
+  const timelineHeardCells = useMemo(
+    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, cueLinks.textForCue),
+    [audioCueCells, timelineCells, timelineLines, cueLinks],
+  )
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change
   // needed for video-first dub playback to follow the takes to their new home.
-  const dubDriverCells = audioCueCells ?? audioMergedCells
+  // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines the timeline and
+  // Play walk (`timelineHeardCells`): with Split into milestones on, the
+  // milestone's, so the line-by-line clock and the dubs stay on its page.
+  const dubDriverCells = timelineHeardCells ?? audioMergedCells
   useEffect(() => {
     if (!videoDrivesDubs || !project?.id || !frontierSession) {
       stopExternalDubs()
@@ -16267,29 +16316,7 @@ export function ProjectWorkspace() {
     freeTiming: timingMode === "audioFirst",
   }
 
-  // ── A book or document on the timeline ──
-  //
-  // Split into milestones off: a book's timeline lays out EVERY chapter, end
-  // to end, on one clock. The chapter the table is on (`chosenScopeKey`) only
-  // names where the reader is; scrolling the table does not swap the timeline
-  // for that chapter. A file with no chapters is the same list (Sam, Oct 28:
-  // the long-file parts are dropped — the timeline draws the clips in view, so
-  // length costs nothing).
-  // Split into milestones on: the timeline draws only the milestone the table
-  // is on, including a part or a time range the continuous timeline ignores.
-  // The timeline, the bottom strip's Play all and every timeline seek share
-  // ONE list of lines (`timelineCells`), so the programme they each lay out
-  // is the same one. On a book, headings follow "Count headings as translatable
-  // content" and hidden lines stay off unless recorded
-  // (lib/timeline/sequence-timeline.ts).
-  const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
-  const splitByMilestone = useMilestoneSplit()
-  const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
-  // The lines a book's timeline may draw at all, before any chapter.
-  const timelineLines = useMemo(
-    () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, null, countStructuralCells) : audioMergedCells),
-    [sequenceTimeline, audioMergedCells, countStructuralCells],
-  )
+  // A book's chapters, for the chapter picker and Play all's run into the next.
   const timelineScopes = useMemo<readonly TimelineChapter[]>(() => {
     if (!sequenceTimeline) return EMPTY_TIMELINE_CHAPTERS
     const chapters = timelineChaptersOf(readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex()))
@@ -16311,29 +16338,6 @@ export function ProjectWorkspace() {
         ?? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: null }))
       : null,
     [timelineScopes, chosenScopeKey, queueChapterKey],
-  )
-  const milestonePages = useMemo(
-    () => (splitByMilestone
-      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
-      : EMPTY_MILESTONE_PAGES),
-    [splitByMilestone, cellStore, cellStoreVersion],
-  )
-  const timelineCells = useMemo(
-    () => timelineCellsForMilestoneSplit(timelineLines, {
-      split: splitByMilestone,
-      milestones: milestonePages,
-      milestoneKey: chosenScopeKey,
-    }),
-    [timelineLines, splitByMilestone, milestonePages, chosenScopeKey],
-  )
-  // AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an
-  // audio cue file, split into milestones: the heard lines of the milestone
-  // on the timeline (paired with its lines, or inside its time range), cut
-  // once so the timeline and Play show the same page as the subtitle cards.
-  // The split off, `audioCueCells` itself.
-  const timelineHeardCells = useMemo(
-    () => heardLinesOfMilestone(audioCueCells, timelineCells, timelineLines, cueLinks.textForCue),
-    [audioCueCells, timelineCells, timelineLines, cueLinks],
   )
   // Group D (Nov 5): what Play all, Space and a timeline seek play. Following
   // the recordings, a file with an audio cue file plays its heard lines — its
@@ -21790,7 +21794,9 @@ export function ProjectWorkspace() {
           // Stage 4: with an audio VTT imported, the recorder walks the CUES —
           // the units the picture wants recorded — and Next/Prev, the count-in
           // and the take's window all follow the cue's own timing.
-          cells={audioCueCells ?? legacyCells}
+          // AQU-2711 x AQU-2253 (review, Nov 25): the heard lines of the
+          // milestone on the timeline, with Split into milestones on.
+          cells={timelineHeardCells ?? legacyCells}
           activeCellId={recordingCellId}
           // Where the take lands. "recording" for the default dub row, so its
           // behaviour is byte-for-byte unchanged; an added track's own id when

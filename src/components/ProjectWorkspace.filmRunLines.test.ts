@@ -235,6 +235,19 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")
   })
 
+  // AQU-2711 x AQU-2253 (review, Nov 25): the recorder, the dub driver and
+  // the line-by-line clock walk the same heard lines as the timeline and Play:
+  // with Split into milestones on, the milestone's (`timelineHeardCells`).
+  it("the recorder, the dub driver and the line-by-line clock take the heard lines cut to the milestone", () => {
+    const cut = workspace.indexOf("const timelineHeardCells = useMemo(")
+    const driver = workspace.indexOf("const dubDriverCells = timelineHeardCells ?? audioMergedCells")
+    expect(cut).toBeGreaterThan(-1)
+    expect(driver).toBeGreaterThan(cut)
+    expect(workspace).not.toContain("const dubDriverCells = audioCueCells")
+    expect(workspace).toContain("cells={timelineHeardCells ?? legacyCells}")
+    expect(workspace).toContain("useSkipSilentLinesOnVirtualClock(dubDriverCells,")
+  })
+
   it("Space and a click on the timeline start the queue with those lines, and no others", () => {
     for (const name of ["handleTimelineTogglePlay", "handleTimelineSeekToTime"] as const) {
       const body = callbackBody(workspace, name)

@@ -14,7 +14,7 @@
 import v8 from "node:v8"
 import vm from "node:vm"
 import { describe, expect, it } from "vitest"
-import { MAX_KB_ORIGINAL_BYTES } from "../../../db/shared/knowledge"
+import { MAX_KB_ORIGINAL_BYTES, MAX_KB_TEXT_CHARS } from "../../../db/shared/knowledge"
 import { MAX_KB_PDF_FORM_BYTES, readPdfForm } from "../routes/knowledge"
 import { startsAsPdf } from "../routes/parse-document"
 import { readBytesWithLimit } from "../../../shared/http-body-limit"
@@ -84,6 +84,38 @@ describe("reading a Knowledge Base PDF form (AQU-2551)", () => {
     expect(sent).toBeLessThanOrEqual(MAX_KB_PDF_FORM_BYTES + 2 * MB)
   })
 
+  // The line-end pass runs over at most the text the server keeps, plus one
+  // character so the route can still tell the text was cut.
+  async function readText(text: string): Promise<string> {
+    const fd = new FormData()
+    fd.append("file", new Blob([new TextEncoder().encode("%PDF-1.7\n")]), "a.pdf")
+    fd.append("text", text)
+    const req = new Request("http://x/", { method: "POST", body: fd })
+    const read = await readPdfForm(new Headers({ "content-type": req.headers.get("content-type")! }), req.body)
+    if (!read.ok) throw new Error(read.reason)
+    return read.text
+  }
+
+  it("cuts a long text one character past the cap, with LF line ends", async () => {
+    const text = await readText("ab\n".repeat(MAX_KB_TEXT_CHARS))
+    expect(text.length).toBe(MAX_KB_TEXT_CHARS + 1)
+    expect(text.startsWith("ab\nab\n")).toBe(true)
+    expect(text).not.toContain("\r")
+  })
+
+  it("still passes the cap when the text is over it only after its CRLFs become LF", async () => {
+    // sent as "a\r\n" (3 characters a line), kept as "a\n" (2): the sent text
+    // is far past the cap, the stored one just past it
+    const text = await readText("a\n".repeat(MAX_KB_TEXT_CHARS / 2 + 1))
+    expect(text.length).toBe(MAX_KB_TEXT_CHARS + 1)
+  })
+
+  it("keeps a text whole that is under the cap once its CRLFs become LF", async () => {
+    const lines = MAX_KB_TEXT_CHARS / 2 - 10
+    const text = await readText("a\n".repeat(lines))
+    expect(text.length).toBe(lines * 2)
+  })
+
   it("reads the original and its text with one copy of the form fewer than before", async () => {
     // the reviewer's case: a 25 MB original and ~4 MB of CRLF text, the old
     // read (raw body, then the parse) kept here as the yardstick
@@ -91,7 +123,8 @@ describe("reading a Knowledge Base PDF form (AQU-2551)", () => {
     const now = await measure(readPdfForm)
     console.log(`AQU-2551 KB memory: form=${now.formMB.toFixed(1)} MB; peak above baseline (heap+ArrayBuffers, Node): before ${old.peakMB.toFixed(0)} MB, now ${now.peakMB.toFixed(0)} MB; file=${now.fileMB.toFixed(1)} MB`)
     expect(now.fileMB).toBe(old.fileMB)
-    expect(now.textLength).toBe(old.textLength)
+    // the text is cut one past the cap before its line ends are changed
+    expect(now.textLength).toBe(Math.min(old.textLength, MAX_KB_TEXT_CHARS + 1))
     // the raw body and its joined copy are gone. Alone the gap is ~95 MB;
     // beside other test files Node collects sooner and it narrows to ~28 MB
     // (one form), so the bar is half a form.

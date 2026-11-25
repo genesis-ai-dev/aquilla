@@ -352,21 +352,29 @@ export async function listPlatformAdminOrgsPage(
     binds.push(...exclude)
   }
 
-  if (opts.cursor) {
-    const cursorName = opts.cursor.name.toLowerCase()
-    where.push(
-      "(lower(coalesce(name, '')) > ? OR (lower(coalesce(name, '')) = ? AND id > ?))",
-    )
-    binds.push(cursorName, cursorName, opts.cursor.id)
-  }
-
   const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""
+  const normalizedName = "lower(coalesce(name, ''))"
+  const rankSql = opts.q
+    ? `CASE WHEN ${normalizedName} = ? THEN 0 WHEN strpos(${normalizedName}, ?) = 1 THEN 1 ELSE 2 END`
+    : "0"
+  if (opts.q) binds.unshift(opts.q, opts.q)
+
+  let afterCursor = ""
+  if (opts.cursor) {
+    const name = opts.cursor.name.toLowerCase()
+    const rank = !opts.q || name === opts.q ? 0 : name.startsWith(opts.q) ? 1 : 2
+    afterCursor = "WHERE (match_rank, sort_name, id) > (?, ?, ?)"
+    binds.push(rank, name, opts.cursor.id)
+  }
   binds.push(opts.limit + 1)
 
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, name FROM organizations
-      ${whereSql}
-      ORDER BY lower(coalesce(name, '')), id
+    `SELECT id, name FROM (
+       SELECT id, name, ${rankSql} AS match_rank, ${normalizedName} AS sort_name
+       FROM organizations ${whereSql}
+     ) ranked
+      ${afterCursor}
+      ORDER BY match_rank, sort_name, id
       LIMIT ?`,
   )
     .bind(...binds)

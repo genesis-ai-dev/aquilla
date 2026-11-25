@@ -102,8 +102,8 @@ export const editor = defineNamespace({
     ),
     "editor.completion.failedPartial": plural(
       {
-        one: "{failed} of {total} cell failed — {done} completed.",
-        other: "{failed} of {total} cells failed — {done} completed.",
+        one: "{failed} of {total} cell failed — {done} drafted.",
+        other: "{failed} of {total} cells failed — {done} drafted.",
       },
       "total",
     ),
@@ -181,7 +181,7 @@ export const editor = defineNamespace({
     "editor.panel.resizeRule": "Resize rule panel",
     "editor.panel.resizeCheck": "Resize file check panel",
     "editor.panel.resizeTranslationNotes": "Resize translation notes panel",
-    "editor.panel.resizeParallelBibles": "Resize parallel bibles panel",
+    "editor.panel.resizeParallelBibles": "Resize parallel Bibles panel",
     "editor.panel.resizeVerseResources": "Resize verse resources panel",
     "editor.translationNotes.loadFailed": "Failed to load translation notes",
     "editor.bookHealth.scoreSuffix": " · health {score}",
@@ -222,11 +222,11 @@ export const editor = defineNamespace({
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
     "editor.waveform.seekTooltip": "Click to seek",
-    "editor.waveform.loading": "Loading waveform...",
+    "editor.waveform.loading": "Loading waveform…",
     "editor.waveform.needsLoadTooltip":
       "Click to download and decode this clip's waveform",
     "editor.waveform.load": "Load waveform",
-    "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click retry",
+    "editor.waveform.decodeErrorTooltip": "Couldn't decode the waveform; click to retry",
     "editor.waveform.retryTooltip": "Couldn't load this clip's waveform; click to retry",
     "editor.waveform.retry": "Retry waveform",
     "editor.waveform.trimStart": "Start of the kept audio",
@@ -256,7 +256,7 @@ export const editor = defineNamespace({
     "editor.attachments.removeFailed": "Couldn't remove this attachment.",
     "editor.attachments.previewAlt": "Attachment preview: {name}",
     "editor.attachments.openInDrawer": "Show in the attachments panel",
-    "editor.attachments.cellGroupUnlabelled": "Unlabelled cell",
+    "editor.attachments.cellGroupUnlabelled": "Unlabeled cell",
 
     // — Empty / loading / error states where the table would be ——————
     "editor.file.loadErrorTitleNamed": "Couldn't load {fileName}",
@@ -383,19 +383,19 @@ export const editor = defineNamespace({
     "editor.footnotes.trayHint": "Updates as the editor scrolls",
     "editor.footnotes.closeTray": "Close footnotes tray",
     "editor.footnotes.trayEmpty": "No footnotes in the visible rows.",
-    "editor.footnotes.docxReadOnly": "read-only · DOCX round-trip not yet safe",
+    "editor.footnotes.docxReadOnly": "read-only · can't export edits to DOCX yet",
     "editor.footnotes.addTarget": "Add target footnote",
     "editor.footnotes.noTarget": "No target footnote",
     "editor.footnotes.noSource": "No source footnote",
     "editor.footnotes.emptyNote": "Empty footnote",
     "editor.footnotes.emptyTarget": "Empty target footnote",
     "editor.footnotes.targetRole": "Target footnote",
-    "editor.footnotes.editPlaceholder": "Translate footnote...",
+    "editor.footnotes.editPlaceholder": "Translate footnote…",
     "editor.footnotes.editLabel": "Edit footnote",
     "editor.footnotes.editMarker": "Edit footnote {label}",
     "editor.footnotes.clickToEdit": "Click to edit footnote",
     "editor.footnotes.translationLabel": "Footnote translation",
-    "editor.footnotes.addTranslation": "Add translation...",
+    "editor.footnotes.addTranslation": "Add translation…",
     "editor.footnotes.deleteConfirm": "I'm sure",
     "editor.footnotes.saveConflict":
       "Couldn't save — this footnote changed while you were editing. Copy your " +
@@ -413,7 +413,7 @@ export const editor = defineNamespace({
     "editor.footnote.markerLetteredDesc":
       "Use letter markers for a separate note sequence.",
     "editor.footnote.textLabel": "Footnote text",
-    "editor.footnote.textPlaceholder": "Selected text: footnote text...",
+    "editor.footnote.textPlaceholder": "Selected text: footnote text…",
     "editor.footnote.attachedTo": "Attached to {ref}.",
     "editor.footnote.textHint":
       "Include the selected word or phrase before a colon when it helps clarify " +
@@ -600,8 +600,8 @@ export const editor = defineNamespace({
     "editor.view.dirMixed": "mixed",
 
     // — Parallel-bibles reference sidebar ————————————————————————————
-    "editor.bibles.show": "Show parallel bibles",
-    "editor.bibles.hide": "Hide parallel bibles",
+    "editor.bibles.show": "Show parallel Bibles",
+    "editor.bibles.hide": "Hide parallel Bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
     "editor.bibles.noReferences": "No Bible references",
@@ -609,9 +609,9 @@ export const editor = defineNamespace({
       "The current cells have no Bible references with chapter and verse numbers. " +
       "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
-      "Scroll the editor to a verse to see it in other bible versions.",
+      "Scroll the editor to a verse to see it in other Bible versions.",
     "editor.bibles.noVersions":
-      "No versions added yet. Add a bible version to read alongside your text.",
+      "No versions added yet. Add a Bible version to read alongside your text.",
     "editor.bibles.removeVersion": "Remove {version}",
     "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
     "editor.bibles.noTextForRef": "No text for {ref} in this version.",
@@ -740,8 +740,7 @@ export const editor = defineNamespace({
     "editor.history.draftKept": "{pct} of AI draft kept",
     "editor.history.draftKeptAsIs": "AI draft kept as-is",
     "editor.history.draftKeptTooltip":
-      "How much of the AI draft above survived this revision, measured character " +
-      "by character. 100% means the draft was approved unchanged.",
+      "How much of the AI draft above survived this revision, measured character by character. 100% means the draft was validated unchanged.",
     "editor.history.aiTrace.show": "Show prompt",
     "editor.history.aiTrace.hide": "Hide prompt",
     "editor.history.aiTrace.output": "Model output",
@@ -751,8 +750,7 @@ export const editor = defineNamespace({
     "editor.history.aiTrace.loadFailed": "Couldn't load the prompt. Open it again to retry.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
-      "This edit lost the first-child-of-parent race for its slot. It was logged " +
-      "but never applied to the cell's current value.",
+      "Another edit arrived at the same time and took effect first. This edit was recorded in history, not applied as the cell's current value.",
     "editor.history.syncing": "syncing",
     "editor.history.syncFailed": "sync failed",
     "editor.history.syncFailedTooltip":
@@ -796,7 +794,7 @@ export const editor = defineNamespace({
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
     "editor.selection.translateNoPermission":
-      "You need contributor role to draft translations",
+      "You need the contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
     "editor.selection.validate": "Validate",
     "editor.selection.validateText": "Validate text",
@@ -847,7 +845,7 @@ export const editor = defineNamespace({
     "editor.selection.noValidations": "No cells have your validation",
     "editor.selection.harmonize": "Harmonize…",
     "editor.selection.harmonizeNeedLead":
-      "You need project lead role to run a harmonization sweep",
+      "You need the project lead role to run a harmonization sweep",
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
     "editor.selection.copySource": "Copy source",
@@ -865,8 +863,8 @@ export const editor = defineNamespace({
       other: "Validated {count} cells ({already} already validated)",
     }),
     "editor.selection.unvalidatedToast": plural({
-      one: "Removed validations from {count} cell",
-      other: "Removed validations from {count} cells",
+      one: "Removed your validation from {count} cell",
+      other: "Removed your validation from {count} cells",
     }),
 
     // -- AQU-1503: batch text validation, shared by the selection toolbar's
@@ -898,7 +896,7 @@ export const editor = defineNamespace({
       other: "{count} cells ready for your check",
     }),
     "editor.batchFile.readyHelp":
-      "Committed text you have not signed off, including lines someone else already checked.",
+      "Saved text you have not signed off, including lines someone else already checked.",
     "editor.batchFile.aiDrafts": plural({
       one: "{count} AI draft nobody has checked",
       other: "{count} AI drafts nobody has checked",
@@ -1000,7 +998,7 @@ export const editor = defineNamespace({
     "editor.timeline.title": "Timeline",
     "editor.timeline.followPlayhead": "Follow playhead",
     "editor.timeline.changeVideo": "Change film",
-    "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
+    "editor.timeline.coreVideoPrompt": "Film URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
     "editor.timeline.zoomOut": "Zoom out",
     "editor.timeline.laneSubtitle": "Subtitles",
@@ -1191,8 +1189,8 @@ export const editor = defineNamespace({
     "editor.history.stepAddFolder": "Make folder",
     "editor.history.stepRenameTrack": "Rename track",
     "editor.history.stepTrackColour": plural({
-      one: "Change {count} track colour",
-      other: "Change {count} track colours",
+      one: "Change {count} track color",
+      other: "Change {count} track colors",
     }),
     "editor.history.stepMoveTrack": plural({
       one: "Move {count} track",
@@ -1211,7 +1209,7 @@ export const editor = defineNamespace({
       one: "Change {count} project setting",
       other: "Change {count} project settings",
     }),
-    "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone any more",
+    "editor.history.skippedUnavailable": "Skipped “{step}”: it can't be undone anymore",
     "editor.history.blockedElsewhere": "Open “{file}” to undo “{step}”",
     "editor.history.blockedElsewhereNoName": "Open the file it was made in to undo “{step}”",
     "editor.history.undonePartly": plural({
@@ -1236,7 +1234,7 @@ export const editor = defineNamespace({
     "editor.history.undoToHere": "Undo to here",
     "editor.history.reasonChanged": "Someone changed it afterwards, so it was left as they made it.",
     "editor.history.reasonGone": "What it changed no longer exists.",
-    "editor.history.reasonUnavailable": "This step can't be undone any more.",
+    "editor.history.reasonUnavailable": "This step can't be undone anymore.",
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
     // Decision 11 (2026-10-20): one history per person and project, on every device.
     "editor.history.reasonApproved": "{name} approved it afterwards, so it was left as it is.",
@@ -1393,7 +1391,7 @@ export const editor = defineNamespace({
     "editor.timeline.linkConfirmHeardSide": "Heard",
     "editor.timeline.linkConfirmGo": "Pair them",
     "editor.timeline.unlinkConfirmGo": "Break the pairing",
-    "editor.timeline.noSpeechHere": "No speech here · {seconds}s",
+    "editor.timeline.noSpeechHere": "No speech here · {seconds} s",
     "editor.timeline.takeLoading": "Loading this clip's audio…",
     "editor.timeline.takeSaving": "Saving — kept safe on this device until it syncs",
     "editor.timeline.recordOverStretch": "Record over this stretch",
@@ -1490,7 +1488,7 @@ export const editor = defineNamespace({
     "editor.station.end": "End",
     "editor.station.typeStartTip": "Click to type the start time, to 0.01 s",
     "editor.station.typeEndTip": "Click to type the end time, to 0.01 s",
-    "editor.station.typeHelp": "Type a time to 0.01 s · Return sets it · Esc cancels",
+    "editor.station.typeHelp": "Type a time to 0.01 s · Enter sets it · Esc cancels",
     "editor.station.set": "Set",
     "editor.station.badTime": "Type a time like 0:01.25 or 1.25.",
     "editor.station.zoomIn": "Zoom in (=)",
@@ -1545,7 +1543,7 @@ export const editor = defineNamespace({
     "editor.station.libraryEmpty": "No other recordings in this file yet.",
     "editor.station.fromFile": "From a file…",
     "editor.station.recordNow": "Record now",
-    "editor.station.recordLater": "Recording straight into an insert comes next.",
+    "editor.station.recordLater": "Recording straight into an insert is coming soon.",
     "editor.station.recordFlagIn": "Recording in {n}",
     "editor.station.recordFlagReady": "Get ready",
     "editor.station.recordFlag": "Recording at {time}",
@@ -1935,17 +1933,17 @@ export const editor = defineNamespace({
     "editor.row.addLineAbove": "Add a line above",
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
-    "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.draftGenerating": "{cellRef}: Translating…",
     "editor.row.aligningStyles": "{cellRef}: Aligning styles…",
     "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
     "editor.assurance.validatedWithInfractions":
       "Validation is authoritative, but automatic checks still found an issue.",
     "editor.assurance.validatedClean":
-      "Human review is complete. Automatic evidence remains available as context.",
+      "Human review is complete. Automatic check results remain available as context.",
     "editor.assurance.lowerSupport":
-      "Lower local support — review terminology and context closely.",
+      "Lower health — review terminology and context closely.",
     "editor.assurance.betterSupport":
-      "Better local support — human review is still required.",
+      "Better health — human review is still required.",
 
     // AQU-646, keyed 2026-08-20: the audio-VTT import dialog, the character-
     // sheet import dialog, the character-check drawer and the pairing drawer.
@@ -2038,8 +2036,7 @@ export const editor = defineNamespace({
     // — Extract subtitles dialog (AQU-1139) ————————————————————
     "editor.timeline.subtitleSourceTitle": "Extract subtitles",
     "editor.timeline.subtitleSourceDescription":
-      "Read the subtitle text and timings out of a sidecar file into " +
-      "\"{fileName}\", so the clip already on it has something to translate.",
+      "Read the subtitle text and timings from a subtitle file into \"{fileName}\", so the clip already on it has something to translate.",
     "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
     "editor.timeline.subtitleSourcePickHint":
       "The .vtt, .srt or .sbv file that came with the clip.",
@@ -2273,7 +2270,7 @@ export const editor = defineNamespace({
       "This edit changed the protected IDML document structure. Undo it or " +
       "re-import the IDML.",
     "editor.idml.caretOutsideSlot":
-      "Place the caret inside an InDesign text slot before adding a line break.",
+      "Place the cursor inside an InDesign text slot before adding a line break.",
     "editor.idml.invalidMetadataError":
       "This IDML cell has invalid formatting metadata and must be repaired or re-imported.",
     "editor.idml.missingSourceHtmlError":
@@ -2429,8 +2426,8 @@ export const editor = defineNamespace({
       other: "{count} open comments",
     }),
     "editor.comments.openAria": plural({
-      one: "{count} open comment — open comments",
-      other: "{count} open comments — open comments",
+      one: "{count} open comment — view comments",
+      other: "{count} open comments — view comments",
     }),
 
     // — Table header, lane switcher and whole-file empty states ——————
@@ -2487,9 +2484,9 @@ export const editor = defineNamespace({
     "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
     "editor.cellMenu.startLabel": "Start time",
     "editor.cellMenu.endLabel": "End time",
-    "editor.cellMenu.betweenHint": "Lines either side start {from} and {to}",
-    "editor.cellMenu.afterHint": "The line before starts {from}",
-    "editor.cellMenu.beforeHint": "The line after starts {to}",
+    "editor.cellMenu.betweenHint": "Lines on either side start at {from} and {to}",
+    "editor.cellMenu.afterHint": "The line before starts at {from}",
+    "editor.cellMenu.beforeHint": "The line after starts at {to}",
     "editor.cellMenu.badTime": "Type a time like 1:02.5",
     "editor.cellMenu.invertedTimes": "The end has to come after the start.",
     "editor.cellMenu.startsBeforePrevious":
@@ -2545,16 +2542,14 @@ export const editor = defineNamespace({
     "editor.source.editText": "Edit source text",
     "editor.source.multiLaneTitle": "Change the source every language lane shares?",
     "editor.source.multiLaneBody":
-      "All language lanes share this source. Changing it marks each language lane's translation of " +
-      "this line for review. The words stay, and so does the approval.",
+      "All language lanes share this source. Changing it marks each language lane's translation of this line for review. The words stay, and so does the validation.",
     "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
     "editor.source.placeholder": "Source text…",
     "editor.source.formattingBadge": "formatting",
     "editor.source.idmlProtected":
-      "IDML source text is protected because changing it would invalidate the " +
-      "original package locator.",
+      "IDML source text is protected because changing it would break the link to the original InDesign layout.",
     "editor.source.formattingLossTooltip":
       "Source has inline formatting that the target does not preserve. Formatting " +
       "will be lost on export.",
@@ -2563,11 +2558,11 @@ export const editor = defineNamespace({
     "editor.ai.draftBadge": "AI draft · review required",
     "editor.ai.draftBadgeAria": "AI draft — human review required",
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
-    "editor.ai.generatingTranslation": "Generating translation…",
+    "editor.ai.generatingTranslation": "Translating…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
     "editor.ai.setUpToEnable": "Set up AI to enable",
     "editor.ai.serviceUnavailable": "AI service unavailable — try again shortly",
-    "editor.ai.generating": "Generating…",
+    "editor.ai.generating": "Translating…",
     "editor.ai.translateWithAi": "Translate with AI",
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
@@ -2720,14 +2715,14 @@ export const editor = defineNamespace({
     }),
     // Decision 7 (Sam, 2026-10-22): a cut take takes no vote of its own.
     "editor.recordingTab.piecesApproved": plural({
-      one: "{approved} of {count} piece approved",
-      other: "{approved} of {count} pieces approved",
+      one: "{approved} of {count} piece validated",
+      other: "{approved} of {count} pieces validated",
     }),
     // Slice 3A (Sam, Oct 29): the same count, shorter, for a row too narrow
     // for the whole sentence — first without "pieces", then as a fraction.
     "editor.recordingTab.piecesApprovedShort": plural({
-      one: "{approved} of {count} approved",
-      other: "{approved} of {count} approved",
+      one: "{approved} of {count} validated",
+      other: "{approved} of {count} validated",
     }),
     "editor.recordingTab.piecesApprovedTiny": "{approved}/{count}",
     "editor.recordingTab.matches": "Matches the text",
@@ -2846,8 +2841,8 @@ export const editor = defineNamespace({
     "editor.outbox.queuedLabel": plural({ other: "Queued {count}" }),
     "editor.outbox.syncedLabel": "Synced",
     "editor.outbox.failedTooltip": plural({
-      one: "{count} change could not be synced after repeated attempts. Click to inspect.",
-      other: "{count} changes could not be synced after repeated attempts. Click to inspect.",
+      one: "{count} change could not be synced after repeated attempts. Click to review.",
+      other: "{count} changes could not be synced after repeated attempts. Click to review.",
     }),
     "editor.outbox.backlogTooltip":
       "Could not sync changes to the server. Edits are still saved locally. Click to review.",
@@ -2873,11 +2868,11 @@ export const editor = defineNamespace({
       other: "This source text appears {count} times in this file. Validating one fills the rest.",
     }, "count"),
     "editor.repetition.applied": plural({
-      one: "Applied to {count} repeated segment",
-      other: "Applied to {count} repeated segments",
+      one: "Applied to {count} repeated row",
+      other: "Applied to {count} repeated rows",
     }, "count"),
     "editor.repetition.undo": "Undo",
-    "editor.repetition.undoFailed": "Couldn't undo the propagation.",
+    "editor.repetition.undoFailed": "Couldn't undo the changes to repeated rows.",
     // AQU-1486 — "Validate all repeated rows, or just this one?"
     "editor.repetition.choiceTitle": "Validate the repeated rows too?",
     "editor.repetition.choiceSingleBody": plural({

@@ -13,10 +13,10 @@ describe("AccessModelLegend", () => {
   it("shows legend body when open=true", () => {
     render(<AccessModelLegend open={true} onToggle={() => {}} />)
     expect(screen.getByText("Direct")).toBeInTheDocument()
-    expect(screen.getByText("Via group")).toBeInTheDocument()
+    expect(screen.getByText("Via team")).toBeInTheDocument()
     expect(screen.getByText("Org-wide")).toBeInTheDocument()
     expect(screen.queryByText("Creator")).not.toBeInTheDocument()
-    expect(screen.getByText(/effective role = max-wins/i)).toBeInTheDocument()
+    expect(screen.getByText(/effective role: highest role wins/i)).toBeInTheDocument()
   })
 
   it("hides legend body when open=false", () => {

@@ -48,7 +48,7 @@ describe("GlossaryRow", () => {
   it("offers Accept/Dismiss for a suggested (draft) concept", () => {
     const h = noopHandlers()
     render(<GlossaryRow concept={c({ status: "draft" })} canManage {...h} />)
-    fireEvent.click(screen.getByRole("button", { name: /accept/i }))
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }))
     expect(h.onAccept).toHaveBeenCalledWith("c1")
   })
 

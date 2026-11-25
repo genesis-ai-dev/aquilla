@@ -42,6 +42,10 @@ jobs:
       NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
       NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
       NEON_DEV_PG_PASSWORD: ${{ secrets.NEON_DEV_PG_PASSWORD }}
+      # Public build-time values for the Google Drive import (Picker). Vite
+      # inlines them into the SPA; without them the panel shows "not configured".
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_API_KEY: ${{ vars.VITE_GOOGLE_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

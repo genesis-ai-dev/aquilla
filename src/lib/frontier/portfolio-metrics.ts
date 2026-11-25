@@ -105,16 +105,18 @@ export function portfolioMeasure<L extends LaneActivity>(
  */
 export function portfolioText<L extends LaneActivity>(
   p: { totalCells: number; filledCells: number; validatedCells: number; lanes?: readonly L[] | null },
-): { total: number; filled: number } {
-  if (!portfolioCountsByLanguage(p)) return { total: p.totalCells, filled: p.filledCells }
+): { total: number; filled: number; validated: number } {
+  if (!portfolioCountsByLanguage(p)) return { total: p.totalCells, filled: p.filledCells, validated: p.validatedCells }
   let total = 0
   let filled = 0
+  let validated = 0
   for (const lane of targetLanes(p)) {
     if (!laneCountsText(lane.delivers)) continue
     total += lane.totalCells ?? 0
     filled += lane.filledCells ?? 0
+    validated += lane.validatedCells ?? 0
   }
-  return { total, filled }
+  return { total, filled, validated }
 }
 
 /**

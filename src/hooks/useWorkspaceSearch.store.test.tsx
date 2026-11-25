@@ -28,13 +28,20 @@ const hit = (cellId: string) => ({
   rank: 0.1,
 })
 
+/** What the fetcher resolves: the rows, and a total that defaults to all of them. */
+const page = (results: ReturnType<typeof hit>[], total = results.length, totalIsLowerBound = false) => ({
+  results,
+  total,
+  totalIsLowerBound,
+})
+
 beforeEach(() => {
   vi.mocked(fetchProjectSearch).mockReset()
 })
 
 describe("useWorkspaceSearchController (AQU-2654)", () => {
   it("a search redraws the subscribed surface and never the owner", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1"), hit("c2")])
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([hit("c1"), hit("c2")]))
     let ownerRenders = 0
     let controller!: WorkspaceSearchController
     function Owner() {
@@ -62,8 +69,27 @@ describe("useWorkspaceSearchController (AQU-2654)", () => {
     expect(ownerRenders).toBe(rendersBefore)
   })
 
+  it("asks the server for the one file a file-scoped search names", async () => {
+    // Narrowing in the browser was not enough: the server had already cut the
+    // project-wide list to one page, so a file's hits could all be on page 2.
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([hit("c1")]))
+    const { result } = renderHook(() =>
+      useWorkspaceSearchController({ projectId: "p1", getToken: async () => "jwt" }),
+    )
+    await act(async () => {
+      await result.current.search("器皿", { fileId: "f1" })
+    })
+    expect(vi.mocked(fetchProjectSearch).mock.calls[0][2]).toMatchObject({ fileId: "f1" })
+    expect(result.current.store.getSnapshot().results.map((r) => r.cellId)).toEqual(["c1"])
+
+    await act(async () => {
+      await result.current.search("器皿")
+    })
+    expect(vi.mocked(fetchProjectSearch).mock.calls[1][2].fileId).toBeUndefined()
+  })
+
   it("lands a finished search as one transition: results, ready and loading together", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1")])
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([hit("c1")]))
     const { result } = renderHook(() =>
       useWorkspaceSearchController({ projectId: "p1", getToken: async () => "jwt" }),
     )
@@ -82,6 +108,24 @@ describe("useWorkspaceSearchController (AQU-2654)", () => {
     ])
   })
 
+  // AQU-2732: the list is cut at the limit asked for. The total beside it is
+  // what lets a surface say "50 of 63" instead of "50 results".
+  it("carries the total beside the cut list, and asks for the limit it was given", async () => {
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([hit("c1"), hit("c2")], 63))
+    const { result } = renderHook(() =>
+      useWorkspaceSearchController({ projectId: "p1", getToken: async () => "jwt" }),
+    )
+    await act(async () => {
+      await result.current.search("temple", { limit: 500 })
+    })
+    expect(vi.mocked(fetchProjectSearch).mock.calls[0][2]).toMatchObject({ limit: 500 })
+    expect(result.current.store.getSnapshot()).toMatchObject({ total: 63, totalIsLowerBound: false })
+    expect(result.current.store.getSnapshot().results).toHaveLength(2)
+
+    act(() => result.current.clear())
+    expect(result.current.store.getSnapshot()).toMatchObject({ results: [], total: 0 })
+  })
+
   it("clearing an already-empty result list announces nothing", () => {
     const { result } = renderHook(() =>
       useWorkspaceSearchController({ projectId: "p1", getToken: async () => "jwt" }),
@@ -93,7 +137,7 @@ describe("useWorkspaceSearchController (AQU-2654)", () => {
   })
 
   it("drops the previous project's hits when the project changes", async () => {
-    vi.mocked(fetchProjectSearch).mockResolvedValue([hit("c1")])
+    vi.mocked(fetchProjectSearch).mockResolvedValue(page([hit("c1")]))
     const { result, rerender } = renderHook(
       ({ projectId }) => useWorkspaceSearch({ projectId, getToken: async () => "jwt" }),
       { initialProps: { projectId: "p1" } },

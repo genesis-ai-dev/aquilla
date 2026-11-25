@@ -83,6 +83,7 @@ function replayableMigration(file: string): string {
 const RLS_MIGRATIONS = [
   "0034_rls_backstop.sql",
   "0083_org_wide_access_floor.sql",
+  "0207_creator_owner_grant.sql",
   "0074_contextual_run_events.sql",
   "0136_contextual_run_traces_rls.sql",
 ] as const
@@ -590,16 +591,16 @@ describe("app_user_can_access_project() SQL function", () => {
     expect(maintainer?.ok).toBe(true)
   })
 
-  it("Path 4 — creator fallback (projects.created_by = user_id) → TRUE", async () => {
+  it("creator without an Owner grant → FALSE (AQU-2357)", async () => {
     await seedUser(104, "creator-user")
-    await seedProject("proj-creator", 104) // this user created it
+    await seedProject("proj-creator", 104) // created_by is history, not access
 
     const db = makeShim().withUser(104)
     const r = await db
       .prepare("SELECT app_user_can_access_project($1) AS ok")
       .bind("proj-creator")
       .first<{ ok: boolean }>()
-    expect(r?.ok).toBe(true)
+    expect(r?.ok).toBe(false)
   })
 
   it("Foreign project — no access path → FALSE", async () => {
@@ -664,7 +665,10 @@ describe("project-scoped query visibility (shim-level, function-based)", () => {
   it("member can select their project's settings row; non-member cannot (via function check)", async () => {
     await seedUser(107, "settings-member")
     await seedUser(207, "settings-outsider")
-    await seedProject("proj-settings-rls", 107) // 107 is creator → has access
+    await seedProject("proj-settings-rls", 107)
+    await pg.query(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-settings-rls', 107, 700)",
+    )
 
     await pg.query(
       "INSERT INTO project_settings (project_id, settings) VALUES ('proj-settings-rls', '{\"theme\":\"dark\"}') ON CONFLICT DO NOTHING",

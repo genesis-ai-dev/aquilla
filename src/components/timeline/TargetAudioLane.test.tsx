@@ -1304,17 +1304,13 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     const rec = () => screen.getByTestId("tl-target-empty-c9-record")
     const speech = () => screen.getByTestId("tl-target-empty-c9-speech")
 
-    // Review S2: the panel's hints name what is on the timeline now — the
-    // grey sparkle beside the mic on an empty line — not the old empty clip,
-    // and not the colour ✨ emoji, which is not what the person sees.
-    it("the Make speech panel's hints point at the sparkle, not an empty clip", () => {
-      for (const key of ["audio.makeSpeech.ghostHint", "audio.makeSpeech.shiftHint"] as const) {
-        const text = String(audioStrings.keys[key])
-        expect(text).not.toMatch(/clip/i)
-        expect(text).not.toContain("✨")
-        expect(text).toMatch(/sparkle/)
-        expect(text).toMatch(/empty line/)
-      }
+    // Review S2: the panel's hint names what is on the timeline now — lines —
+    // not the old empty clip, and not the colour ✨ emoji.
+    it("the Make speech panel's hint points at timeline lines, not an empty clip", () => {
+      const text = String(audioStrings.keys["audio.makeSpeech.shiftHint"])
+      expect(text).not.toMatch(/clip/i)
+      expect(text).not.toContain("✨")
+      expect(text).toMatch(/lines on the timeline/)
     })
 
     // Review N7: in Amharic, the narrow line's button and its Record item use

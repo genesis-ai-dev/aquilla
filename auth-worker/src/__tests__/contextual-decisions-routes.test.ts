@@ -56,11 +56,8 @@ async function seedBareUser(): Promise<string> {
  *  seedBareUser, this proves the role gate itself rejects a real member at
  *  too low a level, not just an unrelated stranger.
  *
- *  Owned by a SEPARATE user: resolveProjectRole gives the project's
- *  `created_by` an implicit level-700 "creator" contribution that wins over
- *  any lower project_members row (max-wins), so a viewer who also created
- *  the project would silently resolve to owner-level and this test would
- *  prove nothing about the gate. */
+ *  Owned by a SEPARATE user so this caller's project_members row is the only
+ *  grant they hold. created_by is history and does not raise their role. */
 async function seedProjectViewer(projectId: string): Promise<string> {
   const ownerId = ++userSeq
   await seedUser(ownerId, `owner-${ownerId}`)

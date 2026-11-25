@@ -23,6 +23,20 @@ describe("fetchProjectSearch", () => {
     expect(url.startsWith("https://sync.example.com/api/v1/projects/proj-a/search?")).toBe(true)
   })
 
+  it("sends the file to search within, and leaves it off for a project search", async () => {
+    global.fetch = vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    ) as unknown as typeof fetch
+    await fetchProjectSearch("proj-a", "器皿", { fileId: "file-2ki" }, "jwt")
+    await fetchProjectSearch("proj-a", "器皿", {}, "jwt")
+    const [scoped, project] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => new URL(call[0] as string).searchParams,
+    )
+    expect(scoped.get("fileId")).toBe("file-2ki")
+    expect(scoped.get("q")).toBe("器皿")
+    expect(project.has("fileId")).toBe(false)
+  })
+
   it("sends match case, whole word, and regexp only when they are on", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({ results: [] }), { status: 200 }),
@@ -39,7 +53,7 @@ describe("fetchProjectSearch", () => {
     expect(url).toContain("regexp=1")
   })
 
-  it("returns the results array on a 200 response", async () => {
+  it("returns the page and how many matched in all", async () => {
     const results = [
       {
         cellId: "c1",
@@ -50,11 +64,24 @@ describe("fetchProjectSearch", () => {
         rank: -3.2,
       },
     ]
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ results }), { status: 200 }),
+    global.fetch = vi.fn().mockImplementation(async (url: string) =>
+      new Response(
+        JSON.stringify(url.includes("q=cut") ? { results, total: 63, totalIsLowerBound: false } : { results }),
+        { status: 200 },
+      ),
     ) as unknown as typeof fetch
-    const out = await fetchProjectSearch("proj-a", "o", {}, "jwt")
-    expect(out).toEqual(results)
+    expect(await fetchProjectSearch("proj-a", "cut", {}, "jwt")).toEqual({
+      results,
+      total: 63,
+      totalIsLowerBound: false,
+    })
+    // A sync-worker that predates `total` sends rows only. They are then all
+    // that is known to have matched.
+    expect(await fetchProjectSearch("proj-a", "old", {}, "jwt")).toEqual({
+      results,
+      total: 1,
+      totalIsLowerBound: false,
+    })
   })
 
   it("throws SearchReadError on non-2xx", async () => {

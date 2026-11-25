@@ -49,6 +49,10 @@ async function owner(orgSettings?: Record<string, unknown>) {
   await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Omni Org', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
     .bind(projectId).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(projectId).run()
   if (orgSettings) {
     await env.AQUILLA_PG.prepare("INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 0, 1)")
       .bind(JSON.stringify(orgSettings)).run()
@@ -242,6 +246,9 @@ describe("Omnilingual billing", () => {
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+    ).bind(projectId).run()
     stubProviders({ text: "ami", words: [{ text: "ami", start: 0, end: 1 }], gpuSeconds: 10, gpu: "NVIDIA L40S" })
     const response = await app.request("http://127.0.0.1/api/v1/audio/transcriptions", {
       method: "POST",
@@ -264,6 +271,9 @@ describe("Omnilingual billing — edge replies", () => {
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+    ).bind(projectId).run()
     stubProviders(reply)
     const response = await app.request("http://127.0.0.1/api/v1/audio/transcriptions", {
       method: "POST",
@@ -581,6 +591,9 @@ describe("omni-fast", () => {
     expect((await paid.send()).status).toBe(200)
     await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Omni', 1, 1)")
       .bind(projectId).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+    ).bind(projectId).run()
     const calls = stubOldService()
     const response = await app.request("http://127.0.0.1/api/v1/audio/transcriptions/warm", {
       method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ projectId, model: "omni-fast" }),

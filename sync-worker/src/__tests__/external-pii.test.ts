@@ -54,6 +54,11 @@ async function seedProject(testDb: TestDb) {
   await testDb.pg.query(
     `INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-a', 'Ukrainian BSB', 10, 1)`,
   )
+  // AQU-2357: creation writes this Owner row. created_by is history and
+  // grants nothing, so a credential for user 1 cannot read without it.
+  await testDb.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-a', 1, 700, 1)`,
+  )
   await testDb.pg.query(
     `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', 'proj-a', 'Genesis', 'evt-file-1')`,
   )
@@ -172,6 +177,9 @@ describe("AQU-1180 — agent-facing PII scrub", () => {
     it("mints different pseudonyms for the same human in different projects", async () => {
       await testDb.pg.query(
         `INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-b', 'Other', 10, 1)`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-b', 1, 700, 1)`,
       )
       await testDb.pg.query(
         `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-y', 'proj-b', 'Exodus', 'evt-file-2')`,

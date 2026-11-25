@@ -96,26 +96,32 @@ describe("AQU-435 — org-wide visibility floor (list query)", () => {
     expect(owner.map((p) => p.id).sort()).toEqual(["bible-a", "bible-b"])
   })
 
-  it("a Contributor still sees their own personal project (creator path)", async () => {
+  it("a Contributor still sees a personal project they hold an Owner grant on", async () => {
     await seed()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('personal', 'My Draft', NULL, 2)",
     ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('personal', 2, 700, 2)",
+    ).run()
 
     const projects = await listProjects("contributor")
     expect(projects.map((p) => p.id)).toEqual(["personal"])
-    expect(projects[0].role).toMatchObject({ level: 700, source: "creator" })
+    expect(projects[0].role).toMatchObject({ level: 700, source: "override" })
   })
 
-  it("a Contributor-created ORG project also stays visible to them (creator path)", async () => {
+  it("a Contributor stays on an org project through their Owner grant", async () => {
     await seed()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('own-org-proj', 'Their Project', 1, 2)",
     ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('own-org-proj', 2, 700, 2)",
+    ).run()
 
     const projects = await listProjects("contributor", "?orgId=1")
     expect(projects.map((p) => p.id)).toEqual(["own-org-proj"])
-    expect(projects[0].role).toMatchObject({ level: 700, source: "creator" })
+    expect(projects[0].role).toMatchObject({ level: 700, source: "override" })
   })
 })
 

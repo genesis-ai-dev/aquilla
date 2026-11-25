@@ -3,8 +3,9 @@
 // prefix. The copies share Settings.xml's <Guid>, and Paratext's Send/Receive
 // brings each one up to date, but only when that copy's own app runs it.
 // Between runs the copies differ, so Aquilla treats them as ONE project with
-// ONE live copy: the folder its mirror reads from and writes to. The others
-// are shown beside it and never get a mirror of their own.
+// ONE live copy: the folder its mirror writes to. The others are shown beside
+// it and never get a mirror of their own, but the mirror reads them too
+// (copy-inbound.ts), so an edit made in any of the apps shows up at once.
 
 import type { BridgeProject } from "./use-paratext-discovery"
 

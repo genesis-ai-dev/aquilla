@@ -1,9 +1,8 @@
 /**
- * AQU-1352 §3.6 (AQU-1072): org "People & access" — who can do what, where.
- * Two views of GET /api/v2/orgs/:orgId/access (tree by scope, one row per
- * person) and a CSV export built from the same payload. The read, and the
- * org-switch rule that keeps one org's grants off another org's page, live in
- * `useOrgAccess` (AQU-2317).
+ * AQU-1352 §3.6: org "People & access". AQU-2318 makes Places the lens: one
+ * selected place, the grants set there, and the ancestor grants that reach it.
+ * The People tab and the CSV stay the per-person view of the same payload.
+ * The read, and the org-switch rule, live in `useOrgAccess`.
  */
 import { useState } from "react"
 import { Download } from "lucide-react"
@@ -11,7 +10,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { AccessPeopleView } from "@/components/org/access/AccessPeopleView"
-import { AccessTreeView } from "@/components/org/access/AccessTreeView"
+import { PlacesLens } from "@/components/org/access/PlacesLens"
 import { orgAccessCsv } from "@/components/org/access/org-access-data"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
@@ -26,7 +25,7 @@ export function OrgAccessPage() {
   const t = useT()
   const { activeOrg } = useActiveOrg()
   const state = useOrgAccess()
-  const [view, setView] = useState<"tree" | "people">("tree")
+  const [view, setView] = useState<"places" | "people">("places")
 
   const title = t("org.access.page.title")
   const exportCsv = () => {
@@ -56,13 +55,13 @@ export function OrgAccessPage() {
           ) : state.status === "error" ? (
             <p role="alert" className="text-sm text-muted-foreground">{t("org.access.page.loadError")}</p>
           ) : (
-            <Tabs value={view} onValueChange={(v) => setView(v === "people" ? "people" : "tree")}>
+            <Tabs value={view} onValueChange={(v) => setView(v === "people" ? "people" : "places")}>
               <TabsList>
-                <TabsTrigger value="tree">{t("org.access.page.treeView")}</TabsTrigger>
+                <TabsTrigger value="places">{t("org.access.places.tab")}</TabsTrigger>
                 <TabsTrigger value="people">{t("org.overviewLaneTable.peopleColumn")}</TabsTrigger>
               </TabsList>
-              <TabsContent value="tree" className="mt-3">
-                <AccessTreeView tree={state.data.tree} />
+              <TabsContent value="places" className="mt-3">
+                <PlacesLens tree={state.data.tree} />
               </TabsContent>
               <TabsContent value="people" className="mt-3">
                 {state.org && <AccessPeopleView people={state.data.people} org={state.org} />}

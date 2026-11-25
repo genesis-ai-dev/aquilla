@@ -42,6 +42,12 @@ async function seedProject(): Promise<void> {
   )
     .bind(PROJECT)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  )
+    .bind(PROJECT)
+    .run()
   for (const [userId, level] of [
     [2, 400],
     [3, 400],

@@ -145,6 +145,12 @@ describe("POST /api/v2/projects org gating", () => {
     await seedOrg()
     const res = await create("anna", { id: "p-new", name: "New", orgId: 1 })
     expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { level: number; name: string; source: string } }
+    expect(body.role).toMatchObject({ level: 700, source: "override" })
+    const grant = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = 'p-new' AND user_id = 2",
+    ).first<{ role_level: number }>()
+    expect(grant?.role_level).toBe(700)
     const row = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = 'p-new'").first<{ org_id: number }>()
     expect(row?.org_id).toBe(1)
   })

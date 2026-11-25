@@ -98,6 +98,11 @@ async function setUp(consumes: "source" | "target" = "source", gate: "head" | "v
      VALUES ($1, 'Downstream', 1, $2, 'live', $3, $4, 0)`,
     [DOWNSTREAM, UPSTREAM, consumes, gate],
   )
+  // AQU-2357: creation writes these Owner rows. created_by grants nothing.
+  await t.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1), ($2, 1, 700, 1)`,
+    [UPSTREAM, DOWNSTREAM],
+  )
   await post(t, { id: "evt-file", kind: "file.create", parentId: null, payload: { name: "LUK.usfm", fileType: "codex" } })
   return t
 }

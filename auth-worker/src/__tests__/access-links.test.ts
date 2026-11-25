@@ -10,12 +10,27 @@ function jwtSub(token: string): string {
   return payload.sub as string
 }
 
-async function seedProjectWithCreator(projectId: string, creatorId: number, creator: string) {
+async function seedProjectWithCreator(
+  projectId: string,
+  creatorId: number,
+  creator: string,
+  options?: { grantOwner?: boolean },
+) {
   await seedUser(creatorId, creator)
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
   )
     .bind(projectId, "Test", creatorId)
+    .run()
+  // AQU-2357: creation writes this Owner row. created_by is history and
+  // grants nothing, so a fixture that stops at the project row has no access.
+  // The footprint test opts out: created_by still marks an account that has
+  // created a project, and that mark is not a role.
+  if (options?.grantOwner === false) return
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?)",
+  )
+    .bind(projectId, creatorId, creatorId)
     .run()
 }
 
@@ -151,7 +166,9 @@ describe("POST /api/v2/access-links (mint)", () => {
 
   it("rejects a target who owns another project through the creator fallback alone", async () => {
     await seedProjectWithCreator("proj-1", 1, "alice")
-    await seedProjectWithCreator("proj-theirs", 2, "bob") // no project_members row for bob
+    // No Owner row. created_by grants bob nothing, and it is still a
+    // footprint: this account created a project, so it is not a fresh translator.
+    await seedProjectWithCreator("proj-theirs", 2, "bob", { grantOwner: false })
 
     const res = await mintLink("proj-1", "alice", { projectId: "proj-1", userId: 2, pin: "4821" })
     expect(res.status).toBe(403)

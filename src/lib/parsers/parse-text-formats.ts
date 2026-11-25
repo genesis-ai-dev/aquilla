@@ -21,6 +21,7 @@ import {
 } from "./subtitle"
 import { parseCsvBilingual } from "./csv-bilingual"
 import { parseUsfmLossless } from "./usfm-lossless"
+import { projectUsfmCellText } from "./usfm-content-only"
 import { extractJsonStrings } from "./json-i18n"
 import { extractPoStrings } from "./po"
 import { extractPropertiesStrings } from "./properties"
@@ -73,7 +74,25 @@ export interface TextParseRequest {
 
 /** Parse one USFM book section into translatable cells (verse bodies + heading/
  *  title/intro paratext), in document order. Shared by plain-USFM import and the
- *  per-book split below. Moved verbatim from import.ts. */
+ *  per-book split below. Moved verbatim from import.ts.
+ *
+ *  AQU-2743: cell text is the CONTENT-ONLY projection of the span, never the
+ *  raw USFM. `projectUsfmCellText` is applied here — in the one function every
+ *  USFM entry point goes through (the in-app "Upload files" importer, the
+ *  Paratext per-book split, and the Agent API's server-side parse, which calls
+ *  this module's `parseTextFormat`) — so a browser import and an API import of
+ *  the same bytes produce the same cells by construction. Before this, only
+ *  the server path cleaned (AQU-1283) and the browser path stored raw markers:
+ *  footnotes, `\wj`, `\b`/`\li1`/`\q1` and CRLF all landed in the cell
+ *  value, where agents drafting from `value` and anything that is not the
+ *  SPA's display transform read them as scripture text.
+ *
+ *  Notes (footnotes, endnotes, crossrefs) are not dropped: they move to
+ *  `metadata.usfmNotes` with their original span in `raw`, which is what the
+ *  exporter re-attaches to a translated verse (AQU-1295, db/shared/usfm-notes).
+ *  The raw bytes are still kept as the file's source blob, so export round-trip
+ *  stays byte-identical (docs/decisions/0002) — it serializes from those bytes,
+ *  not from cell text. */
 export function usfmSectionToStrings(
   section: string,
   opts?: { excludeFrontMatter?: boolean },
@@ -98,7 +117,7 @@ export function usfmSectionToStrings(
     ...doc.verses.map((v) => ({
       order: v.textStart,
       ref: v.ref,
-      text: v.text.trim(),
+      ...projectUsfmCellText(v.text),
       section: `${bookId} ${v.chapter}`,
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
@@ -111,7 +130,7 @@ export function usfmSectionToStrings(
     ...doc.headings.map((h) => ({
       order: h.textStart,
       ref: h.ref,
-      text: h.text.trim(),
+      ...projectUsfmCellText(h.text),
       section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
       type: h.kind,
       paragraphStart: undefined as boolean | undefined,
@@ -129,6 +148,7 @@ export function usfmSectionToStrings(
     type: s.type,
     ...(s.paragraphStart ? { paragraphStart: true } : {}),
     ...(s.paragraphMarker ? { paragraphMarker: s.paragraphMarker } : {}),
+    ...(s.usfmNotes ? { metadata: { usfmNotes: s.usfmNotes } } : {}),
   }))
   return { bookId, strings, duplicateRefs, structureFindings: checkUsfmStructure(section) }
 }

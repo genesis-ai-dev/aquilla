@@ -46,6 +46,12 @@ beforeEach(async () => {
   )
     .bind(PROJECT)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  )
+    .bind(PROJECT)
+    .run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
       ('ln-src', ?, 'source', 'Greek', NULL, NULL, NULL, 0),

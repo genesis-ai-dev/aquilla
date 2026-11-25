@@ -32,9 +32,17 @@
 // it never imported would be a guess. Its inline markers are still typeset. A
 // scripture file imported before AQU-2184 has `paragraphStart` (that predates
 // this) but no marker, so its verses still flow in their paragraphs as prose;
-// only the poetry level of a paragraph's FIRST line is missing, and its
-// continuation lines, which carry their own markers in the cell text, indent
-// as they should.
+// only the poetry level of a paragraph's FIRST line is missing.
+//
+// AQU-2743 — where the markup now is. A USFM import stores the READING in a
+// cell and parks its footnotes in `metadata.usfmNotes`, so there are two kinds
+// of cell on this page and both have to read well:
+//   * imported before AQU-2743: the markers are in the text, and `cellLines`
+//     renders notes, character styles and each line's poetry level from them.
+//   * imported after: the text is clean, and the notes come off the metadata
+//     (`withParkedNotes`) as a marker at the end of their own verse plus the
+//     chapter's notes list. A line break inside a verse survives as a line;
+//     its poetry LEVEL and inline character styles do not — AQU-2746.
 //
 // Inline USFM markers never reach the page raw, and every piece of cell text
 // is HTML-escaped — a translation that reads `<script>`, or a footnote whose
@@ -57,6 +65,7 @@ import {
   type UsfmLead,
   type UsfmLeadBlock,
 } from "../../../../db/shared/usfm-layout"
+import { readUsfmNotes } from "../../../../db/shared/usfm-notes"
 
 export { escapeHtml }
 
@@ -92,7 +101,10 @@ export interface HtmlBackLink {
 }
 
 /** The only fields the page reads; `CellData` satisfies it. */
-export type HtmlExportCell = Pick<CellData, "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker"> &
+export type HtmlExportCell = Pick<
+  CellData,
+  "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker" | "metadata"
+> &
   Parameters<typeof effectiveSourceText>[0]
 
 export { hasBibleVerses, isBibleBookFile } from "@/lib/export/bible-book"
@@ -292,7 +304,7 @@ function entryFor(cell: HtmlExportCell, lead: UsfmLead = splitUsfmLead(cell.tran
   const raw = untranslated ? effectiveSourceText(cell).trim() : translated
   if (!raw) return null
   const text = cellLines(raw)
-  const lines = splitPlainLines(text.lines)
+  const lines = withParkedNotes(splitPlainLines(text.lines), cell)
   if (lines.length === 0) return null
   // A USFM import types its verses `verse`; a migrated Codex book types every
   // verse `text` and says it is one only through its reference (AQU-2210). So
@@ -337,6 +349,47 @@ function splitPlainLines(lines: readonly CellLine[]): CellLine[] {
     })
   }
   return out
+}
+
+/**
+ * A content-only cell's notes, put back on the page (AQU-2743).
+ *
+ * `cellLines` finds a footnote because the marker is still in the cell text.
+ * A USFM import stores the reading instead, with the notes parked in
+ * `metadata.usfmNotes`, so without this a verse's footnotes and
+ * cross-references — the apparatus a printed Bible is partly made of — would
+ * simply not be on the page.
+ *
+ * They go at the END of the cell's last line, not at the character offset they
+ * came from. The offset addresses the source, and this page may be showing a
+ * translation of a different length and word order; verse-end is the same
+ * compromise the USFM exporter settled on for the same reason (AQU-1295).
+ *
+ * A cell whose text still carries its own note markers — anything imported
+ * before AQU-2743 — renders them in place and is left alone, so one page never
+ * shows a note twice.
+ */
+function withParkedNotes(lines: CellLine[], cell: HtmlExportCell): CellLine[] {
+  if (lines.length === 0) return lines
+  if (lines.some((line) => line.runs.some((run) => run.kind === "note"))) return lines
+  const notes = readUsfmNotes(cell.metadata)
+  if (notes.length === 0) return lines
+  const last = lines[lines.length - 1]
+  return [
+    ...lines.slice(0, -1),
+    {
+      ...last,
+      runs: [
+        ...last.runs,
+        ...notes.map((n) => ({
+          kind: "note" as const,
+          noteKind: n.kind,
+          ref: n.ref,
+          text: n.text,
+        })),
+      ],
+    },
+  ]
 }
 
 /** One block of the page: a paragraph or a poetry line. */

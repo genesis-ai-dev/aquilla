@@ -147,9 +147,9 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — Draft Context section (D10)", () => {
-  it("renders the 'Preceding committed-target cells' input", () => {
+  it("renders the 'Preceding translated cells' input", () => {
     renderSettings()
-    const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
+    const input = screen.getByLabelText(/preceding translated cells/i) as HTMLInputElement
     expect(input).toBeTruthy()
     expect(input.type).toBe("number")
     expect(Number(input.value)).toBe(3)
@@ -157,13 +157,13 @@ describe("ProjectSettings — Draft Context section (D10)", () => {
 
   it("reflects the draftContext value from the project record", () => {
     renderSettings()
-    const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
+    const input = screen.getByLabelText(/preceding translated cells/i) as HTMLInputElement
     expect(Number(input.value)).toBe(3)
   })
 
   it("saves a changed value when you leave the box, and only that field", async () => {
     renderSettings()
-    const input = screen.getByLabelText(/preceding committed-target cells/i)
+    const input = screen.getByLabelText(/preceding translated cells/i)
     fireEvent.change(input, { target: { value: "0" } })
     expect(patch).not.toHaveBeenCalled()
     fireEvent.blur(input)
@@ -174,7 +174,7 @@ describe("ProjectSettings — Draft Context section (D10)", () => {
 
   it("clamps input to minimum 0", async () => {
     renderSettings()
-    const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
+    const input = screen.getByLabelText(/preceding translated cells/i) as HTMLInputElement
     fireEvent.change(input, { target: { value: "-5" } })
     fireEvent.blur(input)
     await waitFor(() => expect(Number(input.value)).toBe(0))
@@ -183,7 +183,7 @@ describe("ProjectSettings — Draft Context section (D10)", () => {
 
   it("clamps input to maximum 10", async () => {
     renderSettings()
-    const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
+    const input = screen.getByLabelText(/preceding translated cells/i) as HTMLInputElement
     fireEvent.change(input, { target: { value: "99" } })
     fireEvent.blur(input)
     await waitFor(() => expect(Number(input.value)).toBe(10))

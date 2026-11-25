@@ -136,7 +136,7 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     // AQU-2260: said once under the toolbar, not on a hover.
     expect(screen.getByRole("button", { name: "Add term" })).toBeDisabled()
     expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
-      "Terms cannot be added or imported until the termbase loads.",
+      "Terms cannot be added or imported until the term base loads.",
     )
   })
 
@@ -161,7 +161,7 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     const importBtn = screen.getByRole("button", { name: /Import/ })
     expect(importBtn).toBeDisabled()
     expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/Project Lead/i)
-    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the termbase loads/)
+    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the term base loads/)
   })
 
   // AQU-872: Add term names the CONTRIBUTOR bar, since that is the role this
@@ -185,7 +185,7 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
     const add = screen.getByRole("button", { name: "Add term" })
     expect(add).toBeDisabled()
     expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/at least Contributor access/i)
-    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the termbase loads/)
+    expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the term base loads/)
   })
 
   it("recovers on Retry without a reload", async () => {

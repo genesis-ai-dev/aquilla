@@ -139,7 +139,7 @@ describe("BuiltinChecksList — Bible data checks", () => {
     expect(needsOf("Name form kept")).toEqual(["Needs: a decision for two forms of one name (render.….form.…)"])
     expect(needsOf("Singular or plural “you”")).toEqual(["Needs: singular and plural “you” forms in Language profile"])
     expect(needsOf("Capitals for God")).toEqual([
-      "Needs: the capitals rule for God in Language profile (Divine names)",
+      "Needs: the capitals rule for God in Language profile (Names of God)",
       "Needs: word alignment between the Greek and the translation, which this project does not have",
     ])
     expect(needsOf("Decisions kept")).toEqual([

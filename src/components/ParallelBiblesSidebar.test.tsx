@@ -76,7 +76,7 @@ describe("ParallelBiblesSidebar missing references", () => {
     expect(screen.queryByText("No Bible references")).not.toBeInTheDocument()
     expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
     expect(screen.getByText(
-      "No versions added yet. Add a bible version to read alongside your text.",
+      "No versions added yet. Add a Bible version to read alongside your text.",
     )).toBeInTheDocument()
   })
 })
@@ -188,7 +188,7 @@ async function expectNoHoverTip(el: Element) {
 describe("ParallelBiblesSidebar — the closed edge tab", () => {
   it("carries its own word, so it has no hover", async () => {
     render(<TooltipProvider delay={0}><ParallelBiblesSidebar trackedRef="GEN 1:1" open={false} onToggle={() => {}} /></TooltipProvider>)
-    await expectNoHoverTip(screen.getByRole("button", { name: "Show parallel bibles" }))
+    await expectNoHoverTip(screen.getByRole("button", { name: "Show parallel Bibles" }))
   })
 })
 

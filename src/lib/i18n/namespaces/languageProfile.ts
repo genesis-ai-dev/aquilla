@@ -57,7 +57,7 @@ export const languageProfile = defineNamespace({
     // ── Punctuation (AQU-1906) ──
     "languageProfile.punctuation.title": "Punctuation",
     "languageProfile.punctuation.description":
-      "The marks your language uses where the source uses ? ! . : and ; — the punctuation checks judge the translation by these. Pre-filled from the target language; edit it and your answer wins.",
+      "The marks your language uses where the source uses ? ! . : and ; — the punctuation checks judge the translation by these. Pre-filled from the target language; edit them to use your own.",
     "languageProfile.punctuation.example": "Arabic: ؟ for a question, ؛ for a semicolon. Thai: no mark at the end.",
     "languageProfile.punctuation.question": "Question marks",
     "languageProfile.punctuation.exclamation": "Exclamation marks",
@@ -88,7 +88,7 @@ export const languageProfile = defineNamespace({
     // ── Number separators (AQU-2430) ──
     "languageProfile.numberFormat.title": "Number separators",
     "languageProfile.numberFormat.description":
-      "The characters your translation groups thousands with and marks a decimal fraction with. Leave this alone unless your language writes them differently from the standard for it.",
+      "The characters your translation uses to group thousands and mark decimals. Leave this unchanged unless your language differs from its standard format.",
     "languageProfile.numberFormat.example": "German groups with a dot and fractions with a comma: 1.234,56",
     "languageProfile.numberFormat.group": "Thousands separator",
     "languageProfile.numberFormat.decimal": "Decimal mark",
@@ -102,7 +102,7 @@ export const languageProfile = defineNamespace({
       "Uzbek's 2026 alphabet: sh > \u015F, ch > \u00E7, o\u02BB > \u00F6, g\u02BB > \u011F",
     "languageProfile.orthography.rules": "Replacements",
     "languageProfile.orthography.rulesHint":
-      "One on each line, as old > new. Write the old spelling in lower case \u2014 capitals follow from it.",
+      "One on each line, as old > new. Write the old spelling in lowercase — capitals follow from it.",
     "languageProfile.orthography.apostrophe": "Apostrophe",
     "languageProfile.orthography.apostropheHint":
       "The apostrophe your alphabet uses. Every other apostrophe people type becomes this one.",
@@ -135,7 +135,7 @@ export const languageProfile = defineNamespace({
     // ── Policies ──
     "languageProfile.measures.title": "Measures",
     "languageProfile.measures.description": "How to render units such as cubits, talents and denarii.",
-    "languageProfile.measures.example": "Convert: “about 45 metres” for “a hundred cubits”",
+    "languageProfile.measures.example": "Convert: “about 45 meters” for “a hundred cubits”",
     "languageProfile.measures.convert": "Convert to local units",
     "languageProfile.measures.transliterate": "Keep the original unit",
     "languageProfile.measures.mixed": "Keep the unit and add a conversion",

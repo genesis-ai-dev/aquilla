@@ -277,7 +277,7 @@ const projectSchema = z
     if (linking && data.linkConsumes !== "source" && data.linkConsumes !== "target") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Choose which corpus should become this project's source",
+        message: "Choose what should become this project's source",
         path: ["linkConsumes"],
       })
     }

@@ -59,7 +59,7 @@ export const search = defineNamespace({
     "search.cap.showingFirstOf":
       "Showing first {shown} of {total} matches — narrow the search to see more",
     "search.cap.showingFirst": "Showing first {shown} matches — narrow the search to see more",
-    "search.dock.replaceHint": "Find & replace with diff preview lives in the full panel.",
+    "search.dock.replaceHint": "Find & replace with a preview of changes is available in the full panel.",
     "search.dock.openReplace": "Open find & replace",
 
     // Dock panel — Bible resources (Aquifer) mode
@@ -69,7 +69,7 @@ export const search = defineNamespace({
     "search.bible.notesFor": "Notes for {ref}",
     "search.bible.searchPlaceholder": "Search Bible data…",
     "search.bible.searchAriaLabel": "Search Bible data",
-    "search.bible.noResults": "No resources found",
+    "search.bible.noResults": "No Bible data found",
     "search.bible.idleHint":
       "Search bibletranslation.org for people, places, terms, and translation notes.",
 
@@ -92,16 +92,16 @@ export const search = defineNamespace({
     "search.replace.clearsValidation":
       "Replacing text clears validation — it must be re-reviewed.",
     "search.replace.skippedNotice": plural({
-      one: "{count} match skipped — spans HTML tag boundary.",
-      other: "{count} matches skipped — spans HTML tag boundary.",
+      one: "{count} match skipped — crosses formatting tags.",
+      other: "{count} matches skipped — cross formatting tags.",
     }),
     "search.replace.appliedResult": plural({
       one: "Replaced {count} cell.",
       other: "Replaced {count} cells.",
     }),
     "search.replace.appliedResultWithSkipped": plural({
-      one: "Replaced {count} cell ({skipped} skipped — HTML boundary).",
-      other: "Replaced {count} cells ({skipped} skipped — HTML boundary).",
+      one: "Replaced {count} cell ({skipped} skipped — formatting tags).",
+      other: "Replaced {count} cells ({skipped} skipped — formatting tags).",
     }),
     "search.replace.affectedCount": plural({
       one: "{count} cell affected",
@@ -110,7 +110,7 @@ export const search = defineNamespace({
     "search.replace.selectNone": "Select none",
     "search.replace.cellListAriaLabel": "Cells to replace",
     "search.replace.readOnlyTooltip": "Replace requires contributor access on these files",
-    "search.replace.notWiredTooltip": "Replace is not yet wired",
+    "search.replace.notWiredTooltip": "Replace isn't available here yet",
     "search.replace.applying": "Applying…",
     "search.replace.applyButtonCount": plural({
       one: "Replace {count} cell",
@@ -130,7 +130,7 @@ export const search = defineNamespace({
 
     // Full-panel dialog chrome
     "search.dialog.titlePassages": "Parallel passages",
-    "search.dialog.titleReplace": "Search and replace",
+    "search.dialog.titleReplace": "Find & replace",
     "search.dialog.scopeFile": "File: {fileName}",
     "search.dialog.scopeCurrentFile": "Current file",
     "search.dialog.scopeEntireProject": "Entire project",

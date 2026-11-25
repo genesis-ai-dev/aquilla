@@ -225,7 +225,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
     // AQU-1528: the corpus question is part of the shared flow, so it stands
     // between the pick and the review here too.
     expect(
-      screen.getByText("Which corpus should become this project's source?"),
+      screen.getByText("What should become this project's source?"),
     ).toBeTruthy()
     expect(
       screen.getByRole("button", { name: "Review what will be added" }).hasAttribute("disabled"),

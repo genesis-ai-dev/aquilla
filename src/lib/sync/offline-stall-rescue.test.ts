@@ -42,6 +42,21 @@ describe("rescueUnpersistedOfflineWrites", () => {
   })
 })
 
+describe("rescueUnpersistedOfflineWrites after an error", () => {
+  it("still finishes, and later rescues still run, when clearing a journal entry throws", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    holdJournalUntilPersisted([{ id: "e1" } as OutboxRecord], neverPersisted, () => {
+      throw new Error("localStorage gone")
+    })
+    expect(await rescueUnpersistedOfflineWrites(async () => {})).toBe(true)
+
+    const copy = vi.fn(async () => {})
+    holdJournalUntilPersisted([{ id: "e2" } as OutboxRecord], neverPersisted, () => {})
+    expect(await rescueUnpersistedOfflineWrites(copy)).toBe(true)
+    expect(copy).toHaveBeenCalledOnce()
+  })
+})
+
 describe("untilJournalClearedOrStalled", () => {
   it("waits for the journal entry to clear", async () => {
     let clear = () => {}

@@ -10,6 +10,7 @@
 // changes, which is exactly the condition to detect.
 import { useSyncExternalStore } from "react"
 import type { Store, SyncStatus } from "@livestore/livestore"
+import { EventSequenceNumber } from "@livestore/common/schema"
 import type { schema } from "./schema"
 
 // App-wide "leader is stalled" flag, set by OfflineLeaderWatchdog and read by
@@ -63,13 +64,13 @@ export type LeaderWatchdogOptions = {
   now?: () => number
 }
 
-// LiveStore's sequence number strings: e{global}[.{client}][r{rebaseGeneration}].
-const SEQ_NUM = /^e(\d+)(?:\.(\d+))?(?:r(\d+))?$/
-
-function parseSeqNum(seqNum: string): { global: number; client: number; rebase: number } | null {
-  const match = SEQ_NUM.exec(seqNum)
-  if (!match) return null
-  return { global: Number(match[1]), client: Number(match[2] ?? 0), rebase: Number(match[3] ?? 0) }
+/** LiveStore's own parser for its e{global}[.{client}][r{rebase}] strings; null if unreadable. */
+function parseSeqNum(seqNum: string): EventSequenceNumber.Client.Composite | null {
+  try {
+    return EventSequenceNumber.Client.fromString(seqNum)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -84,7 +85,7 @@ export function leaderHasPersisted(upstreamHead: string, head: string): boolean 
   const upstream = parseSeqNum(upstreamHead)
   const target = parseSeqNum(head)
   if (!upstream || !target) return false
-  return upstream.global > target.global || (upstream.global === target.global && upstream.client >= target.client)
+  return EventSequenceNumber.Client.isGreaterThanOrEqual(upstream, target)
 }
 
 type SyncStatusFeed = Pick<Store<typeof schema>, "syncStatus" | "subscribeSyncStatus">
@@ -120,7 +121,7 @@ function settlePersisted(store: SyncStatusFeed, queue: PersistQueue, status: Per
   // at or past every renumbered commit (later than needed, never earlier).
   if (local) {
     for (const waiter of queue.waiters) {
-      if (parseSeqNum(waiter.head)?.rebase !== local.rebase) waiter.head = String(status.localHead)
+      if (parseSeqNum(waiter.head)?.rebaseGeneration !== local.rebaseGeneration) waiter.head = String(status.localHead)
     }
   }
   const upstreamHead = String(status.upstreamHead)
@@ -129,7 +130,16 @@ function settlePersisted(store: SyncStatusFeed, queue: PersistQueue, status: Per
     settled.push(queue.waiters.shift()!)
   }
   if (queue.waiters.length === 0) stopPersistFeed(store, queue)
-  for (const waiter of settled) waiter.onPersisted()
+  // Each on its own: this runs inside LiveStore's status subscription, and
+  // one throwing callback mustn't strand the waiters after it (already off
+  // the queue) or take the subscription down.
+  for (const waiter of settled) {
+    try {
+      waiter.onPersisted()
+    } catch (error) {
+      console.warn("[offline] A persisted-commit callback failed", error)
+    }
+  }
 }
 
 function stopPersistFeed(store: SyncStatusFeed, queue: PersistQueue): void {

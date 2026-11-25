@@ -647,6 +647,60 @@ describe("flush triggering", () => {
     }
   })
 
+  it("doesn't dequeue a rescued row while its IndexedDB copy is still being written", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+    holdJournalUntilPersisted([{ id: "q1" } as OutboxRecord], () => () => {}, () => {})
+
+    const inOutbox = new Set<string>()
+    const listeners = new Set<() => void>()
+    const outbox = {
+      has: vi.fn(async (ids: readonly string[]) => new Set(ids.filter((id) => inOutbox.has(id)))),
+      subscribe: (cb: () => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      },
+    }
+    // The copy is slow (a quota purge): q1 is marked rescued but not in IndexedDB yet.
+    let landCopy = () => {}
+    const rescue = rescueUnpersistedOfflineWrites(
+      () => new Promise<void>((resolve) => {
+        landCopy = () => {
+          inOutbox.add("q1")
+          resolve()
+        }
+      }),
+    )
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      outbox,
+    })
+    try {
+      await waitFor(() => isRescuedFromOfflineQueue("q1"))
+      // Another edit's outbox write mid-copy.
+      for (const cb of listeners) cb()
+      await new Promise((r) => setTimeout(r, 30))
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+
+      landCopy()
+      expect(await rescue).toBe(true)
+      for (const cb of listeners) cb()
+      await new Promise((r) => setTimeout(r, 30))
+      // In IndexedDB now, waiting to upload: still counts as unsynced.
+      expect(store.query(tables.eventQueue.select("id"))).toEqual(["q1"])
+    } finally {
+      adapter.close()
+      forgetStallRescueForTests()
+    }
+  })
+
   it("after a restart, leaves rows that also have an IndexedDB copy to the HTTP flusher", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     // The leader persisted both before the restart; q1 had also been rescued.

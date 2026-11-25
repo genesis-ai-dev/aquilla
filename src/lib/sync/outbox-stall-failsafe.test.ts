@@ -231,4 +231,17 @@ describe("offline queue fail-safe when the leader stalls", () => {
     expect([first, second]).toEqual([false, false])
     expect(journalLeft()).toEqual(["aquilla:outbox-recovery:v1:tc1"])
   })
+
+  it("doesn't hold the next split run on one that has no journal entry", async () => {
+    leaderDead = true
+    // Too big to journal, and not a lone target commit: nothing in localStorage to pile up.
+    const unjournaled = {
+      ...base, id: "v1", kind: "cell.validate", parentId: null, payload: { note: "x".repeat(300_000) },
+    } as unknown as CqrsRawEvent
+    const started = Date.now()
+    await enqueueOutboxEvents([unjournaled, commit("tc1", "p0")], { splitToJournal: true })
+    // Before the fix the first run waited out the 30 s backstop.
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect([...queuedOffline()].sort()).toEqual(["tc1", "v1"])
+  })
 })

@@ -216,7 +216,13 @@ export function readJournal(lockedElsewhere: ReadonlySet<string> = new Set()): J
       } catch { /* malformed data cannot be replayed */ }
     }
   } catch { return { records: [], keys: [] } }
-  for (const key of keys) inFlight.add(key)
+  // Locked as well as marked: recovery can hold these until the offline
+  // store's leader persists them, and another page's recovery mustn't replay
+  // them meanwhile.
+  for (const key of keys) {
+    inFlight.add(key)
+    lockJournalKey(key)
+  }
   return { records, keys }
 }
 
@@ -234,7 +240,11 @@ export function forgetInFlightJournalForTests(): void {
 
 /** Gives up on recovering `keys` in this page, leaving them for the next one. */
 export function releaseJournal(keys: readonly string[]): void {
-  for (const key of keys) inFlight.delete(key)
+  for (const key of keys) {
+    inFlight.delete(key)
+    lockReleases.get(key)?.()
+    lockReleases.delete(key)
+  }
 }
 
 /**

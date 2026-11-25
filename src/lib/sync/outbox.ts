@@ -484,9 +484,11 @@ export async function enqueueOutboxEvents(
   // entry, so at most one run's worth sits in localStorage at a time: an
   // offline run's entry is held until the leader persists it, so the next
   // run waits for that.
-  for (const run of splitForJournal(records)) {
+  // The last run has nothing after it to hold back.
+  const runs = splitForJournal(records)
+  for (const [i, run] of runs.entries()) {
     const { journalCleared } = await writeJournaledBatch(run, ownerKey)
-    await untilJournalClearedOrStalled(journalCleared)
+    if (i < runs.length - 1) await untilJournalClearedOrStalled(journalCleared)
   }
 }
 
@@ -501,6 +503,8 @@ export interface EnqueueBatchOptions {
   splitToJournal?: boolean
 }
 
+const noJournalEntry = (): void => {}
+
 /** One batch write, journaled whole when it fits (or, for a lone target
  *  commit too big for a batch entry, under its own per-commit entry).
  *  Resolves once written, with a promise of the journal entry clearing. */
@@ -512,7 +516,7 @@ async function writeJournaledBatch(
   const cleared = new Promise<void>((resolve) => {
     markCleared = resolve
   })
-  let clearEntry = () => {}
+  let clearEntry = noJournalEntry
   if (ownerKey !== undefined) {
     const journalKey = journalBatch(records)
     if (journalKey) {
@@ -522,6 +526,9 @@ async function writeJournaledBatch(
       clearEntry = () => clearJournalRecord(records[0].id)
     }
   }
+  // Nothing journaled, so nothing can pile up in localStorage: the next run
+  // needn't wait on this one's leader.
+  if (clearEntry === noJournalEntry) markCleared()
   await writeOutboxRecords(records, {
     routeOffline: isTauriRuntime(),
     clearJournal: () => {

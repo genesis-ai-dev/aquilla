@@ -105,6 +105,33 @@ describe("OfflineLeaderWatchdog", () => {
     expect(rescue).toHaveBeenCalledTimes(2)
   })
 
+  it("ignores a rescue from an earlier stall that finishes after a recovery and a new stall", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    status = stuck
+    let finishFirst: (safe: boolean) => void = () => {}
+    const rescue = vi
+      .fn<() => Promise<boolean>>()
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => (finishFirst = resolve)))
+      .mockResolvedValue(true)
+    render(
+      <>
+        <Toaster />
+        <OfflineLeaderWatchdog stallMs={40} checkEveryMs={10} restart={vi.fn()} rescue={rescue} rescueRetryMs={20} />
+      </>,
+    )
+    await waitFor(() => expect(rescue).toHaveBeenCalledTimes(1))
+
+    status = synced
+    await waitFor(() => expect(isLeaderStalled()).toBe(false))
+    status = { ...stuck, localHead: "e0.20", upstreamHead: "e0.15" }
+    await waitFor(() => expect(rescue).toHaveBeenCalledTimes(2))
+
+    // The first stall's rescue fails late: it must not start a retry loop of its own.
+    await act(async () => finishFirst(false))
+    await act(() => new Promise((r) => setTimeout(r, 80)))
+    expect(rescue).toHaveBeenCalledTimes(2)
+  })
+
   it("shows the edits are safe even after the warning was closed", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {})
     status = stuck

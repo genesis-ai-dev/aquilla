@@ -148,6 +148,19 @@ describe("watchLeaderPersisted", () => {
     expect(listeners.size).toBe(0)
   })
 
+  it("settles the waiters after one whose callback throws", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { store, listeners, advance } = makeFeed("e3.0")
+    const after = vi.fn()
+    watchLeaderPersisted(store, "e3.1", () => {
+      throw new Error("journal clear failed")
+    })
+    watchLeaderPersisted(store, "e3.2", after)
+    expect(() => advance("e3.2")).not.toThrow()
+    expect(after).toHaveBeenCalledOnce()
+    expect(listeners.size).toBe(0)
+  })
+
   it("stops waiting when told to", () => {
     const { store, listeners, advance } = makeFeed("e3.0")
     const onPersisted = vi.fn()

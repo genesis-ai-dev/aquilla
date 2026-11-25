@@ -39,6 +39,18 @@ const awaitingPersist = new Set<AwaitingPersist>()
 /** Ids IndexedDB owns now. Their offline-queue copies are left alone. */
 const rescuedIds = new Set<string>()
 
+/**
+ * Rescued ids whose IndexedDB copy is still being written. Not in the outbox
+ * yet, so "not in the outbox" doesn't mean "uploaded": the adapter mustn't
+ * dequeue them until the copy has landed (or failed and been forgotten).
+ */
+const copyingIds = new Set<string>()
+
+/** True while a rescue is still writing `id`'s IndexedDB copy. */
+export function isRescueCopyInFlight(id: string): boolean {
+  return copyingIds.has(id)
+}
+
 export function isRescuedFromOfflineQueue(id: string): boolean {
   return rescuedIds.has(id)
 }
@@ -127,7 +139,11 @@ let rescueChain: Promise<boolean> = Promise.resolve(true)
  * journal entries stay for the next launch, and a later call tries again.
  */
 export function rescueUnpersistedOfflineWrites(copy: CopyToOutbox): Promise<boolean> {
-  rescueChain = rescueChain.then(() => rescueOnce(copy))
+  // Never rejects: a rejection kept in the chain would fail every later rescue.
+  rescueChain = rescueChain.then(() => rescueOnce(copy)).catch((error: unknown) => {
+    console.error("[outbox] Offline stall rescue failed; a later call tries again", error)
+    return false
+  })
   return rescueChain
 }
 
@@ -137,22 +153,33 @@ async function rescueOnce(copy: CopyToOutbox): Promise<boolean> {
   const records = entries.flatMap((entry) => entry.records)
   // Marked before the copy, not after: once a row lands in IndexedDB the HTTP
   // flusher may send it straight away, and the offline adapter must already
-  // be leaving its queue copy alone by then.
+  // be leaving its queue copy alone by then. Also marked copying, so the
+  // adapter doesn't take "not in the outbox yet" for "uploaded" and dequeue it.
   const marked = records.map((record) => record.id).filter((id) => !rescuedIds.has(id))
+  const copying = records.map((record) => record.id).filter((id) => !copyingIds.has(id))
   markRescuedFromOfflineQueue(marked)
+  for (const id of copying) copyingIds.add(id)
   try {
     await copy(records)
   } catch (error) {
     forgetRescuedFromOfflineQueue(marked)
     console.error("[outbox] Couldn't copy unsaved offline edits to IndexedDB; they stay in the restart journal", error)
     return false
+  } finally {
+    for (const id of copying) copyingIds.delete(id)
   }
   // Every copy is in IndexedDB now, including any the leader confirmed during
   // the write (their journal entries have already gone).
   for (const entry of entries) {
     if (!awaitingPersist.delete(entry)) continue
-    entry.stopWatching()
-    entry.clearJournal()
+    try {
+      entry.stopWatching()
+      entry.clearJournal()
+    } catch (error) {
+      // The edit is in IndexedDB; a journal entry left behind only replays
+      // (idempotently) on the next launch.
+      console.warn("[outbox] Couldn't clear a rescued edit's journal entry", error)
+    }
   }
   console.warn(`[outbox] Copied ${records.length} offline edit(s) the stalled store hadn't saved to IndexedDB`)
   return awaitingPersist.size === 0
@@ -163,5 +190,6 @@ export function forgetStallRescueForTests(): void {
   for (const entry of awaitingPersist) entry.stopWatching()
   awaitingPersist.clear()
   rescuedIds.clear()
+  copyingIds.clear()
   rescueChain = Promise.resolve(true)
 }

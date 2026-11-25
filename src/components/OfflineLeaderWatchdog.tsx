@@ -204,19 +204,28 @@ export function OfflineLeaderWatchdog({
   useEffect(() => {
     if (!store) return
     let stalled = false
+    // Bumped on every stall and recovery: a rescue started for an earlier
+    // stall can resolve after the leader recovered and stalled again, and must
+    // not start a second retry loop (or overwrite this one's timer).
+    let stallEpoch = 0
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     // Copy what the leader never saved to IndexedDB; once that's done the
     // edits are safe, so the toast stops saying they may be lost. Retried
     // until it succeeds or the leader recovers. Later edits skip the offline
     // queue until the leader recovers, so nothing new needs saving after this.
     const rescueUntilSafe = () => {
-      void rescue().then((safe) => {
-        if (!stalled) return
+      const epoch = stallEpoch
+      const settle = (safe: boolean) => {
+        if (!stalled || epoch !== stallEpoch) return
         if (safe) {
           showStalledToast(true)
         } else {
           retryTimer = setTimeout(rescueUntilSafe, rescueRetryMs)
         }
+      }
+      rescue().then(settle, (error: unknown) => {
+        console.error("[offline] Couldn't rescue unsaved offline edits", error)
+        settle(false)
       })
     }
     const stopWatching = watchLeaderLiveness(store, {
@@ -224,6 +233,8 @@ export function OfflineLeaderWatchdog({
       checkEveryMs,
       onStall: (stall) => {
         stalled = true
+        stallEpoch += 1
+        clearTimeout(retryTimer)
         // First, so edits made from here on go to IndexedDB, not the dead queue.
         setLeaderStalled(true)
         const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
@@ -236,12 +247,14 @@ export function OfflineLeaderWatchdog({
       },
       onRecover: () => {
         stalled = false
+        stallEpoch += 1
         clearTimeout(retryTimer)
         setLeaderStalled(false)
         toast.close(LEADER_STALLED_TOAST_ID)
       },
     })
     return () => {
+      stallEpoch += 1
       clearTimeout(retryTimer)
       stopWatching()
       // The next watcher starts unaware of this stall, so it would never

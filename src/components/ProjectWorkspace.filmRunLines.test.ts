@@ -204,7 +204,9 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     // Every line of the file Play plays. Since dev's whole-book timeline
     // (Nov 13) the timeline's lines are every chapter's (`timelineCells` IS
     // `timelineLines`), so the film's lines are `playbackCells` themselves.
-    expect(workspace).toContain("const timelineCells = timelineLines")
+    // With Split into milestones on (AQU-2711) the timeline's lines are the
+    // milestone on screen, which is also all Play plays.
+    expect(workspace).toContain("() => timelineCellsForMilestoneSplit(timelineLines, {")
     expect(workspace).toContain("() => recordingsLines(timelineCells, audioCueCells, timingMode === \"audioFirst\"),")
     expect(workspace).toContain("const filmLines = playbackCells")
     expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")

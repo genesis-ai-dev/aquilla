@@ -238,7 +238,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   onQueueRanOut, queuePlaybackAsk, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm, useQueueStateValue } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
 import {
-  chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  chapterOfCell, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineCellsForMilestoneSplit, timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { useMilestoneSplit } from "@/lib/store/milestone-split-pref"

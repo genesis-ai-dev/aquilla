@@ -1588,6 +1588,7 @@ export const editor = defineNamespace({
     "editor.station.undoWhileRecording": "Stop the recording first",
     "editor.station.versionsWhileRecording": "Stop the recording first",
     "editor.station.undoAfterCut": "This take was cut on the timeline since your last change here: press {mod}Z to undo the cut first.",
+    "editor.station.undoAfterMove": "This take was moved on the timeline since your last change here: press {mod}Z to take the move back first.",
     "editor.station.fileLabel": "the file “{name}”",
     "editor.station.fadeIn": "Fade in",
     "editor.station.fadeOut": "Fade out",
@@ -3830,6 +3831,10 @@ export const editor = defineNamespace({
       },
       "editor.station.undoAfterCut": {
         description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was cut on the timeline after the Station's last change to it. A cut is not the Station's to undo, so the person undoes the cut first with the project-wide Undo shortcut; then the Station's Undo works again.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
+      },
+      "editor.station.undoAfterMove": {
+        description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was moved on the timeline after the Station's last change to it. A move is not the Station's to undo, so the person takes the move back first with the project-wide Undo shortcut; then the Station's Undo works again.",
         placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
       },
       "editor.station.fileLabel": {

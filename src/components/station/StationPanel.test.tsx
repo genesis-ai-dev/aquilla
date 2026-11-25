@@ -175,6 +175,32 @@ describe("the Station", () => {
       await waitFor(() => expect(undone).toEqual(["take.cut", "take.window"]))
     })
 
+    // Review of 152db3f40: Save v2, drag v2 on the timeline, the Station's Undo. Undoing the save under the move
+    // lost the move without a word (⌘Z then found v2 gone). As with a cut: it says so and undoes nothing.
+    it("after the saved take is moved on the timeline, says ⌘Z takes the move back first, and throws nothing away", async () => {
+      await history()
+      registerStepKinds({ "take.place": handler })
+      step("take.add", { cellId: "c331", audioId: "t2.webm", slot: "recording" })
+      step("take.place", { cellId: "c331", audioId: "t2.webm", before: null, after: 600, recordingsBefore: null, recordingsAfter: null })
+      const said: string[] = []
+      const take = makeTake()
+      render(<StationHeader host={makeHost(take)} take={take} target={target} onMessage={(m) => said.push(m)} />)
+      const undo = screen.getByTestId("station-undo")
+      expect(greyed()).toBe(false)
+      expect(undo.getAttribute("aria-label")).toMatch(/moved on the timeline/)
+      fireEvent.click(undo)
+      await act(async () => {})
+      expect(undone).toEqual([])
+      expect(said).toHaveLength(1)
+      expect(said[0]).toMatch(/moved on the timeline since/)
+      expect(said[0]).toMatch(/Z/)
+      // ⌘Z takes the move back; then the Station's Undo reaches its save.
+      await act(async () => { await undoLast() })
+      expect(undone).toEqual(["take.place"])
+      fireEvent.click(screen.getByTestId("station-undo"))
+      await waitFor(() => expect(undone).toEqual(["take.place", "take.add"]))
+    })
+
     it("counts a trim, a save and an approval of this recording as its own", async () => {
       for (const kind of ["take.window", "take.add", "vote.audio"]) {
         await history()

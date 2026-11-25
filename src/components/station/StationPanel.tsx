@@ -19,7 +19,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { placeHoldingStart } from "@/lib/station/hold-place"
-import { cutSinceStationStep, newestStationStep } from "@/lib/station/own-steps"
+import { cutSinceStationStep, movedSinceStationStep, newestStationStep } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -716,7 +716,13 @@ export function StationHeader({
   // since the Station's last change. A cut is not the Station's to undo, and
   // undoing the change past it would drop it as "changed since": say so.
   const cutSince = !unsaved && step != null && STATION_PICKS.undoButton !== "project" && cutSinceStationStep(cellId, audioId, step.id)
-  const cutTip = cutSince ? t("editor.station.undoAfterCut", { mod: modKey() }) : null
+  // Review of 152db3f40: …and the same for a move of the take on the timeline.
+  const movedSince = !cutSince && !unsaved && step != null && STATION_PICKS.undoButton !== "project" && movedSinceStationStep(cellId, audioId, step.id)
+  const cutTip = cutSince
+    ? t("editor.station.undoAfterCut", { mod: modKey() })
+    : movedSince
+      ? t("editor.station.undoAfterMove", { mod: modKey() })
+      : null
   const undoTip = recording
     ? t("editor.station.undoWhileRecording")
     : unsaved

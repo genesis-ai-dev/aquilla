@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { historyReady, recordGroup, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, type StepHandler } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
-import { newestStationStep, stationStepMatch } from "./own-steps"
+import { movedSinceStationStep, newestStationStep, stationStepMatch } from "./own-steps"
 
 describe("the Station's own Undo steps", () => {
   const mine = stationStepMatch("c331", "t2.webm")
@@ -85,6 +85,30 @@ describe("the Station's own Undo and a step made of several parts", () => {
     trim()
     recordStep({ kind: "take.place", data: { cellId: "c12", audioId: "t12.webm", before: null, after: 600, recordingsBefore: null, recordingsAfter: null }, labelKey: "editor.history.stepMove", lane: null })
     expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepTrimTake")
+  })
+
+  // Review of 152db3f40: a save, then a move of the saved take on the timeline. Undoing the save under the
+  // move would throw the move away (the save's undo does not look at places, and ⌘Z then finds no take).
+  it("knows when the open take was moved on the timeline since the Station's last change (a save), as it does a cut", () => {
+    recordGroup({ labelKey: "editor.history.stepStationSaveOver", fileId: "f1" }, [
+      { kind: "take.add", data: { cellId: "c12", audioId: "v2.wav", slot: "recording" }, labelKey: "editor.history.stepAddTake", fileId: "f1" },
+      { kind: "take.remove", data: { cellId: "c12", audioId: "t12.webm", slot: "recording" }, labelKey: "editor.history.stepDeleteTake", fileId: "f1" },
+    ])
+    const save = newestStationStep("c12", "v2.wav")
+    expect(save?.labelKey).toBe("editor.history.stepStationSaveOver")
+    expect(movedSinceStationStep("c12", "v2.wav", save!.id)).toBe(false)
+    recordStep({ kind: "take.place", data: { cellId: "c12", audioId: "other.wav", before: null, after: 600, recordingsBefore: null, recordingsAfter: null }, labelKey: "editor.history.stepMove", lane: null })
+    expect(movedSinceStationStep("c12", "v2.wav", save!.id)).toBe(false)
+    recordStep({ kind: "take.place", data: { cellId: "c12", audioId: "v2.wav", before: null, after: 600, recordingsBefore: null, recordingsAfter: null }, labelKey: "editor.history.stepMove", lane: null })
+    expect(newestStationStep("c12", "v2.wav")?.id).toBe(save!.id)
+    expect(movedSinceStationStep("c12", "v2.wav", save!.id)).toBe(true)
+  })
+
+  it("a move made before the Station's last change is not one since", () => {
+    recordStep({ kind: "take.place", data: { cellId: "c12", audioId: "t12.webm", before: null, after: 600, recordingsBefore: null, recordingsAfter: null }, labelKey: "editor.history.stepMove", lane: null })
+    trim()
+    const own = newestStationStep("c12", "t12.webm")
+    expect(movedSinceStationStep("c12", "t12.webm", own!.id)).toBe(false)
   })
 
   it("an approval of the open take alone, made anywhere, is still its own", () => {

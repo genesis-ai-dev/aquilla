@@ -64,9 +64,30 @@ export function cutSinceStationStep(cellId: string, audioId: string, stepId: str
     ((data as { cuts?: ReadonlyArray<{ cellId?: string; audioId?: string; newAudioId?: string }> } | null)?.cuts ?? []).some(
       (c) => c.cellId === cellId && (c.audioId === audioId || c.newAudioId === audioId),
     )
-  const cuts = matchingSteps(isCut).undo
-  if (cuts.length === 0) return false
+  return matchingStepSince(isCut, stepId)
+}
+
+/**
+ * Review of 152db3f40: whether the open take was moved on the timeline since
+ * the Station's step `stepId`, the same way as a cut. A move is not the
+ * Station's to undo, but undoing the Station's step under it can throw the
+ * move away (a save's undo puts the old take back and the moved one goes,
+ * and ⌘Z then finds nothing to move back). The Station's Undo then says so
+ * instead, and ⌘Z takes the move back first.
+ */
+export function movedSinceStationStep(cellId: string, audioId: string, stepId: string): boolean {
+  const isMove = (kind: string, data: unknown): boolean => {
+    const d = data as { cellId?: unknown; audioId?: unknown } | null
+    return kind === "take.place" && d?.cellId === cellId && d.audioId === audioId
+  }
+  return matchingStepSince(isMove, stepId)
+}
+
+/** Whether a step matching `match` sits above step `stepId` in Undo. */
+function matchingStepSince(match: (kind: string, data: unknown) => boolean, stepId: string): boolean {
+  const found = matchingSteps(match).undo
+  if (found.length === 0) return false
   const order = historyView().undoSteps.map((s) => s.id)
   const at = order.indexOf(stepId)
-  return cuts.some((c) => order.indexOf(c.id) > at)
+  return found.some((c) => order.indexOf(c.id) > at)
 }

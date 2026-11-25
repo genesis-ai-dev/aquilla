@@ -82,7 +82,7 @@ describe("the PDF's print page", () => {
     const page = buildPrintPage(await imported(pdf, (o) => arabic[o]), { title: "notes", lang: "ar" })
     expect(page).toContain('<html lang="ar">')
     expect(body(page)).toContain('<h1 dir="rtl">الفصل الأول</h1>')
-    expect(body(page)).toContain('<p dir="rtl">توقف المطر.<sup class="note-marker footnote"><a id="n-n1-ref" href="#n-n1">1</a></sup></p>')
+    expect(body(page)).toContain('<p dir="rtl">توقف المطر.<sup class="note-marker footnote"><a id="n-n1-ref" href="#n-n1" title="حاشية.">1</a></sup></p>')
     expect(body(page)).toMatch(/<li class="note footnote" id="n-n1" dir="rtl">.*<span class="note-text">حاشية\.<\/span><\/li>/)
   })
 

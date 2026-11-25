@@ -1,11 +1,12 @@
 /**
  * AQU-365 — Tests that SelectionBar (the multi-select "dynamic island")
- * doesn't appear at all for a viewer / any role below every action it offers
- * (translate = contributor 400, validate = reviewer 300). Mirrors the
+ * hides every writing action from a viewer / any role below every action it
+ * offers (translate = contributor 400, validate = reviewer 300). Copy stays:
+ * it does not write. Mirrors the
  * CommentsDrawer AQU-427 role-gating test pattern.
  */
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -47,10 +48,11 @@ import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 vi.mock("@/lib/posthog", () => ({
   default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
 }))
-import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import { playingInSlot } from "@/lib/history/take-steps"
+import { lineStore, type TestLine, LINE_WORDS } from "@/test-utils/line-store"
+import { createHealthCardNamer } from "@/lib/health/health-card-rows"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -247,17 +249,25 @@ function audioMap(over: Partial<AudioAttachmentOut> = {}): Map<string, CellAudio
 }
 
 describe("SelectionBar — viewer suppression (AQU-365)", () => {
-  it("renders nothing for VIEWER (100), even with a live selection", () => {
+  it("offers copy to a VIEWER (100) and hides the actions that write", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
-    const { container } = renderBar(makeProject(ROLE.VIEWER))
-    expect(container.firstChild).toBeNull()
+    renderBar(makeProject(ROLE.VIEWER), [
+      makeCell({ id: "cell-1", original: "Hello", translated: "Bonjour" }),
+      makeCell({ id: "cell-2", original: "World", translated: "" }),
+    ])
+    expect(screen.getByRole("toolbar", { name: "Selection actions" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Copy source" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Copy target" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /^Validate text/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Translate/i })).not.toBeInTheDocument()
     vi.restoreAllMocks()
   })
 
-  it("renders nothing for a low unknown role (50)", () => {
+  it("offers copy for a low unknown role (50) and hides the actions that write", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
-    const { container } = renderBar(makeProject(50))
-    expect(container.firstChild).toBeNull()
+    renderBar(makeProject(50), [makeCell({ id: "cell-1", original: "Hello", translated: "Bonjour" })])
+    expect(screen.getByRole("button", { name: "Copy source" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /^Validate text/i })).not.toBeInTheDocument()
     vi.restoreAllMocks()
   })
 
@@ -287,6 +297,62 @@ describe("SelectionBar — viewer suppression (AQU-365)", () => {
     const { container } = renderBar(makeProject(ROLE.CONTRIBUTOR))
     expect(container.firstChild).toBeNull()
     vi.restoreAllMocks()
+  })
+})
+
+describe("SelectionBar — copy the selection", () => {
+  const write = vi.fn().mockResolvedValue(undefined)
+  const writeText = vi.fn().mockResolvedValue(undefined)
+
+  beforeEach(() => {
+    write.mockClear()
+    writeText.mockClear()
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText },
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function pastedPlain(): Promise<string> {
+    await waitFor(() => {
+      expect(write.mock.calls.length + writeText.mock.calls.length).toBeGreaterThan(0)
+    })
+    if (writeText.mock.calls.length > 0) return String(writeText.mock.calls.at(-1)?.[0])
+    const item = write.mock.calls.at(-1)?.[0]?.[0] as ClipboardItem
+    return (await item.getType("text/plain")).text()
+  }
+
+  it("copies source text in table order, one verse per line, naming each chapter", async () => {
+    // Selected out of reading order. The paste follows the table.
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-b", "cell-a", "cell-c"]))
+    const cells = [
+      makeCell({ id: "cell-a", context: "GEN 1:1", original: "In the beginning", translated: "Au commencement" }),
+      makeCell({ id: "cell-b", context: "GEN 1:2", original: "And the earth", translated: "La terre" }),
+      makeCell({ id: "cell-c", context: "GEN 2:1", original: "Thus the heavens", translated: "Ainsi les cieux" }),
+    ]
+    renderBar(makeProject(ROLE.CONTRIBUTOR), cells)
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy source" }))
+
+    expect(await pastedPlain()).toBe(
+      "Genesis 1\n1 In the beginning\n2 And the earth\nGenesis 2\n1 Thus the heavens",
+    )
+  })
+
+  it("copies the target side on its own, and leaves an empty side unavailable", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [
+      makeCell({ id: "cell-1", context: "GEN 1:1", original: "In the beginning", translated: "" }),
+    ])
+    expect(screen.getByRole("button", { name: "Copy target" })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy source" }))
+
+    expect(await pastedPlain()).toBe("1 In the beginning")
   })
 })
 
@@ -825,7 +891,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
   })
 
   it("never calls the model for a REVIEWER, even on a full 20-cell selection", () => {
-    const cells = Array.from({ length: MAX_SELECTED }, (_, i) =>
+    const cells = Array.from({ length: 20 }, (_, i) =>
       makeCell({ id: `cell-${i + 1}`, translated: "" }),
     )
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
@@ -1635,5 +1701,46 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     })
 
     expect(screen.queryByRole("button", { name: /Play selected/ })).toBeNull()
+  })
+})
+
+/**
+ * AQU-2278 — the health card names a line exactly as the selection bar does
+ * (AQU-1722's one rule), over the same real store: a split verse piece, a line
+ * with only its # column, and a heading ahead of them.
+ */
+describe("SelectionBar — the health card names lines the same way (AQU-2278)", () => {
+  async function namesInBoth(lines: TestLine[], picked: string[]) {
+    const store = lineStore(lines)
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set([...picked, "untranslated"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), [], [], "", { cellStore: store, onValidationCommitted: vi.fn() })
+    const name = createHealthCardNamer(store)
+    const card = name(picked, undefined, LINE_WORDS)
+    return { card, note: await noteBeside("Validate text", /Validate 2 of 3 selected cells/) }
+  }
+
+  it("by reference, a split verse piece included", async () => {
+    const { card, note } = await namesInBoth([
+      { id: "title", type: "heading", ref: "RUT 1:h:1" },
+      { id: "v4", ref: "RUT 1:4", translated: "kwanza" },
+      { id: "v5", ref: "RUT 1:5" },
+      { id: "v5-b", splitFrom: "v5", translated: "pili" },
+      { id: "untranslated", ref: "RUT 1:6" },
+    ], ["v4", "v5-b"])
+    expect(card).toEqual(["RUT 1:4", "RUT 1:5b"])
+    expect(note).toContain("Validate 2 of 3 selected cells: RUT 1:4 and RUT 1:5b")
+    vi.restoreAllMocks()
+  })
+
+  it("by the # column, which skips the heading", async () => {
+    const { card, note } = await namesInBoth([
+      { id: "title", type: "heading" },
+      { id: "p1", translated: "kwanza" },
+      { id: "p2", translated: "pili" },
+      { id: "untranslated" },
+    ], ["p1", "p2"])
+    expect(card).toEqual(["row 1", "row 2"])
+    expect(note).toContain("Validate 2 of 3 selected cells: rows 1 and 2")
+    vi.restoreAllMocks()
   })
 })

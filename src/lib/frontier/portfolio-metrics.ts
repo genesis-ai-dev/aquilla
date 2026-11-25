@@ -18,7 +18,8 @@ import {
   type LaneMeasure,
 } from "../lanes/lane-delivers"
 
-const STALE_MS = 14 * 24 * 60 * 60 * 1000
+/** No work for this long is stalled. The admin directory's SQL uses the same window. */
+export const STALE_MS = 14 * 24 * 60 * 60 * 1000
 
 /**
  * A lane contributes its activity timestamp, and (media redesign slice 1) what
@@ -104,16 +105,18 @@ export function portfolioMeasure<L extends LaneActivity>(
  */
 export function portfolioText<L extends LaneActivity>(
   p: { totalCells: number; filledCells: number; validatedCells: number; lanes?: readonly L[] | null },
-): { total: number; filled: number } {
-  if (!portfolioCountsByLanguage(p)) return { total: p.totalCells, filled: p.filledCells }
+): { total: number; filled: number; validated: number } {
+  if (!portfolioCountsByLanguage(p)) return { total: p.totalCells, filled: p.filledCells, validated: p.validatedCells }
   let total = 0
   let filled = 0
+  let validated = 0
   for (const lane of targetLanes(p)) {
     if (!laneCountsText(lane.delivers)) continue
     total += lane.totalCells ?? 0
     filled += lane.filledCells ?? 0
+    validated += lane.validatedCells ?? 0
   }
-  return { total, filled }
+  return { total, filled, validated }
 }
 
 /**

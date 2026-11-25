@@ -53,7 +53,7 @@ const ROLE = {
 }
 
 // One user per grant path, so the roster is exercised on all four at once.
-const CREATOR = { id: 1, name: 'cora' }        // owner via the creator path, no row
+const CREATOR = { id: 1, name: 'cora' }        // Owner via a direct grant (AQU-2357)
 const CALLER = { id: 2, name: 'mack' }         // direct MAINTAINER — the agent's user
 const DIRECT = { id: 3, name: 'ana' }          // direct CONTRIBUTOR
 const ORG_MAINT = { id: 4, name: 'olga' }      // org MAINTAINER, no project row
@@ -84,8 +84,8 @@ beforeEach(async () => {
     [PROJECT, CREATOR.id],
   )
   await tdb.pg.query(
-    `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, $2, $3), ($1, $4, $5)`,
-    [PROJECT, CALLER.id, ROLE.MAINTAINER, DIRECT.id, ROLE.CONTRIBUTOR],
+    `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, $2, $3), ($1, $4, $5), ($1, $6, $7)`,
+    [PROJECT, CALLER.id, ROLE.MAINTAINER, DIRECT.id, ROLE.CONTRIBUTOR, CREATOR.id, ROLE.OWNER],
   )
   await tdb.pg.query(
     `INSERT INTO org_members (org_id, user_id, role_level) VALUES (7, $1, $2), (7, $3, $4)`,
@@ -149,7 +149,7 @@ describe('list_members roster', () => {
     expect(body.truncated).toBe(false)
     expect(body.data).toEqual([
       // Highest role first, then username.
-      { userId: String(CREATOR.id), username: 'cora', role: 700, roleName: 'owner', roleSource: 'creator', direct: false },
+      { userId: String(CREATOR.id), username: 'cora', role: 700, roleName: 'owner', roleSource: 'override', direct: true },
       { userId: String(CALLER.id), username: 'mack', role: 600, roleName: 'maintainer', roleSource: 'override', direct: true },
       { userId: String(ORG_MAINT.id), username: 'olga', role: 600, roleName: 'maintainer', roleSource: 'org', direct: false },
       { userId: String(TEAM.id), username: 'tess', role: 500, roleName: 'project_lead', roleSource: 'group', direct: false },

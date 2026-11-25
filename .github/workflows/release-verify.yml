@@ -65,8 +65,18 @@ jobs:
       - if: matrix.shard == 1
         run: pnpm test:worker
 
-  workers:
+  # The worker suites run against in-process Postgres (PGlite), one database
+  # per file, so `--shard` splits them cleanly. They were one job run back to
+  # back: 23 minutes of auth-worker, then 47 of sync-worker, on every release
+  # (2026-11-18), which alone put a verified HEAD past the next deploy check.
+  # Shard 1 of each also carries that worker's typecheck.
+  auth-worker:
+    name: auth-worker (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -83,10 +93,48 @@ jobs:
         working-directory: auth-worker
       - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
-      - run: pnpm run type-check && pnpm test
+      - if: matrix.shard == 1
+        run: pnpm run type-check
         working-directory: auth-worker
-      - run: pnpm run type-check && pnpm test
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/3
+        working-directory: auth-worker
+
+  sync-worker:
+    name: sync-worker (shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
+      - if: matrix.shard == 1
+        run: pnpm run type-check
+        working-directory: sync-worker
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/5
+        working-directory: sync-worker
+
+  agent-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
       - run: npm ci && npm run type-check && npm test
         working-directory: agent-worker
 
@@ -110,7 +158,7 @@ jobs:
   # The one check name release-deploy.yml reads for the branch HEAD. A
   # skipped or cancelled job fails it.
   release-verify:
-    needs: [typecheck, lint, unit, workers, build]
+    needs: [typecheck, lint, unit, auth-worker, sync-worker, agent-worker, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:

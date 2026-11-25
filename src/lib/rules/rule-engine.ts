@@ -7,6 +7,7 @@ import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-ru
 import type { BuiltinCheckRunContext } from "@/lib/lqa/builtin-run-context"
 import { suggestionFor } from "@/lib/lqa/check-functions/old-orthography"
 import { compiledPattern, prefilterForPattern } from "@/lib/terminology/match"
+import { catastrophicPatternReason } from "../../../db/shared/regex-safety"
 import { AnchorIndex, prefilterMode, verifyRejected } from "@/lib/terminology/prefilter"
 
 /**
@@ -25,7 +26,21 @@ export interface CellCheckContext {
 // every cell. Failed compiles are cached as null so we don't retry each time.
 // AQU-2654: the cache is the terminology matcher's, so a concept's pattern is
 // compiled once for the editor's highlights AND its `term:` rules.
-const compile = compiledPattern
+//
+// Every rule pattern is screened for catastrophic backtracking first: rules are
+// stored project / org settings any editor can write, and one `(a+)+$` would
+// freeze every collaborator's editor on the keystroke path. The verdict is
+// cached per pattern so the screen runs once, not per cell.
+const patternVerdicts = new Map<string, boolean>()
+function compile(pattern: string, flags: string): RegExp | null {
+  let safe = patternVerdicts.get(pattern)
+  if (safe === undefined) {
+    safe = catastrophicPatternReason(pattern) === null
+    if (patternVerdicts.size >= 2048) patternVerdicts.clear()
+    patternVerdicts.set(pattern, safe)
+  }
+  return safe ? compiledPattern(pattern, flags) : null
+}
 
 /**
  * Every match of a cached global regex in `text`, as `text.matchAll(re)` yields
@@ -320,6 +335,34 @@ export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): bo
   const re = compile(pattern, "g" + caseInsensitiveFlag(check) + unicodeFlag(rule))
   if (!re) return false
   return sourceBearsPattern(effectiveSourceText(cell), re)
+}
+
+/**
+ * The rules whose source gate holds for this cell, in the caller's order: the
+ * same answer as `rules.filter((rule) => ruleSourceGateMatches(rule, cell))`.
+ *
+ * It asks the plan's index first, as `checkRulesForCell` does, so a `term:`
+ * rule whose source pattern cannot occur in this source is dropped without
+ * its regex being compiled. Every editor row asks this when it mounts; testing
+ * each rule's gate directly made the first row compile the source pattern of
+ * every glossary term — about 1.5 s of main thread for 664 terms, before any
+ * row could paint.
+ */
+export function rulesPassingSourceGate(cell: CellData, rules: TranslationRule[]): TranslationRule[] {
+  if (rules.length === 0) return rules
+  const plan = planFor(rules)
+  if (!plan.index) return rules.filter((rule) => ruleSourceGateMatches(rule, cell))
+  const source = effectiveSourceText(cell)
+  const order = rulesToCheck(plan, source)
+  if (prefilterMode() === "verify") verifySkipped(plan, rules, order, source)
+  // `order` leaves out the empty-aware builtins, which carry no source gate.
+  const positions =
+    plan.emptyAware.length === 0 ? order : [...plan.emptyAware, ...order].sort((a, b) => a - b)
+  const passing: TranslationRule[] = []
+  for (const i of positions) {
+    if (ruleSourceGateMatches(rules[i], cell)) passing.push(rules[i])
+  }
+  return passing
 }
 
 /**

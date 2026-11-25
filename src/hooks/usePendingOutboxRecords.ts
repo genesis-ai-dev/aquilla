@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { peekOutboxBatch, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
 
 interface Options {
   /** When false, returns empty and does not subscribe. */
@@ -35,7 +35,7 @@ function outboxRecordKey(record: OutboxRecord): string {
   })
 }
 
-function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): boolean {
+export function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
@@ -68,7 +68,7 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
 
     async function refresh() {
       const request = ++refreshRequest
-      const all = await peekOutboxBatch(maxResults * 2)
+      const all = await peekOutboxShared(maxResults * 2)
       if (cancelled || request !== refreshRequest) return
       // AQU-274: exclude quarantined records from the overlay so failed events
       // don't show as pending validation/commit state. SUB-9: inspector views

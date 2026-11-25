@@ -77,6 +77,39 @@ export const org = defineNamespace({
     "org.access.page.csvGrantedBy": "Granted by",
     "org.access.page.csvGrantedAt": "Granted at",
 
+    // -- AQU-2318 Places lens: one selected place, direct grants and what reaches it --
+    "org.access.places.tab": "Places",
+    "org.access.places.search": "Search people or places",
+    "org.access.places.giveAccess": "Give access",
+    "org.access.places.giveAccessSoon": "Coming next",
+    "org.access.places.grantedHere": "Granted here",
+    "org.access.places.reachesHere": "Reaches here from above",
+    "org.access.places.noReaches": "No one reaches this place from above",
+    "org.access.places.noMatches": "No people or places match",
+    "org.access.places.invitePending": "Invite pending",
+    // Organization kind in the place summary → onboarding.apiTokens.orgLabel
+    // (identical text). org.breadcrumb.organizationFallback already holds the
+    // exception against that key, so a third key for the same word reopens it.
+    "org.access.places.viaProject": "Via project {name}",
+    "org.access.places.fromOrg": "From {name}",
+    "org.access.places.fromTeam": "From the {name} team",
+    "org.access.places.fromPlace": "From {name}",
+    "org.access.places.reachesFrom": "{name} or a team",
+    "org.access.places.reachesFromAbove": "above",
+    "org.access.places.openPlaceAriaLabel": "Show the grant at {name}",
+    "org.access.places.openPeople": plural({
+      one: "{count} person can open this {place}.",
+      other: "{count} people can open this {place}.",
+    }),
+    "org.access.places.grantedCount": plural({
+      one: "{count} is granted here",
+      other: "{count} are granted here",
+    }),
+    "org.access.places.reachesCount": plural({
+      one: "{count} reaches it from {from}",
+      other: "{count} reach it from {from}",
+    }),
+
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
@@ -347,6 +380,7 @@ export const org = defineNamespace({
     "org.membersPage.sourceViaTeam": "via team",
     "org.membersPage.sourceViaOrg": "via org",
     "org.membersPage.sourceProjectCreator": "project creator",
+    "org.membersPage.createdThisProject": "Created this project",
     "org.membersPage.changeRoleAria": "Change role",
     "org.membersPage.inviteLinkReadyHeading": "Invite link ready",
     "org.membersPage.inviteLinkReadyBody":
@@ -1388,6 +1422,7 @@ export const org = defineNamespace({
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
     // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
     // episode or a document depending on the project.
+    "org.orgProjectsDataTable.awaitingValidation": "Awaiting validation",
     "org.orgProjectsDataTable.unitsColumn": "Done",
     "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
     "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
@@ -1474,6 +1509,12 @@ export const org = defineNamespace({
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
+    // AQU-2456: shown before any restore of an archived project. The confirm
+    // button stays the primary Restore action — restoring makes the project
+    // available again, so it is not a destructive (red) action.
+    "org.restoreProject.dialogTitle": "Restore project",
+    "org.restoreProject.dialogBody":
+      "Everyone who had access to this project before will have access again.",
     "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language lane",
     // ── AQU-1092…1098: the plan board ──────────────────────────────────
     // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
@@ -1811,6 +1852,10 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.membersPage.createdThisProject": {
+        description:
+          "AQU-2357: extra note on a member who created this project. It is history, not the source of their role. The role source is Direct, Organization, or a team.",
+      },
       "org.roleDialog.addPersonTitle": {
         description:
           "AQU-2289: title of the role dialog when it adds one known person, e.g. from an empty cell of the members matrix.",
@@ -1875,6 +1920,48 @@ export const org = defineNamespace({
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project Lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.places.viaProject": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the project, shown when a language lane is selected.",
+        placeholders: { name: "The project's name. Not translated." },
+      },
+      "org.access.places.fromOrg": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the organization.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.fromTeam": {
+        description: "AQU-2318: one-line reason on an inherited row that is a team grant.",
+        placeholders: { name: "The team's name. Not translated." },
+      },
+      "org.access.places.fromPlace": {
+        description: "AQU-2318: one-line reason on an inherited row when the source is not an organization, team, or project.",
+        placeholders: { name: "The place's name. Not translated." },
+      },
+      "org.access.places.reachesFrom": {
+        description: "AQU-2318: the tail of the summary sentence naming where inherited access comes from, when the organization is visible.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.openPlaceAriaLabel": {
+        description: "AQU-2318: accessible name of the chevron that selects the place an inherited grant is set at.",
+        placeholders: { name: "The source place's name. Not translated." },
+      },
+      "org.access.places.openPeople": {
+        description: "AQU-2318: first sentence of the selected place's summary. The count is the number of rows in the two lists, not expanded team membership.",
+        placeholders: {
+          count: "How many rows can open this place; also selects the plural form.",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.places.grantedCount": {
+        description: "AQU-2318: the summary clause whose count equals the Granted here rows.",
+        placeholders: { count: "Number of direct grants at this place; also selects the plural form." },
+      },
+      "org.access.places.reachesCount": {
+        description: "AQU-2318: the summary clause whose count equals the Reaches here from above rows.",
+        placeholders: {
+          count: "Number of inherited sources at this place; also selects the plural form.",
+          from: "Already-translated phrase naming the organization or the word above.",
+        },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",
@@ -2761,6 +2848,9 @@ export const org = defineNamespace({
           "describes the lane, so where the word must agree with a noun it agrees with " +
           "the word used for a language lane.",
       },
+      "org.orgProjectsDataTable.awaitingValidation": {
+        description: "Legend for translated text or recorded audio still awaiting validation.",
+      },
       "org.orgProjectsDataTable.unitsColumn": {
         description:
           "Column header on the org projects table: how many of a project's planning " +
@@ -3068,7 +3158,9 @@ export const org = defineNamespace({
       "org.memberLaneScopeEditor.mainLanguageFallback": {
         description:
           "Name shown for a project's main target language in that checkbox list " +
-          "when the project has not named its main language.",
+          "when the project has not named its main language. The same wording " +
+          "labels that language in the lane pickers of the add-people and " +
+          "invite-link forms.",
       },
       "org.memberLaneScopeEditor.unknownLane": {
         description:
@@ -3441,6 +3533,14 @@ export const org = defineNamespace({
       "org.projectOverview.archived.bodyAskManager": {
         description:
           "Body of that panel for a reader who may NOT restore the project, so it names who can instead of pointing at a button they do not have.",
+      },
+      "org.restoreProject.dialogTitle": {
+        description:
+          "Title of the confirmation before an archived project is restored. Shown from the project overview, the archived-project screen, and the archived-projects list. Parallel to Archive project. The confirm button is the standard primary Restore, not red.",
+      },
+      "org.restoreProject.dialogBody": {
+        description:
+          "Body of that confirmation. States that restoring gives access back to everyone who had it before the project was archived. Cancel leaves the project archived. Keep this sentence; do not soften it into a generic 'are you sure'.",
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",

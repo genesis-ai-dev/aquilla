@@ -38,6 +38,8 @@ export const error = defineNamespace({
     "error.network.elevationRequired": "Verify with your admin code, then try again.",
     "error.network.notFound": "That item no longer exists{contextSuffix}.",
     "error.network.conflict": "A conflict occurred{contextSuffix} — please refresh and try again.",
+    "error.network.lastProjectOwner":
+      "This project needs at least one owner. Grant someone else the Owner role before removing this one.",
     "error.network.gone": "That item has been permanently removed{contextSuffix}.",
     "error.network.tooManyRequests": "Too many requests — please wait a moment and try again.",
     "error.network.serverError": "Something went wrong on the server. Please try again in a moment.",
@@ -322,6 +324,10 @@ export const error = defineNamespace({
             "locale has no translation for that object's noun, so the sentence " +
             "must read correctly on its own.",
         },
+      },
+      "error.network.lastProjectOwner": {
+        description:
+          "AQU-2357: shown when removing or demoting a project Owner would leave the project with none. Tells the user to grant Owner to someone else first.",
       },
       "error.network.gone": {
         description:

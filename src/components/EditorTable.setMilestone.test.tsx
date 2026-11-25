@@ -202,10 +202,9 @@ describe("EditorTable — Set a new milestone…", () => {
     renderTable({ project: projectAt(ROLE.CONTRIBUTOR) }, { onSetMilestone: () => {} })
     await screen.findByText("First line")
 
-    // Nothing else on this row is theirs either, so the menu's own
-    // "nothing to offer ⇒ no button" rule applies — which is the thing a new
-    // always-present entry would silently have broken.
-    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    // Copy source text is on the menu. The milestone entry is not.
+    openMenu("line-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(noEntry()).toBeNull()
   })
 
@@ -229,7 +228,8 @@ describe("EditorTable — Set a new milestone…", () => {
     }, { onSetMilestone: () => {} })
     await screen.findByText("First line")
 
-    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    openMenu("line-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(noEntry()).toBeNull()
   })
 
@@ -239,7 +239,8 @@ describe("EditorTable — Set a new milestone…", () => {
     })
     await screen.findByText("First line")
 
-    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    openMenu("line-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(noEntry()).toBeNull()
   })
 
@@ -249,7 +250,8 @@ describe("EditorTable — Set a new milestone…", () => {
     }, { onSetMilestone: () => {} })
     await screen.findByText("First line")
 
-    expect(within(rowEl("line-a")).queryByTestId("cell-menu-line-a")).toBeNull()
+    openMenu("line-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(noEntry()).toBeNull()
   })
 

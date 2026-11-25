@@ -4,6 +4,8 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
+import { toast } from "@/components/ui/toast"
+import * as history from "@/lib/history/history"
 import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -7549,6 +7551,61 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(cuts[0]).toMatchObject({ cellId: "m2", audioId: TAKE_ID })
     expect(cuts[0].atMs).toBeGreaterThan(1900)
     expect(cuts[0].atMs).toBeLessThan(2100)
+  })
+
+  // AQU-2703: one key changed the file with nothing on screen to say so.
+  it("S says the take was split, and its Undo undoes the step", async () => {
+    const add = vi.spyOn(toast, "add")
+    const { playheadTo, chip } = renderSplit()
+    playheadTo(12)
+    fireEvent.click(chip())
+    fireEvent.keyDown(window, { key: "s" })
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({
+      id: "shortcut-cue:timeline-split",
+      title: "Take split at the playhead",
+      description: expect.stringMatching(/^(⌘Z|Ctrl\+Z) to undo$/),
+    }))
+    const undo = vi.spyOn(history, "undoLast").mockResolvedValue(null)
+    const action = add.mock.calls[0][0].actionProps as { children: string; onClick: () => void }
+    expect(action.children).toBe("Undo")
+    action.onClick()
+    expect(undo).toHaveBeenCalledTimes(1)
+    add.mockRestore()
+    undo.mockRestore()
+  })
+
+  // AQU-2703: B turned the Blade on with only a small toolbar button to show it.
+  it("while the Blade is on a chip over the timeline says so, and turns it off", () => {
+    vi.useFakeTimers()
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={[takeCell()]} onRetimeSubtitle={() => {}} onCutTargets={vi.fn()} />,
+      )
+      expect(screen.queryByTestId("tl-blade-cue")).toBeNull()
+
+      // From the key.
+      fireEvent.keyDown(window, { key: "b" })
+      const cue = screen.getByTestId("tl-blade-cue")
+      expect(cue).toHaveAttribute("data-state", "on")
+      expect(cue).toHaveTextContent("Blade on — click a take to cut it")
+      expect(cue).toHaveTextContent("B or Esc")
+
+      // Off from the chip's own button: a moment of "Blade off", then gone.
+      fireEvent.click(screen.getByRole("button", { name: "Turn the Blade off" }))
+      expect(screen.getByTestId("tl-blade-toggle")).toHaveAttribute("aria-pressed", "false")
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "off")
+      expect(screen.getByTestId("tl-blade-cue")).toHaveTextContent("Blade off")
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(screen.queryByTestId("tl-blade-cue")).toBeNull()
+
+      // From the toolbar button: the same chip. Esc turns it off.
+      fireEvent.click(screen.getByTestId("tl-blade-toggle"))
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "on")
+      fireEvent.keyDown(window, { key: "Escape" })
+      expect(screen.getByTestId("tl-blade-cue")).toHaveAttribute("data-state", "off")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("clicking a take leaves the playhead where it is; double-clicking jumps to the line", () => {

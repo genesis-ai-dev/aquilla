@@ -308,6 +308,14 @@ export interface ProjectWideSettings {
    */
   smartExtensionsEnabled?: boolean
   /**
+   * Smart edits for the whole project: underlines on wordings the team has
+   * corrected elsewhere, with the correction offered. Absent / true = on;
+   * false = no member's editor asks for them. Maintainer (600)+, the ordinary
+   * settings floor. The suggestions are computed in auth-worker
+   * (routes/ai-smart-edits.ts) from the project's own commit history.
+   */
+  smartEditsEnabled?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

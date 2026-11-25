@@ -287,6 +287,11 @@ export function MembersMatrixCellEditor({
               )}
             </div>
           </div>
+          {cell.createdThisProject && (
+            <div className="truncate text-[10px] font-normal text-muted-foreground">
+              {t("org.membersPage.createdThisProject")}
+            </div>
+          )}
         </PopoverTrigger>
         <PopoverContent className="w-64 p-2" side="bottom">
           {canEdit ? (

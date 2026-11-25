@@ -20,16 +20,27 @@
 // keys off it any more, and a class that looks load-bearing but is not is worse
 // than no class. The lane's `useHotSlot` (slot-hover.ts) is the whole mechanism.
 
-import type { ReactNode } from "react"
+import type { MouseEvent, ReactNode } from "react"
 
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
+
+/** A slot menu opens after the pointer rests this long on its button... */
+const MENU_HOVER_OPEN_MS = 150
+/** ...and closes this long after the pointer leaves the button and the menu. */
+const MENU_HOVER_CLOSE_MS = 200
 
 export function TimelineSlotButton({
   testId,
   label,
   hot,
   sizePx = SLOT_BUTTON_MAX_PX,
+  pressed,
+  busy = false,
+  folded = false,
+  picked = false,
+  menu,
   onClick,
   children,
 }: {
@@ -43,33 +54,94 @@ export function TimelineSlotButton({
    *  rows are and how wide this slot is, and this button does not. Defaults to
    *  the size it was hard-coded to before the vertical zoom existed. */
   sizePx?: number
-  onClick(): void
+  /** AQU-2663: a toggle's state (Make speech's "this line is picked"). Absent:
+   *  not a toggle, no `aria-pressed`. */
+  pressed?: boolean
+  /** AQU-2663: its work is running. `aria-disabled` and the click is ignored,
+   *  NOT native `disabled`: AppTooltip turns a disabled child into its "why is
+   *  this unavailable" note. The caller swaps the glyph and the label. */
+  busy?: boolean
+  /** AQU-2663: out of flow and 0×0 — draws nothing and takes no room, but
+   *  stays in the DOM and in the Tab order, so focus can reach it and the
+   *  lane can unfold it. */
+  folded?: boolean
+  /** AQU-2663: shows a pick without being a toggle (the one button on a
+   *  narrow line, whose menu holds the toggle): the same primary glyph and
+   *  outline a pressed toggle gets. */
+  picked?: boolean
+  /** AQU-2663: the button opens this menu instead of acting itself (the one
+   *  button on a line too narrow for the pair). The app's dropdown menu, so
+   *  Enter/Space open it, the arrows move and Esc closes; a click opens it,
+   *  and so does resting a mouse on the button. While it is open the tooltip
+   *  stays shut. */
+  menu?: { open: boolean; onOpenChange(open: boolean): void; content: ReactNode }
+  /** Handed the click, for callers that read Shift/Ctrl/⌘. Unused with `menu`. */
+  onClick?(e: MouseEvent<HTMLButtonElement>): void
   children: ReactNode
 }) {
-  return (
-    <AppTooltip content={label}>
+  const button = (
       <button
         type="button"
         aria-label={label}
         data-testid={testId}
         data-hot={hot ? "true" : undefined}
+        data-busy={busy ? "true" : undefined}
+        data-folded={folded ? "true" : undefined}
+        data-picked={picked ? "true" : undefined}
+        aria-pressed={pressed}
+        // A menu button stays usable while busy: its menu still records.
+        aria-disabled={busy && !menu ? true : undefined}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
-          onClick()
+          if (busy || menu) return
+          onClick?.(e)
         }}
-        style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
+        style={folded ? { width: "0px", height: "0px" } : { width: `${sizePx}px`, height: `${sizePx}px` }}
         className={[
           "flex shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0",
+          folded ? "absolute overflow-hidden" : "",
           // The button arrives with the pointer, not before. No fade: the
           // slot is already under the pointer, so a transition only lags it.
           hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
-          "hover:text-foreground",
+          "hover:text-foreground aria-disabled:cursor-progress",
+          // AQU-2663: a toggle's ON state (a line picked for Make speech) is
+          // seen, not only announced. Inert on buttons that pass no `pressed`.
+          "aria-pressed:text-primary aria-pressed:ring-primary/50",
+          picked ? "text-primary ring-primary/50" : "",
           "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
         ].join(" ")}
       >
         {children}
       </button>
-    </AppTooltip>
+  )
+  if (!menu) return <AppTooltip content={label}>{button}</AppTooltip>
+  return (
+    <DropdownMenu open={menu.open} onOpenChange={menu.onOpenChange}>
+      <AppTooltip content={label} disabled={menu.open}>
+        {/* Sam, Nov 19: "open on click or hover. Hovering specifically over
+            the button that shows up." Base UI's own hover-open, on the
+            BUTTON: an intent delay so passing over does not pop it, a grace
+            after leaving, the way into the menu kept open (safe polygon),
+            and mouse only, so touch opens it by tapping. */}
+        <DropdownMenuTrigger
+          render={button}
+          openOnHover
+          delay={MENU_HOVER_OPEN_MS}
+          closeDelay={MENU_HOVER_CLOSE_MS}
+        />
+      </AppTooltip>
+      {/* Portalled, but React still bubbles its events up the component
+          tree: a press or right-click in the menu must not reach the track
+          (its press handler, its own context menu). */}
+      <DropdownMenuContent
+        align="center"
+        className="w-auto"
+        onPointerDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
+      >
+        {menu.content}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -58,3 +58,28 @@ const SMALL_CAPS_CAPITALIZATION = /\bCapitalization="(?:SmallCaps|AllSmallcaps|C
 export function characterStyleBlockIsSmallCaps(block: string): boolean {
     return SMALL_CAPS_CAPITALIZATION.test(block || "");
 }
+
+/**
+ * Small caps does not shrink letters that are already capitals. The study
+ * notes that still say SENHOR in `nd` therefore print full size. Title case
+ * lets the style draw them as small caps. Verse runs (`cv:nd`) are left as
+ * the Bible wrote them.
+ */
+const SMALL_CAPS_NOTE_STYLE =
+    /^CharacterStyle\/(?:nd|k_xt_nd|k_nd)$/;
+
+export function rewriteAllCapsSenhor(storyXml: string): string {
+    if (!storyXml.includes("SENHOR")) return storyXml;
+    return storyXml.replace(
+        /<CharacterStyleRange\b[^>]*>[\s\S]*?<\/CharacterStyleRange>/g,
+        (range) => {
+            const style = range.match(/AppliedCharacterStyle="([^"]+)"/)?.[1] ?? "";
+            if (!SMALL_CAPS_NOTE_STYLE.test(style)) return range;
+            return range.replace(/<Content>([\s\S]*?)<\/Content>/g, (content, text: string) =>
+                /^(\s*)SENHOR(\s*)$/.test(text)
+                    ? `<Content>${text.replace("SENHOR", "Senhor")}</Content>`
+                    : content
+            );
+        }
+    );
+}

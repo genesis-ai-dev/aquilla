@@ -17,6 +17,7 @@ export function toFinding(evidence: Evidence, run: { runId: string; target: stri
     diffs: evidence.outcome.diffs ?? [], unmet: evidence.outcome.unmet ?? [],
     goal: evidence.goal ?? "", secondGoal: evidence.secondGoal ?? null,
     mutator: evidence.mutator ?? null, fuzzSeed: evidence.fuzzSeed ?? null,
+    ...(evidence.scripted ? { scripted: true } : {}),
     ...run, evidencePath, projectIds: evidence.projects.map((project) => project.projectId),
   }
 }

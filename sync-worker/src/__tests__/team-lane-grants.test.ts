@@ -311,3 +311,173 @@ describe('lane creation reaches team members too (AQU-1800)', () => {
     expect(await grantedLanes(7)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
   })
 })
+
+// ---------------------------------------------------------------------------
+// AQU-2563: a lead can limit a team's attachment to chosen lanes (AQU-1813:
+// `lanes_explicit` + `group_project_lanes`), and "people added to the team
+// later inherit that attachment's lanes". The auth-worker paths do that
+// (`reconcileMemberProjectLanes` → `replaceLaneRows`: a grant AND a kind='lane'
+// scope row per chosen lane). The nightly sync's statements read neither
+// column, so a member the sync added got every lane of the project, and a lane
+// created later reached a member the limited team was their only path for.
+
+/** Limit team `teamId`'s attachment to PROJECT to exactly `laneIds`. */
+async function limitTeamTo(teamId: number, laneIds: string[]): Promise<void> {
+  await t.pg.query(
+    `UPDATE group_project_grants SET lanes_explicit = TRUE WHERE group_id = $1 AND project_id = $2`,
+    [teamId, PROJECT],
+  )
+  for (const laneId of laneIds) {
+    await t.pg.query(
+      `INSERT INTO group_project_lanes (group_id, project_id, lane_id) VALUES ($1, $2, $3)`,
+      [teamId, PROJECT, laneId],
+    )
+  }
+}
+
+async function laneScopes(userId: number): Promise<string[]> {
+  const r = await t.pg.query<{ value: string }>(
+    `SELECT value FROM project_member_scopes
+      WHERE project_id = $1 AND user_id = $2 AND kind = 'lane' ORDER BY value`,
+    [PROJECT, userId],
+  )
+  return r.rows.map((row) => row.value)
+}
+
+/** A second team in the same org, attached to PROJECT at Contributor. */
+async function seedSecondAttachedTeam(orgId: number): Promise<number> {
+  const team = await t.pg.query<{ id: number }>(
+    `INSERT INTO groups (org_id, name, created_by, legacy_uuid) VALUES ($1, 'Team L', 1, 'grp-l') RETURNING id`,
+    [orgId],
+  )
+  const teamId = Number(team.rows[0].id)
+  await t.pg.query(
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES ($1, $2, $3, 1)`,
+    [teamId, PROJECT, CONTRIBUTOR],
+  )
+  return teamId
+}
+
+describe('an attachment a lead limited to some lanes (AQU-2563)', () => {
+  it('gives a member the sync adds only the chosen lanes, with the scope rows the auth-worker writes', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, ['tgt00001'])
+
+    const res = await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([8]) }), env())
+    const body = (await res!.json()) as { created: { laneGrants: number } }
+
+    expect(body.created.laneGrants).toBe(1)
+    expect(await grantedLanes(8)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
+    expect(await laneScopes(8)).toEqual(['tgt00001'])
+  })
+
+  it('counts on a dry run exactly the rows the apply then writes', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, ['tgt00001'])
+
+    const dry = await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([8]), dryRun: true }), env())
+    const would = ((await dry!.json()) as { would: { laneGrants: number } }).would.laneGrants
+    const res = await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([8]) }), env())
+    const created = ((await res!.json()) as { created: { laneGrants: number } }).created.laneGrants
+
+    expect(would).toBe(1)
+    expect(created).toBe(would)
+  })
+
+  it('gives nothing when the lead checked no lane', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, [])
+
+    const res = await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([8]) }), env())
+    const body = (await res!.json()) as { created: { laneGrants: number } }
+
+    expect(body.created.laneGrants).toBe(0)
+    expect(await grantedLanes(8)).toEqual([])
+    expect(await laneScopes(8)).toEqual([])
+  })
+
+  it('gives every lane, and no scope row, to a member a living team also brings to the project', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, ['tgt00001'])
+    await seedSecondAttachedTeam(orgId)
+    // The limited team is first in the plan, so its statement runs first. The
+    // living team's membership is already written by then (step 4), and the
+    // two together are every lane, as `teamLaneAccess` says.
+    const plan = {
+      ...planFor([8]),
+      teamMembers: [
+        { teamUuid: 'grp-t', userId: 8 },
+        { teamUuid: 'grp-l', userId: 8 },
+      ],
+    }
+
+    await handleMigrateGroupsRequest(groupsRequest({ plan }), env())
+
+    expect((await grantedLanes(8)).map((g) => g.lane)).toEqual(['tgt00001', 'tgt00002'])
+    expect(await laneScopes(8)).toEqual([])
+  })
+
+  it('gives a direct member the chosen lanes and writes no scope row over their own membership', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, ['tgt00001'])
+    await t.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 8, $2, 1)`,
+      [PROJECT, VIEWER],
+    )
+
+    await handleMigrateGroupsRequest(groupsRequest({ plan: planFor([8]) }), env())
+
+    expect(await grantedLanes(8)).toEqual([{ lane: 'tgt00001', level: CONTRIBUTOR }])
+    expect(await laneScopes(8)).toEqual([])
+  })
+
+  it('keeps the limit when /migrate/project re-attaches a project a lead already limited', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId, { lanes: ['tgt00001', 'tgt00002'] })
+    await limitTeamTo(teamId, ['tgt00002'])
+    await addTeamMember(teamId, 7)
+
+    const res = await handleMigrateProjectRequest(
+      projectRequest({ projectId: PROJECT, name: 'P', orgId, ownerUserId: 1, teamId }),
+      env(),
+    )
+    expect(res?.status).toBe(200)
+
+    expect(await grantedLanes(7)).toEqual([{ lane: 'tgt00002', level: CONTRIBUTOR }])
+    expect(await laneScopes(7)).toEqual(['tgt00002'])
+  })
+
+  it('does not hand a lane created later to a member the limited team is the only path for', async () => {
+    const { orgId, teamId } = await seedOrgAndTeam()
+    await seedAttachedProject(teamId, orgId)
+    await limitTeamTo(teamId, [])
+    await addTeamMember(teamId, 6)
+    // Direct members and a living team's members are unchanged.
+    await t.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 2, $2, 1)`,
+      [PROJECT, CONTRIBUTOR],
+    )
+    const livingTeam = await seedSecondAttachedTeam(orgId)
+    await addTeamMember(livingTeam, 9)
+
+    // The lane and its grant in one batch, as every writer sends them.
+    await t.db.batch([
+      t.db
+        .prepare(
+          `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES ('tgt00003', ?, 'target', 'sw', 'sw', 1)`,
+        )
+        .bind(PROJECT),
+      grantNewLaneStmt(t.db, PROJECT, { laneId: 'tgt00003' }, 1),
+    ])
+
+    expect(await grantedLanes(6)).toEqual([])
+    expect(await grantedLanes(2)).toEqual([{ lane: 'tgt00003', level: CONTRIBUTOR }])
+    expect(await grantedLanes(9)).toEqual([{ lane: 'tgt00003', level: CONTRIBUTOR }])
+  })
+})

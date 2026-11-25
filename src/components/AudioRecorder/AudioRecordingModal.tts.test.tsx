@@ -1,8 +1,8 @@
-// Round 8: the recording modal's Generate-TTS button — the clear
-// "regenerate" counterpart to re-recording, right where recording lives.
+// The recording modal's takes list, saving, transcription and close/step guards.
+// (Generating speech lives in the Voices sidebar, not here.)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -25,10 +25,6 @@ const attachmentsState = vi.hoisted(() => ({ byCellId: new Map<string, unknown>(
 vi.mock("@/hooks/useFileAudioAttachments", () => ({
   useFileAudioAttachments: () => ({ byCellId: attachmentsState.byCellId, isLoading: false, revalidate: vi.fn() }),
   mergeCellsWithAudio: (cells: unknown[]) => cells,
-}))
-const generateCellVoice = vi.fn(async (..._args: unknown[]) => true)
-vi.mock("@/lib/audio/voice-generate-helpers", () => ({
-  generateCellVoice: (...args: unknown[]) => generateCellVoice(...args),
 }))
 const probeSpy = vi.hoisted(() => vi.fn(async () => 1000))
 vi.mock("@/lib/import", () => ({
@@ -96,9 +92,6 @@ vi.mock("@/hooks/useCellAudio", () => ({
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
-import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
-import { resetRecorderVoicePicksForTests } from "@/lib/audio/recorder-voice"
-import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
 
@@ -230,77 +223,7 @@ describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
   })
 })
 
-describe("AudioRecordingModal — TTS becomes the sounding take (round 8c)", () => {
-  beforeEach(() => {
-    attachmentsState.byCellId = new Map()
-    generateCellVoice.mockClear()
-    emitSelect.mockClear()
-  })
 
-  it("names the TTS take at birth and hands the recording slot to the source clip", async () => {
-    seedEntry({
-      "audio-f1-100-clip.mp3": att("audio-f1-100-clip.mp3", { label: null }),
-      "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
-    }, "audio-c1-200-take.webm") // a recorded take holds the slot
-    renderModal(cellWith("bonjour"))
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    const [args] = generateCellVoice.mock.calls[0] as unknown as [{ label?: string }]
-    expect(args.label).toBe("Take 2")
-    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
-    expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({
-      audioId: "audio-f1-100-clip.mp3", slot: "recording",
-    }))
-  })
-
-  // Sam, 2026-09-28 (Mark 1:3): a line with no imported source clip had
-  // nothing to hand the slot to, so the new voice was saved and never played.
-  it("with no source clip, empties the recording slot so the new voice sounds", async () => {
-    emitDeselect.mockClear()
-    injectDeselect.mockClear()
-    seedEntry({ "audio-c1-200-take.webm": att("audio-c1-200-take.webm") }, "audio-c1-200-take.webm")
-    renderModal(cellWith("bonjour"))
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
-    expect(emitDeselect).toHaveBeenCalledWith(expect.objectContaining({ cellId: "c1", slot: "recording" }))
-    expect(injectDeselect).toHaveBeenCalledWith("f1", "c1", "recording", expect.anything())
-    expect(emitSelect).not.toHaveBeenCalled()
-  })
-
-  it("no displacement when the source clip already holds the slot", async () => {
-    seedEntry({
-      "audio-f1-100-clip.mp3": att("audio-f1-100-clip.mp3", { label: null }),
-    }, "audio-f1-100-clip.mp3")
-    renderModal(cellWith("bonjour"))
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    await new Promise((r) => setTimeout(r, 50))
-    expect(emitSelect).not.toHaveBeenCalled()
-  })
-})
-
-describe("AudioRecordingModal — Generate TTS (round 8)", () => {
-  beforeEach(() => generateCellVoice.mockClear())
-
-  it("renders beside Start and is disabled without a translation", () => {
-    renderModal(cellWith(""))
-    const btn = screen.getByTestId("rec-generate-tts")
-    expect(btn).toBeDisabled()
-    expect(screen.getByTestId("rec-start")).toBeInTheDocument()
-  })
-
-  it("generates durably with the modal's project/cell/session/username", async () => {
-    renderModal(cellWith("bonjour"))
-    const btn = screen.getByTestId("rec-generate-tts")
-    expect(btn).toBeEnabled()
-    fireEvent.click(btn)
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    const [args] = generateCellVoice.mock.calls[0] as unknown as [{ project: ProjectRecord; cell: CellData; username: string }]
-    expect(args.project.id).toBe("p1")
-    expect(args.cell.id).toBe("c1")
-    expect(args.username).toBe("sam")
-  })
-})
 
 describe("AudioRecordingModal — take length comes from the recorder (SUB-48)", () => {
   beforeEach(() => {
@@ -529,139 +452,6 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
   })
 })
 
-// ── AQU-646 stage 4c ─────────────────────────────────────────────────────────
-//
-// Sam, 2026-08-26: "If TTS generation fails, the recording modal should reflect
-// this… the generate TTS button itself should turn red and have a little
-// warning written out on it."
-//
-// It never did. `generateCellVoice` has always written the failure into the
-// shared per-cell status store; the modal read only the boolean it returns and,
-// on false, let the button fall back to idle — so a failed generation looked
-// exactly like one that had never been pressed.
-//
-// These drive the STORE directly, because the suite mocks `generateCellVoice`
-// wholesale and its real status writes therefore never run.
-describe("AudioRecordingModal — a failed generation says so (stage 4c)", () => {
-  const KEY = ttsStatusKey("c1")
-  // The default engine's most likely failure, verbatim.
-  const NOT_CONFIGURED = "voice/tts failed (503): TTS not configured"
-
-  beforeEach(() => {
-    attachmentsState.byCellId = new Map()
-    generateCellVoice.mockClear()
-  })
-  // `tts.ts` has no clear function — the store is a module Map that outlives
-  // any component — so a case that leaves an error in it would hand that error
-  // to every case after it.
-  afterEach(() => setTtsStatus(KEY, { kind: "idle" }))
-
-  it("turns the button red and keeps it PRESSABLE, because pressing it is the retry", () => {
-    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
-    renderModal(cellWith("bonjour"))
-    const btn = screen.getByTestId("rec-generate-tts")
-    expect(btn).toHaveTextContent("TTS failed")
-    expect(btn.className).toContain("text-destructive")
-    // The one thing a failure must never do. Disabling it would strand the user
-    // on the error with no way out of it.
-    expect(btn).toBeEnabled()
-  })
-
-  it("writes the reason out in full, without the server's own words", () => {
-    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
-    renderModal(cellWith("bonjour"))
-    const line = screen.getByTestId("rec-tts-error")
-    // What it IS, then what to do about it. AQU-1001 names the engine: the
-    // default engine's 503 reads as Inworld TTS not configured, never as a
-    // missing Gemini key.
-    expect(line).toHaveTextContent(/Inworld TTS isn't configured/i)
-    expect(line).toHaveTextContent(/will not fix/i)
-    // NOT the raw fragment. That is support's text, not the performer's, and it
-    // lives in the tooltip.
-    expect(line.textContent).not.toContain("503")
-    expect(line.textContent).not.toContain("voice/tts")
-  })
-
-  it("does not repeat itself when the explanation already opens with its heading", () => {
-    // The daily-budget body is literally "Daily AI limit reached — resets at
-    // midnight UTC…" under the title "Daily AI limit reached", so a naive join
-    // says it twice.
-    setTtsStatus(KEY, {
-      kind: "error",
-      message: 'voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}',
-    })
-    renderModal(cellWith("bonjour"))
-    const text = screen.getByTestId("rec-tts-error").textContent ?? ""
-    expect(text).toMatch(/Daily AI limit reached/)
-    expect(text.match(/Daily AI limit reached/g)).toHaveLength(1)
-  })
-
-  // THE GUARD THAT MATTERS MOST. `generateCellVoice` also returns false when the
-  // user DECLINED a model download, and that path deliberately sets an idle
-  // status. Reddening the button for a choice someone just made would be a
-  // worse lie than saying nothing — which is exactly why this reads the store
-  // and not the boolean.
-  it("stays quiet when a run returns false without an error — a declined download is not a fault", async () => {
-    generateCellVoice.mockImplementationOnce(async () => false)
-    renderModal(cellWith("bonjour"))
-    const btn = screen.getByTestId("rec-generate-tts")
-    fireEvent.click(btn)
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.getByTestId("rec-generate-tts")).toBeEnabled())
-    expect(screen.getByTestId("rec-generate-tts").className).not.toContain("text-destructive")
-    expect(screen.queryByTestId("rec-tts-error")).toBeNull()
-  })
-
-  it("a retry reads as in-flight, not as the failure it is replacing", async () => {
-    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
-    // Held open so the button is observed mid-run rather than after it.
-    let release: (v: boolean) => void = () => {}
-    generateCellVoice.mockImplementationOnce(
-      () => new Promise<boolean>((resolve) => { release = resolve }),
-    )
-    renderModal(cellWith("bonjour"))
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(screen.getByTestId("rec-generate-tts")).toBeDisabled())
-    const btn = screen.getByTestId("rec-generate-tts")
-    // Busy leads the precedence: the stale error is still sitting in the store,
-    // and a button that showed it while working would say the retry had already
-    // failed.
-    expect(btn).not.toHaveTextContent("TTS failed")
-    expect(btn.className).not.toContain("text-destructive")
-    release(true)
-  })
-
-  it("counts out a voice-model download instead of spinning anonymously", () => {
-    setTtsStatus(KEY, { kind: "loading", loaded: 5, total: 10, file: "model.onnx" })
-    renderModal(cellWith("bonjour"))
-    const btn = screen.getByTestId("rec-generate-tts")
-    expect(btn).toHaveTextContent("Downloading 50%")
-    // A run someone else started for this cell still counts as busy — two
-    // synths for one cell would fight over one status slot.
-    expect(btn).toBeDisabled()
-  })
-
-  it("says when it has stopped downloading and started speaking", () => {
-    setTtsStatus(KEY, { kind: "synthesizing" })
-    renderModal(cellWith("bonjour"))
-    expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Synthesizing")
-  })
-
-  // AQU-2260: behind the (i) at the end of the reason line, on a click. The
-  // button itself has no hover.
-  it("keeps the verbatim server text reachable behind the reason line's (i)", async () => {
-    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
-    renderWithTooltips(
-      <AudioRecordingModal
-        open project={project} cells={[cellWith("bonjour")]} activeCellId="c1"
-        username="sam" onActiveCellChange={() => {}} onClose={() => {}}
-      />,
-    )
-    const line = screen.getByTestId("rec-tts-error")
-    const info = within(line).getByRole("button", { name: "About TTS failed" })
-    await expectClickNote(info, /TTS not configured/i)
-  })
-})
 
 // ── AQU-646: leaving with a take you have not kept ──────────────────────────
 //
@@ -893,11 +683,8 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
   })
 })
 
-// ── AQU-2510 ──────────────────────────────────────────────────────────────
-// WHICH VOICE Generate speaks in. On a dubbing project the cloned voice is
-// the whole point, and this panel used to synthesize in the project default
-// with no way to say otherwise and no mention of which voice ran.
-describe("AudioRecordingModal — the Generate voice (AQU-2510)", () => {
+// AQU-1941: each generated take is labelled with the voice it was made in.
+describe("AudioRecordingModal — generated takes name their voice", () => {
   const narrator = { id: "v-narrator", name: "Narrator", color: "#475569" }
   const chip = { id: "v-chip", name: "Chip Ingram", color: "#0e7490" }
   const clone = { id: "v-clone", name: "Test Arabic Chip", color: "#0d9488" }
@@ -906,99 +693,6 @@ describe("AudioRecordingModal — the Generate voice (AQU-2510)", () => {
 
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
-    generateCellVoice.mockClear()
-    resetRecorderVoicePicksForTests()
-  })
-
-  it("names the project default when nothing casts the line, and says that is what it is", () => {
-    renderModal(cellWith("bonjour"), { project: castProject({}) })
-    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Narrator")
-    expect(screen.getByTestId("rec-generate-voice-note")).toHaveTextContent("project default")
-    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "default")
-  })
-
-  it("defaults to the line's own cast voice and says so", () => {
-    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
-    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Chip Ingram")
-    expect(screen.getByTestId("rec-generate-voice-note")).toHaveTextContent("this line's voice")
-    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "cast")
-  })
-
-  // A single-voice project has no choice to offer: the control would only
-  // restate the default.
-  it("hides the control on a project with one voice", () => {
-    renderModal(cellWith("bonjour"), { project: castProject({ voices: [narrator] }) })
-    expect(screen.queryByTestId("rec-generate-voice")).toBeNull()
-    expect(screen.getByTestId("rec-generate-tts")).toBeInTheDocument()
-  })
-
-  it("generates in the picked voice, overriding the line's cast voice", async () => {
-    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
-    fireEvent.click(screen.getByTestId("rec-generate-voice"))
-    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
-    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Test Arabic Chip")
-    // A pick needs no explaining — the note is the DEFAULT, said out loud.
-    expect(screen.queryByTestId("rec-generate-voice-note")).toBeNull()
-    // AQU-2511: the button names the voice the press will really use — the
-    // pick, not the cast voice it overrides.
-    expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Generate with Test Arabic Chip")
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    expect(generateCellVoice).toHaveBeenCalledWith(expect.objectContaining({ voiceId: clone.id }))
-  })
-
-  // THE CONTAINMENT RULE: a session that never opens the picker generates
-  // through exactly the path it always did — `generateCellVoice` resolves the
-  // line's voice for itself, so no override is passed.
-  it("passes NO voiceId when the default voice is the one offered", async () => {
-    renderModal(cellWith("bonjour"), { project: castProject({ castAssignments: { c1: chip.id } }) })
-    fireEvent.click(screen.getByTestId("rec-generate-tts"))
-    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    expect(generateCellVoice.mock.calls[0][0]).not.toHaveProperty("voiceId")
-  })
-
-  it("carries the pick to the next line of the session, so repeat generation does not re-ask", () => {
-    const project = castProject({})
-    const { unmount } = renderModal(cellWith("bonjour"), { project })
-    fireEvent.click(screen.getByTestId("rec-generate-voice"))
-    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
-    unmount()
-    // Reopened on another line, nothing cast: the pick is still in force.
-    render(
-      <AudioRecordingModal
-        open
-        project={project}
-        cells={[{ ...cellWith("hola"), id: "c2" } as CellData]}
-        activeCellId="c2"
-        username="sam"
-        onActiveCellChange={() => {}}
-        onClose={() => {}}
-      />,
-    )
-    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Test Arabic Chip")
-    expect(screen.getByTestId("rec-generate-voice")).toHaveAttribute("data-voice-source", "carried")
-  })
-
-  // Parity with the editor's character-tag → sparkle path: a line someone
-  // deliberately cast is not re-voiced by a pick made on another line.
-  it("does not carry the pick over a line that IS cast", () => {
-    const project = castProject({ castAssignments: { c2: chip.id } })
-    const { unmount } = renderModal(cellWith("bonjour"), { project })
-    fireEvent.click(screen.getByTestId("rec-generate-voice"))
-    fireEvent.click(screen.getByRole("button", { name: /Test Arabic Chip/ }))
-    unmount()
-    render(
-      <AudioRecordingModal
-        open
-        project={project}
-        cells={[{ ...cellWith("hola"), id: "c2" } as CellData]}
-        activeCellId="c2"
-        username="sam"
-        onActiveCellChange={() => {}}
-        onClose={() => {}}
-      />,
-    )
-    expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Chip Ingram")
   })
 
   it("names the voice each generated take was made in", () => {

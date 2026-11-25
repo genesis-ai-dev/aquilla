@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import AgentMemoryTab from "./AgentMemoryTab"
 import type { AgentMemory } from "@/lib/agent/memory-api"
 import { ROLE } from "@/lib/agent/role-floors"
@@ -292,6 +292,33 @@ describe("mem-M5 notice liveness + mem-m2 badge refetch", () => {
     rerender(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
 
     await waitFor(() => expect(mockListAgentMemories).toHaveBeenCalledTimes(2))
+  })
+
+  it("keeps an approval on screen when the list is re-read before the server has answered it", async () => {
+    // The re-read still says "proposed" for the row being approved. Taking it
+    // as read put the row back in the Proposed queue until the answer came.
+    mockReviewAgentMemory.mockImplementation(() => new Promise(() => {}))
+    const { rerender } = render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+    await waitFor(() => expect(screen.queryByText("observations/foo.md")).not.toBeInTheDocument())
+
+    fakeRuns = [
+      {
+        localId: "run-1",
+        prompt: "p",
+        runId: "r1",
+        items: [{ id: "i0", kind: "memory-proposed", memoryId: "mem-new", path: "x.md", preview: "x", status: "pending" }],
+        status: "ok",
+      },
+    ]
+    rerender(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(mockListAgentMemories).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      await mockListAgentMemories.mock.results[1]?.value
+    })
+
+    expect(screen.queryByText("observations/foo.md")).not.toBeInTheDocument()
   })
 })
 

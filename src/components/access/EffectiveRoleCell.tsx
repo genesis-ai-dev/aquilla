@@ -1,4 +1,4 @@
-import { formatScopePath } from "@/lib/access/scope-path"
+import { formatScopePath, viaTeamName } from "@/lib/access/scope-path"
 import type { GrantOrigin } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -36,11 +36,15 @@ export function EffectiveRoleCell({
     case "platform":
       via = t("org.access.effective.platform", { role: effective })
       break
-    case "inherited":
-      via = effectiveOrigin.from?.length
-        ? t("org.access.effective.via", { role: effective, path: formatScopePath(effectiveOrigin.from) })
+    case "inherited": {
+      const from = effectiveOrigin.from ?? []
+      const team = viaTeamName(from)
+      const phrase = team ? `${t("org.access.scope.team")} ${team}` : formatScopePath(from)
+      via = phrase
+        ? t("org.access.effective.via", { role: effective, path: phrase })
         : effective
       break
+    }
     case "direct":
       via = effective
   }

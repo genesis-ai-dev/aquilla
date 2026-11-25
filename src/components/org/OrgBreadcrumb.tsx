@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useOrgLookup } from "@/hooks/useOrgLookup"
 import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
 import {
   Breadcrumb,
@@ -133,7 +134,13 @@ export function OrgBreadcrumb({
   // shows its own crumb "for free" under this model: it never opts in.
   const showSection = (!isProjectsLanding || parent != null)
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
-  const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
+  const memberOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
+  // An org a platform admin opens without belonging to it is in neither list
+  // the org context loads at boot, so it is looked up by id. On a project
+  // route it is usually not the active org either, which is why the active
+  // org's own name is not enough here. It links and scopes like a membership.
+  const orgLookup = useOrgLookup(resolvedOrgId)
+  const resolvedOrg = memberOrg ?? orgLookup.org
   // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
   // `orgs`. Resolve it from `guestOrgs` and render it as its own top-level
   // crumb — never as a descendant of one of the caller's owned orgs.
@@ -188,6 +195,9 @@ export function OrgBreadcrumb({
       to: isGuestOrgLanding ? undefined : orgHomePath(resolvedGuestOrg.id),
       isCurrent: isGuestOrgLanding,
     })
+  } else if (orgLookup.pending) {
+    // Neither a membership nor a guest org, and its lookup is still out.
+    crumbs.push({ label: "", pending: true })
   }
 
   if (parent) {

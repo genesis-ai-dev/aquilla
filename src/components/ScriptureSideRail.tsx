@@ -1,4 +1,4 @@
-import { BookMarked, Shapes, UsersRound, type LucideIcon } from "lucide-react"
+import { BookMarked, FileSearch, Shapes, UsersRound, type LucideIcon } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { RightRailPanel } from "@/lib/editor/right-rail-panels"
@@ -22,6 +22,11 @@ const TAB: Record<
     icon: UsersRound,
     label: "bibleData.whosWho.panel.edgeTab",
     testId: "whos-who-edge-tab",
+  },
+  preview: {
+    icon: FileSearch,
+    label: "common.preview",
+    testId: "document-preview-edge-tab",
   },
 }
 

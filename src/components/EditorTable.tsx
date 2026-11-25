@@ -25,6 +25,7 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
+  Copy,
   MoreHorizontal,
   Bold,
   VolumeX,
@@ -188,7 +189,6 @@ import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import {
-  MAX_SELECTED,
   clearSelection,
   getSelectedIds,
   getSelectionAnchorId,
@@ -196,6 +196,9 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
+import { dragSelectionIndex, idsForDrag } from "@/lib/editor/selection-drag-index"
+import { claimsCellSelectAll } from "@/lib/editor/select-all-key"
+import { idsForSelectAll } from "@/lib/editor/select-all-ids"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
@@ -207,7 +210,6 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -295,13 +297,10 @@ import {
   type EditorParallelBiblesConfig,
 } from "./parallel-bibles/EditorBibleColumns"
 import { namedCellRef } from "@/lib/cell-named-ref"
+import { lineNumberLabel, scriptureNumberingOf } from "@/lib/cells/line-name"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
-import {
-  cellNumberLabel,
-  importDisplayLabel,
-  verseRangeLabel,
-} from "@/lib/scripture-reference"
+import { verseRangeLabel } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
@@ -373,7 +372,9 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
-import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
+import { toast } from "@/components/ui/toast"
+import { cellTextForDisplay, displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
+import { formatSelectionCopy, writeFormattedSelection } from "@/lib/editor/selection-copy"
 import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
@@ -388,7 +389,7 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findApprovedRenderingMatches } from "@/lib/richtext/terminology-chip-plugin"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isFlagEnabled, isSmartEditsEnabled } from "@/lib/features/flags"
 import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import { readLanguageProfile } from "../../db/shared/language-profile"
 import {
@@ -1177,6 +1178,10 @@ interface EditorTableProps {
    *  correction when one still describes this text, else the corpus-derived
    *  gloss computed on demand (AQU-1408 §1). */
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
+  /** AQU-2655: bumps when the debounced corpus behind `getStatisticalBt` and
+   *  `getAlignmentModel` changes. They read it at call time, so their identity
+   *  no longer says so. */
+  btCorpusSignal?: ChangeSignal
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
@@ -1410,7 +1415,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt, btCorpusSignal,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -1491,12 +1496,14 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const styleSegmentBold = t("editor.format.bold")
   const styleSegmentItalic = t("editor.format.italic")
   const styleSegmentBoldItalic = t("editor.idml.segmentBoldItalic")
+  const styleSegmentSmallCaps = t("editor.idml.segmentSmallCaps")
   useEffect(() => {
     applyVisibleStyleSegmentChrome(visibleStyleSegments, {
       regular: styleSegmentRegular,
       bold: styleSegmentBold,
       italic: styleSegmentItalic,
       boldItalic: styleSegmentBoldItalic,
+      smallCaps: styleSegmentSmallCaps,
     })
   }, [
     visibleStyleSegments,
@@ -1504,6 +1511,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     styleSegmentBold,
     styleSegmentItalic,
     styleSegmentBoldItalic,
+    styleSegmentSmallCaps,
   ])
   useEffect(() => () => {
     applyVisibleStyleSegmentChrome(false, {
@@ -1511,6 +1519,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       bold: "",
       italic: "",
       boldItalic: "",
+      smallCaps: "",
     })
   }, [])
   // The switcher trigger and the closed pill name the lane the same way.
@@ -1743,6 +1752,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     splitByMilestone,
   ])
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
+  const fileCellIdsRef = useRef<readonly string[]>(fileCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
     anchorIndex: number
@@ -1751,6 +1761,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     startY: number
     didDrag: boolean
     clickAction: "clear-single" | null
+    /** Ids already stored when Command/Ctrl started this drag. Null replaces. */
+    keepIds: ReadonlySet<string> | null
   } | null>(null)
   const selectionDragAbortRef = useRef<AbortController | null>(null)
   const selectionAutoScrollFrameRef = useRef<number | null>(null)
@@ -1759,6 +1771,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
   displayCellIdsRef.current = displayCellIds
+  fileCellIdsRef.current = fileCellIds
 
   // 2026-08-07 (wire c): follow-driver plumbing. The driver itself mounts
   // only while the timeline is stacked above (media-sync active).
@@ -2481,20 +2494,20 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [focusGridRowByIndex])
 
-  const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
+  const selectRangeByIndexes = useCallback((
+    anchorIndex: number,
+    focusIndex: number,
+    keepIds: ReadonlySet<string> | null = null,
+  ) => {
     const list = displayCellIdsRef.current
-    if (list.length === 0) return
+    const ids = idsForDrag({
+      listIds: list,
+      anchorIndex,
+      focusIndex,
+      keep: keepIds,
+    })
+    if (ids.length === 0) return
     const anchor = clampIndex(anchorIndex, list.length)
-    const focus = clampIndex(focusIndex, list.length)
-    if (anchor < 0 || focus < 0) return
-
-    const start = focus >= anchor
-      ? anchor
-      : Math.max(focus, anchor - MAX_SELECTED + 1)
-    const end = focus >= anchor
-      ? Math.min(focus, anchor + MAX_SELECTED - 1)
-      : anchor
-    const ids = list.slice(start, end + 1)
     setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])
 
@@ -2548,11 +2561,17 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const updateSelectionFromPointer = useCallback((clientY: number) => {
     const drag = selectionDragRef.current
-    if (!drag) return
-    const nextIndex = getIndexAtClientY(clientY)
+    if (!drag || !drag.didDrag) return
+    // The stored ids are the selection. This writes the range up to the row
+    // under the pointer. Auto-scroll brings the next row there; crossing the
+    // window does not replace the set with every cell.
+    const nextIndex = dragSelectionIndex({
+      rowIndex: getIndexAtClientY(clientY),
+      count: displayCellIdsRef.current.length,
+    })
     if (nextIndex < 0 || nextIndex === drag.lastIndex) return
     drag.lastIndex = nextIndex
-    selectRangeByIndexes(drag.anchorIndex, nextIndex)
+    selectRangeByIndexes(drag.anchorIndex, nextIndex, drag.keepIds)
   }, [getIndexAtClientY, selectRangeByIndexes])
 
   const scrollSelectionNearEdge = useCallback((clientY: number) => {
@@ -2655,8 +2674,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     // row could have shifted since it was set, so the silently-computed
     // range would land 1-2 rows off, or not start on the clicked cell at
     // all. A plain click must always mean "select exactly this cell."
-    const shouldRange = !isAdditive && anchorIndex >= 0 && e.shiftKey
+    // Command/Ctrl keeps the ids already stored and adds this drag to them.
+    const shouldRange = anchorIndex >= 0 && e.shiftKey
     const startIndex = shouldRange ? anchorIndex : rowIndex
+    const keepIds = isAdditive ? new Set(selectedIds) : null
 
     selectionDragRef.current = {
       pointerId: e.pointerId,
@@ -2665,7 +2686,8 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       startX: e.clientX,
       startY: e.clientY,
       didDrag: false,
-      clickAction: isAlreadySelected && selectedIds.size === 1 ? "clear-single" : null,
+      clickAction: !isAdditive && isAlreadySelected && selectedIds.size === 1 ? "clear-single" : null,
+      keepIds,
     }
     selectionPointerYRef.current = e.clientY
 
@@ -2694,10 +2716,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
       // the drag if the browser refuses capture for any reason.
     }
 
-    if (isAdditive) {
+    if (isAdditive && !shouldRange) {
       toggleSelected(cellId)
     } else if (shouldRange) {
-      selectRangeByIndexes(anchorIndex, rowIndex)
+      selectRangeByIndexes(anchorIndex, rowIndex, keepIds)
     } else if (isAlreadySelected && selectedIds.size === 1) {
       // Defer clearing until pointerup. If the user drags from the selected
       // anchor, the move handler should extend the range instead.
@@ -2795,11 +2817,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }),
   [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
   // A file of chapters numbers its lines by verse; anything else counts them.
-  const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
-    item.kind === "chapter"
-    || item.kind === "chapter-range"
-    || item.kind === "preface"
-  )), [milestoneNavigationItems])
+  const scriptureNumbering = useMemo(() => scriptureNumberingOf(milestoneNavigationItems), [milestoneNavigationItems])
 
   // Numbering and paragraph groups depend on structure/validation, not save
   // timestamps or ordinary text edits. One version scan serves both caches;
@@ -2896,6 +2914,37 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }
     if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
+
+  // In the open text pane, Command-A or Control-A checks the cells, unless
+  // the key is going to a text field. A cell editor still selects its text.
+  // Split into milestones checks the chapter on the page; the continuous
+  // list still checks the whole file. getMilestoneSplit is read at key time
+  // so turning the page on does not wait for this listener to rebind.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const root = tableRootRef.current
+      if (!root || !claimsCellSelectAll(root, event)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const wipe = () => root.ownerDocument.getSelection()?.removeAllRanges()
+      wipe()
+      if (event.type === "keydown") {
+        const ids = idsForSelectAll({
+          fileIds: fileCellIdsRef.current,
+          filteredIds: voiceFilterActive ? displayCellIdsRef.current : null,
+          milestoneIds: getMilestoneSplit() ? displayCellIdsRef.current : null,
+        })
+        if (ids.length > 0) setSelection(ids, ids[0] ?? null)
+      }
+      window.requestAnimationFrame(wipe)
+    }
+    window.addEventListener("keydown", onKey, true)
+    window.addEventListener("keyup", onKey, true)
+    return () => {
+      window.removeEventListener("keydown", onKey, true)
+      window.removeEventListener("keyup", onKey, true)
+    }
+  }, [voiceFilterActive])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
     const target = event.target
@@ -3202,7 +3251,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   const onSetUpAffixesStable = useStableCallback(onSetUpAffixes)
   const getStatisticalBtStable = useStableCallback(getStatisticalBt)
   const getAlignmentModelStable = useStableCallback(getAlignmentModel)
-  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel])
+  const btGettersSignal = useChangeSignal([getStatisticalBt, getAlignmentModel], btCorpusSignal)
   const rowUiState = useMemo<RowUiState>(
     () => ({ activeEditorCellId, focusedRailCellId, detailCellId }),
     [activeEditorCellId, focusedRailCellId, detailCellId],
@@ -3699,10 +3748,10 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
 
   const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
 
-  // Smart edits (flag `smartEdits`): one passage request around the active
-  // cell; rows read their own suggestions through SmartEditsProvider.
+  // Smart edits (project-wide, on by default): one passage request around the
+  // active cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
-    enabled: isFlagEnabled(project, "smartEdits"),
+    enabled: isSmartEditsEnabled(project),
     llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
     harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
     projectId: project.id,
@@ -4315,19 +4364,24 @@ function CellMenuAnchorSlot() {
  * kit sets `data-disabled:pointer-events-none` on every item, so a tooltip
  * anchored to a disabled one would never open.
  *
+ * Copy source text is the exception when the cell is empty. The entry stays,
+ * greyed out, and a click opens the same disabled note a greyed-out button
+ * uses ("Nothing to copy") instead of a second line under the label. The
+ * note's stand-in sits outside the item, so the item's missing pointer events
+ * are what deliver the click.
+ *
  * The one exception is Edit timestamps, which is HIDDEN on a file with no
  * clock (Sam, 2026-09-09). That is not a permission or a property of the row —
  * an ordinary text file simply has no timings, and a permanently dead entry on
  * every text project is furniture rather than an explanation.
  *
- * Nothing to offer at all (the tier does not admit you, or the source is
- * mirrored from upstream): the cell renders as given, with the browser's own
- * menu. Those never change while you are in the file, so a permanently empty
- * menu would be furniture.
+ * Copy source text is always there. Someone who can change nothing else
+ * still gets that one entry, because the cell text itself cannot be highlighted.
  */
 function CellSourceMenu({
   children,
   cellId,
+  sourceText,
   /** Insert after this row. */
   onInsertBelow,
   belowDisabledReason,
@@ -4372,6 +4426,8 @@ function CellSourceMenu({
   /** The source column. It becomes the menu's trigger. */
   children: React.ReactElement
   cellId: string
+  /** This cell's source text, already unwrapped for display. */
+  sourceText: string
   onInsertBelow?: () => void
   belowDisabledReason?: string | null
   onInsertAbove?: () => void
@@ -4410,10 +4466,21 @@ function CellSourceMenu({
   // source-edit permission rather than on the add/remove tier, so it is its own
   // flag rather than another term in `structural`.
   const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
-  const offered = structural || parkable || Boolean(onSetMilestone)
-    || Boolean(onSplitIntoLines) || Boolean(splitIntoLinesDisabledReason)
-    || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
-  if (!offered) return children
+  const copyText = sourceText.trim()
+  const onCopySource = () => {
+    if (!copyText) return
+    const payload = formatSelectionCopy([{
+      number: null,
+      chapter: null,
+      chapterLabel: null,
+      text: copyText,
+    }])
+    void writeFormattedSelection(payload).then(() => {
+      toast.add({ type: "success", title: t("editor.selection.copiedSource") })
+    }, () => {
+      toast.add({ type: "error", title: t("editor.selection.copyFailed") })
+    })
+  }
 
   /**
    * Open the context menu from the button, at the button.
@@ -4498,13 +4565,32 @@ function CellSourceMenu({
     <CellMenuAnchorContext.Provider value={anchor}>
       <ContextMenu onOpenChange={(open) => setMenuOpen(open)}>
         <ContextMenuTrigger
-          // The trigger's own class is `select-none`. Source text has to stay
-          // selectable (add-to-termbase / Ask AI), so this wins the merge.
-          className="select-text"
           data-testid={`cell-menu-${cellId}`}
           render={children}
         />
         <ContextMenuContent className="min-w-[13rem]">
+          {copyText ? (
+            <RowInsertItem
+              testId="cell-menu-copy-source"
+              icon={<Copy className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.cellMenu.copySource")}
+              onSelect={onCopySource}
+            />
+          ) : (
+            <AppTooltip
+              content={t("editor.selection.copyEmpty")}
+              disabledTriggerClassName="flex w-full"
+            >
+              <ContextMenuItem
+                data-testid="cell-menu-copy-source"
+                disabled
+                className="w-full"
+              >
+                <Copy className="mr-2 h-3.5 w-3.5 shrink-0" />
+                <span>{t("editor.cellMenu.copySource")}</span>
+              </ContextMenuItem>
+            </AppTooltip>
+          )}
           {(onToggleSourceEdit || sourceEditDisabledReason) && (
             <RowInsertItem
               testId="cell-menu-edit-source"
@@ -4526,9 +4612,6 @@ function CellSourceMenu({
               reason={timestamps.offerUnlock ? null : timestamps.disabledReason}
               onSelect={() => setTimesOpen(true)}
             />
-          )}
-          {(structural || parkable || onSetMilestone) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
-            <ContextMenuSeparator />
           )}
           {/* AQU-2308: a milestone is about the FILE's divisions rather than
               this row, so it sits above the row's own structural actions —
@@ -8025,7 +8108,13 @@ function EditorRow({
         return
       }
       if (document.activeElement !== pm) {
-        pm.focus()
+        // The activation window made the row an editing host with the caret
+        // parked inside it. Left open, the browser hands focus straight back
+        // to the row: an IDML editor, which keeps the caret where it is below,
+        // never focused and its typing went to the row. The buffered text is
+        // already in pendingActivationInputRef; the editor drains it on focus.
+        closeActivationCapture()
+        pm.focus({ preventScroll: true })
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
         if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
@@ -8049,7 +8138,7 @@ function EditorRow({
       // unmounts, another row takes over) — that settles the edit too.
       settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
+  }, [isEditorActive, cell.id, closeActivationCapture, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -8362,17 +8451,8 @@ function EditorRow({
   const issueSummary = issueLines.length > 0
     ? issueLines.map(formatCellIssueLine).join(". ")
     : issueHint
-  const numberLabel = cellNumberLabel({
-    lineNumbersEnabled,
-    cellType: cell.type,
-    canonicalRef: cell.group,
-    sourceCanonicalRef: cell.globalReferences?.[0],
-    scriptureNumbering,
-    rowIndex,
-    contentNumber,
-    displayLabel: importDisplayLabel(cell.metadata),
-    versePart,
-  })
+  // AQU-2278: the same function a line's name reads its number from.
+  const numberLabel = lineNumberLabel(cell, { contentNumber, versePart, scriptureNumbering, rowIndex }, lineNumbersEnabled)
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
   // A media-gutter row "speaks" unless it's STRUCTURE (paratext/heading) —
   // the same set whose number pill is suppressed, so the two left-edge
@@ -9327,6 +9407,7 @@ function EditorRow({
             item. */}
         <CellSourceMenu
           cellId={cell.id}
+          sourceText={cellTextForDisplay(effectiveSourceText(cell))}
           sourceEditing={sourceEditing}
           onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
           // The DCS pin used to show a padlock where the pencil sat, so the
@@ -9358,14 +9439,14 @@ function EditorRow({
           ref={sourceColRef}
           className={cn(
             // The showcase node IS the text surface so it fills the whole
-            // source column. select-text: global chrome disables selection;
-            // source must stay selectable for add-to-termbase / Ask AI.
+            // source column. Text is not highlighted here; Copy source text
+            // in the right-click menu is how that text leaves the cell.
             // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
             // TRACK, but a grid item keeps `min-width: auto` and would still
             // overflow its area on an unbreakable token; min-w-0 lets it
             // shrink and break-words (inherited by the text below) breaks the
             // token instead of blowing the column out.
-            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 select-text transition-[colors,opacity] md:col-auto",
+            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 transition-[colors,opacity] md:col-auto",
             // Match the target well — same muted fill + ring (not a darker
             // primary-tinted edit chrome).
             "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -9768,6 +9849,7 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
+                    sanitizeEntryWhitespace={idmlPreview}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null

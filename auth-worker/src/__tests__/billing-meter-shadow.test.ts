@@ -48,6 +48,10 @@ async function freeOrg() {
   await seedUser(1, 'alice')
   await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Free org', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Shadow', 1, 1)").bind(PROJECT).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)",
+  ).bind(PROJECT).run()
   await env.AQUILLA_PG.prepare('INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)')
     .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', autopilotEnabled: true,
       translationBrief: { parameters: { purpose: 'Community reading' } } })).run()

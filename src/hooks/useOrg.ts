@@ -86,6 +86,7 @@ export function useOrg(): UseOrg {
 }
 
 export interface UseOrgMembers {
+  hasReadableRoster: boolean;
   members: OrgMember[];
   isLoading: boolean;
   error: string | null;
@@ -130,6 +131,8 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   const [error, setError] = useState<string | null>(null);
   const [rosterHidden, setRosterHidden] = useState(false);
   const [rosterAccessDenied, setRosterAccessDenied] = useState(false);
+  const [readScope, setReadScope] = useState<{ orgId: number; jwt: string } | null>(null);
+  const requestId = useRef(0);
   const aliveRef = useRef(true);
 
   // See useOrg above for the StrictMode rationale — same pattern.
@@ -139,12 +142,18 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!jwt || orgId == null) return;
+    const id = ++requestId.current;
+    if (!jwt || orgId == null) {
+      setReadScope(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const result = await fetchOrgRoster(jwt, orgId);
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || id !== requestId.current) return;
+      setReadScope(result.kind === "ok" ? { orgId, jwt } : null);
       if (result.kind === "ok") {
         setMembers(result.members);
         setRosterHidden(false);
@@ -168,7 +177,8 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
         setRosterAccessDenied(true);
       }
     } catch (e) {
-      if (aliveRef.current) {
+      if (aliveRef.current && id === requestId.current) {
+        setReadScope(null);
         setError(e instanceof Error ? e.message : String(e));
         // A thrown failure is its own state — don't leave a previous attempt's
         // hidden/no-access flag standing, or a caller that ranks those above
@@ -177,7 +187,7 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
         setRosterAccessDenied(false);
       }
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && id === requestId.current) setLoading(false);
     }
   }, [jwt, orgId]);
 
@@ -216,6 +226,7 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   }, [jwt, orgId]);
 
   return {
+    hasReadableRoster: readScope !== null && readScope.orgId === orgId && readScope.jwt === jwt,
     members, isLoading, error, rosterHidden, rosterAccessDenied,
     refresh, add, addMany, remove, listMemberProjects,
   };

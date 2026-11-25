@@ -53,6 +53,11 @@ beforeEach(async () => {
   await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-a', 'ProjA', 1, 1)")
   await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-b', 'ProjB', 2, 1)")
   await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-c', 'ProjC', 1, ?)", ROOT_ID)
+  await sql(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-c', ?, 700, ?)",
+    ROOT_ID,
+    ROOT_ID,
+  )
   await sql("INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'proj-a', 300, 1)")
   await sql("INSERT INTO org_invites (token, org_id, role_level, created_by, email) VALUES ('tok-org-1', 1, 400, 1, 'x@example.com')")
   await sql("INSERT INTO project_invites (token, project_id, role_level, created_by) VALUES ('tok-proj-1', 'proj-a', 300, 1)")
@@ -405,12 +410,12 @@ describe("sync-token mint (OPS-44)", () => {
   })
 
   it("un-elevated admin keeps a project they CREATED in a foreign org", async () => {
-    // proj-c is in org 1 (root is not a member) but root created it, so the
-    // creator path grants 700 genuinely. Stripping admin power must leave it.
+    // proj-c is in org 1 (root is not a member). The Owner grant written for
+    // the creator is what keeps access after admin power is stripped.
     const res = await mint("root", "proj-c")
     expect(res.status).toBe(200)
     const body = (await res.json()) as { role: { source: string; level: number } }
-    expect(body.role).toMatchObject({ source: "creator", level: 700 })
+    expect(body.role).toMatchObject({ source: "override", level: 700 })
   })
 
   it("a project outsider still gets the original 403, not an elevation hint", async () => {

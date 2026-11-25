@@ -38,6 +38,7 @@ function GoogleSignInReturn() {
     : error === "rate_limited" ? "auth.google.rateLimited"
     : error === "session_failed" ? "auth.google.sessionFailed"
     : error === "expired_request" || error === "restart" ? "auth.google.expired"
+    : error === "settings_verification_required" ? "auth.security.linkFromSettings"
     : error === "unavailable" ? "auth.google.unavailableRestart"
     : "auth.google.failed"
   const finish = async (result: GoogleSession) => {
@@ -50,7 +51,7 @@ function GoogleSignInReturn() {
       catch { toast.add({ type: "error", title: t("onboarding.privacy.saveFailed") }) }
     }
     clearSignupAnalyticsChoice(); clearGoogleAttempt()
-    navigate(attempt?.next ?? "/app", { replace: true })
+    navigate(result.created ? "/preferences/login-methods?backup=1" : attempt?.next ?? "/app", { replace: true })
   }
   useEffect(() => {
     if (started.current) return
@@ -83,10 +84,10 @@ function GoogleSignInReturn() {
         void googleRequest<GoogleSession>("finish", { code: pending.continuation, verifier: attempt.verifier, ...(pending.step === "signup" ? { username } : { password }) })
           .then(finish).catch(err => setError(err instanceof Error ? err.message : "failed")).finally(() => { setPassword(""); setBusy(false) })
       }}>
-        <p className="text-sm text-muted-foreground">{t(pending.step === "signup" ? "auth.google.usernameNote" : "auth.google.linkNote")}</p>
+        <p className="text-sm text-muted-foreground">{t(pending.step === "signup" ? "auth.google.usernameNote" : pending.step === "legacy" ? "auth.google.legacyNote" : "auth.google.linkNote")}</p>
         <FieldGroup><Field><FieldLabel htmlFor="google-account">{t("common.email")}</FieldLabel><Input id="google-account" value={pending.email} readOnly /></Field>
         {pending.step === "signup" ? <Field><FieldLabel htmlFor="google-username">{t("auth.signup.usernameLabel")}</FieldLabel><Input id="google-username" required minLength={3} maxLength={50} autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} /></Field>
-          : <Field><FieldLabel htmlFor="google-password">{t("auth.google.passwordLabel")}</FieldLabel><RevealableInput id="google-password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></Field>}
+          : <Field><FieldLabel htmlFor="google-password">{t(pending.step === "legacy" ? "auth.google.codexPassword" : "auth.google.passwordLabel")}</FieldLabel><RevealableInput id="google-password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></Field>}
         </FieldGroup>
         <Button type="submit" disabled={busy}>{t(pending.step === "signup" ? "auth.signup.submitDefault" : "auth.google.linkSubmit")}</Button>
         {pending.step === "link" && <Button type="button" variant="link" onClick={() => setRecovering(true)}>{t("auth.login.forgotPasswordLink")}</Button>}
@@ -109,6 +110,14 @@ function GoogleConnectReturn({ username, verifier }: { username: string; verifie
   useEffect(() => {
     if (code) { try { saveGoogleProgress(verifier, { connectCode: code }) } catch { setError(true) } }
   }, [code, verifier])
+  const reauthentication=useRef<Promise<unknown>|null>(null)
+  useEffect(() => {
+    if (!saved?.reauthenticate || loading || !active || active.username!==username || !code) return
+    let alive=true
+    void (reauthentication.current ??= googleRequest("reauthenticate",{code,verifier},active.jwt)).then(()=>{if(alive){clearGoogleAttempt();navigate("/preferences/login-methods",{replace:true})}}).catch(()=>{if(alive)setError(true)})
+    return()=>{alive=false}
+  },[saved,loading,active,username,code,verifier,navigate])
+  if(saved?.reauthenticate) return <AuthPage><AuthPanel><CardContent>{(error || (!loading && (!active || active.username !== username || !code)))?<p role="alert">{t("auth.security.googleVerificationFailedReturnToLoginMethodsAnd")}</p>:<p>{t("auth.security.verifyingYourGoogleAccount")}</p>}<Link to="/preferences/login-methods">{t("auth.security.backToLoginMethods")}</Link></CardContent></AuthPanel></AuthPage>
   const matching = active?.username === username
   if (saved?.emailChange && !loading && matching && code && active) return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.emailChange.title")}</CardTitle></CardHeader><CardContent><EmailChangeForm jwt={active.jwt} passwordAvailable={false} onSetPassword={() => { clearGoogleAttempt(); navigate("/preferences/login-methods") }} onBack={() => { clearGoogleAttempt(); navigate("/preferences/login-methods") }} /></CardContent></AuthPanel></AuthPage>
   return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.google.linkTitle")}</CardTitle></CardHeader>

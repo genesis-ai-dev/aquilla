@@ -64,6 +64,15 @@ export function formatVerseReference(ref: VerseReference): string {
   return `${ref.bookCode} ${ref.chapter}:${ref.verse}${ref.toVerse ? `-${ref.toVerse}` : ""}`
 }
 
+/** A heading's or paratext row's machine locator ("RUT 1:h:1", "RUT:mt:1"):
+ *  where structure sits in a book, not a reference anyone reads. The shape the
+ *  importers mint (normalized-manifest.ts, sandbox-parser.ts, spreadsheet.ts). */
+const SCRIPTURE_STRUCTURE_RE = /^[1-3]?[A-Z]{2,3}(?:\s+\d+)?:[a-z]+\d*:\d+$/i
+
+export function isScriptureStructureLocator(value: string | null | undefined): boolean {
+  return Boolean(value) && SCRIPTURE_STRUCTURE_RE.test(value!.trim())
+}
+
 /** Canonical verse label for the editor gutter. Non-verse cells return null. */
 export function verseLabelFromCanonical(value: string | null | undefined): string | null {
   return parseScriptureReference(value)?.verse ?? null
@@ -92,7 +101,9 @@ export interface CellNumberLabelInput {
   canonicalRef: string | null | undefined
   sourceCanonicalRef?: string | null
   scriptureNumbering: boolean
-  rowIndex: number
+  /** The row's place on the page; the last resort for a count. Without it (a
+   *  line named outside the table) an uncounted line shows no number. */
+  rowIndex?: number
   /**
    * 1-based ordinal among *numbered* (non-paratext) cells, used only by the
    * sequential (non-scripture) numbering path. Passing it makes numbering start
@@ -160,7 +171,8 @@ export function cellNumberLabel({
   // how headings/titles/introductions say "I am structural, not verse zero".
   if (displayLabel !== undefined) return displayLabel
 
-  return scriptureNumbering ? null : String(contentNumber ?? rowIndex + 1)
+  const count = contentNumber ?? (rowIndex === undefined ? undefined : rowIndex + 1)
+  return scriptureNumbering || count === undefined ? null : String(count)
 }
 
 /** Friendly chapter label for editor wayfinding (`MAT 1` → `Matthew 1`). */

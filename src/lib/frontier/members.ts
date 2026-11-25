@@ -62,6 +62,8 @@ export interface ProjectMember {
     source: ProjectMemberRole["source"] | "platform";
     from: ScopePath | null;
   } | null;
+  /** AQU-2357: this person created the project. History, not a grant path. */
+  createdThisProject?: boolean;
 }
 
 /**
@@ -436,8 +438,15 @@ export async function leaveProject(
     { method: "DELETE", headers: authHeaders(jwt) }
   );
   if (res.status === 409) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const text = await res.text().catch(() => "");
+    let body: { error?: string } | null = null;
+    try {
+      body = JSON.parse(text) as { error?: string };
+    } catch {
+      body = null;
+    }
     if (body?.error === "no_direct_membership") throw new NoDirectMembershipError();
+    throw new UserError(409, text, "project");
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");

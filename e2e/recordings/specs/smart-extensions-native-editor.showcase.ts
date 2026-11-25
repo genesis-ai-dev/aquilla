@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test"
-import { mkdirSync } from "node:fs"
+import { mkdirSync, rmSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { ensureAuthState, injectSession } from "../../helpers/auth"
@@ -13,22 +13,27 @@ import {
   seedProjectWithFile,
 } from "../../helpers/seed-project"
 import { NATIVE_EDITOR, ToolsPage } from "../../helpers/page-objects/ToolsPage"
+import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Showcase } from "../helpers/showcase"
 
 /**
- * AQU-2758 · Smart Extensions — Native Editor Integration (`apiRev 8` / `SDK 1.2`)
+ * AQU-2758 · Smart Extensions — Complete Tour of Extension Kinds & Native Editor Integration (apiRev 8)
  *
- * Shot list (1280×800, clarity-first doc profile):
- *   1. Native EditorTable opens by default ("Edit with: Aquilla editor" even with an opt-in
- *      "Focus Editor" custom editor extension installed — default-editor takeover is gone).
- *   2. Open "Verse Companion & Checker" in the side panel → live active-cell sync via `aq.useActiveCell()`.
- *   3. Click "Run term check" (headless `where: ["bar"]` action) → populates native "Study notes" column
- *      (`manifest.columns`), row badges, and wavy span highlights via `aq.editor.annotate()`.
- *   4. Click a wavy span highlight → open native popover → apply one-click target quick-fix ("Replace with Jesús").
- *   5. Click "Jump to MAT 2:1" in the panel → `aq.editor.reveal()` focuses the target row in native EditorTable.
- *   6. Select source text ("Bethlehem") → `SourceSelectionToolbar` shows `where: ["selection"]` action →
- *      click "Look up term" → headless action opens/updates the panel via `aq.ui.openPanel()`.
- *   7. Right-click a cell → native context menu shows `where: ["cell"]` action ("Inspect verse notes").
+ * Captures both a live walkthrough video (1280×800, doc mode) AND 12 crisp screenshots
+ * covering every available kind of Smart Extension and integration surface in Aquilla:
+ *
+ *   01-extensions-hub-and-builder.png  — /extensions hub: AI builder, starters, installed list & where:["settings"] action
+ *   02-full-page-mount.png             — `page` mount: full-page Key-Term & Translation Audit dashboard
+ *   03-side-panel-live-sync.png        — `panel` mount + `aq.useActiveCell()` tracking focused verse in native EditorTable
+ *   04-native-column-badges-spans.png  — `manifest.columns` ("Study notes") + `aq.editor.annotate()` badges & wavy spans + where:["bar"]
+ *   05-span-quick-fix-popover.png      — Declarative span popover with one-click target quick-fix ("Replace with Jesús")
+ *   06-inline-cell-mount.png           — `inline` mount: per-cell expansion "Extensions" tab with `aquilla.context.cell`
+ *   07-cell-menu-action.png            — `where: ["cell"]` action in native cell context menu + `aq.ui.openPanel()`
+ *   08-extensions-palette.png          — Smart Extensions command palette (⌘⇧E) with `where: ["menu"]` actions & mounts
+ *   09-edit-with-opt-in-menu.png       — "Edit with" switcher: native Aquilla editor always default, custom editors opt-in
+ *   10-custom-editor-mount.png         — `editor` mount: opt-in Focus Editor custom editor active for the file
+ *   11-importer-extension.png          — `manifest.importers`: Import dialog rendering schema-driven extension importer form
+ *   12-exporter-extension.png          — `manifest.exports`: Export dialog offering custom extension export format (.tsv)
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -38,29 +43,155 @@ const AUTH_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 
 const TOOL_NAME = "Verse Companion & Checker"
 const CUSTOM_EDITOR_NAME = "Focus Editor"
+const IMPORTER_NAME = "Book Glossary Importer"
 
 const CUSTOM_EDITOR_MANIFEST = {
   name: CUSTOM_EDITOR_NAME,
-  description: "Minimal opt-in custom editor extension for distraction-free drafting.",
+  description: "Distraction-free single-verse card view — opt-in custom editor via Edit with.",
   scopes: ["read:cells", "write:target"],
-  mounts: ["editor"],
+  mounts: ["page", "editor"],
   apiRev: 8,
   sdk: 1,
 }
 
 const CUSTOM_EDITOR_SOURCE = `<!doctype html>
 <html>
-<head><meta charset="utf-8"><style>body{margin:0;padding:24px;font-family:var(--aq-font,system-ui,sans-serif)}</style></head>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 28px 36px; font-family: var(--aq-font, system-ui, sans-serif); color: var(--aq-fg, #111); background: var(--aq-bg, #f8fafc); }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #2563eb; }
+  .title { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .pill { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #e0e7ff; color: #1e40af; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 24px; box-shadow: 0 4px 20px rgba(15,23,42,.05); margin-bottom: 14px; }
+  .ref { font-size: 13px; font-weight: 700; color: #475569; margin-bottom: 10px; }
+  .src { font-size: 17px; line-height: 1.6; color: #0f172a; padding-bottom: 14px; border-bottom: 1px solid #f1f5f9; margin-bottom: 14px; }
+  .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #64748b; margin-bottom: 6px; }
+  .tgt { font-size: 18px; line-height: 1.6; color: #0f172a; padding: 12px 14px; border-radius: 10px; border: 1px solid #cbd5e1; background: #f8fafc; }
+  .nav { display: flex; gap: 10px; justify-content: space-between; align-items: center; margin-top: 14px; }
+  button { font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+  button.primary { background: #2563eb; color: #fff; border-color: transparent; }
+</style>
+</head>
 <body>
-<div id="app">Focus Editor</div>
+<div class="wrap" id="app" data-testid="focus-editor-root">Loading Focus Editor…</div>
 <script>
-(function(){
-  var app = document.getElementById("app");
-  if (window.aq && aq.useCells) {
-    aq.useCells().ready.then(function(cells){
-      app.textContent = "Focus Editor · " + (cells ? cells.length : 0) + " verses";
-    });
+(function () {
+  var root = document.getElementById("app");
+  var idx = 1;
+  var list = [];
+
+  function render() {
+    root.textContent = "";
+    var header = document.createElement("div");
+    header.className = "header";
+    var left = document.createElement("div");
+    var eye = document.createElement("div"); eye.className = "eyebrow"; eye.textContent = "Custom Editor Mount (opt-in via Edit with)";
+    var title = document.createElement("div"); title.className = "title"; title.textContent = "Focus Editor";
+    left.appendChild(eye); left.appendChild(title);
+    var pill = document.createElement("span"); pill.className = "pill";
+    pill.textContent = list.length ? ("Verse " + idx + " of " + (list.length - 1)) : "Loading";
+    header.appendChild(left); header.appendChild(pill);
+    root.appendChild(header);
+
+    var c = list[idx] || list[0];
+    if (!c) return;
+    var card = document.createElement("div");
+    card.className = "card";
+    var ref = document.createElement("div"); ref.className = "ref"; ref.textContent = c.ref || "MAT";
+    var sLbl = document.createElement("div"); sLbl.className = "lbl"; sLbl.textContent = "Source (English)";
+    var src = document.createElement("div"); src.className = "src"; src.textContent = c.source || "";
+    var tLbl = document.createElement("div"); tLbl.className = "lbl"; tLbl.textContent = "Target (Spanish)";
+    var tgt = document.createElement("div"); tgt.className = "tgt"; tgt.textContent = c.target || "";
+    card.appendChild(ref); card.appendChild(sLbl); card.appendChild(src); card.appendChild(tLbl); card.appendChild(tgt);
+    root.appendChild(card);
+
+    var nav = document.createElement("div");
+    nav.className = "nav";
+    var prev = document.createElement("button"); prev.textContent = "← Previous verse";
+    prev.onclick = function () { idx = Math.max(1, idx - 1); render(); };
+    var next = document.createElement("button"); next.className = "primary"; next.textContent = "Next verse →";
+    next.onclick = function () { idx = Math.min(list.length - 1, idx + 1); render(); };
+    nav.appendChild(prev); nav.appendChild(next);
+    root.appendChild(nav);
   }
+
+  aq.useCells().ready.then(function (cells) {
+    list = cells || [];
+    idx = list.length > 1 ? 1 : 0;
+    render();
+  });
+})();
+</script>
+</body>
+</html>`
+
+const IMPORTER_MANIFEST = {
+  name: IMPORTER_NAME,
+  description: "Imports book-level key-term glossaries directly through Aquilla's Import dialog.",
+  scopes: ["write:files"],
+  mounts: ["page"],
+  apiRev: 7,
+  importers: [
+    {
+      id: "glossary",
+      label: "Book glossary",
+      description: "Create a structured glossary file per selected Scripture book.",
+      options: [
+        {
+          key: "books",
+          label: "Books to import",
+          type: "multiselect",
+          required: true,
+          default: ["MAT"],
+          choices: [
+            { value: "MAT", label: "Matthew" },
+            { value: "MRK", label: "Mark" },
+            { value: "LUK", label: "Luke" },
+          ],
+        },
+        {
+          key: "includeNotes",
+          label: "Include translator notes",
+          type: "boolean",
+          default: true,
+        },
+      ],
+    },
+  ],
+}
+
+const IMPORTER_SOURCE = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>body{font-family:system-ui,sans-serif;padding:16px}</style></head>
+<body>
+<h3>Book Glossary Importer</h3>
+<p>Open <strong>Import → Book glossary</strong> to run this importer with platform-rendered options.</p>
+<script>
+(function () {
+  var ctx = aquilla.context || {};
+  if (ctx.mount !== "import" || !ctx.import) return;
+  (async function () {
+    var books = (ctx.import.options && ctx.import.options.books) || ["MAT"];
+    for (var i = 0; i < books.length; i++) {
+      var b = books[i];
+      await aquilla.import.progress("Importing " + b + " glossary", i / books.length);
+      await aquilla.files.upsert({
+        key: "showcase:glossary:" + b,
+        name: b + " glossary",
+        label: b + " · Key-Term Glossary",
+        kind: "normal",
+        tags: ["glossary", "book:" + b],
+        cells: [
+          { key: "g1", value: "Jesus — Greek Iēsous; Spanish: Jesús", ref: b + " 1:1" },
+          { key: "g2", value: "Bethlehem — Judean town of David", ref: b + " 2:1" }
+        ]
+      });
+    }
+    await aquilla.import.done("Imported " + books.join(", "));
+  })();
 })();
 </script>
 </body>
@@ -68,9 +199,9 @@ const CUSTOM_EDITOR_SOURCE = `<!doctype html>
 
 const TOOL_MANIFEST = {
   name: TOOL_NAME,
-  description: "Tracks the active verse, renders a native Study notes column, flags key-term accents with one-click fixes, and adds cell & selection actions.",
+  description: "Full-page audit dashboard, live side panel, per-cell inline inspector, native Study notes column, span quick-fixes, contextual actions, and TSV export.",
   scopes: ["read:cells"],
-  mounts: ["page", "panel"],
+  mounts: ["page", "panel", "inline"],
   apiRev: 8,
   sdk: 1,
   columns: [
@@ -82,9 +213,12 @@ const TOOL_MANIFEST = {
     },
   ],
   actions: [
-    { id: "scan-file", label: "Run term check", where: ["bar", "menu"] },
+    { id: "scan-file", label: "Run term check", where: ["bar", "menu", "settings"] },
     { id: "inspect-verse", label: "Inspect verse notes", where: ["cell"] },
     { id: "lookup-selection", label: "Look up term", where: ["selection"] },
+  ],
+  exports: [
+    { id: "study-tsv", label: "Annotated Study TSV", extension: "tsv" },
   ],
 }
 
@@ -102,8 +236,17 @@ const TOOL_SOURCE = `<!doctype html>
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   button { font: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--aq-border, #cbd5e1); background: var(--aq-bg, #fff); color: var(--aq-fg, #111); cursor: pointer; }
   button.primary { background: var(--aq-primary, #2563eb); color: #fff; border-color: transparent; }
-  .pill { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(37,99,235,.1); color: #1d4ed8; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: rgba(37,99,235,.1); color: #1d4ed8; }
+  .pill.ok { background: #dcfce7; color: #166534; }
+  .pill.warn { background: #fef3c7; color: #92400e; }
   .lookup { border-left: 3px solid #2563eb; padding-left: 10px; margin-top: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stat { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; background: #f8fafc; }
+  .stat-n { font-size: 24px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; background: #f8fafc; }
+  .inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 </style>
 </head>
 <body>
@@ -117,11 +260,6 @@ const TOOL_SOURCE = `<!doctype html>
     "MAT 2:1": { badge: "Geography", tone: "warn", text: "Bethlehem of Judea — check spelling of Jesús." },
     "MAT 2:2": { badge: "Key term", tone: "warn", text: "Eastern magi — verify accent on Jesús." },
     "MAT 2:3": { badge: "Context", tone: "info", text: "Herod the Great (king of Judea)." }
-  };
-  var GLOSS = {
-    "Bethlehem": "Bethlehem of Judea (~8 km south of Jerusalem), ancestral town of David (Mic 5:2).",
-    "Jesus": "Greek Iēsous (Hebrew Yeshua, 'the LORD saves'). Preferred Spanish: Jesús.",
-    "David": "Israel's second king; Messiah's royal lineage."
   };
 
   async function runTermCheck(fileId) {
@@ -179,6 +317,26 @@ const TOOL_SOURCE = `<!doctype html>
     return flagged;
   }
 
+  // -- Headless export (manifest.exports) --
+  if (ctx.mount === "export" && ctx.export) {
+    (async function () {
+      var fid = (ctx.export.fileIds && ctx.export.fileIds[0]) || null;
+      if (!fid) {
+        var files = await aquilla.files.list();
+        fid = files[0] && files[0].fileId;
+      }
+      var page = fid ? await aquilla.cells.page(fid, { limit: 100 }) : { cells: [] };
+      var lines = ["Ref\\tSource\\tTarget\\tStudy Note"];
+      (page.cells || []).forEach(function (c) {
+        var n = NOTES[c.ref || ""];
+        lines.push([c.ref || "", c.source || "", c.target || "", n ? n.text : ""].join("\\t"));
+      });
+      await aquilla.export.deliver([{ name: "matthew-study-notes.tsv", text: lines.join("\\n"), mime: "text/tab-separated-values" }]);
+    })();
+    return;
+  }
+
+  // -- Headless action (manifest.actions) --
   if (ctx.mount === "action") {
     var act = ctx.action || {};
     (async function () {
@@ -188,19 +346,6 @@ const TOOL_SOURCE = `<!doctype html>
           var fid = (act.cell && act.cell.fileId) || (files[0] && files[0].fileId);
           var flagged = await runTermCheck(fid);
           await aquilla.action.done("Annotated verses · " + flagged + " quick-fix suggestions ready");
-          return;
-        }
-        if (act.id === "lookup-selection" && act.selection) {
-          var term = String(act.selection.text || "").trim();
-          await aquilla.storage.set("lastLookup", {
-            kind: "selection",
-            term: term,
-            ref: (act.cell && act.cell.ref) || "",
-            note: GLOSS[term] || ("Glossary lookup for '" + term + "' in " + ((act.cell && act.cell.ref) || "active file") + "."),
-            ts: Date.now()
-          });
-          await aq.ui.openPanel();
-          await aquilla.action.done('Looked up "' + term + '"');
           return;
         }
         if (act.id === "inspect-verse" && act.cell) {
@@ -225,7 +370,112 @@ const TOOL_SOURCE = `<!doctype html>
     return;
   }
 
-  // Panel / Page UI
+  // -- Inline cell mount (mounts: ["inline"]) --
+  if (ctx.mount === "inline" && ctx.cell) {
+    var inlineWrap = document.createElement("div");
+    inlineWrap.setAttribute("data-testid", "inline-extension-root");
+    document.body.appendChild(inlineWrap);
+    (async function () {
+      var list = await aquilla.cells.get(ctx.cell.fileId, [ctx.cell.cellId]);
+      var c = list && list[0];
+      var ref = (c && c.ref) || "Verse";
+      var note = NOTES[ref];
+      var srcWords = (c && c.source ? c.source.trim().split(/\\s+/).length : 0);
+      var tgtWords = (c && c.target ? c.target.trim().split(/\\s+/).length : 0);
+
+      var head = document.createElement("div");
+      head.className = "card";
+      var eye = document.createElement("div"); eye.className = "eyebrow"; eye.textContent = "Inline Cell Mount (aquilla.context.cell)";
+      var title = document.createElement("div"); title.className = "ref"; title.textContent = ref + " — Per-Verse Key-Term Breakdown";
+      head.appendChild(eye); head.appendChild(title);
+
+      var grid = document.createElement("div");
+      grid.className = "inline-grid";
+
+      var left = document.createElement("div");
+      var l1 = document.createElement("div"); l1.className = "label"; l1.textContent = "Exegesis & Glossary Note";
+      var v1 = document.createElement("div"); v1.className = "text"; v1.textContent = note ? note.text : "No additional notes for this cell.";
+      left.appendChild(l1); left.appendChild(v1);
+
+      var right = document.createElement("div");
+      var l2 = document.createElement("div"); l2.className = "label"; l2.textContent = "Verse Metrics";
+      var v2 = document.createElement("div"); v2.className = "text"; v2.textContent = "Source: " + srcWords + " words · Target: " + tgtWords + " words";
+      var badge = document.createElement("span");
+      var hasIssue = c && /\\b(Jesus|Jesu)\\b/.test(c.target || "");
+      badge.className = "pill " + (hasIssue ? "warn" : "ok");
+      badge.style.marginTop = "6px";
+      badge.textContent = hasIssue ? "Diacritic check: Jesús" : "All key terms verified";
+      right.appendChild(l2); right.appendChild(v2); right.appendChild(badge);
+
+      grid.appendChild(left); grid.appendChild(right);
+      head.appendChild(grid);
+      inlineWrap.appendChild(head);
+    })();
+    return;
+  }
+
+  // -- Full-page dashboard (mounts: ["page"]) --
+  if (ctx.mount === "page") {
+    var pageWrap = document.createElement("div");
+    pageWrap.style.maxWidth = "980px";
+    pageWrap.style.margin = "0 auto";
+    pageWrap.setAttribute("data-testid", "page-dashboard-root");
+    document.body.appendChild(pageWrap);
+
+    aq.useCells().ready.then(function (cells) {
+      var verses = (cells || []).filter(function (c) { return !!c.ref; });
+      var flagged = verses.filter(function (c) { return /\\b(Jesus|Jesu)\\b/.test(c.target || ""); }).length;
+      var okCount = verses.length - flagged;
+
+      var eye = document.createElement("div"); eye.className = "eyebrow"; eye.textContent = "Full-Page Extension Mount (/extensions/:toolId)";
+      var h = document.createElement("div"); h.className = "ref"; h.style.fontSize = "22px"; h.textContent = "Verse Companion & Key-Term Audit — Matthew (Spanish)";
+      pageWrap.appendChild(eye); pageWrap.appendChild(h);
+
+      var stats = document.createElement("div"); stats.className = "stats";
+      [
+        ["Verses scanned", String(verses.length)],
+        ["Key terms verified", String(okCount)],
+        ["Quick-fix suggestions", String(flagged)]
+      ].forEach(function (pair) {
+        var box = document.createElement("div"); box.className = "stat";
+        var n = document.createElement("div"); n.className = "stat-n"; n.textContent = pair[1];
+        var l = document.createElement("div"); l.className = "label"; l.textContent = pair[0];
+        box.appendChild(n); box.appendChild(l); stats.appendChild(box);
+      });
+      pageWrap.appendChild(stats);
+
+      var tbl = document.createElement("table");
+      var thead = document.createElement("thead");
+      var hr = document.createElement("tr");
+      ["Ref", "Source", "Spanish Target", "Status", "Study Note"].forEach(function (col) {
+        var th = document.createElement("th"); th.textContent = col; hr.appendChild(th);
+      });
+      thead.appendChild(hr); tbl.appendChild(thead);
+
+      var tbody = document.createElement("tbody");
+      verses.forEach(function (c) {
+        var tr = document.createElement("tr");
+        var issue = /\\b(Jesus|Jesu)\\b/.test(c.target || "");
+        var note = NOTES[c.ref || ""];
+        var tdRef = document.createElement("td"); tdRef.style.fontWeight = "600"; tdRef.style.whiteSpace = "nowrap"; tdRef.textContent = c.ref;
+        var tdSrc = document.createElement("td"); tdSrc.textContent = c.source || "";
+        var tdTgt = document.createElement("td"); tdTgt.textContent = c.target || "";
+        var tdSt = document.createElement("td");
+        var sp = document.createElement("span");
+        sp.className = "pill " + (issue ? "warn" : "ok");
+        sp.textContent = issue ? "Accent check" : "Verified";
+        tdSt.appendChild(sp);
+        var tdNote = document.createElement("td"); tdNote.textContent = note ? note.text : "";
+        tr.appendChild(tdRef); tr.appendChild(tdSrc); tr.appendChild(tdTgt); tr.appendChild(tdSt); tr.appendChild(tdNote);
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      pageWrap.appendChild(tbl);
+    });
+    return;
+  }
+
+  // -- Side panel (mounts: ["panel"]) --
   var root = document.createElement("div");
   document.body.appendChild(root);
 
@@ -282,7 +532,7 @@ const TOOL_SOURCE = `<!doctype html>
     lookupCard.textContent = "";
     var eye = document.createElement("div");
     eye.className = "eyebrow";
-    eye.textContent = item.kind === "selection" ? "Source Selection Action" : "Cell Menu Action";
+    eye.textContent = "Cell Menu Action";
     lookupCard.appendChild(eye);
     var pill = document.createElement("span");
     pill.className = "pill";
@@ -388,8 +638,9 @@ async function cleanScreenshot(page: Page, filename: string): Promise<void> {
   })
 }
 
-test("Smart Extensions — Native Editor Integration (apiRev 8)", async ({ page }) => {
-  test.setTimeout(180_000)
+test("Smart Extensions — All Extension Kinds & Native Editor Integration (apiRev 8)", async ({ page }) => {
+  test.setTimeout(240_000)
+  rmSync(SHOTS_DIR, { recursive: true, force: true })
   mkdirSync(SHOTS_DIR, { recursive: true })
 
   await resetBackend()
@@ -413,7 +664,6 @@ test("Smart Extensions — Native Editor Integration (apiRev 8)", async ({ page 
     translationBrief: { parameters: { purpose: "Spanish Gospel translation" } },
   })
 
-  // Map Spanish translations by actual canonicalRef / source text so heading + verses align accurately.
   const sourceCells = await readProjectedCells(jwt, seeded, "source")
   const idByRef = new Map<string, string>()
   for (const row of sourceCells) {
@@ -444,32 +694,47 @@ test("Smart Extensions — Native Editor Integration (apiRev 8)", async ({ page 
   const mat11 = idByRef.get("MAT 1:1")!
   const mat13 = idByRef.get("MAT 1:3")!
 
-  await installExtension(jwt, seeded.projectId, TOOL_MANIFEST, TOOL_SOURCE, ["read:cells"])
+  const companionId = await installExtension(jwt, seeded.projectId, TOOL_MANIFEST, TOOL_SOURCE, ["read:cells"])
   await installExtension(jwt, seeded.projectId, CUSTOM_EDITOR_MANIFEST, CUSTOM_EDITOR_SOURCE, ["read:cells"])
+  await installExtension(jwt, seeded.projectId, IMPORTER_MANIFEST, IMPORTER_SOURCE, ["write:files"])
 
   const tools = new ToolsPage(page)
+  const ws = new Workspace(page)
   const show = new Showcase(page, {
     persona: "aqu-2758",
     feature: "native-editor-integration",
-    title: "Smart Extensions — Native Editor Integration (apiRev 8)",
-    cta: "Extensions enhance Aquilla's real editor instead of replacing it.",
+    title: "Smart Extensions — Every Extension Kind & Native Editor Integration (apiRev 8)",
+    cta: "Extensions enhance Aquilla's real editor, importers, exporters, and workspaces.",
     mode: "doc",
   })
 
   let verified = false
   try {
-    // 1. Open the file directly into Aquilla's native EditorTable (default-editor extension is retired).
-    await openSeededProject(page, seeded)
+    // ── Shot 01: Smart Extensions Hub & Builder (/extensions) ────────────────
+    await tools.open(seeded.projectId)
+    await expect(tools.installedTool(TOOL_NAME)).toBeVisible({ timeout: 15_000 })
+    await expect(tools.installedTool(CUSTOM_EDITOR_NAME)).toBeVisible({ timeout: 10_000 })
+    await expect(tools.installedTool(IMPORTER_NAME)).toBeVisible({ timeout: 10_000 })
+    await tools.installedTool(TOOL_NAME).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(SHOTS_DIR, "01-extensions-hub-and-builder.png") })
 
+    // ── Shot 02: Full-page extension mount (`mounts: ["page"]`) ──────────────
+    await page.goto(`/project/${seeded.projectId}/extensions/${companionId}`)
+    const pageFrame = tools.toolFrame(TOOL_NAME)
+    await expect(pageFrame.getByTestId("page-dashboard-root")).toBeVisible({ timeout: 20_000 })
+    await expect(pageFrame.getByText("Verses scanned")).toBeVisible({ timeout: 10_000 })
+    await page.screenshot({ path: path.join(SHOTS_DIR, "02-full-page-mount.png") })
+
+    // ── Shot 03: Native EditorTable default + side panel (`mounts: ["panel"]`) ─
+    await openSeededProject(page, seeded)
     await expect(tools.editWithTrigger()).toHaveAttribute("data-editor", "standard", { timeout: 10_000 })
     await expect(tools.editWithTrigger()).toContainText(NATIVE_EDITOR)
 
     await show.chapter("Native editor by default", "default-editor retired · Edit with stays for opt-in custom editors")
     await show.point('[data-testid="edit-with-trigger"]')
-    await show.caption("Files open directly in Aquilla's native editor — even with custom editors installed under Edit with.")
+    await show.caption("Files always open in Aquilla's native editor — even with custom editors installed.")
 
-    // 2. Open the extension side panel and demonstrate live aq.useActiveCell() sync.
-    await show.chapter("Live active-cell sync", "aq.useActiveCell() tracks the focused verse in real time")
+    await show.chapter("Side panel & live active-cell sync", "mounts: ['panel'] + aq.useActiveCell()")
     await tools.openInSidePanelFromPalette(TOOL_NAME)
     const panelFrame = tools.toolFrame(TOOL_NAME)
     await expect(panelFrame.getByTestId("panel-active-cell")).toBeVisible({ timeout: 20_000 })
@@ -478,67 +743,113 @@ test("Smart Extensions — Native Editor Integration (apiRev 8)", async ({ page 
     const mat13Target = page.locator(`[data-cell-id="${mat13}"] [data-editor-cell-surface="target"]`).first()
     await mat11Target.click()
     await expect(panelFrame.getByTestId("active-ref")).toHaveText("MAT 1:1", { timeout: 10_000 })
-    await show.beat(500)
+    await show.beat(400)
     await mat13Target.click()
     await expect(panelFrame.getByTestId("active-ref")).toHaveText("MAT 1:3", { timeout: 10_000 })
-    await show.caption("Clicking verses in the native editor updates side panels immediately via aq.useActiveCell().")
-    await cleanScreenshot(page, "01-native-default-and-panel-sync.png")
+    await show.caption("Side panels track the active verse live via aq.useActiveCell().")
+    await cleanScreenshot(page, "03-side-panel-live-sync.png")
 
-    // 3. Run the headless bar action → populates native "Study notes" column, row badges & wavy span highlights.
-    await show.chapter("Native columns, badges & span highlights", "manifest.columns + aq.editor.annotate() render natively in the grid")
+    // ── Shot 04: Native columns, row badges, wavy spans & where:["bar"] ──────
+    await show.chapter("Native columns, badges & spans", "manifest.columns + aq.editor.annotate() + where: ['bar']")
     await show.click('[data-testid="extension-action"]')
     await expect(page.getByTestId("extension-column-header-notes")).toBeVisible({ timeout: 15_000 })
     await expect(page.getByTestId("extension-row-badge").first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByTestId("extension-row-span").first()).toBeVisible({ timeout: 10_000 })
     await mat11Target.click()
     await expect(panelFrame.getByTestId("active-ref")).toHaveText("MAT 1:1", { timeout: 10_000 })
-    await show.caption("Extensions contribute read-only grid columns, row badges, and wavy span highlights — zero per-row iframes.")
-    await show.beat(400)
-    await cleanScreenshot(page, "02-native-column-badges-and-spans.png")
+    await show.caption("Extensions contribute native grid columns, row badges, and wavy span highlights — zero per-row iframes.")
+    await cleanScreenshot(page, "04-native-column-badges-spans.png")
 
-    // 4. Open a span popover and apply a one-click target quick-fix.
+    // ── Shot 05: Span popover + one-click target quick-fix ───────────────────
     await show.chapter("One-click quick-fix popovers", "Declarative span fixes apply directly in native EditorTable")
     await show.click(`[data-cell-id="${mat13}"] [data-testid="extension-row-span"]`)
-    const fixButton = page.getByTestId("extension-span-apply-fix")
-    await expect(fixButton).toBeVisible({ timeout: 10_000 })
-    await show.caption("Clicking a span highlight explains the issue and offers a one-click target fix.")
-    await cleanScreenshot(page, "03-span-quick-fix-popover.png")
-
+    await expect(page.getByTestId("extension-span-apply-fix")).toBeVisible({ timeout: 10_000 })
+    await show.caption("Clicking a wavy span explains the issue and offers a one-click target fix.")
+    await cleanScreenshot(page, "05-span-quick-fix-popover.png")
     await show.click('[data-testid="extension-span-apply-fix"]')
     await expect(mat13Target).toContainText("Jesús", { timeout: 10_000 })
-    await show.beat(600)
-
-    // 5. Panel calls aq.editor.reveal() to jump to MAT 2:1 in the native editor.
-    await show.chapter("Reveal from extension", "aq.editor.reveal() scrolls and focuses any verse in the real editor")
-    await panelFrame.getByRole("button", { name: "Jump to MAT 2:1" }).click()
-    await expect(panelFrame.getByTestId("active-ref")).toHaveText("MAT 2:1", { timeout: 10_000 })
-    await show.caption("Extensions can jump straight to any verse in EditorTable with aq.editor.reveal().")
     await show.beat(400)
 
-    // 6. Right-click MAT 1:1 to show the cell context menu extension item (`where: ["cell"]`).
-    await show.chapter("Cell menu actions & panel hand-off", 'where: ["cell"] runs headless and updates the panel via aq.ui.openPanel()')
-    const mat11Source = page.locator(`[data-cell-id="${mat11}"] [data-editor-cell-surface="source"]`).first()
-    await mat11Source.scrollIntoViewIfNeeded()
+    // ── Shot 06: Inline cell mount (`mounts: ["inline"]`) ────────────────────
+    await show.chapter("Inline per-cell mount", "mounts: ['inline'] renders under a verse with aquilla.context.cell")
+    await mat11Target.click()
+    const mat11Row = page.locator(`[data-cell-id="${mat11}"]`).first()
+    await mat11Row.getByRole("button", { name: "Open cell details" }).click()
+    await mat11Row.getByRole("tab", { name: "Extensions" }).click()
+    await expect(mat11Row.getByTestId("tools-inline-tab")).toBeVisible({ timeout: 15_000 })
+    const inlineFrame = mat11Row.frameLocator(`iframe[title="${TOOL_NAME} (sandboxed extension)"]`)
+    await expect(inlineFrame.getByTestId("inline-extension-root")).toContainText("MAT 1:1", { timeout: 15_000 })
+    await mat11Row.getByTestId("tools-inline-tab").scrollIntoViewIfNeeded()
+    await show.caption("Inline mounts attach a per-cell extension tab directly inside a verse's expansion drawer.")
+    await cleanScreenshot(page, "06-inline-cell-mount.png")
+    await mat11Row.getByRole("button", { name: "Close cell details" }).first().click()
+
+    // ── Shot 07: Cell context menu action (`where: ["cell"]`) + ui.openPanel() ─
+    await show.chapter("Cell menu actions & panel hand-off", "where: ['cell'] runs headless and opens/updates the side panel")
+    const mat11Source = mat11Row.locator('[data-editor-cell-surface="source"]').first()
     await mat11Source.click({ button: "right" })
     const cellAction = page.getByTestId("cell-menu-extension-inspect-verse")
     await expect(cellAction).toBeVisible({ timeout: 10_000 })
-    await show.caption('Right-clicking a row surfaces cell-level extension actions ("Inspect verse notes") inside the native menu.')
-    await cleanScreenshot(page, "04-cell-menu-extension-action.png")
+    await show.caption('Right-clicking a row exposes cell-level extension actions ("Inspect verse notes").')
+    await cleanScreenshot(page, "07-cell-menu-action.png")
     await cellAction.click()
     await expect(panelFrame.getByTestId("panel-lookup-card")).toContainText("Opening superscription", { timeout: 15_000 })
-    await show.beat(700)
 
-    // 7. Open "Edit with" to show native Aquilla editor is the default while custom editor extensions stay opt-in.
-    await show.chapter("Custom editors remain opt-in", "Aquilla editor is always default · specialized editors live under Edit with")
+    // ── Panel reveal (`aq.editor.reveal()`) ──────────────────────────────────
+    await show.chapter("Jump to verse from extension", "aq.editor.reveal() focuses any verse in EditorTable")
+    await panelFrame.getByRole("button", { name: "Jump to MAT 2:1" }).click()
+    await expect(panelFrame.getByTestId("active-ref")).toHaveText("MAT 2:1", { timeout: 10_000 })
+    await show.beat(400)
+
+    // ── Shot 08: Smart Extensions Command Palette (`⌘⇧E`, where: ["menu"]) ───
+    await show.chapter("Extensions command palette", "⌘⇧E lists panels, custom editors, full pages & menu actions")
+    await page.getByRole("button", { name: "Smart Extensions (⌘⇧E)", exact: true }).click()
+    await expect(page.getByRole("option", { name: `${TOOL_NAME}: Run term check` })).toBeVisible({ timeout: 10_000 })
+    await show.caption("The command palette surfaces every installed extension's panels, editors, pages, and actions.")
+    await cleanScreenshot(page, "08-extensions-palette.png")
+    await page.keyboard.press("Escape")
+
+    // ── Shot 09 & 10: Edit with opt-in menu + active custom `editor` mount ───
+    await show.chapter("Opt-in custom editors", "Aquilla editor is default · specialized editors live under Edit with")
     await show.click('[data-testid="edit-with-trigger"]')
     await expect(tools.editWithItem(CUSTOM_EDITOR_NAME)).toBeVisible({ timeout: 10_000 })
-    await show.caption("The native editor is always the default; users can still opt into custom editors via Edit with.")
-    await cleanScreenshot(page, "05-edit-with-opt-in-custom-editor.png")
+    await show.caption("Native Aquilla editor stays default; users can still opt into specialized custom editors.")
+    await cleanScreenshot(page, "09-edit-with-opt-in-menu.png")
+
+    await tools.editWithItem(CUSTOM_EDITOR_NAME).click()
+    const focusFrame = tools.toolFrame(CUSTOM_EDITOR_NAME)
+    await expect(focusFrame.getByTestId("focus-editor-root")).toContainText("MAT 1:1", { timeout: 20_000 })
+    await show.caption("Custom editor extensions (mounts: ['editor']) render full alternative views and switch right back to native.")
+    await cleanScreenshot(page, "10-custom-editor-mount.png")
+
+    // Switch back to native Aquilla editor before Import/Export dialogs.
+    await tools.switchEditor(NATIVE_EDITOR)
+    await expect(tools.editWithTrigger()).toHaveAttribute("data-editor", "standard", { timeout: 10_000 })
+
+    // ── Shot 11: Importer extension (`manifest.importers`) in Import dialog ──
+    await show.chapter("Importer extensions", "manifest.importers renders schema-driven forms inside Import")
+    await ws.openImportDialog()
+    const glossaryImporter = page.getByTestId("extension-importer").filter({ hasText: "Book glossary" })
+    await expect(glossaryImporter).toBeVisible({ timeout: 15_000 })
+    await glossaryImporter.click()
+    await expect(page.getByTestId("extension-import-panel")).toBeVisible({ timeout: 10_000 })
+    await show.caption("Importer extensions contribute directly to Aquilla's Import dialog with platform-rendered options.")
+    await cleanScreenshot(page, "11-importer-extension.png")
+    await page.keyboard.press("Escape")
+
+    // ── Shot 12: Exporter extension (`manifest.exports`) in Export dialog ────
+    await show.chapter("Exporter extensions", "manifest.exports adds custom formats inside Aquilla's Export dialog")
+    await ws.openExportDialog()
+    const studyExport = page.getByTestId("extension-export").filter({ hasText: "Annotated Study TSV" })
+    await expect(studyExport).toBeVisible({ timeout: 15_000 })
+    await studyExport.scrollIntoViewIfNeeded()
+    await show.caption("Exporter extensions add custom download formats directly inside the Export dialog.")
+    await cleanScreenshot(page, "12-exporter-extension.png")
     await page.keyboard.press("Escape")
 
     verified = true
     await dismissChapterCard(page)
-    await show.beat(900)
+    await show.beat(700)
   } finally {
     await show.save(verified)
   }

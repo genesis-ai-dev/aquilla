@@ -123,9 +123,7 @@ All native editor state lives in `NativeEditorStore` (`src/lib/tools/native-edit
 an external `useSyncExternalStore` owned by `ToolsMountProvider` — never in `ProjectWorkspace`
 React state.
 
-**Parity.** `docs/SMART-EXTENSIONS-PARITY.md` is the feature-by-feature matrix against the
-built-in editor (EditorTable + TranslatedEditor + the workspace around them). In short: an
-`editor` mount gets the workspace's **editor services** (apiRev 3, `src/lib/tools/editor-services.ts`,
+**Custom `editor` mounts.** An `editor` mount gets the workspace's **editor services** (apiRev 3, `src/lib/tools/editor-services.ts`,
 assembled by `useExtensionEditorServices`). The extension reads the workspace's own cell store
 (the file is read once, not twice) and writes through the host's own commit/validate pipeline
 (auto-validate own edit, repetition propagation on `cells.settle`), attributed via `tool_origin`.
@@ -328,17 +326,10 @@ model for free, with no new table and no migration.
 - Workers: `auth-worker/src/__tests__/tools-routes.test.ts`, `tools-builder.test.ts`;
   `sync-worker/src/__tests__/tool-provenance.test.ts`.
 - E2E: `e2e/specs/tools/tools-heatmap.spec.ts`, `e2e/specs/tools/extension-editor.spec.ts`,
-  `e2e/specs/tools/default-editor-extension.spec.ts` (first-party editor extension: edit, rich
-  text, validate, a second user's lock + live edit, switch to built-in and back, revert since T),
-  `e2e/specs/tools/default-editor-perf.spec.ts` (full gospel, extension vs built-in; reports).
-- Unit (apiRev 2): `api-rev2.test.ts`, `live-data-rev2.test.ts`, `default-editor.test.ts`;
-  auth-worker `tools-routes.test.ts` "first-party extensions".
-- Unit (apiRev 3): `api-rev3.test.ts` (store-backed reads, host pipeline delegation with
-  provenance, bound-file refusal, param validation, scopes, runtime round trips, ui.strings,
-  suggestion registry); `shared/tools/revert.test.ts` (re-validation).
-- E2E (apiRev 3): `e2e/specs/tools/default-editor-parity.spec.ts`; the core editor journeys run
-  against the extension editor with `E2E_EDITOR=extension` (`pnpm test:e2e:extension-editor`,
-  `e2e/helpers/editor-mode.ts`: the Workspace page object targets the extension's frame).
-- Recordings: `e2e/recordings/specs/aquilla-tools.showcase.ts` (real build),
-  `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts` (real build),
-  `default-editor-extension.showcase.ts`.
+  `e2e/specs/tools/extension-builder.spec.ts`, `e2e/specs/tools/extension-primitives.spec.ts`,
+  `e2e/specs/tools/smart-extensions-flag-importer.spec.ts`.
+- Unit (apiRev 2–8): `api-rev2.test.ts`, `api-rev3.test.ts`, `rev4.test.ts`, `rev5.test.ts`,
+  `sdk-editor-components.test.ts`, `first-party.test.ts`, `native-editor-integration.test.ts`,
+  `NativeEditorContributions.test.tsx`; auth-worker `tools-routes.test.ts` "first-party extensions".
+- Recordings: `e2e/recordings/specs/smart-extensions-native-editor.showcase.ts` (all extension kinds + apiRev 8 native editor integration),
+  `aquilla-tools.showcase.ts`, `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts`.

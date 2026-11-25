@@ -7,10 +7,14 @@ import { newestStationStep, stationStepMatch } from "./own-steps"
 describe("the Station's own Undo steps", () => {
   const mine = stationStepMatch("c331", "t2.webm")
 
-  it("are changes to the open take: trim, volume and fades, move, rename, a saved version, a delete, an approval", () => {
-    for (const kind of ["take.window", "take.gain", "take.place", "take.rename", "take.add", "take.remove", "vote.audio"]) {
+  it("are changes to the open take: trim, volume and fades, rename, a saved version, a delete, an approval", () => {
+    for (const kind of ["take.window", "take.gain", "take.rename", "take.add", "take.remove", "vote.audio"]) {
       expect(mine(kind, { cellId: "c331", audioId: "t2.webm" })).toBe(true)
     }
+  })
+
+  it("are never a move of the open take on the timeline (the Station cannot move a take; ⌘Z still undoes it)", () => {
+    expect(mine("take.place", { cellId: "c331", audioId: "t2.webm", before: null, after: 600 })).toBe(false)
   })
 
   it("include a version made of a cut take when the open take is one of its later pieces", () => {
@@ -45,7 +49,7 @@ describe("the Station's own Undo and a step made of several parts", () => {
   beforeEach(async () => {
     resetHistoryForTests()
     await clearHistoryStoreForTests()
-    registerStepKinds({ "take.window": noop, "vote.audio": noop, "take.add": noop, "take.remove": noop })
+    registerStepKinds({ "take.window": noop, "take.place": noop, "vote.audio": noop, "take.add": noop, "take.remove": noop })
     setHistoryScope("p1", "sam")
     await historyReady()
   })
@@ -75,6 +79,12 @@ describe("the Station's own Undo and a step made of several parts", () => {
     ])
     expect(newestStationStep("c12", "v2.wav")?.labelKey).toBe("editor.history.stepStationSaveOver")
     expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepStationSaveOver")
+  })
+
+  it("passes over a timeline move of the open take, to the Station's own last change", () => {
+    trim()
+    recordStep({ kind: "take.place", data: { cellId: "c12", audioId: "t12.webm", before: null, after: 600, recordingsBefore: null, recordingsAfter: null }, labelKey: "editor.history.stepMove", lane: null })
+    expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepTrimTake")
   })
 
   it("an approval of the open take alone, made anywhere, is still its own", () => {

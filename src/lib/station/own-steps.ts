@@ -6,13 +6,19 @@
 // step that named the line and carried no take id, so a translation edit, a
 // text approval, a retime or a hide on the same line lit the button up and
 // was taken back from here. Now a step is the Station's only when it is a
-// change to a take (trim, volume and fades, move, rename, a saved or cleaned
+// change to a take (trim, volume and fades, rename, a saved or cleaned
 // version, a delete) or an approval of one, and it names this take.
+//
+// A move is not: it changes where the take sits on the timeline, which the
+// Station has no control for, not the recording open in it. Its Undo taking
+// back a timeline move broke the spheres rule (Sam, Oct 30; evidence pass,
+// Nov 25); ⌘Z still does.
 
 import { historyView, matchingSteps, newestMatchingStep, type StepSummary } from "@/lib/history/history"
 
 /** Step kinds that change or approve one take, named by `audioId`. */
-const isTakeStep = (kind: string): boolean => kind === "vote.audio" || (kind.startsWith("take.") && kind !== "take.select" && kind !== "take.cut")
+const NOT_THE_STATIONS = new Set(["take.select", "take.cut", "take.place"])
+const isTakeStep = (kind: string): boolean => kind === "vote.audio" || (kind.startsWith("take.") && !NOT_THE_STATIONS.has(kind))
 
 /** The match for the Station's Undo while `audioId` on `cellId` is open. */
 export function stationStepMatch(cellId: string, audioId: string): (kind: string, data: unknown) => boolean {

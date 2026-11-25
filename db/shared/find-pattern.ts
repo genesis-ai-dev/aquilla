@@ -11,6 +11,8 @@
  * worker when it must match in JS instead of pushing the pattern into `~`.
  */
 
+import { catastrophicPatternReason } from "./regex-safety"
+
 export interface TextFindOptions {
   /** Case-sensitive. Default false. */
   matchCase?: boolean
@@ -190,6 +192,11 @@ export function preserveMatchedCase(matched: string, replacement: string): strin
 }
 
 function compileFind(query: string, options: TextFindOptions): RegExp {
+  // A pattern that backtracks catastrophically would pin the sync-worker's
+  // pattern scan (up to 80k rows) and the browser tab alike; nothing can
+  // interrupt a running RegExp, so it is refused before it is compiled.
+  const unsafe = options.useRegexp ? catastrophicPatternReason(query) : null
+  if (unsafe) throw new Error(unsafe)
   const body = options.useRegexp ? query : escapeLiteral(query)
   const source = options.wholeWord ? `${WORD_BOUNDARY}(?:${body})${WORD_END}` : body
   const flags = options.matchCase ? "gu" : "giu"

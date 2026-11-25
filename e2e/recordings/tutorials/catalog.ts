@@ -203,6 +203,21 @@ export const TUTORIALS = [
       outro: "The timeline and your exports both use these settings.",
     },
   },
+  {
+    id: "link-a-source",
+    title: "Link a project to a source project",
+    audience: "leads",
+    lines: {
+      intro: "Here's how to link a project to a source project.",
+      when: "Do this when your team translates another team's translation, not the original text.",
+      open: "In your project, open Import and choose From another project.",
+      choose: "Pick the source project. Choose One of its targets, then the translation to work from.",
+      review: "Review what will be added. Nothing changes until you link.",
+      linked: "The source text arrives, ready to translate.",
+      upstream: "Later, the team on the source project revises a verse.",
+      stale: "When the source project's text changes, the matching lines are marked, so you know to look again.",
+    },
+  },
 ] as const satisfies readonly TutorialDef[]
 
 export type TutorialId = (typeof TUTORIALS)[number]["id"]

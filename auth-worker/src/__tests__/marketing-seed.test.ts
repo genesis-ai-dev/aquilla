@@ -82,4 +82,18 @@ describe("marketing seed", () => {
       .all<{ id: string }>()
     expect(files.results.map((row) => row.id)).toEqual(["demo-john-1"])
   })
+
+  it("a re-seed leaves the chain project there and unlinked, for the source-projects video", async () => {
+    await seed()
+    await env.AQUILLA_PG
+      .prepare("UPDATE projects SET source_project_id = 'demo-john', source_link_mode = 'live', source_link_consumes = 'target' WHERE id = 'demo-jean-kreyol'")
+      .run()
+
+    await seed()
+
+    const chain = await env.AQUILLA_PG
+      .prepare("SELECT source_project_id, source_link_mode FROM projects WHERE id = 'demo-jean-kreyol'")
+      .first<{ source_project_id: string | null; source_link_mode: string | null }>()
+    expect(chain).toEqual({ source_project_id: null, source_link_mode: null })
+  })
 })

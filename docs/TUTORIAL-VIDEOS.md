@@ -30,6 +30,7 @@ finish.
 | Find your way around the Media view | translators | `media-view` |
 | Trim and cut a recording | translators | `trim-and-cut` |
 | Set a recording's volume and fades | translators | `volume-and-fades` |
+| Link a project to a source project | leads | `link-a-source` |
 
 Every take starts from the same demo project. The demo sign-in
 (`auth-worker/src/routes/marketing-seed.ts`) drops whatever an earlier take
@@ -40,8 +41,14 @@ recordings from `e2e/recordings/tutorials/fixtures/` there, off camera.
 No audio is played in any video: the audio videos show the Station's controls
 and what they change, with the voice explaining.
 
-Not filmed yet, because they need production: linking a source project to a
-target, making AI voices, and dubbing.
+The source-projects video links a second demo project, "Jean — Kreyòl Draft",
+which the sign-in seeds empty and unlinked, to the demo's French translation.
+The source project's revision is made in a second page, off camera, so the
+video shows the linked project following it live.
+
+Not filmed yet: making AI voices and dubbing. They need the voice keys
+(`INWORLD_API_KEY`, `VOICE_FORGE_URL`, `VOICE_FORGE_TOKEN`) on the stack that
+films.
 
 ## Making them
 

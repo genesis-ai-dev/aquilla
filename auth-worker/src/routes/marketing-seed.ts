@@ -30,6 +30,12 @@ const M_ORG_NAME = "Riverstone Bible Society"
 const M_PROJECT_ID = "demo-john"
 const M_PROJECT_NAME = "John — Plainspeak Draft"
 const M_FILE_ID = "demo-john-1"
+// A second, empty project in the same organization: a regional team that
+// translates the French draft, not the English. The source-projects video
+// links it to the demo project's French translation (a translation chain).
+const M_CHAIN_ID = "demo-jean-kreyol"
+const M_CHAIN_NAME = "Jean — Kreyòl Draft"
+const CHAIN_TARGET_LANG = "ht"
 const M_FILE_NAME = "John 1"
 const SOURCE_LANG = "en"
 const TARGET_LANG = "fr"
@@ -122,6 +128,33 @@ async function seedMarketing(db: AquillaDb): Promise<{
     .bind(M_PROJECT_ID, userId, ROLE.OWNER, userId)
     .run()
 
+  // The chain project starts unlinked at every sign-in: the video links it.
+  await db
+    .prepare(
+      `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, org_id = excluded.org_id,
+         source_project_id = NULL, source_link_mode = NULL, source_link_consumes = NULL,
+         source_link_gate = NULL, source_link_cursor = 0, source_link_file_ids = NULL,
+         updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(M_CHAIN_ID, M_CHAIN_NAME, orgId, userId)
+    .run()
+  await db
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by, granted_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(project_id, user_id) DO UPDATE SET role_level = excluded.role_level`,
+    )
+    .bind(M_CHAIN_ID, userId, ROLE.OWNER, userId)
+    .run()
+  await ensureProjectLanes(db, M_CHAIN_ID, {
+    lanes: [
+      { role: "source", language: TARGET_LANG },
+      { role: "target", language: CHAIN_TARGET_LANG, legacyTag: CHAIN_TARGET_LANG },
+    ],
+  })
+
   // AQU-1594: the demo is a new project. Source lane plus one target lane
   // whose legacy tag is the language — not the old `''` bridge.
   await ensureProjectLanes(db, M_PROJECT_ID, {
@@ -151,15 +184,17 @@ async function seedMarketing(db: AquillaDb): Promise<{
   // next sign-in, which then opens on "No file selected" instead of John 1.
   // Order matters: cells.event_id FKs events(id), so cells before events.
   // Project-level events (no file) stay.
-  await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id IS NOT NULL").bind(M_PROJECT_ID).run()
-  await db.prepare("DELETE FROM cell_audio WHERE project_id = ?").bind(M_PROJECT_ID).run()
-  await db.prepare("DELETE FROM cells WHERE project_id = ?").bind(M_PROJECT_ID).run()
-  await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id IS NOT NULL").bind(M_PROJECT_ID).run()
-  await db.prepare("DELETE FROM files WHERE project_id = ?").bind(M_PROJECT_ID).run()
-  // The project's own rules (settings.rules) and terms: a take that adds a
-  // rule or a term would otherwise mark the next take's verses with it.
-  await db.prepare("DELETE FROM project_settings WHERE project_id = ?").bind(M_PROJECT_ID).run()
-  await db.prepare("DELETE FROM concepts WHERE project_id = ?").bind(M_PROJECT_ID).run()
+  for (const projectId of [M_PROJECT_ID, M_CHAIN_ID]) {
+    await db.prepare("DELETE FROM comments WHERE project_id = ? AND file_id IS NOT NULL").bind(projectId).run()
+    await db.prepare("DELETE FROM cell_audio WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM cells WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM events WHERE project_id = ? AND file_id IS NOT NULL").bind(projectId).run()
+    await db.prepare("DELETE FROM files WHERE project_id = ?").bind(projectId).run()
+    // The project's own rules (settings.rules) and terms: a take that adds a
+    // rule or a term would otherwise mark the next take's verses with it.
+    await db.prepare("DELETE FROM project_settings WHERE project_id = ?").bind(projectId).run()
+    await db.prepare("DELETE FROM concepts WHERE project_id = ?").bind(projectId).run()
+  }
 
   const now = Date.now()
 

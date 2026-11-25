@@ -114,6 +114,13 @@ const EXEMPTIONS: Record<string, number> = {
   "sync-worker/src/events/merge-sibling-route.ts": 1,
   "sync-worker/src/events/plan-route.ts": 1,
   "sync-worker/src/events/lane-read-wall.ts": 1,
+  // AQU-2682: the audio routes apply the lane wall's own rule (Maintainer+ and
+  // platform pass) and the events route's skip of the membership re-check for
+  // a platform token. Copies of the two rules above, no new reach: a platform
+  // view token is still a Viewer, refused writes by the role floors.
+  "sync-worker/src/audio-write-guard.ts": 1,
+  "sync-worker/src/events/source-audio-access.ts": 1,
+  "sync-worker/src/events/source-audio-access-route.ts": 1,
 }
 
 describe("platform-source sync tokens are minted only behind elevation", () => {

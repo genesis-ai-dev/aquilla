@@ -9,7 +9,7 @@ import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { rememberListedProjects } from "@/lib/sync/project-record-seed"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
-import { desktopConnectivity } from "@/lib/offline/connectivity"
+import { desktopConnectivity, useDesktopConnectivity } from "@/lib/offline/connectivity"
 import { readOrgDirectory, rememberOrgDirectory } from "@/lib/offline/org-directory-cache"
 import {
   ALL_ORGS_PARAM,
@@ -107,6 +107,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   // last online load instead of the server (see `offline` above).
   const [orgsFromCache, setOrgsFromCache] = useState(false)
   const [cachedGuestOrgs, setCachedGuestOrgs] = useState<GuestOrg[] | null>(null)
+  // Read by the fetches at call time: a retry from the cached lists keeps them
+  // on screen instead of dropping consumers into their loading state.
+  const orgsFromCacheRef = useRef(false)
+  useEffect(() => { orgsFromCacheRef.current = orgsFromCache }, [orgsFromCache])
+  // Desktop, expired session: the cached lists stand in only while the probe
+  // says offline. Online, sign-in follows (ExpiredSessionGate); before the
+  // first probe, wait rather than paint either answer.
+  const online = useDesktopConnectivity()
+  const expiredCache: "use" | "wait" | "skip" =
+    !isTauriRuntime() || !jwt || !isJwtExpired(jwt) ? "skip"
+    : online === false ? "use"
+    : online == null ? "wait"
+    : "skip"
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
   // Route changes update org scope in the dedicated effect below; they must
@@ -160,7 +173,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (isJwtExpired(jwt)) {
       // Desktop: a session that lapsed in the field still reaches its
       // downloaded projects — sign-in can't happen until it's back online.
-      if (cached) {
+      if (cached && expiredCache === "wait") {
+        setLoading(true)
+        return []
+      }
+      if (cached && expiredCache === "use") {
         applyOrgs(cached.orgs)
         setOrgsFromCache(true)
       } else {
@@ -171,14 +188,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setResolvedOrgJwt(jwt)
       setLoading(false)
       void notifySessionExpiredIfCurrent(jwt)
-      return cached?.orgs ?? []
+      return cached && expiredCache === "use" ? cached.orgs : []
     }
-    setLoading(true); setError(null)
+    const retryingFromCache = orgsFromCacheRef.current
+    if (!retryingFromCache) setLoading(true)
+    setError(null)
     try {
       const list = await listMyOrgs(jwt)
       if (orgRequestRef.current !== requestId) return []
       applyOrgs(list)
       setOrgsFromCache(false)
+      // Leaving the cached view: the online pages must wait for a directory
+      // request that is still out rather than paint it as empty.
+      if (retryingFromCache && projectsInFlightRef.current) setAccessibleProjectsLoading(true)
       return list
     } catch (e) {
       if (orgRequestRef.current !== requestId) return []
@@ -205,7 +227,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     }
-  }, [jwt, sessionLoading, username])
+  }, [jwt, sessionLoading, username, expiredCache])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -234,9 +256,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (isJwtExpired(jwt)) {
       projectsRequestRef.current += 1
       projectsInFlightRef.current = null
+      if (cached && expiredCache === "wait") {
+        setAccessibleProjectsLoading(true)
+        return []
+      }
       setAccessibleProjects([])
       setAccessibleProjectsError(null)
-      setCachedGuestOrgs(cached?.guestOrgs ?? null)
+      setCachedGuestOrgs(cached && expiredCache === "use" ? cached.guestOrgs : null)
       setResolvedProjectsJwt(jwt)
       setAccessibleProjectsLoading(false)
       return []
@@ -250,7 +276,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     const requestId = ++projectsRequestRef.current
     // `cachedGuestOrgs` stays until the server answers (see `orgsFromCache`).
-    setAccessibleProjectsLoading(true)
+    if (!orgsFromCacheRef.current) setAccessibleProjectsLoading(true)
     // AQU-883: clear the previous failure up front so a retry drops consumers
     // back through their loading state instead of leaving a stale error card
     // on screen next to a spinner.
@@ -278,12 +304,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         // no shared projects" — guest orgs and shared projects just vanished.
         if (projectsRequestRef.current === requestId) {
           setAccessibleProjects([])
-          if (cached && !(e instanceof UserError)) {
-            setCachedGuestOrgs(cached.guestOrgs)
-          } else {
-            setCachedGuestOrgs(null)
-            setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
-          }
+          // Unreachable: the cached guest orgs stand in, but only if the org
+          // list is cached too (`offline`). When `/orgs` answered, this is a
+          // directory failure like any other and the error is what shows.
+          setCachedGuestOrgs(cached && !(e instanceof UserError) ? cached.guestOrgs : null)
+          setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
         }
         return []
       } finally {
@@ -298,7 +323,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     })()
     projectsInFlightRef.current = { jwt, requestId, promise }
     return promise
-  }, [jwt, sessionLoading, username])
+  }, [jwt, sessionLoading, username, expiredCache])
 
   useEffect(() => { void refreshAccessibleProjects() }, [refreshAccessibleProjects])
 
@@ -311,8 +336,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   // AQU-473: derive guest orgs from the shared project directory instead of
   // refetching it whenever the member-org list changes.
+  // Offline is decided by the org list alone: a directory that failed while
+  // `/orgs` answered is the AQU-883 error state, not the offline pages.
+  const offline = orgsFromCache
   const guestOrgs = useMemo(() => {
-    if (cachedGuestOrgs) return cachedGuestOrgs.filter((g) => !orgs.some((o) => o.id === g.id))
+    if (offline && cachedGuestOrgs) return cachedGuestOrgs.filter((g) => !orgs.some((o) => o.id === g.id))
     const memberOrgIds = new Set(orgs.map((o) => o.id))
     const seen = new Map<number, GuestOrg>()
     for (const p of accessibleProjects) {
@@ -320,9 +348,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       if (!seen.has(p.orgId)) seen.set(p.orgId, { id: p.orgId, name: p.orgName ?? null })
     }
     return Array.from(seen.values())
-  }, [accessibleProjects, cachedGuestOrgs, orgs])
-
-  const offline = orgsFromCache || cachedGuestOrgs != null
+  }, [accessibleProjects, cachedGuestOrgs, offline, orgs])
 
   // Desktop: keep the last good lists for offline use, and leave the cached
   // ones as soon as the server answers again.
@@ -475,7 +501,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       guestOrgs: visibleGuestOrgs,
       accessibleProjects: visibleAccessibleProjects,
       accessibleProjectsLoading: accessibleProjectsLoading || !projectsReady,
-      accessibleProjectsError: projectsReady ? accessibleProjectsError : null,
+      // Offline, the directory failing is expected; the offline pages say so.
+      accessibleProjectsError: projectsReady && !offline ? accessibleProjectsError : null,
       setActiveOrg,
       setAllOrgs,
       isLoading: isLoading || !orgsReady,

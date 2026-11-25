@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
+import { useSyncExternalStore } from "react"
 import { render, screen, waitFor, act } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
@@ -27,18 +28,30 @@ vi.mock("@/lib/offline/is-tauri", () => ({ isTauriRuntime: () => true }))
 
 const connectivityListeners = new Set<(online: boolean | null) => void>()
 let currentConnectivity: boolean | null = null
+// Declarations, not consts: vi.mock is hoisted above them.
+function currentFake() {
+  return currentConnectivity
+}
+function subscribeFake(listener: (online: boolean | null) => void) {
+  connectivityListeners.add(listener)
+  return () => { connectivityListeners.delete(listener) }
+}
 vi.mock("@/lib/offline/connectivity", () => ({
-  desktopConnectivity: {
-    current: () => currentConnectivity,
-    subscribe: (listener: (online: boolean | null) => void) => {
-      connectivityListeners.add(listener)
-      return () => connectivityListeners.delete(listener)
-    },
-  },
+  desktopConnectivity: { current: currentFake, subscribe: subscribeFake },
+  useDesktopConnectivity: () => useSyncExternalStore(subscribeFake, currentFake),
 }))
 
+function reportConnectivity(online: boolean | null) {
+  currentConnectivity = online
+  act(() => { for (const listener of [...connectivityListeners]) listener(online) })
+}
+
+const LIVE_JWT = "header.eyJleHAiOjk5OTk5OTk5OTl9.sig"
+// exp: 1 (1970)
+const EXPIRED_JWT = "header.eyJleHAiOjF9.sig"
+
 const sessionState = {
-  session: { jwt: "header.eyJleHAiOjk5OTk5OTk5OTl9.sig", username: "anna", createdAt: "x" },
+  session: { jwt: LIVE_JWT, username: "anna", createdAt: "x" },
   loading: false,
 }
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => sessionState }))
@@ -83,6 +96,7 @@ beforeEach(() => {
   fetchAccessibleProjects.mockReset()
   connectivityListeners.clear()
   currentConnectivity = null
+  sessionState.session.jwt = LIVE_JWT
   vi.useRealTimers()
 })
 
@@ -137,7 +151,7 @@ describe("OrgProvider offline fallback (desktop)", () => {
     const renamed = { ...memberOrg, name: "Acme Translation" }
     listMyOrgs.mockResolvedValue([renamed])
     fetchAccessibleProjects.mockResolvedValue({ ok: true, projects: [] })
-    act(() => { for (const listener of connectivityListeners) listener(true) })
+    reportConnectivity(true)
     await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("no"))
     await waitFor(() => expect(screen.getByTestId("orgs").textContent).toBe("Acme Translation"))
     await waitFor(() => expect(readOrgDirectory("anna")?.orgs).toEqual([renamed]))
@@ -153,13 +167,82 @@ describe("OrgProvider offline fallback (desktop)", () => {
     let failOrgs: (e: Error) => void = () => {}
     listMyOrgs.mockReturnValue(new Promise((_, reject) => { failOrgs = reject }))
     fetchAccessibleProjects.mockReturnValue(new Promise(() => {}))
-    act(() => { for (const listener of connectivityListeners) listener(true) })
+    reportConnectivity(true)
     await waitFor(() => expect(listMyOrgs).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId("offline").textContent).toBe("yes")
     expect(screen.getByTestId("guests").textContent).toBe("Guesthouse")
+    // Not loading either: OrgRouteGate would swap the page for its overlay.
+    expect(screen.getByTestId("settled").textContent).toBe("yes")
 
     await act(async () => { failOrgs(new TypeError("Failed to fetch")) })
     expect(screen.getByTestId("offline").textContent).toBe("yes")
+    expect(screen.getByTestId("settled").textContent).toBe("yes")
+  })
+
+  it("waits for the directory still in flight when a retry gets the org list back", async () => {
+    rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [] })
+    listMyOrgs.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    fetchAccessibleProjects.mockResolvedValueOnce({ ok: false, reason: "unreachable" })
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+
+    let answerDirectory: (r: unknown) => void = () => {}
+    listMyOrgs.mockResolvedValue([memberOrg])
+    fetchAccessibleProjects.mockReturnValue(new Promise((resolve) => { answerDirectory = resolve }))
+    reportConnectivity(true)
+    await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("no"))
+    expect(screen.getByTestId("settled").textContent).toBe("no")
+
+    await act(async () => { answerDirectory({ ok: true, projects: [guestProject] }) })
+    await waitFor(() => expect(screen.getByTestId("settled").textContent).toBe("yes"))
+    expect(screen.getByTestId("guests").textContent).toBe("Guesthouse")
+  })
+
+  it("reports a directory failure as an error, not offline, when the org list loaded", async () => {
+    rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [{ id: 9, name: "Guesthouse" }] })
+    listMyOrgs.mockResolvedValue([memberOrg])
+    fetchAccessibleProjects.mockResolvedValue({ ok: false, reason: "unreachable" })
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId("projects-error").textContent).not.toBe("none"))
+    expect(screen.getByTestId("offline").textContent).toBe("no")
+    expect(screen.getByTestId("guests").textContent).toBe("")
+  })
+
+  describe("with an expired session", () => {
+    beforeEach(() => {
+      sessionState.session.jwt = EXPIRED_JWT
+      rememberOrgDirectory("anna", { orgs: [memberOrg], guestOrgs: [{ id: 9, name: "Guesthouse" }] })
+    })
+
+    it("serves the remembered lists while the probe reads offline", async () => {
+      currentConnectivity = false
+      renderProvider()
+      await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+      expect(screen.getByTestId("orgs").textContent).toBe("Acme")
+      expect(screen.getByTestId("guests").textContent).toBe("Guesthouse")
+      expect(listMyOrgs).not.toHaveBeenCalled()
+    })
+
+    it("doesn't claim offline while the probe reads online", async () => {
+      currentConnectivity = true
+      renderProvider()
+      await waitFor(() => expect(screen.getByTestId("settled").textContent).toBe("yes"))
+      expect(screen.getByTestId("offline").textContent).toBe("no")
+      expect(screen.getByTestId("orgs").textContent).toBe("")
+    })
+
+    it("waits for the first probe, then follows it", async () => {
+      renderProvider()
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.getByTestId("settled").textContent).toBe("no")
+
+      reportConnectivity(false)
+      await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("yes"))
+
+      reportConnectivity(true)
+      await waitFor(() => expect(screen.getByTestId("offline").textContent).toBe("no"))
+      expect(screen.getByTestId("orgs").textContent).toBe("")
+    })
   })
 
   it("retries on a timer when the probe never reports a change", async () => {

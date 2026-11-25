@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { ExpiredSessionGate, isSessionGuardedPath } from "./ExpiredSessionGate"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { rememberOrgDirectory } from "@/lib/offline/org-directory-cache"
 
 // AQU-885. `isJwtExpired` is exercised for real — only the stored session is
 // faked, since the whole point is that expiry is decided from the token alone.
@@ -64,7 +65,13 @@ beforeEach(() => {
   offlineResume = null
   desktop = false
   connectivity = null
+  localStorage.clear()
 })
+
+/** Org lists from an earlier online load — what the offline org pages show. */
+function rememberOrgs() {
+  rememberOrgDirectory("anna", { orgs: [], guestOrgs: [] })
+}
 
 describe("ExpiredSessionGate (AQU-885)", () => {
   it("sends a boot with an already-expired stored token to sign-in instead of the dashboard", async () => {
@@ -134,6 +141,7 @@ describe("ExpiredSessionGate (AQU-885)", () => {
 
   it("holds sign-in on the org pages while the desktop app is offline", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    rememberOrgs()
     desktop = true
     connectivity = false
     renderAt("/orgs/3/projects")
@@ -144,6 +152,7 @@ describe("ExpiredSessionGate (AQU-885)", () => {
 
   it("sends the desktop app to sign-in once it is back online", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    rememberOrgs()
     desktop = true
     connectivity = true
     renderAt("/orgs/3/projects")
@@ -153,12 +162,23 @@ describe("ExpiredSessionGate (AQU-885)", () => {
   it("holds sign-in on desktop until the first connectivity probe has answered", async () => {
     // An offline launch: the session check settles long before the probe.
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    rememberOrgs()
     desktop = true
     connectivity = null
     renderAt("/orgs/all")
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.getByText("app shell")).toBeInTheDocument()
     expect(screen.queryByText(/^login page/)).not.toBeInTheDocument()
+  })
+
+  it("sends the desktop app to sign-in offline when no org lists were ever cached", async () => {
+    // Nothing for the offline org pages to show: holding would strand the
+    // user on an empty dashboard until the connection returns.
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    desktop = true
+    connectivity = false
+    renderAt("/orgs/all")
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
   })
 
   it("sends a later visit to the org page to sign-in after the launch already resumed", async () => {

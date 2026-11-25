@@ -24,11 +24,13 @@
  *  - Desktop: a launch waits for OfflineLaunchResume first. Sign-in can't work
  *    offline, so a user whose session lapsed in the field is taken to their
  *    downloaded project instead; their edits queue until they sign in again.
- *  - Desktop, offline: no redirect at all. The org pages list the downloaded
- *    projects from cached org lists (OrgContext `offline`); sign-in follows
- *    once the connection is back. Until the first probe has answered,
- *    connectivity is unknown and the redirect waits too: an offline launch
- *    would otherwise reach sign-in before the probe could say offline.
+ *  - Desktop, offline, with org lists cached from an earlier online load: no
+ *    redirect at all. The org pages list the downloaded projects from them
+ *    (OrgContext `offline`); sign-in follows once the connection is back.
+ *    Until the first probe has answered, connectivity is unknown and the
+ *    redirect waits too: an offline launch would otherwise reach sign-in
+ *    before the probe could say offline. With nothing cached there is no
+ *    offline view to hold for, so sign-in comes at once as on the web.
  */
 
 import { useEffect, useState } from "react"
@@ -41,6 +43,7 @@ import { isLaunchLandingPath } from "@/lib/offline/last-workspace"
 import { pendingOfflineLaunchResume } from "@/lib/offline/launch-resume"
 import { useDesktopConnectivity } from "@/lib/offline/connectivity"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { readOrgDirectory } from "@/lib/offline/org-directory-cache"
 
 /**
  * How long a desktop launch holds the redirect for OfflineLaunchResume. Past
@@ -71,18 +74,30 @@ export function ExpiredSessionGate() {
   return (
     <ConfirmedExpiredRedirect
       jwt={candidateJwt}
+      username={active?.username ?? null}
       pathname={location.pathname}
       next={location.pathname + location.search}
     />
   )
 }
 
-function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathname: string; next: string }) {
+function ConfirmedExpiredRedirect({
+  jwt,
+  username,
+  pathname,
+  next,
+}: {
+  jwt: string
+  username: string | null
+  pathname: string
+  next: string
+}) {
   const [confirmed, setConfirmed] = useState(false)
-  // Null outside the desktop app and before its first probe. On desktop only
-  // a measured "online" lets the redirect through.
+  // Null outside the desktop app and before its first probe. On desktop with
+  // cached org lists, only a measured "online" lets the redirect through.
   const online = useDesktopConnectivity()
-  const holdForConnectivity = isTauriRuntime() && online !== true
+  const holdForConnectivity =
+    isTauriRuntime() && online !== true && username != null && readOrgDirectory(username) != null
 
   useEffect(() => {
     let cancelled = false

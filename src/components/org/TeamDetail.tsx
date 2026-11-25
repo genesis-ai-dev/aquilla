@@ -18,12 +18,10 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { EffectiveRoleCell } from "@/components/access/EffectiveRoleCell"
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
 import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
-import { formatScopePath } from "@/lib/access/scope-path"
-import type { GrantOrigin, ScopePath } from "@/lib/access/types"
+import type { GrantOrigin } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -75,7 +73,7 @@ import {
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
 type TeamTab = "overview" | "projects" | "members"
@@ -191,7 +189,8 @@ export function TeamDetail() {
 
   // AQU-2289: Change role on a member (their organization role, owners only)
   // and on an attached project (the team's grant) both open the one
-  // RoleDialog, with the organization's or the project's list of roles.
+  // RoleDialog. The project grant is a team grant, so Owner stays off it
+  // (AQU-2357). A person's project picker still offers Owner to an Owner.
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
   const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
   // The chooser's organization role caps both lists (the server refuses a
@@ -699,11 +698,6 @@ export function TeamDetail() {
     activeOrgId != null && groupIdNum != null
       ? orgPath(activeOrgId, `/teams/${groupIdNum}`)
       : null
-  const teamScopePath: ScopePath = [
-    ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
-    ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
-  ]
-
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -760,7 +754,7 @@ export function TeamDetail() {
                 }}
                 errorMessage={(e) => {
                   const uf = toUserFacingError(e, "org")
-                  return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+                  return isRoleDenial(uf) ? t("org.roleDialog.orgChangeForbidden") : uf.message
                 }}
               />
 
@@ -769,6 +763,7 @@ export function TeamDetail() {
                 onOpenChange={(open) => { if (!open) setProjectRoleTarget(null) }}
                 mode="change"
                 level="project"
+                teamGrant
                 callerLevel={callerOrgLevel}
                 name={projectRoleTarget?.name ?? ""}
                 currentLevel={projectRoleTarget?.grantedRoleLevel ?? null}
@@ -842,9 +837,9 @@ export function TeamDetail() {
                   )}
                 >
                   <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                    {/* AQU-1352 §3.9 rule 1: the scope breadcrumb (org › team) is the title. */}
+                    {/* A team is a group, not a scope level (AQU-2351). The title is its name. */}
                     <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                      <ScopeBreadcrumb path={teamScopePath} />
+                      {team.name}
                     </h1>
                     {teamDescription ? (
                       <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
@@ -924,7 +919,7 @@ export function TeamDetail() {
                             placeholder={t("org.teamDetail.selectProjectPlaceholder")}
                           />
                           <RoleSelect
-                            options={roleChoices("project", { callerLevel: callerOrgLevel })}
+                            options={roleChoices("project", { callerLevel: callerOrgLevel, teamGrant: true })}
                             value={selectedRole}
                             onValueChange={setSelectedRole}
                             aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
@@ -1049,7 +1044,7 @@ export function TeamDetail() {
                       mode="add"
                       level="team"
                       callerLevel={callerOrgLevel}
-                      title={t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
+                      title={t("org.access.addPeopleTo", { path: team.name })}
                       summary={t("org.roleDialog.teamAddSummary")}
                       people={{
                         kind: "custom",

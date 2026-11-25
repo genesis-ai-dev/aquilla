@@ -192,10 +192,8 @@ export function StyleChecks({
   // Sequential on purpose (AQU-2366): a staged dismissal can carry dozens of
   // proposals, and every verdict refetches the library.
   const dismissMany = useCallback(
-    (ids: readonly string[]) => {
-      void (async () => {
-        for (const id of ids) await review(id, "reject")
-      })()
+    async (ids: readonly string[]) => {
+      for (const id of ids) await review(id, "reject")
     },
     [review],
   )

@@ -162,7 +162,8 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
     const frame = tools.toolFrame(DEFAULT_EDITOR)
     await expect(tools.translationBox(frame, "MAT 1:1")).toBeVisible({ timeout: 60_000 })
     const firstRender = Date.now() - t0
-    const f = alice.frames().find((x) => x.url() === "about:srcdoc" && x !== alice.mainFrame())
+    // The extension's own document: a srcdoc frame inside the shell's srcdoc frame (src/lib/tools/srcdoc.ts).
+    const f = alice.frames().find((x) => x.url() === "about:srcdoc" && x.parentFrame()?.url() === "about:srcdoc")
     expect(f, "extension frame").toBeTruthy()
     // The whole book is in (the list is virtualized: rows mount on scroll, so
     // "loaded" is the editor's own state, read through its inspection hook).

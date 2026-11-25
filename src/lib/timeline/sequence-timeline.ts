@@ -4,10 +4,12 @@
 //
 // Two rules, decided with the removal, and the later one for the drawing:
 //
-//   - THE WHOLE FILE, EVERY CHAPTER. The timeline lays the book out end to
-//     end, so scrolling carries you into the next chapter. The chapter picker
-//     still names a chapter: a pick while playback is running jumps the
-//     playhead to that chapter's first line on this same clock.
+//   - THE WHOLE FILE, EVERY CHAPTER, unless Split into milestones is on.
+//     Off, the timeline lays the book out end to end, so scrolling carries
+//     you into the next chapter. On, it draws only the milestone the table
+//     is on (`timelineCellsForMilestoneSplit`). The chapter picker still
+//     names a chapter: a pick while playback is running jumps the playhead
+//     to that chapter's first line.
 //   - HEADINGS FOLLOW THE PROJECT'S "Count headings as translatable content"
 //     (`countStructuralCells`; Sam's decision 2): counted, a heading or
 //     section break sits on the timeline like any line — its take, or a dashed
@@ -18,6 +20,8 @@
 //     and caches their waveforms, so length costs nothing; parts only added
 //     moving pieces. Only divisions that came from the file are chapters —
 //     the 50-line "Part"s the table pages a file with none by are not.
+//     Split into milestones is the exception: the timeline then shows the
+//     part, time range, or chapter the table is on.
 //
 // Pure. The workspace feeds the chapters from the cell store's own navigation
 // index (the one the chapter picker reads) and the cells from the merged read.
@@ -103,6 +107,46 @@ export function sequenceTimelineCells<T extends CellData>(
 ): T[] {
   const inChapter = chapter ? new Set(chapter.cellIds) : null
   return cells.filter((cell) => (inChapter == null || inChapter.has(cell.id)) && !staysOffSequenceTimeline(cell, countStructural))
+}
+
+/** One milestone the table can page to, including a part or a time range. */
+export interface MilestoneTimelinePage {
+  key: string
+  cellIds: readonly string[]
+}
+
+/**
+ * Lines the timeline draws.
+ *
+ * Split into milestones off: `cells` itself. A book stays one clock from
+ * the first chapter through the last, and a file with no milestones is
+ * unchanged.
+ * Split into milestones on: only the milestone the table is on. A missing
+ * or unknown key opens the first milestone, the page the table opens on.
+ * The same array comes back when every drawn line is already on that page.
+ */
+export function timelineCellsForMilestoneSplit<T extends { id: string }>(
+  cells: readonly T[],
+  options: {
+    split: boolean
+    milestones: readonly MilestoneTimelinePage[]
+    milestoneKey: string | null
+  },
+): T[] {
+  if (!options.split || options.milestones.length === 0) return cells as T[]
+  const known = options.milestoneKey != null
+    && options.milestones.some((page) => page.key === options.milestoneKey)
+  const key = known ? options.milestoneKey : options.milestones[0]?.key
+  const page = options.milestones.find((entry) => entry.key === key)
+  if (!page) return cells as T[]
+  const ids = new Set(page.cellIds)
+  const kept: T[] = []
+  let dropped = false
+  for (const cell of cells) {
+    if (ids.has(cell.id)) kept.push(cell)
+    else dropped = true
+  }
+  return dropped ? kept : cells as T[]
 }
 
 /** The lines of one chapter (the whole list when null), in order. */

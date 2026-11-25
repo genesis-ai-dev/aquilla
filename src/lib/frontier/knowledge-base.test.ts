@@ -41,7 +41,7 @@ describe("Knowledge Base API client", () => {
     const file = new File(["Use formal language."], "style guide.md", { type: "text/markdown" })
 
     await expect(uploadKnowledgeDocument({ kind: "org", id: 42 }, "jwt-2", file))
-      .resolves.toEqual(doc)
+      .resolves.toEqual({ doc, textTruncated: false })
 
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/v2\/orgs\/42\/knowledge$/)
@@ -60,7 +60,7 @@ describe("Knowledge Base API client", () => {
     const pdf = buildPdf({ pages: [{ runs: [{ text: "Use formal language.", x: 72, y: 700 }] }] })
     const file = new File([pdf], "guide.pdf", { type: "application/pdf" })
 
-    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)).resolves.toEqual(doc)
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)).resolves.toEqual({ doc, textTruncated: false })
 
     const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(init.body).toBeInstanceOf(FormData)
@@ -88,6 +88,15 @@ describe("Knowledge Base API client", () => {
     const file = new File(["# notes"], "notes.md")
     const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file).catch((e: unknown) => e)
     expect((thrown as KnowledgeBaseApiError).serverMessage).toBe("Reload the page, then add this PDF again.")
+  })
+
+  it("passes on that only the first part of the text was kept (AQU-2594)", async () => {
+    const doc = { id: "doc-4", name: "long.md", scope: "project" }
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ doc, textTruncated: true }, 201)))
+    const file = new File(["# long"], "long.md", { type: "text/markdown" })
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file))
+      .resolves.toEqual({ doc, textTruncated: true })
   })
 
   // AQU-1499: the boundary used to keep only the status, so a rejection the

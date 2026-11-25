@@ -287,7 +287,7 @@ describe('filterUsernamesWithProjectAccess', () => {
     expect(result).toEqual(['member'])
   })
 
-  it('keeps the project creator', async () => {
+  it("does not keep created_by on its own", async () => {
     const { db } = await makeTestDb()
     await db
       .prepare("INSERT INTO users (id, username, email, password_hash) VALUES (1, 'creator', 'creator@example.com', '')")
@@ -297,7 +297,7 @@ describe('filterUsernamesWithProjectAccess', () => {
       .run()
 
     const result = await filterUsernamesWithProjectAccess(db, 'proj-1', ['creator'])
-    expect(result).toEqual(['creator'])
+    expect(result).toEqual([])
   })
 
   it('rejects a sub-maintainer org membership (below the org-path floor)', async () => {
@@ -394,6 +394,9 @@ describe('sendCommentNotifications', () => {
       .run()
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-1', 1, 700)")
       .run()
 
     const email = makeEmailBinding()
@@ -615,6 +618,9 @@ describe('sendCommentNotifications — preference gating (AQU-1193)', () => {
       .run()
     await db
       .prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-1', 'MyProject', 1)")
+      .run()
+    await db
+      .prepare("INSERT INTO project_members (project_id, user_id, role_level) VALUES ('proj-1', 1, 700)")
       .run()
     await db
       .prepare(

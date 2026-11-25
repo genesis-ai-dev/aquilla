@@ -11,6 +11,7 @@ import { handleMigrateIngestRequest } from "../events/migrate-ingest-route"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 import { buildCellAudioEvents } from "../../../src/lib/migrate/audio-copy"
 import { selectedAudioProjectionRepairEvent, type AudioImport } from "../../../src/lib/migrate/audio"
+import { revalidateEventId, targetCommitEventId, validateEventId } from "../../../src/lib/migrate/ids"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 
 const SECRET = "test-secret"
@@ -194,6 +195,107 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
       expect((await handleMigrateIngestRequest(ingestRequest([{ ...recovery[0], id: `new-recovery-${state}` }]), env()))?.status).toBe(200)
       expect((await t.pg.query("SELECT * FROM cell_audio WHERE audio_id='old.wav'")).rows).toHaveLength(0)
     }
+  }, 120_000)
+
+  // The pinning select lands once; a re-run's copy is an id replay. So when an
+  // old recording's bytes only turn up on a later run, its attach is the one
+  // event that run adds, and it must not be able to select: it used to, which
+  // left migrated verses playing a superseded take with the validated one
+  // deselected beside it.
+  it("a take that first lands on a later import run joins the cell without taking it over", async () => {
+    const cellId = "late-take"
+    const opts = { projectId: PROJECT, fileId: FILE, fallbackAuthor: "legacy-import", fallbackTs: 1800000000000 }
+    const recording = (name: string, createdAt: number, validated = false): AudioImport => ({
+      legacyAudioId: name, aquillaAudioId: `${name}.wav`, diskRelPath: `.project/attachments/files/${name}.wav`,
+      slot: "recording", createdAt,
+      ...(validated ? { validatedBy: [{ username: "validator", creationTimestamp: createdAt + 1000 }] } : {}),
+    })
+    const early = recording("early", 1650000000000)
+    const chosen = recording("chosen", 1700000000000, true)
+    const rows = async () =>
+      (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+
+    // Actual producer -> actual ingest handler -> real Postgres projection.
+    const first = buildCellAudioEvents(cellId, [early, chosen], chosen.aquillaAudioId, opts)
+    expect((await handleMigrateIngestRequest(ingestRequest(first), env()))?.status).toBe(200)
+    const before = await rows()
+    expect(before.map((r) => [r.audio_id, r.selected, r.validator_count])).toEqual([
+      ["chosen.wav", 1, 1],
+      ["early.wav", 0, 0],
+    ])
+
+    const late = recording("late", 1600000000000)
+    const second = buildCellAudioEvents(cellId, [late, early, chosen], chosen.aquillaAudioId, opts)
+    const response = await handleMigrateIngestRequest(ingestRequest(second), env())
+    expect(await response!.json()).toMatchObject({ accepted: 1, replayed: first.length })
+    const after = await rows()
+    for (const row of before) expect(after.find((x) => x.audio_id === row.audio_id)).toEqual(row)
+    expect(after.find((x) => x.audio_id === "late.wav")).toMatchObject({ selected: 0, deleted: 0, validator_count: 0 })
+
+    // The saved payloads recreate the same state from scratch.
+    await t.pg.query("DELETE FROM cell_audio")
+    const rebuild = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+      method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+    }), env())
+    expect(rebuild?.status, await rebuild?.clone().text()).toBe(200)
+    expect((await rows()).map((r) => [r.audio_id, r.selected, r.validator_count])).toEqual([
+      ["chosen.wav", 1, 1],
+      ["early.wav", 0, 0],
+      ["late.wav", 0, 0],
+    ])
+  }, 120_000)
+
+  // A new commit resets a verse to unvalidated, so the same reviewer signing off
+  // the new text is a new fact. Sent under the id of their first sign-off it is
+  // a replay, and the verse reads unvalidated in Aquilla while Codex shows it
+  // validated; the mapper therefore gives it `revalidateEventId` (which id the
+  // mapper picks is pinned in src/lib/migrate/map.test.ts).
+  it("a reviewer's sign-off of a later edit is dropped under their first id and lands under its own", async () => {
+    const cellId = "re-validated"
+    const source = cellCreate("src-re-validated", cellId, "source")
+    const commit = (editIdx: number, parentId: string, value: string): IngestEventIn => ({
+      id: targetCommitEventId(PROJECT, FILE, cellId, editIdx), kind: "target.cell.commit", fileId: FILE, cellId,
+      parentId, author: "translator", clientTs: 1700000000000 + editIdx,
+      payload: { value, valueHtml: `<p>${value}</p>`, sourceEventId: source.id },
+    })
+    const signOff = (id: string, editEventId: string): IngestEventIn => ({
+      id, kind: "cell.validate", fileId: FILE, cellId, parentId: null, author: "reviewer",
+      clientTs: 1700000001000, payload: { editEventId },
+    })
+    const verse = async () =>
+      (await t.pg.query<Record<string, unknown>>("SELECT event_id, validated, value FROM cells WHERE side='target' AND cell_id=$1", [cellId])).rows[0]
+    const votes = async () =>
+      (await t.pg.query<Record<string, unknown>>("SELECT username, event_id FROM cell_validators WHERE cell_id=$1", [cellId])).rows
+
+    // First import: one edit, validated.
+    const first = commit(0, source.id, "one")
+    const firstSignOff = signOff(validateEventId(PROJECT, FILE, cellId, "reviewer"), first.id)
+    expect((await handleMigrateIngestRequest(ingestRequest([source, first, firstSignOff]), env()))?.status).toBe(200)
+    expect(await verse()).toMatchObject({ event_id: first.id, validated: 1, value: "one" })
+
+    // Second import, as it used to be sent: the new edit, and the reviewer's
+    // validation of it under the id their first one already holds.
+    const second = commit(1, first.id, "two")
+    const asReplay = await handleMigrateIngestRequest(ingestRequest([
+      source, first, second, signOff(firstSignOff.id, second.id),
+    ]), env())
+    expect(await asReplay!.json()).toMatchObject({ accepted: 1, replayed: 3 })
+    expect(await verse()).toMatchObject({ event_id: second.id, validated: 0, value: "two" })
+    expect(await votes()).toEqual([{ username: "reviewer", event_id: first.id }])
+
+    // The same validation under an id that names the edit.
+    const ownId = signOff(revalidateEventId(PROJECT, FILE, cellId, "reviewer", 1), second.id)
+    const landed = await handleMigrateIngestRequest(ingestRequest([source, first, second, ownId]), env())
+    expect(await landed!.json()).toMatchObject({ accepted: 1, replayed: 3 })
+    expect(await verse()).toMatchObject({ event_id: second.id, validated: 1, value: "two" })
+    expect(await votes()).toEqual([{ username: "reviewer", event_id: second.id }])
+
+    // The saved events recreate the same state from scratch.
+    const rebuild = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+      method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+    }), env())
+    expect(rebuild?.status, await rebuild?.clone().text()).toBe(200)
+    expect(await verse()).toMatchObject({ event_id: second.id, validated: 1, value: "two" })
   }, 120_000)
 
   it("assigns unique ascending seqs from one allocated block (eventsOnly firehose)", async () => {

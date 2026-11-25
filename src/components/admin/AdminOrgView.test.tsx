@@ -9,9 +9,14 @@ import { AdminOrgView } from "./AdminOrgView"
 import type { AdminOrg, AdminProject } from "@/lib/frontier/admin"
 
 const getAdminOrgMembers = vi.fn()
+const getAdminProjectsPage = vi.fn()
 vi.mock("@/lib/frontier/admin", async () => {
   const actual = await vi.importActual<typeof import("@/lib/frontier/admin")>("@/lib/frontier/admin")
-  return { ...actual, getAdminOrgMembers: (...a: unknown[]) => getAdminOrgMembers(...a) }
+  return {
+    ...actual,
+    getAdminOrgMembers: (...a: unknown[]) => getAdminOrgMembers(...a),
+    getAdminProjectsPage: (...a: unknown[]) => getAdminProjectsPage(...a),
+  }
 })
 
 const org: AdminOrg = { id: 1, name: "Alpha", createdAt: "2026-01-01", ownerUsername: "al", memberCount: 2, projectCount: 1 }
@@ -40,9 +45,16 @@ describe("AdminOrgView", () => {
     getAdminOrgMembers.mockResolvedValue([
       { userId: 5, username: "al", displayName: null, email: "al@x", roleLevel: 700, joinedAt: "2026-01-01", lastActiveAt: null },
     ])
+    getAdminProjectsPage.mockResolvedValue({
+      rows: [proj({ id: "a", name: "Mine" })],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      overdue: null,
+    })
   })
 
-  it("shows only this org's projects and its people, and opens a person", async () => {
+  it("loads this org's project page and its people, and opens a person", async () => {
     const onSelectUser = vi.fn()
     const onOpenInApp = vi.fn()
     render(
@@ -50,16 +62,18 @@ describe("AdminOrgView", () => {
         <AdminOrgView
           jwt="jwt"
           org={org}
-          projects={[proj({ id: "a", name: "Mine" }), proj({ id: "b", name: "Theirs", orgId: 2, orgName: "Beta" })]}
-          teams={[]}
           tenantsHref="/admin?tab=tenants"
           onOpenInApp={onOpenInApp}
           onSelectUser={onSelectUser}
         />
       </MemoryRouter>,
     )
-    expect(screen.getByText("Mine")).toBeInTheDocument()
+    expect(await screen.findByText("Mine")).toBeInTheDocument()
     expect(screen.queryByText("Theirs")).not.toBeInTheDocument()
+    expect(getAdminProjectsPage).toHaveBeenCalledWith(
+      "jwt",
+      expect.objectContaining({ orgId: 1, limit: 50, offset: 0 }),
+    )
     expect(screen.getByRole("link", { name: "All tenants" })).toHaveAttribute("href", "/admin?tab=tenants")
 
     const people = await screen.findByTestId("admin-org-people-table")

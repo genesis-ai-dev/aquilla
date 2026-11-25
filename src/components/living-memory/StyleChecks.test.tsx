@@ -316,6 +316,26 @@ describe("StyleChecks — batched proposal review", () => {
     }
   })
 
+  it("keeps the dismissed proposals out of the queue while their rejections are being sent", async () => {
+    // The list still holds them until each rejection is answered. Putting
+    // them back for that stretch made every dismissed card return, then leave
+    // one by one.
+    mockHook({ rules: proposals(12) })
+    review.mockImplementation(() => new Promise(() => {}))
+    await renderSection()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss the remaining 2" }))
+      await act(async () => { vi.advanceTimersByTime(8_000) })
+
+      expect(review).toHaveBeenCalledWith("cand-11", "reject")
+      expect(screen.queryByRole("button", { name: /Dismiss the remaining/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("offers no bulk dismissal below Project Lead", async () => {
     mockHook({ rules: proposals(12) })
     await renderSection(ROLE.CONTRIBUTOR)

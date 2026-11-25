@@ -366,6 +366,229 @@ describe("exodus 36 chapter boundary", () => {
         expect(xml).not.toContain("English 36:2.");
     });
 
+    it("writes a section heading once and keeps the chapter digit in the drop cap", () => {
+        const study = exoStory(
+            chapterVerse("35", "1", "English 35:1.") +
+                chapterVerse("35", "30", "English 35:30.", "ParagraphStyle/text%3ap", false) +
+                chapterVerse("35", "35", "English 35:35.", "ParagraphStyle/text%3ap", false) +
+                genDeuDc2Boundary() +
+                chapterVerse("36", "2", "English 36:2.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = exoStory(
+            bibleVerse("35", "1", "PT 35:1.") +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Bezalel e Aoliabe</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                bibleVerse("35", "30", "escolheu Bezalel.", false) +
+                bibleVerse("35", "35", "PT 35:35.", false) +
+                bibleVerse("36", "1", "PT 36:1.") +
+                bibleVerse("36", "2", "PT 36:2.", false)
+        );
+        const plan = buildVersificationPlan(study, bible);
+        const { xml } = applyStructureSwapToStudyXml(
+            study,
+            buildBibleChapterBlockIndex(bible),
+            { bibleStoryXml: bible, versificationPlan: plan }
+        );
+
+        expect(xml.split("Bezalel e Aoliabe").length - 1).toBe(1);
+        expect(xml.split("escolheu Bezalel").length - 1).toBe(1);
+        const dropCap = xml.match(
+            /<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle\/text%3ap_dc2">[\s\S]*?<\/ParagraphStyleRange>/
+        );
+        expect(dropCap?.[0]).toContain(">36<");
+        expect(dropCap?.[0]).not.toContain("Bezalel e Aoliabe");
+        expect(dropCap?.[0]).toContain("PT 36:1.");
+    });
+
+    it("puts a heading that opens a chapter in front of that chapter's drop cap", () => {
+        const study = exoStory(
+            chapterVerse("8", "1", "English 8:1.") +
+                chapterVerse("8", "32", "English 8:32.", "ParagraphStyle/text%3ap", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_dc1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>9</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc_sp"><Content> </Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>9:</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>English 9:1.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                chapterVerse("9", "2", "English 9:2.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = exoStory(
+            bibleVerse("8", "1", "PT 8:1.") +
+                bibleVerse("8", "32", "PT 8:32.", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>A quinta praga</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_dc1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>9</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>9.</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 9:1.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                bibleVerse("9", "2", "PT 9:2.", false)
+        );
+        const plan = buildVersificationPlan(study, bible);
+        const { xml } = applyStructureSwapToStudyXml(
+            study,
+            buildBibleChapterBlockIndex(bible),
+            { bibleStoryXml: bible, versificationPlan: plan }
+        );
+
+        expect(xml.split("A quinta praga").length - 1).toBe(1);
+        const headingAt = xml.indexOf("A quinta praga");
+        const chapter8At = xml.indexOf("PT 8:32.");
+        const chapter9At = xml.indexOf("PT 9:1.");
+        expect(chapter8At).toBeGreaterThan(0);
+        expect(headingAt).toBeGreaterThan(chapter8At);
+        expect(chapter9At).toBeGreaterThan(headingAt);
+        const dropCap = xml.slice(xml.indexOf("text%3ap_dc1"));
+        expect(dropCap.startsWith("text%3ap_dc1")).toBe(true);
+        expect(dropCap.indexOf(">9<")).toBeLessThan(dropCap.indexOf("PT 9:1."));
+        expect(dropCap.indexOf("A quinta praga")).toBe(-1);
+    });
+
+    it("keeps the Exodus 7:25 heading once and the chapter 8 digit", () => {
+        const study = exoStory(
+            chapterVerse("7", "24", "English 7:24.", "ParagraphStyle/text%3ap", true) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_dc1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>8</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc_sp"><Content> </Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content><?ACE 3?></Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Seven days passed.</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>7:</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>8:</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Then the Lord said.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                chapterVerse("8", "5", "English 8:5.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = exoStory(
+            bibleVerse("7", "24", "PT 7:24.", true) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>A segunda praga: rãs</Content><Br /></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_fj">` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Passaram-se sete dias.</Content><Br /></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap_dc1_fn">` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>8</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/notes%3af_call_dc"><Content>footnote</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Senhor feriu o Nilo.</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>7.</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>25</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>8.</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 8:1.</Content><Br /></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                bibleVerse("8", "5", "PT 8:5.", false)
+        );
+        const plan = buildVersificationPlan(study, bible);
+        const { xml } = applyStructureSwapToStudyXml(
+            study,
+            buildBibleChapterBlockIndex(bible),
+            { bibleStoryXml: bible, versificationPlan: plan }
+        );
+
+        expect(xml.split("A segunda praga: rãs").length - 1).toBe(1);
+        expect(xml.split("Passaram-se sete dias").length - 1).toBe(1);
+        expect(xml.indexOf("PT 7:24.")).toBeLessThan(xml.indexOf("A segunda praga: rãs"));
+        expect(xml.indexOf("A segunda praga: rãs")).toBeLessThan(xml.indexOf("Passaram-se sete dias"));
+        const dropCap = xml.match(
+            /<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle\/text%3ap_dc1">[\s\S]*?<\/ParagraphStyleRange>/
+        );
+        expect(dropCap?.[0]).toContain(">8<");
+        expect(dropCap?.[0]).toContain("PT 8:1.");
+        expect(dropCap?.[0]).not.toContain("Passaram-se sete dias");
+        expect(dropCap?.[0]).not.toContain("Senhor feriu o Nilo");
+        expect(xml.indexOf("Passaram-se sete dias")).toBeLessThan(xml.indexOf("Senhor feriu o Nilo"));
+        expect(xml.indexOf("Senhor feriu o Nilo")).toBeLessThan(xml.indexOf("text%3ap_dc1"));
+        expect(xml.indexOf(">8<")).toBeLessThan(xml.indexOf("PT 8:1."));
+    });
+
+    it("writes a mid-chapter heading once when a study note splits the chapter", () => {
+        const study = exoStory(
+            chapterVerse("14", "1", "English 14:1.", "ParagraphStyle/text%3ap_dc2") +
+                chapterVerse("14", "4", "English 14:4.", "ParagraphStyle/text%3ap", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aipi">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>12:1 – 14:26 study note.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aimi">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Worship only God.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                chapterVerse("14", "28", "English 14:28.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = exoStory(
+            bibleVerse("14", "1", "PT 14:1.") +
+                bibleVerse("14", "4", "PT 14:4.", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>A entrega dos dízimos</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                bibleVerse("14", "22", "Separem o dízimo.", false) +
+                bibleVerse("14", "28", "PT 14:28.", false)
+        );
+        const plan = buildVersificationPlan(study, bible);
+        const { xml } = applyStructureSwapToStudyXml(
+            study,
+            buildBibleChapterBlockIndex(bible),
+            { bibleStoryXml: bible, versificationPlan: plan }
+        );
+
+        expect(xml.split("A entrega dos dízimos").length - 1).toBe(1);
+        expect(xml.split("Separem o dízimo").length - 1).toBe(1);
+        const noteAt = xml.indexOf("Worship only God.");
+        expect(noteAt).toBeGreaterThan(xml.indexOf("PT 14:4."));
+        expect(xml.indexOf("Separem o dízimo")).toBeLessThan(noteAt);
+    });
+
+    it("keeps a heading once when the next verse shares the heading's paragraph", () => {
+        const packed = `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/text%3ap">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>22</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>22</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Separem o dízimo.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>22</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av"><Content>28</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>28</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>PT 14:28.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>28</Content></CharacterStyleRange>
+</ParagraphStyleRange>`;
+        const study = exoStory(
+            chapterVerse("14", "1", "English 14:1.", "ParagraphStyle/text%3ap_dc2") +
+                chapterVerse("14", "22", "English 14:22.", "ParagraphStyle/text%3ap", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aipi">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>12:1 – 14:26 study note.</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                chapterVerse("14", "28", "English 14:28.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = exoStory(
+            bibleVerse("14", "1", "PT 14:1.") +
+                bibleVerse("14", "4", "PT 14:4.", false) +
+                `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3as1">` +
+                `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>A entrega dos dízimos</Content></CharacterStyleRange>` +
+                `</ParagraphStyleRange>` +
+                packed
+        );
+        const plan = buildVersificationPlan(study, bible);
+        const { xml } = applyStructureSwapToStudyXml(
+            study,
+            buildBibleChapterBlockIndex(bible),
+            { bibleStoryXml: bible, versificationPlan: plan }
+        );
+
+        expect(xml.split("A entrega dos dízimos").length - 1).toBe(1);
+        expect(xml.split("Separem o dízimo").length - 1).toBe(1);
+        const noteAt = xml.indexOf("12:1 – 14:26 study note.");
+        expect(xml.indexOf("Separem o dízimo")).toBeLessThan(noteAt);
+        expect(noteAt).toBeLessThan(xml.indexOf("PT 14:28."));
+    });
+
     it("keeps the next-chapter boundary splice when a prior span overlaps it", () => {
         const out = normalizeOverlappingSplices([
             {

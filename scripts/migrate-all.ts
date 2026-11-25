@@ -153,7 +153,11 @@ const STATE_FILE = ".migrate-state.json"
 // v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
 // v5: cells Codex parked with the eye icon (`data.hidden`) migrate hidden —
 //     source.cell.visibility.set, NOT a retraction (AQU-1425).
-const CONTENT_LOGIC_VERSION = 5
+// v6: a validator's sign-off of a later edit gets its own event id, so it is
+//     no longer dropped as a replay of their first one (AQU-2750). Only
+//     sign-offs made since 2026-11-24 change; a re-derive sends those and
+//     nothing else.
+const CONTENT_LOGIC_VERSION = 6
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }

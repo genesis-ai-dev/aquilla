@@ -189,4 +189,34 @@ export const bridgeStore = {
   async deleteLink(id: BridgeStateId): Promise<void> {
     await (await db()).delete("links", `pt:${id}`)
   },
+
+  /**
+   * Point a mirror at another copy of the same project (see copies.ts). The
+   * caller has checked that the two copies' book files are identical, so the
+   * old folder's last-seen units are the new folder's too and come along.
+   * Whatever the new folder had from an earlier session (a stale base, a write
+   * log, holds) is dropped first: against it, verses Paratext changed since
+   * would read as edited on both sides. One transaction, so a crash leaves
+   * the old link in place.
+   */
+  async moveLink(link: MirrorLink, toPath: string, books: MirrorLink["books"]): Promise<MirrorLink> {
+    const from = bridgeStateId(link.projectGuid, link.projectPath)
+    const to = bridgeStateId(link.projectGuid, toPath)
+    const moved: MirrorLink = { ...link, projectPath: toPath, books }
+    const tx = (await db()).transaction([...STATE_STORES, "links"], "readwrite")
+    const range = (id: BridgeStateId) => IDBKeyRange.bound(`pt:${id}:`, `pt:${id}:￿`)
+    for (const name of STATE_STORES) {
+      const store = tx.objectStore(name)
+      for (const key of await store.getAllKeys(range(to))) await store.delete(key)
+    }
+    const lastSeen = tx.objectStore("lastSeen")
+    const prefix = `pt:${from}:`
+    for (const row of await lastSeen.getAll(range(from))) {
+      await lastSeen.put({ ...row, key: `pt:${to}:${row.key.slice(prefix.length)}`, projectGuid: to })
+    }
+    await tx.objectStore("links").delete(`pt:${from}`)
+    await tx.objectStore("links").put({ ...moved, key: `pt:${to}` })
+    await tx.done
+    return moved
+  },
 }

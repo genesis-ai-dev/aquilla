@@ -14,6 +14,9 @@ export function editorUnderTest(): EditorUnderTest {
 
 /** The first-party editor extension's frame (ToolFrame title). */
 export const EXTENSION_EDITOR_FRAME = 'iframe[title="Aquilla editor (Smart Extension) (sandboxed extension)"]'
+/** An extension's document is one frame further in: the frame the app mounts is
+ *  a shell that only stops the extension navigating itself (src/lib/tools/srcdoc.ts). */
+export const EXTENSION_DOCUMENT = "iframe"
 
 /** Init-script source that opts a browser context into the extension editor. */
 export function editorOptInScript(): string {

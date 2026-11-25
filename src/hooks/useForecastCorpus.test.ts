@@ -8,6 +8,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
 }))
 
 const { useForecastCorpus } = await import("./useForecastCorpus")
+const { useDebouncedSource } = await import("./useDebouncedValue")
 
 afterEach(() => {
   cleanup()
@@ -39,7 +40,7 @@ describe("useForecastCorpus", () => {
           projectId: "p",
           files,
           activeFileId: "f1",
-          activeCells: cells,
+          activeCells: useDebouncedSource(cells, 0),
           getToken: async () => "jwt",
           lane: "",
         }),
@@ -63,7 +64,7 @@ describe("useForecastCorpus", () => {
 
   it("is off when disabled", () => {
     const { result } = renderHook(() =>
-      useForecastCorpus({ enabled: false, projectId: "p", files, activeFileId: "f1", activeCells: [], getToken: async () => null, lane: "" }),
+      useForecastCorpus({ enabled: false, projectId: "p", files, activeFileId: "f1", activeCells: useDebouncedSource<Cell[]>([], 0), getToken: async () => null, lane: "" }),
     )
     expect(result.current).toBeNull()
   })

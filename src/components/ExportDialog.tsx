@@ -82,7 +82,7 @@ import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
-import { exportHtml, hasBibleVerses } from "@/lib/export/exporters/html"
+import { exportHtml, isBibleBookFile } from "@/lib/export/exporters/html"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
@@ -1149,20 +1149,9 @@ export function ExportDialog({
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
-  /**
-   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM or eBible
-   * file is one by definition (AQU-2211: a migrated book now lands as either);
-   * a `codex` file only when its lines carry Bible verse references — migrated
-   * Codex projects also store dubbing episodes, Pilgrim's Progress and
-   * commentaries as `codex`, and only the lines tell them apart.
-   */
-  const offersHtmlPage = useMemo(
-    () =>
-      activeFileType === "usfm"
-      || activeFileType === "ebible"
-      || (activeFileType === "codex" && hasBibleVerses(cells)),
-    [activeFileType, cells],
-  )
+  /** AQU-2182/AQU-2210: the Web page lays out one Bible book — the same rule
+   *  that offers the Bible document layout and its reading preview. */
+  const offersHtmlPage = useMemo(() => isBibleBookFile(activeFileType, cells), [activeFileType, cells])
 
   /**
    * What the fold offers, in what order.

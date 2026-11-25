@@ -8,6 +8,8 @@ import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { ScopeGrantChip } from "@/components/access/ScopeBreadcrumb"
+import { formatScopePath } from "@/lib/access/scope-path"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
@@ -21,7 +23,7 @@ import { TableEmptyState } from "@/components/ui/page"
 import { toast } from "@/components/ui/toast"
 import { NoteOnClick } from "@/components/ui/info-note"
 import { RoleLabel } from "@/components/RoleLabel"
-import { toUserFacingError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError } from "@/lib/errors/user-error"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import {
@@ -150,17 +152,26 @@ export function OrgMembersTable({
                   <ChevronRight className="size-3.5" />
                 )}
               </button>
-              <MemberInspectorTrigger
-                userId={m.userId}
-                username={m.username}
-                from={{ type: "org", id: String(orgId) }}
-                herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
-                onManageAccess={() => {
-                  if (!expanded.has(m.userId)) toggleExpand(m.userId)
-                }}
-              >
-                <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="font-normal" />
-              </MemberInspectorTrigger>
+              <div className="flex min-w-0 flex-col">
+                <MemberInspectorTrigger
+                  userId={m.userId}
+                  username={m.username}
+                  from={{ type: "org", id: String(orgId) }}
+                  herePath={[{ type: "org", id: String(orgId), name: orgName ?? t("org.access.scope.org") }]}
+                  onManageAccess={() => {
+                    if (!expanded.has(m.userId)) toggleExpand(m.userId)
+                  }}
+                >
+                  <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="font-normal" />
+                </MemberInspectorTrigger>
+                {orgName ? (
+                  <ScopeGrantChip
+                    path={[{ type: "org", id: String(orgId), name: orgName }]}
+                    viaTeam={null}
+                    className="truncate text-xs font-normal text-muted-foreground"
+                  />
+                ) : null}
+              </div>
             </div>
           )
         },
@@ -217,7 +228,7 @@ export function OrgMembersTable({
         ),
       },
     ],
-    [expanded, isOwner, t, toggleExpand],
+    [expanded, isOwner, orgId, orgName, t, toggleExpand],
   )
 
   return (
@@ -238,7 +249,7 @@ export function OrgMembersTable({
           }}
           errorMessage={(e) => {
             const uf = toUserFacingError(e, "org")
-            return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+            return isRoleDenial(uf) ? t("org.roleDialog.orgChangeForbidden") : uf.message
           }}
         />
       )}
@@ -250,7 +261,11 @@ export function OrgMembersTable({
           mode="add"
           level="org"
           callerLevel={callerOrgRoleLevel}
-          title={t("org.membersPage.orgTable.addMemberTitle")}
+          title={orgName
+            ? t("org.access.addPeopleTo", {
+                path: formatScopePath([{ type: "org", id: String(orgId), name: orgName }]),
+              })
+            : t("org.membersPage.orgTable.addMemberTitle")}
           summary={t("org.roleDialog.orgAddSummary")}
           details={t("org.roleDialog.orgRoleDetails")}
           people={{
@@ -272,7 +287,7 @@ export function OrgMembersTable({
               },
               onBatchErrorMessage: (e) => {
                 const uf = toUserFacingError(e, "org")
-                return uf.category === "forbidden" ? t("org.roleDialog.orgAddForbidden") : uf.message
+                return isRoleDenial(uf) ? t("org.roleDialog.orgAddForbidden") : uf.message
               },
             },
           }}
@@ -369,6 +384,7 @@ export function OrgMembersTable({
               <MemberAccessSubRow
                 orgId={orgId}
                 userId={m.userId}
+                orgRoleLevel={m.role.level}
                 callerOrgRoleLevel={callerOrgRoleLevel}
                 colSpan={4}
               />

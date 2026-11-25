@@ -57,6 +57,7 @@ import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { stepLabel } from "@/lib/history/step-label"
 import { beforeHistoryMove, redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { announceShortcutAction, ModeCue, undoKeysLabel } from "@/components/ui/shortcut-cue"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -561,7 +562,7 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
-  /** AQU-2577: pick a line for Make speech from its ghost clip on the dub row. */
+  /** AQU-2577: pick a line for Make speech from its sparkle beside the mic on the dub row. */
   onPickGhost?(cellId: string, opts: { additive: boolean }): void
   pickedGhostIds?: ReadonlySet<string>
   makingSpeechCellIds?: ReadonlySet<string>
@@ -633,6 +634,9 @@ export interface TimelineEditorProps {
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
+  /** Every selected line, in file order (the highlighted one plus any added
+   *  with Shift/⌘-click). Make speech runs on exactly these. */
+  onSelectionChange?(cellIds: readonly string[]): void
   /** AQU-928: run transcription over exactly these sections. Present = the
    *  media view shows its section-scoped transcribe row; absent (read-only
    *  users, focused unit tests) = no row at all, since the run would emit
@@ -1389,6 +1393,7 @@ export function TimelineEditor({
   layoutControls,
   project,
   onSelectCell,
+  onSelectionChange,
   onTranscribeSections,
   session,
   audioByCellId,
@@ -2893,6 +2898,18 @@ export function TimelineEditor({
   }
   const splitAtPlayheadRef = useRef(selectedTakeCutAtPlayhead)
   splitAtPlayheadRef.current = selectedTakeCutAtPlayhead
+  // AQU-2703: S changes the file with one key, so it says so, with its Undo.
+  // (B's cue is the Blade chip below: it follows the mode, however it was
+  // turned on.)
+  const announceSplitRef = useRef<() => void>(() => {})
+  announceSplitRef.current = () =>
+    announceShortcutAction({
+      id: "timeline-split",
+      title: t("editor.timeline.cueSplit"),
+      undoHint: t("editor.timeline.cueUndoHint", { keys: undoKeysLabel() }),
+      undoLabel: t("editor.history.undoThis"),
+      onUndo: () => runHistory("undo"),
+    })
   useEffect(() => {
     if (!canCut) return
     function onKeyDown(event: KeyboardEvent) {
@@ -2906,6 +2923,7 @@ export function TimelineEditor({
         if (!cut || !onCutTargets) return
         event.preventDefault()
         onCutTargets([cut])
+        announceSplitRef.current()
       } else if (event.key === "Escape") {
         setBladeOn(false)
       }
@@ -4298,6 +4316,11 @@ export function TimelineEditor({
     () => selectedIdsInOrder({ primaryId: selectedId, extraIds }, orderedIds),
     [selectedId, extraIds, orderedIds],
   )
+  useEffect(() => {
+    onSelectionChange?.(selectedIds)
+  }, [selectedIds, onSelectionChange])
+  // No timeline, no selection: don't leave it behind for the next view.
+  useEffect(() => () => onSelectionChange?.([]), [onSelectionChange])
   const multiSelectedIds = useMemo(
     () => new Set(selectedIds.filter((id) => id !== selectedId)),
     [selectedIds, selectedId],
@@ -5445,7 +5468,7 @@ export function TimelineEditor({
       ref={editorRef}
       data-testid="tl-editor"
       data-tl-lane-epoch={laneEpoch.current}
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden"
       style={
         {
           "--tl-row-h": `${rowMetrics.rowH}px`,
@@ -5534,6 +5557,21 @@ export function TimelineEditor({
           </button>
         </div>
       )}
+
+      {/* AQU-2703: while the Blade is on, a chip over the tracks says so —
+          the toolbar button alone was missed, and is folded into ⋯ on a
+          narrow timeline. It turns off from here too. */}
+      <ModeCue
+        active={bladeActive}
+        testId="tl-blade-cue"
+        onLabel={t("editor.timeline.cueBladeOn")}
+        offKeys={t("editor.timeline.cueBladeOffKeys")}
+        offLabel={t("editor.timeline.cueBladeOff")}
+        turnOffLabel={t("editor.timeline.cueBladeTurnOff")}
+        onTurnOff={() => setBladeOn(false)}
+        // Clear of the status line under the tracks ("Target: 3.9s").
+        className="bottom-12"
+      />
 
       {/* timeline */}
       {/* Stage 3, and the layout the whole round turns on: the TRACK COLUMN

@@ -32,6 +32,14 @@ async function seedOrg(db: AquillaDb, orgSettings: Record<string, unknown> | nul
     )
     .bind(PROJECT)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await db
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 1, 700, 1)
+       ON CONFLICT (project_id, user_id) DO NOTHING`,
+    )
+    .bind(PROJECT)
+    .run()
   if (orgSettings) {
     await db
       .prepare(`INSERT INTO org_settings (org_id, settings, version) VALUES (42, ?, 1)`)

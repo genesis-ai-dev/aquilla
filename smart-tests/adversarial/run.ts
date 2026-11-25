@@ -35,10 +35,6 @@ function inputGroups(contract: Contract): [string, string][][] {
  * goal and then stopped must not have the missing half blamed on the product.
  */
 async function newlySeen(page: Page, attack: Attack, contract: Contract, action: AgentAction, seen: Set<number>): Promise<void> {
-  if (attack.observe === "any-action") {
-    if (["click", "fill", "select"].includes(action.kind)) seen.add(0)
-    return
-  }
   if (attack.observe === "pressed") {
     if (action.kind !== "click") return
     for (const req of contract.required) {

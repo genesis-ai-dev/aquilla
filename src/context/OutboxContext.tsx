@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
-import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
+import { useOutboxSnapshot } from "@/hooks/useOutboxSnapshot"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
 import {
   sessionKey,
@@ -123,8 +123,8 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const {
-    pendingCount,
-    failedCount,
+    pendingCount: flusherPendingCount,
+    failedCount: flusherFailedCount,
     failureStreak,
     flushNow,
     refreshPending,
@@ -143,8 +143,13 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
     subscribeFlushTargets: subscribeSession,
   })
 
-  const records = usePendingOutboxRecords({ enabled: Boolean(jwt), fileId: null })
-  const inspectorRecords = usePendingOutboxRecords({ enabled: Boolean(jwt), fileId: null, includeFailed: true })
+  // Counts and both record lists come from one read per outbox notification
+  // and change together, so one outbox change is one render for consumers.
+  const { pendingCount, failedCount, records, inspectorRecords } = useOutboxSnapshot({
+    enabled: Boolean(jwt),
+    flusherPendingCount,
+    flusherFailedCount,
+  })
 
   const value = useMemo<OutboxContextValue>(
     () => ({

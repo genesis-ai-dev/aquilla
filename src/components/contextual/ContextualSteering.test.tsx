@@ -27,7 +27,7 @@ const { sendMock, MockApiError, MockAuthError } = vi.hoisted(() => {
     }
   }
   class MockAuthError extends MockApiError {
-    constructor(message = "You need to be signed in to use contextual drafting.") {
+    constructor(message = "You need to be signed in to use Autopilot.") {
       super(message, 401)
     }
   }
@@ -192,7 +192,7 @@ describe("ContextualSteering", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "You need to be signed in to use contextual drafting.",
+      "You need to be signed in to use Autopilot.",
     )
   })
 

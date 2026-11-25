@@ -1273,9 +1273,8 @@ async function commitOrgRoleLevel(
 /**
  * Commit a CreateProject (spec §2, receipt-only). Re-checks scope + org role
  * live, runs the shared gates (commit-gates.ts), then applies the row write via
- * createProjectShared with writeCreatorMembership: true (the receipt-only apply
- * has no implicit creator-path resolver, so the owner-level 700 membership row
- * must be written explicitly). An id claimed by ANOTHER caller between prepare
+ * createProjectShared, which writes the creator's Owner grant itself
+ * (AQU-2357). An id claimed by ANOTHER caller between prepare
  * and commit → `conflict`; the caller's OWN prior attempt (a crash-retry that
  * already inserted) is absorbed idempotently.
  */
@@ -1311,7 +1310,7 @@ async function commitCreateProject(
   if (gate instanceof Response) return gate
   const confirmationId = gate.confirmationId
 
-  // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
+  // Apply. The shared insert writes the creator's Owner grant.
   let inserted: boolean
   try {
     const created = await createProjectShared(db, {
@@ -1319,7 +1318,6 @@ async function commitCreateProject(
       name: cmd.name,
       orgId,
       createdBy: cred.userId,
-      writeCreatorMembership: true,
       // Lanes become rows. The four project-level language keys are not written.
       ...(cmd.lanes !== undefined ? { lanes: cmd.lanes } : {}),
     })

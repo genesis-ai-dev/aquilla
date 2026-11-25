@@ -119,7 +119,7 @@ describe("useRepetitionValidation", () => {
       ["r2", "Neema.", "seed"],
     ])
     expect(emitted.votes).toEqual([])
-    expect(lastToast().title).toBe("Applied to 2 repeated segments")
+    expect(lastToast().title).toBe("Applied to 2 repeated rows")
     expect(lastToast().data?.secondaryAction?.label).toBe("Validate all")
 
     await act(async () => { lastToast().data!.secondaryAction!.onClick() })

@@ -88,6 +88,7 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       members: [],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -181,6 +182,7 @@ describe("MembersPage — AQU-485 roster visibility", () => {
       members: [],
       isLoading: false,
       error: null,
+      hasReadableRoster: false,
       rosterHidden: true,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -311,6 +313,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -350,6 +353,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -404,6 +408,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -464,6 +469,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -493,6 +499,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -505,7 +512,10 @@ describe("MembersPage — Teams-style roster table", () => {
     renderMembers()
     await waitFor(() => expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
-    expect(screen.getByRole("dialog", { name: /add a member/i })).toBeInTheDocument()
+    const title = screen.getByTestId("scope-breadcrumb").textContent
+    expect(title).toBe("Come and See")
+    expect(screen.getByRole("dialog", { name: `Add people to ${title}` })).toBeInTheDocument()
+    expect(screen.getByTestId("scope-grant-scope").textContent).toBe(title)
     expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
     // AQU-1107: default org-add is Contributor, and the dialog states that
@@ -548,6 +558,6 @@ describe("MembersPage pending invites", () => {
       </QueryClientProvider>,
     )
     await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
-    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone with the link can join/)
   })
 })

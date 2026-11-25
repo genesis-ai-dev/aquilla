@@ -26,6 +26,7 @@ import {
   type OrgDeletedFile,
 } from "@/lib/sync/cloud-projects"
 import { unarchiveProjectRemote } from "@/lib/sync/archive"
+import { RestoreProjectDialog } from "@/components/RestoreProjectDialog"
 import { emitFileRestore, InsufficientRoleError } from "@/lib/sync/events-emit"
 import { archivedPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
@@ -53,6 +54,7 @@ export function ArchivedProjects() {
   const [projectsLoadError, setProjectsLoadError] = useState<string | null>(null)
   const [filesLoadError, setFilesLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [restoreCandidateId, setRestoreCandidateId] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
   const projectsRequestRef = useRef(0)
   const filesRequestRef = useRef(0)
@@ -361,7 +363,7 @@ export function ArchivedProjects() {
                     renderRowMenuItems={(p) => (
                       <MenuItem
                         disabled={restoringId != null}
-                        onClick={() => void handleRestoreProject(p.id)}
+                        onClick={() => setRestoreCandidateId(p.id)}
                       >
                         <ArchiveRestore className="size-4" />
                         {t("common.restore")}
@@ -455,6 +457,16 @@ export function ArchivedProjects() {
               </TabsContent>
             </Tabs>
           )}
+          <RestoreProjectDialog
+            open={restoreCandidateId != null}
+            onOpenChange={(open) => {
+              if (!open) setRestoreCandidateId(null)
+            }}
+            onConfirm={() => {
+              const id = restoreCandidateId
+              if (id) void handleRestoreProject(id)
+            }}
+          />
         </Page>
       }
     />

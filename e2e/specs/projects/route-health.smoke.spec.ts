@@ -66,8 +66,17 @@ for (const failure of ["browser-offline", "unreachable-host"] as const) {
   test(`first offline editor visit explains the missing screen and recovers on reconnect (${failure})`, async ({ alice }) => {
     const { jwtFor, seedProjectWithFile } = await import("../../helpers/seed-project")
     const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: "Cold offline editor" })
+    // The project directory paints Open before this project's own read lands.
+    // Going offline in that window fails the read and replaces the page with
+    // the unreachable banner, so the click never reaches the editor.
+    const projectPath = `/api/v2/projects/${seeded.projectId}`
+    const projectReady = alice.waitForResponse((resp) => {
+      const path = new URL(resp.url()).pathname
+      return path === projectPath && resp.request().method() === "GET" && resp.ok()
+    })
     await alice.goto(`/projects/${seeded.projectId}`)
     await expect(alice.getByRole("button", { name: "Open project", exact: true })).toBeVisible()
+    await projectReady
     if (failure === "browser-offline") {
       await alice.context().setOffline(true)
     } else {

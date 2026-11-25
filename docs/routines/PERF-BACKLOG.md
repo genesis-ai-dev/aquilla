@@ -19,14 +19,45 @@ Measured after the pass: one cell commit is 8 workspace renders (target 3); one 
    `useRefusedFileEvents`, `useRefusedComments`). The workspace subscribes to the whole outbox
    context, which is 3–4 of its renders per commit. One store, one read per notification,
    selectors for consumers. 26 test files mock the outbox per hook — do it in steps.
+   *Step 1 done (2026-11-19):* the provider publishes counts and both record lists from one read
+   in one update (`src/hooks/useOutboxSnapshot.ts`), and the workspace's stats overlay takes its
+   records from that snapshot instead of reading again. At 1× CPU a commit went from 9 workspace
+   renders to 8. *Step 2 done (2026-11-19):* the eight hooks that re-read on a notification
+   (`useActiveCellStore`, `useOutboxSnapshot`, `usePendingOutboxRecords`,
+   `useForbiddenOutboxRecords`, `useRefusedFileEvents`, `useRefusedComments`, `useCells`,
+   `useProjectCells` up to 2,000 rows) share one in-flight scan (`peekOutboxShared` in
+   `src/lib/sync/outbox.ts`), so they resume in one task and React renders them together:
+   7 → 5 workspace renders per commit at 1× (after item 4 landed); at 4× the count varies
+   from run to run (7, 7, 6, 5 → 6, 5, 6, 5). *Left:* each hook still keeps its own
+   subscription and its own state; the workspace still subscribes to the whole outbox context.
+   The two `store#` version bumps that remain on this path are item 2.
 2. **Audit stats are workspace state pushed into the store by an effect** (`store.setRuntime`),
    and `useSyncExternalStore`'s consistency check forces a second render. Apply them in the same
    task as their cause, or keep them out of workspace state.
+   *Traced 2026-11-21 (nightly, `plain.commit`, 4× throttle; probe hooked to
+   `window.__cellStore.emitAll` and diffing `ProjectWorkspace`'s hook state per React commit).*
+   One cell commit makes 6 workspace renders, in this order: (1) `applyOptimisticTargetEdit`;
+   (2) the outbox enqueue, which reaches the workspace through `OutboxProvider` and, in the same
+   render, through the store's own `setPendingState` refresh; (3) **`setRuntime` from the
+   passive effect in `useActiveCellStore`, because render 2 recomputed the audit overlay in
+   `useCellsAuditStatsWithOverlay`. This is the render this item removes: about 220 of the
+   commit's 2,100 component renders**; (4) the socket echo (`liveApplier` batch) plus
+   `applyCommittedCellStats`; (5) `applyValidationCellStats`, alone in its own task once
+   `onOwnEcho`'s outbox lookup resolves (`src/lib/sync/flush-applied.ts`), which is a second
+   avoidable render of about 100 components; (6) the outbox draining. The store and the audit
+   overlay read the same outbox notification through two separate pipelines (the store's
+   pending refresh, and React state through `OutboxProvider`). That is why their updates land
+   in separate tasks and `WHOLE_FILE_NOTIFY_MS` cannot merge them. The fix is one pipeline: the
+   store computes the audit overlay from the pending records it already reads. That interacts
+   with item 1's remaining step, so design the two together.
 3. **Commit and self-validation are two outbox transactions.** The notification is held across
    both today (`holdOutboxNotifications`); one transaction would remove the hold. The batch
    enqueue path journals differently — read that first.
-4. **`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
-   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.
+4. ~~**`useDebouncedValue(cellSummaries)`** renders the workspace once more 600 ms after every
+   commit for the forecast and glosser corpus. Move the consumer out of the workspace render.~~
+   *Done (2026-11-19):* the corpus is a `useDebouncedSource` — read on demand, with a signal
+   that an open Back-translation tab follows. The other `useDebouncedValue` callers are small
+   components and were left alone.
 5. **EditorTable's `activeEditorCellId` / `focusedRailCellId`** change across blur, click and
    focus: 9 table renders per activation, and a chapter-label state that passes through `null`.
 6. **The workspace commits while idle:** 5 commits, about 1,500 component renders and 1 request
@@ -118,6 +149,40 @@ From `scripts/perf/surfaces-probe.ts` (4× throttle, 2 files / 400 cells unless 
 34. A save still renders the workspace about 5 times (about 1,600 components) — items 1–4 above.
 35. `TypedText` ticks every 30 ms during a pass: most of the 407 commits left in "transcribe all".
 36. The quantise loop runs on the main thread (73 ms at 4× for a 60 s window).
+
+## The harness itself
+
+37. **`plain.open.componentRenders` is not stable enough for its budget.** Five runs of one tree
+    on one machine on 2026-11-19: 7,033, 8,604, 8,975, 9,077, 9,581 against a budget of 8,733 —
+    and 9,077 was the budget commit itself. Find what makes the open's render count depend on
+    timing before trusting a breach of it.
+38. **A first translation of an empty cell is not measured, and may cost more than it should.**
+    The scenario edits the same cells every run. On a newly seeded fixture they are
+    untranslated, and `plain.commit` measured 28 row renders, 10 workspace renders and one or
+    two extra reads (`cell-confidence`, `branching-search`; one run also saw a whole-file
+    `GET …/files/:id/cells`); on a fixture that has been run against, the same tree measures
+    10–11, 7–8 and none. The harness now runs one unmeasured settling pass after it seeds
+    (2026-11-20), so the budgets describe an edit and a new machine no longer sees a false
+    breach. What is left: whether 28 row renders for a first translation is the price of the
+    cell changing state or a defect — not traced. Trace it, then give it its own phase.
+39. **Commit-path render counts depend on the CPU throttle.** After one cell commit the outbox's
+    separate state updates each render the workspace at 1× CPU (9 renders on 2026-11-19), but
+    under the benchmark's 4× throttle some of them fall into one React batch (7). So removing
+    one of those updates shows at 1× (9 → 8) and stays inside the noise at 4× (7, 7, 7 → 7, 7,
+    6). Measure commit-path render counts at 1× as well before deciding a change did nothing.
+
+40. **`plain.commit.requests` counts a one-time corpus load.** One of the commit phase's two
+    requests is `GET …/files/<the other file>/cells?limit=500&lane=…`: the forecast corpus
+    loading every other file the first time the editor asks for a suggestion
+    (`loadOtherFiles` in `src/hooks/useForecastCorpus.ts`, by design). The typing phase ends before
+    the load starts, so the load lands in the commit window. A commit itself costs one request
+    (the `POST /events`). Either load the corpus in a phase of its own, or exclude it from the
+    commit's count, before the commit request budget is next lowered (traced 2026-11-21).
+41. **Container commits after every whole-file store wake-up.** About 40 ms after each
+    workspace render that a store emit started, a separate React commit renders two
+    `ComboboxTrigger`s and every mounted Legend List `Container` (237, 49 and 227 components in
+    one commit, about a quarter of the commit's renders). Item 12 is the per-row part. Which two
+    comboboxes subscribe on their own is not traced yet (2026-11-21).
 
 ## Needs a person, not the routine
 

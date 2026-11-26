@@ -48,6 +48,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleUploadTicketRequest } from "./external/upload-tickets"
 import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleExternalTranscriptionRequest } from "./external/transcription-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
@@ -674,6 +675,9 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+    // Signed upload URLs minted by the MCP create_upload_url tool.
+    const uploadTicketResponse = await handleUploadTicketRequest(request, env)
+    if (uploadTicketResponse) return withCors(uploadTicketResponse, request)
 
     // AQU-1762: Agent API knowledge-base (reference document) upload / list.
     // Bridged to auth-worker, which owns extraction + indexing.

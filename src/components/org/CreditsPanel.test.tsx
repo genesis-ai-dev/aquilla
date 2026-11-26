@@ -83,7 +83,7 @@ describe("CreditsPanel — renders for maintainer when data is present", () => {
     expect(screen.getByTestId("agentcap-day")).toBeInTheDocument()
     expect(screen.getByTestId("agentcap-week")).toBeInTheDocument()
     // Agent sub-cap section headline.
-    expect(screen.getByText(/Agent spend \(elevated rail/)).toBeInTheDocument()
+    expect(screen.getByText(/Agent usage \(separate cap/)).toBeInTheDocument()
     expect(mockGetOrgCredits).toHaveBeenCalledWith("mgr-jwt", 1)
   })
 

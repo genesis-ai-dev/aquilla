@@ -50,9 +50,22 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
   connect-src 'none'; form-action 'none'; base-uri 'none'`. `allow-forms` only makes `submit`
   events fire (Chrome drops them otherwise — the first real build hit this); `form-action 'none'`
   still blocks submission. Theme arrives as CSS variables.
+- **No navigation either (the shell frame).** `connect-src 'none'` does not stop a sandboxed frame
+  navigating ITSELF (`location.href = …`, a clicked link, a meta refresh), and the query string of
+  that request would carry whatever the extension has read. A document's own CSP has no say over
+  where it navigates to; only the `frame-src` of the document that embeds it does. So the frame the
+  app mounts is a **shell** (`buildToolShellSrcdoc`, `TOOL_SHELL_CSP` in `src/lib/tools/srcdoc.ts`):
+  a script-free srcdoc document with `frame-src 'none'` whose only content is the extension's own
+  frame. The browser then refuses every navigation of the extension before a request is made,
+  whatever the app page's own `frame-src` allows (it is report-only on the web build, and has to
+  list every site the app embeds). The extension's window is the shell's child (`toolWindowOf`);
+  the runtime talks to its grandparent; the shell relays nothing. A refused navigation leaves that
+  extension's frame on the browser's error page until it is reopened. Pinned by
+  `srcdoc-permissions.test.ts`, `bridge.test.ts` and, in a real browser, `e2e/specs/tools/web-read.spec.ts`.
 - **Bridge.** `src/lib/tools/runtime-source.ts` is a source string (tests evaluate the exact
   bytes that ship). Boot data is embedded with `embedJson` (escapes `<`, `>`, `&`, U+2028/9).
-  The host validates `event.source` and origin; the runtime only accepts its parent.
+  The host validates `event.source` (the extension's own window, inside the shell) and origin; the
+  runtime only accepts the app's window.
   Surfaces (apiRev 1): `files.list`, `cells.list`, `terms.list`, `cells.commit`, `cells.validate`,
   `storage.get/set/remove`, `permissions.request/list`, `ui.notify`, `tell`, `ai.generate`,
   `on("cells.changed")`. Added in apiRev 2 (additive only — rev-1 extensions run unchanged):

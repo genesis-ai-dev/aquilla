@@ -69,9 +69,9 @@ export const bibleChecks = defineNamespace({
     "bibleChecks.reason.headingInsidePericope":
       "This heading stands inside a passage (“{title}”), not where a passage starts.",
     "bibleChecks.reason.verseNotInPack":
-      "The Bible data has no verse {refs}, so its facts do not reach this cell. The file can number verses in a different way.",
+      "The Bible data has no verse {refs}, so its facts do not reach this cell. The file may number verses differently.",
     "bibleChecks.reason.packVerseWithoutCell":
-      "The Bible data has {refs} after this cell, but the file has no cell for it. The file can number verses in a different way.",
+      "The Bible data has {refs} after this cell, but the file has no cell for it. The file may number verses differently.",
     "bibleChecks.evidence.number": "{dataset}: {ref} words {from}–{to}",
     "bibleChecks.evidence.numberWord": "{dataset}: {ref} word {from}",
     "bibleChecks.evidence.about": "The source says “about” before this number.",

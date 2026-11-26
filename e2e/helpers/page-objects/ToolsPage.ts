@@ -1,4 +1,5 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
+import { EXTENSION_DOCUMENT } from "../editor-mode"
 
 /** The native (built-in) editor's "Edit with" label. The effective default is
  *  marked with a "Your default" badge in the menu; "(default)" in a label
@@ -102,7 +103,7 @@ export class ToolsPage {
 
   /** The running tool's document (an opaque-origin sandboxed frame). */
   toolFrame(name: string): FrameLocator {
-    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`)
+    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`).frameLocator(EXTENSION_DOCUMENT)
   }
 
   permissionPrompt(): Locator {

@@ -17,7 +17,7 @@ import { createToolHandlers } from "@/lib/tools/host-handlers"
 import { LiveToolData, type ToolHostServices } from "@/lib/tools/live-data"
 import { dispatchHostKey } from "@/lib/tools/host-keys"
 import { METHOD_SCOPES, applyPromptAnswer, decideScope, type PromptAnswer } from "@/lib/tools/permissions"
-import { readThemeVars } from "@/lib/tools/srcdoc"
+import { readThemeVars, toolWindowOf } from "@/lib/tools/srcdoc"
 import { loadFrameFonts } from "@/lib/tools/frame-fonts"
 import { mintToolSession, setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
 import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
@@ -207,7 +207,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     // Editor mounts read the workspace's store: nothing to warm.
     if (warmFile && !servicesRef.current?.editor) data.warm(warmFile)
     const host = createBridgeHost({
-      getFrameWindow: () => frameRef.current?.contentWindow ?? null,
+      getFrameWindow: () => toolWindowOf(frameRef.current),
       handlers: createToolHandlers(data),
       authorize: async (method, hold) => {
         const scope = METHOD_SCOPES[method]
@@ -409,7 +409,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   useEffect(() => {
     if (!ready || !revealCellId) return
     hostRef.current?.push({ type: "editor.reveal", fileId: boundFile ?? null, cellId: revealCellId })
-    frameRef.current?.contentWindow?.focus()
+    toolWindowOf(frameRef.current)?.focus()
   }, [ready, revealCellId, boundFile, frameRef])
 
   // apiRev 3: catch a mount that loads but draws nothing (asked twice: a

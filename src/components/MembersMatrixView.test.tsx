@@ -188,7 +188,7 @@ describe("MembersMatrixView", () => {
         return el!
       })
       expect(popover).toHaveTextContent("Also has access via:")
-      expect(popover).toHaveTextContent(/via group/i)
+      expect(popover).toHaveTextContent(/via team/i)
     })
   })
 })

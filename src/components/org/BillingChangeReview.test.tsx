@@ -51,7 +51,7 @@ it('rejects mismatched reviews and permits a new explicit review', async () => {
   await user.click(await screen.findByRole('button', { name: 'Review Team' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('current plan stays unchanged')
   fetch.mockResolvedValueOnce(Response.json(review))
-  await user.click(screen.getByRole('button', { name: 'Try change review again' }))
+  await user.click(screen.getByRole('button', { name: 'Reload change review' }))
   expect(await screen.findByText('$3.65')).toBeVisible()
 })
 it('discards a pending change review when the workspace changes', async () => {

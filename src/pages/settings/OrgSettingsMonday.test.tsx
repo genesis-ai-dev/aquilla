@@ -86,7 +86,7 @@ it("stops waiting and shows the failure when the Monday tab reports one", async 
 
   announceMondayOAuthOutcome({ ok: false, reason: "cancelled", orgId: 7 })
 
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/cancelled in Monday\.com/))
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/canceled in Monday\.com/))
   expect(screen.queryByText(/waiting for the monday\.com tab/i)).toBeNull()
 })
 

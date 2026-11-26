@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { ensureAuthState, injectSession } from "../../helpers/auth"
+import { EXTENSION_DOCUMENT } from "../../helpers/editor-mode"
 import { resetBackend } from "../../helpers/seed"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
@@ -59,7 +60,7 @@ test("Smart Extensions — a first-time user builds one", async ({ page }) => {
   // Try it: the extension running on sample verses.
   const review = page.getByTestId("built-candidate")
   await expect(review).toBeVisible({ timeout: 30_000 })
-  await expect(review.getByTestId("extension-preview-frame").contentFrame().locator("body")).toContainText("words", { timeout: 30_000 })
+  await expect(review.getByTestId("extension-preview-frame").contentFrame().frameLocator(EXTENSION_DOCUMENT).locator("body")).toContainText("words", { timeout: 30_000 })
   await page.waitForTimeout(2000)
   await review.getByTestId("extension-preview-frame").scrollIntoViewIfNeeded()
   await page.waitForTimeout(2500)
@@ -75,7 +76,7 @@ test("Smart Extensions — a first-time user builds one", async ({ page }) => {
   await new Workspace(page).waitForEditor()
   await page.waitForTimeout(1000)
   await tools.openInSidePanelFromPalette("Word Count")
-  const panel = page.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]')
+  const panel = page.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
   await page.waitForTimeout(3500)
 })

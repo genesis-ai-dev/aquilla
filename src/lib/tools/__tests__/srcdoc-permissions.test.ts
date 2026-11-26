@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { ROLE } from "@/lib/sync/role-policy"
-import { TOOL_CSP, TOOL_SANDBOX, buildToolSrcdoc, embedJson } from "../srcdoc"
+import { readFileSync, readdirSync, statSync } from "node:fs"
+import path from "node:path"
+import { TOOL_CSP, TOOL_SANDBOX, TOOL_SHELL_CSP, buildToolShellSrcdoc, buildToolSrcdoc, embedJson, toolWindowOf } from "../srcdoc"
 import { applyPromptAnswer, decideScope, grantableAtInstall, revokeScope } from "../permissions"
 import type { ToolScope } from "../../../../shared/tools/manifest"
 
@@ -42,6 +44,61 @@ describe("buildToolSrcdoc", () => {
     const doc = buildToolSrcdoc(`<div>hi</div><script>x()</script>`, BOOT)
     expect(doc.startsWith("<!doctype html><html><head>")).toBe(true)
     expect(doc).toContain("<body><div>hi</div>")
+  })
+})
+
+// A sandboxed frame may navigate itself, and only its EMBEDDER's frame-src can
+// refuse that. So a tool document is never mounted directly: see TOOL_SHELL_CSP.
+describe("the shell frame around every tool", () => {
+  it("forbids every navigation of the tool frame, holds the tool document intact and runs nothing itself", () => {
+    expect(TOOL_SHELL_CSP).toContain("frame-src 'none'")
+    // Nothing looser than the tool: a srcdoc document inherits its embedder's policy.
+    expect(TOOL_SHELL_CSP.startsWith(TOOL_CSP)).toBe(true)
+
+    const tool = buildToolSrcdoc(`<p title='a "quoted" &amp; &quot;escaped&quot; value'>x</p></iframe><script>tool("</iframe>")</script>`, BOOT)
+    const shell = new DOMParser().parseFromString(buildToolShellSrcdoc(tool, `Notes "Reader" & co`), "text/html")
+    const frames = shell.querySelectorAll("iframe")
+    expect(frames).toHaveLength(1)
+    expect(frames[0].getAttribute("srcdoc")).toBe(tool)
+    expect(frames[0].getAttribute("title")).toBe(`Notes "Reader" & co`)
+    expect(frames[0].getAttribute("sandbox")).toBe(TOOL_SANDBOX)
+    expect(shell.querySelectorAll("script")).toHaveLength(0)
+    const csp = shell.querySelector("meta[http-equiv=Content-Security-Policy]")
+    expect(csp?.getAttribute("content")).toBe(TOOL_SHELL_CSP)
+    // The policy is in force before the frame it governs exists.
+    expect(csp && frames[0].compareDocumentPosition(csp) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  })
+
+  it("the tool's window is the shell's only child, and nothing before the shell has parsed", () => {
+    const toolWindow = { tool: true }
+    const frame = (contentWindow: unknown) => ({ contentWindow }) as unknown as HTMLIFrameElement
+    expect(toolWindowOf(frame({ 0: toolWindow }))).toBe(toolWindow)
+    expect(toolWindowOf(frame({}))).toBeNull()
+    expect(toolWindowOf(frame(null))).toBeNull()
+    expect(toolWindowOf(null)).toBeNull()
+  })
+
+  it("every module that sandboxes a tool frame mounts it through the shell and reads the tool's window through it", () => {
+    const root = path.resolve(__dirname, "../../..")
+    const sources: string[] = []
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const file = path.join(dir, name)
+        if (statSync(file).isDirectory()) walk(file)
+        else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) sources.push(file)
+      }
+    }
+    walk(root)
+    const mounting = sources.filter((file) => /sandbox=\{TOOL_SANDBOX\}|setAttribute\("sandbox", TOOL_SANDBOX\)/.test(readFileSync(file, "utf8")))
+    expect(mounting.length).toBeGreaterThanOrEqual(4)
+    for (const file of mounting) {
+      const source = readFileSync(file, "utf8")
+      const where = path.relative(root, file)
+      expect(source, `${where} must mount buildToolShellSrcdoc(...), never a tool document directly`).toMatch(/buildToolShellSrcdoc\(/)
+      expect(source, `${where}: a frame's own contentWindow is the shell; use toolWindowOf`).not.toMatch(/\.contentWindow\b/)
+    }
+    // The hook the mounts share is where the bridge finds the tool's window.
+    expect(readFileSync(path.join(root, "components/tools/useToolHost.ts"), "utf8")).not.toMatch(/\.contentWindow\b/)
   })
 })
 

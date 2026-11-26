@@ -8,11 +8,11 @@
  * Unlike those two, the option list is **not** data-derived — the buckets are
  * fixed windows (last 7 / 30 / 90 days) so the control reads the same on every
  * portfolio, and "any time" is always the default. The value it narrows on is
- * the Updated column's `lastEditAt`; rows with no edit at all (the column's
+ * the Updated column’s latest activity timestamp; rows with no activity (the column’s
  * "—") are excluded from every window but still listed under "any time".
  */
 
-import type { PortfolioProject } from "@/lib/frontier/portfolio"
+import { latestActivityAt, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 export const UPDATED_FILTER_ANY = "any"
 
@@ -40,8 +40,8 @@ export function updatedFilterFor(days: UpdatedFilterWindowDays): UpdatedFilter {
   return `${DAYS_PREFIX}${days}`
 }
 
-/** The rows this module reads — only the last-edit stamp matters. */
-type WithLastEdit = Pick<PortfolioProject, "lastEditAt">
+/** The project edit and per-lane activity stamps used by Updated. */
+type WithLastEdit = Pick<PortfolioProject, "lastEditAt" | "lanes">
 
 function selectedDays(filter: UpdatedFilter): number {
   return Number(filter.slice(DAYS_PREFIX.length))
@@ -80,7 +80,7 @@ export function filterByUpdated<T extends WithLastEdit>(
   if (filter === UPDATED_FILTER_ANY) return [...projects]
   const windowMs = selectedDays(filter) * MS_PER_DAY
   return projects.filter((project) => {
-    const lastEditAt = project.lastEditAt
+    const lastEditAt = latestActivityAt(project)
     if (lastEditAt == null) return false
     return now - lastEditAt <= windowMs
   })

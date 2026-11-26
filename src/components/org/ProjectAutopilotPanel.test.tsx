@@ -204,7 +204,7 @@ describe("ProjectAutopilotPanel", () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole("button", { name: "View 9 ready to review" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "View 9 drafts ready to review" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "View activity" }))
     expect((await screen.findAllByText("A.usfm")).length).toBeGreaterThan(0)
 
@@ -218,7 +218,7 @@ describe("ProjectAutopilotPanel", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Autopilot activity" })).not.toBeInTheDocument())
     expect(screen.queryAllByText("A.usfm")).toHaveLength(0)
-    expect(await screen.findByRole("button", { name: "View 1 ready to review" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "View 1 draft ready to review" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "View activity" }))
     expect((await screen.findAllByText("B.usfm")).length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenCalledWith("project-b")
@@ -242,8 +242,8 @@ describe("ProjectAutopilotPanel", () => {
     }))
     renderPanel()
     const panel = await screen.findByTestId("project-autopilot-panel")
-    expect(screen.getByRole("button", { name: "View 12 ready to review" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "View 2 needs attention" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View 12 drafts ready to review" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View 2 issues needing attention" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "View 2 context suggestions" })).toBeInTheDocument()
     expect(panel.querySelector("table")).toBeNull()
     expect(panel.querySelector('[role="list"]')).toBeNull()
@@ -393,7 +393,7 @@ describe("ProjectAutopilotPanel", () => {
 
     expect(within(panel).getByText("Working")).toBeInTheDocument()
     expect(within(panel).getByTestId("autopilot-process-graph-mini")).toBeInTheDocument()
-    expect(within(panel).getByRole("button", { name: "View 1 needs attention" })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 1 issue needing attention" })).toBeInTheDocument()
     expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })
 
@@ -418,7 +418,7 @@ describe("ProjectAutopilotPanel", () => {
 
     expect(within(panel).getByText("Working")).toBeInTheDocument()
     expect(within(panel).getByText(/Working across 1 file.*3 of 10 passages complete/)).toBeInTheDocument()
-    expect(within(panel).getByRole("button", { name: "View 1 needs attention" })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 1 issue needing attention" })).toBeInTheDocument()
   })
 
   it("surfaces an exhausted run as a startable terminal failure", async () => {
@@ -430,7 +430,7 @@ describe("ProjectAutopilotPanel", () => {
     const panel = await screen.findByTestId("project-autopilot-panel")
 
     expect(within(panel).getAllByText("Needs attention").length).toBeGreaterThan(0)
-    expect(within(panel).getByRole("button", { name: "View 1 needs attention" })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 1 issue needing attention" })).toBeInTheDocument()
     expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
   })
 
@@ -552,7 +552,7 @@ describe("ProjectAutopilotPanel", () => {
     renderPanel()
     const panel = await screen.findByTestId("project-autopilot-panel")
 
-    expect(within(panel).getByRole("button", { name: "View 2 needs attention" })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "View 2 issues needing attention" })).toBeInTheDocument()
     expect(within(panel).getByText(/2 issues need attention/)).toBeInTheDocument()
   })
 
@@ -819,7 +819,7 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByText("Waiting on LUK 4:1–4:12 — 6 drafts to review."))
       .toBeInTheDocument()
     // The tile leads with the actionable 6, not the 212-deep pile.
-    expect(within(panel).getByRole("button", { name: "View 6 ready to review" }))
+    expect(within(panel).getByRole("button", { name: "View 6 drafts ready to review" }))
       .toBeInTheDocument()
     expect(within(panel).getByText("+206 in earlier passages")).toBeInTheDocument()
   })
@@ -841,7 +841,7 @@ describe("ProjectAutopilotPanel", () => {
     renderPanel()
 
     const panel = await screen.findByTestId("project-autopilot-panel")
-    expect(within(panel).getByRole("button", { name: "View 6 ready to review" }))
+    expect(within(panel).getByRole("button", { name: "View 6 drafts ready to review" }))
       .toBeInTheDocument()
     // AC: no "+0 more".
     expect(within(panel).queryByText(/in earlier passages/)).not.toBeInTheDocument()
@@ -858,7 +858,7 @@ describe("ProjectAutopilotPanel", () => {
 
     const panel = await screen.findByTestId("project-autopilot-panel")
     expect(within(panel).getByText("212 drafts are ready for review.")).toBeInTheDocument()
-    expect(within(panel).getByRole("button", { name: "View 212 ready to review" }))
+    expect(within(panel).getByRole("button", { name: "View 212 drafts ready to review" }))
       .toBeInTheDocument()
     expect(within(panel).queryByText(/in earlier passages/)).not.toBeInTheDocument()
   })
@@ -877,7 +877,7 @@ describe("ProjectAutopilotPanel", () => {
     const panel = await screen.findByTestId("project-autopilot-panel")
     // Naming one of two parked passages would be a guess; the count still splits.
     expect(within(panel).queryByText(/Waiting on/)).not.toBeInTheDocument()
-    expect(within(panel).getByRole("button", { name: "View 9 ready to review" }))
+    expect(within(panel).getByRole("button", { name: "View 9 drafts ready to review" }))
       .toBeInTheDocument()
     expect(within(panel).getByText("+203 in earlier passages")).toBeInTheDocument()
   })

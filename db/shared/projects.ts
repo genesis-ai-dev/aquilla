@@ -65,57 +65,63 @@ export interface CreateProjectInput {
 }
 
 /**
- * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and the
- * creator's Owner grant (AQU-2357). `created_by` is history only. Returns
- * whether the project row was newly inserted (false on an id collision — the
- * caller decides whether that is a conflict or a benign retry).
+ * Insert a project row and, only when THIS call inserted it, the creator's
+ * Owner grant (AQU-2357) and the project's lanes. `created_by` is history only.
+ * Returns whether the project row was newly inserted (false on an id collision
+ * — the caller decides whether that is a conflict or a benign retry).
+ *
+ * The project id is client-chosen and not secret, so on a collision nothing at
+ * all is written: an Owner grant or lane written into an existing project would
+ * hand that project to whoever guessed its id. A genuine retry by the creator
+ * needs nothing written either — the first attempt's grant and lanes committed
+ * with its project row, or none of them did and this call inserts afresh. The
+ * guard is "inserted by this call", not "created_by = caller": a creator an
+ * Owner later demoted must not get Owner back by re-posting the create.
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
  *
- * AQU-1594: the same batch writes the source lane and each requested target
- * lane. No project-level language keys are written.
+ * AQU-1594: the same transaction writes the source lane and each requested
+ * target lane. No project-level language keys are written.
  */
 export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
+  const transaction = db.transaction?.bind(db)
+  if (!transaction) throw new Error("createProjectShared needs a database handle with transactions")
   // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
-  // whole batch back, so repeating it does not insert the project twice.
-  return retryingLaneIdCollision(async () => {
-    const projectStmt = db
-      .prepare(
-        `INSERT INTO projects (id, name, org_id, created_by)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-      .bind(input.projectId, input.name, input.orgId, input.createdBy)
-
-    // The project insert stays FIRST in the batch — `inserted` is read off index 0.
-    const stmts: AquillaStatement[] = [projectStmt]
-
-    // Atomic with the project insert. A lower row on a retry is raised to
-    // Owner; an existing Owner row is left alone.
-    stmts.push(
-      db
+  // whole transaction back, so repeating it does not insert the project twice.
+  return retryingLaneIdCollision(() =>
+    transaction(async (tx) => {
+      const created = await tx
         .prepare(
-          `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
-           VALUES (?, ?, 700, ?)
-           ON CONFLICT(project_id, user_id) DO UPDATE
-             SET role_level = 700
-             WHERE project_members.role_level < 700`,
+          `INSERT INTO projects (id, name, org_id, created_by)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING
+           RETURNING id`,
         )
-        .bind(input.projectId, input.createdBy, input.createdBy),
-    )
+        .bind(input.projectId, input.name, input.orgId, input.createdBy)
+        .first<{ id: string }>()
+      if (!created) return { inserted: false }
 
-    const lanes = lanesForNewProject(input)
-    stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { lanes }),
-    )
-
-    const [projectResult] = await db.batch(stmts)
-    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-  })
+      const stmts: AquillaStatement[] = [
+        tx
+          .prepare(
+            `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+             VALUES (?, ?, 700, ?)
+             ON CONFLICT(project_id, user_id) DO UPDATE
+               SET role_level = 700
+               WHERE project_members.role_level < 700`,
+          )
+          .bind(input.projectId, input.createdBy, input.createdBy),
+        ...ensureProjectLaneStmts(tx, input.projectId, { lanes: lanesForNewProject(input) }),
+      ]
+      // Sequential: a batch inside db.transaction() cannot open its own.
+      for (const stmt of stmts) await stmt.run()
+      return { inserted: true }
+    }),
+  )
 }
 
 /** Source lane plus each requested target. The first target's tag is its language. */

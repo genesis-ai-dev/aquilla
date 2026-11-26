@@ -1063,6 +1063,10 @@ interface EditorTableProps {
   /** AQU-1681: on that empty state, make this file's rows from the linked
    *  video's own sound. Maintainers only, never for a YouTube video. */
   linkedVideoSound?: LinkedVideoSoundActions
+  /** AQU-2682: why the workspace withheld the recording upload from a Project
+   *  Lead (his access does not cover every language, or that is still being
+   *  checked). Shown where the upload would be. */
+  sourceMediaNote?: string | null
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1435,7 +1439,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   isAnonymous, onJumpToCell,
   castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
-  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound,
+  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound, sourceMediaNote,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onLinkConceptToEntity, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -4141,6 +4145,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
           onAttachCaptions={onAttachCaptions}
           onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
           videoSound={linkedVideoSound}
+          sourceMediaNote={sourceMediaNote}
         />
       ) : (
         <div className="flex-1" />
@@ -8130,7 +8135,13 @@ function EditorRow({
         return
       }
       if (document.activeElement !== pm) {
-        pm.focus()
+        // The activation window made the row an editing host with the caret
+        // parked inside it. Left open, the browser hands focus straight back
+        // to the row: an IDML editor, which keeps the caret where it is below,
+        // never focused and its typing went to the row. The buffered text is
+        // already in pendingActivationInputRef; the editor drains it on focus.
+        closeActivationCapture()
+        pm.focus({ preventScroll: true })
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
         if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
@@ -8154,7 +8165,7 @@ function EditorRow({
       // unmounts, another row takes over) — that settles the edit too.
       settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
+  }, [isEditorActive, cell.id, closeActivationCapture, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -9876,6 +9887,7 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
+                    sanitizeEntryWhitespace={idmlPreview}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null

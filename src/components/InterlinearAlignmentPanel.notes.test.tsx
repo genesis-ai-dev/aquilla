@@ -56,8 +56,8 @@ describe("InterlinearAlignmentPanel — explanations open on click (AQU-2260)", 
 
   it("a reviewer's locked ✓ says why on a click", async () => {
     drawGod(false)
-    const locked = screen.getAllByRole("button", { name: "Contributor+ required to confirm or reject alignments" })[0]
-    await expectDisabledNote(locked, "Contributor+ required to confirm or reject alignments")
+    const locked = screen.getAllByRole("button", { name: "Contributor or above required to confirm or reject alignments" })[0]
+    await expectDisabledNote(locked, "Contributor or above required to confirm or reject alignments")
   })
 
   it("the original-language help and the via-lemma mark open on a click", async () => {

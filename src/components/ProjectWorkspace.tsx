@@ -35,6 +35,7 @@ import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
+import { RecentlyDeletedRow } from "@/components/RecentlyDeletedRow"
 import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
 import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
 import { TabStrip as TabStripImpl } from "./TabStrip"
@@ -294,7 +295,7 @@ import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { attachmentOutFrom, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
@@ -389,7 +390,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom, canAttachSourceAudio } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -532,7 +533,7 @@ import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import type { SyncTokenResponse } from "@/lib/sync/sync-token"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackIsLayer, takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -556,6 +557,7 @@ import { useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
+import { useSourceAudioAccess } from "@/hooks/useSourceAudioAccess"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -1996,6 +1998,18 @@ export function ProjectWorkspace() {
 
   const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
+  // AQU-2682: the server's answer to "does this person's access cover every
+  // language?", which storing the file's source audio needs ("Upload a
+  // recording to make lines", attaching media by url, the film's sound).
+  // Null until it arrives; nothing that stores source audio is offered
+  // before then. Not asked below Project Lead, where those are withheld.
+  const sourceAudioCoversEveryLanguage = useSourceAudioAccess({
+    projectId: project?.id,
+    fileId: activeFileId,
+    getToken: getTokenForFile,
+    enabled: canAttachSourceAudio(project?.syncRole?.level ?? null),
+  })
+
   // AQU-1006 follow-up: this project's concepts, read from the sync-worker
   // projection. `project.terminology` (the settings-blob key) is retired — it
   // could only express "here is the entire termbase", so every add rewrote the
@@ -2074,9 +2088,11 @@ export function ProjectWorkspace() {
       // `file.create` the org reserved for maintainers before it reaches the
       // durable outbox — the same reason the static mirror exists.
       importMinRole: carriedImportMinRole,
+      // AQU-2682: attach-media refuses source audio without the server's yes.
+      sourceAudioCoversEveryLanguage,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole, sourceAudioCoversEveryLanguage])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -4860,8 +4876,13 @@ export function ProjectWorkspace() {
       const shared = attachmentOutFrom(audioId, att, slot)
       const firstVoters = pieceVoters?.first ?? []
       const secondVoters = pieceVoters?.second ?? []
+      // AQU-2494 (review, Nov 9): …and the take's volume and fades split as
+      // the server splits them: the volume on both, the fade-in on the first
+      // piece, the fade-out on the new one.
+      const levels = levelsAfterCut(att, atMs)
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
+        ...levels.first,
         trimEndMs: Math.round(atMs),
         validatorCount: firstVoters.length,
         validators: firstVoters,
@@ -4869,6 +4890,7 @@ export function ProjectWorkspace() {
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
+        ...levels.second,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
         validatorCount: secondVoters.length,
@@ -14284,6 +14306,7 @@ export function ProjectWorkspace() {
       },
       lineName,
       trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      takeIsLayer: (fileId, slot) => takeTrackIsLayer({ files: project.files, fileId, slot }),
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
@@ -15202,10 +15225,15 @@ export function ProjectWorkspace() {
    * govern. It needs Project Lead on EVERY empty media file, not only a
    * linked video's, because the clip is stored as the file's source audio.
    */
-  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows } = mediaEmptyGates({
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows, sourceMediaNote: sourceMediaNoteKind } = mediaEmptyGates({
     roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
     linkedVideoUrl: activeFile?.coreMediaUrl,
+    coversEveryLanguage: sourceAudioCoversEveryLanguage,
   })
+  // AQU-2682: the plain reason shown where the upload would be.
+  const sourceMediaNote = sourceMediaNoteKind === "needsEveryLanguage"
+    ? t("editor.empty.mediaNeedsEveryLanguage")
+    : sourceMediaNoteKind === "checking" ? t("editor.empty.mediaAccessChecking") : null
   /**
    * AQU-1681: make an empty linked video's rows from its own sound. The sound
    * is fetched (a streamed film's audio track, or a direct file), stored as
@@ -20204,6 +20232,7 @@ export function ProjectWorkspace() {
                     canEdit={extensionEditorConfig?.canEdit ?? false}
                     onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
                     onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
+                    sourceMediaNote={sourceMediaNote}
                     onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
                     onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
                     onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
@@ -20365,6 +20394,7 @@ export function ProjectWorkspace() {
             onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
             onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
             linkedVideoSound={linkedVideoSound}
+            sourceMediaNote={sourceMediaNote}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -21048,6 +21078,11 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
+          // AQU-2682: an audio or video import stores the file's source audio,
+          // held to the same "every language" answer as the empty file's upload.
+          mediaDisabledReason={sourceMediaNoteKind === "needsEveryLanguage"
+            ? t("importExport.upload.mediaNeedsEveryLanguage")
+            : sourceMediaNoteKind === "checking" ? t("importExport.upload.mediaAccessChecking") : null}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an
             // upload, through the same review the three-dot entry used to open.
@@ -21757,25 +21792,12 @@ export function ProjectWorkspace() {
               <p className="px-1 py-1 text-sm text-muted-foreground">{t("workspace.trash.empty")}</p>
             )}
             {trashFiles.map((f) => (
-              <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
-                <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                {/* AQU-2260: labelled buttons say nothing on hover; what
-                    Delete forever does is the retention note below. */}
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                  onClick={() => void handleRestoreFile(f.fileId)}
-                >
-                  {t("common.restore")}
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                  onClick={() => void handlePurgeFile(f.fileId)}
-                >
-                  {t("workspace.trash.deleteForever")}
-                </button>
-              </div>
+              <RecentlyDeletedRow
+                key={f.fileId}
+                file={f}
+                onRestore={() => void handleRestoreFile(f.fileId)}
+                onPurge={() => void handlePurgeFile(f.fileId)}
+              />
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
               {t("workspace.trash.retentionNote")}

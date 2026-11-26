@@ -70,7 +70,11 @@ describe("roleChangeOptions", () => {
     ["a team offers its own rungs under the cap", "team", maint, someone(100), { ok: true, roles: [600, 500, 100] }],
     ["a Maintainer cannot change a team role above theirs", "team", maint, someone(700), { ok: false, denial: "target_outranks", cap: 600 }],
     ["the org offers Owner and Maintainer to an Owner", "org", owner, someone(600), { ok: true, roles: [700, 600] }],
-    ["lane rows belong to lane staffing", "lane", owner, someone(300), { ok: false, denial: "lane_needs_staffing", cap: 700 }],
+    // AQU-2322: a lane offers its own three rungs, never Project lead, even to an Owner.
+    ["a lane row offers Contributor, Reviewer, Viewer", "lane", owner, someone(300), { ok: true, roles: [400, 300, 100] }],
+    ["a Project lead changes a lane row", "lane", lead, someone(400), { ok: true, roles: [400, 300, 100] }],
+    ["nobody changes their own lane row", "lane", lead, someone(300, { isSelf: true }), { ok: false, denial: "self", cap: 500 }],
+    ["a lane row needs a Project lead", "lane", { ok: false, denial: "lead_only" }, someone(300), { ok: false, denial: "lead_only", cap: null }],
     ["no Project lead, no dropdown", "project", { ok: false, denial: "lead_only" }, someone(300), { ok: false, denial: "lead_only", cap: null }],
   ])("%s", (_why, type, place, target, expected) => {
     expect(roleChangeOptions(type, place, target)).toEqual(expected)
@@ -87,7 +91,13 @@ describe("removalCheck", () => {
     ["a team needs an org Maintainer to remove", "team", { ok: false, denial: "maintainer_only" }, someone(100), { ok: false, denial: "maintainer_only", cap: null }],
     ["an Owner cannot remove themselves from the org", "org", owner, someone(700, { isSelf: true }), { ok: false, denial: "self", cap: 700 }],
     ["a Project lead cancels a project invite", "project", lead, someone(400, { invite: true }), { ok: true }],
-    ["lane rows belong to lane staffing", "lane", owner, someone(300), { ok: false, denial: "lane_needs_staffing", cap: 700 }],
+    // AQU-2322: a Project lead removes a lane grant (the project route would need Maintainer).
+    ["a Project lead removes a lane grant", "lane", lead, someone(400), { ok: true }],
+    ["nobody removes their own lane grant", "lane", lead, someone(300, { isSelf: true }), { ok: false, denial: "self", cap: 500 }],
+    // The dry run passes the higher of the lane row and their project role: a peer lead's lane is not a lead's to take.
+    ["a Project lead cannot remove a peer Project lead's lane", "lane", lead, someone(500), { ok: false, denial: "target_outranks", cap: 500 }],
+    ["a Maintainer can", "lane", maint, someone(500), { ok: true }],
+    ["a lane grant needs a Project lead to remove", "lane", { ok: false, denial: "lead_only" }, someone(300), { ok: false, denial: "lead_only", cap: null }],
   ])("%s", (_why, type, place, target, expected) => {
     expect(removalCheck(type, place, target)).toEqual(expected)
   })

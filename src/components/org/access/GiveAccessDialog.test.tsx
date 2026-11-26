@@ -13,6 +13,8 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { PlaceGrantability } from "@/lib/access/grant-rules"
+import { t } from "@/lib/i18n/standalone"
+import { previewLines } from "./GrantPreviewPanel"
 import { GiveAccessDialog, type GiveAccessDialogProps } from "./GiveAccessDialog"
 import type { GrantPreview, PreviewResult } from "./give-access-data"
 import type { OrgAccessPayload } from "./org-access-data"
@@ -188,5 +190,44 @@ describe("GiveAccessDialog", () => {
     }
     await user.keyboard("{Escape}")
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything()))
+  })
+})
+
+describe("AQU-2322: narrowing to one lane", () => {
+  it("lists the project's lanes under it with a hint, and a lane offers exactly Contributor, Reviewer, Viewer (AC3)", async () => {
+    // Opened on the lane with Project lead asked for: the lane cannot carry it, so no role is filled.
+    const { user } = renderDialog({ initialPlace: { type: "lane", id: "fr01" }, initialRoleLevel: 500 })
+    expect(screen.getByTestId("give-role")).toHaveTextContent("role")
+    expect(await roleLevelsOffered(user)).toEqual([400, 300, 100])
+    await user.click(screen.getByTestId("give-place"))
+    const projectRow = await screen.findByTestId("give-place-all-project:p1")
+    expect(within(projectRow).getByTestId("give-place-narrow")).toHaveTextContent(/narrow to one language lane/i)
+    expect(screen.getByTestId("give-place-all-lane:fr01")).toBeInTheDocument()
+  })
+
+  it("What changes states the lane, and says other lanes stay closed or are not restricted yet by the wall", () => {
+    const lanePreview = (lane: GrantPreview["lane"]) =>
+      preview({ placePath: [org, project, lane ? { type: "lane", id: "fr01", name: "French" } : project], roleLevel: 400, lane })
+    const on = previewLines(t, lanePreview({ wallOn: true, siblingsClosed: true }), null)
+    expect(on).toContain("Opens French only. The project's other languages stay closed to them.")
+    const off = previewLines(t, lanePreview({ wallOn: false, siblingsClosed: true }), null)
+    expect(off).toContain("Narrowed to French, but access to the project's other languages is not restricted yet.")
+    // They already open every other lane: nothing to say about siblings.
+    expect(previewLines(t, lanePreview({ wallOn: true, siblingsClosed: false }), null).join(" ")).not.toMatch(/other languages/)
+  })
+})
+
+describe("AQU-2323: opened with person and place filled in", () => {
+  it("starts on the role blank, the one thing left to choose; otherwise the dialog keeps its own first field", async () => {
+    renderDialog({ initialPerson: { userId: "9" }, initialPlace: { type: "project", id: "p1" } })
+    const role = screen.getByTestId("give-role")
+    expect(screen.getByTestId("give-place")).toHaveTextContent("Pattani")
+    await waitFor(() => expect(document.activeElement).toBe(role))
+  })
+
+  it("does not jump to the role when the place is still blank", async () => {
+    renderDialog({ initialPerson: { userId: "9" } })
+    await waitFor(() => expect(screen.getByTestId("give-access-dialog")).toContainElement(document.activeElement as HTMLElement))
+    expect(document.activeElement).not.toBe(screen.getByTestId("give-role"))
   })
 })

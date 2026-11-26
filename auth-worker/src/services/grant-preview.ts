@@ -38,6 +38,14 @@ export interface OrgWorld {
   lanes: { id: string; projectId: string; name: string }[]
   /** group_project_grants: a team member reaches the project at this role. */
   attachments: { teamId: string; projectId: string; roleLevel: number }[]
+  /** AQU-2322: LANE_READ_WALL is on. Off, a lane grant narrows nothing yet. */
+  wallOn?: boolean
+  /**
+   * AQU-2322: the lanes this granter's Places lens shows (under the read wall
+   * a Project lead sees only their own). A preview names or counts no other
+   * lane. Absent: every lane in `lanes`.
+   */
+  visibleLaneIds?: ReadonlySet<string>
 }
 
 export interface Granter {
@@ -57,7 +65,7 @@ export type GrantTarget =
       /** Their access_grants rows inside this org. */
       grants: AccessGrant[]
       /** project_member_lane_roles rows inside this org. */
-      laneGrants: { projectId: string; laneId: string; roleLevel: number }[]
+      laneGrants: { projectId: string; laneId: string; roleLevel: number; grantedBy?: string | null; grantedAt?: string | null }[]
     }
   | { kind: "invite"; email: string }
 
@@ -74,7 +82,6 @@ export type RefusalCode =
   | "no_team_invite"
   | "self_grant"
   | "target_outranks"
-  | "lane_needs_staffing"
 
 export interface GrantRefusal {
   status: 400 | 403 | 409
@@ -115,6 +122,46 @@ export interface GrantPreview {
   guest: { before: boolean; after: boolean }
   /** Team grants reach projects attached to the team later, too. */
   includesFutureProjects: boolean
+  /**
+   * AQU-2322, lane grants only. `siblingsClosed`: after this grant some other
+   * lane of the project, among those the granter can see, stays closed to
+   * them under the read wall. `wallOn` false: the wall is off, so those lanes
+   * are not restricted yet.
+   */
+  lane: { wallOn: boolean; siblingsClosed: boolean } | null
+}
+
+type LaneRow = { projectId: string; laneId: string; roleLevel: number }
+
+/**
+ * AQU-2322: their role inside one lane, the way the read wall answers it. The
+ * project must open (a lane row alone opens nothing). Below Maintainer, with
+ * the wall on, a lane opens only through a row of Viewer or above. Inside a
+ * lane the role is the higher of the project role and the lane row.
+ */
+export function laneRoleAt(
+  world: OrgWorld,
+  grants: readonly AccessGrant[],
+  laneGrants: readonly LaneRow[],
+  projectId: string,
+  laneId: string,
+  wallOn: boolean = world.wallOn === true,
+): number | null {
+  const project = resolveAt(world, grants, projectId)
+  if (!project) return null
+  const row = laneGrants.find((g) => g.projectId === projectId && g.laneId === laneId && g.roleLevel >= 100)
+  if (!wallOn || project.level >= 600) return Math.max(project.level, row?.roleLevel ?? 0)
+  return row ? Math.max(project.level, row.roleLevel) : null
+}
+
+/** The lane rows after one lane is granted at a role: that row is written or overwritten, no other. */
+export function withLaneRow(laneGrants: readonly LaneRow[], row: LaneRow): LaneRow[] {
+  return [...laneGrants.filter((g) => !(g.projectId === row.projectId && g.laneId === row.laneId)), row]
+}
+
+/** Lanes of the project this granter can see, other than `laneId`. */
+export function siblingLanes(world: OrgWorld, projectId: string, laneId: string): OrgWorld["lanes"] {
+  return world.lanes.filter((l) => l.projectId === projectId && l.id !== laneId && (world.visibleLaneIds?.has(l.id) ?? true))
 }
 
 const ROLE_WORD: Record<number, string> = {
@@ -262,8 +309,13 @@ export function withGrant(world: OrgWorld, userId: string, grants: readonly Acce
           .map((a) => ({ ...row("project", a.projectId), roleLevel: a.roleLevel, source: "team" as const, viaTeamId: place.id }))
     return [...kept, ...joined, row("team", place.id)]
   }
-  // Project and lane grants are both a project_members row; a lane narrows which lanes it opens.
   const pid = projectId ?? place.id
+  if (place.type === "lane") {
+    // AQU-2322: a lane grant adds one lane row and leaves every other grant as
+    // it is. Only someone the project does not open yet also gets the
+    // membership that opens it, at the lane role.
+    return resolveAt(world, grants, pid) != null ? [...grants] : [...grants, row("project", pid)]
+  }
   const kept = grants.filter((g) => !(g.scopeType === "project" && g.scopeId === pid && g.source === "direct"))
   return [...kept, row("project", pid)]
 }
@@ -310,10 +362,19 @@ export function checkGrant(
   }
 
   if (place.type !== "team" && target.userId === granter.userId) return fail(409, "self_grant", "you cannot change your own access", cap)
-  if (place.type === "project" || place.type === "lane") {
+  if (place.type === "project") {
     const existing = target.grants.find((g) => g.scopeType === "project" && g.scopeId === located.projectId && g.source === "direct")
     if (existing && cap < 700 && existing.roleLevel >= cap) {
       return fail(403, "target_outranks", `${target.displayName} already holds ${roleWord(existing.roleLevel)} there, at or above your role (${roleWord(cap)})`, cap)
+    }
+  }
+  if (place.type === "lane" && located.projectId) {
+    // AQU-2322: a lane row is theirs whatever path opens the project, so the
+    // cap reads their effective project role (a team Project lead's lane rows
+    // sit at Contributor), not only a direct row.
+    const level = resolveAt(world, target.grants, located.projectId)?.level ?? 0
+    if (cap < 700 && level >= cap) {
+      return fail(403, "target_outranks", `${target.displayName} already holds ${roleWord(level)} on this project, at or above your role (${roleWord(cap)})`, cap)
     }
   }
   if (place.type === "team") {
@@ -322,16 +383,9 @@ export function checkGrant(
       return fail(403, "target_outranks", `${target.displayName} holds ${roleWord(current.roleLevel)} on this team, above your role (${roleWord(cap)})`, cap)
     }
   }
-  if (place.type === "lane" && located.projectId) {
-    // A lane grant writes a lane-scoped project membership. For someone already
-    // on the project that would REPLACE the lanes they hold, so it is refused
-    // here rather than quietly narrowing them (lane staffing owns that, AQU-2322).
-    const reaches = resolveAt(world, target.grants, located.projectId) != null
-      || target.laneGrants.some((g) => g.projectId === located.projectId)
-    if (reaches) {
-      return fail(409, "lane_needs_staffing", `${target.displayName} already reaches this project; change their lanes from the project's lane staffing`, cap)
-    }
-  }
+  // AQU-2322: a lane grant to someone already on the project is additive (it
+  // writes one lane row and never touches their other lanes), so it is not
+  // refused any more.
   return { ok: true, cap }
 }
 
@@ -378,11 +432,14 @@ export function previewGrant(
   const after = withGrant(world, userId, before, proposal, located.projectId)
   const changes = diffAccess(world, before, after)
 
-  const here = proposal.place.type === "lane"
-    ? { before: null, after: { roleLevel: proposal.roleLevel, source: "lane" as const, via: located.path[located.path.length - 1] } }
+  const lane = proposal.place.type === "lane" && located.projectId
+    ? laneAnswer(world, target, proposal, located.projectId, before, after, located.path[located.path.length - 1])
+    : null
+  const here = lane
+    ? lane.here
     : { before: hereRole(world, before, proposal, located), after: hereRole(world, after, proposal, located) }
   const wasGuest = target.kind === "invite" || !target.isOrgMember
-  const replaces = existingRowAt(before, proposal, world.org.id, located.projectId)
+  const replaces = lane ? lane.replaces : existingRowAt(before, proposal, world.org.id, located.projectId)
   return {
     ok: true,
     preview: {
@@ -399,6 +456,36 @@ export function previewGrant(
         (replaces == null || replaces === proposal.roleLevel),
       guest: { before: wasGuest, after: wasGuest && proposal.place.type !== "org" },
       includesFutureProjects: proposal.place.type === "team",
+      lane: lane ? { wallOn: world.wallOn === true, siblingsClosed: lane.siblingsClosed } : null,
     },
+  }
+}
+
+/** AQU-2322: a lane grant's own before/after, the row it overwrites, and whether sibling lanes stay closed. */
+function laneAnswer(
+  world: OrgWorld,
+  target: GrantTarget,
+  proposal: GrantProposal,
+  projectId: string,
+  before: readonly AccessGrant[],
+  after: readonly AccessGrant[],
+  laneRef: ScopeRef,
+): { here: GrantPreview["here"]; replaces: number | null; siblingsClosed: boolean } {
+  const laneId = proposal.place.id
+  const rowsBefore = target.kind === "account" ? target.laneGrants : []
+  const rowsAfter = withLaneRow(rowsBefore, { projectId, laneId, roleLevel: proposal.roleLevel })
+  const at = (grants: readonly AccessGrant[], rows: readonly LaneRow[]): EffectiveRole | null => {
+    const level = laneRoleAt(world, grants, rows, projectId, laneId)
+    return level == null ? null : { roleLevel: level, source: "lane", via: laneRef }
+  }
+  // Read as if the wall were on. With it off nothing is closed yet, and the
+  // preview says the other lanes are not restricted yet instead.
+  const siblingsClosed = siblingLanes(world, projectId, laneId)
+    .some((l) => laneRoleAt(world, after, rowsAfter, projectId, l.id, true) == null)
+  const existing = rowsBefore.find((g) => g.projectId === projectId && g.laneId === laneId)
+  return {
+    here: { before: at(before, rowsBefore), after: at(after, rowsAfter) },
+    replaces: existing?.roleLevel ?? null,
+    siblingsClosed,
   }
 }

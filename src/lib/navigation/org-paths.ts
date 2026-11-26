@@ -78,6 +78,11 @@ export function resumeOrgPath(): string {
   }
 }
 
+/** AQU-2323: one person's page under People & access. */
+export function accessPersonPath(orgId: number, userId: string): string {
+  return orgPath(orgId, `/access/people/${encodeURIComponent(userId)}`)
+}
+
 export function membersPath(orgId: number, tab: "roster" | "matrix" = "roster"): string {
   return tab === "matrix" ? orgPath(orgId, "/members/matrix") : orgPath(orgId, "/members")
 }

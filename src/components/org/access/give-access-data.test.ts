@@ -53,13 +53,28 @@ describe("submitGrant", () => {
       ["setTeamMemberRole", "jwt", 1, 7, 9, 600],
     ]],
     ["project account → project member on every current lane", guest, row(project, [org, project]), 300, [["addProjectMember", "jwt", "p1", "naladda", 300, { allCurrentLanes: true }]]],
-    ["lane account → project member narrowed to that lane", guest, row(lane, [org, project, lane]), 300, [["addProjectMember", "jwt", "p1", "naladda", 300, { scopeLanes: ["fr01"] }]]],
     ["org email → org invite", invite, row(org, [org]), 600, [["createOrgInvite", "jwt", 1, { email: "new@example.com", role: 600 }]]],
     ["project email → project invite for every lane", invite, row(project, [org, project]), 300, [["createServerInvite", "jwt", "p1", 300, undefined, "new@example.com", undefined, undefined, true]]],
     ["lane email → project invite for that lane", invite, row(lane, [org, project, lane]), 300, [["createServerInvite", "jwt", "p1", 300, undefined, "new@example.com", undefined, ["fr01"], undefined]]],
   ])("%s", async (_why, person, place, roleLevel, expected) => {
     await submitGrant("jwt", 1, { person, roleLevel, place })
     expect(state.calls).toEqual(expected)
+  })
+
+  it("AQU-2322: a lane account goes to the additive lane-grant route by userId, never as a lane-scoped membership", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ granted: {} }), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    try {
+      await submitGrant("jwt", 1, { person: guest, roleLevel: 300, place: row(lane, [org, project, lane]) })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(state.calls).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toMatch(/\/api\/v2\/orgs\/1\/access\/lane-grant$/)
+    expect(init.method).toBe("PUT")
+    expect(JSON.parse(String(init.body))).toEqual({ laneId: "fr01", userId: "9", roleLevel: 300 })
   })
 
   it("writes the account the dry run named: by its username, never by a display name two people can share", async () => {

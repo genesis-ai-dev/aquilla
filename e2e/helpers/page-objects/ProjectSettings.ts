@@ -41,8 +41,17 @@ export class ProjectSettings {
     await expect(section).toBeVisible({ timeout: 10_000 })
   }
 
+  /**
+   * A language's own row in the Languages table. Only those rows carry
+   * `lane-identity-row-<id>`; the table also holds a header row and the
+   * "Delivers" help line (AQU-2260), whose sentence contains short tags
+   * such as "es", so a text filter over every row matches two elements.
+   */
   private laneRow(tag: string): Locator {
-    return this.page.getByTestId("target-lanes-list").getByRole("row").filter({ hasText: tag })
+    return this.page
+      .getByTestId("target-lanes-list")
+      .locator("[data-testid^='lane-identity-row-']")
+      .filter({ hasText: tag })
   }
 
   async enableTimelineTracks(projectId: string): Promise<void> {
@@ -171,6 +180,24 @@ export class ProjectSettings {
     await expect(flagSwitch).not.toBeChecked()
     await flagSwitch.click()
     await expect(flagSwitch).toBeChecked()
+  }
+
+  /**
+   * Settings index → Experimental → "Try Autopilot" ON, from any settings
+   * page of the project. Since AQU-1246 the opt-in is project-wide and stored
+   * on the server, and a project that has not opted in shows no Autopilot
+   * surface anywhere, so this waits for the settings write before returning.
+   */
+  async optInToAutopilot(): Promise<void> {
+    await this.page.goto(`/project/${this.projectIdFromCurrentUrl()}/settings`)
+    await this.page.getByRole("link", { name: /^Experimental\b/ }).click()
+    const optIn = this.page.getByRole("switch", { name: "Try Autopilot" })
+    await expect(optIn).toBeVisible({ timeout: 10_000 })
+    await expect(optIn).not.toBeChecked()
+    const saved = this.settingsSave()
+    await optIn.click()
+    expect((await saved).ok(), "opting the project into Autopilot should save").toBe(true)
+    await expect(optIn).toBeChecked()
   }
 
   /** Dismiss the settings modal; the background route comes back via history. */

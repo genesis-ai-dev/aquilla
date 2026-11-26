@@ -309,7 +309,7 @@ export function TeamsList() {
                 if (activeOrgId != null) navigate(orgPath(activeOrgId, `/teams/${t.id}`))
               }}
               initialSorting={[{ id: "name", desc: false }]}
-              searchPlaceholder="Search teams…"
+              searchPlaceholder={t("org.teamsList.searchPlaceholder")}
               searchValue={teamQuery}
               onSearchChange={setTeamQuery}
               searching={directory.searching}

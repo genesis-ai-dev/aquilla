@@ -16,11 +16,19 @@ import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatCount } from "@/lib/i18n/format"
 
 export interface SearchResultsViewProps {
   query: string
   results: WorkspaceSearchResult[]
+  /**
+   * How many the search matched before the list was cut (AQU-2732). Omitted
+   * reads as "the list is all of them".
+   */
+  total?: number
+  /** `total` is a floor: there are at least that many, and may be more. */
+  totalIsLowerBound?: boolean
   onJumpToResult: (result: WorkspaceSearchResult) => void
   onClose: () => void
 }
@@ -64,10 +72,15 @@ function highlightSnippet(text: string, query: string): React.ReactNode {
 export function SearchResultsView({
   query,
   results,
+  total: totalProp,
+  totalIsLowerBound = false,
   onJumpToResult,
   onClose,
 }: SearchResultsViewProps) {
   const t = useT()
+  const { locale } = useI18n()
+  const total = Math.max(totalProp ?? results.length, results.length)
+  const cut = results.length > 0 && (total > results.length || totalIsLowerBound)
   const groups = useMemo<FileGroup[]>(() => {
     const map = new Map<string, FileGroup>()
     for (const r of results) {
@@ -110,6 +123,18 @@ export function SearchResultsView({
           <X />
         </Button>
       </div>
+
+      {/* "Expand all" still ends somewhere: say where, and that there is more. */}
+      {cut && (
+        <p className="shrink-0 border-b px-4 py-1.5 text-xs text-muted-foreground" role="status">
+          {totalIsLowerBound
+            ? t("search.cap.showingFirst", { shown: formatCount(results.length, locale) })
+            : t("search.cap.showingFirstOf", {
+                shown: formatCount(results.length, locale),
+                total: formatCount(total, locale),
+              })}
+        </p>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">

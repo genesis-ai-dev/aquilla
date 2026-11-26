@@ -429,7 +429,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
                 triggerVariant="outline"
                 triggerSize="icon"
                 triggerClassName={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
-                ariaLabel="File options"
+                ariaLabel={t("editor.fileOptionsAria")}
                 testId="file-options-menu"
               />
             </>

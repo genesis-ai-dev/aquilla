@@ -379,6 +379,17 @@ export function injectOptimisticAudioTrim(
       ...live.att,
       trimStartMs: attachment.trimStartMs,
       trimEndMs: attachment.trimEndMs,
+      // AQU-2664: and a reading measured just after the take was made, so it
+      // plays evened out at once (only when this overlay carries one).
+      ...(attachment.evenTargetLufs !== undefined ? { evenTargetLufs: attachment.evenTargetLufs } : {}),
+      ...(attachment.loudnessLufs != null
+        ? {
+            loudnessLufs: attachment.loudnessLufs,
+            truePeakDb: attachment.truePeakDb,
+            loudnessFromMs: attachment.loudnessFromMs,
+            loudnessToMs: attachment.loudnessToMs,
+          }
+        : {}),
     }
     attachEventBinding(fileId, live, eventId)
     broadcast(fileId, cellId, live)

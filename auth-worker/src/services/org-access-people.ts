@@ -131,7 +131,7 @@ export function assembleOrgPeople(input: {
 
   if (places.hasOrg) {
     for (const invite of input.extras.orgInvites) {
-      addInvite(`invite:org:${invite.token}`, invite.email, invite.roleLevel, invite.expiresAt, [{
+      addInvite(`invite:org:${invite.ref}`, invite.email, invite.roleLevel, invite.expiresAt, [{
         scopePath: [input.org],
         roleLevel: invite.roleLevel,
         origin: { kind: "direct" },
@@ -157,7 +157,7 @@ export function assembleOrgPeople(input: {
               roleLevel: invite.roleLevel,
               origin: { kind: "direct" as const },
             }))
-      addInvite(`invite:project:${projectId}:${invite.token}`, invite.email, invite.roleLevel, invite.expiresAt, grants)
+      addInvite(`invite:project:${projectId}:${invite.ref}`, invite.email, invite.roleLevel, invite.expiresAt, grants)
     }
   }
 

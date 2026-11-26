@@ -10,9 +10,12 @@ export interface StationUi {
   /** Set by the open Station: what its ⋯ items do (slice 9). */
   removeNoise: (() => void) | null
   changeVoice: (() => void) | null
+  /** AQU-2493 (review, Nov 9): why those two are greyed (Record now is
+   *  running), or null when they are offered. */
+  versionsWait: string | null
 }
 
-let ui: StationUi = { historyOpen: false, historyCount: 0, removeNoise: null, changeVoice: null }
+let ui: StationUi = { historyOpen: false, historyCount: 0, removeNoise: null, changeVoice: null, versionsWait: null }
 const listeners = new Set<() => void>()
 
 export function setStationUi(patch: Partial<StationUi>): void {

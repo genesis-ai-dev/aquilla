@@ -434,6 +434,12 @@ function sameOrgSettingsResponse(a: OrgSettingsResponse, b: OrgSettingsResponse)
   }
 }
 
+interface PendingOrgWrite {
+  id: number
+  partial: OrgWideSettings
+}
+let pendingOrgWriteSeq = 0
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -443,7 +449,18 @@ export function useOrgSettings(
   const jwt = session?.jwt ?? null
   const t = useT()
 
-  const [server, setServer] = useState<OrgSettingsResponse | null>(null)
+  const [confirmed, setServer] = useState<OrgSettingsResponse | null>(null)
+  // Writes that have been asked for and not yet answered, oldest first. They
+  // are laid over whatever was last read, so a change shows the moment it is
+  // made and keeps showing until its own answer arrives: a read that started
+  // before the write and lands during it cannot put the old value back.
+  const [pendingWrites, setPendingWrites] = useState<readonly PendingOrgWrite[]>([])
+  const server = useMemo(
+    () => confirmed && pendingWrites.length > 0
+      ? { ...confirmed, settings: Object.assign({}, confirmed.settings, ...pendingWrites.map((write) => write.partial)) as OrgWideSettings }
+      : confirmed,
+    [confirmed, pendingWrites],
+  )
   const [hasFetched, setHasFetchedState] = useState(false)
   // Set only when it differs: setting what React already holds can still cost
   // a render of the host component, and every re-read sets it.
@@ -506,6 +523,15 @@ export function useOrgSettings(
     lastFetchAtRef.current = Date.now()
     const got = await fetchOrgSettings(jwt, orgId)
     if (!aliveRef.current) return null
+    const held = serverRef.current
+    if (held && held.orgId === orgId) {
+      // A read that failed says nothing about the org's settings: keep what is
+      // held rather than show every setting at its default until the next read.
+      if (!got) return held
+      // An answer older than the row already held (a read that started before
+      // a write and landed after it) would put the old values back.
+      if (got.version < held.version) return held
+    }
     writeServer(got)
     setHasFetched(true)
     return got
@@ -748,6 +774,11 @@ export function useOrgSettings(
       if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: t("org.orgSettings.noSessionError") }
       if (!canEdit) return { kind: "blocked" }
 
+      // Shown from this moment until the write is answered (see `pendingWrites`).
+      const pendingId = ++pendingOrgWriteSeq
+      setPendingWrites((prev) => [...prev, { id: pendingId, partial }])
+      const settlePending = () => setPendingWrites((prev) => prev.filter((write) => write.id !== pendingId))
+
       return runSerialized(async () => {
         const fresh = (await fetchOrgSettings(jwt, orgId)) ?? serverRef.current
         const baseVersion = fresh?.version ?? 0
@@ -779,7 +810,16 @@ export function useOrgSettings(
           void refresh()
         }
         return result
-      })
+      }).then(
+        (result) => {
+          settlePending()
+          return result
+        },
+        (err: unknown) => {
+          settlePending()
+          throw err
+        },
+      )
     },
     [orgId, jwt, canEdit, runSerialized, writeServer, refresh, adoptFromSibling, t],
   )

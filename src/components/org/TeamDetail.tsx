@@ -74,7 +74,7 @@ import {
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
 type TeamTab = "overview" | "projects" | "members"
@@ -190,7 +190,8 @@ export function TeamDetail() {
 
   // AQU-2289: Change role on a member (their organization role, owners only)
   // and on an attached project (the team's grant) both open the one
-  // RoleDialog, with the organization's or the project's list of roles.
+  // RoleDialog. The project grant is a team grant, so Owner stays off it
+  // (AQU-2357). A person's project picker still offers Owner to an Owner.
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
   const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
   // The chooser's organization role caps both lists (the server refuses a
@@ -754,7 +755,7 @@ export function TeamDetail() {
                 }}
                 errorMessage={(e) => {
                   const uf = toUserFacingError(e, "org")
-                  return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+                  return isRoleDenial(uf) ? t("org.roleDialog.orgChangeForbidden") : uf.message
                 }}
               />
 
@@ -763,6 +764,7 @@ export function TeamDetail() {
                 onOpenChange={(open) => { if (!open) setProjectRoleTarget(null) }}
                 mode="change"
                 level="project"
+                teamGrant
                 callerLevel={callerOrgLevel}
                 name={projectRoleTarget?.name ?? ""}
                 currentLevel={projectRoleTarget?.grantedRoleLevel ?? null}
@@ -928,7 +930,7 @@ export function TeamDetail() {
                             placeholder={t("org.teamDetail.selectProjectPlaceholder")}
                           />
                           <RoleSelect
-                            options={roleChoices("project", { callerLevel: callerOrgLevel })}
+                            options={roleChoices("project", { callerLevel: callerOrgLevel, teamGrant: true })}
                             value={selectedRole}
                             onValueChange={setSelectedRole}
                             aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
@@ -970,7 +972,7 @@ export function TeamDetail() {
                       data={team.projects}
                       getRowId={(p) => p.id}
                       initialSorting={[{ id: "name", desc: false }]}
-                      searchPlaceholder="Search by name"
+                      searchPlaceholder={t("org.teamDetail.projectsSearchPlaceholder")}
                       globalFilterFn={(row, _columnId, filterValue) => {
                         const q = String(filterValue).trim().toLowerCase()
                         if (!q) return true
@@ -1140,7 +1142,7 @@ export function TeamDetail() {
                       data={team.members}
                       getRowId={(m) => String(m.userId)}
                       initialSorting={[{ id: "name", desc: false }]}
-                      searchPlaceholder="Search by name or email"
+                      searchPlaceholder={t("org.membersTable.searchPlaceholder")}
                       globalFilterFn={(row, _columnId, filterValue) => {
                         const q = String(filterValue).trim().toLowerCase()
                         if (!q) return true

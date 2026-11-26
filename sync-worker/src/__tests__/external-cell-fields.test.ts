@@ -124,7 +124,7 @@ beforeEach(async () => {
   })
   // Unlocked timing by default; track editing OFF by default (its own gate is
   // switched on per-test, matching the product default).
-  await setSettings(tdb, { timingLocked: false })
+  await setSettings(tdb, { timingLocked: false, sourceTextFloor: 'project_lead' })
   const minted = await tdb.pg.query<{ id: string }>(
     `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
     [PROJECT],
@@ -235,12 +235,14 @@ describe('cell-field commands — role floors', () => {
       kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'x',
     })
     expect(setTranslation).toBe(ROLE.CONTRIBUTOR)
-    expect(setSource).toBe(ROLE.PROJECT_LEAD)
-    expect(setSource).toBeGreaterThan(setTranslation)
+    // AQU-2647: the static floor is the lowest sourceTextFloor can admit.
+    // The project's tier (default Maintainer) is enforced when the event is written.
+    expect(setSource).toBe(ROLE.CONTRIBUTOR)
+    expect(setSource).toBe(setTranslation)
 
     expect(
       requiredRoleForCommand({ kind: 'SetTranscription', fileId: FILE, cellId: 'c', transcription: 't' }),
-    ).toBe(ROLE.PROJECT_LEAD)
+    ).toBe(ROLE.CONTRIBUTOR)
     expect(
       requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, cellId: 'c', startMs: 0, endMs: 1 }),
     ).toBe(ROLE.CONTRIBUTOR)
@@ -254,22 +256,23 @@ describe('cell-field commands — role floors', () => {
     ).toBe(ROLE.MAINTAINER)
   })
 
-  it('a CONTRIBUTOR — enough for SetTranslation — cannot stage a SetSource', async () => {
+  it('refuses a contributor SetSource at prepare when the floor is Project Lead', async () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, ROLE.CONTRIBUTOR)
 
-    // The same credential CAN stage the target-side write, so the refusal below
-    // is about the source floor and not about membership or scope.
     const ok = await prepare(env, contributor, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: bridgeLane, value: 'una traducción' },
     ])
     expect(ok.res.status).toBe(200)
 
-    const denied = await prepare(env, contributor, [
+    // The fixture floor is Project Lead. Prepare refuses, so a plan the
+    // caller could never commit is not staged.
+    const staged = await prepare(env, contributor, [
       { kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'corrected source' },
     ])
-    expect(denied.res.status).toBe(403)
-    expect(denied.body.error.code).toBe('permission_denied')
+    expect(staged.res.status).toBe(403)
+    expect(staged.body.error.code).toBe('permission_denied')
+    expect(staged.body.error.message).toContain('source.cell.commit')
   })
 
   it('a PROJECT_LEAD can stage a SetSource', async () => {
@@ -503,8 +506,8 @@ describe('cell-field commands — changeset hygiene', () => {
 describe('cell-field commands — describe_command catalog', () => {
   it('documents all four, with floors matching what the engine enforces', () => {
     const expected: [string, number][] = [
-      ['SetSource', ROLE.PROJECT_LEAD],
-      ['SetTranscription', ROLE.PROJECT_LEAD],
+      ['SetSource', ROLE.CONTRIBUTOR],
+      ['SetTranscription', ROLE.CONTRIBUTOR],
       ['SetTiming', ROLE.CONTRIBUTOR],
       ['SetTrackOverride', ROLE.MAINTAINER],
     ]

@@ -48,7 +48,12 @@ export function StationTransport({
   onMessage,
   locked = false,
   status,
+  lead,
 }: {
+  /** AQU-2664 (evidence 72D): the Even out line, in the hint's place, right
+   *  under the transport. It stays while the hint would fade; Record now's
+   *  line and the typing help still take the row over it. */
+  lead?: ReactNode
   ed: StationEditor
   editable: boolean
   /** Slice 14: Play waits while Record now runs. */
@@ -230,15 +235,27 @@ export function StationTransport({
           Record now's and the typing help's 24 px buttons and the 6 px under
           them, so the lane keeps its height when they show too. */}
       <div data-testid="station-status-row" className="grid min-h-[30px] shrink-0 items-center px-3 pb-1.5">
-        <div
-          aria-hidden={!calm || typing != null || status != null}
-          className={cn(
-            "[grid-area:1/1] text-[11.5px] text-muted-foreground/70 transition-opacity",
-            calm && !typing && !status ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-        >
-          {hint}
-        </div>
+        {lead ? (
+          <div
+            aria-hidden={typing != null || status != null}
+            className={cn(
+              "[grid-area:1/1] transition-opacity",
+              !typing && !status ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          >
+            {lead}
+          </div>
+        ) : (
+          <div
+            aria-hidden={!calm || typing != null || status != null}
+            className={cn(
+              "[grid-area:1/1] text-[11.5px] text-muted-foreground/70 transition-opacity",
+              calm && !typing && !status ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          >
+            {hint}
+          </div>
+        )}
         {typing ? (
           <div className="flex items-center justify-end gap-2 [grid-area:1/1]">
             <span className="text-[11.5px] text-muted-foreground">{t("editor.station.typeHelp")}</span>

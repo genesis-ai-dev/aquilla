@@ -29,6 +29,15 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
     { code: "const x = <p>Ctrl + Enter</p>", filename: "src/components/Foo.tsx" },
     // Non-translatable attribute (not in TRANSLATABLE_ATTRS).
     { code: "const x = <div className=\"Save changes\" />", filename: "src/components/Foo.tsx" },
+    // AQU-2740: a component's own prop is only checked for phrase-shaped copy,
+    // so enum values, ids and single words pass.
+    { code: "const x = <Badge tone=\"Warning\" />", filename: "src/components/Foo.tsx" },
+    { code: "const x = <Picker format=\"MMM d, yyyy\" />", filename: "src/components/Foo.tsx" },
+    { code: "const x = <Card layout=\"two-column grid\" />", filename: "src/components/Foo.tsx" },
+    // …and never on props that do not carry copy, even when the value is a phrase.
+    { code: "const x = <Menu testId=\"File options menu\" />", filename: "src/components/Foo.tsx" },
+    { code: "const x = <Select value=\"Project lead\" />", filename: "src/components/Foo.tsx" },
+    { code: "const x = <NavRow hint={t('projectSettings.hint.rolesInvites')} />", filename: "src/components/Foo.tsx" },
     // Translatable attribute, but the value is an atomic term / identifier shape.
     { code: "const x = <img alt=\"USFM\" />", filename: "src/components/Foo.tsx" },
     { code: "const x = <input placeholder=\"https://example.com/path\" />", filename: "src/components/Foo.tsx" },
@@ -49,6 +58,34 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
   ],
 
   invalid: [
+    // AQU-2740: a prop named like copy gets the full check, single words included.
+    {
+      code: "const x = <DataTable searchPlaceholder=\"Search…\" />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    {
+      code: "const x = <OverflowMenu ariaLabel=\"More\" />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    {
+      code: "const x = <NavRow hint=\"Restore\" />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    // Any other prop: phrase-shaped copy, the shape that shipped in English to
+    // the Chinese UI (`<NavRow hint="Roles & invites">`).
+    {
+      code: "const x = <OrgBreadcrumb section=\"Assigned to me\" />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    {
+      code: "const x = <Row badge={isNew ? \"Just added\" : t('x')} />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
     // JSXText between tags — the highest-confidence detection class.
     {
       code: "const x = <p>Save changes</p>",

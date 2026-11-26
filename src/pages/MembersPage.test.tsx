@@ -88,6 +88,7 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       members: [],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -181,6 +182,7 @@ describe("MembersPage — AQU-485 roster visibility", () => {
       members: [],
       isLoading: false,
       error: null,
+      hasReadableRoster: false,
       rosterHidden: true,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -311,6 +313,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -352,6 +355,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -406,6 +410,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -466,6 +471,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -495,6 +501,7 @@ describe("MembersPage — Teams-style roster table", () => {
       ],
       isLoading: false,
       error: null,
+      hasReadableRoster: true,
       rosterHidden: false,
       rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
@@ -553,6 +560,6 @@ describe("MembersPage pending invites", () => {
       </QueryClientProvider>,
     )
     await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
-    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone with the link can join/)
   })
 })

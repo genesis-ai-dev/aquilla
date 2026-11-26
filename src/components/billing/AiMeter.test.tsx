@@ -73,7 +73,7 @@ describe("AiMeter", () => {
 
   it("100% for a member: they cannot buy anything, so they are told to ask an admin", () => {
     show(metered(100), { canManage: false })
-    expect(screen.getByText("Ask a workspace admin to upgrade or add your own key.")).toBeVisible()
+    expect(screen.getByText("Ask a workspace admin to upgrade, or use your own key.")).toBeVisible()
     expect(screen.queryByRole("link", { name: "Upgrade to Team" })).toBeNull()
   })
 

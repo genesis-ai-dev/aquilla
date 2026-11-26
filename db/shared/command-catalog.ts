@@ -192,7 +192,7 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: every key needs MAINTAINER 600. sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings and are rejected — languages and lanes are lane rows (CreateProject or ProjectSetup \`lanes\`).
 \`terminology\` is RETIRED (AQU-1724): key terms live in the concepts table, so prepare rejects a \`terminology\` op with \`validation_failed\`. Write terms with \`term.create\` / \`term.update\` events in an EmitEvents changeset (read the termbase with \`list_terms\` first).
-Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
+Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, sourceTextFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 ${PATCH_SETTINGS_CHECKS_DOC}
@@ -307,12 +307,12 @@ Kept for compatibility. Rejected if any policy key's value would change (see Pat
     kind: 'SetSource',
     title: 'Set source text',
     oneLiner: 'Correct a cell\u2019s SOURCE text (marks dependent targets stale).',
-    minRoleLevel: PROJECT_LEAD,
+    minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetSource
 Params: \`{ fileId, cellId, value, valueHtml? }\` \u2014 batchable with the other cell-field commands.
-Compiles to \`source.cell.commit\` through the /events perimeter. Floor is PROJECT_LEAD (500), a rung ABOVE SetTranslation \u2014 a source edit changes the text every translator works from.
+Compiles to \`source.cell.commit\` through the /events perimeter. The static floor is CONTRIBUTOR (400), the lowest the project's sourceTextFloor can admit. The tier in force (default Maintainer) is enforced when the event is written, so a credential that clears this static floor can still be refused.
 Gotchas:
 - The commit advances the source chain head, so every target pinned to the old head goes STALE (AD-9), exactly as a UI source edit does. That is the intended effect, not a side effect \u2014 review it before approving a batch.
 - The plan pins the cell's live source head at prepare; a source edit by anyone else in between makes the commit \`plan_stale\`.
@@ -323,13 +323,13 @@ Example: \`{ "kind": "SetSource", "fileId": "f1", "cellId": "c3", "value": "In t
     kind: 'SetTranscription',
     title: 'Set transcription',
     oneLiner: 'Write a media cell\u2019s corrected transcript (leaves the filename intact).',
-    minRoleLevel: PROJECT_LEAD,
+    minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetTranscription
 Params: \`{ fileId, cellId, transcription }\`.
 Compiles to a transcript-only \`source.cell.commit\`. An imported media cell's \`value\` is the import FILENAME and stays put as provenance; the transcript is what export and AI actually read (AQU-847).
-Same PROJECT_LEAD (500) floor as SetSource \u2014 it is the same event kind, and it advances the source chain head, so dependent targets go stale.
+Same static floor as SetSource — it is the same event kind, and the project's sourceTextFloor (default Maintainer) is enforced when the event is written. It advances the source chain head, so dependent targets go stale.
 Example: \`{ "kind": "SetTranscription", "fileId": "f1", "cellId": "c3", "transcription": "and then he said\u2026" }\``,
   },
   {
@@ -617,12 +617,12 @@ Gotchas:
     kind: 'HideCell',
     title: 'Hide cell',
     oneLiner: 'Park a cell — out of translation and exports, reversibly.',
-    minRoleLevel: PROJECT_LEAD,
+    minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### HideCell
 Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with ShowCell (stage the hides and the shows as two plans).
-Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter, at the same PROJECT_LEAD floor the editor's own **Hide cell** menu item uses.
+Compiles to \`source.cell.visibility.set\` (\`hidden: true\`) through the /events perimeter. The static floor is CONTRIBUTOR (400), the lowest the project's \`sourceTextFloor\` can admit. The tier in force (default Maintainer) is enforced when the plan is prepared and again when the event is written. Hide cell uses that same tier in the editor.
 **This is the REVERSIBLE one.** Hiding takes the row out of the editor for everyone, in every language lane, and out of every export — but deletes NOTHING. The source text, every lane's translation, recordings, comments and validations survive and come back untouched on ShowCell. Reach for this, not DeleteCell, for a stray heading, a marker that bled through an import, or a paragraph the client does not want translated.
 Gotchas:
 - Sugar over EmitEvents: the staged plan you read back holds the equivalent \`source.cell.visibility.set\` events, not a \`HideCell\` entry. Behavior is identical either way. The raw EmitEvents door does NOT accept the kind — these named commands are the way in.
@@ -636,12 +636,12 @@ Example: \`{ "kind": "HideCell", "fileId": "f1", "cellId": "c7" }\``,
     kind: 'ShowCell',
     title: 'Show cell',
     oneLiner: 'Bring a hidden cell back with everything it had.',
-    minRoleLevel: PROJECT_LEAD,
+    minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### ShowCell
 Params: \`{ fileId, cellId }\` — batch several per changeset; cannot mix with other command kinds, and cannot mix with HideCell.
-Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the PROJECT_LEAD floor. The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
+Compiles to \`source.cell.visibility.set\` (\`hidden: false\`) through the /events perimeter, at the same source-text floor as HideCell (static CONTRIBUTOR; the project's tier, default Maintainer, is enforced on prepare and on write). The exact inverse of HideCell: the row returns in its ORIGINAL position with its source text, every lane's translation, recordings, comments and validation state as they were — nothing was ever deleted.
 Gotchas:
 - Sugar over EmitEvents, same as HideCell; the staged plan holds \`source.cell.visibility.set\` events.
 - Refused at prepare when the cell does not exist or is NOT currently hidden.

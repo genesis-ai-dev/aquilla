@@ -354,6 +354,23 @@
        dark steps UP from a mid grey-blue one — a heading is "slightly apart
        from the page" either way, not "always darker". */
     --tl-folder-band: oklch(0.945 0.003 264);
+    /* AQU-2664 (board 74): the track header's Logic-style buttons and fader —
+       grey buttons, teal mute, yellow solo, blue / amber ≈ (Even out). */
+    --lg-btn: oklch(0.93 0.003 264);
+    --lg-btn-bd: oklch(0.84 0.004 264);
+    --lg-ink: oklch(0.35 0.008 264);
+    --lg-m: oklch(0.56 0.09 210);
+    --lg-m-ink: #ffffff;
+    --lg-s: oklch(0.86 0.15 92);
+    --lg-s-ink: oklch(0.25 0.03 90);
+    --lg-ev: oklch(0.58 0.15 252);
+    --lg-ev-ink: #ffffff;
+    --lg-part: oklch(0.80 0.14 75);
+    --lg-part-ink: oklch(0.28 0.05 60);
+    --lg-groove: oklch(0.86 0.004 264);
+    --lg-fill: oklch(0.55 0.01 264);
+    --lg-thumb: #ffffff;
+    --lg-thumb-bd: oklch(0.70 0.005 264);
     /* AQU-2138: THE EDITOR TAB STRIP's own fills. The active tab has to read as
        selected against two different grounds at once — its inactive
        neighbours AND the `bg-sidebar` header the strip floats on — and
@@ -432,6 +449,22 @@
        must sit clear of it; 0.355 reads as a band without becoming a second
        surface. */
     --tl-folder-band: oklch(0.355 0.014 250);
+    /* AQU-2664 (board 74): the track header's controls, dark. */
+    --lg-btn: oklch(0.38 0.006 264);
+    --lg-btn-bd: oklch(1 0 0 / .10);
+    --lg-ink: oklch(0.90 0.005 264);
+    --lg-m: oklch(0.55 0.09 210);
+    --lg-m-ink: #ffffff;
+    --lg-s: oklch(0.85 0.15 92);
+    --lg-s-ink: oklch(0.22 0.03 90);
+    --lg-ev: oklch(0.62 0.14 252);
+    --lg-ev-ink: #ffffff;
+    --lg-part: oklch(0.78 0.14 75);
+    --lg-part-ink: oklch(0.22 0.05 60);
+    --lg-groove: oklch(0.22 0.008 264);
+    --lg-fill: oklch(0.72 0.01 264);
+    --lg-thumb: oklch(0.82 0.005 264);
+    --lg-thumb-bd: oklch(0.55 0.005 264);
     /* AQU-2138: the tab strip's dark fills; see the light block. Dark keeps
        the tinted active fill (AQU-2147 made only the light one white): its
        header IS --surface, so there is no "lighter than the header" to use.
@@ -1015,17 +1048,21 @@ textarea,
 }
 
 /* Display-only IDML emphasis. Applied at render from data-idml-character-style
-   — never persisted, never editable. Bold and italic only. */
+   — never persisted, never editable. Bold, italic, and small caps.
+   all-small-caps shrinks capitals too, so SENHOR drawn in the divine-name
+   run still reads as small caps. Export writes the InDesign character style. */
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
+.idml-style-small-caps { font-variant-caps: all-small-caps; }
 
-/* Visible style segments: only bold and italic runs are blocks. Consecutive
-   plain runs are one typing space. An empty plain run shows a single faint
-   "Regular" on its first slot, with no box; the plain slots after it add
-   neither another word nor a gap. An empty bold or italic run shows its own
-   faint label until the translator types. Labels are not document text. */
+/* Visible style segments: bold, italic, and small-caps runs are blocks.
+   Consecutive plain runs are one typing space. An empty plain run shows a
+   single faint "Regular" on its first slot, with no box; the plain slots
+   after it add neither another word nor a gap. An empty styled run shows
+   its own faint label until the translator types. Labels are not document text. */
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps {
   border-radius: 0.2em;
   padding-inline: 0.18em;
   margin-inline: 1px;
@@ -1038,14 +1075,16 @@ textarea,
   background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
 }
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps[data-style-segment-empty] {
   display: inline-block;
   min-height: 1.15em;
   vertical-align: baseline;
 }
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps:not(.idml-style-bold):not(.idml-style-italic)[data-style-segment-empty]::before {
   color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
   pointer-events: none;
   user-select: none;
@@ -1059,8 +1098,12 @@ textarea,
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
   content: var(--aq-style-label-bold-italic, "Bold italic");
 }
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps:not(.idml-style-bold):not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-small-caps, "Small caps");
+}
 [data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
-[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-small-caps.idml-segment-caret {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
 }
 [data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
@@ -1082,8 +1125,8 @@ textarea,
 }
 
 /* While style segments are visible, a placed translation is adjusted by
-   dragging the side of a bold or italic box, the way a window is resized.
-   The bar is the grab. The resize cursor is set on the slot itself. */
+   dragging the side of a bold, italic, or small-caps box, the way a window
+   is resized. The bar is the grab. The resize cursor is set on the slot itself. */
 [data-segment-edge-mode] {
   user-select: none;
   -webkit-user-select: none;

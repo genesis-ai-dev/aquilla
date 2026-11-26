@@ -468,6 +468,292 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect((await bindingCount())?.n).toBe(2)
   })
 
+  it("keeps a supporting original on the source lane when the target language has its own tag (AQU-2554)", async () => {
+    // A project made since AQU-1594 has a source lane and a target lane tagged
+    // with its language, and no `''` lane. A supporting original (the SDBH
+    // edition, a multi-book container, a Paratext package) carries no target
+    // language, so it has to land on the source lane.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [
+        { id: "f1", project_id: "p1", name: "SDBH-GEN", event_id: "ev1" },
+        { id: "f2", project_id: "p1", name: "SDBH-EXO", event_id: "ev2" },
+      ],
+    })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0),
+              ('lane-es', 'p1', 'target', NULL, 'es', 'es', 1)`,
+    ).run()
+    // The real resolver only: the test harness would otherwise mint the
+    // missing `''` lane and hide the refusal.
+    await db.prepare(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`).first()
+    const firstToken = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const secondToken = await makeTestToken(SECRET, { projectId: "p1", fileId: "f2", role: 500 })
+    const env = { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any
+    const artifactId = "01900000-0000-7000-8000-000000000011"
+
+    const upload = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${firstToken}`,
+          "X-Source-Format": "sdbh-master",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Name": "SDBH-master.json",
+          "X-Artifact-Binding-Role": "support",
+          "X-Artifact-Member-Path": "SDBH-GEN",
+          "X-Artifact-Profile-Id": "builtin:sdbh",
+          "X-Artifact-Profile-Version": "1",
+          "X-Artifact-Fidelity": "preserved-only",
+          "X-Update-Source-Sidecar": "false",
+        },
+        body: new TextEncoder().encode('{"entries":[]}'),
+      },
+    ), env)
+    expect(upload?.status).toBe(200)
+
+    const bind = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secondToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          bindingRole: "support",
+          memberPath: "SDBH-EXO",
+          profileId: "builtin:sdbh",
+          profileVersion: "1",
+          fidelity: "preserved-only",
+        }),
+      },
+    ), env)
+    expect(bind?.status).toBe(200)
+
+    const bindings = await db.prepare(
+      `SELECT file_id, binding_role, lane_id FROM artifact_bindings
+        WHERE artifact_id::text = ? ORDER BY file_id`,
+    ).bind(artifactId).all<{ file_id: string; binding_role: string; lane_id: string }>()
+    expect(bindings.results).toEqual([
+      { file_id: "f1", binding_role: "support", lane_id: "lane-src" },
+      { file_id: "f2", binding_role: "support", lane_id: "lane-src" },
+    ])
+    const lanes = await db.prepare(`SELECT count(*)::int AS n FROM lanes WHERE project_id = 'p1'`).first<{ n: number }>()
+    expect(lanes?.n).toBe(2)
+  })
+
+  it("binds an already stored supporting original to another file on a project whose target lane is tagged (AQU-2554)", async () => {
+    // The bind route on its own, so its refusal on dev is not hidden behind
+    // the upload's.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f2", project_id: "p1", name: "SDBH-EXO", event_id: "ev2" }],
+    })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0),
+              ('lane-es', 'p1', 'target', NULL, 'es', 'es', 1)`,
+    ).run()
+    const artifactId = "01900000-0000-7000-8000-000000000012"
+    await db.prepare(
+      `INSERT INTO artifacts (id, project_id, uploaded_by_user_id, name, content_type, size_bytes, sha256, r2_key, kind, metadata)
+       VALUES (?::uuid, 'p1', '1', 'SDBH-master.json', 'application/json', 2, 'x', 'k', 'source', '{}'::jsonb)`,
+    ).bind(artifactId).run()
+    await db.prepare(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`).first()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f2", role: 500 })
+    const bind = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          bindingRole: "support",
+          memberPath: "SDBH-EXO",
+          profileId: "builtin:sdbh",
+          profileVersion: "1",
+          fidelity: "preserved-only",
+        }),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(bind?.status).toBe(200)
+    const row = await db.prepare(
+      `SELECT lane_id FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ lane_id: string }>()
+    expect(row).toEqual({ lane_id: "lane-src" })
+  })
+
+  it("keeps a translation's original on a project that has no target lane yet, creating the blank lane as a translation write does (AQU-2554)", async () => {
+    // A source-only project: the editor's default translation is the '' lane,
+    // which a cell write creates on first use (AQU-1594). The import uploads
+    // the translation's original before any cell, so the upload creates it.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [
+        { id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" },
+        { id: "f2", project_id: "p1", name: "Exodus", event_id: "ev2" },
+      ],
+    })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0)`,
+    ).run()
+    await db.prepare(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`).first()
+    const firstToken = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const secondToken = await makeTestToken(SECRET, { projectId: "p1", fileId: "f2", role: 500 })
+    const env = { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any
+    const artifactId = "01900000-0000-7000-8000-000000000013"
+
+    const upload = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${firstToken}`,
+          "X-Source-Format": "usfm",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Profile-Id": "builtin:target-usfm",
+          "X-Artifact-Profile-Version": "1",
+          "X-Artifact-Fidelity": "preserved-only",
+          "X-Update-Source-Sidecar": "false",
+        },
+        body: new TextEncoder().encode("\\id GEN\n\\c 1\n\\v 1 Au commencement"),
+      },
+    ), env)
+    expect(upload?.status).toBe(200)
+    const bind = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secondToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          bindingRole: "target",
+          targetLang: "",
+          memberPath: "Exodus",
+          profileId: "builtin:target-usfm",
+          profileVersion: "1",
+          fidelity: "preserved-only",
+        }),
+      },
+    ), env)
+    expect(bind?.status).toBe(200)
+
+    const lanes = await db.prepare(
+      `SELECT id, role, legacy_tag FROM lanes WHERE project_id = 'p1' ORDER BY position`,
+    ).all<{ id: string; role: string; legacy_tag: string | null }>()
+    expect(lanes.results.map((l) => [l.role, l.legacy_tag])).toEqual([["source", null], ["target", ""]])
+    const bridge = lanes.results[1].id
+    const bindings = await db.prepare(
+      `SELECT file_id, lane_id FROM artifact_bindings WHERE artifact_id::text = ? ORDER BY file_id`,
+    ).bind(artifactId).all<{ file_id: string; lane_id: string }>()
+    expect(bindings.results).toEqual([
+      { file_id: "f1", lane_id: bridge },
+      { file_id: "f2", lane_id: bridge },
+    ])
+  })
+
+  it("binds a translation's original on its own to a project with no target lane, creating and granting the blank lane as a translation write does (AQU-2554)", async () => {
+    // The bind route by itself (no upload first creates the lane for it).
+    // Member 2 is an unscoped Contributor, member 3 a Contributor scoped to
+    // something else, member 4 a Maintainer: only member 2 is granted the new
+    // lane (AQU-1781's rule, the same as a cell write's).
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f2", project_id: "p1", name: "Exodus", event_id: "ev2" }],
+    })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+       VALUES ('p1', 2, 400, 1), ('p1', 3, 400, 1), ('p1', 4, 600, 1)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
+       VALUES ('p1', 3, 'lane', 'some-other-lane', '1', 0)`,
+    ).run()
+    const artifactId = "01900000-0000-7000-8000-000000000014"
+    await db.prepare(
+      `INSERT INTO artifacts (id, project_id, uploaded_by_user_id, name, content_type, size_bytes, sha256, r2_key, kind, metadata)
+       VALUES (?::uuid, 'p1', '1', 'GEN.usfm', 'text/plain', 2, 'x', 'k', 'source', '{}'::jsonb)`,
+    ).bind(artifactId).run()
+    await db.prepare(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`).first()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f2", role: 500 })
+    const bind = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          bindingRole: "target",
+          targetLang: "",
+          memberPath: "Exodus",
+          profileId: "builtin:target-usfm",
+          profileVersion: "1",
+          fidelity: "preserved-only",
+        }),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(bind?.status).toBe(200)
+    const bridge = await db.prepare(
+      `SELECT id FROM lanes WHERE project_id = 'p1' AND role = 'target' AND legacy_tag = ''`,
+    ).first<{ id: string }>()
+    expect(bridge?.id).toBeTruthy()
+    const row = await db.prepare(
+      `SELECT lane_id FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ lane_id: string }>()
+    expect(row).toEqual({ lane_id: bridge!.id })
+    const grants = await db.prepare(
+      `SELECT user_id, lane FROM project_member_lane_roles WHERE project_id = 'p1' ORDER BY user_id`,
+    ).all<{ user_id: number; lane: string }>()
+    expect(grants.results.map((g) => [Number(g.user_id), g.lane])).toEqual([[2, bridge!.id]])
+  })
+
+  it("refuses a translation's original with no language on a project whose target lanes all have one, and adds no blank lane (AQU-2554)", async () => {
+    // The blank lane is only ever the first target lane of a project that has
+    // none (AQU-1615). Such a request is refused and nothing is left behind.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" }],
+    })
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0),
+              ('lane-es', 'p1', 'target', NULL, 'es', 'es', 1)`,
+    ).run()
+    await db.prepare(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`).first()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const artifactId = "01900000-0000-7000-8000-000000000015"
+    const upload = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "usfm",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Update-Source-Sidecar": "false",
+        },
+        body: new TextEncoder().encode("\\id GEN\n\\c 1\n\\v 1 En el principio"),
+      },
+    ), { SNAPSHOTS, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(upload?.status).not.toBe(200)
+    const lanes = await db.prepare(
+      `SELECT id FROM lanes WHERE project_id = 'p1' ORDER BY position`,
+    ).all<{ id: string }>()
+    expect(lanes.results.map((l) => l.id)).toEqual(["lane-src", "lane-es"])
+    const bindings = await db.prepare(`SELECT count(*)::int AS n FROM artifact_bindings`).first<{ n: number }>()
+    expect(bindings?.n).toBe(0)
+    expect(SNAPSHOTS._allKeys()).toEqual([])
+  })
+
   it("does not allow an artifact to be bound to a file in another project", async () => {
     const { db } = await makeTestDb({
       projects: [

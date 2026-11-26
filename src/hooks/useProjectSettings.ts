@@ -15,6 +15,7 @@ import {
   type ProjectSettingsResponse,
   type ProjectLaneView,
   type ProjectSettingsEditor,
+  type SourceTextTier,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
@@ -278,6 +279,23 @@ export function broadcastProjectSettingsUpdated(detail: ProjectSettingsUpdatedDe
 
 let settingsInstanceSeq = 0
 
+interface PendingSettingsWrite {
+  id: number
+  partial: ProjectWideSettings
+  mergeKeys: readonly string[] | undefined
+}
+let pendingWriteSeq = 0
+
+/** `settings` with every unanswered write laid over it, oldest first. */
+export function withPendingWrites(
+  settings: ProjectWideSettings,
+  pending: readonly { partial: ProjectWideSettings; mergeKeys: readonly string[] | undefined }[],
+): ProjectWideSettings {
+  let out = settings
+  for (const write of pending) out = applySettingsPatch(out, write.partial, write.mergeKeys)
+  return out
+}
+
 export type CannotEditReason = "offline" | "role" | null
 
 export type PatchOutcome =
@@ -346,6 +364,11 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
+  /**
+   * AQU-2647: the org's source-text floor. Null when the org set none, or
+   * before the first response that carries it; then the floor is Maintainer.
+   */
+  orgSourceTextFloor: SourceTextTier | null
   /** AQU-2342: the legacy agent brief text from the same response ("" when
    *  none, or once the project stored its own instructions). */
   legacyProjectBriefText: string
@@ -607,6 +630,11 @@ export function useProjectSettings(
   const [local, setLocal] = useState<ProjectWideSettings>({})
   const [hasFetched, setHasFetched] = useState(false)
   const [conflict, setConflict] = useState(false)
+  // Writes that have been asked for and not yet answered, oldest first. They
+  // are laid over whatever was last read, so a change shows the moment it is
+  // made and keeps showing until its own answer arrives: a read that started
+  // before the write and lands during it cannot put the old value back.
+  const [pendingWrites, setPendingWrites] = useState<readonly PendingSettingsWrite[]>([])
   const dismissConflict = useCallback(() => setConflict(false), [])
 
   // aliveRef tracks component liveness for long-running callbacks that start
@@ -666,6 +694,7 @@ export function useProjectSettings(
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
+  const [orgSourceTextFloor, setOrgSourceTextFloor] = useState<SourceTextTier | null>(null)
   const [legacyProjectBriefText, setLegacyProjectBriefText] = useState("")
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
@@ -680,6 +709,7 @@ export function useProjectSettings(
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
+    if (next?.orgSourceTextFloor !== undefined) setOrgSourceTextFloor(next.orgSourceTextFloor)
     if (next?.legacyProjectBriefText !== undefined) setLegacyProjectBriefText(next.legacyProjectBriefText)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
@@ -737,7 +767,9 @@ export function useProjectSettings(
       void hydrateFromOfflineCopy()
       return null
     }
-    if (refreshInFlightRef.current) return refreshInFlightRef.current
+    // A read that follows a write must not be answered by this instance's own
+    // older request: that one may hold the row from before the write.
+    if (mode !== "afterWrite" && refreshInFlightRef.current) return refreshInFlightRef.current
 
     const analyticsAtStart = analyticsRef.current
     const request = (async (): Promise<ProjectSettingsResponse | null> => {
@@ -762,6 +794,13 @@ export function useProjectSettings(
       const readKey = `${jwt}\n${projectId}`
       if (appliedReadKeyRef.current === readKey && sameProjectSettingsResponse(serverRef.current, got)) {
         return serverRef.current
+      }
+      // An answer older than the row this instance already holds (a read that
+      // started before a write and landed after it) would put the old values
+      // back until the next read. The version only ever counts up.
+      const held = serverRef.current
+      if (appliedReadKeyRef.current === readKey && got && held && got.version < held.version) {
+        return held
       }
       writeServerConfirmed(got)
       appliedReadKeyRef.current = readKey
@@ -931,6 +970,10 @@ export function useProjectSettings(
       // Our own write — `patch` already committed the authoritative response to
       // `serverRef`/`server`, so a re-GET would only cost a round-trip.
       if (detail.origin && detail.origin === instanceIdRef.current) return
+      // The relayed frame for a write this instance made itself (or has already
+      // read): it holds that version, so there is nothing newer to fetch.
+      const held = serverRef.current
+      if (detail.version != null && held && appliedReadKeyRef.current && detail.version <= held.version) return
       void refresh()
     }
     window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
@@ -954,10 +997,13 @@ export function useProjectSettings(
 
   // Server values overlay local for keys the server has set (non-empty row).
   const settings: ProjectWideSettings = useMemo(
-    () => server && server.version > 0
-      ? mergeProjectWideSettings(local, server.settings)
-      : local,
-    [local, server],
+    () => withPendingWrites(
+      server && server.version > 0
+        ? mergeProjectWideSettings(local, server.settings)
+        : local,
+      pendingWrites,
+    ),
+    [local, server, pendingWrites],
   )
 
   const canEdit = isOnline && roleLevel != null && roleLevel >= SETTINGS_EDIT_ROLE_FLOOR
@@ -1121,6 +1167,12 @@ export function useProjectSettings(
     // (after the role guard) rather than before it so a below-floor user never
     // writes stale data to IDB on a synced project.
     setLocal((prev) => over(prev))
+    // Shown from this moment until the write is answered (see `pendingWrites`).
+    // Taken off in the same turn the answer is applied, so the value on screen
+    // goes straight from "what I chose" to "what the server holds".
+    const pendingId = ++pendingWriteSeq
+    setPendingWrites((prev) => [...prev, { id: pendingId, partial, mergeKeys }])
+    const settlePending = () => setPendingWrites((prev) => prev.filter((write) => write.id !== pendingId))
     void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
       console.warn("[useProjectSettings] local IDB patch failed", err)
     })
@@ -1173,8 +1225,13 @@ export function useProjectSettings(
       if (outcome.kind === "ok") writeServerConfirmed(outcome.value)
       else if (outcome.kind === "conflict") writeServerConfirmed(outcome.latest)
       return outcome
+    }).catch((err: unknown) => {
+      // Never leave a failed write showing as if it were still on its way.
+      settlePending()
+      throw err
     })
     if (!aliveRef.current) return { kind: "ok" }
+    settlePending()
 
     if (result.kind === "ok") {
       writeServer(result.value)
@@ -1284,6 +1341,7 @@ export function useProjectSettings(
     visibilityFloors,
     importFloor,
     orgMediaDefaults,
+    orgSourceTextFloor,
     legacyProjectBriefText,
     lanes,
     isOnline,

@@ -43,10 +43,15 @@ import {
   isLinkRoleLevel,
   forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
+  resolveGenuineProjectRole,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import {
+  LAST_PROJECT_OWNER_MESSAGE,
+  removingDirectOwnerLeavesNone,
+} from "../services/last-project-owner"
 import {
   getAssignmentsGivenBy,
   getFileChapters,
@@ -539,27 +544,49 @@ projects.post(
       }
     }
 
+    let inserted: boolean
     try {
       // Row write is shared with sync-worker's receipt-only CreateProject
-      // command (db/shared/projects.ts). The internal route leaves
-      // writeCreatorMembership unset: the creator resolves to owner (700) via
-      // the resolver's implicit creator path, so the hardcoded response below
-      // and later role resolutions are unchanged.
-      await createProjectShared(c.env.AQUILLA_PG, {
+      // command (db/shared/projects.ts). AQU-2357: that write includes the
+      // creator's ordinary Owner grant. created_by stays history only.
+      const created = await createProjectShared(c.env.AQUILLA_PG, {
         projectId: body.id,
         name: body.name,
         orgId,
         createdBy: user.id,
       })
+      inserted = created.inserted
     } catch (err) {
       console.error("project create failed:", err)
       return c.json({ error: "create failed" }, 500)
     }
+    if (!inserted) {
+      // The id is client-chosen and not secret. Only the creator's own retry of
+      // a create that already landed is benign; it wrote nothing new.
+      const existing = await c.env.AQUILLA_PG
+        .prepare("SELECT created_by FROM projects WHERE id = ?")
+        .bind(body.id)
+        .first<{ created_by: number | string | null }>()
+      if (existing == null || String(existing.created_by) !== String(user.id)) {
+        return c.json({ error: "a project with this id already exists" }, 409)
+      }
+    }
+
+    // [Pen test 2026-11-26] A replay is authorised by `created_by`, which is
+    // history only (AQU-2357), and the create gate above never looks at the
+    // project. So a creator later removed from the project, narrowed to one
+    // lane, or whose team was detached could replay the create to re-attach
+    // their team as a Viewer grant and read every lane again. On a replay,
+    // re-attach only for a caller who still holds Owner on the project now —
+    // the original retry-after-partial-failure case. Genuine role: an
+    // operator's blanket platform Owner does not count here.
+    const mayAttachTeams = inserted ||
+      ((await resolveGenuineProjectRole(c.env, user, body.id))?.level ?? 0) >= ROLE.OWNER
 
     // AQU-1352 P2: attach the selected teams at the attach dialog's default.
     // SWARM-TODO(AQU-1352): not transactional with the create; a failure here
     // leaves the project without its team and the caller as creator only.
-    if (orgId != null) {
+    if (orgId != null && mayAttachTeams) {
       for (const teamId of teamIds) {
         await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
       }
@@ -575,7 +602,7 @@ projects.post(
         roleBefore: null,
         roleAfter: ROLE.OWNER,
       })
-      for (const teamId of teamIds) {
+      for (const teamId of mayAttachTeams ? teamIds : []) {
         await auditMembershipChange(c.env, user, {
           action: "team.project.attach",
           where: { scope: "team", orgId, groupId: teamId },
@@ -590,7 +617,7 @@ projects.post(
       id: body.id,
       name: body.name,
       orgId,
-      role: { level: 700, name: "owner", source: "creator" },
+      role: { level: 700, name: "owner", source: "override" },
     })
   },
 )
@@ -646,24 +673,24 @@ projects.get("/", authMiddleware, async (c) => {
   const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
   const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
-  // AD-12 max-wins across direct + group + org + creator. Each path is
+  // AD-12 max-wins across direct + group + org. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
   // tie, attribution credit goes in declaration order (override > group >
-  // org > creator) to match the resolver in project-permissions.ts.
+  // org) to match the resolver in project-permissions.ts.
+  // created_by is history (AQU-2357), not a path.
   //
   // AQU-435: the org path is gated at ORG_WIDE_ACCESS_FLOOR (maintainer) in
   // BOTH the access predicate and the role computation — a sub-maintainer
   // org_members row neither reveals a project nor contributes to its
   // resolved role. Mirrors resolveProjectRole.
   //
-  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds
+  // Params (positional ?): 5 user.id binds + isAdmin + 2 orgFilter binds
   // + optional minRole / q / cursor / limit.
-  //   ?1-?4  : user.id for creator CASE expressions
-  //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
-  //   ?8     : isAdmin (1/0) — platform operators bypass the access check
-  //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
-  //   ?12-?13: orgFilter (IS NULL bypass + equality)
-  //   ?14-?15: minRole (IS NULL bypass + threshold)
+  //   ?1-?3  : user.id for LEFT JOIN conditions (pm, om, gm)
+  //   ?4     : isAdmin (1/0) — platform operators bypass the access check
+  //   ?5-?6  : user.id for WHERE access check (pm, om)
+  //   ?7-?8  : orgFilter (IS NULL bypass + equality)
+  //   ?9-?10 : minRole (IS NULL bypass + threshold)
   // AQU-1274: the org path's contribution to max-wins, as SQL. Must stay
   // equivalent to db/shared/project-roles.ts::orgPathContribution — this list
   // endpoint is where `project.syncRole` comes from, so if it disagrees with
@@ -707,23 +734,19 @@ projects.get("/", authMiddleware, async (c) => {
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              ${orgContribSql},
-              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+              ${orgContribSql}
             ) AS role_level,
             CASE
               WHEN pm.role_level IS NOT NULL
                 AND pm.role_level >= COALESCE(gg.max_grant, 0)
                 AND pm.role_level >= (${orgContribSql})
-                AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'override'
               WHEN gg.max_grant IS NOT NULL
                 AND gg.max_grant >= (${orgContribSql})
-                AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'group'
               WHEN (${orgContribSql}) > 0
-                AND (${orgContribSql}) >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'org'
-              ELSE 'creator'
+              ELSE 'override'
             END AS role_source
        FROM projects p
        LEFT JOIN organizations o
@@ -751,7 +774,6 @@ projects.get("/", authMiddleware, async (c) => {
       WHERE ${archivedClause}
         AND (
           ?::int = 1
-          OR p.created_by = ?
           OR pm.user_id = ?
           OR gg.max_grant IS NOT NULL
           OR (p.org_id IS NOT NULL AND om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
@@ -760,21 +782,18 @@ projects.get("/", authMiddleware, async (c) => {
         AND (?::int IS NULL OR GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              ${orgContribSql},
-              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+              ${orgContribSql}
             ) >= ?)
         ${extraWhereSql}
       ORDER BY LOWER(p.name), p.id
       ${limitSql}`,
   )
     .bind(
-      user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
-      user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
-      adminBypass ? 1 : 0,                 // ?8: platform-operator bypass
-      user.id, user.id, user.id,           // ?9-?11: WHERE: created_by, pm, om
-      orgFilter, orgFilter,                // ?12-?13: org filter (IS NULL bypass + equality)
+      user.id, user.id, user.id,           // pm.user_id, om.user_id, gm.user_id
+      adminBypass ? 1 : 0,                 // platform-operator bypass
+      user.id, user.id,                    // WHERE: pm, om
+      orgFilter, orgFilter,                // org filter (IS NULL bypass + equality)
       minRoleBind,                         // minRole IS NULL bypass
-      user.id,                             // GREATEST created_by in minRole clause
       minRoleBind,                         // minRole threshold
       ...extraBinds,
     )
@@ -790,7 +809,7 @@ projects.get("/", authMiddleware, async (c) => {
       pm_username: string | null
       granted_at: string | null
       role_level: number
-      role_source: "creator" | "override" | "org" | "group"
+      role_source: "override" | "org" | "group"
     }>()
 
   const allRows = rows.results ?? []
@@ -1632,6 +1651,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
         source: m.source,
       },
       secondarySources: m.secondarySources,
+      createdThisProject: Number(m.userId) === Number(project.created_by),
     })),
   })
 })
@@ -1713,7 +1733,7 @@ const projectMemberBody = z.union([projectMemberBatch, projectMemberSingle])
 // Per-person grant error codes — stable + machine-readable so batch callers can
 // report exactly who failed and why. In single-user mode each maps to the same
 // HTTP status the endpoint returned before this issue.
-const PROJECT_GRANT_ERROR_STATUS: Record<string, 400 | 403 | 404> = {
+const PROJECT_GRANT_ERROR_STATUS: Record<string, 400 | 403 | 404 | 409> = {
   role_above_caller: 403,
   user_not_found: 404,
   self_grant: 400,
@@ -1721,6 +1741,7 @@ const PROJECT_GRANT_ERROR_STATUS: Record<string, 400 | 403 | 404> = {
   lane_choice_required: 400,
   lane_choice_conflict: 400,
   lane_unresolved: 400,
+  last_owner: 409,
 }
 
 type ProjectGrantOutcome =
@@ -1798,6 +1819,18 @@ async function grantProjectMemberOne(
         username,
         code: "target_outranks_caller",
         message: `cannot modify a member whose current role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+      }
+    }
+  }
+
+  // AQU-2357: demoting the last direct Owner is refused. An org Owner does not count.
+  if (existing && Number(existing.role_level) >= 700 && role < 700) {
+    if (await removingDirectOwnerLeavesNone(env.AQUILLA_PG, projectId, target.id)) {
+      return {
+        ok: false,
+        username,
+        code: "last_owner",
+        message: LAST_PROJECT_OWNER_MESSAGE,
       }
     }
   }
@@ -1936,6 +1969,9 @@ projects.post(
     // Single-user mode — response + error statuses preserved exactly.
     const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, body, user)
     if (!outcome.ok) {
+      if (outcome.code === "last_owner") {
+        return c.json({ error: "last_owner", message: outcome.message }, 409)
+      }
       return c.json({ error: outcome.message }, PROJECT_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
     notifyRoleChangeBestEffort(c, projectId, {
@@ -1963,9 +1999,9 @@ projects.post(
 // capture "me" as a userId.
 //
 // Only a direct `project_members` row can be given up. Access that arrives
-// through the org, a team, or being the project's creator is not the
-// caller's to drop (AD-12 paths are additive), so the response reports
-// whether any access survived rather than pretending the project is gone.
+// through the org or a team is not the caller's to drop (AD-12 paths are
+// additive), so the response reports whether any access survived rather than
+// pretending the project is gone. Dropping the last Owner is refused.
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.delete("/:projectId/members/me", authMiddleware, async (c) => {
@@ -1986,6 +2022,13 @@ projects.delete("/:projectId/members/me", authMiddleware, async (c) => {
       },
       409,
     )
+  }
+
+  if (
+    Number(existing.role_level) >= 700 &&
+    (await removingDirectOwnerLeavesNone(c.env.AQUILLA_PG, projectId, user.id))
+  ) {
+    return c.json({ error: "last_owner", message: LAST_PROJECT_OWNER_MESSAGE }, 409)
   }
 
   await c.env.AQUILLA_PG.prepare(
@@ -2075,6 +2118,13 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
+  if (
+    targetCurrentLevel >= 700 &&
+    (await removingDirectOwnerLeavesNone(c.env.AQUILLA_PG, projectId, targetUserId))
+  ) {
+    return c.json({ error: "last_owner", message: LAST_PROJECT_OWNER_MESSAGE }, 409)
+  }
+
   // Presence identity for the DO socket match (its presence key is the
   // username). Full row so resolveProjectRole below can re-resolve.
   const targetUser = await c.env.AQUILLA_PG.prepare(
@@ -2103,8 +2153,8 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   // their own direct row resolved it above as the caller).
   forgetProjectRole(c.env, projectId, targetUserId)
 
-  // AQU-346: when NO grant path survives the delete (AD-12: org / group /
-  // creator paths are additive and unaffected by removing the direct row),
+  // AQU-346: when NO grant path survives the delete (AD-12: org / group
+  // paths are additive and unaffected by removing the direct row),
   // eject the removed user's live WS sessions + denylist their still-valid
   // sync tokens. Users who retain access via another path must NOT be
   // ejected. Best-effort — removal must not fail on it.

@@ -85,7 +85,9 @@ Full convention, how to register one, and the known string-level gaps:
 pnpm i
 pnpm dev          # tsx scripts/dev-stack.ts — full local stack (SPA + workers; agent-worker :8790)
 pnpm dev:vite     # just the vite dev server
-pnpm build        # tsc -b && vite build && scripts/check-brand-build.ts aquilla
+pnpm build        # pnpm typecheck && vite build && scripts/check-brand-build.ts aquilla
+pnpm typecheck    # tsc -b with a 6 GiB heap (set in the script). Use it instead of a bare
+                  #   `tsc -b`: the app project no longer fits Node's default ~4 GiB heap
 pnpm lint         # eslint . with an 8 GiB heap (NODE_OPTIONS in the script; AQU-2084)
 pnpm test         # vitest run — root suite EXCLUDES e2e/** and all worker packages
                   #   (auth-worker, sync-worker, agent-worker, worker, parity)

@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import JSZip from "jszip";
-import { mergeBibleHeadingStylesIntoStudyStylesXml } from "../headingStyleMerge";
+import {
+    mergeBibleHeadingStylesIntoStudyStylesXml,
+    retargetFootnoteCharacterFonts,
+    stampPortugueseHyphenationLanguage,
+} from "../headingStyleMerge";
 
 const studyStyles = `<?xml version="1.0"?>
 <idPkg:Styles>
@@ -86,6 +90,73 @@ describe("mergeBibleHeadingStylesIntoStudyStylesXml", () => {
         expect(s1).toContain('<AppliedFont type="string">Source Sans 3</AppliedFont>');
         expect(s1).toContain("CharacterStyle/#base.bd");
         expect(s1).toContain('FontStyle="Regular"');
+        expect(s1).toContain('BalanceRaggedLines="Off"');
+
+        const veeStudy = studyStyles.replace(
+            "</RootParagraphStyleGroup>",
+            '<ParagraphStyle Self="ParagraphStyle/title%3as1" Name="title:s1" BalanceRaggedLines="VeeShape"></ParagraphStyle></RootParagraphStyleGroup>'
+        );
+        const patched = mergeBibleHeadingStylesIntoStudyStylesXml(veeStudy, bibleStyles);
+        const existing = patched.match(
+            /<ParagraphStyle Self="ParagraphStyle\/title%3as1"[^>]*>/
+        )?.[0];
+        expect(existing).toContain('BalanceRaggedLines="Off"');
+    });
+
+    it("stamps Portuguese on a hyphenating English paragraph style", () => {
+        const sheet = [
+            '<ParagraphStyle Self="ParagraphStyle/notes%3af" AppliedLanguage="$ID/English: UK" Hyphenation="true"></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/text%3ap" AppliedLanguage="$ID/English: USA" Hyphenation="false"></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/text%3ap_pt" AppliedLanguage="$ID/Portuguese: Brazilian" Hyphenation="true"></ParagraphStyle>',
+        ].join("");
+        const stamped = stampPortugueseHyphenationLanguage(sheet);
+        expect(stamped).toContain(
+            'Self="ParagraphStyle/notes%3af" AppliedLanguage="$ID/Portuguese: Brazilian"'
+        );
+        expect(stamped).toContain('AppliedLanguage="$ID/English: USA"');
+        expect(stamped).toContain(
+            'Self="ParagraphStyle/text%3ap_pt" AppliedLanguage="$ID/Portuguese: Brazilian"'
+        );
+    });
+
+    it("stamps the English base when a descendant hyphenates through it", () => {
+        const sheet = [
+            '<ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]" AppliedLanguage="$ID/Portuguese: Brazilian" Hyphenation="true"></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/#base.text" AppliedLanguage="$ID/English: UK"><BasedOn type="string">$ID/[No paragraph style]</BasedOn></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/#base.note"><BasedOn type="object">ParagraphStyle/#base.text</BasedOn></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/notes%3af"><BasedOn type="object">ParagraphStyle/#base.note</BasedOn></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/text%3aq" Hyphenation="false"><BasedOn type="object">ParagraphStyle/#base.text</BasedOn></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/text%3aq1" Hyphenation="true"><BasedOn type="object">ParagraphStyle/text%3aq</BasedOn></ParagraphStyle>',
+            '<ParagraphStyle Self="ParagraphStyle/text%3ap" AppliedLanguage="$ID/English: USA" Hyphenation="false"></ParagraphStyle>',
+        ].join("");
+        const stamped = stampPortugueseHyphenationLanguage(sheet);
+        expect(stamped).toContain(
+            'Self="ParagraphStyle/#base.text" AppliedLanguage="$ID/Portuguese: Brazilian"'
+        );
+        expect(stamped).toContain('AppliedLanguage="$ID/English: USA"');
+        expect(stamped).not.toContain('Self="ParagraphStyle/notes%3af" AppliedLanguage');
+        expect(stamped).not.toContain('Self="ParagraphStyle/text%3aq1" AppliedLanguage');
+    });
+
+    it("points the footnote space and drop-cap call at the note fonts", () => {
+        const sheet = [
+            '<CharacterStyle Self="CharacterStyle/notes%3af" AppliedFont="Myriad Pro"></CharacterStyle>',
+            '<CharacterStyle Self="CharacterStyle/notes%3afr_sp" AppliedFont="Charis SIL"></CharacterStyle>',
+            '<CharacterStyle Self="CharacterStyle/notes%3af_call" AppliedFont="Karmina"></CharacterStyle>',
+            '<CharacterStyle Self="CharacterStyle/notes%3af_call_dc" AppliedFont="Source Sans 3"></CharacterStyle>',
+        ].join("");
+        const retargeted = retargetFootnoteCharacterFonts(sheet);
+        expect(retargeted).toContain(
+            'Self="CharacterStyle/notes%3afr_sp" AppliedFont="Myriad Pro"'
+        );
+        expect(retargeted).toContain(
+            'Self="CharacterStyle/notes%3af_call_dc" AppliedFont="Karmina"'
+        );
+        expect(retargeted).toContain(
+            'Self="CharacterStyle/notes%3af" AppliedFont="Myriad Pro"'
+        );
+        expect(retargeted).not.toContain("Charis SIL");
+        expect(retargeted).not.toContain("Source Sans 3");
     });
 
     it("does not rewrite a Study stylesheet that already has the heading styles", () => {

@@ -28,7 +28,9 @@ export const AGENT_ROLE = {
 
 export const AGENT_REQUIRED_ROLE: Record<string, number> = {
   "source.cell.create": AGENT_ROLE.PROJECT_LEAD,
-  "source.cell.commit": AGENT_ROLE.PROJECT_LEAD,
+  // AQU-2647: static floor only. The project's sourceTextFloor (default
+  // Maintainer) is enforced when the event is written.
+  "source.cell.commit": AGENT_ROLE.CONTRIBUTOR,
   "source.cell.delete": AGENT_ROLE.PROJECT_LEAD,
   "source.cell.reorder": AGENT_ROLE.PROJECT_LEAD,
   "target.cell.create": AGENT_ROLE.CONTRIBUTOR,

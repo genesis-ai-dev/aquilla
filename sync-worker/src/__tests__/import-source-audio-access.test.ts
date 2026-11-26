@@ -1,0 +1,248 @@
+// AQU-2682: an import that stores source audio is held to the same rule as the
+// source attach on the events route (coversEveryLanguage). The Import dialog's
+// media import finishes with POST /import { complete, attachments }, which
+// writes `cell.audio.attach` events with role 'source' straight to the
+// database. Before this, a Project Lead granted only Arabic could import a
+// recording under the lane wall and store it as the source every language
+// hears.
+import { describe, it, expect } from 'vitest'
+
+import { handleBulkImportRequest } from '../events/import-route'
+import { makeTestDb } from './helpers/pg-test-db'
+import { makeTestToken } from './helpers/auth'
+import { sign } from 'hono/jwt'
+import { TOOL_SESSION_AUDIENCE } from '../../../shared/tools/tool-session'
+
+const SECRET = 'import-source-access-secret'
+const P = 'proj-imp-access'
+const F = 'file-imp-access'
+const AR = 'cc33dd44'
+const ES = 'aa11bb22'
+
+interface Who { username: string; userId: number; role: number; scopes?: unknown; laneGrants?: unknown; src?: string }
+const LEAD: Who = { username: 'ravi', userId: 3, role: 500 }
+const LEAD_ALL: Who = { ...LEAD, laneGrants: [{ lane: AR, level: 500 }, { lane: ES, level: 500 }] }
+const LEAD_AR: Who = { ...LEAD, laneGrants: [{ lane: AR, level: 500 }] }
+const MAINTAINER_AR: Who = { username: 'max', userId: 4, role: 600, laneGrants: [{ lane: AR, level: 600 }] }
+const LEAD_SCOPED: Who = { ...LEAD, scopes: [{ kind: 'lane', value: 'es' }] }
+
+const env = (db: AquillaDb, wall: boolean) =>
+  ({ AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, ...(wall ? { LANE_READ_WALL: '1' } : {}) }) as never
+
+function post(token: string, body: Record<string, unknown>) {
+  return new Request('https://worker/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectId: P, fileId: F, ...body }),
+  })
+}
+
+/** Stage a media file the way the Import dialog does, then finish it. */
+async function importMedia(who: Who, wall: boolean, role?: 'source' | 'dub') {
+  const h = await makeTestDb()
+  await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
+    ('${AR}', '${P}', 'target', 'Arabic', 'ar', ''),
+    ('${ES}', '${P}', 'target', 'Spanish', 'es', 'es')`)
+  const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...who } as never)
+  const first = await handleBulkImportRequest(post(token, {
+    file: { id: 'file-evt-1', name: 'sermon.wav', fileType: 'audio' },
+    stageEventId: 'file-stage-1',
+    cells: [{ id: 'src-evt-1', cellId: 'cell-1', value: 'sermon.wav', medium: 'media' }],
+  }), env(h.db, wall))
+  expect(first?.status).toBe(200)
+  await h.db.prepare(
+    `INSERT INTO artifacts (
+       id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+       size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+     ) VALUES (?::uuid, ?, '3', NULL, 'sermon.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'sermon-1.wav', '{}'::jsonb)`,
+  ).bind('01900000-0000-7000-8000-000000000201', P, 'b'.repeat(64), `projects/${P}/files/${F}/audio/sermon-1.wav`, F).run()
+  const done = await handleBulkImportRequest(post(token, {
+    cells: [],
+    complete: true,
+    publishEventId: 'file-publish-1',
+    attachments: [{
+      id: 'attach-1', cellId: 'cell-1', audioId: 'sermon-1.wav', url: 'frontier-audio://sermon-1.wav',
+      slot: 'recording', mimeType: 'audio/wav', durationMs: 1000,
+      ...(role ? { role } : {}),
+    }],
+  }), env(h.db, wall))
+  const events = await h.rows<{ id: string }>('events')
+  return {
+    status: done!.status,
+    text: await done!.text(),
+    audioRows: (await h.rows('cell_audio')).length,
+    attachEvents: events.filter((e) => e.id === 'attach-1').length,
+    publishEvents: events.filter((e) => e.id === 'file-publish-1').length,
+    staged: (await h.rows<{ deleted_at: unknown }>('files'))[0]?.deleted_at != null,
+  }
+}
+
+describe('POST /import: source audio needs every language', () => {
+  it('refuses a Project Lead granted only Arabic, under the wall, and writes nothing', async () => {
+    const r = await importMedia(LEAD_AR, true)
+    expect(r.status).toBe(403)
+    expect(r.text).toMatch(/every language/)
+    expect(r.audioRows).toBe(0)
+    expect(r.attachEvents).toBe(0)
+    // The file stays staged (hidden); the reveal did not run either.
+    expect(r.publishEvents).toBe(0)
+    expect(r.staged).toBe(true)
+  })
+
+  it('refuses an attachment with no role (the default is source)', async () => {
+    expect((await importMedia(LEAD_AR, true, undefined)).status).toBe(403)
+    expect((await importMedia(LEAD_AR, true, 'source')).status).toBe(403)
+  })
+
+  it.each([
+    ['a Project Lead with every language, under the wall', LEAD_ALL, true],
+    ['a Maintainer with one grant, under the wall', MAINTAINER_AR, true],
+    ['an unscoped Project Lead, wall off', LEAD, false],
+    ['a platform token below Maintainer, under the wall', { ...LEAD, src: 'platform' }, true],
+  ] as const)('accepts %s', async (_name, who, wall) => {
+    const r = await importMedia(who, wall)
+    expect(r.status).toBe(200)
+    expect(r.audioRows).toBe(1)
+    expect(r.staged).toBe(false)
+  })
+
+  it('refuses a Project Lead with a language scope, wall off', async () => {
+    const r = await importMedia(LEAD_SCOPED, false)
+    expect(r.status).toBe(403)
+    expect(r.audioRows).toBe(0)
+  })
+
+  it('refuses a token limited to other files, as the events route refuses its attach', async () => {
+    const r = await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: 'file-other' }] }, true)
+    expect(r.status).toBe(403)
+    expect(r.text).toMatch(/not in scope/)
+    expect(r.audioRows).toBe(0)
+    expect(r.staged).toBe(true)
+    // A dub attachment is held to the file limit too, as on the events route.
+    expect((await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: 'file-other' }] }, true, 'dub')).status).toBe(403)
+    // Limited to this file: accepted.
+    expect((await importMedia({ ...LEAD_ALL, scopes: [{ kind: 'file', value: F }] }, true)).status).toBe(200)
+  })
+
+  it('leaves a text-only finish alone for a lead limited to Arabic', async () => {
+    const h = await makeTestDb()
+    await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
+      ('${AR}', '${P}', 'target', 'Arabic', 'ar', '')`)
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...LEAD_AR, laneGrants: [] } as never)
+    const res = await handleBulkImportRequest(post(token, { cells: [], complete: true }), env(h.db, true))
+    expect(res?.status).toBe(200)
+  })
+})
+
+// Review (Nov 21): every attachment is held to the events route's audio rules
+// (audio-event-rules.ts), whatever role it names. An attachment naming role
+// 'dub' with the source clip's audio id upserts that row (it keeps role
+// 'source' and takes the new trims), so it is the same change of the source
+// clip the events route allows only a Maintainer.
+describe('POST /import: attachments meet the events route audio rules', () => {
+  const LEAD_ES: Who = { ...LEAD, laneGrants: [{ lane: ES, level: 500 }] }
+  const MAINTAINER: Who = { username: 'max', userId: 4, role: 600 }
+
+  async function finish(h: Awaited<ReturnType<typeof makeTestDb>>, who: Who, id: string, extra: Record<string, unknown>) {
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...who } as never)
+    const res = await handleBulkImportRequest(post(token, {
+      cells: [], complete: true,
+      attachments: [{
+        id, cellId: 'cell-1', audioId: 'sermon-1.wav', url: 'frontier-audio://sermon-1.wav',
+        slot: 'recording', mimeType: 'audio/wav', durationMs: 1000, ...extra,
+      }],
+    }), env(h.db, true))
+    return { status: res!.status, text: await res!.text() }
+  }
+
+  /** A published media import whose source clip has a trim window. */
+  async function importedSource() {
+    const h = await makeTestDb()
+    await h.pg.exec(`INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag) VALUES
+      ('${AR}', '${P}', 'target', 'Arabic', 'ar', ''),
+      ('${ES}', '${P}', 'target', 'Spanish', 'es', 'es')`)
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, ...MAINTAINER } as never)
+    expect((await handleBulkImportRequest(post(token, {
+      file: { id: 'file-evt-1', name: 'sermon.wav', fileType: 'audio' },
+      cells: [{ id: 'src-evt-1', cellId: 'cell-1', value: 'sermon.wav', medium: 'media' }],
+    }), env(h.db, true)))?.status).toBe(200)
+    await h.db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '3', NULL, 'sermon.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'sermon-1.wav', '{}'::jsonb)`,
+    ).bind('01900000-0000-7000-8000-000000000201', P, 'b'.repeat(64), `projects/${P}/files/${F}/audio/sermon-1.wav`, F).run()
+    expect((await finish(h, MAINTAINER, 'attach-0', { role: 'source', trimStartMs: 0, trimEndMs: 1000 })).status).toBe(200)
+    const trims = async () => (await h.rows<{ role: string; trim_start_ms: number; trim_end_ms: number }>('cell_audio'))
+      .map((r) => [r.role, Number(r.trim_start_ms), Number(r.trim_end_ms)])
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    return { h, trims }
+  }
+
+  it("refuses a role 'dub' re-trim of the source clip by a Project Lead granted only Arabic", async () => {
+    const { h, trims } = await importedSource()
+    const r = await finish(h, LEAD_AR, 'attach-dub', { role: 'dub', trimStartMs: 200, trimEndMs: 800 })
+    expect(r.status).toBe(403)
+    expect(r.text).toMatch(/requires maintainer/)
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    expect((await h.rows<{ id: string }>('events')).some((e) => e.id === 'attach-dub')).toBe(false)
+  })
+
+  it('refuses a source re-trim by a Project Lead with every language (Maintainer only), and lets a Maintainer do it', async () => {
+    const { h, trims } = await importedSource()
+    for (const role of ['source', 'dub', undefined] as const) {
+      const r = await finish(h, LEAD_ALL, `attach-${role}`, { ...(role ? { role } : {}), trimStartMs: 200, trimEndMs: 800 })
+      expect(r.status, String(role)).toBe(403)
+    }
+    expect(await trims()).toEqual([['source', 0, 1000]])
+    expect((await finish(h, MAINTAINER, 'attach-m', { role: 'dub', trimStartMs: 200, trimEndMs: 800 })).status).toBe(200)
+    expect(await trims()).toEqual([['source', 200, 800]])
+  })
+
+  it("checks a dub attachment's language: refused outside the Lead's grants, accepted in them", async () => {
+    // The dub names no language, so it lands in the lane tagged '' (Arabic here).
+    const spanishOnly = await importMedia(LEAD_ES, true, 'dub')
+    expect(spanishOnly.status).toBe(403)
+    expect(spanishOnly.audioRows).toBe(0)
+    expect(spanishOnly.staged).toBe(true)
+    const own = await importMedia(LEAD_AR, true, 'dub')
+    expect(own.status).toBe(200)
+    expect(own.audioRows).toBe(1)
+    expect(own.staged).toBe(false)
+  })
+})
+
+// Review (Nov 21): a Contributor may finish an import into an extension data
+// file through a verified extension, but a source attachment needs Project
+// Lead, as `role: 'source'` does on the events route.
+describe('POST /import: a source attachment needs Project Lead', () => {
+  it('refuses a Contributor with a verified tool session, and lets their dub through to the next check', async () => {
+    const h = await makeTestDb({ files: [{ id: F, project_id: P, role: 'extension-data' }] })
+    const now = Math.floor(Date.now() / 1000)
+    const session = await sign(
+      { aud: TOOL_SESSION_AUDIENCE, projectId: P, toolId: 'tool-1', version: 2, codeHash: 'c'.repeat(64), userId: 7, username: 'cora', iat: now, exp: now + 600 },
+      SECRET, 'HS256',
+    )
+    const toolOrigin = { origin: 'tool', toolId: 'tool-1', version: 2, codeHash: 'c'.repeat(64), session }
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F, username: 'cora', userId: 7, role: 400 } as never)
+    const send = (role?: 'source' | 'dub') => handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Aquilla-Extension-Data': '1' },
+      body: JSON.stringify({
+        projectId: P, fileId: F, cells: [], complete: true, toolOrigin,
+        attachments: [{
+          id: `attach-${role}`, cellId: 'cell-1', audioId: 'clip.wav', url: 'frontier-audio://clip.wav',
+          slot: 'recording', ...(role ? { role } : {}),
+        }],
+      }),
+    }), env(h.db, false))
+    for (const role of ['source', undefined] as const) {
+      const res = await send(role)
+      expect(res?.status, String(role)).toBe(403)
+      expect(await res!.text()).toMatch(/project lead/)
+    }
+    // A dub is not refused on role; it meets the cell and artifact checks.
+    expect((await send('dub'))?.status).toBe(409)
+    expect(await h.rows('cell_audio')).toHaveLength(0)
+  })
+})

@@ -41,7 +41,7 @@ async function makeToken(overrides: Record<string, unknown> = {}): Promise<strin
   return makeTestToken(SECRET, {
     projectId: UPSTREAM,
     fileId: "file-x",
-    role: 500,
+    role: 600,
     ...overrides,
   } as never)
 }
@@ -129,6 +129,11 @@ function makeProjectSyncEnv(db: AquillaDb, recipientsOf?: (downstream: string) =
 
 async function seedUpstreamFile(t: TestDb): Promise<void> {
   await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Upstream', 1)`, [UPSTREAM])
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await t.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1)`,
+    [UPSTREAM],
+  )
 }
 
 async function seedDownstream(
@@ -141,6 +146,10 @@ async function seedDownstream(
     `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode, source_link_consumes)
      VALUES ($1, $2, 1, $3, $4, $5)`,
     [id, id, UPSTREAM, mode, consumes],
+  )
+  await t.pg.query(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1)`,
+    [id],
   )
 }
 

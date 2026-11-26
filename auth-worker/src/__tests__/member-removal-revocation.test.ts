@@ -33,6 +33,10 @@ async function seedProjectWithMember(): Promise<void> {
   await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj-r', 'Revoke', NULL, 1)",
   ).run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-r', 1, 700, 1)",
+  ).run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-r', 2, 400, 1)",
   ).run()
@@ -343,7 +347,11 @@ describe("AQU-2321 — team and org removal notify the sync-worker for each proj
     )
     expect(res.status).toBe(200)
     await new Promise((r) => setTimeout(r, 0))
-    expect(notified(fetchSpy)).toEqual(["t-a"])
+    // AQU-2357: an org removal takes the person's direct grants in that org
+    // too, so the t-b row that survives a team removal (above) does not survive
+    // this one. t-a is lost through the team, t-b through the direct grant;
+    // each project gets exactly one notice.
+    expect(notified(fetchSpy)).toEqual(["t-a", "t-b"])
     const call = fetchSpy.mock.calls.find((c) => String(c[0]).includes("/admin/projects/t-a/member-removed"))
     expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ userId: 2, username: "bob" })
   })

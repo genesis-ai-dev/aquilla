@@ -107,9 +107,12 @@ describe("AQU-2322 lane grants on the Places and People lenses", () => {
 
     const quechua = place(body, "lane", QUECHUA)
     expect(quechua?.directGrantees).toEqual([])
-    // Project-level people who open Quechua under the wall: the creator and direct_above (Maintainer).
+    // Project-level people who open Quechua under the wall: direct_above (Maintainer).
+    // The creator is not one of them: created_by adds no role (AQU-2357), so the
+    // org Owner reaches the lane through the organization.
     const viaProject = quechua?.inherited.filter((r) => r.from.type === "project").map((r) => r.displayName).sort()
-    expect(viaProject).toEqual(["direct_above", "owner"])
+    expect(viaProject).toEqual(["direct_above"])
+    expect(quechua?.inherited.find((r) => r.displayName === "owner")?.from.type).toBe("org")
     expect(quechua?.inherited.some((r) => r.userId === LUCIA)).toBe(false)
 
     const alpha = place(body, "project", "p1")

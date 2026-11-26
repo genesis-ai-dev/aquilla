@@ -101,7 +101,7 @@ function isHeadParagraphStyle(style: string): boolean {
  * Russian SNG uses `head:ms1` between the superscription and the first poetry
  * line; treating it as a retained section heading keeps verse 1 contiguous.
  */
-function isSectionHeadingParagraphStyle(style: string): boolean {
+export function isSectionHeadingParagraphStyle(style: string): boolean {
     const s = style.replace(/^ParagraphStyle\//, "");
     return (
         /(?:^|\/)head%3a(?:s|r|ms)/.test(s) ||
@@ -118,13 +118,41 @@ export function isSpeakerLabelParagraphStyle(style: string): boolean {
     return /(?:^|\/)head%3asp(?:$|_|[a-z])/.test(s) || /(?:^|\/)head:sp(?:$|_|[a-z])/.test(s);
 }
 
-function isBlankSpacerParagraphStyle(style: string): boolean {
+export function isBlankSpacerParagraphStyle(style: string): boolean {
     if (isTextBlockParagraphStyle(style)) return false;
     const s = style.replace(/^ParagraphStyle\//, "");
     return (
         /(?:^|\/)b(?:b)?_head/.test(s) ||
         /(?:^|\/)b(?:_$|\b)/.test(s)
     );
+}
+
+/**
+ * A section heading that opens a verse slice belongs in front of that slice,
+ * as its own paragraph. Blank spacers between the heading and the verse are
+ * dropped so they are not flattened into the verse paragraph.
+ */
+export function splitLeadingSectionHeadings(xml: string): {
+    headings: string;
+    body: string;
+} {
+    if (!xml) return { headings: "", body: "" };
+    let consumed = 0;
+    let headings = "";
+    for (const para of getParagraphIndex(xml)) {
+        const style = para.appliedParagraphStyle;
+        if (isSectionHeadingParagraphStyle(style)) {
+            headings += xml.slice(para.fullStart, para.fullEnd);
+            consumed = para.fullEnd;
+            continue;
+        }
+        if (headings && isBlankSpacerParagraphStyle(style)) {
+            consumed = para.fullEnd;
+            continue;
+        }
+        break;
+    }
+    return { headings, body: xml.slice(consumed) };
 }
 
 function isMidSliceParagraph(style: string): boolean {
@@ -879,7 +907,12 @@ export function extractSliceByVerseRange(
 
         if (touches) {
             if (sliceStart < 0) {
-                if (pendingRunStart >= 0 && pendingHasHeading) {
+                // A heading introduces the paragraph's first verse. When this
+                // slice starts later in that same paragraph (Deuteronomy 14:28
+                // shares its paragraph with 14:22), taking the heading prints
+                // it again after the study note.
+                const startsBeforeRange = verseNums.some((v) => v < firstVerse);
+                if (pendingRunStart >= 0 && pendingHasHeading && !startsBeforeRange) {
                     sliceStart = pendingRunStart;
                 } else {
                     sliceStart = para.fullStart;
@@ -959,6 +992,40 @@ function isDecorativeChapterDigitStyle(style: string): boolean {
         /(?:^|\/)cv%3adc(?:$|\b)/.test(style) ||
         /(?:^|\/)cv:dc(?:$|\b)/.test(style)
     );
+}
+
+/**
+ * Drop-cap digit, the space after it, and the footnote hung on that digit.
+ * `cv:dc_sp_fn` is the space Portuguese puts between the footnote and the
+ * closing line (Exodus 7:25 / 8:1).
+ */
+function isLeadingDropCapDecorationStyle(style: string): boolean {
+    return (
+        /(?:^|\/)cv(?:%3a|:)dc(?:_sp(?:_fn)?)?$/.test(style) ||
+        /(?:^|\/)notes(?:%3a|:)f_call(?:_dc)?$/.test(style)
+    );
+}
+
+/**
+ * End of a drop-cap digit (and its footnote) sitting at the start of a
+ * paragraph, before the previous chapter's closing line. Returns `bodyStart`
+ * when the paragraph does not open with that digit.
+ */
+function leadingDropCapDecorationEnd(
+    storyXml: string,
+    bodyStart: number,
+    bodyEnd: number
+): number {
+    let end = bodyStart;
+    let sawDigit = false;
+    for (const csr of iterateCsrAbs(storyXml, bodyStart, bodyEnd)) {
+        if (!isLeadingDropCapDecorationStyle(csr.appliedCharacterStyle)) break;
+        if (isDecorativeChapterDigitStyle(csr.appliedCharacterStyle)) {
+            sawDigit = true;
+        }
+        end = csr.absFullEnd;
+    }
+    return sawDigit ? end : bodyStart;
 }
 
 /**
@@ -1098,6 +1165,31 @@ export function rewriteRemappedChapterMarkersInStory(
  * Index every contiguous verse text span per (book, chapter). Study files may
  * yield multiple spans when intro note blocks split the chapter.
  */
+/**
+ * Where an opening verse's marker begins, when that marker is written before
+ * the `meta:c` that introduces the verse. Returns `markerPos` when the text
+ * before the chapter marker belongs only to the closing chapter.
+ */
+function openingVerseLeadStart(
+    storyXml: string,
+    from: number,
+    markerPos: number,
+    paraEnd: number
+): number {
+    const after = new Set(getVerseNumbersInRegion(storyXml, markerPos, paraEnd));
+    if (after.size === 0) return markerPos;
+    let cut = markerPos;
+    for (const csr of iterateCsrAbs(storyXml, from, markerPos)) {
+        if (!isAnyVerseMarkerStyle(csr.appliedCharacterStyle)) continue;
+        const nums = parseVerseMarkerNumbers(
+            collectContentText(storyXml, csr.absBodyStart, csr.absBodyEnd)
+        );
+        if (!nums.some((n) => after.has(n))) continue;
+        if (csr.absFullStart < cut) cut = csr.absFullStart;
+    }
+    return cut;
+}
+
 export function buildChapterSpanIndex(
     storyXml: string,
     options?: BuildChapterBlockOptions
@@ -1202,7 +1294,17 @@ export function buildChapterSpanIndex(
         fullStart: number,
         fullEnd: number,
         verseNums: number[],
-        clippedBody?: { bodyFrom: number; bodyTo: number; paraFullStart: number; paraBodyStart: number; paraBodyEnd: number; paraFullEnd: number }
+        clippedBody?: {
+            bodyFrom: number;
+            bodyTo: number;
+            paraFullStart: number;
+            paraBodyStart: number;
+            paraBodyEnd: number;
+            paraFullEnd: number;
+            /** Drop-cap digit and footnote, prepended when they sit before the opening verse. */
+            bodyPrefix?: string;
+        },
+        leadingXml?: string
     ) => {
         if (!book || !chapter || verseNums.length === 0) return;
         const key = chapterBlockKey(book, chapter);
@@ -1213,12 +1315,18 @@ export function buildChapterSpanIndex(
                 clippedBody.paraFullStart,
                 clippedBody.paraBodyStart
             );
-            const body = storyXml.slice(clippedBody.bodyFrom, clippedBody.bodyTo);
+            const body =
+                (clippedBody.bodyPrefix ?? "") +
+                storyXml.slice(clippedBody.bodyFrom, clippedBody.bodyTo);
             const closeTag = storyXml.slice(
                 clippedBody.paraBodyEnd,
                 clippedBody.paraFullEnd
             );
             blockXml = `${openTag}${body}${closeTag}`;
+            // The clipped body is only the drop-cap paragraph. A heading that
+            // opens this chapter sits before that paragraph and has to be
+            // prepended; the unclipped slice already contains it.
+            if (leadingXml) blockXml = leadingXml + blockXml;
         }
         list.push({
             book,
@@ -1232,11 +1340,47 @@ export function buildChapterSpanIndex(
         index.set(key, list);
     };
 
-    for (const para of getParagraphIndex(storyXml)) {
+    const storyParagraphs = getParagraphIndex(storyXml);
+    /** Headings that sit immediately before the next chapter's drop cap. */
+    const pendingOpeningHeadings: Array<(typeof storyParagraphs)[number]> = [];
+
+    const nextParagraphOpensNewChapter = (fromIndex: number): boolean => {
+        for (let j = fromIndex + 1; j < storyParagraphs.length; j++) {
+            const next = storyParagraphs[j];
+            const nextStyle = next.appliedParagraphStyle;
+            if (
+                isRetainedHeadingParagraphStyle(nextStyle, options) ||
+                isBlankSpacerParagraphStyle(nextStyle)
+            ) {
+                continue;
+            }
+            const nextChapter = readChapterTransitionFromParagraph(
+                storyXml,
+                nextStyle,
+                next.bodyStart,
+                next.bodyEnd,
+                currentBook
+            );
+            return Boolean(nextChapter && nextChapter !== currentChapter);
+        }
+        return false;
+    };
+
+    const takePendingOpeningHeading = (): { xml: string; start: number } | null => {
+        if (pendingOpeningHeadings.length === 0) return null;
+        const start = pendingOpeningHeadings[0].fullStart;
+        const end = pendingOpeningHeadings[pendingOpeningHeadings.length - 1].fullEnd;
+        pendingOpeningHeadings.length = 0;
+        return { xml: storyXml.slice(start, end), start };
+    };
+
+    for (let paraIndex = 0; paraIndex < storyParagraphs.length; paraIndex++) {
+        const para = storyParagraphs[paraIndex];
         const style = para.appliedParagraphStyle;
 
         if (isBookMarkerParagraphStyle(style)) {
             flushBlock();
+            pendingOpeningHeadings.length = 0;
             reopenAfterBoundary = false;
             let bookRaw = "";
             for (const c of iterateContentAbs(storyXml, para.bodyStart, para.bodyEnd)) {
@@ -1293,6 +1437,17 @@ export function buildChapterSpanIndex(
                 // prayer's heading in `head:d*`. It also carries the opening
                 // chapter marker, so the block has to keep it either way.
                 extendBlock(para.fullStart, para.fullEnd);
+                continue;
+            }
+            // A section title immediately before a new chapter's drop cap
+            // belongs to that chapter. The chapter number is only visible on
+            // the following paragraph, so extending it now would file it on
+            // the chapter that is still open and the slice would clip it off.
+            if (
+                isRetainedHeadingParagraphStyle(style, options) &&
+                nextParagraphOpensNewChapter(paraIndex)
+            ) {
+                pendingOpeningHeadings.push(para);
                 continue;
             }
             // A mid-chapter section title (`head:s*`/`head:r*`) or speaker label
@@ -1353,6 +1508,11 @@ export function buildChapterSpanIndex(
         );
 
         if (!hasMidParagraphTransition) {
+            const pending = takePendingOpeningHeading();
+            if (pending && blockStart < 0) {
+                blockStart = pending.start;
+                blockEnd = pending.start + pending.xml.length;
+            }
             extendBlock(para.fullStart, para.fullEnd, reopenAfterBoundary);
             reopenAfterBoundary = false;
             continue;
@@ -1365,6 +1525,50 @@ export function buildChapterSpanIndex(
         flushBlock();
 
         const clip = Boolean(options?.clipChapterBoundarySpans);
+        // Exodus 8's drop cap, and the footnote on it, sit at the start of the
+        // paragraph that finishes 7:25 ("Senhor feriu o Nilo"). The digit
+        // belongs to chapter 8; the closing line joins the verse it continues.
+        const decorationEnd = clip
+            ? leadingDropCapDecorationEnd(storyXml, para.bodyStart, para.bodyEnd)
+            : para.bodyStart;
+        let decorationXml =
+            decorationEnd > para.bodyStart
+                ? storyXml.slice(para.bodyStart, decorationEnd)
+                : "";
+        let decorationChapter = "";
+        const takeDecoration = (chapter: string): string => {
+            if (!decorationXml || chapter !== decorationChapter) return "";
+            const xml = decorationXml;
+            decorationXml = "";
+            return xml;
+        };
+        /**
+         * The closing line is the tail of the previous paragraph (Exodus 7:25
+         * is `p_fj` "…depois que o" plus "Senhor feriu o Nilo" in the drop cap).
+         * A separate drop-cap paragraph for that tail would keep chapter 8 from
+         * leading with its digit.
+         */
+        const foldClosingProse = (chapter: string, from: number, to: number): boolean => {
+            if (to <= from) return false;
+            const list = index.get(chapterBlockKey(currentBook, chapter));
+            const last = list?.[list.length - 1];
+            if (!last || last.absEnd > para.fullStart) return false;
+            if (storyXml.slice(last.absEnd, para.fullStart).trim() !== "") return false;
+            const styles = [
+                ...last.blockXml.matchAll(/AppliedParagraphStyle="([^"]+)"/g),
+            ];
+            const lastStyle = styles[styles.length - 1]?.[1] ?? "";
+            if (!isTextBlockParagraphStyle(lastStyle)) return false;
+            if (/text(?:%3a|:)(?:lh_dc|p_dc|li\d*_dc)/.test(lastStyle)) return false;
+            const closeAt = last.blockXml.lastIndexOf("</ParagraphStyleRange>");
+            if (closeAt < 0) return false;
+            last.blockXml =
+                last.blockXml.slice(0, closeAt) +
+                storyXml.slice(from, to) +
+                last.blockXml.slice(closeAt);
+            return true;
+        };
+
         let segBodyStart = para.bodyStart;
         let segChapter = currentChapter;
         for (const marker of markers) {
@@ -1386,44 +1590,70 @@ export function buildChapterSpanIndex(
                 marker.absPos,
                 para.bodyEnd
             );
-            pushParagraphSpan(
-                currentBook,
-                segChapter,
-                para.fullStart,
-                para.fullEnd,
-                closingVerses,
-                clip
-                    ? {
-                          bodyFrom: segBodyStart,
-                          bodyTo: marker.absPos,
-                          paraFullStart: para.fullStart,
-                          paraBodyStart: para.bodyStart,
-                          paraBodyEnd: para.bodyEnd,
-                          paraFullEnd: para.fullEnd,
-                      }
-                    : undefined
+            // The opening verse's cv:v often sits before its meta:c (EXO 8:1
+            // inside the 7:25 drop-cap paragraph). End the closing clip before
+            // that lead-in so verse 1 is not glued onto verse 25.
+            const leadStart = openingVerseLeadStart(
+                storyXml,
+                segBodyStart,
+                marker.absPos,
+                para.bodyEnd
             );
+            if (!decorationChapter && decorationXml && decorationEnd <= leadStart) {
+                decorationChapter = marker.chapter;
+            }
+            const closingFrom =
+                decorationEnd > segBodyStart && decorationEnd < leadStart
+                    ? decorationEnd
+                    : segBodyStart;
+            const folded =
+                clip &&
+                closingFrom > segBodyStart &&
+                foldClosingProse(segChapter, closingFrom, leadStart);
+            if (!folded) {
+                pushParagraphSpan(
+                    currentBook,
+                    segChapter,
+                    para.fullStart,
+                    para.fullEnd,
+                    closingVerses,
+                    clip
+                        ? {
+                              bodyFrom: closingFrom,
+                              bodyTo: leadStart,
+                              bodyPrefix: takeDecoration(segChapter),
+                              paraFullStart: para.fullStart,
+                              paraBodyStart: para.bodyStart,
+                              paraBodyEnd: para.bodyEnd,
+                              paraFullEnd: para.fullEnd,
+                          }
+                        : undefined
+                );
+            }
             segChapter = marker.chapter;
-            segBodyStart = marker.absPos;
+            segBodyStart = leadStart;
             currentChapter = marker.chapter;
         }
         const openingVerses = verseNumsInRange(segBodyStart, para.bodyEnd);
+        const openingHead = takePendingOpeningHeading();
         pushParagraphSpan(
             currentBook,
             segChapter,
-            para.fullStart,
+            openingHead?.start ?? para.fullStart,
             para.fullEnd,
             openingVerses,
             clip
                 ? {
                       bodyFrom: segBodyStart,
                       bodyTo: para.bodyEnd,
+                      bodyPrefix: takeDecoration(segChapter),
                       paraFullStart: para.fullStart,
                       paraBodyStart: para.bodyStart,
                       paraBodyEnd: para.bodyEnd,
                       paraFullEnd: para.fullEnd,
                   }
-                : undefined
+                : undefined,
+            openingHead?.xml
         );
         reopenAfterBoundary = clip;
     }

@@ -305,13 +305,13 @@ describe("source.cell.visibility.set contract", () => {
     expect(isChainMutatingKind("source.cell.visibility.set")).toBe(false)
   })
 
-  it("floors at PROJECT_LEAD, with source.cell.commit and not with the create/delete trio", () => {
-    // Hiding takes a cell out of translation and out of every export, in every
-    // lane, for everyone — a decision about what the file contains. The
-    // create/delete/reorder trio sits at COMMENTER because re-import, DCS repair
-    // and diarization all emit those through a user's own outbox; nothing emits
-    // this but a person choosing it.
-    expect(REQUIRED_ROLE["source.cell.visibility.set"]).toBe(ROLE.PROJECT_LEAD)
+  it("shares source.cell.commit's static floor, above the create/delete trio", () => {
+    // AQU-2647: hiding and editing source text share sourceTextFloor. The
+    // static floor is Contributor, the lowest that setting can admit. The
+    // tier (default Maintainer) is enforced in authorize.ts. The
+    // create/delete/reorder trio stays at Commenter because re-import, DCS
+    // repair and diarization emit those through a user's own outbox.
+    expect(REQUIRED_ROLE["source.cell.visibility.set"]).toBe(ROLE.CONTRIBUTOR)
     expect(REQUIRED_ROLE["source.cell.visibility.set"]).toBe(REQUIRED_ROLE["source.cell.commit"])
     expect(REQUIRED_ROLE["source.cell.visibility.set"]).toBeGreaterThan(
       REQUIRED_ROLE["source.cell.delete"],

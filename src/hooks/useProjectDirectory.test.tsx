@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { clearPortfolioSeeds } from "@/lib/frontier/portfolio-seed"
 import { useProjectDirectory } from "./useProjectDirectory"
 
 const getPortfolioPage = vi.fn()
@@ -14,6 +15,7 @@ vi.mock("@/lib/frontier/portfolio", async (importOriginal) => {
 })
 
 beforeEach(() => {
+  clearPortfolioSeeds()
   vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })))
   getPortfolioPage.mockReset()
   getPortfoliosPage.mockReset()
@@ -39,6 +41,22 @@ describe("useProjectDirectory", () => {
     expect(getPortfolioPage).not.toHaveBeenCalled()
     rerender({ jwt: "jwt", enabled: true, orgIds: [1] })
     await waitFor(() => expect(getPortfolioPage).toHaveBeenCalledTimes(1))
+  })
+
+  it("paints the prior first page on return while revalidating, then replaces it", async () => {
+    const open = () => renderHook(() => useProjectDirectory({ jwt: "jwt", enabled: true, orgIds: [1], query: "" }))
+    const page = { projects: [{ id: "old" }], nextCursor: "old-cursor" }
+    getPortfolioPage.mockResolvedValueOnce(page)
+    const first = open()
+    await waitFor(() => expect(first.result.current.hasMore).toBe(true))
+    first.unmount()
+    let finish!: (page: unknown) => void
+    getPortfolioPage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const back = open()
+    expect(back.result.current).toMatchObject({ projects: page.projects, loading: false, hasMore: false })
+    expect(getPortfolioPage.mock.lastCall?.[2].cached).toBe(page)
+    await act(async () => finish({ projects: [{ id: "new" }], nextCursor: null }))
+    expect(back.result.current.projects).toEqual([{ id: "new" }])
   })
 
   it("discards a late page from the previous account", async () => {

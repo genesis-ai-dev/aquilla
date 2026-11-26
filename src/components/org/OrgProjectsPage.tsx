@@ -206,11 +206,9 @@ export function OrgProjectsPage() {
 
   const isPageLoading =
     sessionLoading ||
-    orgLoading ||
-    accessibleProjectsLoading ||
     (isGuestOrg
-      ? false
-      : directory.loading && directory.projects.length === 0)
+      ? orgLoading || accessibleProjectsLoading
+      : (orgLoading || directory.loading || accessibleProjectsLoading) && directory.projects.length === 0)
   const memberProjects = directory.projects.map((project) => ({
     ...project,
     orgId: project.orgId ?? activeOrgId ?? undefined,

@@ -59,6 +59,10 @@ export function rememberDirectoryPage(jwt: string, orgKey: string, page: Portfol
   rememberPortfolioRows(jwt, page.projects)
 }
 
+export function forgetDirectoryPage(jwt: string, orgKey: string): void {
+  if (scopeJwt === jwt) directoryPages.delete(orgKey)
+}
+
 export function readDirectoryPageSeed(jwt: string | null, orgKey: string): PortfolioDirectoryPage | null {
   if (!jwt || scopeJwt !== jwt) return null
   return directoryPages.get(orgKey) ?? null

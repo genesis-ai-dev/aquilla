@@ -9,7 +9,7 @@ import {
   type PortfolioProject,
   type PortfolioDirectoryPage,
 } from "@/lib/frontier/portfolio"
-import { readDirectoryPageSeed, rememberDirectoryPage } from "@/lib/frontier/portfolio-seed"
+import { forgetDirectoryPage, readDirectoryPageSeed, rememberDirectoryPage } from "@/lib/frontier/portfolio-seed"
 
 export const PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS = 200
 
@@ -86,12 +86,19 @@ export function useProjectDirectory(opts: {
     setError(null)
     setLoadingMore(false)
     loadingMoreRef.current = false
+    const cached = seedKey ? readDirectoryPageSeed(jwt, orgKey) ?? undefined : undefined
+    if (cached) {
+      setProjects(cached.projects)
+      // Resume pagination once the server confirms the current page and cursor.
+      setNextCursor(null)
+      setSettledKey(fetchKey)
+    }
     void (async () => {
       try {
         const page = await fetchDirectoryPage(jwt, scopedIds, {
           q: debouncedQuery,
           validate: Boolean(seedKey),
-          cached: seedKey ? readDirectoryPageSeed(jwt, orgKey) ?? undefined : undefined,
+          cached,
           signal: controller.signal,
         })
         if (requestIdRef.current !== requestId) return
@@ -102,6 +109,7 @@ export function useProjectDirectory(opts: {
       } catch (e) {
         if (controller.signal.aborted) return
         if (requestIdRef.current !== requestId) return
+        if (seedKey) forgetDirectoryPage(jwt, orgKey)
         setProjects([])
         setNextCursor(null)
         setError(e instanceof Error ? e.message : String(e))

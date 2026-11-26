@@ -2,6 +2,7 @@
 // `cloudflare/src/routes/orgs.ts`. Personal-org lazy-create, members CRUD,
 // member-project listing, and pending-invite listing.
 
+import { aoeTodayIso } from "../../../db/shared/plan-units"
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
@@ -371,18 +372,41 @@ orgs.get("/:orgId", async (c) => {
 /** No length cap. Omitted orgIds resolves every membership (AQU-756). */
 const portfolioOrgIdsField = z.array(z.number().int().positive()).optional()
 
-// An absent revision preserves the original response. Hash only authorized,
-// fully materialized rows so changes to access, progress, or pagination count.
-async function directoryResponse(c: Context<AuthHonoEnv>, body: object, known?: string) {
-  if (known === undefined) return c.json(body)
+// Sample BEFORE materializing the page. A concurrent write replaces its
+// marker transactionally, so a later request cannot confirm an obsolete page.
+async function directoryRevision(
+  c: Context<AuthHonoEnv>, known: string | undefined, orgIds: number[], mode: string,
+  role: number | boolean, limit: number | undefined, now: number,
+): Promise<string | undefined> {
+  if (known === undefined || limit == null) return undefined
   try {
-    const bytes = new TextEncoder().encode(JSON.stringify(body))
-    const digest = await crypto.subtle.digest("SHA-256", bytes)
-    const revision = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("")
-    if (known === revision) return c.json({ unchanged: true, revision })
-    return c.json({ ...body, revision })
+    const ids = orgIds
+    const uid = c.get("user").id
+    const marks = ids.map(() => "?").join(",")
+    const { results } = await c.env.AQUILLA_PG.prepare(
+      `WITH scoped AS (
+         SELECT id FROM projects WHERE org_id IN (${marks}) AND archived_at IS NULL
+       ), keys AS (
+         SELECT 'p:' || id AS scope FROM scoped
+         UNION ALL SELECT 'o:' || id::text FROM organizations WHERE id IN (${marks})
+         UNION ALL SELECT 'u:' || ?::text UNION ALL SELECT 'reset'
+       )
+       SELECT keys.scope, r.revision::text AS value FROM keys
+       LEFT JOIN portfolio_directory_revisions_v1() r USING(scope)
+       UNION ALL
+       SELECT 'clock:' || l.project_id,
+         concat(l.token_expires_at <= to_timestamp(?::double precision / 1000),
+           ':', l.last_synced_at IS NULL AND l.created_at + interval '24 hours' <= to_timestamp(?::double precision / 1000))
+       FROM langquest_links l JOIN scoped ON scoped.id = l.project_id
+       ORDER BY 1`,
+    ).bind(...ids, ...ids, uid, now, now).all<{scope: string; value: string | null}>()
+    const input = [c.env.CF_VERSION_METADATA?.id ?? "directory-v2", uid, ids, mode, role, limit,
+      c.env.LANE_READ_WALL, c.env.ACCESS_GRANTS_RESOLVER, aoeTodayIso(now), results]
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(input)))
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("")
   } catch {
-    return c.json(body)
+    // Includes previews whose database has not yet received the migration.
+    return undefined
   }
 }
 
@@ -467,6 +491,11 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     ? { q, limit: clampProjectDirectoryLimit(limitNum != null ? String(limitNum) : undefined), cursor }
     : null
 
+  const now = Date.now()
+  const known = c.req.valid("json").revision
+  const revision = !q && !cursor ? await directoryRevision(c, known, uniqueOrgIds, "batch", isAdmin, page?.limit, now) : undefined
+  if (revision && revision === known) return c.json({ unchanged: true, revision })
+
   // AQU-745: scope each org's rollup to the projects this caller can actually
   // see — a sub-maintainer member must not enumerate every project name in the
   // org via the dashboard. Maintainer+ / platform admins still see all.
@@ -475,6 +504,7 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     uniqueOrgIds,
     { userId: user.id, isAdmin },
     page,
+    now,
   )
   const byOrg = new Map<number, typeof rows>()
   for (const row of rows) {
@@ -483,13 +513,14 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     else byOrg.set(row.orgId, [row])
   }
 
-  return directoryResponse(c, {
+  return c.json({
+    revision,
     portfolios: uniqueOrgIds.map((orgId) => ({
       orgId,
       projects: (byOrg.get(orgId) ?? []).map(({ orgId: _orgId, ...project }) => project),
     })),
     nextCursor,
-  }, c.req.valid("json").revision)
+  })
 })
 
 /** GET /api/v2/orgs/:orgId/portfolio — per-project rollup for org (derive-on-read). */
@@ -523,17 +554,22 @@ orgs.get("/:orgId/portfolio", async (c) => {
   // different numbers, and neither one is an omitted field.
   const seesEveryLanguage =
     isAdmin || role >= READ_WALL_MAINTAINER || !laneReadWallEnabled(c.env.LANE_READ_WALL)
+  const now = Date.now()
+  const known = c.req.query("revision")
+  const revision = !q && !cursor ? await directoryRevision(c, known, [orgId], isAdmin ? "admin-org" : "org", role, page?.limit, now) : undefined
+  if (revision && revision === known) return c.json({ unchanged: true, revision })
   const [{ projects, nextCursor }, activeLanguageCount] = await Promise.all([
-    listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
+    listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page, now),
     seesEveryLanguage
       ? countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]).then(({ byOrg }) => byOrg.get(orgId) ?? 0)
       : countVisibleActiveLanguages(c.env, orgId, user.id),
   ])
-  return directoryResponse(c, {
+  return c.json({
+    revision,
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
     activeLanguageCount,
     nextCursor,
-  }, c.req.query("revision"))
+  })
 })
 
 /**

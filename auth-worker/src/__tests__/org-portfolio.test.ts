@@ -809,6 +809,40 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(body.nextCursor).toBeNull()
   })
 
+  it("checks access and scoped revisions before the all-org rollup, and serves rows if comparison fails", async () => {
+    await seedUser(1, "wendi")
+    await seedUser(2, "other")
+    const db = env.AQUILLA_PG
+    await db.prepare("INSERT INTO organizations (id,name,owner_user_id) VALUES (1,'One',1),(2,'Two',2)").run()
+    await db.prepare("INSERT INTO org_members (org_id,user_id,role_level,granted_by) VALUES (1,1,700,1),(2,2,700,2)").run()
+    await db.prepare("INSERT INTO projects (id,name,org_id,created_by) VALUES ('p','First',1,1),('q','Other',2,2)").run()
+    const headers = { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" }
+    const read = (revision: string) => app.request("/api/v2/orgs/portfolio", {
+      method: "POST", headers, body: JSON.stringify({ orgIds: [1], limit: 40, revision }),
+    }, env)
+    const first = await (await read("")).json() as { revision: string }
+    expect(first.revision).toMatch(/^[a-f0-9]{64}$/)
+    await db.prepare("UPDATE projects SET name='Elsewhere' WHERE id='q'").run()
+    await db.prepare("UPDATE org_members SET last_active_at=CURRENT_TIMESTAMP WHERE user_id=1").run()
+    const prepare = db.prepare.bind(db)
+    const calls = vi.spyOn(db, "prepare")
+    try {
+      expect(await (await read(first.revision)).json()).toEqual({ unchanged: true, revision: first.revision })
+      expect(calls.mock.calls.some(([sql]) => sql.includes("au_cells AS MATERIALIZED"))).toBe(false)
+      calls.mockImplementation(sql => {
+        if (sql.includes("portfolio_directory_revisions_v1")) throw new Error("validation unavailable")
+        return prepare(sql)
+      })
+      const normal = await (await read(first.revision)).json()
+      expect(normal).toMatchObject({ portfolios: [{ projects: [{ id: "p" }] }] })
+      expect(normal).not.toHaveProperty("revision")
+    } finally {
+      calls.mockRestore()
+    }
+    await db.prepare("DELETE FROM org_members WHERE org_id=1 AND user_id=1").run()
+    expect((await read(first.revision)).status).toBe(403)
+  })
+
   it("pages and searches with limit/cursor/q instead of dumping every project", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
@@ -831,10 +865,18 @@ describe("POST /api/v2/orgs/portfolio", () => {
     const initial = await app.request(url, { headers }, env)
     const validated = await initial.json() as { revision: string }
     expect(validated.revision).toMatch(/^[a-f0-9]{64}$/)
+    const statements = vi.spyOn(env.AQUILLA_PG, "prepare")
     const match = await app.request(url + validated.revision, { headers }, env)
     expect(await match.json()).toEqual({ unchanged: true, revision: validated.revision })
+    expect(statements.mock.calls.some(([sql]) => sql.includes("au_cells AS MATERIALIZED"))).toBe(false)
+    statements.mockRestore()
     const stale = await app.request(url + "outdated", { headers }, env)
     expect(await stale.json()).toMatchObject({ projects: firstBody.projects, revision: validated.revision })
+
+    await env.AQUILLA_PG.prepare("UPDATE projects SET name = 'Acts updated' WHERE id = 'pc'").run()
+    const changed = await app.request(url + validated.revision, { headers }, env)
+    expect(await changed.json()).toMatchObject({ projects: [{ name: "Acts updated" }] })
+    await env.AQUILLA_PG.prepare("UPDATE projects SET name = 'Acts' WHERE id = 'pc'").run()
 
     const second = await app.request(
       `/api/v2/orgs/1/portfolio?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,

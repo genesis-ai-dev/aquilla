@@ -662,7 +662,7 @@ export async function authorize<K extends EventKind>(
   // role alone would refuse a lane lead whose project role is Viewer.
   let sourceAuthority: number | null = null
   if (isSourceTextEditKind(raw.kind)) {
-    sourceAuthority = await sourceTextAuthorityForClaims(db, raw.projectId, tokenClaims)
+    sourceAuthority = await sourceTextAuthorityForClaims(db ?? null, raw.projectId, tokenClaims)
     if (sourceAuthority > roleForGate) roleForGate = sourceAuthority
   }
 
@@ -762,7 +762,7 @@ export async function authorize<K extends EventKind>(
     sourceAuthority != null &&
     !(extensionGate?.ok && extensionGate.dataFile && raw.kind === 'source.cell.commit')
   ) {
-    const floor = await effectiveSourceTextFloorLevel(db, raw.projectId, settings)
+    const floor = await effectiveSourceTextFloorLevel(db ?? null, raw.projectId, settings)
     const reason = sourceTextEditRefusal(sourceAuthority, floor, raw.kind)
     if (reason) return { ok: false, status: 403, reason }
   }

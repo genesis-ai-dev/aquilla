@@ -7,7 +7,7 @@
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach } from "vitest"
-import { stageEvents, type EmitStageContext, type StageOutcome } from "../lib/agent/emit-stage"
+import { stageEvents, type EmitStageContext, type EmitStageResult, type StageOutcome } from "../lib/agent/emit-stage"
 import { AliasMap } from "../lib/agent/compress"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -859,7 +859,7 @@ describe("stageEvents — source text floor (AQU-2647)", () => {
     )
   }
 
-  function refused(result: StageOutcome) {
+  function refused(result: EmitStageResult) {
     expect(result.proposal).toBeNull()
     expect(result.modelVerdictBlock).toContain("role too low to edit source text")
   }

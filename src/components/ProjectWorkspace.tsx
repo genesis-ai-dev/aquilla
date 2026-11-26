@@ -689,6 +689,7 @@ import { listBatchBooks } from "@/lib/review/batch-books"
 import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review/batch-scope"
 import { listChapterLabels } from "@/lib/export/chapter-scope"
 import { loadBookCells } from "@/lib/review/load-book-cells"
+import { holdBatchForSync } from "@/lib/review/hold-batch-for-sync"
 import { openFlagsInBook } from "@/lib/review/open-flags-in-book"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -13158,6 +13159,7 @@ export function ProjectWorkspace() {
   // untouched AI drafts in a file-wide validation.
   const batchValidateChoicesRef = useRef<ValidateRunChoices>({
     includeReadyCells: true,
+    includeSignedByOthers: true,
     includeUntouchedAiDrafts: false,
     // AQU-2507: a check flag is overruled only on purpose.
     includeFlaggedCells: false,
@@ -13620,13 +13622,40 @@ export function ProjectWorkspace() {
   const runAcrossBooks = useCallback((request: BatchBooksRequest, choices: BatchBooksChoices) => {
     if (!project) return
     const names = new Map(batchBooks.map((book) => [book.id, book.name]))
-    const readingId = toast.add({
-      type: "loading",
-      title: t("editor.batchBooks.reading", { name: names.get(choices.fileIds[0] ?? "") ?? "" }),
-      timeout: 0,
-    })
     void (async () => {
+      let readingId: ReturnType<typeof toast.add> | null = null
       try {
+        // An unvalidate still in the outbox still looks like this person's
+        // signature, so the run would skip the cell. Wait, then read.
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            readingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          const title = t("editor.batch.syncTimedOut")
+          if (readingId) toast.update(readingId, { type: "error", title })
+          else toast.add({ type: "error", title })
+          return
+        }
+        const firstName = names.get(choices.fileIds[0] ?? "") ?? ""
+        if (readingId) {
+          toast.update(readingId, {
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+          })
+        } else {
+          readingId = toast.add({
+            type: "loading",
+            title: t("editor.batchBooks.reading", { name: firstName }),
+            timeout: 0,
+          })
+        }
         const byFile = new Map<string, Awaited<ReturnType<typeof loadBookCells>>>()
         // Unresolved checks are collected per book after the dialog has closed,
         // while this loading toast is still up. The open book already has its
@@ -13639,7 +13668,9 @@ export function ProjectWorkspace() {
             title: t("editor.batchBooks.reading", { name: names.get(fileId) ?? "" }),
           })
           let cells
-          if (fileId === activeFileId) {
+          // After a wait the open book's store can still show the signature
+          // that just synced away, until the next render. Read the server.
+          if (fileId === activeFileId && outcome !== "synced") {
             cells = getActiveCells().filter((cell) => cell.fileId === fileId)
             if (flagged) {
               for (const id of flaggedCellIds()) flagged.add(id)
@@ -13663,6 +13694,8 @@ export function ProjectWorkspace() {
                 activeLane,
                 allowSelfValidation: project.allowSelfValidation,
                 includeReadyCells: choices.includeReadyCells,
+                includeSignedByOthers: choices.includeSignedByOthers,
+                validationCount,
                 includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
                 projectRules: rules,
                 rulesForCell: libraryLint.rulesForCell,
@@ -13673,7 +13706,7 @@ export function ProjectWorkspace() {
           }
           byFile.set(fileId, cells)
         }
-        toast.close(readingId)
+        if (readingId) toast.close(readingId)
         if (request === "draft") {
           for (const cells of byFile.values()) {
             const chosen = selectBatchDraft(classifyBatchDraft(cells), {
@@ -13711,12 +13744,14 @@ export function ProjectWorkspace() {
               ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) }
               : {}),
             includeReadyCells: choices.includeReadyCells,
+            includeSignedByOthers: choices.includeSignedByOthers,
             includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
             includeFlaggedCells: choices.includeFlaggedCells,
           },
         )
         batchValidateChoicesRef.current = {
           includeReadyCells: choices.includeReadyCells,
+          includeSignedByOthers: choices.includeSignedByOthers,
           includeUntouchedAiDrafts: choices.includeUntouchedAiDrafts,
           includeFlaggedCells: choices.includeFlaggedCells,
           chapter: WHOLE_BOOK,
@@ -13728,7 +13763,7 @@ export function ProjectWorkspace() {
           : { fileId: firstId, fileName: names.get(firstId ?? "") ?? null }
         workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
       } catch (err) {
-        toast.close(readingId)
+        if (readingId) toast.close(readingId)
         const name = err instanceof Error ? err.message : ""
         toast.add({
           type: "error",
@@ -13736,7 +13771,132 @@ export function ProjectWorkspace() {
         })
       }
     })()
-  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, rules, libraryLint, actionCtx, actionArgs, t])
+  }, [project, batchBooks, activeFileId, getActiveCells, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, flaggedCellIds, rules, libraryLint, actionCtx, actionArgs, outboxFlushNow, t])
+  /**
+   * Batch validate text and Draft AI text. Same wait as the book runs: the
+   * confirm button has been pressed, and a pending edit must land before the
+   * cells are classified.
+   */
+  const runFileBatchAfterSync = useCallback((
+    request: "validate" | "draft",
+    choices: ValidateRunChoices | DraftRunChoices,
+  ) => {
+    if (!project || !activeFileId) return
+    const fileName = project.files.find((file) => file.id === activeFileId)?.name ?? ""
+    void (async () => {
+      let waitingId: ReturnType<typeof toast.add> | null = null
+      try {
+        const outcome = await holdBatchForSync({
+          flushNow: outboxFlushNow,
+          onWaiting: () => {
+            waitingId = toast.add({
+              type: "loading",
+              title: t("editor.batch.waitingForSync"),
+              timeout: 0,
+            })
+          },
+        })
+        if (outcome === "timeout") {
+          const title = t("editor.batch.syncTimedOut")
+          if (waitingId) toast.update(waitingId, { type: "error", title })
+          else toast.add({ type: "error", title })
+          return
+        }
+        if (waitingId) toast.close(waitingId)
+        waitingId = null
+        if (outcome === "idle") {
+          if (request === "validate") {
+            batchValidateChoicesRef.current = choices as ValidateRunChoices
+            workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+          } else {
+            const draft = choices as DraftRunChoices
+            draftChoicesRef.current = draft
+            const id = draft.scope === "next" ? "run-completions" : "complete-all"
+            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
+          }
+          return
+        }
+        const mint = await getTokenForProjectFile(project.id, activeFileId)
+        if (!mint.token) throw new Error(fileName)
+        const cells = await loadBookCells({
+          projectId: project.id,
+          fileId: activeFileId,
+          jwt: mint.token,
+          lane: activeLane,
+          username: currentUsername,
+          requiredValidations: validationCount,
+        })
+        if (request === "draft") {
+          const draft = choices as DraftRunChoices
+          const chosen = selectBatchDraft(
+            classifyBatchDraft(applyChapterScope(cells, draft.chapter)),
+            {
+              includeEmpty: draft.includeEmpty,
+              refreshAiDrafts: draft.refreshAiDrafts,
+              scope: draft.scope,
+              batchSize: completionBatchSizeFor(project),
+            },
+          )
+          if (chosen.length > 0) await completeBatch(chosen)
+          return
+        }
+        const validate = choices as ValidateRunChoices
+        const scoped = applyChapterScope(cells, validate.chapter)
+        const flagged = validate.includeFlaggedCells
+          ? null
+          : await openFlagsInBook({
+            cells: scoped,
+            username: currentUsername,
+            myScopes,
+            activeLane,
+            allowSelfValidation: project.allowSelfValidation,
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            validationCount,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            projectRules: rules,
+            rulesForCell: libraryLint.rulesForCell,
+            libraryMayLint: libraryLint.signature !== "",
+          })
+        batchValidateChoicesRef.current = validate
+        batchValidateOverrideRef.current = summarizeBatchValidate(
+          scoped.map((cell) => ({
+            id: cell.id,
+            fileId: cell.fileId,
+            translated: cell.translated,
+            targetEventId: cell.targetEventId,
+            aiDrafted: cell.aiDrafted,
+            activeValidators: cell.activeValidators,
+            lastEditor: cell.lastEditor,
+            group: cell.group,
+          })),
+          {
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            hasTarget: true,
+            ...(flagged ? { hasOpenFlags: (cellId: string) => flagged.has(cellId) } : {}),
+            includeReadyCells: validate.includeReadyCells,
+            includeSignedByOthers: validate.includeSignedByOthers,
+            includeUntouchedAiDrafts: validate.includeUntouchedAiDrafts,
+            includeFlaggedCells: validate.includeFlaggedCells,
+          },
+        )
+        workspaceActions.find((action) => action.id === "batch-validate")?.run(actionCtx, actionArgs)
+      } catch (err) {
+        if (waitingId) toast.close(waitingId)
+        const name = err instanceof Error && err.message ? err.message : fileName
+        toast.add({
+          type: "error",
+          title: t("editor.batchBooks.loadFailed", { name }),
+        })
+      }
+    })()
+  }, [project, activeFileId, outboxFlushNow, getTokenForProjectFile, activeLane, currentUsername, validationCount, completeBatch, myScopes, rules, libraryLint, actionCtx, actionArgs, t])
   const booksMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!project || batchBooks.length < 2 || activeLaneDelivers === "audio") return []
     const level = project.syncRole?.level ?? null
@@ -21628,16 +21788,12 @@ export function ProjectWorkspace() {
             ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
             : []}
           onConfirmValidate={(choices) => {
-            batchValidateChoicesRef.current = choices
-            workspaceActions.find((action) => action.id === "batch-validate")
-              ?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("validate", choices)
           }}
           onConfirmDraft={(choices) => {
-            draftChoicesRef.current = choices
-            const id = choices.scope === "next" ? "run-completions" : "complete-all"
-            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
             setBatchFileModal(null)
+            runFileBatchAfterSync("draft", choices)
           }}
         />
       )}
@@ -21646,6 +21802,7 @@ export function ProjectWorkspace() {
           ref={booksDialogRef}
           books={batchBooks}
           initialFileId={activeFileId}
+          validationCount={validationCount}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           onConfirm={runAcrossBooks}
         />

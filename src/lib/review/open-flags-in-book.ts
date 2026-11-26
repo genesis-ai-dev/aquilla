@@ -11,7 +11,7 @@
  */
 import type { CellData } from "@/hooks/useCells"
 import { isUntouchedAiDraft } from "@/lib/review/batch-file-options"
-import { batchValidateSkipReason } from "@/lib/review/batch-validate-summary"
+import { batchValidateSkipReason, hasEnoughSignatures } from "@/lib/review/batch-validate-summary"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { LibraryLintResolver } from "@/lib/rules/effective-rules"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -28,6 +28,10 @@ export interface OpenFlagsInBookArgs {
   activeLane: string
   allowSelfValidation?: boolean
   includeReadyCells: boolean
+  /** Cells that already have enough signatures. Absent means include them. */
+  includeSignedByOthers?: boolean
+  /** How many signatures the project requires. Absent is 1. */
+  validationCount?: number
   includeUntouchedAiDrafts: boolean
   /** Lane rules, including disabled ones. Disabled rules are not run. */
   projectRules: readonly TranslationRule[]
@@ -45,7 +49,11 @@ function wouldSignOff(cell: CellData, args: OpenFlagsInBookArgs): boolean {
   }) !== null) return false
   const untouched = isUntouchedAiDraft(cell)
   if (untouched && !args.includeUntouchedAiDrafts) return false
-  if (!untouched && !args.includeReadyCells) return false
+  if (!untouched) {
+    const enough = hasEnoughSignatures(cell, args.validationCount)
+    const includeSigned = args.includeSignedByOthers ?? true
+    if ((enough && !includeSigned) || (!enough && !args.includeReadyCells)) return false
+  }
   return true
 }
 

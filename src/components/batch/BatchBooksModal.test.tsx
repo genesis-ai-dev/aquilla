@@ -52,12 +52,14 @@ describe("BatchBooksModal", () => {
     await user.click(screen.getByText("Exodus"))
     expect(screen.getByRole("checkbox", { name: "Exodus" })).toBeChecked()
     expect(screen.queryByText("What this run includes")).toBeNull()
-    await user.click(screen.getByText("Include unvalidated cells"))
-    expect(screen.getByRole("checkbox", { name: "Include unvalidated cells" })).not.toBeChecked()
+    await user.click(screen.getByText("Include cells nobody has validated"))
+    expect(screen.getByRole("checkbox", { name: "Include cells nobody has validated" })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Include cells someone else has validated" })).toBeChecked()
     await user.click(screen.getByRole("button", { name: "Validate books" }))
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       fileIds: ["gen", "exo"],
       includeReadyCells: false,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: false,
       includeFlaggedCells: false,
     }))
@@ -104,7 +106,8 @@ describe("BatchBooksModal", () => {
       </I18nProvider>,
     )
     expect(screen.getByText(/each sign-off is in your name/i)).toBeInTheDocument()
-    expect(screen.getByText("Signs off translated cells you have not validated yet.")).toBeInTheDocument()
+    expect(screen.getByText("Signs off cells nobody has validated.")).toBeInTheDocument()
+    expect(screen.getByText("Signs off cells someone else has validated.")).toBeInTheDocument()
     expect(screen.getByText("Signs off AI drafts that have not been edited or validated yet.")).toBeInTheDocument()
     expect(screen.getByText("Signs off cells flagged by your project checks and rules.")).toBeInTheDocument()
 

@@ -24,6 +24,7 @@ import {
   classifyBatchDraft,
   isUntouchedAiDraft,
   selectBatchDraft,
+  signatureCheckboxCopy,
   type DraftChoiceCell,
   type DraftRunChoices,
   type ValidateRunChoices,
@@ -32,6 +33,7 @@ import {
   BATCH_VALIDATE_SKIP_REASONS,
   batchValidateChunkSize,
   batchValidateSkipClauses,
+  hasEnoughSignatures,
   noPermissionMessage,
   summarizeBatchValidate,
   type BatchValidateCandidate,
@@ -88,6 +90,7 @@ export function BatchFileModal({
 }: BatchFileModalProps) {
   const t = useT()
   const [includeReady, setIncludeReady] = useState(true)
+  const [includeSigned, setIncludeSigned] = useState(true)
   const [includeAi, setIncludeAi] = useState(false)
   const [includeFlagged, setIncludeFlagged] = useState(false)
   const [includeEmpty, setIncludeEmpty] = useState(true)
@@ -106,6 +109,7 @@ export function BatchFileModal({
     if (openedFor.current === request) return
     openedFor.current = request
     setIncludeReady(true)
+    setIncludeSigned(true)
     setIncludeAi(false)
     setIncludeFlagged(false)
     setIncludeEmpty(true)
@@ -132,6 +136,7 @@ export function BatchFileModal({
       ...validateOptions,
       cap: undefined,
       includeReadyCells: true,
+      includeSignedByOthers: true,
       includeUntouchedAiDrafts: true,
       includeFlaggedCells: true,
     })
@@ -140,8 +145,10 @@ export function BatchFileModal({
     // A flagged line is its own box, named by its reference, including a
     // flagged AI draft. Counting that draft on the AI line made the title one
     // short and left the check off this list while the run still skipped it.
+    const openReady = openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell) && !flaggedCell(cell))
     return {
-      ready: openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell) && !flaggedCell(cell)),
+      unsigned: openReady.filter((cell) => !hasEnoughSignatures(cell, validateOptions.validationCount)),
+      signedByOthers: openReady.filter((cell) => hasEnoughSignatures(cell, validateOptions.validationCount)),
       untouched: openSet.validatable.filter((cell) => isUntouchedAiDraft(cell) && !flaggedCell(cell)),
       flagged: isFlagged
         ? openSet.validatable.filter((cell) => flaggedCell(cell))
@@ -154,9 +161,10 @@ export function BatchFileModal({
   const validatePreview = useMemo(() => summarizeBatchValidate(scopedValidate, {
     ...validateOptions,
     includeReadyCells: includeReady,
+    includeSignedByOthers: includeSigned,
     includeUntouchedAiDrafts: canIncludeUntouchedAi && includeAi,
     includeFlaggedCells: includeFlagged,
-  }), [scopedValidate, validateOptions, includeReady, includeAi, canIncludeUntouchedAi, includeFlagged])
+  }), [scopedValidate, validateOptions, includeReady, includeSigned, includeAi, canIncludeUntouchedAi, includeFlagged])
 
   const draftGroups = useMemo(() => classifyBatchDraft(scopedDraft), [scopedDraft])
   const draftChoices = useMemo<DraftRunChoices>(() => ({
@@ -177,7 +185,8 @@ export function BatchFileModal({
   // says why.
   const nothingOffered = request.kind === "validate"
     && !validateGroups.blocked
-    && validateGroups.ready.length === 0
+    && validateGroups.unsigned.length === 0
+    && validateGroups.signedByOthers.length === 0
     && validateGroups.untouched.length === 0
     && validateGroups.flagged.length === 0
   const emptyValidate = nothingOffered ? emptyValidateCopy(validatePreview, chapter, t) : null
@@ -221,6 +230,7 @@ export function BatchFileModal({
     canConfirm = true
   }
 
+  const signatureCopy = signatureCheckboxCopy(validateOptions.validationCount ?? 1)
   const showDraftScope = request.kind === "draft" && draftIncludedCount > batchSize
   // A whole Bible is a thousand chapters. SearchSelect mounts only the rows
   // in view; a plain Select mounted every one and the menu stalled on open.
@@ -266,10 +276,18 @@ export function BatchFileModal({
             <OptionRow
               id="batch-file-ready"
               checked={includeReady}
-              disabled={validateGroups.ready.length === 0}
+              disabled={validateGroups.unsigned.length === 0}
               onCheckedChange={setIncludeReady}
-              label={t("editor.batchFile.includeUnvalidated")}
-              help={t("editor.batchFile.includeUnvalidatedHelp", { count: validateGroups.ready.length })}
+              label={t(signatureCopy.label)}
+              help={t(signatureCopy.fileHelp, { count: validateGroups.unsigned.length })}
+            />
+            <OptionRow
+              id="batch-file-signed"
+              checked={includeSigned}
+              disabled={validateGroups.signedByOthers.length === 0}
+              onCheckedChange={setIncludeSigned}
+              label={t(signatureCopy.signedLabel)}
+              help={t(signatureCopy.signedFileHelp, { count: validateGroups.signedByOthers.length })}
             />
             <OptionRow
               id="batch-file-ai"
@@ -357,28 +375,29 @@ export function BatchFileModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {canConfirm ? t("common.cancel") : t("common.close")}
           </Button>
-          {(canConfirm || (request.kind === "validate" && emptyValidate)) && (
-            <Button
-              disabled={!canConfirm}
-              onClick={() => {
-                if (!canConfirm) return
-                if (request.kind === "validate") {
+          {/* Stay on screen when the choices match nothing. Hiding it made an
+              empty chapter or an unchecked box look like the action was gone. */}
+          <Button
+            disabled={!canConfirm}
+            onClick={() => {
+              if (!canConfirm) return
+              if (request.kind === "validate") {
                   onConfirmValidate({
                     includeReadyCells: includeReady,
+                    includeSignedByOthers: includeSigned,
                     includeUntouchedAiDrafts: canIncludeUntouchedAi && includeAi,
                     includeFlaggedCells: includeFlagged,
                     chapter,
                   })
-                } else {
-                  onConfirmDraft(draftChoices)
-                }
-              }}
-            >
-              {request.kind === "validate"
-                ? t("editor.selection.validateText")
-                : t("editor.batchFile.confirmDraft")}
-            </Button>
-          )}
+              } else {
+                onConfirmDraft(draftChoices)
+              }
+            }}
+          >
+            {request.kind === "validate"
+              ? t("editor.selection.validateText")
+              : t("editor.batchFile.confirmDraft")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

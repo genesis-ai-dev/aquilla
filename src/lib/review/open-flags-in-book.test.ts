@@ -78,6 +78,25 @@ describe("openFlagsInBook", () => {
     expect([...flags].sort()).toEqual(["library", "wrong"])
   })
 
+  it("skips a cell that already has enough signatures when that box is off", async () => {
+    const rulesForCell = vi.fn(() => [wrong])
+    const flags = await openFlagsInBook({
+      cells: [cell({ id: "done", translated: "has wrong", activeValidators: ["joy"] })],
+      username: ME,
+      myScopes: [],
+      activeLane: "",
+      includeReadyCells: true,
+      includeSignedByOthers: false,
+      validationCount: 1,
+      includeUntouchedAiDrafts: false,
+      projectRules: [wrong],
+      libraryMayLint: false,
+      rulesForCell,
+    })
+    expect(flags.size).toBe(0)
+    expect(rulesForCell).not.toHaveBeenCalled()
+  })
+
   it("leaves a ready cell unchecked when that box is off", async () => {
     const rulesForCell = vi.fn(() => [wrong])
     const flags = await openFlagsInBook({

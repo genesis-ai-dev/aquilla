@@ -294,6 +294,27 @@ describe("summarizeBatchValidate — machine provenance is not an eligibility ru
     expect(optedOut.outcome).toBe("nothing-eligible")
   })
 
+  it("puts a finished cell on the second box and keeps a short cell on the first", () => {
+    const cells = [
+      cell({ id: "none" }),
+      cell({ id: "one", activeValidators: ["joy"] }),
+      cell({ id: "two", activeValidators: ["joy", "sam"] }),
+    ]
+    const required = { ...base, validationCount: 2 }
+    expect(summarizeBatchValidate(cells, required).validatable.map((c) => c.id)).toEqual(["none", "one", "two"])
+    const firstOnly = summarizeBatchValidate(cells, { ...required, includeSignedByOthers: false })
+    expect(firstOnly.validatable.map((c) => c.id)).toEqual(["none", "one"])
+    expect(firstOnly.skips.notChosen).toBe(1)
+    const secondOnly = summarizeBatchValidate(cells, { ...required, includeReadyCells: false })
+    expect(secondOnly.validatable.map((c) => c.id)).toEqual(["two"])
+    expect(secondOnly.skips.notChosen).toBe(2)
+    const oneRequired = summarizeBatchValidate(
+      [cell({ id: "none" }), cell({ id: "joy", activeValidators: ["joy"] })],
+      { ...base, includeSignedByOthers: false },
+    )
+    expect(oneRequired.validatable.map((c) => c.id)).toEqual(["none"])
+  })
+
   it("keeps an AI draft someone else already checked when untouched drafts are left out", () => {
     const summary = summarizeBatchValidate(
       [cell({ id: "second", aiDrafted: true, activeValidators: ["joy"] })],

@@ -15,6 +15,7 @@ import {
 import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { BatchBook } from "@/lib/review/batch-books"
+import { signatureCheckboxCopy } from "@/lib/review/batch-file-options"
 
 /** Measured book row (checkbox + name). A larger estimate makes LegendList build extra rows. */
 const BOOK_ROW_PX = 20
@@ -25,6 +26,7 @@ export type BatchBooksRequest = "validate" | "draft"
 export interface BatchBooksChoices {
   fileIds: string[]
   includeReadyCells: boolean
+  includeSignedByOthers: boolean
   includeUntouchedAiDrafts: boolean
   includeFlaggedCells: boolean
   includeEmpty: boolean
@@ -38,6 +40,8 @@ interface BatchBooksModalProps {
   books: readonly BatchBook[]
   /** The open file, checked when the dialog opens. */
   initialFileId: string | null
+  /** How many signatures make a cell validated. Absent is 1. */
+  validationCount?: number
   canIncludeUntouchedAi: boolean
   onConfirm: (choices: BatchBooksChoices) => void
 }
@@ -48,12 +52,15 @@ export function BatchBooksModal({
   request,
   books,
   initialFileId,
+  validationCount = 1,
   canIncludeUntouchedAi,
   onConfirm,
 }: BatchBooksModalProps) {
   const t = useT()
+  const signatureCopy = signatureCheckboxCopy(validationCount)
   const [checked, setChecked] = useState<Set<string>>(() => new Set())
   const [includeReady, setIncludeReady] = useState(true)
+  const [includeSigned, setIncludeSigned] = useState(true)
   const [includeAi, setIncludeAi] = useState(false)
   const [includeFlagged, setIncludeFlagged] = useState(false)
   const [includeEmpty, setIncludeEmpty] = useState(true)
@@ -69,6 +76,7 @@ export function BatchBooksModal({
     opened.current = true
     setChecked(new Set(initialFileId && books.some((book) => book.id === initialFileId) ? [initialFileId] : []))
     setIncludeReady(true)
+    setIncludeSigned(true)
     setIncludeAi(false)
     setIncludeFlagged(false)
     setIncludeEmpty(true)
@@ -158,8 +166,15 @@ export function BatchBooksModal({
               id="batch-books-ready"
               checked={includeReady}
               onCheckedChange={setIncludeReady}
-              label={t("editor.batchFile.includeUnvalidated")}
-              help={t("editor.batchFile.readyHelp")}
+              label={t(signatureCopy.label)}
+              help={t(signatureCopy.booksHelp)}
+            />
+            <OptionRow
+              id="batch-books-signed"
+              checked={includeSigned}
+              onCheckedChange={setIncludeSigned}
+              label={t(signatureCopy.signedLabel)}
+              help={t(signatureCopy.signedBooksHelp)}
             />
             <OptionRow
               id="batch-books-ai"
@@ -206,6 +221,7 @@ export function BatchBooksModal({
             onClick={() => onConfirm({
               fileIds: books.filter((book) => checked.has(book.id)).map((book) => book.id),
               includeReadyCells: includeReady,
+              includeSignedByOthers: includeSigned,
               includeUntouchedAiDrafts: canIncludeUntouchedAi && includeAi,
               includeFlaggedCells: includeFlagged,
               includeEmpty,
@@ -264,9 +280,10 @@ export interface BatchBooksDialogHandle {
 export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
   books: readonly BatchBook[]
   initialFileId: string | null
+  validationCount?: number
   canIncludeUntouchedAi: boolean
   onConfirm: (request: BatchBooksRequest, choices: BatchBooksChoices) => void
-}>(function BatchBooksDialog({ books, initialFileId, canIncludeUntouchedAi, onConfirm }, ref) {
+}>(function BatchBooksDialog({ books, initialFileId, validationCount, canIncludeUntouchedAi, onConfirm }, ref) {
   const [request, setRequest] = useState<BatchBooksRequest | null>(null)
   useImperativeHandle(ref, () => ({ open: setRequest }), [])
   if (!request) return null
@@ -277,6 +294,7 @@ export const BatchBooksDialog = forwardRef<BatchBooksDialogHandle, {
       request={request}
       books={books}
       initialFileId={initialFileId}
+      validationCount={validationCount}
       canIncludeUntouchedAi={canIncludeUntouchedAi}
       onConfirm={(choices) => {
         const kind = request

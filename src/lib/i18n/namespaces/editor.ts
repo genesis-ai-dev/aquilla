@@ -902,8 +902,28 @@ export const editor = defineNamespace({
     "editor.batchFile.readyHelp": "Signs off translated cells you have not validated yet.",
     "editor.batchFile.includeUnvalidated": "Include unvalidated cells",
     "editor.batchFile.includeUnvalidatedHelp": plural({
-      one: "{count} cell you have not signed off.",
-      other: "{count} cells you have not signed off.",
+      one: "{count} cell you have not validated.",
+      other: "{count} cells you have not validated.",
+    }),
+    "editor.batchFile.includeUnsigned": "Include cells nobody has validated",
+    "editor.batchFile.includeUnsignedHelp": plural({
+      one: "{count} cell nobody has validated.",
+      other: "{count} cells nobody has validated.",
+    }),
+    "editor.batchFile.includeSignedByOthers": "Include cells someone else has validated",
+    "editor.batchFile.includeSignedByOthersHelp": plural({
+      one: "{count} cell someone else has validated.",
+      other: "{count} cells someone else has validated.",
+    }),
+    "editor.batchFile.includeStillShort": "Include cells that still need a signature",
+    "editor.batchFile.includeStillShortHelp": plural({
+      one: "{count} cell that still needs a signature.",
+      other: "{count} cells that still need a signature.",
+    }),
+    "editor.batchFile.includeEnough": "Include cells that already have enough signatures",
+    "editor.batchFile.includeEnoughHelp": plural({
+      one: "{count} cell that already has enough signatures.",
+      other: "{count} cells that already have enough signatures.",
     }),
     "editor.batchFile.includeUnresolved": "Include cells with unresolved checks",
     "editor.batchFile.includeUnresolvedHelp":
@@ -974,8 +994,12 @@ export const editor = defineNamespace({
     "editor.batchBooks.description":
       "Each book you check is included in full. To limit one book to a chapter, open that book and use its file menu.",
     "editor.batchBooks.validateDescription":
-      "Each book you check is included in full. Each sign-off is in your name, and a cell you have already signed off is left as it is. To limit one book to a chapter, open that book and use its file menu.",
+      "Each book you check is included in full. Each sign-off is in your name, and a cell you have already validated is left as it is. To limit one book to a chapter, open that book and use its file menu.",
     "editor.batchBooks.aiDrafts": "Include AI drafts",
+    "editor.batchBooks.unsignedHelp": "Signs off cells nobody has validated.",
+    "editor.batchBooks.signedByOthersHelp": "Signs off cells someone else has validated.",
+    "editor.batchBooks.stillShortHelp": "Signs off cells that still need a signature.",
+    "editor.batchBooks.enoughHelp": "Signs off cells that already have enough signatures.",
     "editor.batchBooks.aiDraftsHelp":
       "Signs off AI drafts that have not been edited or validated yet.",
     "editor.batchBooks.flaggedHelp":
@@ -989,6 +1013,8 @@ export const editor = defineNamespace({
     "editor.batchBooks.menuValidate": "Validate books…",
     "editor.batchBooks.menuDraft": "Draft books…",
     "editor.batchBooks.reading": "Reading {name}…",
+    "editor.batch.waitingForSync": "Waiting for sync to complete.",
+    "editor.batch.syncTimedOut": "Sync did not finish, so nothing was changed.",
     "editor.batchBooks.loadFailed": "Could not read {name}. Nothing was changed.",
     "editor.batchBooks.historyName": plural({
       one: "{count} book",
@@ -7708,6 +7734,56 @@ export const editor = defineNamespace({
           count: "How many unvalidated cells this box will sign off. Selects the plural form.",
         },
       },
+      "editor.batchFile.includeUnsigned": {
+        description:
+          "Checkbox in the file and books batch-validate dialogs when the project "
+          + "needs one signature. Checked by default. Cells nobody has validated.",
+        maxLength: 48,
+      },
+      "editor.batchFile.includeUnsignedHelp": {
+        description: "Help under that checkbox in the file dialog. Names how many cells it covers.",
+        placeholders: {
+          count: "How many cells nobody has validated. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.includeSignedByOthers": {
+        description:
+          "Checkbox in the file and books batch-validate dialogs when the project "
+          + "needs one signature. Checked by default. Cells a teammate has already validated.",
+        maxLength: 52,
+      },
+      "editor.batchFile.includeSignedByOthersHelp": {
+        description: "Help under that checkbox in the file dialog. Names how many cells it covers.",
+        placeholders: {
+          count: "How many cells someone else has validated. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.includeStillShort": {
+        description:
+          "Checkbox in the file and books batch-validate dialogs when the project "
+          + "needs more than one signature. Checked by default. Cells that do not "
+          + "yet have enough signatures, including ones a teammate has started.",
+        maxLength: 52,
+      },
+      "editor.batchFile.includeStillShortHelp": {
+        description: "Help under that checkbox in the file dialog. Names how many cells it covers.",
+        placeholders: {
+          count: "How many cells still need a signature. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.includeEnough": {
+        description:
+          "Checkbox in the file and books batch-validate dialogs when the project "
+          + "needs more than one signature. Checked by default. Cells that already "
+          + "have enough signatures; adding yours is an extra sign-off.",
+        maxLength: 60,
+      },
+      "editor.batchFile.includeEnoughHelp": {
+        description: "Help under that checkbox in the file dialog. Names how many cells it covers.",
+        placeholders: {
+          count: "How many cells already have enough signatures. Selects the plural form.",
+        },
+      },
       "editor.batchFile.includeUnresolved": {
         description:
           "Checkbox label for cells a project check or rule has flagged. Off by "
@@ -7872,12 +7948,32 @@ export const editor = defineNamespace({
         description:
           "Intro for the validate-books dialog. Same book-and-chapter note as "
           + "editor.batchBooks.description, plus that each sign-off is in the "
-          + "reader's name and a cell they have already signed off is skipped.",
+          + "reader's name and a cell they have already validated is skipped.",
       },
       "editor.batchBooks.aiDrafts": {
         description:
           "Checkbox in the books batch-validate dialog for unvalidated AI drafts. "
           + "Off unless a reviewer or project lead turns it on.",
+      },
+      "editor.batchBooks.unsignedHelp": {
+        description:
+          "Help under Include cells nobody has validated in the books dialog. "
+          + "No count: the books dialog has not read the cells yet.",
+      },
+      "editor.batchBooks.signedByOthersHelp": {
+        description:
+          "Help under Include cells someone else has validated in the books dialog. "
+          + "No count: the books dialog has not read the cells yet.",
+      },
+      "editor.batchBooks.stillShortHelp": {
+        description:
+          "Help under Include cells that still need a signature in the books dialog, "
+          + "shown when the project needs more than one signature.",
+      },
+      "editor.batchBooks.enoughHelp": {
+        description:
+          "Help under Include cells that already have enough signatures in the books dialog, "
+          + "shown when the project needs more than one signature.",
       },
       "editor.batchBooks.aiDraftsHelp": {
         description:
@@ -7923,6 +8019,18 @@ export const editor = defineNamespace({
         placeholders: {
           name: "The book being read.",
         },
+      },
+      "editor.batch.waitingForSync": {
+        description:
+          "Loading toast after Validate books, Draft books, Batch validate text, " +
+          "or Draft AI text is confirmed, while edits on this device are still " +
+          "being saved. Shown only when something is still syncing. The run " +
+          "starts once those edits have landed.",
+      },
+      "editor.batch.syncTimedOut": {
+        description:
+          "Error toast when those edits do not finish syncing in time. The " +
+          "batch does not start, so nothing is validated or drafted.",
       },
       "editor.batchBooks.loadFailed": {
         description: "Error toast when a book could not be read. Nothing was validated or drafted.",

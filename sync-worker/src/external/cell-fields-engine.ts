@@ -34,6 +34,7 @@ import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, roleLabel } from '../events/role-policy'
 import { isUserInsertedCell, resolveTimingLocked } from '../events/timing-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from '../events/track-editing-authority'
+import { sourceTextPrepareRefusal } from '../events/source-text-authority'
 import type { RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -149,6 +150,17 @@ export async function prepareCellFields(
   callerRoleLevel: number,
 ): Promise<Response> {
   const plan = planCellFields(cmds)
+  // AQU-2647: SetSource and SetTranscription commit source.cell.commit. The
+  // static gate is Contributor; the project's floor decides.
+  if (plan.sourceCommits.length > 0) {
+    const sourceRefusal = await sourceTextPrepareRefusal(
+      db,
+      projectId,
+      { role: callerRoleLevel, userId: Number(cred.userId) },
+      ['source.cell.commit'],
+    )
+    if (sourceRefusal) return errorResponse('permission_denied', sourceRefusal)
+  }
   const refs = collectRefs(plan)
   const [states, files] = await Promise.all([
     resolveCellStates(db, projectId, refs.cellRefs),

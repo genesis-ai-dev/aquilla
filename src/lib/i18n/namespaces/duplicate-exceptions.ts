@@ -739,6 +739,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "field. Thai and Myanmar already translate those two import labels " +
     "differently, and a language that shortens a tab beside 'Translation' " +
     "while spelling out a column name or an import choice needs this one apart.",
+  // AQU-2647: the organization's Project defaults page gains a group for who
+  // may edit source text, headed with the same two words.
+  "settings.sourceText.groupLabel":
+    "Group heading on the organization's Project defaults page, above the " +
+    "setting for who may edit source text: the topic of a permission, beside " +
+    "headings such as 'Timeline and recordings'. editor.source.textAria is the " +
+    "screen-reader name of the source column in the editor, " +
+    "search.side.sourceText is a Command-K tab, and the two import labels name " +
+    "a choice card and a spreadsheet column. A language that names a settings " +
+    "topic with a noun phrase of its own, apart from the pane, tab or column, " +
+    "needs this one free.",
   "search.side.translation":
     "One-word tab in the Command-K dialog, and the label above each written " +
     "hit, paired with 'Source text' — the side being written, not a file kind " +

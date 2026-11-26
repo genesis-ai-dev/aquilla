@@ -805,6 +805,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     runId,
     projectId: body.projectId,
     roleLevel,
+    userId: user.id,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
     lane: resolvedLaneId,

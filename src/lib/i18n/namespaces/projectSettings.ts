@@ -398,6 +398,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellLabel.label": "Who can label cells",
     "projectSettings.cellLabel.description":
       "A label is a short note typed on a line — a section name, a reviewer's mark. It is never a voice or a character. Maintainers can label cells unless you open this to project leads.",
+    // AQU-2647: who may edit source text. The same people may hide a cell and
+    // split a line at quotes. "language lane" is the phrase the word list allows.
+    "projectSettings.sourceText.label": "Who can edit source text",
+    "projectSettings.sourceText.description":
+      "Who may change the source text. The same people may hide a cell and split a line at quotation marks. Maintainers and owners always may. This project uses the organization default unless you set one here.",
+    "projectSettings.sourceText.optionMaintainer": "Maintainer",
+    "projectSettings.sourceText.optionProjectLead": "Project Lead on any language lane",
+    "projectSettings.sourceText.optionContributor": "Contributor on any language lane",
     // AQU-2309: who may set, rename, resize and remove a hand-set milestone.
     // Sits under the same "Content structure" heading, and reuses the
     // cell-editing ladder's role names.
@@ -2156,6 +2164,31 @@ export const projectSettings = defineNamespace({
           "is (a short note typed on a line), that it is never a voice or a character, " +
           "and that maintainers may label cells unless the setting opens it to project " +
           "leads. Role names as in common.role.*.",
+      },
+      "projectSettings.sourceText.label": {
+        description:
+          "Row label for the dropdown in Project settings → Content structure that " +
+          "says who may edit source text. A question-like noun phrase, matching " +
+          "'Who can add and remove cells'.",
+      },
+      "projectSettings.sourceText.description": {
+        description:
+          "Help text under that row. Says the same people may hide a cell and split " +
+          "a line at quotation marks, that maintainers and owners always may, and that " +
+          "the project follows the organization until it sets its own.",
+      },
+      "projectSettings.sourceText.optionMaintainer": {
+        description: "Dropdown option: only maintainers and owners may edit source text. Also the closed-trigger label.",
+      },
+      "projectSettings.sourceText.optionProjectLead": {
+        description:
+          "Dropdown option: a Project Lead on any language lane may edit source text, " +
+          "and so may someone who still holds the project role Project Lead. Also the closed-trigger label.",
+      },
+      "projectSettings.sourceText.optionContributor": {
+        description:
+          "Dropdown option: a Contributor on any language lane may edit source text, " +
+          "and so may someone who still holds the project role Contributor. Also the closed-trigger label.",
       },
       "projectSettings.milestones.label": {
         description:

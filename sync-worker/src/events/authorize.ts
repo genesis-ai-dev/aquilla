@@ -9,6 +9,12 @@ import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { effectiveCellEditingFloorLevel } from './cell-removal-authority'
+import {
+  effectiveSourceTextFloorLevel,
+  isSourceTextEditKind,
+  sourceTextAuthorityForClaims,
+  sourceTextEditRefusal,
+} from './source-text-authority'
 import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
@@ -656,6 +662,16 @@ export async function authorize<K extends EventKind>(
     if (decision.action === 'allow') roleForGate = decision.effectiveRole
   }
 
+  // AQU-2647: a Project Lead or Contributor on any language lane meets that
+  // rung even when their project role is lower. The static floor below is
+  // Contributor, the lowest the setting can admit; comparing it to the project
+  // role alone would refuse a lane lead whose project role is Viewer.
+  let sourceAuthority: number | null = null
+  if (isSourceTextEditKind(raw.kind)) {
+    sourceAuthority = await sourceTextAuthorityForClaims(db ?? null, raw.projectId, tokenClaims)
+    if (sourceAuthority > roleForGate) roleForGate = sourceAuthority
+  }
+
   // Role gate: check that the token's role is sufficient for this event kind.
   if (roleForGate < requiredRole) {
     // AQU-496: assignment.create self-assign carve-out. A below-lead member
@@ -742,6 +758,19 @@ export async function authorize<K extends EventKind>(
     if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
+  }
+
+  // AQU-2647: the project's source-text floor, on top of the static
+  // Contributor floor. Default Maintainer. An extension's own data file is
+  // exempt — that commit is the extension's alignment, not the source text
+  // translators work from (see extensionWriteGate).
+  if (
+    sourceAuthority != null &&
+    !(extensionGate?.ok && extensionGate.dataFile && raw.kind === 'source.cell.commit')
+  ) {
+    const floor = await effectiveSourceTextFloorLevel(db ?? null, raw.projectId, settings)
+    const reason = sourceTextEditRefusal(sourceAuthority, floor, raw.kind)
+    if (reason) return { ok: false, status: 403, reason }
   }
 
   // AQU-2304: the org's configurable import floor raises `file.create` from

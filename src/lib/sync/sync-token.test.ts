@@ -652,8 +652,9 @@ describe("one mint per (identity, project, file) for the tab", () => {
     const late = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API)
     expect(await late()).toEqual({ token: "tok-1", status: 200 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    // Each closure still learns the role the token carries.
-    expect(onRole).toHaveBeenCalledWith(role)
+    // Each closure still learns the role the token carries, and the token
+    // itself (AQU-2647 reads the language-lane grants from its claims).
+    expect(onRole).toHaveBeenCalledWith(role, "tok-1")
   })
 
   it("keeps identities, projects and files apart", async () => {

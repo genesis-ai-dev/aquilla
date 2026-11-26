@@ -9,6 +9,7 @@
  */
 import type { AccessGrant, GrantScope, GrantSource } from "../../../db/shared/access-grants"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import type { Env } from "../types"
 import type { ViewerScope } from "./access-payload"
 import type { Granter, GrantTarget, OrgWorld } from "./grant-preview"
@@ -80,6 +81,20 @@ export async function loadGrantWorld(env: Env, vs: ViewerScope, orgId: number): 
   }
 }
 
+/**
+ * AQU-2322: the world as one viewer's lens shows it, for lane answers. The
+ * read wall flag, and the lanes their Places lens lists (`grantable` carries
+ * one `lane:<id>` key per lane node), so no preview names or counts a lane
+ * the metadata wall hides from them.
+ */
+export function withLaneView(world: OrgWorld, grantable: Readonly<Record<string, unknown>>, wallFlag: string | undefined): OrgWorld {
+  return {
+    ...world,
+    wallOn: laneReadWallEnabled(wallFlag),
+    visibleLaneIds: new Set(world.lanes.filter((l) => `lane:${l.id}` in grantable).map((l) => l.id)),
+  }
+}
+
 interface GrantRow {
   scope_type: GrantScope
   scope_id: string
@@ -113,11 +128,12 @@ export async function loadGrantTarget(env: Env, orgId: number, userId: number): 
           AND COALESCE(CASE WHEN g.scope_type = 'org' THEN g.scope_id::BIGINT END, p.org_id, t.org_id) = ?`,
     ).bind(userId, orgId).all<GrantRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT r.project_id AS project_id, r.lane AS lane, r.role_level AS role_level
+      `SELECT r.project_id AS project_id, r.lane AS lane, r.role_level AS role_level,
+              r.granted_by AS granted_by, r.granted_at AS granted_at
          FROM project_member_lane_roles r
          JOIN projects p ON p.id = r.project_id
         WHERE r.user_id = ? AND p.org_id = ? AND p.archived_at IS NULL`,
-    ).bind(userId, orgId).all<{ project_id: string; lane: string; role_level: number }>(),
+    ).bind(userId, orgId).all<{ project_id: string; lane: string; role_level: number; granted_by: number | string | null; granted_at: string | Date | null }>(),
   ])
   const grants: AccessGrant[] = (grantsRes.results ?? []).map((r) => ({
     userId: String(userId),
@@ -130,7 +146,14 @@ export async function loadGrantTarget(env: Env, orgId: number, userId: number): 
     // AQU-2321: the removal dialog names the date of each grant a person keeps.
     grantedAt: r.granted_at == null ? null : new Date(r.granted_at).toISOString(),
   }))
-  const laneGrants = (laneRes.results ?? []).map((r) => ({ projectId: r.project_id, laneId: r.lane, roleLevel: Number(r.role_level) }))
+  // AQU-2323: the person inspector names who gave each lane grant, and when.
+  const laneGrants = (laneRes.results ?? []).map((r) => ({
+    projectId: r.project_id,
+    laneId: r.lane,
+    roleLevel: Number(r.role_level),
+    grantedBy: r.granted_by == null ? null : String(r.granted_by),
+    grantedAt: r.granted_at == null ? null : new Date(r.granted_at).toISOString(),
+  }))
   const isOrgMember = memberRow != null
   if (!isOrgMember && grants.length === 0 && laneGrants.length === 0) return null
   return { kind: "account", userId: String(userId), displayName: user.username, isOrgMember, grants, laneGrants }

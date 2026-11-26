@@ -100,7 +100,12 @@ export function offeredRoles(type: GrantScopeType, cap: number, opts: { invite?:
  *   project DELETE /projects/:p/members/:u   Maintainer+ on the project
  *           POST /projects/:p/members        Project lead+ (role change)
  *                         both refuse a member at or above you unless you are Owner
- *   lane    lane staffing owns lane rows (AQU-2322); this slice does not write them
+ *   lane    PUT + DELETE /orgs/:id/access/lane-grant (AQU-2322)
+ *                         Project lead+ on the project, never yourself. A
+ *                         lane carries at most Contributor, below every cap.
+ *                         Removing someone's last lane grant also ends the
+ *                         project membership it opened; the dry run then
+ *                         applies the project rule as well.
  * Invites are cancelled by whoever may send them there (org: Owner, project
  * and lane: Project lead+).
  */
@@ -109,7 +114,6 @@ export type EditDenial =
   | "maintainer_on_project"
   | "target_outranks"
   | "self"
-  | "lane_needs_staffing"
 
 export type EditCheck = { ok: true } | { ok: false; denial: EditDenial; cap: number | null }
 
@@ -122,12 +126,16 @@ export interface EditTarget {
   invite?: boolean
 }
 
-const capOf = (place: PlaceGrantability) => (place.ok ? place.cap : null)
-
 /** May this viewer remove this row at this place? `place` is the grantable entry for it. */
 export function removalCheck(type: GrantScopeType, place: PlaceGrantability, target: EditTarget): EditCheck {
   if (target.invite) return place.ok ? { ok: true } : { ok: false, denial: place.denial, cap: null }
-  if (type === "lane") return { ok: false, denial: "lane_needs_staffing", cap: capOf(place) }
+  if (type === "lane") {
+    if (!place.ok) return { ok: false, denial: place.denial, cap: null }
+    if (target.isSelf) return { ok: false, denial: "self", cap: place.cap }
+    // `roleLevel` is the higher of the lane row and their project role (the dry run passes both).
+    if (place.cap < OWNER && target.roleLevel >= place.cap) return { ok: false, denial: "target_outranks", cap: place.cap }
+    return { ok: true }
+  }
   if (type === "team") {
     // Removing someone from a team hands nothing out, so the pen-test cap on
     // joining (team_above_you) does not apply; the route asks only for Maintainer+.
@@ -149,7 +157,6 @@ export function roleChangeOptions(
   place: PlaceGrantability,
   target: EditTarget,
 ): { ok: true; roles: number[] } | { ok: false; denial: EditDenial; cap: number | null } {
-  if (type === "lane") return { ok: false, denial: "lane_needs_staffing", cap: capOf(place) }
   if (!place.ok) return { ok: false, denial: place.denial, cap: null }
   if (target.isSelf && type !== "team") return { ok: false, denial: "self", cap: place.cap }
   const outranked = type === "team" ? target.roleLevel > place.cap : place.cap < OWNER && target.roleLevel >= place.cap

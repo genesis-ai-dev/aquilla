@@ -17,7 +17,7 @@ import {
   type PlaceCounts,
 } from "@/lib/access/people-lens"
 import { scopePathKey } from "@/lib/access/scope-path"
-import { membersPath } from "@/lib/navigation/org-paths"
+import { accessPersonPath } from "@/lib/navigation/org-paths"
 import { formatRelativeTime } from "@/lib/time/relative"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
@@ -32,8 +32,7 @@ const FILTER_LABEL = {
 } as const
 
 /**
- * AQU-2319: one roster. A name links to the member list. The person inspector
- * is a later slice.
+ * AQU-2319: one roster. AQU-2323: a name opens that person's inspector.
  */
 export function PeopleLens({
   people,
@@ -147,7 +146,7 @@ function PersonRow({
   const t = useT()
   const level = highestRoleLevel(person)
   const granted = grantedAtPlaces(person)
-  const href = orgId != null && !person.pendingInvite ? `${membersPath(orgId)}#member-${person.userId}` : null
+  const href = orgId != null && !person.pendingInvite ? accessPersonPath(orgId, person.userId) : null
   const expiry = person.pendingInvite ? inviteExpiry(t, person.pendingInvite.expiresAt) : null
   const email = person.email && person.email !== person.displayName ? person.email : null
   const chip = person.pendingInvite ? (

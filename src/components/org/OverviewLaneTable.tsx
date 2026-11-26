@@ -61,6 +61,7 @@ import { UserChip } from "@/components/UserChip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
+import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
@@ -277,6 +278,10 @@ export function OverviewLaneTable({
   // they were launched from (⋯ menu), matching the workspace's one-modal pattern.
   const [assignLane, setAssignLane] = useState<string | null>(null)
   const [staffLane, setStaffLane] = useState<string | null>(null)
+  // AQU-2322: the Staff popover's Add hands off to Give access. The request is
+  // held here, not in the popover: `staffLane` is a dependency of the columns
+  // below, so closing the popover rebuilds the actions cell and remounts it.
+  const [giving, setGiving] = useState<GiveAccessRequest | null>(null)
   const [archivedOpen, setArchivedOpen] = useState(false)
   /**
    * AQU-1998: bumped after a staffing change so the per-member scope reads
@@ -486,6 +491,7 @@ export function OverviewLaneTable({
                     onOpenChange={(next) => {
                       setStaffLane(next ? laneStaffKey(row.original) : null)
                     }}
+                    onGiveAccess={setGiving}
                     trigger={
                       <span
                         data-testid={`overview-lane-staff-${tagId}`}
@@ -672,6 +678,20 @@ export function OverviewLaneTable({
         author={author}
         onAssigned={() => { setAssignLane(null); onChanged?.() }}
       />
+      {/* One shared Give access, opened by a lane row's Staff popover. Mounted
+          only while there is a request, so an idle table reads no session. */}
+      {orgId != null && giving && (
+        <GiveAccessLauncher
+          orgId={orgId}
+          request={giving}
+          onClose={() => setGiving(null)}
+          onGranted={() => {
+            void refreshMembers()
+            setScopesNonce((n) => n + 1)
+            onChanged?.()
+          }}
+        />
+      )}
     </Section>
   )
 }

@@ -20,6 +20,7 @@ export const org = defineNamespace({
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
     "org.access.roleBadge.via": "{role} · via {path}",
+    "org.access.roleBadge.lanes": "{role} · {lanes}",
     "org.access.roleBadge.origin": "{role} · {origin}",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",
@@ -160,11 +161,15 @@ export const org = defineNamespace({
     "org.access.give.becomesMember": "Becomes a member of the organization",
     "org.access.give.futureProjects": "Projects attached to {team} later are included",
     "org.access.give.inviteNote": "Sends an invitation to {email}. It expires in 30 days.",
+    "org.access.give.narrowToLane": "Narrow to one Language lane below",
+    "org.access.give.laneOnly": "Opens {lane} only. The project's other languages stay closed to them.",
+    "org.access.give.laneNotRestricted": "Narrowed to {lane}, but access to the project's other languages is not restricted yet.",
     "org.access.give.submit": "Give access",
     "org.access.give.submitInvite": "Send invite",
     "org.access.give.done": "{name} is now {role} at {path}",
     "org.access.give.invited": "Invited {email} as {role} at {path}",
     "org.access.give.submitError": "Couldn't give access. Nothing was changed.",
+    "org.access.give.loadError": "Couldn't open Give access. You may not be able to see this organization's people.",
 
     // -- AQU-2321 Places lens editing: change a direct row's role, remove a grant (keeps / loses) --
     "org.access.edit.changeRole": "Change {name}'s role",
@@ -179,7 +184,7 @@ export const org = defineNamespace({
     "org.access.edit.denied.maintainer_on_project": "Only a Maintainer or above on this project can remove its members",
     "org.access.edit.denied.target_outranks": "They hold a role at or above yours ({cap})",
     "org.access.edit.denied.self": "You can't change your own access here",
-    "org.access.edit.denied.lane_needs_staffing": "A language's members are changed from the project's Language lane staffing",
+    "org.access.edit.denied.lanes": "This is their language access. Change it on each language below the project.",
     "org.access.edit.denied.creator": "Creator access comes with making the project and can't be changed",
     "org.access.edit.denied.invite": "An invitation's role is set when it's sent. Cancel it and send a new one.",
     "org.access.remove.title": "Remove {name}'s access",
@@ -187,6 +192,11 @@ export const org = defineNamespace({
     "org.access.remove.description": "Nothing changes until you confirm.",
     "org.access.remove.removes": "Removes {role} at {path}",
     "org.access.remove.removesTeam": "Removes them from the team {team}",
+    "org.access.remove.removesWithLastLane": "Also ends their {role} membership of {path}: only their language grants opened it",
+    "org.access.remove.laneLoses": "Can no longer open {lane}",
+    "org.access.remove.laneOpenedNothing": "Their {lane} grant opened nothing on its own; removing it tidies the list",
+    "org.access.remove.laneStillOpens": "Still opens {lane} as {role} through their project role",
+    "org.access.remove.laneNotRestricted": "Still opens {lane}: access to a project's languages is not restricted yet",
     "org.access.remove.loading": "Checking what changes…",
     "org.access.remove.error": "Couldn't check this removal. Close the dialog and try again.",
     "org.access.remove.losesHeading": "Loses",
@@ -2027,6 +2037,14 @@ export const org = defineNamespace({
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
+      "org.access.roleBadge.lanes": {
+        description:
+          "AQU-2322: the solid role pill on a project for someone whose access there is language-lane grants: the role, then the languages.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Contributor\".",
+          lanes: "Comma-separated language lane names, e.g. \"Spanish\"; never translated.",
+        },
+      },
       "org.access.roleBadge.via": {
         description:
           "AQU-2317: the role pill for a grant inherited from an ancestor place — the role, then the place it is set at. The pill is a link to that place.",
@@ -2100,6 +2118,39 @@ export const org = defineNamespace({
           count: "Number of inherited sources at this place; also selects the plural form.",
           from: "Already-translated phrase naming the organization or the word above.",
         },
+      },
+      "org.access.give.laneOnly": {
+        description: "AQU-2322: What changes line for a language-lane grant while the lane read wall is on.",
+        placeholders: { lane: "The language lane's name, e.g. \"Spanish\"; never translated." },
+      },
+      "org.access.give.laneNotRestricted": {
+        description:
+          "AQU-2322: What changes line for a language-lane grant while the lane read wall is off: the grant is recorded, but other languages still open.",
+        placeholders: { lane: "The language lane's name, e.g. \"Spanish\"; never translated." },
+      },
+      "org.access.remove.removesWithLastLane": {
+        description:
+          "AQU-2322: Remove dialog line when removing someone's last language-lane grant also ends the project membership it opened.",
+        placeholders: {
+          role: "Localized role label of that membership.",
+          path: "Scope breadcrumb of the project; never translated.",
+        },
+      },
+      "org.access.remove.laneLoses": {
+        description: "AQU-2322: Remove dialog line: after the removal they can no longer open this language lane.",
+        placeholders: { lane: "The language lane's name; never translated." },
+      },
+      "org.access.remove.laneOpenedNothing": {
+        description: "AQU-2322: Remove dialog line: the lane grant being removed did not open anything, because nothing opened its project.",
+        placeholders: { lane: "The language lane's name; never translated." },
+      },
+      "org.access.remove.laneStillOpens": {
+        description: "AQU-2322: Remove dialog line: the lane still opens after the removal, through the person's role on the whole project.",
+        placeholders: { lane: "The language lane's name; never translated.", role: "Localized role label they keep there." },
+      },
+      "org.access.remove.laneNotRestricted": {
+        description: "AQU-2322: Remove dialog line while the lane read wall is off: the lane still opens, because languages are not restricted yet.",
+        placeholders: { lane: "The language lane's name; never translated." },
       },
       "org.access.edit.changeRole": {
         description: "AQU-2321: accessible name of the role pill on a direct grant, which opens the role dropdown.",

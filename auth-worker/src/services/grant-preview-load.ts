@@ -9,6 +9,7 @@
  */
 import type { AccessGrant, GrantScope, GrantSource } from "../../../db/shared/access-grants"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import type { Env } from "../types"
 import type { ViewerScope } from "./access-payload"
 import type { Granter, GrantTarget, OrgWorld } from "./grant-preview"
@@ -77,6 +78,20 @@ export async function loadGrantWorld(env: Env, vs: ViewerScope, orgId: number): 
       })),
     },
     granter: { userId: viewerId, orgRole: await vs.orgRole(orgId), projectRoles },
+  }
+}
+
+/**
+ * AQU-2322: the world as one viewer's lens shows it, for lane answers. The
+ * read wall flag, and the lanes their Places lens lists (`grantable` carries
+ * one `lane:<id>` key per lane node), so no preview names or counts a lane
+ * the metadata wall hides from them.
+ */
+export function withLaneView(world: OrgWorld, grantable: Readonly<Record<string, unknown>>, wallFlag: string | undefined): OrgWorld {
+  return {
+    ...world,
+    wallOn: laneReadWallEnabled(wallFlag),
+    visibleLaneIds: new Set(world.lanes.filter((l) => `lane:${l.id}` in grantable).map((l) => l.id)),
   }
 }
 

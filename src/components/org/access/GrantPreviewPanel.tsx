@@ -50,6 +50,11 @@ export function previewLines(t: TFunction, preview: GrantPreview, email: string 
   } else {
     lines.push(t("org.access.give.gainsHere", { role: roleLabel(t, preview.roleLevel), path }))
   }
+  // AQU-2322: a lane grant names its lane and what happens to the project's other lanes.
+  if (preview.lane?.siblingsClosed) {
+    const lane = placeName(preview.placePath[preview.placePath.length - 1])
+    lines.push(t(preview.lane.wallOn ? "org.access.give.laneOnly" : "org.access.give.laneNotRestricted", { lane }))
+  }
   if (preview.replaces != null && preview.replaces !== preview.roleLevel) {
     lines.push(t("org.access.give.replaces", { role: roleLabel(t, preview.replaces) }))
   }

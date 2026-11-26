@@ -67,6 +67,13 @@
 // means choosing their lanes, so it belongs in the project's Members / Share
 // flows where lanes are explicit, not behind a one-click link in a
 // lane-scoped control. Keep this surface to the lane you clicked.
+//
+// AQU-2322 — the Add no longer writes from here. It opens Give access
+// pre-filled with the person, the role and this lane, and the grant goes
+// through the additive lane-grant route behind that dialog's dry run (one
+// lane row, beside the lanes they hold; never the scopes table). The Remove
+// half below still rewrites scopes; the popover itself is retired in slice 8
+// of the access UI.
 
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
@@ -80,11 +87,9 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
 import { StaffedLaneMembers, type StaffedLanePerson } from "@/components/StaffedLaneMembers"
 import { ROLE, roleName, roleDescription } from "@/lib/frontier/roles"
-import { LANE_SCOPE_ABOVE_CEILING_ERROR } from "@/lib/lanes/scope-ids"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { addProjectMember } from "@/lib/frontier/members"
 import {
   fetchMemberLaneAssignments,
   fetchMemberScopes,
@@ -97,7 +102,7 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
-import { toast } from "@/components/ui/toast"
+import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
 import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { ScopePath } from "@/lib/access/types"
@@ -129,6 +134,14 @@ export interface StaffLanePopoverProps {
    * row ⋯ menu and only needs an anchor in the actions cell.
    */
   anchorOnly?: boolean
+  /**
+   * AQU-2322: take the Give access request instead of opening the dialog from
+   * here. A caller that can remount this popover when it closes must pass it
+   * and hold the launcher itself: OverviewLaneTable rebuilds its actions cell
+   * when the open lane changes, and a request kept in this component's state
+   * was gone before the dialog could open. Absent, the popover opens it.
+   */
+  onGiveAccess?: (request: GiveAccessRequest) => void
 }
 
 /**
@@ -149,7 +162,6 @@ const STAFFABLE_ROLES: readonly number[] = [ROLE.REVIEWER, ROLE.CONTRIBUTOR]
 
 const MAX_RESULTS = 20
 
-type Phase = "idle" | "submitting" | "done" | "error"
 
 /** AQU-731: the ways the org roster can be unsearchable, each with its own
  * message. `null` (see `rosterBlocked`) means the roster is usable. */
@@ -177,6 +189,7 @@ export function StaffLanePopover({
   open: openProp,
   onOpenChange,
   anchorOnly = false,
+  onGiveAccess,
 }: StaffLanePopoverProps) {
   const { t, locale } = useI18n()
   const location = useLocation()
@@ -197,9 +210,8 @@ export function StaffLanePopover({
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState<{ userId: number; username: string } | null>(null)
   const [role, setRole] = useState<number>(ROLE.REVIEWER)
-  const [phase, setPhase] = useState<Phase>("idle")
-  const [message, setMessage] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  /** AQU-2322: the Give access the Add opened, pre-filled; null when none is open. */
+  const [giving, setGiving] = useState<GiveAccessRequest | null>(null)
   /**
    * AQU-1998: who is already staffed on this lane. `null` until the first
    * scope read for an open popover has come back, so "nobody yet" and "not
@@ -325,9 +337,6 @@ export function StaffLanePopover({
     setQuery("")
     setSelected(null)
     setRole(ROLE.REVIEWER)
-    setPhase("idle")
-    setMessage(null)
-    setErrorMsg(null)
     // Drop the staffed list too: a reopened popover re-reads it rather than
     // showing who was on the lane when it was last closed.
     setStaffed(null)
@@ -340,31 +349,6 @@ export function StaffLanePopover({
     if (!controlled) setUncontrolledOpen(next)
     onOpenChange?.(next)
     if (!next) reset()
-  }
-
-  /** Ensures membership at >= targetRole, skipping the POST when the person
-   * already holds it — an explicit downgrade is never issued from here. */
-  async function ensureMembership(userId: number, username: string, targetRole: number) {
-    const existing = projectMembers.find((m) => m.userId === userId)
-    if (existing && existing.role.level >= targetRole) return
-    if (!jwt) throw new Error("Sign in to manage membership.")
-    // A new member below project lead has to name this lane on the add.
-    // Sending it afterwards, only as a scope, used to grant every lane first.
-    // A lead stays unscoped: the role already sees every lane.
-    if (targetRole < ROLE.PROJECT_LEAD) {
-      await addProjectMember(jwt, projectId, username, targetRole, {
-        scopeLanes: [laneId || lane],
-      })
-    } else {
-      await addProjectMember(jwt, projectId, username, targetRole)
-    }
-  }
-
-  function mergeLaneScope(existing: MemberScope[]): MemberScope[] {
-    // AQU-1607: write the lane id when we have it, and drop a row that named
-    // this same lane the old way so the member ends up with one scope for it.
-    const value = laneValue
-    return [...existing.filter((s) => !scopeNamesLane(s, value, lane)), { kind: "lane", value }]
   }
 
   /**
@@ -468,52 +452,28 @@ export function StaffLanePopover({
     }
   }
 
-  async function handleConfirm() {
-    if (!selected || !jwt || seesEveryLane) return
-    setPhase("submitting")
-    setErrorMsg(null)
-    try {
-      await ensureMembership(selected.userId, selected.username, role)
-      try {
-        const existingScopes = (await fetchMemberScopes(jwt, projectId, selected.userId)) ?? []
-        await putMemberScopes(jwt, projectId, selected.userId, mergeLaneScope(existingScopes))
-      } catch (scopeErr) {
-        const text = scopeErr instanceof Error ? scopeErr.message : String(scopeErr)
-        if (text.startsWith(LANE_SCOPE_ABOVE_CEILING_ERROR)) {
-          // The person's effective role is already maintainer+ (the roster
-          // we checked was stale) — the server is correctly refusing to scope
-          // them. That's not a failure: they already see every language.
-          await refreshProjectMembers()
-          setPhase("done")
-          setMessage(t("org.staffLanePopover.alreadySeesEveryLanguage", { name: selected.username }))
-          onDone?.()
-          return
-        }
-        throw scopeErr
-      }
-      await refreshProjectMembers()
-      // AQU-1998: the person just staffed belongs in the list above, so
-      // re-read the scopes rather than leaving it as it was on open.
-      setStaffedNonce((n) => n + 1)
-      setPhase("done")
-      const sentence = describeGrant(t, {
-        names: [selected.username],
-        roleLevel: heldRole,
-        stays: keepsRole,
-        scope: {
-          kind: "project",
-          projectName: grantProjectName(t, projectName),
-          lanes: [laneLabel],
-        },
-        locale,
-      }).sentence
-      setMessage(sentence)
-      toast.add({ type: "success", title: sentence })
-      onDone?.()
-    } catch (err) {
-      setPhase("error")
-      setErrorMsg(err instanceof Error ? err.message : String(err))
+  /**
+   * AQU-2322: hand the add to Give access, pre-filled with this person, the
+   * picked role and this lane. Its dry run and the lane-grant route decide;
+   * nothing is written from here. The popover closes so the dialog is on top.
+   */
+  function handleConfirm() {
+    if (!selected || seesEveryLane || orgId == null) return
+    const request: GiveAccessRequest = {
+      userId: String(selected.userId),
+      roleLevel: role,
+      place: laneId ? { type: "lane", id: laneId } : undefined,
+      nonce: Date.now(),
     }
+    if (onGiveAccess) onGiveAccess(request)
+    else setGiving(request)
+    handleOpenChange(false)
+  }
+
+  function handleGranted() {
+    void refreshProjectMembers()
+    setStaffedNonce((n) => n + 1)
+    onDone?.()
   }
 
   const laneScopePath: ScopePath = [
@@ -521,9 +481,8 @@ export function StaffLanePopover({
     ...(projectName?.trim() ? [{ type: "project" as const, id: projectId, name: projectName.trim() }] : []),
     { type: "lane" as const, id: laneId ?? lane, name: laneLabel },
   ]
-  const busy = phase === "submitting"
-
   return (
+    <>
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         // This control is mounted inside the row's actions cell on clickable
@@ -688,7 +647,6 @@ export function StaffLanePopover({
                 variant="ghost"
                 className="h-6 px-1.5 text-[11px]"
                 onClick={() => setSelected(null)}
-                disabled={busy}
               >
                 {t("org.projectOverview.change")}
               </Button>
@@ -702,7 +660,6 @@ export function StaffLanePopover({
               }))}
               value={role}
               onValueChange={setRole}
-              disabled={busy}
               size="sm"
               aria-label={t("common.roleLabel")}
             />
@@ -726,8 +683,7 @@ export function StaffLanePopover({
                 }).sentence}
               />
             )}
-            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt || seesEveryLane}>
-              {busy && <Spinner className="me-1.5 size-3.5" />}
+            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={!jwt || seesEveryLane || orgId == null} data-testid="staff-lane-give-access">
               {grantButtonLabel(
                 t,
                 t("common.add"),
@@ -744,15 +700,13 @@ export function StaffLanePopover({
               )}
             </Button>
 
-            {phase === "done" && message && (
-              <p data-testid="grant-scope-result" className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>
-            )}
-            {phase === "error" && errorMsg && (
-              <p className="text-[11px] text-destructive">{errorMsg}</p>
-            )}
           </div>
         )}
       </PopoverContent>
     </Popover>
+    {orgId != null && !onGiveAccess && (
+      <GiveAccessLauncher orgId={orgId} request={giving} onClose={() => setGiving(null)} onGranted={handleGranted} />
+    )}
+    </>
   )
 }

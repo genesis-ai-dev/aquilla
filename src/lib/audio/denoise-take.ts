@@ -72,6 +72,9 @@ export interface DenoiseTakeArgs {
     gainDb?: number | null
     fadeInMs?: number | null
     fadeOutMs?: number | null
+    /** AQU-2494 (review, Nov 9): the voice an AI take was made with — on an
+     *  added track its only mark — so the cleaned take is still marked AI. */
+    voiceId?: string | null
   }
 }
 
@@ -148,6 +151,8 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       url: result.url,
       slot,
       mimeType: blob.type || undefined,
+      // AQU-2494 (review, Nov 9): an AI voice stays one when it is cleaned.
+      ...(src?.voiceId ? { voiceId: src.voiceId } : {}),
       referenceAudioId: sourceAudioId,
       durationMs: Math.round(durationMs),
       ...(src?.label ? { label: src.label } : {}),
@@ -185,7 +190,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     url: result.url,
     slot,
     mimeType: blob.type || null,
-    voiceId: null,
+    voiceId: src?.voiceId ?? null,
     referenceAudioId: sourceAudioId,
     durationMs: Math.round(durationMs),
     trimStartMs: src?.trimStartMs ?? null,
@@ -253,6 +258,8 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         url: result.url,
         slot: piece.slot,
         mimeType: blob.type || undefined,
+        // AQU-2494 (review, Nov 9): an AI voice stays one when it is cleaned.
+        ...(piece.voiceId ? { voiceId: piece.voiceId } : {}),
         referenceAudioId: piece.audioId,
         durationMs: Math.round(durationMs),
         ...(piece.label ? { label: piece.label } : {}),
@@ -264,6 +271,13 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         author,
       })
       attached += 1
+      // AQU-2494 (review, Nov 9): each cleaned piece keeps its own piece's
+      // volume and fades, as a cleaned whole take keeps the take's. They came
+      // back at the recorded volume with no fades.
+      const level = { gainDb: piece.gainDb ?? null, fadeInMs: piece.fadeInMs ?? null, fadeOutMs: piece.fadeOutMs ?? null }
+      if (level.gainDb != null || level.fadeInMs != null || level.fadeOutMs != null) {
+        await emitCellAudioGain({ projectId, fileId, cellId, audioId, ...level, ...lane, author })
+      }
       // AQU-2267: in both timings — its place following the recordings is
       // stated beside its place following the source, so neither moves.
       const placeP = piece.targetOffsetMs != null || piece.recordingsOffsetMs != null
@@ -279,7 +293,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         url: result.url,
         slot: piece.slot,
         mimeType: blob.type || null,
-        voiceId: null,
+        voiceId: piece.voiceId ?? null,
         referenceAudioId: piece.audioId,
         durationMs: Math.round(durationMs),
         trimStartMs: piece.trimStartMs ?? null,
@@ -288,6 +302,9 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
         ...(piece.label ? { label: piece.label } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...(level.gainDb != null ? { gainDb: level.gainDb } : {}),
+        ...(level.fadeInMs != null ? { fadeInMs: level.fadeInMs } : {}),
+        ...(level.fadeOutMs != null ? { fadeOutMs: level.fadeOutMs } : {}),
       }, placeP ?? eventId)
     }
   } catch (emitErr) {

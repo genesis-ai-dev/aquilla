@@ -79,6 +79,13 @@ export function takeTrackVars(input: TakeColorInput): Record<string, string> {
   return trackHueVarsFor(track?.kind ?? "target-audio", track?.color ?? null)
 }
 
+/** AQU-2493 (review, Nov 9): is the take's track a layer (AQU-2252: an added
+ *  track whose takes set no line's length — music, effects, ambience)? */
+export function takeTrackIsLayer(input: Omit<TakeColorInput, "sourceSection">): boolean {
+  const track = takeTrack(input)
+  return track?.kind === "audio" && track.setsLineLengths === false
+}
+
 /** The name of the track a take sits on, as the timeline shows it; null for a
  *  track this build cannot name (a collaborator's newer one). */
 export function takeTrackName(input: Omit<TakeColorInput, "sourceSection">): string | null {

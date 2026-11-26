@@ -82,7 +82,7 @@ export function forgetPortfolioProject(jwt: string, projectId: string): void {
   for (const [key, page] of directoryPages) {
     if (!page.projects.some((project) => project.id === projectId)) continue
     directoryPages.set(key, {
-      ...page,
+      nextCursor: page.nextCursor,
       projects: page.projects.filter((project) => project.id !== projectId),
     })
   }

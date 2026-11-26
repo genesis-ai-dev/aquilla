@@ -201,7 +201,7 @@ describe("a removed member with the project open (AQU-2455)", () => {
     expect(screen.getByTestId("project-list")).toBeInTheDocument()
     expect(screen.queryByText(/PMR Alpha/)).not.toBeInTheDocument()
     expect(screen.queryByText(/80 translated/)).not.toBeInTheDocument()
-    expect(screen.getByText("Beta Notes · 1 translated")).toBeInTheDocument()
+    expect(screen.queryByText("Beta Notes · 1 translated")).not.toBeInTheDocument()
     expect(getPortfolioPage).toHaveBeenCalled()
     expect(refreshAccessibleProjects).toHaveBeenCalledTimes(1)
 

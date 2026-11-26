@@ -34,12 +34,11 @@ export async function holdBatchForSync(opts: {
   return new Promise((resolve) => {
     let settled = false
     let unsubscribe = () => {}
-    let timer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: OutboxSyncHold) => {
       if (settled) return
       settled = true
       unsubscribe()
-      if (timer !== undefined) clearTimeout(timer)
+      clearTimeout(timer)
       resolve(result)
     }
     const check = () => {
@@ -49,9 +48,11 @@ export async function holdBatchForSync(opts: {
         // An unreadable outbox is not an empty one. Keep waiting.
       })
     }
+    // Armed before subscribe: a synchronous outbox callback can finish the
+    // wait, and the timer has to exist already for that clear to be valid.
+    const timer = setTimeout(() => finish("timeout"), timeoutMs)
     unsubscribe = subscribe(check)
     opts.flushNow()
-    timer = setTimeout(() => finish("timeout"), timeoutMs)
     check()
   })
 }

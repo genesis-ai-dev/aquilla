@@ -11,7 +11,13 @@
  * that are untranslated or stale, each with the English source and the
  * translator note `contextNote()` already assembles from the context sidecar.
  *
- *   npx tsx scripts/i18n-todo.ts [outDir] [--locale <code>]   (default: i18n-todo/)
+ *   npx tsx scripts/i18n-todo.ts [outDir] [--locale <code>] [--new]   (default: i18n-todo/)
+ *
+ * `--new` (AQU-2740) narrows each packet to the keys the translation baseline
+ * does not allow: what a branch added or reworded, which `pnpm i18n:check`
+ * fails on. That is the packet a PR author fills; without the flag the packet
+ * is the locale's whole backlog, for a sweep. Fill it, then
+ * `pnpm i18n:import-todo` imports every locale's packet at once.
  *
  * Two classes land in a packet, and the distinction matters:
  *   - **untranslated** — the locale has no value for this key. It currently
@@ -46,6 +52,8 @@ import { CATALOGS } from "../src/lib/i18n/messages/all"
 import { en, type MessageKey } from "../src/lib/i18n/messages/en"
 import { isPluralMessage } from "../src/lib/i18n/plurals"
 import sourceHashes from "../src/lib/i18n/source-hashes.json" with { type: "json" }
+import translationBaseline from "../src/lib/i18n/translation-baseline.json" with { type: "json" }
+import type { TranslationBaseline } from "../src/lib/i18n/coverage"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_OUT_DIR = "i18n-todo"
@@ -70,7 +78,9 @@ interface Packet {
   notes: Record<string, string>
 }
 
-function packetFor(locale: string): Packet {
+const BASELINE = translationBaseline as TranslationBaseline
+
+function packetFor(locale: string, onlyNew: boolean): Packet {
   const catalog = CATALOGS[locale] ?? {}
   const hashes = (sourceHashes as Record<string, SourceHashes>)[locale] ?? {}
   const untranslated: string[] = []
@@ -85,6 +95,16 @@ function packetFor(locale: string): Packet {
     // both keyed by `MessageKey` — can be indexed without repeating the cast.
     const messageKey = key as MessageKey
     const value = catalog[messageKey]
+    if (onlyNew) {
+      // A gap the baseline still allows is backlog, not this branch's work.
+      if (BASELINE[messageKey]?.includes(locale)) continue
+      // The ratchet checks whole keys (src/lib/i18n/coverage.ts): a key with a
+      // current translation passes even when a plural category is missing, so
+      // that leaf is backlog too.
+      const keyIsStale =
+        hashes[messageKey] !== undefined && hashes[messageKey] !== sourceHash(messageKey)
+      if (value !== undefined && !keyIsStale) continue
+    }
     const hasValue =
       value !== undefined &&
       (!isPluralMessage(value) || (category ? value.forms[category] !== undefined : true))
@@ -112,6 +132,7 @@ function packetFor(locale: string): Packet {
 const args = process.argv.slice(2)
 const localeFlag = args.indexOf("--locale")
 const only = localeFlag === -1 ? null : args[localeFlag + 1]
+const onlyNew = args.includes("--new")
 const outDirArg = args.find((a) => !a.startsWith("--") && a !== only)
 const outDir = resolve(REPO_ROOT, outDirArg ?? DEFAULT_OUT_DIR)
 mkdirSync(outDir, { recursive: true })
@@ -120,7 +141,10 @@ let grandTotal = 0
 for (const { code } of LOCALES) {
   if (code === DEFAULT_LOCALE) continue
   if (only && code !== only) continue
-  const packet = packetFor(code)
+  const packet = packetFor(code, onlyNew)
+  // With --new, a locale with nothing to do gets no packet, so the directory
+  // holds exactly the work and import-todo touches nothing else.
+  if (onlyNew && packet.untranslated.length + packet.stale.length === 0) continue
   const total = packet.untranslated.length + packet.stale.length
   grandTotal += total
 
@@ -142,5 +166,7 @@ for (const { code } of LOCALES) {
 console.log(`\ni18n-todo: ${grandTotal} leaf/leaves total across locales → ${outDir}`)
 console.log(
   `Fill the values in <locale>.todo.json, then:\n` +
-    `  npx tsx scripts/i18n-catalog.ts import <locale> ${outDirArg ?? DEFAULT_OUT_DIR}/<locale>.todo.json`,
+    `  npx tsx scripts/i18n-catalog.ts import <locale> ${outDirArg ?? DEFAULT_OUT_DIR}/<locale>.todo.json\n` +
+    `or import every packet at once:\n` +
+    `  pnpm i18n:import-todo ${outDirArg ?? DEFAULT_OUT_DIR}`,
 )

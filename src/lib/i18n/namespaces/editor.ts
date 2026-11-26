@@ -2864,6 +2864,8 @@ export const editor = defineNamespace({
     "editor.navTitle.organizationSettings": "Organization settings",
     "editor.navTitle.membersMatrix": "Members matrix",
     "editor.navTitle.members": "Members",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "editor.fileOptionsAria": "File options",
     "editor.navTitle.team": "Team",
     "editor.navTitle.teams": "Teams",
     "editor.navTitle.projectOverview": "Project overview",
@@ -3052,6 +3054,10 @@ export const editor = defineNamespace({
       screenshot: "editor-table",
     },
     keys: {
+      "editor.fileOptionsAria": {
+        description:
+          "Screen-reader name of the '⋯' icon button in the open file's toolbar that opens a menu of actions for the whole file (rename, export, and so on). Not visible text.",
+      },
       // AQU-646, keyed 2026-08-20. Only the two classes that require their own
       // entry — a placeholder and an accessibility name; the rest of that batch
       // inherits the namespace description above.

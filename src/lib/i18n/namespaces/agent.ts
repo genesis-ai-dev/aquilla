@@ -63,6 +63,8 @@ export const agent = defineNamespace({
     "agent.run.stepRunning": "Step running",
     "agent.run.stepSucceeded": "Step succeeded",
     "agent.run.stepFailed": "Step failed",
+    // ── AQU-2740: copy that was hard-coded in English at the call site ──
+    "agent.run.failedFallback": "Agent run failed.",
     "agent.run.chooseFile": "Choose a file:",
     "agent.run.useFileMessage": "Use \"{name}\"",
     "agent.run.capped": "Run hit its step/token cap — results may be partial.",
@@ -710,6 +712,10 @@ export const agent = defineNamespace({
       screenshot: "editor-table",
     },
     keys: {
+      "agent.run.failedFallback": {
+        description:
+          "Shown in a red alert under an AI agent run that failed when the provider gave no error message of its own. When it does give one, that message is shown instead.",
+      },
       "agent.dock.openInEditorAriaLabel": {
         description:
           "Accessible name (and tooltip) for the icon button that opens the agent's " +

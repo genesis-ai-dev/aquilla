@@ -41,6 +41,12 @@ green on the PR's head or a person adds `release:approved`.
 | Adversarial Jev | the advisory `pr` job on every non-draft PR into `dev`, plus the 09:00 UTC nightly against deployed `dev` and `workflow_dispatch` | the `pr` job attacks the PR's own preview, keeps one sticky comment, and files no tickets; it goes red only when the harness said nothing about the commit (`HARNESS UNAVAILABLE`, `NOT RUN`, `NOT VERIFIED` — AQU-1899). The nightly files Linear tickets. Neither affects the cut or the deploy. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
 
+**UI text ships translated (AQU-2740).** `i18n:check` fails a branch that adds or
+rewords an English message without translating it into every locale. Before pushing, run
+`pnpm i18n:todo --new`, fill each `i18n-todo/<locale>.todo.json`, then run `pnpm
+i18n:import-todo`. Never grow `src/lib/i18n/translation-baseline.json` to get a green
+check. The full workflow is in `docs/I18N-CONTEXT-CATALOG.md`, under "Translation coverage".
+
 Branch protection requires the `ci.yml` jobs that always report a status
 (`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,
 `agent-worker-tests`) and the Cloudflare preview. `unit` aggregates the three

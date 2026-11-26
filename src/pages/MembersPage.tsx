@@ -56,7 +56,7 @@ export function MembersPage() {
             inset={false}
           />
           <DataTablePanelSkeleton
-            searchPlaceholder="Search by name or email"
+            searchPlaceholder={t("org.membersTable.searchPlaceholder")}
             loadingLabel={t("org.membersPage.loadingMembers")}
             className={ADMIN_TABLE_PANEL_CLASS}
           />
@@ -181,7 +181,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             inset={false}
           />
           <DataTablePanelSkeleton
-            searchPlaceholder="Search by name or email"
+            searchPlaceholder={t("org.membersTable.searchPlaceholder")}
             loadingLabel={t("org.membersPage.loadingMembers")}
             className={ADMIN_TABLE_PANEL_CLASS}
           />

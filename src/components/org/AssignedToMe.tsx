@@ -302,7 +302,7 @@ export function AssignedToMe() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Assigned to me" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.assignedToMe")} />}
       statusBar={null}
       main={
         // Match Members / Teams: Page size="wide" (max-w-6xl) inside AppShell.
@@ -337,7 +337,7 @@ export function AssignedToMe() {
               onRowClick={(a) => { void openAssignment(a) }}
               rowLink={{ columnId: "assignment", to: assignmentHref }}
               initialSorting={[{ id: "deadline", desc: false }]}
-              searchPlaceholder="Search assignments…"
+              searchPlaceholder={t("org.assignedToMe.searchPlaceholder")}
               globalFilterFn={(row, _columnId, filterValue) => {
                 const q = String(filterValue).trim().toLowerCase()
                 if (!q) return true

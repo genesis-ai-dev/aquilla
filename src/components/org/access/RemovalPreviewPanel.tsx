@@ -28,6 +28,15 @@ function keepText(t: TFunction, kept: KeptAccess, date: (iso: string) => string)
   return t("org.access.remove.keepsHidden", vars)
 }
 
+/** AQU-2322: what removing a lane grant does to that lane. */
+function laneText(t: TFunction, entry: { lane: ScopeRef; before: number | null; after: number | null }, wallOn: boolean): string {
+  const lane = placeName(entry.lane)
+  if (entry.after == null) return t(entry.before == null ? "org.access.remove.laneOpenedNothing" : "org.access.remove.laneLoses", { lane })
+  return wallOn
+    ? t("org.access.remove.laneStillOpens", { lane, role: roleLabel(t, entry.after) })
+    : t("org.access.remove.laneNotRestricted", { lane })
+}
+
 function alsoText(t: TFunction, grant: GrantRef, kept: KeptAccess): string {
   if (grant.type === "org") return t("org.access.remove.alsoOrg")
   if (grant.type === "team") return t("org.access.remove.alsoTeam", { team: placeName(kept.after.via) })
@@ -66,7 +75,9 @@ export function RemovalPreviewPanel({
           <li key={grantKey(r.grant) + formatScopePath(r.path)} data-testid="removal-removes">
             {r.grant.type === "team" && r.roleLevel == null
               ? t("org.access.remove.removesTeam", { team: placeName(r.path[r.path.length - 1]) })
-              : t("org.access.remove.removes", { role: roleLabel(t, r.roleLevel), path: formatScopePath(r.path) })}
+              : r.withLastLane
+                ? t("org.access.remove.removesWithLastLane", { role: roleLabel(t, r.roleLevel), path: formatScopePath(r.path) })
+                : t("org.access.remove.removes", { role: roleLabel(t, r.roleLevel), path: formatScopePath(r.path) })}
           </li>
         ))}
       </ul>
@@ -77,6 +88,9 @@ export function RemovalPreviewPanel({
             ? t("org.access.remove.losesNothing")
             : t(preview.invite ? "org.access.remove.inviteLoses" : "org.access.remove.loses", { list: names(preview.loses) })}
         </p>
+        {(preview.lanes ?? []).map((entry) => (
+          <p key={entry.lane.id} data-testid="removal-lane">{laneText(t, entry, preview.wallOn === true)}</p>
+        ))}
         {preview.leavesTeams.length > 0 && <p data-testid="removal-leaves-teams">{t("org.access.remove.leavesTeams", { list: names(preview.leavesTeams) })}</p>}
         {!preview.guest.before && preview.guest.after && <p>{t("org.access.remove.becomesGuest")}</p>}
       </section>

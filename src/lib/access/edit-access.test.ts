@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { inviteRowId, rowEdit, rowRemoval, shortList } from "./edit-access"
+import { inviteRowId, rowEdit, rowGrant, rowRemoval, shortList } from "./edit-access"
 import type { PlaceGrantability } from "./grant-rules"
 
 const org = { type: "org" as const, id: "1", name: "Org" }
@@ -21,10 +21,10 @@ describe("edit-access", () => {
     expect(inviteRowId(project, [org, project], "42")).toBeNull()
   })
 
-  it("lets a Project lead cancel a lane invite (a project invite), but not remove a lane member", () => {
+  it("lets a Project lead cancel a lane invite (a project invite) and remove a lane grant (AQU-2322)", () => {
     expect(rowRemoval(lane, [org, project, lane], { userId: "invite:tok", roleLevel: 300, source: "invite" }, leadOnP1, false)).toEqual({ ok: true })
-    expect(rowRemoval(lane, [org, project, lane], { userId: "6", roleLevel: 300, source: "direct" }, leadOnP1, false))
-      .toEqual({ ok: false, reason: "lane_needs_staffing", cap: 500 })
+    expect(rowRemoval(lane, [org, project, lane], { userId: "6", roleLevel: 300, source: "direct" }, leadOnP1, false)).toEqual({ ok: true })
+    expect(rowGrant(lane)).toEqual({ type: "lane", id: "fr" })
   })
 
   it("never edits a creator row or an invite's role", () => {

@@ -111,15 +111,18 @@ describe("AQU-2320 Give access dry run", () => {
     expect(body.preview?.redundant).toBe(false)
   })
 
-  it("a lane grant opens one lane for someone not yet on the project, and refuses to narrow someone already there", async () => {
+  it("a lane grant opens one lane for someone not yet on the project, and adds one for someone already there", async () => {
     const fresh = await preview("owner", { place: { type: "lane", id: "lanefr01" }, roleLevel: 400, person: person("org_contrib") })
     expect(fresh.status).toBe(200)
     expect(fresh.body.preview?.placePath.map((s) => s.name)).toEqual(["Fixture Org", "Alpha", "French"])
     expect(fresh.body.preview?.here.after).toMatchObject({ roleLevel: 400, source: "lane" })
 
+    // AQU-2322: the lane write is additive (one lane row), so someone already on
+    // the project is no longer refused; their project access does not move.
     const onProject = await preview("owner", { place: { type: "lane", id: "lanefr01" }, roleLevel: 300, person: person("team_only") })
-    expect(onProject.status).toBe(409)
-    expect(onProject.body.code).toBe("lane_needs_staffing")
+    expect(onProject.status).toBe(200)
+    expect(onProject.body.preview?.changes).toEqual([])
+    expect(onProject.body.preview?.here.before).toMatchObject({ roleLevel: 400, source: "lane" })
   })
 
   it.each<[string, FixtureUser, { type: string; id: string }, number, Person, number, string, RegExp]>([

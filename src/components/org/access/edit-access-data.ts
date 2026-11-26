@@ -8,11 +8,13 @@
  *     org      DELETE /orgs/:id/members/:u       (also takes their teams)
  *     team     DELETE /orgs/:id/groups/:g/members/:u
  *     project  DELETE /projects/:p/members/:u
+ *     lane     DELETE /orgs/:id/access/lane-grant (AQU-2322)
  *     invite   DELETE /orgs/:id/invites/:t  or  /projects/:p/invites/:t
  *   Every one of them tells the sync-worker to eject live sessions on the
  *   projects the person lost (AQU-346; org and team since AQU-2321).
  *   Not atomic: they run one after another and the result says how far it got.
- * - `changeGrantRole` — team by userId (PATCH .../members/:u); org and project
+ * - `changeGrantRole` — team and lane by userId (PATCH .../members/:u, PUT
+ *   /orgs/:id/access/lane-grant); org and project
  *   through the add routes, which take a username: the roster's own username
  *   field, never the display name, and the account written is checked.
  */
@@ -25,7 +27,7 @@ import { grantKey, type GrantRef } from "@/lib/access/edit-access"
 import type { ScopeRef } from "@/lib/access/types"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
 
-import { writableUsername, type EffectiveRole } from "./give-access-data"
+import { deleteLaneGrant, putLaneGrant, writableUsername, type EffectiveRole } from "./give-access-data"
 
 /** Mirrors auth-worker/src/services/removal-preview.ts RemovalPreview. */
 export interface KeptAccess {
@@ -39,11 +41,15 @@ export interface KeptAccess {
 export interface RemovalPreview {
   person: { userId: string; displayName: string }
   invite: boolean
-  removes: { grant: GrantRef; path: ScopeRef[]; roleLevel: number | null }[]
+  /** `withLastLane`: a project row that goes with the last lane grant that opened it (AQU-2322). */
+  removes: { grant: GrantRef; path: ScopeRef[]; roleLevel: number | null; withLastLane?: true }[]
   loses: ScopeRef[]
   keeps: KeptAccess[]
   leavesTeams: ScopeRef[]
   guest: { before: boolean; after: boolean }
+  /** AQU-2322: each lane grant removed, and their role in that lane before and after. Absent before AQU-2322. */
+  lanes?: { lane: ScopeRef; before: number | null; after: number | null }[]
+  wallOn?: boolean
 }
 
 export type RemovalState =
@@ -125,6 +131,7 @@ export async function removeGrants(
 function removeOne(jwt: string, orgId: number, userId: number, grant: GrantRef): Promise<void> {
   if (grant.type === "org") return removeOrgMember(jwt, orgId, userId)
   if (grant.type === "team") return removeTeamMember(jwt, orgId, Number(grant.id), userId)
+  if (grant.type === "lane") return deleteLaneGrant(jwt, orgId, { laneId: grant.id, userId: String(userId) })
   return removeProjectMember(jwt, grant.id, userId)
 }
 
@@ -148,6 +155,10 @@ export async function changeGrantRole(
 ): Promise<void> {
   if (grant.type === "team") {
     await setTeamMemberRole(jwt, orgId, Number(grant.id), Number(person.userId), roleLevel)
+    return
+  }
+  if (grant.type === "lane") {
+    await putLaneGrant(jwt, orgId, { laneId: grant.id, userId: person.userId, roleLevel })
     return
   }
   const username = writableUsername(person)

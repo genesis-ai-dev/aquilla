@@ -32,8 +32,9 @@ import {
   type PlaceGrant,
 } from "../services/org-access-places"
 import { assembleOrgPeople, type OrgAccessPerson } from "../services/org-access-people"
+import { buildLaneShape } from "../services/lane-shape"
 import { grantableMap, previewGrant, type GrantTarget } from "../services/grant-preview"
-import { loadGrantTarget, loadGrantWorld } from "../services/grant-preview-load"
+import { loadGrantTarget, loadGrantWorld, withLaneView } from "../services/grant-preview-load"
 import { removalCheck, type PlaceGrantability } from "../../../src/lib/access/grant-rules"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { getOrgMemberRole } from "../services/org-permissions"
@@ -159,6 +160,9 @@ export async function buildOrgAccess(
     memberIds.add(id)
     lastActiveAt.set(id, isoTimestamp(row.last_active_at))
   }
+  // AQU-2322: read off every row in the org, before viewer filtering, so who
+  // counts as lane-granted does not depend on who is looking.
+  const laneShape = buildLaneShape({ grants, laneGrants: extras.laneGrants, lanes: extras.lanes })
   const { tree, visibleTeamIds } = assembleAccessTree({
     org: { type: "org", id: String(org.id), name: org.name },
     seesOrg,
@@ -171,6 +175,7 @@ export async function buildOrgAccess(
     projects: projectsRes.results ?? [],
     memberIds,
     extras,
+    laneShape,
   })
 
   // treeGrants is `visible` plus team-scope rows on a team this viewer can see.
@@ -182,6 +187,7 @@ export async function buildOrgAccess(
     org: { type: "org", id: String(org.id), name: org.name },
     tree,
     extras,
+    laneShape,
   })
   // The org, and any team this viewer is not on, lose their names. A team they
   // can see keeps its name — hiding that too would contradict the tree.
@@ -244,7 +250,8 @@ orgAccess.post("/:orgId/access/preview", authMiddleware, zValidator("json", prev
     if (!account) return hidden()
     target = account
   }
-  const result = previewGrant(loaded.world, loaded.granter, target, { place: body.place, roleLevel: body.roleLevel })
+  const world = withLaneView(loaded.world, access.payload.grantable, c.env.LANE_READ_WALL)
+  const result = previewGrant(world, loaded.granter, target, { place: body.place, roleLevel: body.roleLevel })
   if (result.ok) return c.json({ preview: result.preview })
   if ("notFound" in result) return hidden()
   const { status, message, ...rest } = result.refusal
@@ -294,16 +301,13 @@ orgAccess.post("/:orgId/access/removal-preview", authMiddleware, zValidator("jso
   const userId = body.person.userId
   if (!people.some((p) => p.userId === userId && !p.pendingInvite)) return hidden()
   if (body.grants.length === 0) return c.json({ error: "name at least one grant to remove" }, 400)
-  const lane = body.grants.find((g) => g.type === "lane")
-  if (lane) {
-    return c.json({ error: "a language's members change from the project's lane staffing", code: "lane_needs_staffing" }, 409)
-  }
   const loaded = await loadGrantWorld(c.env, vs, orgId)
   if (!loaded) return hidden()
   const target = await loadGrantTarget(c.env, orgId, Number(userId))
   if (!target) return hidden()
-  const refs = body.grants.map((g) => ({ type: g.type as GrantRef["type"], id: g.id }))
-  const result = previewRemoval(loaded.world, loaded.granter, target, refs)
+  const refs = body.grants.map((g): GrantRef => ({ type: g.type, id: g.id }))
+  const world = withLaneView(loaded.world, grantable, c.env.LANE_READ_WALL)
+  const result = previewRemoval(world, loaded.granter, target, refs)
   if (result.ok) return c.json({ preview: result.preview })
   if ("notFound" in result) return hidden()
   const { status, message, ...rest } = result.refusal
@@ -337,6 +341,8 @@ function invitePreview(
     keeps: [],
     leavesTeams: [],
     guest: { before: false, after: false },
+    lanes: [],
+    wallOn: false,
   }
 }
 

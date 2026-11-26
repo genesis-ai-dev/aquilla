@@ -1179,7 +1179,7 @@ function comparePlacedFrames(left: PlacedStoryFrame, right: PlacedStoryFrame): n
 /** `GeometricBounds` is top, left, bottom, right, then moved by `ItemTransform`. */
 function pageSpreadBox(page: XmlElement): { minX: number; minY: number; maxX: number; maxY: number } {
   const transform = absoluteTransform(page)
-  const [y1, x1, y2, x2] = (getAttribute(page, "GeometricBounds") ?? "0 0 0 0")
+  const [y1 = NaN, x1 = NaN, y2 = NaN, x2 = NaN] = (getAttribute(page, "GeometricBounds") ?? "0 0 0 0")
     .trim()
     .split(/\s+/)
     .map(Number)

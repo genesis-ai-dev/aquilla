@@ -394,6 +394,30 @@ CREATE TABLE project_settings (
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
+-- 0210 (AQU-2719): the authored living-memory entries, moved OFF the blob
+-- above and onto rows — the same move terminology made onto `concepts` in
+-- 0084, and for the same reasons: a whole-array key can only ever express
+-- "here is the entire list", so every save rewrote it from the writer's stale
+-- snapshot, and every unrelated settings read paid to parse it. Keyed on the
+-- entry's own client-minted id, so the move and the save path are idempotent
+-- without a lock. `sort_index` carries the array order the blob expressed.
+--
+-- Readers never assume these rows exist: the settings read merges them with
+-- whatever is still under the blob key, so an un-migrated project, a
+-- half-migrated one, and an entry the move refused to carry all read
+-- correctly (db/shared/living-memory-entries.ts).
+CREATE TABLE project_living_memory_entries (
+    entry_id   TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'standard',
+    text       TEXT NOT NULL,
+    author     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    sort_index INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX project_living_memory_entries_project_idx
+    ON project_living_memory_entries (project_id, sort_index);
+
 -- 0158 (AQU-1846): the react watcher's per-project bookmark and its
 -- round-robin stamp. Deliberately NOT in the settings blob: persisting the
 -- cursor there meant a read-modify-write of a multi-MB TEXT column every five

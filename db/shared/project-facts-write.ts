@@ -30,6 +30,7 @@
 
 import type { AquillaDb } from '../shim/postgres'
 import { normalizeSettings } from './projects'
+import { withLivingMemoryEntries } from './living-memory-entries'
 import { readLegacyServerInstructions } from './load-translation-instructions'
 import {
   appendInstructionLine,
@@ -166,8 +167,15 @@ async function currentInstructions(
   settings: Record<string, unknown>,
 ): Promise<string> {
   if (storedTranslationInstructions(settings) !== null) return resolveTranslationInstructions(settings)
+  // AQU-2719: the composed path is the only one that reads
+  // `livingMemoryEntries`, and this function's caller read the blob with its
+  // own SELECT — which no longer carries the key once the entries moved to
+  // rows. Merge them in for the RESOLUTION only: `next` (the object the caller
+  // writes back to the blob) must stay as it was read, or this writer would
+  // put the entries back into the blob they were moved out of.
+  const withEntries = await withLivingMemoryEntries(tx, projectId, settings)
   const projectBriefText = await readLegacyServerInstructions(tx, projectId)
-  return resolveTranslationInstructions(settings, { projectBriefText })
+  return resolveTranslationInstructions(withEntries, { projectBriefText })
 }
 
 async function writeLocked(

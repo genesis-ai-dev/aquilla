@@ -12,6 +12,7 @@ import { createEditorHandlers, type ToolEditorHostData } from "./host-handlers-e
 import { createRev4Handlers, type ToolRev4HostData } from "./host-handlers-rev4"
 import { MAX_UI_STRING_KEYS, type UiStrings } from "./ui-strings"
 import { createFilesHandlers, parseFileFilter, type ToolFileView, type ToolFilesHostData } from "./host-handlers-files"
+import { createNativeEditorHandlers, type ToolNativeEditorHostData } from "./host-handlers-native"
 
 export type { ToolFileView } from "./host-handlers-files"
 
@@ -84,7 +85,7 @@ export interface ToolWebResponse {
   url: string
 }
 
-export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData, ToolFilesHostData {
+export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData, ToolFilesHostData, ToolNativeEditorHostData {
   listFiles: () => Promise<ToolFileView[]>
   listCells: (fileId: string, lane: string) => Promise<ToolCellView[]>
   listTerms: () => Promise<ToolTermView[]>
@@ -207,6 +208,7 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
     ...createEditorHandlers(data),
     ...createRev4Handlers(data),
     ...createFilesHandlers(data),
+    ...createNativeEditorHandlers(data),
     // apiRev 7: optional { tags, kind, group } filter, and each file's extension metadata.
     "files.list": async (params) => {
       const filter = parseFileFilter(params)

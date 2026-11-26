@@ -24,6 +24,8 @@ async function seedProject(id: string, name: string, createdBy: number): Promise
   )
     .bind(id, name, createdBy)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by is history and grants nothing.
+  await grant(id, createdBy, 700)
 }
 
 async function grant(projectId: string, userId: number, roleLevel: number): Promise<void> {

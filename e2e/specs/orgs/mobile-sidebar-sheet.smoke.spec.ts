@@ -22,7 +22,7 @@ test("mobile org sidebar opens in a sheet from the header", async ({ alice }) =>
   await expect(trigger).toBeVisible({ timeout: 10_000 })
   await expect(alice.locator("aside")).toHaveCount(0)
 
-  const crumbs = alice.getByRole("navigation", { name: "breadcrumb" })
+  const crumbs = alice.getByRole("navigation", { name: "Breadcrumb" })
   await expect(crumbs).toBeVisible()
   const triggerBox = await trigger.boundingBox()
   const crumbBox = await crumbs.boundingBox()

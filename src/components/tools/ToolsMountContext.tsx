@@ -10,10 +10,7 @@ import { useParams } from "react-router-dom"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { ensureFirstPartyTool, getTool, listTools, type FirstPartyEnsureResult, type ToolDetail, type ToolSummary } from "@/lib/tools/tools-api"
-import { defaultEditorExtensionEnabled } from "@/lib/tools/default-editor-flag"
-import { FIRST_PARTY_DEFAULT_EDITOR } from "../../../shared/tools/first-party/default-editor"
 import { FIRST_PARTY_DOOR43_IMPORTER } from "../../../shared/tools/first-party/door43-importer"
-import type { ToolScope } from "../../../shared/tools/manifest"
 import { useProject } from "@/hooks/useProject"
 import { useSmartExtensionsEnabled } from "@/lib/tools/smart-extensions-enabled"
 import type { HeadlessJob, HeadlessJobHooks, HeadlessOutcome } from "./HeadlessRuns"
@@ -21,6 +18,17 @@ import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileImportProvenance } from "../../../shared/tools/file-extension"
 import { dueOnOpenActions, markOnOpenRun } from "@/lib/tools/on-open-actions"
+import {
+  NativeEditorStore,
+  readExtensionColumnPrefs,
+  writeExtensionColumnPrefs,
+  type ExtensionColumnPref,
+} from "@/lib/tools/native-editor-store"
+
+export interface ActionRunTarget {
+  cell?: { fileId: string; cellId: string; ref?: string | null }
+  selection?: { fileId: string; cellId: string; side: "source" | "target"; text: string }
+}
 
 // AQU-2093: the runner brings zip, the rich-text editor and the HTML sanitiser
 // with it, so it loads with the first headless job, not with every page.
@@ -44,18 +52,15 @@ export interface ToolsMountValue {
   openInPanel: (toolId: string) => void
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
-  /** The first-party default editor extension's id, when it is the default
-   *  (flag on, installed, not removed). */
-  defaultEditorId: string | null
-  /** Scopes the first-party editor was auto-granted for this user on this
-   *  open (shown on the editor bar; empty once acknowledged/revisited). */
-  autoGranted: ToolScope[]
-  /** The first-party default editor is enabled (flag) for this browser. */
-  defaultEditorEnabled: boolean
-  /** The project's extensions (and the first-party install) have loaded. */
+  /** The project's extensions (and first-party installs) have loaded. */
   toolsReady: boolean
-  /** apiRev 7: run a manifest action headless. */
-  runAction: (toolId: string, actionId: string, trigger?: "click" | "open") => void
+  /** apiRev 7/8: run a manifest action headless (optionally targeting a cell or text selection). */
+  runAction: (toolId: string, actionId: string, trigger?: "click" | "open" | "cell" | "selection", target?: ActionRunTarget) => void
+  /** apiRev 8: bridge store connecting extensions to Aquilla's real native EditorTable. */
+  nativeEditor: NativeEditorStore
+  /** apiRev 8: per-user visibility overrides for manifest.columns (`${toolId}:${columnId}`). */
+  columnPrefs: Record<string, ExtensionColumnPref>
+  setColumnPref: (key: string, pref: ExtensionColumnPref) => void
   /** apiRev 7: run a manifest export headless; settles once files were delivered. */
   runExport: (toolId: string, exportId: string, fileIds: string[], lane: string) => Promise<HeadlessOutcome>
   /** AQU-1937: run an import contribution headless (run, or refresh files). */
@@ -131,11 +136,30 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   const username = session?.username ?? ""
   const prefsId = `${username}:${projectId}`
   const [prefs, setPrefs] = useState<ExtensionPrefs>(() => readPrefs(username, projectId))
+  const [columnPrefs, setColumnPrefs] = useState<Record<string, ExtensionColumnPref>>(() => readExtensionColumnPrefs(username, projectId))
   const [prefsFor, setPrefsFor] = useState(prefsId)
   if (prefsFor !== prefsId) {
     setPrefsFor(prefsId)
     setPrefs(readPrefs(username, projectId))
+    setColumnPrefs(readExtensionColumnPrefs(username, projectId))
   }
+  // apiRev 8: one external store per project for active-cell sync, reveal,
+  // declarative row annotations, and extension column cells.
+  const [nativeEditorState, setNativeEditorState] = useState(() => ({ projectId, store: new NativeEditorStore() }))
+  if (nativeEditorState.projectId !== projectId) {
+    setNativeEditorState({ projectId, store: new NativeEditorStore() })
+  }
+  const nativeEditor = nativeEditorState.store
+  const setColumnPref = useCallback(
+    (key: string, pref: ExtensionColumnPref) => {
+      setColumnPrefs((prev) => {
+        const next = { ...prev, [key]: pref }
+        writeExtensionColumnPrefs(username, projectId, next)
+        return next
+      })
+    },
+    [username, projectId],
+  )
   const [panelRequestSeq, setPanelRequestSeq] = useState(0)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const updatePrefs = useCallback(
@@ -162,8 +186,6 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     [setDockSelection],
   )
 
-  const [autoGranted, setAutoGranted] = useState<ToolScope[]>([])
-  const [defaultEditorOn] = useState(() => defaultEditorExtensionEnabled())
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   // AQU-1937: nothing about extensions loads (not even the first-party
   // install) unless the project has Smart Extensions switched on.
@@ -176,22 +198,10 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       return
     }
     let cancelled = false
-    // First-party editor extension: the server installs (or upgrades) it from
-    // the repo's reviewed source, so it is always there to OPT INTO from the
-    // "Edit with" picker. It is not the default (the native editor is, see
-    // default-editor-flag.ts). Best-effort — a failure only means it is not
-    // offered, never blocks the list. Runs IN PARALLEL with the list (one
-    // round trip), and its answer carries the editor's source, which seeds
-    // the detail cache so mounting it needs no further fetch.
-    const ensured: Promise<FirstPartyEnsureResult | null> = version === 0
-      ? ensureFirstPartyTool(jwt, projectId, FIRST_PARTY_DEFAULT_EDITOR).catch((err: unknown) => {
-          console.warn("[extensions] first-party editor install failed:", err)
-          return null
-        })
-      : Promise.resolve(null)
     // AQU-1937: the first-party Door43 importer (Import → "Door43 resources"),
-    // installed the same way. Its auto-grant (read:web for git.door43.org,
-    // write:files, write:data) is the user's own; the role ceiling still applies.
+    // installed by the server from the repo's reviewed source. Its auto-grant
+    // (read:web for git.door43.org, write:files, write:data) is the user's own;
+    // the role ceiling still applies.
     const ensuredDoor43: Promise<FirstPartyEnsureResult | null> = version === 0
       ? ensureFirstPartyTool(jwt, projectId, FIRST_PARTY_DOOR43_IMPORTER).catch((err: unknown) => {
           console.warn("[extensions] first-party Door43 importer install failed:", err)
@@ -200,19 +210,10 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       : Promise.resolve(null)
     // Listed AFTER that install, so a fresh install is in the first list.
     const listed = ensuredDoor43.then(() => listTools(jwt, projectId).catch(() => null))
-    void Promise.all([ensured, listed]).then(([res, list]) => {
+    void listed.then((list) => {
       if (cancelled) return
-      let next = list ?? []
-      const fresh = res?.tool ?? null
-      if (fresh) {
-        details.set(`${fresh.id}@${fresh.currentVersion}`, Promise.resolve(fresh))
-        // The list may have been read before this ensure installed/upgraded it.
-        const { source: _source, ...summary } = fresh
-        next = next.some((t) => t.id === fresh.id) ? next.map((t) => (t.id === fresh.id ? summary : t)) : [summary, ...next]
-      }
-      if (res && res.autoGranted.length > 0) setAutoGranted(res.autoGranted)
       // Tools are an optional surface: a failed list never blocks the editor.
-      setTools(next)
+      setTools(list ?? [])
       setLoadedFor(projectId)
     })
     return () => {
@@ -249,22 +250,35 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   // A click can arrive before this provider's own tool list has the tool
   // (the extensions page lists tools with its own, faster read; a just-installed
   // tool): the run waits for the list instead of being silently dropped.
-  const pendingActions = useRef<Array<{ toolId: string; actionId: string; trigger: "click" | "open" }>>([])
+  const pendingActions = useRef<Array<{ toolId: string; actionId: string; trigger: "click" | "open" | "cell" | "selection"; target?: ActionRunTarget }>>([])
   const runAction = useCallback(
-    (toolId: string, actionId: string, trigger: "click" | "open" = "click") => {
+    (toolId: string, actionId: string, trigger: "click" | "open" | "cell" | "selection" = "click", target?: ActionRunTarget) => {
       const tool = tools.find((x) => x.id === toolId)
       const action = tool?.manifest.actions?.find((a) => a.id === actionId)
       if (!tool || !action) {
         const first = pendingActions.current.length === 0
-        pendingActions.current.push({ toolId, actionId, trigger })
+        pendingActions.current.push({ toolId, actionId, trigger, ...(target ? { target } : {}) })
         // Loaded but missing: it was installed after the last list — read it again (once).
         if (first && toolsReady) refresh()
         return
       }
       setJobs((prev) =>
-        prev.some((j) => j.toolId === toolId && j.actionId === actionId)
+        // Cell/selection runs may fire back-to-back on different cells; deduplicate bar/open runs only.
+        !target && prev.some((j) => j.toolId === toolId && j.actionId === actionId)
           ? prev
-          : [...prev, { key: `${toolId}:${actionId}:${Date.now()}`, toolId, kind: "action", label: action.label, actionId, trigger }],
+          : [
+              ...prev,
+              {
+                key: `${toolId}:${actionId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+                toolId,
+                kind: "action",
+                label: action.label,
+                actionId,
+                trigger,
+                ...(target?.cell ? { cell: target.cell } : {}),
+                ...(target?.selection ? { selection: target.selection } : {}),
+              },
+            ],
       )
     },
     [tools, toolsReady, refresh],
@@ -275,7 +289,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     pendingActions.current = []
     for (const p of waiting) {
       const known = tools.some((t) => t.id === p.toolId && t.manifest.actions?.some((x) => x.id === p.actionId))
-      if (known) runAction(p.toolId, p.actionId, p.trigger)
+      if (known) runAction(p.toolId, p.actionId, p.trigger, p.target)
     }
   }, [tools, toolsReady, runAction])
   const runExport = useCallback(
@@ -400,10 +414,6 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     }
   }, [loadedFor, projectId, openChecked, roleLevel, username, tools, runAction])
 
-  const defaultEditorId = defaultEditorOn
-    ? (tools.find((t) => t.firstParty === FIRST_PARTY_DEFAULT_EDITOR && t.manifest.mounts.includes("editor"))?.id ?? null)
-    : null
-
   const value = useMemo(
     () => ({
       projectId,
@@ -419,11 +429,11 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       openInPanel,
       paletteOpen,
       setPaletteOpen,
-      defaultEditorId,
-      autoGranted,
-      defaultEditorEnabled: defaultEditorOn,
       toolsReady,
       runAction,
+      nativeEditor,
+      columnPrefs,
+      setColumnPref,
       runExport,
       runningJobs: jobs.length,
       extensionsEnabled,
@@ -433,7 +443,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       fileImports,
       refreshFile,
     }),
-    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, defaultEditorId, autoGranted, defaultEditorOn, toolsReady, runAction, runExport, jobs.length, extensionsEnabled, runImport, importChoices, cancelJob, fileImports, refreshFile],
+    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, toolsReady, runAction, nativeEditor, columnPrefs, setColumnPref, runExport, jobs.length, extensionsEnabled, runImport, importChoices, cancelJob, fileImports, refreshFile],
   )
   // Mounted from the first job on and kept, so tools it has loaded stay loaded.
   const [runnerNeeded, setRunnerNeeded] = useState(false)

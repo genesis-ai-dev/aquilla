@@ -34,6 +34,8 @@ beforeAll(async () => {
   data = await makeTestDb({
     users: [{ id: 1, username: "owner", email: "owner@example.test" }],
     projects: [{ id: "p", name: "Pattani", created_by: 1 }],
+    // AQU-2357: creation writes this Owner row. created_by grants nothing.
+    project_members: [{ project_id: "p", user_id: 1, role_level: 700, granted_by: 1 }],
     files: [{ id: "f", project_id: "p", name: "Mark", event_id: "f-event" }],
     cells: ["c1", "c2"].map((cellId, index) => ({ project_id: "p", file_id: "f", cell_id: cellId,
       side: "source", target_lang: "", value: `Passage ${index + 1}`, canonical_ref: `MRK 1:${index + 1}`, event_id: `${cellId}-event`, last_edit_at: 1,

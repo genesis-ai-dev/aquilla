@@ -91,7 +91,7 @@ describe("rendering", () => {
   it("renders a lint badge when the after-text violates an active rule", () => {
     render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} rules={[FORBID_RULE]} />)
     expect(
-      screen.getByText(/"No Latin loanwords": target contains forbidden pattern/),
+      screen.getByText(/"No Latin loanwords": Translation contains a forbidden pattern/),
     ).toBeInTheDocument()
   })
 

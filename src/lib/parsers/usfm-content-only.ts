@@ -25,6 +25,7 @@
  */
 
 import { segmentUsfmForDisplay, type UsfmNoteSegment } from "./usfm-display"
+import type { UsfmNoteRecord } from "../../../db/shared/usfm-notes"
 
 export interface UsfmContentOnlyResult {
   /** Marker-free text; breaks rendered as "\n". */
@@ -64,4 +65,37 @@ export function usfmContentOnly(raw: string): UsfmContentOnlyResult {
     .trim()
 
   return { text, notes }
+}
+
+/** The projection every USFM IMPORT path applies to a parsed span before it
+ *  becomes a cell (AQU-2743).
+ *
+ *  `parseUsfmLossless` hands back the verse/heading span verbatim — markers,
+ *  note spans, line endings and all. That is the right thing to keep as the
+ *  file's source bytes and the wrong thing to store as a cell's text, so this
+ *  is where the two part company: the bytes stay in the source blob (which is
+ *  what export serializes from, so round-trip is untouched) and the cell gets
+ *  the content. Notes come back as `UsfmNoteRecord`s for `metadata.usfmNotes`,
+ *  `raw` included, which is what the exporter re-attaches to a translated
+ *  verse (AQU-1295).
+ *
+ *  Trimmed after the projection, not before: `usfmContentOnly` returns
+ *  marker-free input unchanged apart from `~`, so it is this trim that handles
+ *  a plain verse's edge whitespace. */
+export function projectUsfmCellText(raw: string): {
+  text: string
+  usfmNotes?: UsfmNoteRecord[]
+} {
+  const { text, notes } = usfmContentOnly(raw)
+  if (notes.length === 0) return { text: text.trim() }
+  return {
+    text: text.trim(),
+    usfmNotes: notes.map((n) => ({
+      kind: n.noteKind,
+      caller: n.caller,
+      ref: n.ref,
+      text: n.text,
+      raw: n.raw,
+    })),
+  }
 }

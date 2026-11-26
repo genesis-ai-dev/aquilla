@@ -17,8 +17,8 @@ const directory = path.dirname(fileURLToPath(import.meta.url))
 export const FIXTURE = path.join(directory, "../fixtures/smart-edit.md")
 
 // Read at call time: the launcher and global setup set these per target.
-const identity = () => process.env.VITE_FRONTIER_BASE ?? ""
-const sync = () => process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? ""}`
+export const identity = () => process.env.VITE_FRONTIER_BASE ?? ""
+export const sync = () => process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? ""}`
 
 /** Shared by every worker; written once by global setup. */
 export interface RunContext {

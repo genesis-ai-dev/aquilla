@@ -294,6 +294,7 @@ export function OrgOverview() {
 
               {activeOrgId != null && (
                 <OrgSetupChecklist
+                  key={activeOrgId}
                   orgId={activeOrgId}
                   projectCount={portfolio.projects.length}
                   onProjectCreated={(project) => navigate(`/projects/${project.id}`)}

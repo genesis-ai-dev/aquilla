@@ -10,8 +10,9 @@ stop.** Who reads the cut and who deploys it is set by
 
 - **On the hour** (`:05`). The hourly release line
   (`docs/RELEASE-RISK-GATES.md`): with no release in flight and ready PRs
-  on `dev`, the next slice is cut; `release-deploy.yml` deploys it at
-  `:45` once `release-verify` and smart Jev have reported on its HEAD.
+  on `dev`, the next slice is cut; `release-deploy.yml` deploys it as
+  soon as `release-verify` and smart Jev have reported on its HEAD (it
+  looks when verify finishes, and every ten minutes).
 - **After every production deploy.** `pnpm run deploy:aquilla` ends with
   `scripts/tag-release.sh`, which pushes the calver tag once production
   serves the release. That tag push starts the workflow, so the next slice
@@ -58,10 +59,13 @@ go green on the PR head; see `docs/RELEASE-RISK-GATES.md`). A pick that
 does not land joins the held list with its own reason and the cut goes on
 with the rest: a conflict is aborted and listed as `pick conflict in
 <paths>; needs #N` (the held PR it was built on, when the plan's files
-show one); a pick with nothing to commit is skipped, never committed
-empty, and listed as `empty pick: already in base, or needs #N`. Neither
-is a failed run and neither is dropped: when nothing could be picked, the
-run summary lists each PR with its reason.
+show one); a pick with nothing to commit is skipped and listed as
+`empty pick: already in base, or needs #N`, unless the plan proves
+production already carries it (no PR still off the branch touches its
+files), in which case it is committed empty as the record and listed
+under **Recorded, no change**. None of these is a failed run and none is
+dropped: when nothing could be picked, the run summary lists each PR with
+its reason.
 
 **Not a hard stop either:** a commit pushed straight to `dev` with no PR.
 The plan carries it in its dev position. One that touches only the
@@ -98,10 +102,11 @@ The workflow does not start Jev and does not read its result. The push that
 creates `plan.branch`, and every later push onto that branch, is what starts
 the one Hetzner run and the `release-verify` workflow (the full suite:
 typecheck, lint, every unit and worker test, the production build).
-`release-deploy.yml` reads both for the branch's current HEAD at `:45`
+`release-deploy.yml` reads both for the branch's current HEAD when
+`release-verify` finishes and every ten minutes
 (`scripts/release-deploy-check.mjs`) and deploys when `release-verify`
-succeeded and Jev reported anything but FAIL; no Jev result yet means it
-waits an hour. The webhook accepts `push` events for
+succeeded, Jev reported anything but FAIL, and no `release:halt` issue is
+open; no Jev result yet means it waits for the next look. The webhook accepts `push` events for
 `refs/heads/release/YYYY/MM/DD-NN` and ignores pull requests. See
 [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 

@@ -72,6 +72,18 @@ describe("idml style display metadata", () => {
       })
   })
 
+  it("keeps a small-caps face that has no bold or italic", () => {
+    expect(idmlStyleCatalogFromMetadata({
+      idmlStyleDisplay: {
+        "CharacterStyle/nd": { bold: false, italic: false, smallCaps: true },
+        "CharacterStyle/Emphasis": { bold: false, italic: true },
+      },
+    })).toEqual({
+      "CharacterStyle/nd": { bold: false, italic: false, smallCaps: true },
+      "CharacterStyle/Emphasis": { bold: false, italic: true },
+    })
+  })
+
   it("reads a persisted catalog back for already-imported cells", () => {
     expect(idmlStyleCatalogFromMetadata({
       idml: { version: 2 },

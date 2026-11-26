@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { buildCellData, type CellData } from "@/hooks/useCells"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox } from "@/lib/sync/outbox"
 
 const LOAD_CONCURRENCY = 4
 const OUTBOX_READ_LIMIT = 10_000
@@ -316,7 +316,7 @@ export function useProjectCells({
 
     async function refreshPending(): Promise<void> {
       try {
-        const rows = await peekOutboxBatch(OUTBOX_READ_LIMIT)
+        const rows = await peekOutboxShared(OUTBOX_READ_LIMIT)
         if (cancelled) return
         const next = new Map<string, PendingTargetEdit>()
         for (const row of rows) {

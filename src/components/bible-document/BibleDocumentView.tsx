@@ -1,5 +1,6 @@
 // The Bible document layout (AQU-2559): a book's source and translation side
-// by side as flowing text, with an optional live preview of the exported file.
+// by side as flowing text, with an optional live preview — the book laid out
+// as a reader sees it, or, for a USFM book, the USFM file an export writes.
 // It replaces the cell table for one file and drives the same cell store and
 // the same commit path, so everything else in the workspace keeps working.
 
@@ -10,14 +11,17 @@ import { EDITOR_SURFACE_TOOLBAR_CLASS } from "@/components/editor-surface-toolba
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Toggle } from "@/components/ui/toggle"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { readAtVersion, useCellStoreVersion, type CellStore } from "@/hooks/useActiveCellStore"
 import { unitsFromCells } from "@/lib/bible-document/units"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { setBibleDocumentPanes, useBibleDocumentViewPref } from "@/lib/store/bible-document-view-pref"
+import { setBibleDocumentPanes, useBibleDocumentViewPref, type BibleDocumentPreviewMode } from "@/lib/store/bible-document-view-pref"
 import { cn } from "@/lib/utils"
+import type { BibleDocumentRejection } from "@/lib/bible-document/editor-extensions"
 import { ExportPreviewPane } from "./ExportPreviewPane"
+import { ReadingPreviewPane } from "./ReadingPreviewPane"
 import { SourceDocumentPane } from "./SourceDocumentPane"
 import { TargetDocumentEditor, type TargetDocumentHandle } from "./TargetDocumentEditor"
 import { useLinkedScroll } from "./useLinkedScroll"
@@ -50,6 +54,13 @@ export interface BibleDocumentViewProps {
   fileId: string
   lane?: string
   store: CellStore
+  /** The book was imported as USFM. Only then can the translator add layout
+   *  (paragraphs, headings, styles), because only the USFM export carries it,
+   *  and only then is there a USFM file to preview. */
+  usfm: boolean
+  /** The file's name and the translation's language, for the reading preview. */
+  fileName?: string | null
+  lang?: string | null
   /** True until the store holds the whole file. */
   loading: boolean
   editable: boolean
@@ -71,7 +82,7 @@ export interface BibleDocumentViewProps {
 }
 
 export function BibleDocumentView(props: BibleDocumentViewProps) {
-  const { projectId, fileId, lane, store, loading, editable, lockedBy, lockVersion, onClaimCell, onReleaseCell, commitTarget, getToken } = props
+  const { projectId, fileId, lane, store, usfm, loading, editable, lockedBy, lockVersion, onClaimCell, onReleaseCell, commitTarget, getToken } = props
   const t = useT()
   const pref = useBibleDocumentViewPref()
   const version = useCellStoreVersion(store)
@@ -82,7 +93,7 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
   const [marker, setMarker] = useState<string | null>(null)
   const [unsaved, setUnsaved] = useState<ReadonlyMap<string, string>>(() => new Map())
   const [failed, setFailed] = useState(0)
-  const [notice, setNotice] = useState<"locked" | null>(null)
+  const [notice, setNotice] = useState<"locked" | "layout" | null>(null)
 
   const targetRef = useRef<TargetDocumentHandle | null>(null)
   const sourcePaneRef = useRef<HTMLDivElement | null>(null)
@@ -91,13 +102,21 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
 
   const tooLong = units.length > DOCUMENT_UNIT_LIMIT
   const canEdit = editable && !loading && !tooLong
+  const canEditLayout = canEdit && usfm
+  const previewMode: BibleDocumentPreviewMode = usfm ? pref.previewMode : "reading"
 
   useLinkedScroll([sourcePaneRef, targetPaneRef], pref.linked && pref.source && !tooLong)
 
-  const preview = useUsfmExportPreview({ enabled: pref.preview && !tooLong, projectId, fileId, lane, getToken, cells, unsaved })
+  const preview = useUsfmExportPreview({ enabled: pref.preview && previewMode === "usfm" && !tooLong, projectId, fileId, lane, getToken, cells, unsaved })
   const activeRef = useMemo(
     () => (activeCellId ? units.find((u) => u.cellId === activeCellId)?.ref ?? null : null),
     [activeCellId, units],
+  )
+  // The reading page tags verses by the row's own reference (`group`), which
+  // for a verse the target renamed can differ from the source's.
+  const activeGroup = useMemo(
+    () => (activeCellId ? cells.find((c) => c.id === activeCellId)?.group || null : null),
+    [activeCellId, cells],
   )
 
   const handleActiveCell = useCallback((cellId: string | null) => {
@@ -120,8 +139,8 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
     await commitTarget(cellId, { value, valueHtml: htmlForValue(value) })
   }, [commitTarget])
 
-  const handleRejected = useCallback((reason: "skeleton" | "locked" | "read-only") => {
-    if (reason === "locked") setNotice("locked")
+  const handleRejected = useCallback((reason: BibleDocumentRejection) => {
+    if (reason === "locked" || reason === "layout") setNotice(reason)
   }, [])
 
   const scrollTo = useCallback((cellId: string): boolean => {
@@ -175,6 +194,8 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
     ? t("bibleDocument.status.failed", { count: failed })
     : notice === "locked"
       ? t("bibleDocument.status.locked")
+      : notice === "layout"
+        ? t("bibleDocument.status.layoutUsfmOnly")
       : !editable
         ? t("bibleDocument.status.readOnly")
         : unsaved.size > 0
@@ -185,26 +206,31 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
     <div className="flex h-full min-h-0 flex-col" data-testid="bible-document-view">
       <div className={cn(EDITOR_SURFACE_TOOLBAR_CLASS, "justify-between")} data-testid="bible-document-toolbar">
         <div className="flex min-w-0 items-center gap-1.5">
-          <Select
-            items={styleItems}
-            value={marker ?? ""}
-            onValueChange={(value) => { if (value) targetRef.current?.setParagraphMarker(String(value)) }}
-            disabled={!canEdit || marker === null}
-          >
-            <SelectTrigger aria-label={t("bibleDocument.toolbar.paragraphStyle")} className="h-8 w-44">
-              <SelectValue placeholder={t("bibleDocument.toolbar.paragraphStyle")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {styleItems.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="sm" className="h-8" disabled={!canEdit || marker === null} onClick={() => targetRef.current?.insertHeading()}>
-            <Heading data-icon="inline-start" aria-hidden />
-            {t("bibleDocument.toolbar.heading")}
-          </Button>
-          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+          {/* Added layout only reaches a USFM export (decision 0010). */}
+          {usfm ? (
+            <>
+              <Select
+                items={styleItems}
+                value={marker ?? ""}
+                onValueChange={(value) => { if (value) targetRef.current?.setParagraphMarker(String(value)) }}
+                disabled={!canEditLayout || marker === null}
+              >
+                <SelectTrigger aria-label={t("bibleDocument.toolbar.paragraphStyle")} className="h-8 w-44">
+                  <SelectValue placeholder={t("bibleDocument.toolbar.paragraphStyle")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {styleItems.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" className="h-8" disabled={!canEditLayout || marker === null} onClick={() => targetRef.current?.insertHeading()}>
+                <Heading data-icon="inline-start" aria-hidden />
+                {t("bibleDocument.toolbar.heading")}
+              </Button>
+              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+            </>
+          ) : null}
           <Toggle size="sm" variant="outline" pressed={pref.source} onPressedChange={(on) => setBibleDocumentPanes({ source: on })}>
             {t("bibleDocument.pane.source")}
           </Toggle>
@@ -261,6 +287,7 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
                   ref={targetRef}
                   units={units}
                   editable={canEdit}
+                  layoutEditable={canEditLayout}
                   lockedBy={lockedBy}
                   lockVersion={lockVersion}
                   dir={props.targetDir}
@@ -279,17 +306,44 @@ export function BibleDocumentView(props: BibleDocumentViewProps) {
             <section aria-label={t("bibleDocument.pane.preview")} className="flex min-w-0 flex-1 flex-col bg-muted/20">
               <PaneTitle>
                 {t("bibleDocument.pane.preview")}
-                {preview.status === "ready" ? (
+                {usfm ? (
+                  <Tabs
+                    value={previewMode}
+                    onValueChange={(value) => setBibleDocumentPanes({ previewMode: value === "usfm" ? "usfm" : "reading" })}
+                    className="ms-2 inline-flex gap-0 align-middle"
+                  >
+                    <TabsList className="h-6 gap-0.5" aria-label={t("bibleDocument.preview.modeLabel")} data-testid="preview-mode-switch">
+                      <TabsTrigger value="reading" className="h-5 px-2 text-[11px] normal-case tracking-normal">{t("bibleDocument.preview.reading")}</TabsTrigger>
+                      <TabsTrigger value="usfm" className="h-5 px-2 text-[11px] normal-case tracking-normal">{t("bibleDocument.preview.usfm")}</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                ) : null}
+                {previewMode === "usfm" && preview.status === "ready" ? (
                   <span className="ms-2 font-normal normal-case tracking-normal" data-testid="export-preview-summary">
                     {t("bibleDocument.preview.summary", { translated: preview.preview.translated, total: preview.preview.total })}
                     {preview.preview.lossy > 0 ? ` · ${t("bibleDocument.preview.lossy", { count: preview.preview.lossy })}` : ""}
                   </span>
                 ) : null}
               </PaneTitle>
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-2">
-                <p className="pb-2 text-xs text-muted-foreground">{t("bibleDocument.preview.hint")}</p>
-                <ExportPreviewPane state={preview} activeRef={activeRef} />
-              </div>
+              {previewMode === "usfm" ? (
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-2">
+                  <p className="pb-2 text-xs text-muted-foreground">{t("bibleDocument.preview.hint")}</p>
+                  <ExportPreviewPane state={preview} activeRef={activeRef} />
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <p className="px-4 pb-2 pt-2 text-xs text-muted-foreground">{t("bibleDocument.preview.readingHint")}</p>
+                  <div className="min-h-0 flex-1">
+                    <ReadingPreviewPane
+                      cells={cells}
+                      unsaved={unsaved}
+                      fileName={props.fileName}
+                      lang={props.lang}
+                      activeRef={activeGroup}
+                    />
+                  </div>
+                </div>
+              )}
             </section>
           ) : null}
         </div>

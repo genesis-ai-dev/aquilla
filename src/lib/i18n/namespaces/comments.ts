@@ -23,7 +23,7 @@ export const comments = defineNamespace({
     "comments.mention.restricted": "No one in your language lanes to mention yet.",
     "comments.mention.suggestionsAria": "Project members",
     "comments.composer.editPlaceholder": "Edit comment…",
-    "comments.composer.replyPlaceholder": "Leave a reply...",
+    "comments.composer.replyPlaceholder": "Leave a reply…",
 
     // Single comment bubble
     "comments.bubble.actionsLabel": "Comment actions",
@@ -48,12 +48,12 @@ export const comments = defineNamespace({
     "comments.stale.badge": "stale",
     "comments.stale.tooltip": "Translation changed since this thread was created",
     "comments.reply.notWired":
-      "Replies from this view are not yet wired — open the cell in the editor to reply.",
+      "Replying from this view isn't available yet — open the cell in the editor to reply.",
 
     // In-thread reply composer (CommentThread.tsx — no @mention hint here)
-    "comments.thread.replyPlaceholder": "Leave a reply...",
+    "comments.thread.replyPlaceholder": "Leave a reply…",
     "comments.thread.reply": "Reply",
-    "comments.thread.closeWithReply": "Close with reply",
+    "comments.thread.closeWithReply": "Reply and resolve",
     "comments.thread.actionsAria": "Comment actions",
     "comments.thread.resolve": "Resolve thread",
     "comments.thread.reopen": "Reopen thread",
@@ -113,7 +113,7 @@ export const comments = defineNamespace({
     "comments.drawer.noComments": "No comments yet.",
     "comments.drawer.loadError": "Couldn't load comments. Existing threads may be missing.",
     "comments.drawer.newThreadHeading": "New thread",
-    "comments.drawer.newThreadPlaceholder": "Leave a comment...",
+    "comments.drawer.newThreadPlaceholder": "Leave a comment…",
     "comments.drawer.post": "Post",
     "comments.drawer.submitRefused": plural({
       one: "{count} comment you wrote wasn't posted — {reason}.",
@@ -127,15 +127,15 @@ export const comments = defineNamespace({
     "comments.inbox.empty": "When a teammate @mentions you in a comment, it shows up here.",
     "comments.inbox.markAllRead": "Mark all as read",
     "comments.inbox.markRead": "Mark as read",
-    "comments.inbox.markUnread": "Mark unread",
+    "comments.inbox.markUnread": "Mark as unread",
     "comments.inbox.verseInFile": "{verse} in {file}",
     "comments.inbox.commented": "{author} commented: {message}",
-    "comments.inbox.unreadsOnly": "Show unreads only",
+    "comments.inbox.unreadsOnly": "Show unread only",
     "comments.inbox.actionsAria": "Notification actions",
     "comments.inbox.delete": "Delete notification",
     "comments.inbox.deletedToast": "Notification deleted",
     "comments.inbox.undo": "Undo",
-    "comments.inbox.undoneToast": "Undo \"{action}\"",
+    "comments.inbox.undoneToast": "Undone: \"{action}\"",
     "comments.inbox.deleteAll": "Delete all",
     "comments.inbox.deleteAllRead": "Delete all read",
     "comments.inbox.deleteTitle": "Delete notification?",

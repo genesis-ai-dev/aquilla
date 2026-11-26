@@ -99,13 +99,13 @@ describe("PiecesApproved in a narrow row", () => {
   // Name 51 + length 23 + two gaps 8 = 82 px the text needs; the date may go.
   it("says the whole sentence while the name and the length keep their room — the date gives way first", () => {
     drawAt(82 + 115 + 4 + 1)
-    expect(shown()).toHaveTextContent(/^0 of 2 pieces approved$/)
+    expect(shown()).toHaveTextContent(/^0 of 2 pieces validated$/)
     expect(screen.getByTestId("count")).toHaveAttribute("data-form", "long")
   })
 
   it("leaves out \"pieces\" before the name or the length give up any room", () => {
     drawAt(82 + 100)
-    expect(shown()).toHaveTextContent(/^0 of 2 approved$/)
+    expect(shown()).toHaveTextContent(/^0 of 2 validated$/)
     expect(screen.getByTestId("count")).toHaveAttribute("data-form", "short")
   })
 
@@ -118,9 +118,9 @@ describe("PiecesApproved in a narrow row", () => {
   it("keeps the whole sentence on hover and for a screen reader when it is short", () => {
     drawAt(82 + 40)
     const count = screen.getByTestId("count")
-    expect(count).toHaveAttribute("title", "0 of 2 pieces approved")
+    expect(count).toHaveAttribute("title", "0 of 2 pieces validated")
     expect(shown()).toHaveAttribute("aria-hidden", "true")
-    expect(count.querySelector(".sr-only")).toHaveTextContent(/^0 of 2 pieces approved$/)
+    expect(count.querySelector(".sr-only")).toHaveTextContent(/^0 of 2 pieces validated$/)
   })
 
   it("is the whole sentence where it is not asked to fit", () => {
@@ -130,6 +130,6 @@ describe("PiecesApproved in a narrow row", () => {
         <PiecesApproved pieces={pieces} requirement={1} testId="count" />
       </I18nProvider>,
     )
-    expect(screen.getByTestId("count")).toHaveTextContent(/^0 of 2 pieces approved$/)
+    expect(screen.getByTestId("count")).toHaveTextContent(/^0 of 2 pieces validated$/)
   })
 })

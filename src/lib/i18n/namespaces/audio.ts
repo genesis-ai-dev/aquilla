@@ -144,7 +144,7 @@ export const audio = defineNamespace({
     "audio.newVoice.inworldLanguageLabel": "Language",
     "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
     "audio.newVoice.inworldLanguageHint":
-      "At least one project language isn't a code Inworld recognizes. Choose the closest match so we can load matching voices.",
+      "At least one language lane doesn't use a language code Inworld recognizes. Choose the closest match so we can load matching voices.",
     "audio.newVoice.inworldLanguageOther": "Other",
     "audio.newVoice.inworldLanguageCodeLabel": "Language code",
     "audio.newVoice.inworldLanguageCodeHint":
@@ -177,9 +177,9 @@ export const audio = defineNamespace({
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
-    "audio.newVoice.errorNameRequired": "Name the voice",
-    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice",
-    "audio.newVoice.errorCloneConsentRequired": "Confirm the speaker's consent before creating a cloned voice",
+    "audio.newVoice.errorNameRequired": "Name the voice.",
+    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice.",
+    "audio.newVoice.errorCloneConsentRequired": "Confirm the speaker's consent before creating a cloned voice.",
     "audio.newVoice.makeNarratorHint":
       "Make this the narrator — used for lines without an explicit speaker.",
     "audio.newVoice.makeNarratorButton": "Make narrator",
@@ -256,33 +256,26 @@ export const audio = defineNamespace({
     "audio.recordingModal.capturedHint": "Captured — review and save, or retake.",
     "audio.recordingModal.saveFailedNotice":
       "Saving failed — the take is safe, try Save again. ({error})",
-    "audio.recordingModal.savedStatus": "Saved — moving to next cell…",
+    "audio.recordingModal.savedStatus": "Saved — moving to the next line…",
     "audio.recordingModal.idleHintPrefix": "Press",
     "audio.recordingModal.idleHintSuffix":
       "or click Start. The beep plays a 3-2-1 countdown before recording.",
     "audio.recordingModal.genericError": "Something went wrong.",
     "audio.recordingModal.errorHint": "Press Space or Start to try again.",
-    "audio.recordingModal.prevCellTooltip": "Previous cell (←)",
+    "audio.recordingModal.prevCellTooltip": "Previous line (←)",
     "audio.recordingModal.prevButton": "Prev",
-    "audio.recordingModal.nextCellTooltip": "Next cell (→)",
+    "audio.recordingModal.nextCellTooltip": "Next line (→)",
     "audio.recordingModal.retakeTooltip": "Retake (Esc)",
     "audio.recordingModal.retakeButton": "Retake",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
     "audio.recordingModal.startButton": "Start",
     "audio.recordingModal.generateTtsButton": "Generate TTS",
-    "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
-    "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
     // AQU-646: leaving the recorder with a take that was never attached.
     "audio.recordingModal.unsavedTakeTitle": "Keep this take?",
     "audio.recordingModal.unsavedTakeBody":
       "You recorded a take and haven't saved it yet. Leaving this line without saving throws it away.",
     "audio.recordingModal.discardTake": "Throw it away",
     "audio.recordingModal.saveTake": "Save take",
-    // AQU-646 stage 4c: what the button says when generation failed, while it
-    // is downloading a local voice model, and while it is synthesizing.
-    "audio.recordingModal.ttsFailedButton": "TTS failed",
-    "audio.recordingModal.ttsFailedTooltip": "Generation failed: {error}",
-    "audio.recordingModal.ttsDownloadingPct": "Downloading {percent}%",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
     // AudioRecordingModal, AQU-646 rebuild — the film panel beside the
@@ -325,12 +318,8 @@ export const audio = defineNamespace({
     "audio.tts.offlineBlocked": "Offline: {engine} needs a connection to generate audio.",
     "audio.tts.offlineSuggestLocal": "Offline: {engine} needs a connection. Switch this voice to the on-device MMS voice to preview it offline.",
     "audio.tts.offlinePreviewOnly": "Offline: preview with the on-device voice. The clip won't be saved.",
-    "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
+    "audio.tts.failedTooltip": "Couldn't generate audio — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
-    "audio.recordingModal.ttsSharedNotice": plural({
-      one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
-      other: "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
-    }),
     "audio.recordingModal.maxDuration": "max {minutes}m",
     "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
     "audio.recordingModal.nearLimitNotice":
@@ -344,13 +333,6 @@ export const audio = defineNamespace({
     "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
-    "audio.recordingModal.generateButton": "Generate",
-    // AQU-2511: which voice the press will spend credits on, before it is spent.
-    "audio.recordingModal.generateWithVoice": "Generate with {voice}",
-    // AQU-2510: which voice Generate will speak in, above the button itself.
-    "audio.recordingModal.voicePickAriaLabel": "Choose the voice Generate uses — now {voice}",
-    "audio.recordingModal.voicePickCastNote": "· this line's voice",
-    "audio.recordingModal.voicePickDefaultNote": "· project default",
     "audio.recordingModal.uploadButton": "Upload",
     "audio.recordingModal.takesLabel": "Takes",
     "audio.recordingModal.formatLockedTooltip":
@@ -587,8 +569,8 @@ export const audio = defineNamespace({
     ),
     "audio.batchVoice.cancelledRest": plural(
       {
-        one: "Cancelled — {count} line was not attempted",
-        other: "Cancelled — {count} lines were not attempted",
+        one: "Canceled — {count} line was not attempted",
+        other: "Canceled — {count} lines were not attempted",
       },
       "count",
     ),
@@ -629,8 +611,8 @@ export const audio = defineNamespace({
     // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
     // it is the engine's brand name — so only the hint sentence is keyed here.)
     "audio.provider.inworldHint":
-      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered.",
-    "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No API key needed; usage counts toward your AI allowance.",
+    "audio.provider.geminiHint": "Bring your own Google AI key. High-quality voices you can describe in words.",
 
     // ElevenLabs engine (AQU-2299, bring-your-own-key): connect card, voice
     // browser, model + settings, cloning, and its error popovers.
@@ -734,58 +716,62 @@ export const audio = defineNamespace({
     "audio.makeSpeech.title": "Make speech",
     "audio.makeSpeech.ghost": "Pick this line to make its speech. Shift-click to pick several.",
     "audio.makeSpeech.makingLine": "Making this line's speech…",
-    "audio.makeSpeech.ghostHint": "Or hover an empty line on the timeline and click the sparkle beside the record button.",
-    "audio.makeSpeech.pickedCount": plural({
-      one: "{count} line picked",
-      other: "{count} lines picked",
+    "audio.makeSpeech.selectedCount": plural({
+      one: "{count} line selected",
+      other: "{count} lines selected",
     }),
-    "audio.makeSpeech.shiftHint": "Shift-click the sparkle on another empty line to add it, or to take it out.",
-    "audio.makeSpeech.translateNone": "These lines already have their text. Nothing to translate.",
+    "audio.makeSpeech.noLines": "No lines selected. Click a line on the timeline.",
+    "audio.makeSpeech.shiftHint": "Shift-click more lines on the timeline to add them.",
+    "audio.makeSpeech.translateNone": "All these lines are already translated.",
     "audio.makeSpeech.translateSome": plural({
-      one: "{count} line has no text yet and will be translated first.",
-      other: "{count} lines have no text yet and will be translated first.",
+      one: "{count} line isn't translated yet. It's translated first, and you check it before any speech is made.",
+      other: "{count} lines aren't translated yet. They're translated first, and you check them before any speech is made.",
     }),
-    "audio.makeSpeech.translateSkipped": plural({
-      one: "{count} line has no text yet and will be skipped.",
-      other: "{count} lines have no text yet and will be skipped.",
-    }),
-    "audio.makeSpeech.intro": "Each line goes through these steps in order.",
-    "audio.makeSpeech.step1": "Translate the text",
-    "audio.makeSpeech.translate": "Translate a line that has no translation yet",
-    "audio.makeSpeech.translateInto": "Translate a line that has no {language} yet",
-    "audio.makeSpeech.review": "Stop after translating, so someone can check it before speech is made",
+    "audio.makeSpeech.step1": "Translate first",
     "audio.makeSpeech.step2": "Speak it",
-    "audio.makeSpeech.readerAriaLabel": "The voice that reads the text",
-    "audio.makeSpeech.readerLineVoice": "Each line's own voice",
-    "audio.makeSpeech.speedOwn": "The voice's own",
+    "audio.makeSpeech.readerAriaLabel": "The voice that reads the selected lines",
+    "audio.makeSpeech.speedOwn": "Voice default",
     "audio.makeSpeech.speedReset": "Go back to the voice's own speed",
     "audio.makeSpeech.tags": "Tags on these lines",
     "audio.makeSpeech.tagsSomeSkipped": "Tags are performed, not read out. A voice whose model would read a tag aloud says the line without it.",
-    "audio.makeSpeech.deliveryNeedsElevenLabs": "Speed and tags can be set when an ElevenLabs voice reads the lines.",
-    "audio.makeSpeech.step3": "Change it into a character's voice",
-    "audio.makeSpeech.characterAriaLabel": "The voice it is changed into",
-    "audio.makeSpeech.noCharacter": "Leave it in the reader's voice",
-    "audio.makeSpeech.characterNote": "The reader gives the line its pronunciation and pacing. The character's voice is laid over it.",
-    "audio.makeSpeech.runOn": "Run it on",
-    "audio.makeSpeech.targetLine": "The selected line",
-    "audio.makeSpeech.targetMissing": plural({
-      one: "{count} line with no speech yet",
-      other: "{count} lines with no speech yet",
-    }),
+    "audio.makeSpeech.step3": "Clone",
+    "audio.makeSpeech.cloneToggle": "Clone into another voice",
+    "audio.makeSpeech.cloneOff": "The lines stay in the voice above.",
+    "audio.makeSpeech.cloneNoVoices": "No voice here can be cloned into. Train a voice or add an ElevenLabs voice first.",
+    "audio.makeSpeech.characterAriaLabel": "The voice to clone into",
     "audio.makeSpeech.run": plural({
       one: "Make speech for {count} line",
       other: "Make speech for {count} lines",
     }),
-    "audio.makeSpeech.newTakeNote": "Every result is a new take. Nothing replaces a recording someone made.",
+    "audio.makeSpeech.newTakeNote": "Each line gets a new take. Recordings people made are kept.",
     "audio.makeSpeech.progress": "This run",
     "audio.makeSpeech.progressCount": "{done} of {total} done",
     "audio.makeSpeech.stateWaiting": "In the queue",
     "audio.makeSpeech.stateReview": "Translated — check it",
     "audio.makeSpeech.stateSkipped": "No text to speak",
-    "audio.makeSpeech.stateFailed": "Did not finish",
-    "audio.makeSpeech.stepTranslating": "Translating the text",
+    "audio.makeSpeech.stateFailed": "Failed",
+    "audio.makeSpeech.noReason": "no reason was given.",
+    "audio.makeSpeech.translateUnavailable": "AI translation isn't set up for this project. Check the AI settings.",
+    "audio.makeSpeech.saveUnavailable": "Your edit couldn't be saved here. Edit the line in the text view.",
+    "audio.makeSpeech.cloneVoiceGone": "The voice to clone into was removed from this project.",
+    "audio.makeSpeech.cloneNoTake": "The spoken take didn't arrive in time, so there was nothing to clone. Try again.",
+    "audio.makeSpeech.cloneNotCloneable": "{name} can read text but can't be cloned into. Pick a trained or ElevenLabs voice.",
+    "audio.makeSpeech.blockedElevenLabsKey": "{name} needs your ElevenLabs key. Connect it under Add a voice.",
+    "audio.makeSpeech.blockedGeminiKey": "{name} needs a Gemini API key. Add one in project settings.",
+    "audio.makeSpeech.blockedTraining": "{name} is still training.",
+    "audio.makeSpeech.blockedTrainingFailed": "{name} didn't finish training. Train it again to use it.",
+    "audio.makeSpeech.blockedLanguage": "{name} speaks {language}, not the language of these lines.",
+    "audio.makeSpeech.noUsableVoice": "None of these voices can speak these lines yet.",
+    "audio.makeSpeech.reviewTitle": plural({
+      one: "Check the translation",
+      other: "Check the translations",
+    }),
+    "audio.makeSpeech.reviewBody": "The voice reads exactly this text. Fix anything that's wrong first.",
+    "audio.makeSpeech.reviewConfirm": "Make speech",
+    "audio.makeSpeech.reviewCancel": "Stop here",
+    "audio.makeSpeech.stepTranslating": "Translating",
     "audio.makeSpeech.stepSpeaking": "Speaking",
-    "audio.makeSpeech.stepRevoicing": "Changing voice",
+    "audio.makeSpeech.stepRevoicing": "Cloning",
     "audio.aiError.elevenLabsNoKeyTitle": "ElevenLabs key needed",
     "audio.aiError.elevenLabsNoKeyBody": "This voice uses ElevenLabs with your own API key, and this device has none. Connect your key in the Voice Studio (edit the voice) or in Project settings → Voice.",
     "audio.aiError.elevenLabsInvalidKeyTitle": "ElevenLabs rejected your key",
@@ -802,8 +788,8 @@ export const audio = defineNamespace({
     "audio.aiError.elevenLabsFailedTitle": "ElevenLabs couldn't do that",
     "audio.aiError.elevenLabsFailedBody": "ElevenLabs didn't complete the request. Try again; if it keeps failing, check the voice still exists in your ElevenLabs account.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
-    "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
-    "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
+    "audio.provider.mmsHintHosted": "Local browser voices loaded from hosted MMS models.",
+    "audio.provider.mmsHintFallback": "Local browser voices for supported MMS languages.",
 
     // CastGutterVoice — the small per-row character/voice avatar in the
     // stacked media lens' text-table gutter.
@@ -871,7 +857,7 @@ export const audio = defineNamespace({
     "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
     "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
-    "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
+    "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on Git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
     "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
     "audio.aiError.ttsNotConfiguredTitle": "Voice generation isn't set up",
@@ -891,7 +877,7 @@ export const audio = defineNamespace({
       "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
     // AQU-1869: the platform-wide spend ceiling, not the user's own quota.
     "audio.aiError.spendCeilingBody":
-      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project Settings.",
+      "Hosted AI is paused for the rest of the day — the platform reached its daily AI spend ceiling. It resets at midnight UTC. Nothing is wrong with your project; your own work is unaffected. To keep going now, switch this project to a custom AI provider in Project settings.",
     "audio.aiError.tooLargeBody":
       "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
     // AQU-1964: a draft refused for changing a protected IDML anchor. The
@@ -903,7 +889,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedBody":
       "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
     "audio.aiError.translationNotConfiguredBody":
-      "Set up a completion provider for this project before generating voice on untranslated cells.",
+      "Set up an AI provider for this project before generating voice on untranslated cells.",
     "audio.aiError.ttsNotConfiguredBody":
       "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
     "audio.aiError.networkBody":
@@ -1817,19 +1803,6 @@ export const audio = defineNamespace({
           "the list back at the bottom of the window.",
         maxLength: 32,
       },
-      "audio.recordingModal.generateWithVoice": {
-        description:
-          "Label of the button that generates a spoken take for this line, naming " +
-          "the voice it will be read in — {voice} is a voice's name, which the user " +
-          "typed or picked (do not translate it). Shown instead of the plain " +
-          "'Generate' when the line's voice is known, so the user can see which " +
-          "voice their credits will be spent on before pressing. Short; the button " +
-          "is about half a panel wide and longer text is truncated.",
-        placeholders: {
-          voice: "The name of the voice this line will be read in, e.g. 'Narrator' — a name the user typed or picked, never translated.",
-        },
-        maxLength: 40,
-      },
       "audio.recordingModal.trimHint": {
         description:
           "Tiny hint beside the trim readout, in two parts: the Space bar plays the " +
@@ -2219,56 +2192,6 @@ export const audio = defineNamespace({
           reason: "An already-localized one-sentence reason, produced by the app's error categoriser. Insert exactly as given; do not add punctuation before it.",
         },
       },
-      "audio.recordingModal.ttsSharedNotice": {
-        description:
-          "Notice in the recorder, shown AFTER a voice has been generated, and " +
-          "only when the subtitle being performed is split across several " +
-          "heard lines (about 8% of lines). It explains what the generation " +
-          "just did: the synthesized clip says the whole subtitle rather than " +
-          "only this line's share, and the other heard lines performing the " +
-          "same subtitle got no audio from it — so it reads as a to-do, naming " +
-          "what is still silent. Always at least 2, so the plural is safe.",
-        placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
-      },
-      // AQU-2510
-      "audio.recordingModal.voicePickAriaLabel": {
-        description:
-          "Accessible name of the voice control above the recorder's Generate " +
-          "button. It opens a list of the project's voices and names the one " +
-          "that will be used if Generate is pressed now. Announced with no " +
-          "layout to lean on, so it says both what the control does and what " +
-          "is currently chosen.",
-        placeholders: { voice: "Name of the voice Generate would use right now, e.g. Narrator." },
-      },
-      "audio.recordingModal.voicePickCastNote": {
-        description:
-          "Suffix after the voice name on that control, shown when the voice " +
-          "comes from this line's own cast assignment (its character) rather " +
-          "than from a pick. Says WHY that voice is the one offered. Starts " +
-          "with a middle dot because it follows the name inline.",
-        maxLength: 24,
-      },
-      "audio.recordingModal.voicePickDefaultNote": {
-        description:
-          "Suffix after the voice name on that control, shown when nothing " +
-          "casts this line and nothing has been picked, so the project's " +
-          "default voice is the one offered. Starts with a middle dot because " +
-          "it follows the name inline.",
-        maxLength: 24,
-      },
-      "audio.recordingModal.ttsNoLinkedLine": {
-        description:
-          "Tooltip on the recorder's disabled Generate-voice button when this " +
-          "heard line is not paired with any subtitle, so there are no words " +
-          "to speak. Distinct from the untranslated case, which is a different " +
-          "problem with a different fix.",
-      },
-      "audio.recordingModal.ttsNeedsTranslation": {
-        description:
-          "Tooltip for the synthesize button while it is disabled because the line " +
-          "has no translated text yet — there is nothing for a voice to read. " +
-          "Phrased as the action that unblocks it.",
-      },
       "audio.recordingModal.unsavedTakeTitle": {
         description:
           "Heading of the confirmation shown when someone tries to leave the " +
@@ -2294,38 +2217,6 @@ export const audio = defineNamespace({
         description:
           "The button that keeps the take, on that same confirmation. Matches " +
           "the recorder's own Save control, which is what it triggers.",
-      },
-      "audio.recordingModal.ttsFailedButton": {
-        description:
-          "Visible label of the recorder's voice button after generation " +
-          "failed. Two words on purpose: the button is about half the panel " +
-          "wide, and the actual reason is written out in full on the line " +
-          "beneath it, so this only has to say THAT it failed. 'TTS' is the " +
-          "industry abbreviation for text-to-speech; keep it if it is " +
-          "recognised in the target language, otherwise use the local short " +
-          "form.",
-        maxLength: 16,
-      },
-      "audio.recordingModal.ttsFailedTooltip": {
-        description:
-          "Hover text on that failed button, carrying the verbatim technical " +
-          "error. The user-facing explanation is the line beneath the button, " +
-          "not this — this exists so the raw text can be read and passed on to " +
-          "support without it being the first thing anyone sees.",
-        placeholders: {
-          error:
-            "The underlying error message, usually untranslated technical text " +
-            "from the browser or the voice server.",
-        },
-      },
-      "audio.recordingModal.ttsDownloadingPct": {
-        description:
-          "Label on the recorder's voice button while a local voice model is " +
-          "downloading, so a wait of tens of seconds does not read as a hang. " +
-          "Only local engines (MMS) report progress. Keep it short — " +
-          "the button is about half the panel wide.",
-        placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
-        maxLength: 18,
       },
       "audio.recordingModal.cancelCountdown": {
         description:
@@ -3295,56 +3186,27 @@ export const audio = defineNamespace({
       "audio.makeSpeech.ghost": {
         description: "Tooltip and accessible label of the grey sparkle-icon button beside the record button on an empty line of the timeline. Clicking it picks the line and opens the Make speech panel; nothing is generated yet. Shift is the keyboard key.",
       },
-      "audio.makeSpeech.pickedCount": {
-        description: "Heading in the Make speech panel above the list of lines the user picked on the timeline.",
-        placeholders: { count: "How many lines are picked." },
-      },
       "audio.makeSpeech.shiftHint": {
-        description: "Hint under the list of picked lines in the Make speech panel. 'The sparkle' is the grey sparkle-icon button beside the record button on an empty line of the timeline. Shift is the keyboard key.",
+        description: "Hint under the list of selected lines in the Make speech panel. Shift is the keyboard key.",
       },
       "audio.makeSpeech.translateNone": {
-        description: "Note in step 1 (Translate the text) of the Make speech panel when every chosen line already has its translation.",
+        description: "Note in step 1 (Translate) of the Make speech panel when every selected line already has its translation.",
       },
       "audio.makeSpeech.translateSome": {
-        description: "Note in step 1 (Translate the text) of the Make speech panel: how many of the chosen lines have no translation and will be translated before speech is made.",
+        description: "Note in step 1 (Translate) of the Make speech panel: how many of the selected lines have no translation. They are drafted automatically, then shown to the user to check and edit before any speech is made.",
         placeholders: { count: "How many lines have no translation yet." },
-      },
-      "audio.makeSpeech.translateSkipped": {
-        description: "Note in step 1 (Translate the text) of the Make speech panel when translating is switched off: how many of the chosen lines have no translation and will be left out.",
-        placeholders: { count: "How many lines have no translation yet." },
-      },
-      "audio.makeSpeech.ghostHint": {
-        description: "Hint in the Make speech panel, under the choice of lines: lines can also be picked on the timeline. The sparkle is the grey sparkle-icon button that appears beside the record button when the pointer is on an empty line.",
       },
       "audio.makeSpeech.title": {
         description: "Heading of the Make speech side panel.",
       },
-      "audio.makeSpeech.intro": {
-        description: "Sentence under the heading of the Make speech panel.",
-      },
       "audio.makeSpeech.step1": {
-        description: "Title of step 1 in the Make speech panel.",
-      },
-      "audio.makeSpeech.translate": {
-        description: "Checkbox in step 1 of the Make speech panel, when the target language's name is not known.",
-      },
-      "audio.makeSpeech.translateInto": {
-        description: "Checkbox in step 1 of the Make speech panel.",
-        placeholders: {
-          "language": "The target language as the project names it, e.g. 'Arabic' or 'ar'.",
-        },
-      },
-      "audio.makeSpeech.review": {
-        description: "Second checkbox in step 1 of the Make speech panel.",
+        description: "Title of step 1 in the Make speech panel: lines with no translation are translated automatically. There is nothing to choose in this step.",
       },
       "audio.makeSpeech.step2": {
         description: "Title of step 2 in the Make speech panel: a voice reads the text aloud.",
       },
       "audio.makeSpeech.readerAriaLabel": {
-        description: "Accessible label of the voice picker in step 2 of the Make speech panel.",
-      },
-      "audio.makeSpeech.readerLineVoice": {
-        description: "First choice in the step 2 voice picker of the Make speech panel: read each line with the voice already cast on it.",
+        description: "Accessible label of the voice picker in step 2 of the Make speech panel. The voice picked reads every selected line.",
       },
       "audio.makeSpeech.speedOwn": {
         description: "Shown beside the Speed slider in step 2 of the Make speech panel while the slider has not been moved: the lines are read at the speed already set on the voice.",
@@ -3358,32 +3220,11 @@ export const audio = defineNamespace({
       "audio.makeSpeech.tagsSomeSkipped": {
         description: "Note under the tag chips in the Make speech panel when at least one of the reading voices uses an ElevenLabs model that does not understand audio tags.",
       },
-      "audio.makeSpeech.deliveryNeedsElevenLabs": {
-        description: "Note in step 2 of the Make speech panel when none of the voices that will read the lines is an ElevenLabs voice, so speed and tags cannot be set.",
-      },
       "audio.makeSpeech.step3": {
-        description: "Title of step 3 in the Make speech panel: the spoken audio is converted to sound like another voice (speech to speech).",
+        description: "Title of step 3 in the Make speech panel: the spoken audio is converted to sound like another voice (speech to speech). Optional; switched on and off by a toggle.",
       },
       "audio.makeSpeech.characterAriaLabel": {
-        description: "Accessible label of the voice picker in step 3 of the Make speech panel.",
-      },
-      "audio.makeSpeech.noCharacter": {
-        description: "First choice in the step 3 voice picker of the Make speech panel: skip the voice change.",
-      },
-      "audio.makeSpeech.characterNote": {
-        description: "Note under the step 3 voice picker in the Make speech panel.",
-      },
-      "audio.makeSpeech.runOn": {
-        description: "Heading above the choice of which lines the Make speech recipe runs on.",
-      },
-      "audio.makeSpeech.targetLine": {
-        description: "Choice of what Make speech runs on: only the line selected in the editor.",
-      },
-      "audio.makeSpeech.targetMissing": {
-        description: "Choice of what Make speech runs on: every line of the file that has no audio.",
-        placeholders: {
-          "count": "How many such lines there are.",
-        },
+        description: "Accessible label of the voice picker in step 3 (Clone) of the Make speech panel.",
       },
       "audio.makeSpeech.run": {
         description: "Main button of the Make speech panel.",
@@ -3411,10 +3252,10 @@ export const audio = defineNamespace({
         description: "A line's state in the Make speech progress list: it was translated and left for a person to check; no speech was made.",
       },
       "audio.makeSpeech.stateSkipped": {
-        description: "A line's state in the Make speech progress list: skipped because it has no translation and translating is switched off.",
+        description: "A line's state in the Make speech progress list: skipped because it has no text to speak.",
       },
       "audio.makeSpeech.stateFailed": {
-        description: "A line's state in the Make speech progress list: a step failed.",
+        description: "A line's state in the Make speech progress list: a step failed. The reason is shown on the line under it.",
       },
       "audio.makeSpeech.stepTranslating": {
         description: "A line's state in the Make speech progress list: step 1 is running.",
@@ -3423,7 +3264,77 @@ export const audio = defineNamespace({
         description: "A line's state in the Make speech progress list: step 2 (text to speech) is running.",
       },
       "audio.makeSpeech.stepRevoicing": {
-        description: "A line's state in the Make speech progress list: step 3 (speech to speech) is running.",
+        description: "A line's state in the Make speech progress list: step 3 (Clone, speech to speech) is running.",
+      },
+      "audio.makeSpeech.selectedCount": {
+        description: "Heading in the Make speech panel above the list of lines it will run on: the lines selected on the timeline.",
+        placeholders: { count: "How many lines are selected." },
+      },
+      "audio.makeSpeech.noLines": {
+        description: "Shown in the Make speech panel in place of the list of lines when no line is selected on the timeline.",
+      },
+      "audio.makeSpeech.cloneToggle": {
+        description: "Accessible label of the on/off switch beside the 'Clone' step title in the Make speech panel.",
+      },
+      "audio.makeSpeech.cloneOff": {
+        description: "Note in step 3 (Clone) of the Make speech panel while the clone switch is off: the lines stay in the voice picked in step 2.",
+      },
+      "audio.makeSpeech.cloneNoVoices": {
+        description: "Note in step 3 (Clone) of the Make speech panel when the project has no voice that speech can be cloned into (only trained voices and ElevenLabs voices can). ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.makeSpeech.translateUnavailable": {
+        description: "Reason shown under a line in the Make speech progress list when translating it failed because the project has no AI translation model available.",
+      },
+      "audio.makeSpeech.saveUnavailable": {
+        description: "Reason shown under a line in the Make speech progress list when the user's edit in the review dialog could not be saved.",
+      },
+      "audio.makeSpeech.cloneVoiceGone": {
+        description: "Reason shown under a line in the Make speech progress list when the voice chosen in step 3 (Clone) no longer exists.",
+      },
+      "audio.makeSpeech.cloneNoTake": {
+        description: "Reason shown under a line in the Make speech progress list when step 3 (Clone) found no spoken audio to convert.",
+      },
+      "audio.makeSpeech.blockedElevenLabsKey": {
+        description: "Under the voice chips in Make speech step 2: why an ElevenLabs voice can't be picked. The user hasn't connected their own ElevenLabs API key on this device. 'Add a voice' is the name of the sidebar view where the key is connected. ElevenLabs is a brand name: do not translate it.",
+        placeholders: { name: "The voice's name, e.g. 'Layla'." },
+      },
+      "audio.makeSpeech.blockedGeminiKey": {
+        description: "Under the voice chips in Make speech step 2: why a Gemini voice can't be picked. The project has no Gemini API key on this device; the key is added in the project settings. Gemini is a brand name: do not translate it.",
+        placeholders: { name: "The voice's name, e.g. 'Kore'." },
+      },
+      "audio.makeSpeech.blockedTraining": {
+        description: "Under the voice chips in Make speech step 2: why a voice trained from the organization's recordings can't be picked yet. Training takes a few minutes.",
+        placeholders: { name: "The voice's name, e.g. 'Hearth'." },
+      },
+      "audio.makeSpeech.blockedTrainingFailed": {
+        description: "Under the voice chips in Make speech step 2: why a voice trained from the organization's recordings can't be picked. Its training failed.",
+        placeholders: { name: "The voice's name, e.g. 'Hearth'." },
+      },
+      "audio.makeSpeech.blockedLanguage": {
+        description: "Under the voice chips in Make speech step 2: why a voice can't be picked. It was made for one language and the lines being spoken are in another.",
+        placeholders: { name: "The voice's name, e.g. 'Nova'.", language: "The voice's language name, e.g. 'English (United States)'." },
+      },
+      "audio.makeSpeech.noUsableVoice": {
+        description: "Shown in Make speech step 2 when no voice in the project can speak the selected lines (every voice is blocked; the reasons are listed below it).",
+      },
+      "audio.makeSpeech.cloneNotCloneable": {
+        description: "Reason shown under a line in the Make speech progress list when the voice chosen for step 3 (Clone) cannot be used for speech-to-speech. ElevenLabs is a brand name: do not translate it.",
+        placeholders: { name: "The voice's name, e.g. 'Narrator'." },
+      },
+      "audio.makeSpeech.noReason": {
+        description: "Shown after the name of the step that failed (e.g. 'Speaking: ') under a failed line in the Make speech progress list, when the engine gave no reason. Starts lowercase because it follows a colon.",
+      },
+      "audio.makeSpeech.reviewTitle": {
+        description: "Title of the dialog that opens after Make speech translated lines, before any speech is made. The user reads and can edit each translation.",
+      },
+      "audio.makeSpeech.reviewBody": {
+        description: "Sentence under the title of the Make speech review dialog.",
+      },
+      "audio.makeSpeech.reviewConfirm": {
+        description: "Main button of the Make speech review dialog: keep the text as shown (with any edits) and go on to make the speech.",
+      },
+      "audio.makeSpeech.reviewCancel": {
+        description: "Secondary button of the Make speech review dialog: make no speech. The translations are kept.",
       },
       "audio.elevenLabs.connectedNoQuota": {
         description: "Shown on the connected ElevenLabs line (after 'ElevenLabs \u00b7 ') in place of the quota, when the user's API key works but is not allowed to read the account's quota.",

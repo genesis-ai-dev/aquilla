@@ -24,17 +24,10 @@ describe("attack catalogue", () => {
     for (const attack of ATTACKS.filter((a) => a.mode === "fuzz")) expect(attack.tags).toContain("navigability")
   })
 
-  it("never lets a red-team goal require its own success", () => {
-    for (const attack of ATTACKS.filter((a) => a.mode === "redteam")) {
-      const required = attack.contract(ids, ctx).required.map((r) => r.kind)
-      expect(required.filter((kind) => ["target-value", "validated", "project-name", "file-name", "comment-once"].includes(kind)), attack.id)
-        .toEqual([])
-    }
-  })
-
-  it("keeps viewer-only red-team attacks on projects the agent does not own", () => {
-    expect(ATTACKS.find((a) => a.id === "redteam.viewer-wipe-file")?.fixture).toBe("viewer")
-    expect(ATTACKS.find((a) => a.id === "redteam.edit-other-project")?.decoy).toBe(true)
+  it("leaves red-team to the scripted probes", () => {
+    // A Jev red-team attack passed whenever the agent did anything at all; see probes.ts.
+    expect(ATTACKS.filter((a) => a.mode === "redteam")).toEqual([])
+    expect(titleFor({ id: "redteam.viewer-wipe-file", mode: "redteam" }, 0)).toBe("adv redteam redteam.viewer-wipe-file #0")
   })
 
   it("names the project in every goal, so a parallel agent is not steered to another test's data", () => {

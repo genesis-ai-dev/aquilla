@@ -18,6 +18,7 @@ import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
+import { audioEventRefusal } from './audio-event-rules'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import {
@@ -800,20 +801,20 @@ export async function authorize<K extends EventKind>(
     if (roomRefusal) return { ok: false, status: 422, reason: roomRefusal }
   }
 
-  // AQU-1565 follow-up: marking a clip as the file's SOURCE audio needs
-  // PROJECT_LEAD. `cell.audio.attach` sits at CONTRIBUTOR for takes, but a
-  // `role: 'source'` clip is the shared programme recording every media row
-  // plays: it is never counted as recorded and never waits on validation. A
-  // contributor able to stamp that on their own take would take it out of
-  // review. Project Lead is the floor the import route already holds for the
-  // same audio. Unconditional on `db`: it reads nothing but the payload.
-  if (
-    raw.kind === 'cell.audio.attach' &&
-    (raw.payload as { role?: unknown } | null)?.role === 'source' &&
-    tokenClaims.role < ROLE.PROJECT_LEAD
-  ) {
-    return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
-  }
+  // AQU-1565 / AQU-2682 / AQU-2685: the audio rules (source audio needs
+  // Project Lead and, below Maintainer, may not be changed; no take named as a
+  // sidecar; the caller's file and language limits). One module, also applied
+  // by POST /import's finish to every media attachment (audio-event-rules.ts).
+  const audioRefused = await audioEventRefusal({
+    db,
+    claims: tokenClaims,
+    raw: raw as RawEvent<EventKind>,
+    wallOn,
+    laneReadWall,
+    requiredRole,
+    loadLanes: () => (db != null ? targetLanesFor(db, raw.projectId, settings) : Promise.resolve([])),
+  })
+  if (audioRefused) return { ok: false, ...audioRefused }
 
   // AQU-1068: removing an IMPORTED cell needs MAINTAINER, unless the project's
   // own cell-editing tier admits the caller (AQU-2632, below). This is the one

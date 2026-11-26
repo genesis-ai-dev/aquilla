@@ -58,7 +58,7 @@ describe("ToolRunPage header marks", () => {
   })
 
   it("says what First party means, on click", async () => {
-    tool = { ...TOOL, firstParty: "default-editor" }
+    tool = { ...TOOL, firstParty: "door43-importer" }
     renderPage()
     await screen.findByRole("heading", { name: "Glossary" })
     await expectClickNote(screen.getByTestId("first-party-badge"), "First party · built in")

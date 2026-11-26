@@ -12,7 +12,7 @@ import {
   scheduleCellsCacheWrite,
   walkAnchorChain,
 } from "@/lib/sync/cells-cache"
-import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { peekOutboxShared, subscribeToOutbox } from "@/lib/sync/outbox"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
@@ -3702,7 +3702,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const activeLane = lane
     let cancelled = false
     async function refresh() {
-      const all = await peekOutboxBatch(2000)
+      const all = await peekOutboxShared(2000)
       if (cancelled) return
       const next = new Map<string, PendingOverlay>()
       const pendingProgressEventIds: string[] = []

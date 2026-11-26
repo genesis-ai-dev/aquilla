@@ -158,7 +158,13 @@ describe("useComments — a focus revalidation is quiet (AQU-2654)", () => {
     expect(result.current.comments).toBe(listBefore)
     expect(result.current.counts).toBe(countsBefore)
     expect(seen.some((flags) => flags.isLoading || flags.isLoadingRest)).toBe(false)
-    expect(renders()).toBe(rendersBefore)
+    // At most ONE render, and none that changed anything (asserted above). The
+    // first state update that changes nothing after a real render still makes
+    // React run the hook once before it bails out. Which no-change update pays
+    // for that — the mount-time outbox read's, or this revalidation's —
+    // depends on when the outbox read settles, so an exact count is a race.
+    // A revalidation that flipped a flag or replaced the list renders twice.
+    expect(renders()).toBeLessThanOrEqual(rendersBefore + 1)
   })
 
   it("keeps every thread on screen until the whole new answer is in", async () => {

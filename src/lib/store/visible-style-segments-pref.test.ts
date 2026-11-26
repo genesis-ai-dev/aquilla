@@ -15,6 +15,7 @@ const LABELS = {
   bold: "Bold",
   italic: "Italic",
   boldItalic: "Bold italic",
+  smallCaps: "Small caps",
 }
 
 beforeEach(() => {

@@ -336,9 +336,9 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    const preview = /maria stays a project lead on mark, spanish language lane only/i
+    const preview = /maria remains project lead on mark, spanish language lane only/i
     expect(screen.getByTestId("staff-lane-popover")).toHaveTextContent(preview)
-    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as a reviewer/i)
+    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as reviewer/i)
   })
 
   it("filters the org roster by the search query", async () => {

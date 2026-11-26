@@ -1,7 +1,5 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
-
-/** The first-party editor extension's name (manifest name, also its "Edit with" label). */
-export const DEFAULT_EDITOR = "Aquilla editor (Smart Extension)"
+import { EXTENSION_DOCUMENT } from "../editor-mode"
 
 /** The native (built-in) editor's "Edit with" label. The effective default is
  *  marked with a "Your default" badge in the menu; "(default)" in a label
@@ -52,13 +50,18 @@ export class ToolsPage {
     return ((await candidate.getByRole("heading", { level: 2 }).textContent()) ?? "").trim()
   }
 
-  /** Step 3: "Add to project" from Try it. */
-  async addCandidate(): Promise<void> {
+  /** Step 3: "Add to project" from Try it. Resolves to the installed
+   *  extension's id (its page is /project/:id/extensions/<that id>). */
+  async addCandidate(): Promise<string> {
     const installed = this.page.waitForResponse(
       (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
     )
     await this.page.getByTestId("candidate-add").click()
-    expect((await installed).status()).toBe(201)
+    const response = await installed
+    expect(response.status()).toBe(201)
+    const { tool } = (await response.json()) as { tool: { id: string } }
+    expect(tool.id, "the install response names the new extension").toBeTruthy()
+    return tool.id
   }
 
   /** The "Edit with" menu button above the editor; `data-editor` holds the
@@ -88,31 +91,12 @@ export class ToolsPage {
     await this.page.getByTestId("edit-with-set-default").click()
   }
 
-  /** Restore the product default for this browser context — the first-party
-   *  editor extension (the e2e build pins it off). Call before navigating. */
-  async optIntoDefaultEditorExtension(): Promise<void> {
-    await this.page.context().addInitScript(() => {
-      localStorage.setItem("aquilla.extensions.defaultEditor", "on")
-    })
-  }
-
-  /** Open a file straight into whichever editor is the default, waiting for
-   *  the first-party extension editor's frame to render its rows. */
-  async openFileInDefaultEditor(projectId: string, fileId: string, firstRef: string): Promise<FrameLocator> {
-    await this.page.goto(`/project/${projectId}/editor/file/${fileId}`)
-    const frame = this.toolFrame(DEFAULT_EDITOR)
-    await expect(this.translationBox(frame, firstRef)).toBeVisible({ timeout: 30_000 })
-    return frame
-  }
-
-  /** The target surface of one row in the default editor extension (the
-   *  read view, which becomes the editing surface when activated — like the
-   *  built-in's TranslatedEditor). */
+  /** The target surface of one row in an SDK-based editor extension. */
   translationBox(frame: FrameLocator, ref: string): Locator {
     return frame.locator(`.cell[data-ref="${ref}"] [data-target-read-view]`)
   }
 
-  /** One row (source, target, badges) of the default editor extension. */
+  /** One row (source, target, badges) of an SDK-based editor extension. */
   editorRow(frame: FrameLocator, ref: string): Locator {
     return frame.locator(`.cell[data-ref="${ref}"]`)
   }
@@ -124,7 +108,7 @@ export class ToolsPage {
 
   /** The running tool's document (an opaque-origin sandboxed frame). */
   toolFrame(name: string): FrameLocator {
-    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`)
+    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`).frameLocator(EXTENSION_DOCUMENT)
   }
 
   permissionPrompt(): Locator {

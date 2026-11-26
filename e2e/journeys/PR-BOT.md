@@ -281,6 +281,22 @@ If the PR says a surface is *absent* (not disabled), assert absence: the
 heading, button, or test-id is not in the snapshot. A greyed-out control
 is a fail against an absence claim.
 
+**A disabled control explains itself on a click, never on a hover
+(AQU-2260).** When the PR says a disabled button's note reads something,
+hovering proves nothing. `AppTooltip` around a disabled control shows no
+tooltip, and the note's text is not in the page until the note is open, so
+a search of the DOM comes back empty too. Click the control where it sits,
+or focus it and press Enter or Space. The button itself takes no pointer
+events, so the click lands on the span around it
+(`[data-slot="tooltip-disabled-trigger"]`); a driver that refuses to click
+a disabled element clicks that span instead. The note opens in an element
+with role `dialog` (`[data-slot="disabled-reason-note"]`), and a second
+click or a click outside shuts it. Quote the note from there. A hover only
+names an enabled icon-only button. PR 2151 got a **FAIL** for `Coming next`
+after a 4-second hover and a DOM search on all three walks; the walk at the
+head before it had clicked and read the note. The **FAIL** is a note still
+missing after the click, on all three walks.
+
 Persistence claims get a reload. Appearance claims get navigation without
 reload *and* a reload. The 626 miss was an appearance claim treated as a
 click claim.

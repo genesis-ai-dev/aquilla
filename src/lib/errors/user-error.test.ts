@@ -184,7 +184,7 @@ describe("messageForStatus 403 role_required", () => {
   it("names role, origin and required role", () => {
     const r = messageForStatus(403, body({ roleLevel: 400, source: "group" }))
     expect(r.category).toBe("forbidden")
-    expect(r.message).toBe("You are Contributor here (Via group). Maintainer is required.")
+    expect(r.message).toBe("You are Contributor here (Via team). Maintainer is required.")
   })
 
   it("never renders a numeric level", () => {

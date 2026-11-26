@@ -74,7 +74,8 @@ function resolvePerson(payload: OrgAccessPayload, ref: GiveAccessPersonRef | und
 function resetText(t: TFunction, reset: RoleReset): string {
   const role = roleLabel(t, reset.roleLevel)
   if (reset.reason === "not_offered") {
-    const place = reset.place === "org" ? t("org.access.places.kindOrg") : t(`org.access.scope.${reset.place}`)
+    // "Organization" is onboarding.apiTokens.orgLabel, as in PlacesLens' PLACE_KIND.
+    const place = reset.place === "org" ? t("onboarding.apiTokens.orgLabel") : t(`org.access.scope.${reset.place}`)
     return t("org.access.give.reset.not_offered", { role, place })
   }
   return t(`org.access.give.reset.${reset.reason}`, { role, cap: roleLabel(t, reset.cap) })

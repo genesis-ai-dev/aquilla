@@ -18,19 +18,21 @@ export function StationMenuItems() {
   const ui = useStationUi()
   return (
     <>
+      {/* AQU-2493 (review, Nov 9): greyed while Record now runs, as Save is:
+          the new version would take the recording with the take it is in. */}
       {ui.removeNoise ? (
-        <DropdownMenuItem onClick={ui.removeNoise} data-testid="station-menu-noise">
+        <DropdownMenuItem onClick={ui.removeNoise} disabled={ui.versionsWait != null} data-testid="station-menu-noise">
           <span className="flex min-w-0 flex-col">
             <span>{t("editor.station.removeNoise")}</span>
-            <span className="text-[11px] text-muted-foreground/70">{t("editor.station.makesVersion")}</span>
+            <span className="text-[11px] text-muted-foreground/70">{ui.versionsWait ?? t("editor.station.makesVersion")}</span>
           </span>
         </DropdownMenuItem>
       ) : null}
       {ui.changeVoice ? (
-        <DropdownMenuItem onClick={ui.changeVoice} data-testid="station-menu-voice">
+        <DropdownMenuItem onClick={ui.changeVoice} disabled={ui.versionsWait != null} data-testid="station-menu-voice">
           <span className="flex min-w-0 flex-col">
             <span>{t("editor.station.changeVoice")}</span>
-            <span className="text-[11px] text-muted-foreground/70">{t("editor.station.makesVersion")}</span>
+            <span className="text-[11px] text-muted-foreground/70">{ui.versionsWait ?? t("editor.station.makesVersion")}</span>
           </span>
         </DropdownMenuItem>
       ) : null}

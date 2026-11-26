@@ -31,8 +31,12 @@ import { MAX_WEB_DOMAINS, validateWebDomain } from "./web-domains"
  *  files (aquilla.data.*), cells.byRef across files, file groups, manifest
  *  `actions` (headless runs from the bar/menu/settings, optional check on
  *  project open) and manifest `exports` (formats in the export dialog), plus
- *  web.fetch as bytes. */
-export const TOOLS_API_REV = 7
+ *  web.fetch as bytes. Rev 8 (additive only): native editor integration —
+ *  active-cell sync (editor.activeCell + push event), editor.reveal into the
+ *  native EditorTable, declarative row badges/spans/columns (editor.annotate /
+ *  editor.clearAnnotations), ui.openPanel, cell/selection action places, and
+ *  manifest.columns for native read-only editor columns. */
+export const TOOLS_API_REV = 8
 
 /** SDK majors the host can inject (manifest.sdk; shared/tools/sdk/sdk.ts). */
 export const TOOLS_SDK_MAJORS: readonly number[] = [1]
@@ -86,18 +90,30 @@ export function isToolScope(value: unknown): value is ToolScope {
  *  a file (the file arrives as `aquilla.context.file`). */
 export type ToolMount = "page" | "panel" | "inline" | "editor"
 
-/** apiRev 7: a button that runs the extension HEADLESS (no visible frame).
+/** apiRev 7/8: a button that runs the extension HEADLESS (no visible frame).
  *  `where`: the extensions bar above the file view, the extensions palette
- *  menu, or the extension's card in Smart Extensions settings. `onOpen`: also
- *  run it (at most once a day per user) when a member who may write files opens
- *  the project — "check for updates" for live-linked importers. */
+ *  menu, the extension's card in Smart Extensions settings, a cell's menu
+ *  ("cell", apiRev 8), or the source text selection toolbar ("selection",
+ *  apiRev 8). `onOpen`: also run it (at most once a day per user) when a
+ *  member who may write files opens the project — "check for updates" for
+ *  live-linked importers. */
 export interface ToolAction {
   id: string
   label: string
   where: ToolActionPlace[]
   onOpen?: boolean
 }
-export type ToolActionPlace = "bar" | "menu" | "settings"
+export type ToolActionPlace = "bar" | "menu" | "settings" | "cell" | "selection"
+
+/** apiRev 8: a read-only column rendered natively in Aquilla's EditorTable.
+ *  Extensions populate cells via `aquilla.editor.annotate(fileId, { cells: { [id]: { columns: { [colId]: { text } } } } })`. */
+export interface ToolColumn {
+  id: string
+  label: string
+  description?: string
+  /** "before" sits between Source and Target (like Parallel Bibles); "after" sits after Target (like Back-translation). Default "after". */
+  placement?: "before" | "after"
+}
 
 /** apiRev 7: an export format the extension contributes to the export dialog.
  *  `tags`: offered only for files carrying one of these tags (absent = every
@@ -127,6 +143,8 @@ export interface ToolManifest {
   exports?: ToolExport[]
   /** apiRev 7 (AQU-1937): import contributions offered in the Import dialog. */
   importers?: ToolImporter[]
+  /** apiRev 8: declarative read-only columns rendered natively in EditorTable. */
+  columns?: ToolColumn[]
 }
 
 /** One field of an importer's options form. The PLATFORM renders the form
@@ -227,8 +245,9 @@ function readImporters(input: unknown, errors: string[]): ToolImporter[] {
 const ACTION_ID = /^[a-z][a-z0-9-]{0,39}$/
 const MAX_ACTIONS = 8
 const MAX_EXPORTS = 8
+const MAX_COLUMNS = 4
 const MAX_LABEL = 60
-const ACTION_PLACES: readonly ToolActionPlace[] = ["bar", "menu", "settings"]
+const ACTION_PLACES: readonly ToolActionPlace[] = ["bar", "menu", "settings", "cell", "selection"]
 
 function readActions(input: unknown, errors: string[]): ToolAction[] {
   if (input === undefined || input === null) return []
@@ -251,7 +270,7 @@ function readActions(input: unknown, errors: string[]): ToolAction[] {
     const where: ToolActionPlace[] = []
     for (const p of places) {
       const place = ACTION_PLACES.find((x) => x === p)
-      if (!place) errors.push(`manifest.actions[${i}].where: unknown place ${String(p)} (bar, menu, settings)`)
+      if (!place) errors.push(`manifest.actions[${i}].where: unknown place ${String(p)} (bar, menu, settings, cell, selection)`)
       else if (!where.includes(place)) where.push(place)
     }
     out.push({ id, label, where: where.length ? where : ["bar"], ...(raw.onOpen === true ? { onOpen: true } : {}) })
@@ -283,6 +302,32 @@ function readExports(input: unknown, errors: string[]): ToolExport[] {
     out.push({ id, label, extension, ...(tags.length ? { tags } : {}) })
   }
   if (out.length > MAX_EXPORTS) errors.push(`manifest.exports lists more than ${MAX_EXPORTS} formats`)
+  return out
+}
+
+function readColumns(input: unknown, errors: string[]): ToolColumn[] {
+  if (input === undefined || input === null) return []
+  if (!Array.isArray(input)) {
+    errors.push("manifest.columns must be a list")
+    return []
+  }
+  const out: ToolColumn[] = []
+  for (const [i, raw] of input.entries()) {
+    if (!isRecord(raw)) {
+      errors.push(`manifest.columns[${i}] must be an object`)
+      continue
+    }
+    const id = typeof raw.id === "string" ? raw.id : ""
+    const label = typeof raw.label === "string" ? raw.label.trim() : ""
+    if (!ACTION_ID.test(id)) errors.push(`manifest.columns[${i}].id must be lowercase letters, digits and dashes`)
+    else if (out.some((x) => x.id === id)) errors.push(`manifest.columns has two columns with id ${id}`)
+    if (!label || label.length > MAX_LABEL) errors.push(`manifest.columns[${i}].label must be 1-${MAX_LABEL} characters`)
+    const description = typeof raw.description === "string" ? raw.description.trim().slice(0, MAX_DESCRIPTION) : ""
+    const placement = raw.placement === undefined ? undefined : raw.placement === "before" || raw.placement === "after" ? raw.placement : null
+    if (placement === null) errors.push(`manifest.columns[${i}].placement must be "before" or "after"`)
+    out.push({ id, label, ...(description ? { description } : {}), ...(placement ? { placement } : {}) })
+  }
+  if (out.length > MAX_COLUMNS) errors.push(`manifest.columns lists more than ${MAX_COLUMNS} columns`)
   return out
 }
 
@@ -369,7 +414,9 @@ export function validateManifest(input: unknown): ManifestValidation {
   const actions = readActions(input.actions, errors)
   const exportsList = readExports(input.exports, errors)
   const importers = readImporters(input.importers, errors)
+  const columns = readColumns(input.columns, errors)
   if ((actions.length > 0 || exportsList.length > 0 || importers.length > 0) && apiRev < 7) errors.push("manifest.actions, manifest.exports and manifest.importers need apiRev 7 or later")
+  if (columns.length > 0 && apiRev < 8) errors.push("manifest.columns needs apiRev 8 or later")
   if (importers.length > 0 && !scopes.includes("write:files")) errors.push("manifest.importers needs the write:files scope")
 
   if (errors.length > 0) return { ok: false, manifest: null, errors }
@@ -386,6 +433,7 @@ export function validateManifest(input: unknown): ManifestValidation {
       ...(actions.length ? { actions } : {}),
       ...(exportsList.length ? { exports: exportsList } : {}),
       ...(importers.length ? { importers } : {}),
+      ...(columns.length ? { columns } : {}),
     },
     errors,
   }
@@ -436,6 +484,7 @@ export async function toolCodeHash(source: string, manifest: ToolManifest): Prom
       ...(manifest.actions?.length ? { actions: manifest.actions } : {}),
       ...(manifest.exports?.length ? { exports: manifest.exports } : {}),
       ...(manifest.importers?.length ? { importers: manifest.importers } : {}),
+      ...(manifest.columns?.length ? { columns: manifest.columns } : {}),
     },
   })
   const bytes = new TextEncoder().encode(canonical)

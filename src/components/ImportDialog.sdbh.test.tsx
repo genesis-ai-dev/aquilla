@@ -69,7 +69,7 @@ async function openSdbhAndImport() {
     render(<ImportDialog {...baseProps} />)
   })
   await act(async () => {
-    fireEvent.click(await screen.findByText("SDBH Hebrew Lexicon"))
+    fireEvent.click(await screen.findByText("SDBH Hebrew lexicon"))
   })
   const master = await waitFor(() => {
     const input = document.querySelector<HTMLInputElement>('input[type="file"][accept=".json,.JSON"]')

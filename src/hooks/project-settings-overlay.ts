@@ -118,6 +118,9 @@ export function overlaySettings(
   // see no Autopilot at all — the surfaces render only when this is on (or the
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
+  // Must reach the workspace: a stored false is the only thing that turns
+  // smart edits off, and the editor reads it from the record.
+  assign("smartEditsEnabled", settings.smartEditsEnabled)
   // AQU-2041: the voice-management switch. Absent stays off; a stored false
   // must still reach the workspace or a lead keeps the controls after a
   // maintainer turns them off.

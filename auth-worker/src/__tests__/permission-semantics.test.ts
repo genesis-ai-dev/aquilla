@@ -13,7 +13,7 @@
  *   1. direct project_members row ("override")
  *   2. group_project_grants + group_members ("group")
  *   3. org_members row at Maintainer+ when project.org_id matches ("org")
- *   4. projects.created_by === user.id → 700 ("creator")
+ *   4. created_by is history (AQU-2357). It does not grant a role.
  *
  * MEMBERSHIP → VISIBILITY RULE (the key answer, updated by AQU-435):
  *   An org member sees EVERY project in that org that they have at least one
@@ -725,10 +725,9 @@ describe("Invite flow: link grant → project access", () => {
 
 // ─── Suite 7: Creator fallback ────────────────────────────────────────────
 
-describe("Creator fallback: project creator always gets owner (700)", () => {
-  it("project creator (not in org) resolves as owner 700 via creator path", async () => {
+describe("AQU-2357: created_by is history, not an Owner grant", () => {
+  it("a creator with no Owner row has no access", async () => {
     await seedBaseOrg()
-    // outsider creates a standalone project (no org)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj_personal', 'Personal', NULL, 3)",
     ).run()
@@ -738,9 +737,6 @@ describe("Creator fallback: project creator always gets owner (700)", () => {
       { headers: authHeader(await jwtFor("outsider")) },
       env,
     )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { role: { level: number; source: string } }
-    expect(body.role.level).toBe(700)
-    expect(body.role.source).toBe("creator")
+    expect(res.status).toBe(403)
   })
 })

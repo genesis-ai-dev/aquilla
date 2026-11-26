@@ -93,6 +93,42 @@ function Probe({ run }: { run: () => Promise<{ kind: "saved" } | { kind: "theirs
   )
 }
 
+// A saved value that only catches up after the write (a project name is
+// re-read once the rename lands) used to show the OLD text from the moment
+// the field was left until then.
+describe("a typing field whose save takes a moment", () => {
+  const field = (value: string, commit: (next: string) => Promise<{ kind: string }>) =>
+    renderHook(
+      ({ value: v }) => useCommitOnPause({ value: v, toText: (x) => x, parse: (t) => t.trim() || null, commit }),
+      { initialProps: { value } },
+    )
+
+  it("keeps showing what was typed until the saved value catches up", async () => {
+    let answer!: (result: { kind: string }) => void
+    const { result, rerender } = field("Ruth", () => new Promise((resolve) => { answer = resolve }))
+    type(result.current, "Ruth 2")
+    act(() => result.current.onBlur())
+    expect(result.current.value).toBe("Ruth 2")
+
+    await act(async () => answer({ kind: "saved" }))
+    // Saved, but the page has not re-read the name yet.
+    expect(result.current.value).toBe("Ruth 2")
+
+    rerender({ value: "Ruth 2" })
+    expect(result.current.value).toBe("Ruth 2")
+    // From here the field follows the saved value again.
+    rerender({ value: "Ruth 3" })
+    expect(result.current.value).toBe("Ruth 3")
+  })
+
+  it("shows the saved value again when the save fails", async () => {
+    const { result } = field("Ruth", async () => ({ kind: "failed" }))
+    type(result.current, "Ruth 2")
+    await act(async () => result.current.onBlur())
+    expect(result.current.value).toBe("Ruth")
+  })
+})
+
 describe("the quiet Saved", () => {
   it("appears beside the setting once it has saved, then fades", async () => {
     render(

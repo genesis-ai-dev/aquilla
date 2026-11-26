@@ -126,6 +126,28 @@ describe("IDML v2 parser adapter", () => {
     expect(strings[0]?.originalHtml).toContain('data-idml-character-style="CharacterStyle/Emphasis"')
   })
 
+  it("records a small-caps divine-name style so the cell can show that run", async () => {
+    const buffer = await makeIdmlParagraph(
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">`
+        + `<Content>When the </Content></CharacterStyleRange>`
+        + `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/nd">`
+        + `<Content>Lord</Content></CharacterStyleRange>`,
+      `<?xml version="1.0" encoding="UTF-8"?><idPkg:Styles xmlns:idPkg="${IDPKG}">`
+        + `<CharacterStyle Self="CharacterStyle/#base.sc" Capitalization="SmallCaps"/>`
+        + `<CharacterStyle Self="CharacterStyle/nd">`
+        + `<Properties><BasedOn type="object">CharacterStyle/#base.sc</BasedOn></Properties>`
+        + `</CharacterStyle>`
+        + `</idPkg:Styles>`,
+    )
+    const strings = await extractIdmlStrings(buffer, (bytes, profile) => parseIdml(bytes, profile))
+    expect(strings[0]?.metadata).toMatchObject({
+      idmlStyleDisplay: {
+        "CharacterStyle/nd": { bold: false, italic: false, smallCaps: true },
+      },
+    })
+    expect(strings[0]?.originalHtml).toContain('data-idml-character-style="CharacterStyle/nd"')
+  })
+
   it("records a heading paragraph style so unstyled Treasure Hunt runs can display Bold", async () => {
     const buffer = await makeIdmlParagraph(
       `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">`

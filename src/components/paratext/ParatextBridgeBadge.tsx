@@ -79,6 +79,7 @@ export function ParatextBridgeBadge(host: MirrorHost) {
             </div>
           ) : null}
           {hasPending ? <p className="font-medium" data-testid="paratext-pending">{pendingLabel}</p> : null}
+          {m.heldElsewhere > 0 ? <p className="text-muted-foreground" data-testid="paratext-held-elsewhere">{t("paratextBridge.mirror.heldElsewhere", { count: m.heldElsewhere })}</p> : null}
           {m.unmapped > 0 ? <p className="text-muted-foreground">{t("paratextBridge.mirror.unmapped", { count: m.unmapped })}</p> : null}
           {m.refusals.length > 0 ? (
             <div className="space-y-2 rounded-md border border-border p-2">

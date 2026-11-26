@@ -64,6 +64,13 @@ describe("decide", () => {
     expect(decide({ verify: "in_progress", jev: "pass" }).deploy).toBe(false)
     expect(decide({ verify: undefined, jev: "pass" })).toEqual({ deploy: false, reason: "release-verify is missing" })
   })
+
+  // The rollback watch opens the issue: the next slice is cut from the
+  // tagged tip and would ship the change it just took back.
+  it("deploys nothing while a release:halt issue is open, however green the HEAD", () => {
+    expect(decide({ verify: "success", jev: "pass", halt: 2150 })).toEqual({ deploy: false, reason: "the line is halted by #2150 (release:halt); close it to resume" })
+    expect(decide({ verify: "success", jev: "pass", halt: undefined }).deploy).toBe(true)
+  })
 })
 
 describe("verifyState", () => {

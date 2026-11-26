@@ -650,7 +650,7 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     expect(agentMode.compareDocumentPosition(chatOptions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(textTab)
     expect(onLensChange).toHaveBeenCalledWith("text")
-    expect(within(row).queryByRole("button", { name: "Collapse Agent pane" })).not.toBeInTheDocument()
+    expect(within(row).queryByRole("button", { name: "Collapse agent pane" })).not.toBeInTheDocument()
     expect(within(row).queryByTestId("file-options-menu")).not.toBeInTheDocument()
   })
 
@@ -681,7 +681,7 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     render(<AgentWorkbench {...workbenchProps()} onCollapse={onCollapse} />)
 
     const header = screen.getByTestId("agent-toolbar-row")
-    const collapse = within(header).getByRole("button", { name: "Collapse Agent pane" })
+    const collapse = within(header).getByRole("button", { name: "Collapse agent pane" })
     expect(collapse).not.toHaveTextContent("Collapse")
     expect(within(header).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
     fireEvent.click(collapse)

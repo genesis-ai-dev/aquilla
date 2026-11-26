@@ -195,7 +195,11 @@ export function holdOutboxNotifications(): () => void {
   return release
 }
 
+/** Advances on every in-process outbox write, held or not (see peekOutboxShared). */
+let outboxChangeVersion = 0
+
 function notifyOutboxChanged(): void {
+  outboxChangeVersion++
   if (notifyHolds > 0) {
     notifyWhileHeld = true
     return
@@ -226,6 +230,7 @@ export async function resetOutboxConnectionForTests(): Promise<void> {
   listeners.clear()
   notifyHolds = 0
   notifyWhileHeld = false
+  sharedRead = null
 }
 
 async function openDb(): Promise<IDBDatabase> {
@@ -735,6 +740,42 @@ export async function peekOutboxBatch(
   } catch {
     return []
   }
+}
+
+/** Rows one shared read fetches; the largest any reactive reader asks for. */
+const SHARED_READ_LIMIT = 2000
+
+let sharedRead: {
+  changeVersion: number
+  ownerVersion: number
+  promise: Promise<OutboxRecord[]>
+} | null = null
+
+/**
+ * `peekOutboxBatch` for the active owner, for the hooks that re-read on every
+ * outbox notification. Callers that ask while a read of the same outbox state
+ * is in flight get that read, so the N subscribers of one notification cost
+ * one IndexedDB scan and all resume in the same task — React then renders
+ * their updates together, not once per reader (AQU-2655).
+ *
+ * Only an in-flight read is shared, and only if no in-process write happened
+ * since it began: a read never serves a caller that asked after a change the
+ * read may have missed. The array is shared between callers — do not mutate.
+ */
+export function peekOutboxShared(limit: number): Promise<OutboxRecord[]> {
+  if (limit > SHARED_READ_LIMIT) return peekOutboxBatch(limit)
+  let read = sharedRead
+  if (!read || read.changeVersion !== outboxChangeVersion || read.ownerVersion !== activeOwnerVersion) {
+    const started: NonNullable<typeof sharedRead> = {
+      changeVersion: outboxChangeVersion,
+      ownerVersion: activeOwnerVersion,
+      promise: peekOutboxBatch(SHARED_READ_LIMIT).finally(() => {
+        if (sharedRead === started) sharedRead = null
+      }),
+    }
+    read = sharedRead = started
+  }
+  return read.promise.then((all) => (all.length > limit ? all.slice(0, limit) : all))
 }
 
 /**

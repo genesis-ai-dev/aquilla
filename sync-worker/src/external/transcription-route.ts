@@ -43,6 +43,7 @@ import { canonicalWavSamples, toBase64, windowCanonicalWav, SAMPLE_RATE, type Wa
 import {
   ASR_MODEL_CHOICES, ASR_WINDOW_SECONDS, pickAsrModel, type AsrModel, type AsrModelChoice,
 } from '../../../db/shared/asr-models'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 
 const ROUTE_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/transcriptions(\/status)?$/
 
@@ -121,9 +122,19 @@ async function callAuthWorker(env: ExternalEnv, path: string, body: unknown): Pr
   }
 }
 
+/**
+ * Largest JSON body accepted: a 10-minute raw WAV, base64-encoded (4/3), plus
+ * room for the other fields. Read through the streaming cap so an oversize or
+ * chunked body is refused before it is parsed and decoded (~3x its size in
+ * memory) inside the shared 128 MB isolate.
+ */
+const MAX_BODY_BYTES = Math.ceil(MAX_RAW_WAV_BYTES / 3) * 4 + 64 * 1024
+
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
-    const parsed: unknown = await request.json()
+    const read = await readTextBodyWithLimit(request.headers, request.body, MAX_BODY_BYTES)
+    if (!read.ok) return null
+    const parsed: unknown = JSON.parse(read.text)
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
   } catch { return null }
 }
@@ -154,7 +165,7 @@ export async function handleExternalTranscriptionRequest(
   const db = env.AQUILLA_PG as AquillaDb
   const userId = authed.cred.userId
   const body = await readBody(request)
-  if (!body) return errorResponse('validation_failed', 'body must be a JSON object')
+  if (!body) return errorResponse('validation_failed', `body must be a JSON object of at most ${MAX_BODY_BYTES} bytes`)
 
   if (match[2]) {
     const model = body.model ?? 'omni-zs'

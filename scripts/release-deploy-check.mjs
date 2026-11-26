@@ -11,6 +11,8 @@
 //                    HARNESS UNAVAILABLE do not (same rule as the manual
 //                    deploy). No comment yet means wait: the hour's deploy
 //                    goes by, the next one reads it again.
+//   no halt          an open issue labelled `release:halt` stops every
+//                    deploy until it is closed (HALT_LABEL below).
 //
 // Usage: node scripts/release-deploy-check.mjs
 //   GITHUB_TOKEN   contents: read
@@ -78,7 +80,16 @@ export function verifyState(checkRuns) {
   return newest ? (newest.status === "completed" ? newest.conclusion : newest.status) : undefined
 }
 
-export function decide({ verify, jev }) {
+// A person's stop on the whole line: an open issue carrying this label. The
+// rollback watch opens one when it takes a release back (release-rollback.mjs),
+// because the next slice is cut from the tagged tip and would ship the same
+// change again; a person can open one too. Only people with triage rights
+// can label an issue, so the label is the authority, not the issue. Closing
+// the issue resumes the line.
+export const HALT_LABEL = "release:halt"
+
+export function decide({ verify, jev, halt }) {
+  if (halt) return { deploy: false, reason: `the line is halted by #${halt} (${HALT_LABEL}); close it to resume` }
   if (verify !== "success") return { deploy: false, reason: `${VERIFY_CHECK_NAME} is ${verify ?? "missing"}` }
   if (jev === null) return { deploy: false, reason: "Jev has not reported on this HEAD yet" }
   if (jev === "fail") return { deploy: false, reason: "Jev FAIL on this HEAD" }
@@ -137,6 +148,8 @@ async function main() {
   }
   const [branch] = open
   const sha = git(["rev-parse", `origin/${branch}`])
+  const halts = await githubApi(`/issues?state=open&labels=${encodeURIComponent(HALT_LABEL)}&per_page=1`, token)
+  const halt = Array.isArray(halts) && halts.length ? halts[0].number : undefined
   const checks = await githubApi(`/commits/${sha}/check-runs?check_name=${VERIFY_CHECK_NAME}&per_page=100`, token)
   const verify = verifyState(checks?.check_runs)
   const comments = await commitComments(sha, token)
@@ -144,7 +157,7 @@ async function main() {
     comments.map((comment) => ({ body: comment.body, login: comment.user?.login })),
     jevTrustedLogins(),
   )
-  console.log(JSON.stringify({ branch, sha, ...decide({ verify, jev }) }))
+  console.log(JSON.stringify({ branch, sha, ...decide({ verify, jev, halt }) }))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

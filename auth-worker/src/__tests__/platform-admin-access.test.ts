@@ -227,7 +227,7 @@ describe("platform-admin cross-tenant access", () => {
     ).run()
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Alpha Org', 1), (11, 'Beta Org', 1), (12, 'Gamma Org', 1)",
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Alpha Org', 1), (11, 'Beta Org', 1), (12, 'Gamma Org', 1), (13, 'Beta', 1), (14, 'A Beta', 1)",
     ).run()
 
     const first = await app.request("/api/v2/orgs?limit=1", { headers: authHeader(await jwtFor("root")) }, env)
@@ -257,7 +257,11 @@ describe("platform-admin cross-tenant access", () => {
 
     const search = await app.request("/api/v2/orgs?q=beta&limit=40", { headers: authHeader(await jwtFor("root")) }, env)
     const searchBody = (await search.json()) as { orgs: Array<{ name: string | null }> }
-    expect(searchBody.orgs.map((o) => o.name)).toEqual(["Beta Org"])
+    expect(searchBody.orgs.map((o) => o.name)).toEqual(["Beta", "Beta Org", "A Beta"])
+    const ranked = await app.request("/api/v2/orgs?q=beta&limit=2", { headers: authHeader(await jwtFor("root")) }, env)
+    const { nextCursor } = await ranked.json() as { nextCursor: string }
+    const rest = await app.request(`/api/v2/orgs?q=beta&limit=2&cursor=${encodeURIComponent(nextCursor)}`, { headers: authHeader(await jwtFor("root")) }, env)
+    expect(await rest.json()).toMatchObject({ orgs: [{ name: "A Beta" }], nextCursor: null })
   })
 })
 

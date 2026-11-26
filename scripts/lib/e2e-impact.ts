@@ -39,7 +39,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // Aquilla Tools (prototype): sandboxed tool host, bridge, store, provenance.
     source: /^(?:src\/(?:lib|components|pages)\/[Tt]ools\/|shared\/tools\/|auth-worker\/src\/(?:routes\/tools|lib\/tools\/)|sync-worker\/src\/events\/(?:tool-provenance|cells-by-ref-route|handlers\/file-extension-set)|src\/lib\/import\/change-detection|src\/lib\/dcs\/(?:extension\/|import-plan)|db\/postgres\/migrations\/.*project_tools)/,
-    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts", "e2e/specs/tools/default-editor-extension.spec.ts", "e2e/specs/tools/default-editor-parity.spec.ts", "e2e/specs/tools/built-extension-renders.spec.ts", "e2e/specs/tools/sdk-extension.spec.ts", "e2e/specs/tools/default-editor-rev4.spec.ts", "e2e/specs/tools/default-editor-rev5.spec.ts", "e2e/specs/tools/extension-builder.spec.ts", "e2e/specs/tools/web-read.spec.ts", "e2e/specs/tools/extension-primitives.spec.ts", "e2e/specs/tools/smart-extensions-flag-importer.spec.ts"],
+    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts", "e2e/specs/tools/extension-editor.spec.ts", "e2e/specs/tools/built-extension-renders.spec.ts", "e2e/specs/tools/sdk-extension.spec.ts", "e2e/specs/tools/extension-builder.spec.ts", "e2e/specs/tools/web-read.spec.ts", "e2e/specs/tools/extension-primitives.spec.ts", "e2e/specs/tools/smart-extensions-flag-importer.spec.ts"],
   },
   {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
@@ -162,7 +162,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 ]
 
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
-const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
+// src/lib/sync/offline-gate/ is a Vitest harness (docs/RELEASE-RISK-GATES.md,
+// the offline-sync gate): its table, fakes and golden sit beside the test
+// file and nothing in the app imports them, so a change there is a unit-test
+// change, not a change to the sync journey.
+const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$|^src\/lib\/sync\/offline-gate\//i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
 const PRODUCT_RUNTIME = /^(?:db\/postgres\/migrations\/0206_login_method_security\.sql$|plugins\/aquilla\/|db\/shared\/api-credentials|db\/postgres\/migrations\/.*mcp_oauth|src\/|auth-worker\/|sync-worker\/|packages\/|shared\/timeline-import|index\.html$|config\/pricing\/|db\/shared\/(?:billing|workspace-access)|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/
 

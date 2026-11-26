@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
 import { parseTextFormat, TEXT_PARSE_FILE_TYPES } from "./parse-text-formats"
+import {
+  USFM_MARKER_SHAPES_CRLF,
+  USFM_MARKER_SHAPES_LF,
+} from "./__fixtures__/usfm-marker-shapes"
+import type { UsfmNoteRecord } from "../../../db/shared/usfm-notes"
 
 describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
   it("parses a plain text file into strings", () => {
@@ -150,5 +155,65 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
   ] as const)("parses %s through its deterministic adapter", (fileType, name, text, expected) => {
     const [result] = parseTextFormat({ fileType, name, text })
     expect(result.strings[0].original).toBe(expected)
+  })
+})
+
+describe("USFM import is content-only (AQU-2743)", () => {
+  const cellsOf = (text: string) => {
+    const [book] = parseTextFormat({ fileType: "usfm", text, name: "41MAT.SFM" })
+    return book.strings
+  }
+  const byRef = (text: string, ref: string) => {
+    const cell = cellsOf(text).find((s) => s.context === ref)
+    if (!cell) throw new Error(`no cell for ${ref}`)
+    return cell
+  }
+
+  it("keeps no USFM markup in a verse cell's text", () => {
+    for (const cell of cellsOf(USFM_MARKER_SHAPES_CRLF)) {
+      expect(cell.original).not.toContain("\\")
+      expect(cell.original).not.toContain("\r")
+    }
+  })
+
+  it("lifts footnotes out of the verse and parks them in metadata.usfmNotes", () => {
+    const mat1v1 = byRef(USFM_MARKER_SHAPES_CRLF, "MAT 1:1")
+    expect(mat1v1.original).toBe(
+      "This is the genealogy of Jesus the Messiah the son of David, the son of Abraham:",
+    )
+    const notes = mat1v1.metadata?.usfmNotes as UsfmNoteRecord[]
+    expect(notes).toHaveLength(2)
+    expect(notes[0]).toMatchObject({ kind: "footnote", caller: "+", ref: "1:1" })
+    // The nested \+xt cross-reference is flattened into the note's text, and
+    // the original span is kept verbatim so export can restore it (AQU-1295).
+    expect(notes[1].text).toContain("verse 18")
+    expect(notes[1].raw).toContain("\\+xt verse 18|MAT 1:18\\+xt*")
+  })
+
+  it("unwraps \\wj and joins poetry lines with a newline", () => {
+    expect(byRef(USFM_MARKER_SHAPES_CRLF, "MAT 5:3").original).toBe(
+      "“Blessed are the poor in spirit,\nfor theirs is the kingdom of heaven.",
+    )
+    // \wj spanning a footnote: the words survive, the note is parked.
+    const mat5v4 = byRef(USFM_MARKER_SHAPES_CRLF, "MAT 5:4")
+    expect(mat5v4.original).toBe(
+      "“Blessed are those who mourn,\nfor they will be comforted.",
+    )
+    expect(mat5v4.metadata?.usfmNotes).toHaveLength(1)
+  })
+
+  it("reads CRLF and LF to the same cells", () => {
+    const crlf = cellsOf(USFM_MARKER_SHAPES_CRLF).map((s) => [s.context, s.original, s.metadata])
+    const lf = cellsOf(USFM_MARKER_SHAPES_LF).map((s) => [s.context, s.original, s.metadata])
+    expect(crlf).toEqual(lf)
+  })
+
+  it("leaves a cell that never had USFM markup in it alone", () => {
+    expect(byRef(USFM_MARKER_SHAPES_CRLF, "MAT 5:2").original).toBe(
+      "and he began to teach them.",
+    )
+    expect(byRef(USFM_MARKER_SHAPES_CRLF, "MAT 1:s1:1").original).toBe(
+      "The Genealogy of Jesus the Messiah",
+    )
   })
 })

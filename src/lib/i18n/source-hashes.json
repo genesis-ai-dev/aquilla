@@ -4995,7 +4995,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9975,7 +9978,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14942,7 +14948,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19935,7 +19944,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -26202,7 +26214,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32471,7 +32486,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38812,7 +38830,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -45200,7 +45221,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51503,7 +51527,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59753,7 +59780,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -68008,7 +68038,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -84973,7 +85006,10 @@
     "error.airtable.loadLink": "75d189f5f864f83e",
     "error.airtable.saveLink": "a26b7993329f9b16",
     "error.airtable.updateLink": "a954280498443697",
-    "error.airtable.removeLink": "cfdff39b9bd8a890"
+    "error.airtable.removeLink": "cfdff39b9bd8a890",
+    "error.airtable.loadConnection": "ea638053b07bf0a1",
+    "error.airtable.unreachable": "2a7af2c109e9c87b",
+    "error.airtable.sync": "aa34759ff67778ea"
   },
   "ha": {
     "common.save": "1509f561f2416598",

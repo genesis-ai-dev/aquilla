@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { activeVersion, decideRollback, rollbackPlan, workerVerdict } from "./release-rollback.mjs"
+import { activeVersion, decideRollback, decisiveEarly, rollbackPlan, workerVerdict } from "./release-rollback.mjs"
 
 // The watch changes production by itself, in both directions: a missed
 // signal leaves a broken release up, a false one takes a good release down.
@@ -22,6 +22,22 @@ describe("workerVerdict", () => {
     expect(workerVerdict({ before: { requests: 9000, errors: 9 }, after: { requests: 1500, errors: 150 } }).why).toBe(
       "150 of 1500 invocations failed (10.0%); the hour before: 0.1%; limit 5.0%",
     )
+  })
+})
+
+describe("decisiveEarly", () => {
+  const reading = (before: { requests: number; errors: number }, after: { requests: number; errors: number }) => ({ worker: "aquilla-sync-worker", ...workerVerdict({ before, after }) })
+
+  it("keeps watching through a post-deploy reconnect burst (2026.11.25.05: 16 of 294 at minute 3)", () => {
+    expect(decisiveEarly([reading({ requests: 1200, errors: 18 }, { requests: 294, errors: 16 })])).toBe(false)
+  })
+
+  it("stops at once for a release that throws on most requests", () => {
+    expect(decisiveEarly([reading({ requests: 9000, errors: 9 }, { requests: 400, errors: 300 })])).toBe(true)
+  })
+
+  it("never stops early on a clean or quiet reading", () => {
+    expect(decisiveEarly([reading({ requests: 9000, errors: 9 }, { requests: 1500, errors: 2 }), reading({ requests: 9000, errors: 9 }, { requests: 40, errors: 40 })])).toBe(false)
   })
 })
 

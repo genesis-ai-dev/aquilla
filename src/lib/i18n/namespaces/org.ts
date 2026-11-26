@@ -166,6 +166,58 @@ export const org = defineNamespace({
     "org.access.give.invited": "Invited {email} as {role} at {path}",
     "org.access.give.submitError": "Couldn't give access. Nothing was changed.",
 
+    // -- AQU-2321 Places lens editing: change a direct row's role, remove a grant (keeps / loses) --
+    "org.access.edit.changeRole": "Change {name}'s role",
+    "org.access.edit.remove": "Remove {name}'s access here",
+    "org.access.edit.cancelInvite": "Cancel the invitation to {email}",
+    "org.access.edit.roleChanged": "{name} is now {role} at {path}",
+    "org.access.edit.roleError": "Couldn't change the role. Nothing was changed.",
+    "org.access.edit.denied.owner_only": "Only an Owner can change organization roles",
+    "org.access.edit.denied.maintainer_only": "Only an org Maintainer can change team members",
+    "org.access.edit.denied.lead_only": "Only a Project lead or above here can change this",
+    "org.access.edit.denied.team_above_you": "This team holds a role above yours",
+    "org.access.edit.denied.maintainer_on_project": "Only a Maintainer or above on this project can remove its members",
+    "org.access.edit.denied.target_outranks": "They hold a role at or above yours ({cap})",
+    "org.access.edit.denied.self": "You can't change your own access here",
+    "org.access.edit.denied.lane_needs_staffing": "A language's members are changed from the project's Language lane staffing",
+    "org.access.edit.denied.creator": "Creator access comes with making the project and can't be changed",
+    "org.access.edit.denied.invite": "An invitation's role is set when it's sent. Cancel it and send a new one.",
+    "org.access.remove.title": "Remove {name}'s access",
+    "org.access.remove.titleInvite": "Cancel the invitation to {email}",
+    "org.access.remove.description": "Nothing changes until you confirm.",
+    "org.access.remove.removes": "Removes {role} at {path}",
+    "org.access.remove.removesTeam": "Removes them from the team {team}",
+    "org.access.remove.loading": "Checking what changes…",
+    "org.access.remove.error": "Couldn't check this removal. Close the dialog and try again.",
+    "org.access.remove.losesHeading": "Loses",
+    "org.access.remove.loses": "Can no longer open {list}",
+    "org.access.remove.losesNothing": "Every project they open now stays open.",
+    "org.access.remove.inviteLoses": "The invitation to {list} stops working",
+    "org.access.remove.andMore": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
+    "org.access.remove.leavesTeams": "Also leaves {list}: removing someone from the organization takes them off its teams",
+    "org.access.remove.becomesGuest": "Becomes a Guest: no organization membership",
+    "org.access.remove.keepsHeading": "Keeps",
+    "org.access.remove.keepsDirect": "{role} on {project} through their direct grant there, given {date}",
+    "org.access.remove.keepsDirectUndated": "{role} on {project} through their direct grant there",
+    "org.access.remove.keepsTeam": "{role} on {project} through the team {team}",
+    "org.access.remove.keepsOrg": "{role} on {project} through their organization role",
+    "org.access.remove.keepsCreator": "{role} on {project} as its creator",
+    "org.access.remove.keepsHidden": "{role} on {project} through a grant you can't see",
+    "org.access.remove.alsoRemove": "Also remove these. Other grants are left as they are.",
+    "org.access.remove.alsoDirect": "Also remove their {role} grant on {project}",
+    "org.access.remove.alsoTeam": "Also remove them from the team {team}",
+    "org.access.remove.alsoOrg": "Also remove them from the organization",
+    "org.access.remove.confirm": "Remove access",
+    "org.access.remove.confirmInvite": "Cancel invitation",
+    "org.access.remove.keepInvite": "Keep invitation",
+    "org.access.remove.done": "{name} no longer has that access",
+    "org.access.remove.doneInvite": "Invitation to {email} cancelled",
+    "org.access.remove.failed": "Couldn't remove access. Nothing was changed.",
+    "org.access.remove.partial": "Removed {done} of {total}, then a removal failed. The list shows what changed.",
+
     // -- AQU-2319 People lens: one roster, reach columns, CSV and print --
     "org.access.people.person": "Person",
     "org.access.people.highestRole": "Highest role",
@@ -2079,6 +2131,113 @@ export const org = defineNamespace({
           count: "Number of inherited sources at this place; also selects the plural form.",
           from: "Already-translated phrase naming the organization or the word above.",
         },
+      },
+      "org.access.edit.changeRole": {
+        description: "AQU-2321: accessible name of the role pill on a direct grant, which opens the role dropdown.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.edit.remove": {
+        description: "AQU-2321: accessible name of the × on a direct grant row; opens the Remove dialog.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.edit.cancelInvite": {
+        description: "AQU-2321: accessible name of the × on a pending invitation row.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.edit.roleChanged": {
+        description: "AQU-2321: toast after a role change on the Places lens.",
+        placeholders: {
+          name: "The person's name or username.",
+          role: "Localized role label, e.g. \"Reviewer\".",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani\"; never translated.",
+        },
+      },
+      "org.access.edit.denied.target_outranks": {
+        description: "AQU-2321: why a role pill or × is not editable: the person holds a role at or above the viewer's own there.",
+        placeholders: { cap: "Localized label of the viewer's own role there, e.g. \"Project Lead\"." },
+      },
+      "org.access.remove.title": {
+        description: "AQU-2321: title of the Remove dialog.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.remove.titleInvite": {
+        description: "AQU-2321: title of the Remove dialog for a pending invitation.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.remove.removes": {
+        description: "AQU-2321: one line per grant the dialog removes.",
+        placeholders: {
+          role: "Localized role label of the grant being removed.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani\"; never translated.",
+        },
+      },
+      "org.access.remove.removesTeam": {
+        description: "AQU-2321: the line for removing a team membership that carries no team role of its own.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.remove.loses": {
+        description: "AQU-2321: the projects the person can no longer open after the removal.",
+        placeholders: { list: "Already-formatted list of project names, ending with \"N more\" when long, e.g. \"Genesis, Exodus and 3 more\"." },
+      },
+      "org.access.remove.inviteLoses": {
+        description: "AQU-2321: the places a cancelled invitation would have opened.",
+        placeholders: { list: "Already-formatted list of place names." },
+      },
+      "org.access.remove.andMore": {
+        description: "AQU-2321: the last item of a shortened list of names, e.g. the \"3 more\" in \"Genesis, Exodus and 3 more\".",
+        placeholders: { count: "How many names were left out; also selects the plural form." },
+      },
+      "org.access.remove.leavesTeams": {
+        description: "AQU-2321: removing someone from the organization also takes them off its teams; this names those teams.",
+        placeholders: { list: "Already-formatted list of team names." },
+      },
+      "org.access.remove.keepsDirect": {
+        description: "AQU-2321: a project the person keeps after the removal, through their own grant on it.",
+        placeholders: {
+          role: "Localized role label they keep.",
+          project: "The project's name; never translated.",
+          date: "Already-formatted date the grant was given.",
+        },
+      },
+      "org.access.remove.keepsDirectUndated": {
+        description: "AQU-2321: as keepsDirect, when the grant's date is not known.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsTeam": {
+        description: "AQU-2321: a project the person keeps through a team.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated.", team: "The team's name; never translated." },
+      },
+      "org.access.remove.keepsOrg": {
+        description: "AQU-2321: a project the person keeps through their organization role.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsCreator": {
+        description: "AQU-2321: a project the person keeps because they created it.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsHidden": {
+        description: "AQU-2321: a project the person keeps through a grant the viewer is not allowed to see.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.alsoDirect": {
+        description: "AQU-2321: checkbox offering to remove, too, the person's own grant that keeps them on a project.",
+        placeholders: { role: "Localized role label of that grant.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.alsoTeam": {
+        description: "AQU-2321: checkbox offering to remove the person from the team that keeps them on a project.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.remove.done": {
+        description: "AQU-2321: toast after a removal.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.remove.doneInvite": {
+        description: "AQU-2321: toast after an invitation is cancelled.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.remove.partial": {
+        description: "AQU-2321: a removal of several grants stopped partway; removals are separate requests and are not undone.",
+        placeholders: { done: "How many grants were removed.", total: "How many the dialog tried to remove." },
       },
       "org.access.give.inviteEmail": {
         description: "AQU-2320: Give access person list item that turns a typed email address into an invitation.",

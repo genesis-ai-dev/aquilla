@@ -28,7 +28,7 @@ test("analytics requires approval and cannot cross account boundaries", async ({
   await page.getByRole("button", { name: /get started/i }).click()
   await expect(page.getByRole("switch", { name: /share usage data/i })).toBeChecked()
   await page.getByRole("button", { name: /agree and continue/i }).click()
-  await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Create an Aquilla account" })).toBeVisible()
   expect(await (await request.get(`${collector}/_audit`)).json()).toEqual([])
   await injectSessions(page, [a, b], "alice")
   await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible()

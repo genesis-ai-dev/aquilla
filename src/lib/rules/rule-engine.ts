@@ -7,6 +7,7 @@ import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-ru
 import type { BuiltinCheckRunContext } from "@/lib/lqa/builtin-run-context"
 import { suggestionFor } from "@/lib/lqa/check-functions/old-orthography"
 import { compiledPattern, prefilterForPattern } from "@/lib/terminology/match"
+import { catastrophicPatternReason } from "../../../db/shared/regex-safety"
 import { AnchorIndex, prefilterMode, verifyRejected } from "@/lib/terminology/prefilter"
 
 /**
@@ -25,7 +26,21 @@ export interface CellCheckContext {
 // every cell. Failed compiles are cached as null so we don't retry each time.
 // AQU-2654: the cache is the terminology matcher's, so a concept's pattern is
 // compiled once for the editor's highlights AND its `term:` rules.
-const compile = compiledPattern
+//
+// Every rule pattern is screened for catastrophic backtracking first: rules are
+// stored project / org settings any editor can write, and one `(a+)+$` would
+// freeze every collaborator's editor on the keystroke path. The verdict is
+// cached per pattern so the screen runs once, not per cell.
+const patternVerdicts = new Map<string, boolean>()
+function compile(pattern: string, flags: string): RegExp | null {
+  let safe = patternVerdicts.get(pattern)
+  if (safe === undefined) {
+    safe = catastrophicPatternReason(pattern) === null
+    if (patternVerdicts.size >= 2048) patternVerdicts.clear()
+    patternVerdicts.set(pattern, safe)
+  }
+  return safe ? compiledPattern(pattern, flags) : null
+}
 
 /**
  * Every match of a cached global regex in `text`, as `text.matchAll(re)` yields

@@ -7,29 +7,25 @@ import { editorChoiceKey } from "@/lib/tools/editor-choice"
 import { expectClickNote } from "@/test-utils/tooltip"
 
 /**
- * Daniel, 2026-10-12 / 10-14: the Smart Extension editor is the default; ANY
- * user switches back to the original "Aquilla editor" by picking it in the one
- * "Edit with" menu (this file), or makes it their default for the project
- * from the same menu (every file) — local, remembered choices no role or
- * extension permission can block. The original editor opens by itself when
- * the extension fails to load.
+ * Native "Aquilla editor" is always the default. Any user can opt into an
+ * installed custom editor extension per file or project-wide from the one
+ * "Edit with" menu, and switch back to the native editor with one pick —
+ * local, remembered choices no role or extension permission can block. The
+ * native editor also opens automatically when a custom editor fails to load.
  */
 
 const EXT: ToolSummary = {
-  id: "fp-editor",
-  name: "Aquilla editor (Smart Extension)",
-  firstParty: "default-editor",
-  manifest: { name: "Aquilla editor (Smart Extension)", description: "The Aquilla editor, as a Smart Extension", scopes: ["read:cells"], mounts: ["page", "editor"], apiRev: 5, sdk: 1 },
+  id: "custom-editor",
+  name: "Focus Editor",
+  firstParty: null,
+  manifest: { name: "Focus Editor", description: "One verse at a time", scopes: ["read:cells"], mounts: ["page", "editor"], apiRev: 5, sdk: 1 },
 } as unknown as ToolSummary
 
 const ctx = {
   projectId: "p1",
   tools: [EXT],
-  defaultEditorId: EXT.id,
-  defaultEditorEnabled: true,
   toolsReady: true,
   session: { jwt: "j", username: "carol" },
-  autoGranted: [],
 }
 
 vi.mock("./ToolsMountContext", () => ({ useToolsMount: () => ctx, useMountedTool: () => ({ tool: null, error: null }) }))
@@ -50,49 +46,49 @@ function Harness({ fileId = "f1" }: { fileId?: string }) {
 
 const openMenu = async () => userEvent.click(screen.getByTestId("edit-with-trigger"))
 
-describe("Smart Extension editor default, with the original one pick away", () => {
+describe("Native Aquilla editor default, with optional custom extension editors", () => {
   beforeEach(() => localStorage.clear())
 
-  it("opens the extension by default; one menu lists the native editor first, then the extension, with the default marked", async () => {
+  it("opens the native editor by default; one menu lists the native editor first, then installed custom editors", async () => {
     render(<Harness />)
-    expect(screen.getByTestId("selected")).toHaveTextContent(EXT.id)
-    expect(screen.getByRole("button", { name: "Edit with: Aquilla editor (Smart Extension)" })).toBeInTheDocument()
+    expect(screen.getByTestId("selected")).toHaveTextContent("standard")
+    expect(screen.getByRole("button", { name: "Edit with: Aquilla editor" })).toBeInTheDocument()
     await openMenu()
     const items = screen.getAllByRole("menuitemradio")
     expect(items.map((i) => i.textContent)).toEqual([
       expect.stringContaining("Aquilla editor"),
-      expect.stringContaining("Aquilla editor (Smart Extension)"),
+      expect.stringContaining("Focus Editor"),
     ])
-    expect(items[1]).toHaveAttribute("aria-checked", "true")
-    expect(items[1]).toHaveTextContent("Your default")
-    // No separate switch-back button, checkbox or build button any more.
-    expect(screen.queryByRole("button", { name: "Use the original Aquilla editor" })).toBeNull()
-    expect(screen.queryByRole("checkbox", { name: "Use for every file in this project" })).toBeNull()
+    expect(items[0]).toHaveAttribute("aria-checked", "true")
+    expect(items[0]).toHaveTextContent("Your default")
   })
 
-  it("lets a commenter-level user (no write role, no extension grant) pick the original for a file, then make it the project default", async () => {
-    // Nothing here reads the role or the grants: the choice is the user's own.
+  it("lets any user opt into a custom editor per file or project-wide, then switch back to the native editor", async () => {
     const { unmount } = render(<Harness />)
     await openMenu()
-    await userEvent.click(screen.getAllByRole("menuitemradio")[0])
-    expect(screen.getByTestId("selected")).toHaveTextContent("standard")
-    expect(JSON.parse(localStorage.getItem(editorChoiceKey("carol", "p1")) ?? "{}")).toEqual({ project: null, files: { f1: "standard" } })
+    await userEvent.click(screen.getAllByRole("menuitemradio")[1])
+    expect(screen.getByTestId("selected")).toHaveTextContent(EXT.id)
+    expect(JSON.parse(localStorage.getItem(editorChoiceKey("carol", "p1")) ?? "{}")).toEqual({ project: null, files: { f1: EXT.id } })
 
     // Every file of the project: the explicit menu action.
     await openMenu()
     await userEvent.click(await screen.findByRole("menuitem", { name: /Set as default for this project/ }))
-    expect(JSON.parse(localStorage.getItem(editorChoiceKey("carol", "p1")) ?? "{}")).toEqual({ project: "standard", files: {} })
+    expect(JSON.parse(localStorage.getItem(editorChoiceKey("carol", "p1")) ?? "{}")).toEqual({ project: EXT.id, files: {} })
     unmount()
-    // A reload (fresh mount) and another file keep it.
+
+    // Reloading on another file keeps the project-wide pick, and picking native switches back.
     render(<Harness fileId="f2" />)
-    expect(screen.getByTestId("selected")).toHaveTextContent("standard")
+    expect(screen.getByTestId("selected")).toHaveTextContent(EXT.id)
     await openMenu()
-    expect(screen.getAllByRole("menuitemradio")[0]).toHaveTextContent("Your default")
+    expect(screen.getAllByRole("menuitemradio")[1]).toHaveTextContent("Your default")
+    await userEvent.click(screen.getAllByRole("menuitemradio")[0])
+    expect(screen.getByTestId("selected")).toHaveTextContent("standard")
   })
 
   // AQU-2260 (Sam, Oct 29): why it failed opens on a click of the notice,
   // never on a hover title.
   it("gives the failure's reason on click of the fallback notice", async () => {
+    localStorage.setItem(editorChoiceKey("carol", "p1"), JSON.stringify({ project: EXT.id, files: {} }))
     render(<Harness />)
     act(() => screen.getByRole("button", { name: "simulate load failure" }).click())
     const notice = screen.getByTestId("extension-editor-fallback")
@@ -100,15 +96,16 @@ describe("Smart Extension editor default, with the original one pick away", () =
     await expectClickNote(screen.getByRole("button", { name: /couldn't load/ }), "blank")
   })
 
-  it("falls back to the original editor when the extension fails to load, and says so", async () => {
+  it("falls back to the native editor when a chosen custom editor fails to load, and says so", async () => {
+    localStorage.setItem(editorChoiceKey("carol", "p1"), JSON.stringify({ project: EXT.id, files: {} }))
     render(<Harness />)
+    expect(screen.getByTestId("selected")).toHaveTextContent(EXT.id)
     act(() => screen.getByRole("button", { name: "simulate load failure" }).click())
     expect(screen.getByTestId("selected")).toHaveTextContent("standard")
     expect(screen.getByTestId("extension-editor-fallback")).toHaveTextContent(
-      "Aquilla editor (Smart Extension) couldn't load, so the original Aquilla editor is open.",
+      "Focus Editor couldn't load, so the original Aquilla editor is open.",
     )
-    // Not persisted: the user's choice is untouched, and Retry tries again.
-    expect(localStorage.getItem(editorChoiceKey("carol", "p1"))).toBeNull()
+    // Not persisted as native: Retry tries the chosen extension again.
     await userEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(screen.getByTestId("selected")).toHaveTextContent(EXT.id)
   })

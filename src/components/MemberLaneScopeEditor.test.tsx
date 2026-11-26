@@ -214,7 +214,7 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     await openEditor()
     expect(screen.getByTestId("member-lane-grants")).toHaveTextContent("Spanish")
     expect(screen.getByText("no access")).toBeInTheDocument()
-    expect(screen.getByRole("alert")).toHaveTextContent("has no grant for every language lane")
+    expect(screen.getByRole("alert")).toHaveTextContent("doesn't have a grant for every language lane")
     // The lie this issue is about is gone.
     expect(screen.queryByText("Unscoped — full access")).toBeNull()
   })

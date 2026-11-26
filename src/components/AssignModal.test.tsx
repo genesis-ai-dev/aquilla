@@ -334,7 +334,7 @@ describe("task (AQU-1969)", () => {
     render(<AssignModal {...BASE_PROPS} />)
     expect(screen.getByRole("combobox", { name: /task/i }).textContent).toMatch(/translate/i)
     // The validate-only sentence is not there to explain the default.
-    expect(screen.queryByText(/lines they approve themselves/i)).toBeNull()
+    expect(screen.queryByText(/lines they validate themselves/i)).toBeNull()
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
@@ -344,7 +344,7 @@ describe("task (AQU-1969)", () => {
   it("sends a Validate assignment, and says what its progress will count", async () => {
     render(<AssignModal {...BASE_PROPS} />)
     await pickSelectOption(/task/i, /validate/i)
-    expect(screen.getByText(/lines they approve themselves/i)).toBeTruthy()
+    expect(screen.getByText(/lines they validate themselves/i)).toBeTruthy()
     await pickSelectOption(/assign to/i, /anna/)
     fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))

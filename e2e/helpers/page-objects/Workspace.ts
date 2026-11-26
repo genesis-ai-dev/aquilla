@@ -1,5 +1,5 @@
 import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
-import { EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
+import { EXTENSION_DOCUMENT, EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -36,7 +36,7 @@ export class Workspace {
    *  renders the same row anatomy (data-cell-id, data-cell-type, the read
    *  view, the action rail and its aria-labels), so journeys run unchanged. */
   private get root(): Page | FrameLocator {
-    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
+    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME).frameLocator(EXTENSION_DOCUMENT) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */
@@ -88,7 +88,7 @@ export class Workspace {
     const dialog = this.page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
-    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByLabel("Film name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()

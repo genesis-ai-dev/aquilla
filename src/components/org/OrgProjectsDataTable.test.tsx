@@ -147,27 +147,29 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(headers.indexOf("Status")).toBeLessThan(headers.indexOf("Updated"))
   })
 
-  it("uses teams-style text metric headers and right-aligned muted values", () => {
-    renderTable([baseProject({ id: "metrics", filledCells: 40, validatedCells: 20, audioCells: 10 })])
+  it("groups produced and validated shares by medium and opens the exact values", async () => {
+    renderTable([baseProject({ id: "metrics", filledCells: 40, validatedCells: 20,
+      lanes: [{ lane: "", delivers: "text_and_audio", totalCells: 100, filledCells: 40,
+        validatedCells: 20, bothValidatedCells: 1, lastEditAt: now }],
+      audioCells: 10, validatedAudioCells: 6 })])
+    expect(screen.getByRole("button", { name: "Text" })).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Language" })).toBeNull()
+    expect(screen.queryByRole("columnheader", { name: "Role" })).toBeNull()
+    const text = screen.getByRole("button", { name: "40% translated, 20% validated" })
+    const audio = screen.getByRole("button", { name: "10% recorded, 6% audio validated" })
+    expect(barParts(text)).toEqual(["textValidated 20%", "textTranslated 20%"])
+    expect(barParts(audio)).toEqual(["audioValidated 6%", "audioRecorded 4%"])
+    await expectClickNote(audio, "10% recorded, 6% audio validated")
+  })
 
-    expect(screen.getByRole("button", { name: /Translated/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Validated/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^Audio$/i })).toBeInTheDocument()
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass(
-      "text-right",
-      "tabular-nums",
-      "text-muted-foreground",
-    )
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass(
-      "text-right",
-      "tabular-nums",
-      "text-muted-foreground",
-    )
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass(
-      "text-right",
-      "tabular-nums",
-      "text-muted-foreground",
-    )
+  it("uses recent lane activity for Updated even when the last text edit is older", () => {
+    const recent = new Date(now)
+    recent.setDate(recent.getDate() - 3)
+    renderTable([baseProject({
+      lastEditAt: now - 30 * 86_400_000,
+      lanes: [{ lane: "", totalCells: 10, filledCells: 4, validatedCells: 2, lastEditAt: recent.getTime() }],
+    })])
+    expect(screen.getByText("3 days ago")).toBeInTheDocument()
   })
 
   it("lets the embedded overview table scroll horizontally instead of clipping", () => {
@@ -219,6 +221,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByText("Gospels")).toHaveClass("font-medium")
     // RoleLabel resolves the localized display name (AQU-511) — "Maintainer",
     // not the raw role name with a CSS capitalize class.
+    fireEvent.click(screen.getByTestId("project-row-actions-chrome"))
     expect(screen.getByText("Maintainer")).toBeInTheDocument()
   })
 
@@ -229,7 +232,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     ])
     const mark = screen.getByTestId("langquest-list-mark")
     expect(mark).toHaveAttribute("data-health", "broken")
-    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken, reconnect LangQuest")
+    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken — reconnect LangQuest")
     expect(within(screen.getByText("Kalam").closest("span")!.parentElement!).getByTestId("langquest-list-mark")).toBe(mark)
     expect(screen.getAllByTestId("langquest-list-mark")).toHaveLength(1)
   })
@@ -245,7 +248,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
       ],
       targetLanguage: "en-target",
     })
-    renderTable([p])
+    renderTable([p], { layout: "embedded" })
 
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
@@ -255,7 +258,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     const esChip = screen.getByTestId("lane-chip-p1-es")
     expect(esChip).toHaveTextContent("es")
     expect(esChip).toHaveTextContent("22%")
-    expect(screen.getByTestId("lane-chip-p1-fr")).toBeInTheDocument()
+    expect(screen.getByTestId("lane-chip-overflow-p1")).toHaveTextContent("+1")
     // AQU-1764: each chip's mini bar is the shared two-part bar — validated,
     // then translated but not validated — ending at the printed percentage.
     expect(barParts(defaultChip)).toEqual(["textValidated 40%", "textTranslated 28%"])
@@ -270,7 +273,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     // Post-lanes-migration shape: the target lives on project settings, which
     // a resolver that did not read it rendered as "Default".
     const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
-    renderTable([p])
+    renderTable([p], { layout: "embedded" })
 
     const chip = screen.getByTestId("lane-chip-p6-")
     expect(chip).toHaveTextContent("French")
@@ -279,7 +282,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
 
   it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
     const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
-    renderTable([p])
+    renderTable([p], { layout: "embedded" })
 
     expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
   })
@@ -289,7 +292,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     // It used to be able to come from a per-file declared-language hint, which
     // could name a language the lane does not have.
     const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100, targetLanguage: "sw" })
-    renderTable([p])
+    renderTable([p], { layout: "embedded" })
 
     const chip = screen.getByTestId("lane-chip-p2-")
     expect(chip).toHaveTextContent("sw")
@@ -298,7 +301,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.queryByTestId("lane-chip-overflow-p2")).not.toBeInTheDocument()
   })
 
-  it("collapses lanes beyond the cap into a '+N' overflow that expands the row", () => {
+  it("opens lane details from the project menu", () => {
     const lanes = [
       { lane: "", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "es", totalCells: 100, filledCells: 20, validatedCells: 0, lastEditAt: now },
@@ -307,8 +310,8 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     ]
     renderTable([baseProject({ id: "p3", lanes })])
 
-    const overflow = screen.getByTestId("lane-chip-overflow-p3")
-    expect(overflow).toHaveTextContent("+1")
+    fireEvent.click(screen.getByTestId("project-row-actions-p3"))
+    const overflow = screen.getByRole("menuitem", { name: "Language" })
     expect(screen.queryByTestId("project-lanes-subrow-p3")).not.toBeInTheDocument()
     fireEvent.click(overflow)
     expect(screen.getByTestId("project-lanes-subrow-p3")).toBeInTheDocument()
@@ -325,7 +328,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     ],
   })
 
-  it("expands via language overflow into one sub-row per lane with correct translated/validated pcts", () => {
+  it("expands from the project menu into one sub-row per lane with correct translated/validated pcts", () => {
     const lanes = [
       { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
       { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
@@ -333,7 +336,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
     renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
-    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Language" }))
 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
     expect(defaultRow).toHaveTextContent("en-target")
@@ -386,7 +390,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
 
     function expandDeliversProject() {
       renderTable([baseProject({ id: "p1", name: "Gospels", lanes: deliversLanes })])
-      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+      fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+      fireEvent.click(screen.getByRole("menuitem", { name: "Language" }))
     }
 
     it("prints both halves for a language that delivers text and audio", () => {
@@ -436,7 +441,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
           ],
         }),
       ])
-      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+      fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+      fireEvent.click(screen.getByRole("menuitem", { name: "Language" }))
       // 10 approved of the language's own 40, not of the project's 400.
       expect(screen.getByTestId("project-lane-row-p1-d")).toHaveTextContent("25% audio validated")
     })
@@ -462,7 +468,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
     renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
-    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Language" }))
 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {
       name: /open/i,
@@ -483,7 +490,8 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
     renderTable([baseProject({ id: "p1", name: "Gospels", lanes })])
-    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Language" }))
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     fireEvent.click(within(esRow).getByRole("button", { name: /assign/i }))
     expect(screen.getByTestId("assign-open-p1-es")).toBeInTheDocument()
@@ -509,7 +517,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
 describe("units done column", () => {
   it("shows how many units are done out of the total", () => {
     renderTable([baseProject({ id: "p1", name: "Tok Pisin", unitsTotal: 66, unitsDone: 5 })])
-    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("5 of 66")
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("5/66")
   })
 
   it("never names the unit, because it varies by project", () => {

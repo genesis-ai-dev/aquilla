@@ -30,8 +30,8 @@ export interface ToolSummary {
   origin: ToolVersionOrigin
   /** The caller's standing grant. */
   grantedScopes: ToolScope[]
-  /** Set on a first-party extension Aquilla ships (e.g. "default-editor")
-   *  while its current version is the shipped code (apiRev 2). */
+  /** Set on a first-party extension Aquilla ships (e.g. "door43-importer")
+   *  while its current version is the shipped code. */
   firstParty: string | null
 }
 

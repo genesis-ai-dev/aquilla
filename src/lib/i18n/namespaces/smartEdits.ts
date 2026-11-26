@@ -8,7 +8,7 @@ export const smartEdits = defineNamespace({
     "smartEdits.flagRoleHint": "Only a maintainer can change this.",
     "smartEdits.llmFlagLabel": "Smart edits: AI wording",
     "smartEdits.llmFlagDescription":
-      "When smart edits have no suggestion of their own, let you ask an AI model for one. Each request uses AI credits. Only on this device.",
+      "When smart edits have no suggestion of their own, you can ask an AI model for one. Each request uses AI credits. Only on this device.",
     "smartEdits.popoverTitle": "Suggested edit",
     "smartEdits.accept": "Accept",
     "smartEdits.dismiss": "Dismiss",

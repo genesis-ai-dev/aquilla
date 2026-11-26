@@ -661,7 +661,8 @@ projectKnowledge.get("/:projectId/knowledge/search", authMiddleware, async (c) =
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
   const q = c.req.query("q") ?? ""
-  const limit = Math.min(Number.parseInt(c.req.query("limit") ?? "5", 10) || 5, 20)
+  // Clamped both ways: a negative `limit` reached Postgres `LIMIT` and 500'd.
+  const limit = Math.max(1, Math.min(Number.parseInt(c.req.query("limit") ?? "5", 10) || 5, 20))
   return c.json({ snippets: await searchKnowledge(c.env.AQUILLA_PG, projectId, q, limit) })
 })
 

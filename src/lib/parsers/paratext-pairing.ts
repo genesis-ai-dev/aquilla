@@ -12,6 +12,7 @@
 
 import { v7 as uuidv7 } from "uuid"
 import { parseUsfmLossless } from "./usfm-lossless"
+import { projectUsfmCellText } from "./usfm-content-only"
 import { getBookName, getBookOrdinal } from "../file-labeling/bible-book-names"
 import { bookDisplayName, type ParatextBookName } from "./paratext"
 
@@ -107,7 +108,13 @@ export function pairSourceTarget(
         order: verse.textStart,
         ref: verse.ref,
         type: "verse" as const,
-        targetText: verse.text.trim(),
+        // AQU-2743: the same content-only projection every other USFM import
+        // path applies. The target column is what a translator edits, and the
+        // editor hydrates it from the stored string — raw `\f`/`\wj` here
+        // spills markers into the editor the moment the cell is clicked
+        // (AQU-1363). A `PairedRow` carries text and nothing else, so a note
+        // leaves with the rest of the markup rather than riding inline.
+        targetText: projectUsfmCellText(verse.text).text,
         paragraphStart: verse.paragraphStart,
         paragraphMarker: verse.paragraphMarker,
       })),
@@ -115,7 +122,7 @@ export function pairSourceTarget(
         order: heading.textStart,
         ref: heading.ref,
         type: heading.kind,
-        targetText: heading.text.trim(),
+        targetText: projectUsfmCellText(heading.text).text,
         paragraphStart: undefined,
         paragraphMarker: undefined as string | undefined,
       })),

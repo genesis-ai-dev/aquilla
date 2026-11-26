@@ -543,19 +543,32 @@ projects.post(
       }
     }
 
+    let inserted: boolean
     try {
       // Row write is shared with sync-worker's receipt-only CreateProject
       // command (db/shared/projects.ts). AQU-2357: that write includes the
       // creator's ordinary Owner grant. created_by stays history only.
-      await createProjectShared(c.env.AQUILLA_PG, {
+      const created = await createProjectShared(c.env.AQUILLA_PG, {
         projectId: body.id,
         name: body.name,
         orgId,
         createdBy: user.id,
       })
+      inserted = created.inserted
     } catch (err) {
       console.error("project create failed:", err)
       return c.json({ error: "create failed" }, 500)
+    }
+    if (!inserted) {
+      // The id is client-chosen and not secret. Only the creator's own retry of
+      // a create that already landed is benign; it wrote nothing new.
+      const existing = await c.env.AQUILLA_PG
+        .prepare("SELECT created_by FROM projects WHERE id = ?")
+        .bind(body.id)
+        .first<{ created_by: number | string | null }>()
+      if (existing == null || String(existing.created_by) !== String(user.id)) {
+        return c.json({ error: "a project with this id already exists" }, 409)
+      }
     }
 
     // AQU-1352 P2: attach the selected teams at the attach dialog's default.

@@ -51,7 +51,7 @@ let blobs: Blob[] = []
 
 const CELL_ID = "4f9c2a1e-7b3d-5e6f-8a9b-0c1d2e3f4a5b"
 const SECONDS = [0.5, 0.7, 0.9]
-const ids = SECONDS.map((_, i) => langquestAudioId(CELL_ID, { hash: `01h${i}` }))
+const ids = SECONDS.map((_, i) => langquestAudioId(CELL_ID, "take-1", { hash: `01h${i}` }))
 
 beforeEach(async () => {
   blobs = []

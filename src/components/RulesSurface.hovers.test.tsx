@@ -54,7 +54,7 @@ function renderSurface(extra: Record<string, unknown> = {}) {
 describe("RulesSurface hovers", () => {
   it("the usage line says what it counts on click", async () => {
     renderSurface()
-    await expectClickNote(screen.getByRole("button", { name: /3 fixes applied/ }), "LLM usage on this project")
+    await expectClickNote(screen.getByRole("button", { name: /3 fixes applied/ }), "AI usage in this project")
   })
 
   it("Try to fix all and Promote to org say nothing on hover", async () => {

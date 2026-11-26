@@ -58,7 +58,7 @@ export const onboarding = defineNamespace({
     // — OAuth consent for MCP hosts (ChatGPT, Claude, Codex): /oauth/consent ———
     "onboarding.oauth.title": "Connect {client} to Aquilla",
     "onboarding.oauth.titleGeneric": "Connect an app to Aquilla",
-    "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it may reach.",
+    "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it can access.",
     "onboarding.oauth.verified": "Request from {host}. The app supplies its own name; Aquilla checked only the domain.",
     "onboarding.oauth.return": "After you choose, you return to {host}.",
     "onboarding.oauth.act": "This app can create and update content in the organizations you select, within your current permissions.",
@@ -155,7 +155,7 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create an Aquilla Account",
+    "onboarding.step.signIn.headingSignup": "Create an Aquilla account",
     "onboarding.step.signIn.headingLogin": "Log in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
@@ -199,7 +199,7 @@ export const onboarding = defineNamespace({
     "onboarding.step.project.createFailed": "Failed to create project.",
     "onboarding.step.project.signInHeading": "Sign in to create a project",
     "onboarding.step.project.signInDescription":
-      "Projects are stored on the server. You need to be signed in so the project is accessible on all your devices and won't 403 when you open it.",
+      "Projects are stored on the server. You need to be signed in so the project is accessible on all your devices and opens without access errors.",
     "onboarding.step.project.backToSignIn": "Back to sign in",
     "onboarding.step.project.doThisLater": "Do this later",
     "onboarding.step.project.heading": "Create your first project",
@@ -258,7 +258,7 @@ export const onboarding = defineNamespace({
       "AI fills in suggested translations as you go and keeps style consistent across the project. " +
       "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
-      "Sign in with a Aquilla account to use the managed model.",
+      "Sign in with an Aquilla account to use Aquilla AI.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
     "onboarding.checklist.aiProvider.frontierLabel": "Aquilla AI",
     "onboarding.checklist.aiProvider.recommendedBadge": "Recommended",
@@ -291,7 +291,7 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.noneLabel": "None — set up later",
     "onboarding.checklist.aiModels.noneHint":
       "Skip voice generation. You can come back from project settings.",
-    "onboarding.checklist.aiModels.geminiLabel": "Gemini (cloud, BYOK)",
+    "onboarding.checklist.aiModels.geminiLabel": "Gemini (cloud, your own key)",
     "onboarding.checklist.aiModels.geminiHint":
       "Highest quality, promptable voices. Needs a Google AI Studio API key. No local download.",
     "onboarding.checklist.aiModels.geminiKeySaved": "Gemini key saved",
@@ -321,7 +321,7 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.setUpAnyway": "Set up anyway",
     "onboarding.checklist.aiModels.skipLink": "We don’t use voice or transcription — skip this",
     "onboarding.checklist.aiModels.statusFailed": "Failed",
-    "onboarding.checklist.aiModels.statusDownloading": "downloading",
+    "onboarding.checklist.aiModels.statusDownloading": "Downloading",
     "onboarding.checklist.aiModels.sizeMb": "{size} MB",
 
     // — InviteStep —
@@ -413,7 +413,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.workspace.confirmReplaceLabel":
       "Confirm before replacing a translation",
     "onboarding.preferences.workspace.confirmReplaceDescription":
-      "Ask for confirmation when AI Generate replaces a cell that already has a translation. Validated cells always confirm regardless of this setting.",
+      "Ask for confirmation when Translate with AI replaces a cell that already has a translation. Validated cells always require confirmation regardless of this setting.",
 
     // — AppearanceSection —
     "onboarding.preferences.appearance.groupLabel": "Theme",
@@ -551,8 +551,8 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.accessWriteLabel": "Read and write",
     "onboarding.apiTokens.accessWriteDescription":
       "the agent can also propose and apply changes, subject to the mode below.",
-    "onboarding.apiTokens.accessReadBadge": "read-only",
-    "onboarding.apiTokens.connectedAppBadge": "connected app",
+    "onboarding.apiTokens.accessReadBadge": "Read-only",
+    "onboarding.apiTokens.connectedAppBadge": "Connected app",
     "onboarding.apiTokens.modeNotApplicable":
       "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
@@ -570,7 +570,7 @@ export const onboarding = defineNamespace({
     // exposes, because the people exposed are not the person clicking.
     "onboarding.apiTokens.piiLabel": "Show translator names to the agent",
     "onboarding.apiTokens.piiDescription":
-      "Off by default: the agent sees a stable anonymous id per person instead of a name, so it can tell edits apart without knowing who made them. Turn this on and every name it reads is sent to whichever AI service you paste the token into, and kept in that service's logs. Only an owner of the selected organization or project can turn it on.",
+      "Off by default: the agent sees a stable anonymous ID per person instead of a name, so it can tell edits apart without knowing who made them. Turn this on and every name it reads is sent to whichever AI service you paste the token into, and kept in that service's logs. Only an owner of the selected organization or project can turn it on.",
     "onboarding.apiTokens.piiRequiresOwner":
       "Select an organization or project you own to enable this.",
     "onboarding.apiTokens.nameRequired": "Give this token a name.",
@@ -585,11 +585,11 @@ export const onboarding = defineNamespace({
     "onboarding.credits.rail.llm": "Chat",
     "onboarding.credits.rail.tts": "TTS",
     "onboarding.credits.panelTitle": "AI credits",
-    "onboarding.credits.panelDescription": "Usage against daily & weekly caps, broken out by rail",
-    "onboarding.credits.agentSpendNote": "Agent spend (elevated rail — own cap, 5× markup)",
+    "onboarding.credits.panelDescription": "Usage against daily and weekly caps, broken down by feature",
+    "onboarding.credits.agentSpendNote": "Agent usage (separate cap, 5× credit rate)",
     "onboarding.credits.dialSummary": "Agent credits used today: {credits}",
     "onboarding.credits.popoverAgentTitle": "Agent credits",
-    "onboarding.credits.popoverAllUsageTitle": "All AI usage (every rail)",
+    "onboarding.credits.popoverAllUsageTitle": "All AI usage (all features)",
     "onboarding.credits.dialFooter": "{remaining} agent credits left today · caps set by your org",
   },
   context: {

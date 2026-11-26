@@ -75,10 +75,11 @@ type OrgSwitcherItem =
       isNew?: boolean
     }
 
-function orgMatchesSearch(name: string, query: string): boolean {
-  const normalized = query.trim().toLocaleLowerCase()
-  if (!normalized) return true
-  return name.toLocaleLowerCase().includes(normalized)
+function matchRank(label: string, query: string) {
+  const name = label.toLowerCase()
+  if (name === query) return 0
+  if (name.startsWith(query)) return 1
+  return 2
 }
 
 function byName(a: { name: string | null }, b: { name: string | null }) {
@@ -195,6 +196,7 @@ function OrgMark({
 }
 
 function OrgSwitcherList({
+  searching,
   guestSelected,
   localSelected,
   isAllOrgs,
@@ -206,6 +208,7 @@ function OrgSwitcherList({
   loadingMore,
   onLoadMore,
 }: {
+  searching: boolean
   guestSelected: boolean
   localSelected: boolean
   isAllOrgs: boolean
@@ -219,8 +222,8 @@ function OrgSwitcherList({
 }) {
   const { t } = useI18n()
   const filtered = ComboboxPrimitive.useFilteredItems<OrgSwitcherItem>()
-  const members = filtered.filter((item) => item.kind !== "guest")
-  const guests = filtered.filter((item) => item.kind === "guest")
+  const members = searching ? filtered : filtered.filter((item) => item.kind !== "guest")
+  const guests = searching ? [] : filtered.filter((item) => item.kind === "guest")
 
   return (
     <>
@@ -231,7 +234,7 @@ function OrgSwitcherList({
               key={item.key}
               item={item}
               selected={
-                item.kind === "all"
+                item.kind === "guest" ? selectedGuestOrgId === item.id : item.kind === "all"
                   ? !guestSelected && isAllOrgs
                   : item.kind === "local"
                     ? localSelected
@@ -521,14 +524,12 @@ export function OrgSwitcher() {
   }, [showAllOrgs, showLocal, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected, newSharedOrgIds])
 
   const visibleItems = useMemo<OrgSwitcherItem[]>(() => {
-    if (!catalogEnabled) return items
-    const query = inputValue.trim()
-    return items.filter((item) => {
-      if (item.kind === "all" || item.kind === "local") return query === ""
-      if (query !== "") return orgMatchesSearch(item.label, query)
-      return true
-    })
-  }, [catalogEnabled, items, inputValue])
+    const query = inputValue.trim().toLowerCase()
+    if (!query) return items
+    return items.filter((item) =>
+      item.kind !== "all" && item.kind !== "local" && item.label.toLowerCase().includes(query)
+    ).sort((a, b) => matchRank(a.label, query) - matchRank(b.label, query) || a.label.localeCompare(b.label))
+  }, [items, inputValue])
 
   const selectedItem = useMemo((): OrgSwitcherItem | null => {
     if (onLocalRoute) return items.find((item) => item.kind === "local") ?? null
@@ -659,15 +660,8 @@ export function OrgSwitcher() {
     <>
       <Combobox
         items={items}
-        {...(catalogEnabled
-          ? { filteredItems: visibleItems, filter: null as null }
-          : {
-              filter: (item: OrgSwitcherItem, query: string) => {
-                // All-orgs / This computer are navigation shortcuts, not searchable orgs — hide while typing.
-                if (item.kind === "all" || item.kind === "local") return query.trim() === ""
-                return orgMatchesSearch(item.label, query)
-              },
-            })}
+        filteredItems={visibleItems}
+        filter={null}
         value={selectedItem}
         onValueChange={(item) => handleSelect(item)}
         open={open}
@@ -741,6 +735,7 @@ export function OrgSwitcher() {
           </ComboboxEmpty>
           <ComboboxList className="max-h-80 flex-1" aria-busy={catalog.searching || catalog.loadingMore || undefined}>
             <OrgSwitcherList
+              searching={Boolean(inputValue.trim())}
               guestSelected={guestSelected}
               localSelected={onLocalRoute}
               isAllOrgs={viewingAllOrgs}

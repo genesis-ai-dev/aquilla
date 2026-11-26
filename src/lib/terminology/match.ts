@@ -202,7 +202,10 @@ function literalSegment(seg: string, foldMarks: boolean): string {
  * Returns `null` for empty / whitespace-only terms (nothing to match).
  */
 export function termToRegexSource(term: string, opts: TermRegexOptions = {}): string | null {
-  const trimmed = term.trim()
+  // A run of stars means the same as one, and each star becomes an unbounded
+  // letter class: `a**********z` would compile to ten adjacent wildcards and
+  // backtrack polynomially (~n^10) on a long word with no `z`. Collapse them.
+  const trimmed = term.trim().replace(/\*{2,}/g, "*")
   if (!trimmed) return null
   const fold = opts.foldMarks === true
 

@@ -17,6 +17,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents, type EnqueueBatchOptions } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
+import { noteLocalTakeChange } from "@/lib/audio/local-take-changes"
 import { canAttachSourceAudio, canImportSourceFiles, canPerform, importDenialFloor, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
@@ -738,6 +739,9 @@ export interface CellAudioAttachInput {
    * slot in one lane at most, not all of them.
    */
   wordsOnly?: boolean
+  /** Re-check S2: don't tell auto-even about this take (bulk upload: its
+   *  finish offers "Even out the track to match" instead). */
+  skipAutoEven?: boolean
   /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -849,6 +853,12 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...playedDuration(input),
     }, analytics)
   }
+  // Review M1: this tab made or attached the take (a recording, an upload,
+  // a Station version, Remove noise…); auto-even may even it. Re-check M1a:
+  // not a words-only attach (transcribe, Transcribe all, a transcript save
+  // or clear), which changes no audio; nor an attach that asks to stay quiet
+  // (bulk upload, whose finish says how to even the track instead).
+  if (!input.wordsOnly && !input.skipAutoEven) noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }], "new")
   return eventId
 }
 
@@ -925,6 +935,8 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
     },
     clientTs: input.clientTs,
   })
+  // Review M1: this tab trimmed the take; auto-even may measure it again.
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }], "changed")
   return eventId
 }
 
@@ -1076,6 +1088,8 @@ export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string
     },
     clientTs: input.clientTs,
   })
+  // Review M1: this tab cut the take; auto-even may even its pieces.
+  noteLocalTakeChange([{ cellId: input.cellId, audioId: input.audioId }, { cellId: input.cellId, audioId: input.newAudioId }], "changed")
   return eventId
 }
 
@@ -1128,13 +1142,50 @@ export async function emitCellLinkSet(input: CellLinkSetInput): Promise<string> 
   return eventId
 }
 
+export interface CellAudioEvenInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The loudness (LUFS) to even the take out to; null = clear. */
+  evenTargetLufs: number | null
+  /** AQU-1462: lane the member was working in. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.even` (AQU-2664) — the loudness a take is evened out to,
+ * ONLY: never its volume, fades or the recording (they are a later stage).
+ */
+export async function emitCellAudioEven(input: CellAudioEvenInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.even",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, evenTargetLufs: input.evenTargetLufs, ...targetLaneFields(input) },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioMeasureInput {
   projectId: string
   fileId: string
   cellId: string
   audioId: string
-  /** The clip's decoded length. The server fills only a NULL duration. */
-  durationMs: number
+  /** The clip's decoded length. The server fills only a NULL duration.
+   *  AQU-2664: left out when not known (null, 0) — never stored as 0. */
+  durationMs?: number | null
+  /** AQU-2664: the recording's loudness (LUFS) and true peak (dBTP), both or
+   *  neither; the server fills them only when NULL. */
+  loudness?: { loudnessLufs: number; truePeakDb: number; loudnessFromMs?: number | null; loudnessToMs?: number | null }
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -1156,7 +1207,19 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...targetLaneFields(input) },
+    payload: {
+      audioId: input.audioId,
+      ...(input.durationMs != null && input.durationMs > 0 ? { durationMs: intMs(input.durationMs) } : {}),
+      ...(input.loudness
+        ? {
+            loudnessLufs: input.loudness.loudnessLufs,
+            truePeakDb: input.loudness.truePeakDb,
+            ...(input.loudness.loudnessFromMs !== undefined ? { loudnessFromMs: input.loudness.loudnessFromMs == null ? null : intMs(input.loudness.loudnessFromMs) } : {}),
+            ...(input.loudness.loudnessToMs !== undefined ? { loudnessToMs: input.loudness.loudnessToMs == null ? null : intMs(input.loudness.loudnessToMs) } : {}),
+          }
+        : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1376,6 +1439,9 @@ export interface FileTrackSetInput {
      *  it back to the default (every track sets them). The server refuses it
      *  on a reserved (derived) track id. */
     setsLineLengths?: boolean | null
+    /** AQU-2664: the track's volume, dB (−150…+6), or "-inf" for silence;
+     *  null clears it to 0 dB. */
+    volumeDb?: number | "-inf" | null
   } | null
   author: string
   clientTs?: number

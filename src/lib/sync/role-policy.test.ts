@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   ROLE,
   canAttachSourceAudio,
+  canSetTrackVolume,
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
@@ -527,6 +528,21 @@ describe("importDenialFloor", () => {
     expect(importDenialFloor(9999)).toBe(ROLE.PROJECT_LEAD)
   })
 })
+
+// AQU-2664 (Sam, Nov 19): a track's volume is a take's volume floor; the
+// track's other settings stay with maintainers (the worker's trackPatchRoleFloor).
+describe("canSetTrackVolume", () => {
+  it("is a contributor's, like a take's volume, and not a viewer's", () => {
+    expect(canSetTrackVolume(ROLE.CONTRIBUTOR)).toBe(true)
+    expect(canSetTrackVolume(ROLE.MAINTAINER)).toBe(true)
+    expect(canSetTrackVolume(ROLE.VIEWER)).toBe(false)
+    expect(canSetTrackVolume(ROLE.CONTRIBUTOR)).toBe(canPerform("cell.audio.gain", ROLE.CONTRIBUTOR))
+  })
+
+  it("leaves the track's other settings at the maintainer floor", () => {
+    expect(canPerform("file.track.set", ROLE.CONTRIBUTOR)).toBe(false)
+    })
+  })
 
 // AQU-2476: the export floor the original-download routes actually apply.
 // `canExport` treats an unset floor as no gate; these do not.

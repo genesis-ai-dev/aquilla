@@ -1,17 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[] }))
+const calls = vi.hoisted(() => ({ attach: [] as unknown[], place: [] as unknown[], remove: [] as unknown[], even: [] as unknown[], measure: [] as unknown[] }))
 vi.mock("@/lib/audio/upload", () => ({
   buildAudioId: (seed: string) => `audio-${seed}`,
   uploadCellAudio: vi.fn(async (a: { audioId: string }) => ({ audioId: a.audioId, ext: "wav", url: `frontier-audio://${a.audioId}.wav` })),
   deleteCellAudio: vi.fn(async () => {}),
 }))
 vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
-vi.mock("@/lib/audio/audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
+const overlays = vi.hoisted(() => ({ trim: [] as Array<Record<string, unknown>> }))
+vi.mock("@/lib/audio/audio-attachments-bus", () => ({
+  injectOptimisticAudioAttachment: vi.fn(),
+  injectOptimisticAudioTrim: vi.fn((_f: string, _c: string, att: Record<string, unknown>) => overlays.trim.push(att)),
+  notifyAudioAttachmentsChanged: vi.fn(),
+}))
+// The meter, off the page (loudness-client.ts): held here so a test can
+// keep it busy and see the save not wait for it.
+const meter = vi.hoisted(() => ({ gate: null as Promise<void> | null }))
+vi.mock("@/lib/audio/loudness-client", async () => {
+  const { measureLoudness } = await import("@/lib/audio/loudness")
+  return {
+    loudnessClient: () => ({
+      measure: async (channels: Float32Array[], rate: number) => {
+        if (meter.gate) await meter.gate
+        return measureLoudness(channels, rate)
+      },
+    }),
+  }
+})
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async (x: unknown) => (calls.attach.push(x), "ev")),
   emitCellAudioPlace: vi.fn(async (x: unknown) => (calls.place.push(x), "ev")),
   emitCellAudioRemove: vi.fn(async (x: unknown) => (calls.remove.push(x), "ev")),
+  emitCellAudioGain: vi.fn(async () => "ev"),
+  emitCellAudioEven: vi.fn(async (x: unknown) => (calls.even.push(x), "ev")),
+  emitCellAudioMeasure: vi.fn(async (x: unknown) => (calls.measure.push(x), "ev")),
 }))
 
 import { historyReady, historyView, matchingSteps, redoLast, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast } from "@/lib/history/history"
@@ -38,6 +60,49 @@ describe("Save as new version", () => {
     calls.attach.length = 0
     calls.place.length = 0
     calls.remove.length = 0
+    calls.even.length = 0
+    calls.measure.length = 0
+  })
+
+  // AQU-2664 review M3: an evened-out take's new version stays evened out,
+  // and its new audio is measured (it is in memory already).
+  it("carries the evening out to the new version and measures its audio", async () => {
+    const tone = Float32Array.from({ length: 48000 }, (_, i) => 0.1 * Math.sin((2 * Math.PI * 1000 * i) / 48000))
+    const res = await saveStationVersion({
+      projectId: "p",
+      samples: tone,
+      rate: 48000,
+      placements: [{ ...base, evenTargetLufs: -16 }, { ...base, cellId: "c316", fromAudioId: "t1.webm" }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+    })
+    expect(calls.even).toEqual([expect.objectContaining({ cellId: "c331", audioId: res.audioIds[0], evenTargetLufs: -16 })])
+    await vi.waitFor(() => expect(calls.measure).toHaveLength(2))
+    const m = calls.measure[0] as { loudness: { loudnessLufs: number; truePeakDb: number }; audioId: string }
+    expect(m.audioId).toBe(res.audioIds[0])
+    expect(m.loudness.truePeakDb).toBeCloseTo(-20, 1)
+    expect(m.loudness.loudnessLufs).toBeLessThan(-10)
+    // Shown on the page at once, not only after the outbox flushes.
+    await vi.waitFor(() => expect(overlays.trim.some((o) => o.audioId === res.audioIds[0] && typeof o.loudnessLufs === "number")).toBe(true))
+  })
+
+  // Re-check S3: the save never waits for the meter; it measures after.
+  it("finishes without waiting for the meter, which runs after it", async () => {
+    let open: () => void = () => {}
+    meter.gate = new Promise<void>((r) => { open = r })
+    try {
+      const res = await saveStationVersion({
+        projectId: "p", samples: new Float32Array(48000).fill(0.1), rate: 48000,
+        placements: [base], author: "ana", getSyncToken: async () => "jwt", where: { fileId: "f" },
+      })
+      expect(res.audioIds).toHaveLength(1)
+      expect(calls.measure).toHaveLength(0)
+      open()
+      await vi.waitFor(() => expect(calls.measure).toHaveLength(1))
+    } finally {
+      meter.gate = null
+    }
   })
 
   it("attaches the new version on each line, pointing back at the take it replaces, keeping track, name, trim and place", async () => {

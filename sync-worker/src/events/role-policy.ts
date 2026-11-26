@@ -100,6 +100,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   // AQU-2327: a take's volume and fades need what trimming it needs.
   'cell.audio.gain': ROLE.CONTRIBUTOR,
+  // AQU-2664: whoever may set a take's volume may even it out.
+  'cell.audio.even': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   'cell.audio.cut': ROLE.CONTRIBUTOR,

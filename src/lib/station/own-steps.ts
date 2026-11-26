@@ -24,8 +24,11 @@ const isTakeStep = (kind: string): boolean => kind === "vote.audio" || (kind.sta
 export function stationStepMatch(cellId: string, audioId: string): (kind: string, data: unknown) => boolean {
   return (kind, data) => {
     if (!isTakeStep(kind)) return false
-    const d = data as { cellId?: unknown; audioId?: unknown; pieces?: unknown } | null
+    const d = data as { cellId?: unknown; audioId?: unknown; pieces?: unknown; run?: unknown } | null
     if (!d || d.cellId !== cellId) return false
+    // AQU-2664 (board 73C): a run of Even out over a file or tracks is ⌘Z's,
+    // not the Station's; a Clear made here (no `run`) is.
+    if (kind === "take.even" && d.run) return false
     // A version made of a cut take names its other pieces beside the first.
     return d.audioId === audioId || (Array.isArray(d.pieces) && d.pieces.includes(audioId))
   }

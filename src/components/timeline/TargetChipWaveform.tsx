@@ -51,15 +51,18 @@ export interface TargetChipWaveformProps {
   /** The chip is the red one at fault in an overlap: the waveform keeps the
    *  alarm's colour (the chip's own text colour), as it always has. */
   fault?: boolean
+  /** AQU-2664 (board 72): how tall to draw, 0.12…1 — the level the take plays
+   *  at (take-gain `waveLevelScale`). Absent: full height, as before. */
+  level?: number
 }
 
-function TargetChipWaveformImpl({ peaks, x0, x1, chipH, topPx = 0, drawH, playing = false, fault = false }: TargetChipWaveformProps) {
+function TargetChipWaveformImpl({ peaks, x0, x1, chipH, topPx = 0, drawH, playing = false, fault = false, level = 1 }: TargetChipWaveformProps) {
   // No zoom term in these deps, and that is the envelope's whole advantage over
   // the bars it replaced: the shape is stretched by the viewBox, so it is
   // rebuilt only when the audio or the row height changes — never during a
   // zoom glide.
   const h = drawH ?? chipH
-  const d = useMemo(() => waveformPathD(peaks, h), [peaks, h])
+  const d = useMemo(() => waveformPathD(level === 1 ? peaks : peaks.map((p) => p * level), h), [peaks, h, level])
   const width = x1 - x0
   if (!d || !(width > 0) || !(h > 0)) return null
 

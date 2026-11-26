@@ -2170,6 +2170,14 @@ case 'cell.audio.attach': {
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
+              -- AQU-2664: a re-attach that swaps the audio is a new recording,
+              -- so the old one's reading goes (the evened-out target stays
+              -- and waits for the next measure: an unmeasured take plays at
+              -- its own volume). The same url keeps it.
+              loudness_lufs      = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_lufs END,
+              true_peak_db       = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.true_peak_db END,
+              loudness_from_ms   = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_from_ms END,
+              loudness_to_ms     = CASE WHEN cell_audio.url IS DISTINCT FROM excluded.url THEN NULL ELSE cell_audio.loudness_to_ms END,
               mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
               voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
@@ -2449,6 +2457,29 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.even': {
+      // AQU-2664: the loudness this take is evened out to, and nothing else —
+      // its own stage before the take's volume and fades, which it never
+      // writes (nor the votes). Always stated; null clears it.
+      const p = event.payload as EventPayloads['cell.audio.even']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.even event ${event.id} is missing fileId or cellId`)
+      }
+      const t = p.evenTargetLufs
+      if (typeof p.audioId !== 'string' || (t !== null && (typeof t !== 'number' || !Number.isFinite(t)))) {
+        throw new Error(`cell.audio.even event ${event.id} has a malformed payload`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET even_target_lufs = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(t, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.audio.place': {
       // WHERE THIS TAKE SITS, and nothing else. (AQU-646 stage 3)
       //
@@ -2571,7 +2602,8 @@ case 'cell.audio.attach': {
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
               created_by, role, target_offset_ms, recordings_offset_ms, piece_of,
-              gain_db, fade_in_ms, fade_out_ms
+              gain_db, fade_in_ms, fade_out_ms,
+              loudness_lufs, true_peak_db, loudness_from_ms, loudness_to_ms, even_target_lufs
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
@@ -2580,7 +2612,8 @@ case 'cell.audio.attach': {
                    COALESCE(a.piece_of, a.audio_id),
                    a.gain_db, NULL,
                    CASE WHEN a.fade_out_ms IS NULL THEN NULL
-                        ELSE LEAST(a.fade_out_ms, COALESCE(a.trim_end_ms, a.duration_ms) - ?) END
+                        ELSE LEAST(a.fade_out_ms, COALESCE(a.trim_end_ms, a.duration_ms) - ?) END,
+                   a.loudness_lufs, a.true_peak_db, a.loudness_from_ms, a.loudness_to_ms, a.even_target_lufs
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'
@@ -2808,14 +2841,42 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.measure event ${event.id} is missing fileId or cellId`)
       }
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
-          )
-          .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
-      )
+      // AQU-2664: a reading may come without a known length; a missing or
+      // zero duration stores nothing (fill-only, a 0 would stay for good).
+      if (typeof p.durationMs === 'number' && p.durationMs > 0) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET duration_ms = COALESCE(duration_ms, ?)
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(p.durationMs, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
+      // AQU-2664: the loudness and true peak of the take's WINDOW of the
+      // recording, both or neither, with the window they measured. The same
+      // window again is a no-op (a replay, a second device); another window
+      // (the take was cut or trimmed since) replaces the old reading.
+      if (p.loudnessLufs !== undefined || p.truePeakDb !== undefined) {
+        const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+        const okMs = (v: unknown) => v == null || ok(v)
+        if (!ok(p.loudnessLufs) || !ok(p.truePeakDb) || !okMs(p.loudnessFromMs) || !okMs(p.loudnessToMs)) {
+          throw new Error(`cell.audio.measure event ${event.id} has a malformed loudness reading`)
+        }
+        const from = p.loudnessFromMs == null ? null : Math.round(p.loudnessFromMs)
+        const to = p.loudnessToMs == null ? null : Math.round(p.loudnessToMs)
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET loudness_lufs = ?, true_peak_db = ?, loudness_from_ms = ?, loudness_to_ms = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND (loudness_lufs IS NULL
+                       OR loudness_from_ms IS DISTINCT FROM ?::bigint
+                       OR loudness_to_ms IS DISTINCT FROM ?::bigint)`,
+            )
+            .bind(p.loudnessLufs, p.truePeakDb, from, to, event.projectId, event.fileId, event.cellId, p.audioId, from, to),
+        )
+      }
       return ['cell_audio']
     }
 

@@ -45,7 +45,7 @@ function buildSelections(
       }
       byProject.set(row.projectId, sel)
     }
-    sel.files.push({ id: row.fileId, name: row.fileName, type: row.fileType })
+    sel.files.push({ id: row.fileId, name: row.fileName, type: row.fileType, ...(row.trackOverrides ? { trackOverrides: row.trackOverrides } : {}) })
   }
   return [...byProject.values()]
 }

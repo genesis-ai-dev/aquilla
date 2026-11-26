@@ -111,7 +111,7 @@ describe("laneWriteLocked mirrors the server's archived-lane kind table", () => 
       "target.cell.create", "target.cell.commit", "target.cell.delete",
       "target.cell.reorder", "target.cell.repin", "cell.validate", "cell.unvalidate",
       "cell.waive", "cell.unwaive", "cell.audio.attach", "cell.audio.select",
-      "cell.audio.remove", "cell.audio.rename", "cell.audio.trim", "cell.audio.place",
+      "cell.audio.remove", "cell.audio.rename", "cell.audio.trim", "cell.audio.even", "cell.audio.place",
       "cell.audio.cut", "cell.audio.measure", "cell.audio.validate", "cell.audio.unvalidate",
       "cell.lane.retime", "cell.backtranslation.set",
     ]

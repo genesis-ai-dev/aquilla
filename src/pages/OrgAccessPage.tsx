@@ -178,6 +178,7 @@ export function OrgAccessPage() {
                         onChanged={state.reload}
                         onNewProject={canCreateProject ? (folderId) => setCreatingProject((prev) => ({ folderId, n: (prev?.n ?? 0) + 1 })) : undefined}
                         onNewFolder={canCreateFolder ? newFolder : undefined}
+                        canMoveProjects={canCreateFolder}
                         onNewLanguage={newLanguage}
                       />
                     )}

@@ -112,6 +112,8 @@ vi.mock("./org-access-data", async (orig) => ({
   ...(await orig<typeof import("./org-access-data")>()),
   fetchOrgAccess: () => Promise.resolve(payload),
 }))
+const applyProjectMove = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
+vi.mock("./move-project-data", () => ({ applyProjectMove: (...a: unknown[]) => applyProjectMove(...a) }))
 const submitGrant = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
 vi.mock("./give-access-data", async (orig) => ({
   ...(await orig<typeof import("./give-access-data")>()),
@@ -251,6 +253,45 @@ describe("OrgAccessPage folder tree", () => {
     expect(within(folderRow(team)).getByRole("button", { name: "New project" })).toBeTruthy()
     // A language is a leaf; nothing goes inside it.
     expect(within(folderRow(french)).queryByTestId("folder-new")).toBeNull()
+  })
+})
+
+describe("OrgAccessPage moving projects between folders", () => {
+  it("moves a project out of its folder from the Move to menu, and the folder's access goes with it", async () => {
+    applyProjectMove.mockClear()
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    fireEvent.click(within(folderRow(project)).getByTestId("folder-move"))
+    // Where it is now is ticked and cannot be picked again.
+    expect(await screen.findByTestId("move-to-7")).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(screen.getByTestId("move-to-org"))
+    await waitFor(() => expect(applyProjectMove).toHaveBeenCalledOnce())
+    expect(applyProjectMove.mock.calls[0]).toEqual(["jwt", 1, "p1", { attach: [], detach: ["7"] }])
+  })
+
+  it("drops a project onto a folder like a file, giving the folder's people the default Viewer role", async () => {
+    applyProjectMove.mockClear()
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" }
+    expect(folderRow(other)).toHaveAttribute("draggable", "true")
+    fireEvent.dragStart(folderRow(other), { dataTransfer })
+    fireEvent.dragOver(folderRow(team), { dataTransfer })
+    expect(folderRow(team)).toHaveAttribute("data-drop-target", "true")
+    fireEvent.drop(folderRow(team), { dataTransfer })
+    await waitFor(() => expect(applyProjectMove).toHaveBeenCalledOnce())
+    expect(applyProjectMove.mock.calls[0]).toEqual(["jwt", 1, "p2", { attach: [{ folderId: "7", roleLevel: 100 }], detach: [] }])
+  })
+
+  it("does not take a drop where the project already is, and only projects drag", async () => {
+    renderPage()
+    await screen.findByTestId("access-folder-tree")
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "", dropEffect: "" }
+    fireEvent.dragStart(folderRow(other), { dataTransfer })
+    fireEvent.dragOver(folderRow(org), { dataTransfer })
+    expect(folderRow(org)).not.toHaveAttribute("data-drop-target")
+    expect(folderRow(team)).not.toHaveAttribute("draggable")
+    expect(folderRow(french)).not.toHaveAttribute("draggable")
   })
 })
 

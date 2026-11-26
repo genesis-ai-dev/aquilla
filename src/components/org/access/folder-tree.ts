@@ -109,3 +109,72 @@ export function newChildKinds(type: ScopeRef["type"]): ("team" | "project" | "la
   if (type === "project") return ["lane"]
   return []
 }
+
+/** A folder a project is attached to, with the role that folder's people get on it. */
+export interface FolderAttachment {
+  folderId: string
+  folderName: string
+  roleLevel: number
+}
+
+/**
+ * The folders a project is attached to. The server lists each attachment on
+ * the project as access that reaches it from a team, so they are read there.
+ */
+export function projectAttachments(project: AccessTreeNode): FolderAttachment[] {
+  const byId = new Map<string, FolderAttachment>()
+  for (const source of project.inherited ?? []) {
+    if (source.kind !== "team" || source.from.type !== "team") continue
+    const prior = byId.get(source.from.id)
+    if (!prior || source.roleLevel > prior.roleLevel) {
+      byId.set(source.from.id, { folderId: source.from.id, folderName: source.from.name, roleLevel: source.roleLevel })
+    }
+  }
+  return [...byId.values()]
+}
+
+/** The writes behind one move: attach first, then detach, so no one loses access in between. */
+export interface MovePlan {
+  attach: { folderId: string; roleLevel: number }[]
+  detach: string[]
+}
+
+/**
+ * Moving a project works like moving a file: afterwards it is in exactly the
+ * destination folder (`null`: straight in the organization, in no folder).
+ * The folder it moves into gives its people the same role the folder it was
+ * shown in gave them; a project that was in no folder gets `defaultRole`.
+ * Returns null when the move changes nothing.
+ */
+export function planProjectMove(
+  attachments: readonly FolderAttachment[],
+  shownIn: string | null,
+  to: string | null,
+  defaultRole: number,
+): MovePlan | null {
+  const detach = attachments.map((a) => a.folderId).filter((id) => id !== to)
+  const alreadyThere = to != null && attachments.some((a) => a.folderId === to)
+  const roleLevel =
+    attachments.find((a) => a.folderId === shownIn)?.roleLevel ??
+    Math.max(defaultRole, ...attachments.map((a) => a.roleLevel))
+  const attach = to != null && !alreadyThere ? [{ folderId: to, roleLevel }] : []
+  if (attach.length === 0 && detach.length === 0) return null
+  return { attach, detach }
+}
+
+/** The plan that puts a project back where it was before `plan` ran. */
+export function undoMovePlan(attachments: readonly FolderAttachment[], plan: MovePlan): MovePlan {
+  return {
+    attach: plan.detach.flatMap((id) => {
+      const before = attachments.find((a) => a.folderId === id)
+      return before ? [{ folderId: id, roleLevel: before.roleLevel }] : []
+    }),
+    detach: plan.attach.map((a) => a.folderId),
+  }
+}
+
+/** The folder a project row is drawn under, or null when it sits straight in the organization. */
+export function projectShownIn(project: FolderNode): string | null {
+  const parent = project.path[project.path.length - 2]
+  return parent?.type === "team" ? parent.id : null
+}

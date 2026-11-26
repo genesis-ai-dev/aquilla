@@ -165,7 +165,7 @@ function TeamRow({ team, roleLevel, memberCount }: { team: ScopeRef; roleLevel: 
     <li data-testid="inherited-team" className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1">
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm">{t("org.access.places.fromTeam", { name: team.name })}</span>
+        <span className="truncate text-sm">{t("org.access.tree.fromFolder", { name: team.name })}</span>
         <span className="text-xs text-muted-foreground">{t("org.teamsList.memberCount", { count: memberCount })}</span>
       </span>
       <RoleBadge roleLevel={roleLevel} origin={INHERITED} />

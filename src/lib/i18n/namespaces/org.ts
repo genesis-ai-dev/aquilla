@@ -112,6 +112,11 @@ export const org = defineNamespace({
     // -- People & access folder tree: organization → projects → languages --
     "org.access.tree.kindFolder": "folder",
     "org.access.tree.newFolder": "New folder",
+    "org.access.tree.fromFolder": "From the {name} folder",
+    "org.access.tree.moveTo": "Move {name} to another folder",
+    "org.access.tree.noFolder": "{name}, not in a folder",
+    "org.access.tree.moved": "Moved {project} to {place}",
+    "org.access.tree.moveFailed": "Couldn't finish moving {project}. The tree shows where it is now.",
     "org.access.tree.newIn": "Add something to {name}",
     "org.access.tree.folderName": "Folder name",
     "org.access.tree.createFolder": "Create folder",
@@ -2094,6 +2099,26 @@ export const org = defineNamespace({
     keys: {
       "org.access.tree.kindFolder": {
         description: "Small grey label after a folder's name in the People & access tree. A folder groups projects inside an organization (stored as a team). Lower case, one word if possible.",
+      },
+      "org.access.tree.fromFolder": {
+        description: "A row in the folder-tree people list for a folder (stored as a team) whose people can open this project, e.g. \"From the Asia folder\".",
+        placeholders: { name: "The folder's name; not translated." },
+      },
+      "org.access.tree.moveTo": {
+        description: "Label and tooltip of the small button on a project row in the People & access tree that opens the list of folders to move the project into.",
+        placeholders: { name: "The project's name; not translated." },
+      },
+      "org.access.tree.noFolder": {
+        description: "First entry in the move-to list: moving the project straight into the organization, out of every folder.",
+        placeholders: { name: "The organization's name; not translated." },
+      },
+      "org.access.tree.moved": {
+        description: "Toast after a project was moved into a folder (or into the organization itself). Shown with an Undo button.",
+        placeholders: { project: "The project's name; not translated.", place: "The folder or organization it moved into; not translated." },
+      },
+      "org.access.tree.moveFailed": {
+        description: "Error toast when a project move (or its undo) did not finish. Part of it may have happened, so the tree is re-read to show where the project is.",
+        placeholders: { project: "The project's name; not translated." },
       },
       "org.access.tree.newFolder": {
         description: "Menu item under the + button on the organization row of the People & access tree; it adds a row where a new folder is named. A folder groups projects.",

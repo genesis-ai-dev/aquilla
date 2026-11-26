@@ -5,8 +5,9 @@
  * shows the people added there (FolderPeopleStack) and, where the viewer may
  * grant, an "add person" button (AddPersonPopover). Hovering a row shows a
  * "+" that makes something inside it: a folder or project in the
- * organization, a project in a folder, a language in a project. Access set
- * on a row reaches everything inside it.
+ * organization, a project in a folder, a language in a project. Projects
+ * move between folders by drag and drop or a "Move to" menu (ProjectMove).
+ * Access set on a row reaches everything inside it.
  */
 import { useEffect, useMemo, useState } from "react"
 import { ChevronRight, Plus } from "lucide-react"
@@ -29,6 +30,8 @@ import { AddPersonPopover } from "./AddPersonPopover"
 import { FolderPeopleStack, type FolderEditing, type Removing } from "./FolderPeopleStack"
 import { accessFolders, newChildKinds, type FolderNode } from "./folder-tree"
 import type { AccessTreeNode, OrgAccessPerson } from "./org-access-data"
+import { MoveProjectMenu } from "./ProjectMove"
+import { moveDestinations, useProjectMove, type MoveDestination } from "./useProjectMove"
 import { RemoveAccessDialog } from "./RemoveAccessDialog"
 
 const KIND_LABEL = {
@@ -57,6 +60,8 @@ export interface AccessFolderTreeProps {
   onNewFolder?: (name: string) => Promise<void>
   /** Opens the project's "Add language" form. */
   onNewLanguage: (projectId: string) => void
+  /** The viewer may move projects between folders (org Maintainer or above). */
+  canMoveProjects?: boolean
 }
 
 type ChildKind = "team" | "project" | "lane"
@@ -72,6 +77,7 @@ export function AccessFolderTree({
   onNewProject,
   onNewFolder,
   onNewLanguage,
+  canMoveProjects = false,
 }: AccessFolderTreeProps) {
   const t = useT()
   const [params] = useSearchParams()
@@ -82,6 +88,9 @@ export function AccessFolderTree({
   const folders = useMemo(() => accessFolders(filterPlaceTree(tree, query)), [tree, query])
   const rows = useMemo(() => new Map(placeRows(tree, grantable).map((row) => [row.key, row])), [tree, grantable])
   const usernames = useMemo(() => new Map(people.map((p) => [p.userId, p.username ?? null])), [people])
+  // Destinations come from the whole tree, so a search never hides where a project can go.
+  const destinations = useMemo(() => moveDestinations(accessFolders(tree)), [tree])
+  const mover = useProjectMove({ orgId, enabled: canMoveProjects, onChanged })
   const editing: FolderEditing = { orgId, grantable, usernames, viewerUsername, onChanged, onRemove: setRemoving }
   // ?place=type:id (ManageAccessLink and older links) marks that row and scrolls to it.
   const marked = params.get("place")
@@ -136,14 +145,23 @@ export function AccessFolderTree({
     const choices = creatable(scope)
     const naming = namingFolderIn === key && onNewFolder != null
     const hasChildren = folder.children.length > 0 || naming
+    const destination: MoveDestination | null =
+      scope.type === "org" ? { id: null, scope } : scope.type === "team" ? { id: scope.id, scope } : null
+    const drop = mover.dropTargetProps(destination)
     return (
       <li key={key} role="treeitem" aria-expanded={hasChildren ? !isCollapsed : undefined} aria-selected={marked === key}>
         <div
           id={accessNodeId(scope)}
           data-testid={accessNodeId(scope)}
+          data-drop-target={drop.isTarget || undefined}
+          {...mover.dragSource(folder)}
+          {...drop.props}
           className={cn(
             "group/folder flex min-h-10 min-w-0 scroll-mt-16 items-center gap-1.5 rounded-md pe-2 hover:bg-accent/40 focus-within:bg-accent/40",
             marked === key && "bg-accent/60",
+            scope.type === "project" && mover.enabled && "cursor-grab active:cursor-grabbing",
+            drop.isTarget && "bg-primary/10 ring-2 ring-inset ring-primary/60",
+            (mover.dragging === key || mover.moving === key) && "opacity-50",
           )}
           style={{ paddingInlineStart: `${0.5 + depth * 1.25}rem` }}
         >
@@ -167,6 +185,14 @@ export function AccessFolderTree({
           </span>
           <span className="shrink-0 text-xs lowercase text-muted-foreground">{t(KIND_LABEL[scope.type])}</span>
           <NewChildButton name={scope.name} choices={choices} />
+          {scope.type === "project" && mover.enabled && (
+            <MoveProjectMenu
+              project={folder}
+              destinations={destinations}
+              disabled={mover.moving != null}
+              onMove={(to) => void mover.move(folder, to)}
+            />
+          )}
           <span className="flex-1" />
           <FolderPeopleStack folder={folder} editing={editing} />
           {canGrant && row ? (

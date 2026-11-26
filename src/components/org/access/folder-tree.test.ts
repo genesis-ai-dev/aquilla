@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { accessFolders, inheritedAccess, newChildKinds } from "./folder-tree"
+import { accessFolders, inheritedAccess, newChildKinds, planProjectMove, projectAttachments, undoMovePlan } from "./folder-tree"
 import type { AccessTreeNode } from "./org-access-data"
 
 const org = { type: "org" as const, id: "1", name: "Org" }
@@ -59,5 +59,45 @@ describe("newChildKinds", () => {
     expect(newChildKinds("team")).toEqual(["project"])
     expect(newChildKinds("project")).toEqual(["lane"])
     expect(newChildKinds("lane")).toEqual([])
+  })
+})
+
+describe("moving a project between folders", () => {
+  // A move is a change of who can open the project: the folder it leaves
+  // stops giving its people access, the folder it enters starts. The plan must
+  // never leave the project in two places, and undo must restore the roles.
+  const project = (inherited: AccessTreeNode["inherited"]): AccessTreeNode => ({ ...leaf(shared), inherited })
+
+  it("reads a project's folders, and their roles, from what reaches it from a team", () => {
+    const node = project([
+      { kind: "team", roleLevel: 400, memberCount: 2, from: teamA },
+      { kind: "person", userId: "u", displayName: "U", roleLevel: 600, from: org },
+    ])
+    expect(projectAttachments(node)).toEqual([{ folderId: "a", folderName: "Asia", roleLevel: 400 }])
+  })
+
+  it("moves into the destination with the role the old folder gave, then leaves every other folder", () => {
+    const attachments = [
+      { folderId: "a", folderName: "Asia", roleLevel: 400 },
+      { folderId: "b", folderName: "Africa", roleLevel: 100 },
+    ]
+    expect(planProjectMove(attachments, "a", "c", 100)).toEqual({ attach: [{ folderId: "c", roleLevel: 400 }], detach: ["a", "b"] })
+    expect(planProjectMove(attachments, "a", "b", 100)).toEqual({ attach: [], detach: ["a"] })
+  })
+
+  it("moves out to the organization by leaving every folder, and into a folder with the default role", () => {
+    expect(planProjectMove([{ folderId: "a", folderName: "Asia", roleLevel: 400 }], "a", null, 100)).toEqual({ attach: [], detach: ["a"] })
+    expect(planProjectMove([], null, "a", 100)).toEqual({ attach: [{ folderId: "a", roleLevel: 100 }], detach: [] })
+  })
+
+  it("does nothing for a move to where the project already is", () => {
+    expect(planProjectMove([{ folderId: "a", folderName: "Asia", roleLevel: 400 }], "a", "a", 100)).toBeNull()
+    expect(planProjectMove([], null, null, 100)).toBeNull()
+  })
+
+  it("undoes a move with the roles the folders had before", () => {
+    const attachments = [{ folderId: "a", folderName: "Asia", roleLevel: 400 }]
+    const plan = planProjectMove(attachments, "a", "c", 100)!
+    expect(undoMovePlan(attachments, plan)).toEqual({ attach: [{ folderId: "a", roleLevel: 400 }], detach: ["c"] })
   })
 })

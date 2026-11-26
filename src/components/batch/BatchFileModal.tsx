@@ -137,14 +137,14 @@ export function BatchFileModal({
     })
     const isFlagged = validateOptions.hasOpenFlags
     const flaggedCell = (cell: BatchValidateCandidate) => Boolean(isFlagged?.(cell.id))
-    // A flagged line is its own box, named by its reference. Counting it again
-    // under the unvalidated box made "21" validate 20. An untouched AI draft
-    // stays on the AI line, where that choice already lives.
+    // A flagged line is its own box, named by its reference, including a
+    // flagged AI draft. Counting that draft on the AI line made the title one
+    // short and left the check off this list while the run still skipped it.
     return {
       ready: openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell) && !flaggedCell(cell)),
-      untouched: openSet.validatable.filter((cell) => isUntouchedAiDraft(cell)),
+      untouched: openSet.validatable.filter((cell) => isUntouchedAiDraft(cell) && !flaggedCell(cell)),
       flagged: isFlagged
-        ? openSet.validatable.filter((cell) => flaggedCell(cell) && !isUntouchedAiDraft(cell))
+        ? openSet.validatable.filter((cell) => flaggedCell(cell))
         : [],
       blocked: openSet.outcome === "no-permission" || openSet.outcome === "no-target",
       blockedSummary: openSet,
@@ -259,7 +259,7 @@ export function BatchFileModal({
           </div>
         )}
         {emptyValidate && <EmptyValidateStatus copy={emptyValidate} />}
-        {request.kind === "validate" && !validateGroups.blocked && !emptyValidate && (
+        {request.kind === "validate" && !validateGroups.blocked && (
           <FieldSet>
             {/* A chapter with none of a kind keeps the choice on screen, grayed.
                 The tick stays, and the run still has no such cells to sign off. */}
@@ -357,9 +357,11 @@ export function BatchFileModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {canConfirm ? t("common.cancel") : t("common.close")}
           </Button>
-          {canConfirm && (
+          {(canConfirm || (request.kind === "validate" && emptyValidate)) && (
             <Button
+              disabled={!canConfirm}
               onClick={() => {
+                if (!canConfirm) return
                 if (request.kind === "validate") {
                   onConfirmValidate({
                     includeReadyCells: includeReady,

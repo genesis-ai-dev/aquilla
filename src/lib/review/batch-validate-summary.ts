@@ -252,6 +252,19 @@ export function summarizeBatchValidate(
       skips[reason]++
       continue
     }
+    // A flagged cell belongs to the unresolved-checks choice, even when it is
+    // also an untouched AI draft. That list is where the reader sees it, so
+    // the skip reason is the flag, and opting into the list takes the cell.
+    // Counting it on the AI line as well explained one cell twice and left
+    // the list at zero while the run still skipped it.
+    if (hasOpenFlags?.(cell.id)) {
+      if (!includeFlaggedCells) {
+        skips.flagged++
+        continue
+      }
+      eligible.push(cell)
+      continue
+    }
     const untouched = isUntouchedAiDraft(cell)
     if (untouched && !includeUntouchedAiDrafts) {
       skips.aiDraft++
@@ -259,13 +272,6 @@ export function summarizeBatchValidate(
     }
     if (!untouched && !includeReadyCells) {
       skips.notChosen++
-      continue
-    }
-    // AQU-2507: asked last of the choices, so a cell that is both an untouched
-    // AI draft and flagged is reported under the box the reader can see rather
-    // than under a second one explaining the same cell twice.
-    if (!includeFlaggedCells && hasOpenFlags?.(cell.id)) {
-      skips.flagged++
       continue
     }
     eligible.push(cell)

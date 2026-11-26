@@ -640,15 +640,25 @@ describe("summarizeBatchValidate — open check flags are a choice (AQU-2507)", 
     expect(summary.skips.flagged).toBe(0)
   })
 
-  it("reports a flagged untouched AI draft under the AI-draft box, not twice", () => {
-    const summary = summarizeBatchValidate(
+  it("reports a flagged untouched AI draft under the unresolved-checks choice, once", () => {
+    const leftOut = summarizeBatchValidate(
       [cell({ id: "ai", aiDrafted: true })],
       { ...flagged("ai"), includeUntouchedAiDrafts: false },
     )
-    expect(summary.skips.aiDraft).toBe(1)
-    expect(summary.skips.flagged).toBe(0)
-    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
-    expect(bucketed).toBe(summary.skippedTotal)
+    expect(leftOut.skips.flagged).toBe(1)
+    expect(leftOut.skips.aiDraft).toBe(0)
+    expect(leftOut.validatable).toEqual([])
+    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + leftOut.skips[r], 0)
+    expect(bucketed).toBe(leftOut.skippedTotal)
+
+    // The unresolved-checks box is enough. The AI box does not have to be on.
+    const taken = summarizeBatchValidate(
+      [cell({ id: "ai", aiDrafted: true }), cell({ id: "clean", aiDrafted: true })],
+      { ...flagged("ai"), includeUntouchedAiDrafts: false, includeFlaggedCells: true },
+    )
+    expect(taken.validatable.map((c) => c.id)).toEqual(["ai"])
+    expect(taken.skips.flagged).toBe(0)
+    expect(taken.skips.aiDraft).toBe(1)
   })
 })
 

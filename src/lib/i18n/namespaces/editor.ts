@@ -8030,7 +8030,8 @@ export const editor = defineNamespace({
       "editor.batch.syncTimedOut": {
         description:
           "Error toast when those edits do not finish syncing in time. The " +
-          "batch does not start, so nothing is validated or drafted.",
+          "batch does not start, so nothing is validated or drafted. It stays " +
+          "until the reader closes it.",
       },
       "editor.batchBooks.loadFailed": {
         description: "Error toast when a book could not be read. Nothing was validated or drafted.",

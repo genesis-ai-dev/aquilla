@@ -690,6 +690,7 @@ import { WHOLE_BOOK, applyChapterScope, initialChapterScope } from "@/lib/review
 import { listChapterLabels } from "@/lib/export/chapter-scope"
 import { loadBookCells } from "@/lib/review/load-book-cells"
 import { holdBatchForSync } from "@/lib/review/hold-batch-for-sync"
+import { showBatchSyncTimeoutToast } from "@/lib/review/batch-sync-timeout-toast"
 import { openFlagsInBook } from "@/lib/review/open-flags-in-book"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -13638,9 +13639,7 @@ export function ProjectWorkspace() {
           },
         })
         if (outcome === "timeout") {
-          const title = t("editor.batch.syncTimedOut")
-          if (readingId) toast.update(readingId, { type: "error", title })
-          else toast.add({ type: "error", title })
+          showBatchSyncTimeoutToast(t("editor.batch.syncTimedOut"), readingId)
           return
         }
         const firstName = names.get(choices.fileIds[0] ?? "") ?? ""
@@ -13797,9 +13796,7 @@ export function ProjectWorkspace() {
           },
         })
         if (outcome === "timeout") {
-          const title = t("editor.batch.syncTimedOut")
-          if (waitingId) toast.update(waitingId, { type: "error", title })
-          else toast.add({ type: "error", title })
+          showBatchSyncTimeoutToast(t("editor.batch.syncTimedOut"), waitingId)
           return
         }
         if (waitingId) toast.close(waitingId)

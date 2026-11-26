@@ -41,8 +41,17 @@ export class ProjectSettings {
     await expect(section).toBeVisible({ timeout: 10_000 })
   }
 
+  /**
+   * A language's own row in the Languages table. Only those rows carry
+   * `lane-identity-row-<id>`; the table also holds a header row and the
+   * "Delivers" help line (AQU-2260), whose sentence contains short tags
+   * such as "es", so a text filter over every row matches two elements.
+   */
   private laneRow(tag: string): Locator {
-    return this.page.getByTestId("target-lanes-list").getByRole("row").filter({ hasText: tag })
+    return this.page
+      .getByTestId("target-lanes-list")
+      .locator("[data-testid^='lane-identity-row-']")
+      .filter({ hasText: tag })
   }
 
   async enableTimelineTracks(projectId: string): Promise<void> {

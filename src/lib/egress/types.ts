@@ -1,3 +1,4 @@
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 /**
  * Org data egress — shared types for the engine (src/lib/egress), the audio
  * assembly module (src/lib/export/audio-assembly.ts), and the UI
@@ -69,6 +70,9 @@ export interface EgressFileRef {
   id: string
   name: string
   type: string
+  /** AQU-2664 re-check S5: the file's track deltas (files.meta), so the zip
+   *  applies each track's volume as every editor export does. Absent: 0 dB. */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 /** One project's slice of the user's selection. */

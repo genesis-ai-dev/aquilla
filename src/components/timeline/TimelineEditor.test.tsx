@@ -192,7 +192,7 @@ const progressTicks = vi.hoisted(() => {
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 // Round 5: the speaker buttons push audibility straight into the queue.
-let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
+let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] } | null = null
 // Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
 // against `getQueueAudibility()` rather than against component state, precisely
 // so the editor's button and the video pane's cannot clobber each other. So the
@@ -204,18 +204,21 @@ let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, 
 // would make every per-track mute read back as "audible" inside this suite —
 // the same blindness that let stage 6A's bug reach Sam.
 const audibilityStore = vi.hoisted(() => {
-  let value: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } = {
+  let value: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] } = {
     source: true,
     target: true,
   }
   const listeners = new Set<() => void>()
   return {
     get: () => value,
-    set: (next: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
+    set: (next: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] }) => {
       value = {
         source: next.source,
         target: next.target,
         ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+        // AQU-2664: solo rides the same store, as in the real one.
+        ...(next.solo && next.solo.length > 0 ? { solo: [...next.solo] } : {}),
+        ...(next.drawn ? { drawn: [...next.drawn] } : {}),
       }
       for (const l of listeners) l()
     },
@@ -253,7 +256,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
     // file position cannot be allowed to drift from the real rule.
     queueClockIsFileTime: (cell: CellData | undefined | null) =>
       cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
-    setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
+    setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean>; solo?: string[]; drawn?: string[] }) => {
       lastAudibility = a
       audibilityStore.set(a)
     },
@@ -1058,29 +1061,127 @@ describe("TimelineEditor", () => {
       <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={withTake} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
-    expect(lastAudibility).toEqual({ source: true, target: true })
-    const src = screen.getByTestId("tl-speaker-source")
-    const tgt = screen.getByTestId("tl-speaker-target")
-    expect(src).toHaveAttribute("aria-pressed", "true")
-    expect(tgt).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: true, target: true })
+    const src = screen.getByTestId("tl-mute-source")
+    const tgt = screen.getByTestId("tl-mute-target")
+    expect(src).toHaveAttribute("aria-pressed", "false")
+    expect(tgt).toHaveAttribute("aria-pressed", "false")
 
     fireEvent.click(src)
-    expect(src).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(src).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
     expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
 
     fireEvent.click(tgt)
-    expect(lastAudibility).toEqual({ source: false, target: false })
+    expect(lastAudibility).toMatchObject({ source: false, target: false })
     // STAGE 6A — THE ASSERTION THIS TEST WAS MISSING. It checked that the click
     // reached the store and never that the button reported it back, so a reader
     // that classified `"target"` differently from the writer passed here and
     // shipped: the row really did mute while the icon stayed on, and the second
     // click people naturally gave it turned the sound back on (Sam, 2026-08-27).
-    expect(tgt).toHaveAttribute("aria-pressed", "false")
+    expect(tgt).toHaveAttribute("aria-pressed", "true")
 
     fireEvent.click(tgt)
-    expect(tgt).toHaveAttribute("aria-pressed", "true")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(tgt).toHaveAttribute("aria-pressed", "false")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
+  })
+
+  // AQU-2664 (board 74): the Logic-style header — M | S, the fader and ≈ in one
+  // line on the target track; the source row keeps M | S alone.
+  describe("the track header like Logic (AQU-2664, board 74)", () => {
+    const TAKE = "audio-m1-1700000000-take.webm"
+    const withTake = () => [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, selectedAudioId: TAKE,
+        attachments: {
+          [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" },
+          [TAKE]: { type: "audio", url: "frontier-audio://take" },
+        },
+      } as Partial<CellData>),
+      mediaCells[1],
+    ]
+    beforeEach(() => {
+      localStorage.removeItem("aquilla:timelineAudibility:hdr")
+    })
+
+    it("puts M | S, the fader and ≈ in that order after the target track's name", () => {
+      render(
+        <TimelineEditor
+          fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}}
+          onSetTrackVolume={() => {}}
+          evenOut={{ states: new Map([["target-audio", "none" as const]]), open: () => {} }}
+        />,
+      )
+      const m = screen.getByTestId("tl-mute-target")
+      const fader = screen.getByTestId("tl-fader-target-audio")
+      const ev = screen.getByTestId("tl-even-target-audio")
+      expect(m.compareDocumentPosition(fader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(fader.compareDocumentPosition(ev) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(screen.getByTestId("tl-solo-target")).toBeInTheDocument()
+      // The source row: M | S, never a fader or ≈.
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("tl-fader-source-audio")).toBeNull()
+      expect(screen.queryByTestId("tl-even-source-audio")).toBeNull()
+    })
+
+    it("solo plays one track alone: the others' M stays as it was, and it persists", () => {
+      render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      fireEvent.click(screen.getByTestId("tl-solo-target"))
+      expect(screen.getByTestId("tl-solo-target")).toHaveAttribute("aria-pressed", "true")
+      expect(lastAudibility).toMatchObject({ source: true, target: true, solo: ["target"] })
+      expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "false")
+      expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:hdr")!)).toMatchObject({ solo: ["target"] })
+      fireEvent.click(screen.getByTestId("tl-solo-target"))
+      expect(lastAudibility?.solo).toBeUndefined()
+    })
+
+    // Review M4: a soloed track that goes away must not silence the rest.
+    it("tells the play queue which rows are drawn, so a deleted or hidden soloed track is ignored", () => {
+      const withMusic = deriveTracksForFile({ trackOverrides: { music: { kind: "audio", name: "Music" } } })
+      const { rerender } = render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={withMusic} onRetimeSubtitle={() => {}} />)
+      expect(lastAudibility?.drawn).toEqual(expect.arrayContaining(["source", "target", "music"]))
+      rerender(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={deriveTracksForFile(null)} onRetimeSubtitle={() => {}} />)
+      expect(lastAudibility?.drawn).not.toContain("music")
+      expect(lastAudibility?.drawn).toContain("target")
+    })
+
+    it("saves the fader once, on Option-click, and only when it changed", () => {
+      const onSetTrackVolume = vi.fn()
+      const tracks = deriveTracksForFile({ trackOverrides: { "target-audio": { volumeDb: -9 } } })
+      render(
+        <TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} tracks={tracks} onRetimeSubtitle={() => {}} onSetTrackVolume={onSetTrackVolume} />,
+      )
+      const fader = screen.getByTestId("tl-fader-target-audio")
+      expect(fader).toHaveAttribute("aria-valuenow", "-9")
+      fireEvent.pointerDown(fader, { clientX: 10, pointerId: 1, button: 0, altKey: true })
+      expect(onSetTrackVolume).toHaveBeenCalledExactlyOnceWith("target-audio", 0)
+    })
+
+    it("draws the fader but never moves it for someone who may not change it", () => {
+      render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      expect(screen.getByTestId("tl-fader-target-audio")).toHaveAttribute("aria-disabled", "true")
+    })
+
+    it("opens the Even out window on the track from its ≈, lit when evened", () => {
+      const open = vi.fn()
+      render(
+        <TimelineEditor
+          fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}}
+          evenOut={{ states: new Map([["target-audio", "part" as const]]), open }}
+        />,
+      )
+      const ev = screen.getByTestId("tl-even-target-audio")
+      expect(ev).toHaveAttribute("data-even", "part")
+      fireEvent.click(ev)
+      expect(open).toHaveBeenCalledExactlyOnceWith(["target-audio"], "target-audio")
+    })
+
+    it("has no ≈ without the clearance, or on a track with no takes", () => {
+      const { rerender } = render(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} />)
+      expect(screen.queryByTestId("tl-even-target-audio")).toBeNull()
+      rerender(<TimelineEditor fileId="hdr" coreMediaUrl={null} editable cells={withTake()} onRetimeSubtitle={() => {}} evenOut={{ states: new Map(), open: () => {} }} />)
+      expect(screen.queryByTestId("tl-even-target-audio")).toBeNull()
+    })
   })
 
   // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too, on
@@ -1101,7 +1202,7 @@ describe("TimelineEditor", () => {
     expect(pill).toHaveTextContent(/^Sound: Film$/)
     // In the SOURCE row, with its speaker, not the target's...
     let row: HTMLElement | null = pill.parentElement
-    while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
+    while (row && !row.contains(screen.getByTestId("tl-mute-source"))) row = row.parentElement
     expect(row).not.toBeNull()
     // (Target audio has no takes here, so since AQU-1682 it shows no speaker;
     // tell the rows apart by name.)
@@ -1123,7 +1224,7 @@ describe("TimelineEditor", () => {
           soundSource={{ value: "video", recordingName: null, onChange: () => {} }}
         />,
       )
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
       expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
     } finally {
       localStorage.removeItem("aquilla:tlGutterCollapsed:sndstrip")
@@ -1136,8 +1237,8 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
   })
 
   // ── 2026-08-07: the chip strip follows the CURRENT chip, not just clicks ──
@@ -2383,7 +2484,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
-    const speaker = screen.getByTestId("tl-speaker-source")
+    const speaker = screen.getByTestId("tl-mute-source")
     // Named for what actually goes quiet. On this file the row's cues are
     // timings over the FILM's soundtrack, and "source audio" would be true but
     // useless at the moment of clicking.
@@ -2407,7 +2508,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("tl-mute-target")).toHaveAttribute("aria-pressed", "false")
   })
 
   // AQU-1682: a lane's mute button only where the lane has something to play.
@@ -2424,9 +2525,9 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-target")).toBeNull()
       // The film still sounds, so the Source audio row keeps its speaker.
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
     })
 
     it("gives the Source audio row no speaker when nothing on it plays (cues, no video, no recording)", () => {
@@ -2436,7 +2537,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-source")).toBeNull()
     })
 
     it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
@@ -2447,14 +2548,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-source")).toBeNull()
     })
 
     it("keeps the Source audio row's speaker for an imported recording", () => {
       render(
         <TimelineEditor fileId="f1682" coreMediaUrl={null} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
       )
-      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-mute-source")).toBeInTheDocument()
     })
 
     it("keeps the button on a muted lane even when it has nothing to play, so it can be unmuted", () => {
@@ -2466,11 +2567,11 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      const target = screen.getByTestId("tl-speaker-target")
-      expect(target).toHaveAttribute("aria-pressed", "false")
+      const target = screen.getByTestId("tl-mute-target")
+      expect(target).toHaveAttribute("aria-pressed", "true")
       fireEvent.click(target)
       // Unmuted and still empty: now it goes.
-      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      expect(screen.queryByTestId("tl-mute-target")).toBeNull()
     })
   })
 
@@ -2483,11 +2584,11 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     // The dialogue lane, not the cue row — media cells own this track.
     expect(screen.queryByTestId("tl-source-regions")).not.toBeInTheDocument()
     expect(screen.getAllByTestId("tl-lane")).toHaveLength(2)
-    const speaker = screen.getByTestId("tl-speaker-source")
-    expect(speaker).toHaveAttribute("aria-pressed", "true")
+    const speaker = screen.getByTestId("tl-mute-source")
+    expect(speaker).toHaveAttribute("aria-pressed", "false")
     fireEvent.click(speaker)
-    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
-    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(screen.getByTestId("tl-mute-source")).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toMatchObject({ source: false, target: true })
   })
 
   // Round 8: the VTT's own timing is not ours to nudge, but a line added into
@@ -3285,6 +3386,21 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.queryByTestId("tl-track-move-to")).toBeNull()
   })
 
+  // Evidence 71C: the track menu is the board's 236 px, and "Even out
+  // loudness (3 tracks)…" stays on one line.
+  it("draws the track menu at the board's width, its Even out item on one line", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        evenOut={{ states: new Map([["target-audio", "none" as const]]), open: () => {} }}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
+    const item = screen.getByTestId("tl-track-even-out")
+    expect(item.className).toContain("whitespace-nowrap")
+    expect(item.closest("[data-slot=context-menu-content], [role=menu]")?.className).toContain("w-[236px]")
+  })
+
   // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
   // the fact the person is being asked to accept.
   it("asks before deleting, naming the track", () => {
@@ -3574,7 +3690,7 @@ describe("TimelineEditor — rows come from the track model", () => {
   it("leaves the speaker button's own click alone", () => {
     render(selectable())
     // The Source-audio row carries the speaker; pressing it must mute, not select.
-    fireEvent.click(screen.getByTestId("tl-speaker-source"))
+    fireEvent.click(screen.getByTestId("tl-mute-source"))
     expect(selectedRows()).toEqual([])
   })
 
@@ -5378,7 +5494,7 @@ describe("TimelineEditor — the gutter's trailing controls sit in one column", 
         onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
       />,
     )
-    const speaker = screen.getByTestId("tl-speaker-source")
+    const speaker = screen.getByTestId("tl-mute-source")
     const row = speaker.closest("[data-tl-track-row]")!
     // Exactly two: the name block, and the controls. Three is the bug.
     expect(row.children).toHaveLength(2)

@@ -539,7 +539,7 @@ export class Workspace {
       .filter({ visible: true })
       .first()
     const moreButton = this.page.getByRole("banner")
-      .getByRole("button", { name: /^More$/i })
+      .getByRole("button", { name: /^More actions$/i })
 
     // Wait for cold project hydration before choosing the available surface.
     // An already-open dialog is also valid (for example, setup opened it).
@@ -772,6 +772,16 @@ export class Workspace {
 
   cellRow(index = 0): Locator {
     return this.root.locator("[data-cell-id]").nth(index)
+  }
+
+  /**
+   * AQU-599: the always-visible badge on a row that carries an open thread
+   * ("1 open comment — view comments"). The hover rail's comment button is
+   * named only "1 open comment", so the "— view comments" tail is what tells
+   * the two apart.
+   */
+  commentBadge(index = 0): Locator {
+    return this.cellRow(index).getByRole("button", { name: /open comments? — view comments$/i })
   }
 
   private editableTarget(index: number): Locator {
@@ -1394,7 +1404,7 @@ export class Workspace {
 
   /** Open the workspace header ⋯ overflow menu (project-scoped actions). */
   async openHeaderOverflowMenu(): Promise<void> {
-    const moreBtn = this.page.getByRole("button", { name: /^More$/i })
+    const moreBtn = this.page.getByRole("button", { name: /^More actions$/i })
     await expect(moreBtn).toBeVisible({ timeout: 10_000 })
     await moreBtn.click()
   }

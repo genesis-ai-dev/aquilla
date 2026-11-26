@@ -105,3 +105,29 @@ describe("trackMenuScopes — sets line lengths (AQU-2252)", () => {
     expect(trackMenuIsEmpty(scopes([byId("boaz")]))).toBe(false)
   })
 })
+
+// AQU-2664 (board 71C): "Even out loudness…" is the menu's first item, on the
+// tracks that hold takes, and counts a selection like the other items.
+describe("trackMenuScopes — even out (AQU-2664)", () => {
+  const tracks = deriveTracksForFile({ trackOverrides: { music: { kind: "audio", name: "Music" } } })
+  const byId = (id: string) => tracks.find((track) => track.id === id)!
+  const withTakes = new Set(["target-audio", "music"])
+  const scopes = (targets: TimelineTrack[], canEvenOut = true) =>
+    trackMenuScopes({ targets, canRename: false, canColour: false, canEdit: false, canEvenOut, evenOutTrackIds: withTakes })
+
+  it("offers the tracks with takes, and is enough to open the menu", () => {
+    expect(scopes([byId("target-audio")]).evenable.map((t) => t.id)).toEqual(["target-audio"])
+    expect(scopes([byId("target-audio"), byId("music")]).evenable).toHaveLength(2)
+    expect(trackMenuIsEmpty(scopes([byId("music")]))).toBe(false)
+  })
+
+  it("is nothing on a track with no takes, the source row, or without the clearance", () => {
+    expect(scopes([byId("source-audio")]).evenable).toEqual([])
+    expect(scopes([byId("target-audio")], false).evenable).toEqual([])
+    expect(trackMenuIsEmpty(scopes([byId("source-audio")]))).toBe(true)
+  })
+
+  it("takes only the selected tracks that hold takes", () => {
+    expect(scopes([byId("source-audio"), byId("music")]).evenable.map((t) => t.id)).toEqual(["music"])
+  })
+})

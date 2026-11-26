@@ -6,6 +6,8 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Run the type-check as `pnpm typecheck`, in scripts and workflows too. It is the same `tsc -b` under a 6 GiB heap; a bare `tsc -b` gets Node's default ceiling (about 4 GiB at best), which the app project (about 4.8 GB) fits only while GC keeps up, and when it stops fitting every PR's preview, the dev deploy and release-verify go red together.
+
 Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
 plus environment/artifact checks. They run no tests, lint, or secret scans.
 QA tests the published preview; its green check proves compilation only.
@@ -38,6 +40,12 @@ green on the PR's head or a person adds `release:approved`.
 | Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | a `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. It does not run on pull requests. |
 | Adversarial Jev | the advisory `pr` job on every non-draft PR into `dev`, plus the 09:00 UTC nightly against deployed `dev` and `workflow_dispatch` | the `pr` job attacks the PR's own preview, keeps one sticky comment, and files no tickets; it goes red only when the harness said nothing about the commit (`HARNESS UNAVAILABLE`, `NOT RUN`, `NOT VERIFIED` — AQU-1899). The nightly files Linear tickets. Neither affects the cut or the deploy. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
+
+**UI text ships translated (AQU-2740).** `i18n:check` fails a branch that adds or
+rewords an English message without translating it into every locale. Before pushing, run
+`pnpm i18n:todo --new`, fill each `i18n-todo/<locale>.todo.json`, then run `pnpm
+i18n:import-todo`. Never grow `src/lib/i18n/translation-baseline.json` to get a green
+check. The full workflow is in `docs/I18N-CONTEXT-CATALOG.md`, under "Translation coverage".
 
 Branch protection requires the `ci.yml` jobs that always report a status
 (`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,

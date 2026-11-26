@@ -842,6 +842,30 @@ export const projectSettings = defineNamespace({
     // later slice). The dialog reuses the link flow's count sentence, scope
     // notes and same-name warning, so the two read the same.
     "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    // ── AQU-2549: join a copy the link brought in into the project's own file.
+    "projectSettings.sourceLink.joinButton": "Join a copy into my file",
+    "projectSettings.sourceLink.joinTitle": "Join a copy into my existing file",
+    "projectSettings.sourceLink.joinDescription":
+      "Your file takes the source project's text and keeps its translations and validations. " +
+      "The copy goes to Recently deleted.",
+    "projectSettings.sourceLink.joinLoading": "Looking for copies…",
+    "projectSettings.sourceLink.joinLoadFailed": "Couldn't load the copies. Close this and try again.",
+    "projectSettings.sourceLink.joinNoCopies": "This project has no copies from the source project to join.",
+    "projectSettings.sourceLink.joinCopyLabel": "Copy from the source project",
+    "projectSettings.sourceLink.joinTargetLabel": "Your file to join it into",
+    "projectSettings.sourceLink.joinCopyTranslated":
+      "{name} can't be joined because it has translations of its own, which would end up on a deleted file.",
+    "projectSettings.sourceLink.joinNoMatch": plural({
+      one: "These two files are not the same material: {same} of {count} line matches, so they can't be joined.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines match, so they can't be joined.",
+    }),
+    "projectSettings.sourceLink.joinConfirm": "Join",
+    "projectSettings.sourceLink.joinJoining": "Joining…",
+    "projectSettings.sourceLink.joinIncomplete":
+      "The copy is still being joined. This can take a moment for a big file.",
+    "projectSettings.sourceLink.joinNoConnection":
+      "The copy wasn't joined because there's no connection. Try again when you're connected.",
     "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
     "projectSettings.sourceLink.chooseFilesDescription":
       "Files this link follows are checked. Check more of the source project's " +
@@ -981,7 +1005,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote":
+      "Project Lead or above required to choose, join or replace files, or detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -1062,11 +1087,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.previewNoneSelected":
       "Pick at least one file to link.",
     // ── AQU-1679: a file this project already has can follow the link itself,
-    // instead of gaining a second copy. Offered per same-named file, off by
-    // default, and shown with what it will do before anything is linked.
+    // instead of gaining a second copy, shown with what it will do before
+    // anything is linked. AQU-2549: ticked by default when exactly one file
+    // shares the name; the lead can pick any other of his files.
     "projectSettings.linkSource.replaceOption":
       "Replace the source in my existing {name} and keep its translations",
+    // AQU-2549: the lead picks which of his files a row replaces; a row whose
+    // name matches exactly one file starts ticked with that file.
+    "projectSettings.linkSource.replaceOptionChoose":
+      "Replace the source in one of my files and keep its translations",
+    "projectSettings.linkSource.replaceTargetLabel": "Your file to replace with {name}",
+    "projectSettings.linkSource.replaceTargetPlaceholder": "Choose a file",
+    "projectSettings.linkSource.replaceTargetTaken":
+      "Another file in this list is already set to replace {name}. Pick a different file for one of them.",
+    // AQU-2549: a file picked under another name takes the source file's name.
+    "projectSettings.linkSource.replaceRenames": "{from} will be renamed {to}, the source file's name.",
     "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    // AQU-2549: the source project's import of the file has not finished.
+    "projectSettings.linkSource.replaceStillImporting":
+      "This file is still importing in the source project. Try again when the import finishes.",
     "projectSettings.linkSource.replaceCompareFailed":
       "Couldn't compare the two files. Turn this off and on to try again, or " +
       "leave it off to add the file as a separate copy.",
@@ -2993,6 +3032,55 @@ export const projectSettings = defineNamespace({
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
       },
+      "projectSettings.sourceLink.joinButton": {
+        description:
+          "Button on the Source link card (live link to the source project's source, " +
+          "Project Lead or higher). Opens a dialog to join a second copy of a file, " +
+          "which the link brought in, into the project's own file.",
+      },
+      "projectSettings.sourceLink.joinTitle": { description: "Title of the join dialog." },
+      "projectSettings.sourceLink.joinDescription": {
+        description:
+          "What joining does: the project's own file takes the source project's text and " +
+          "keeps its translations and validations; the copy is moved to Recently deleted " +
+          "(the app's name for the bin of deleted files).",
+      },
+      "projectSettings.sourceLink.joinLoading": { description: "While the dialog reads the list of copies." },
+      "projectSettings.sourceLink.joinLoadFailed": { description: "The list of copies could not be read." },
+      "projectSettings.sourceLink.joinNoCopies": {
+        description: "The project holds no copy of a source project file that could be joined.",
+      },
+      "projectSettings.sourceLink.joinCopyLabel": {
+        description: "Accessible name of the picker of copies the link brought in.",
+      },
+      "projectSettings.sourceLink.joinTargetLabel": {
+        description: "Accessible name of the picker of the project's own files the copy joins into.",
+      },
+      "projectSettings.sourceLink.joinCopyTranslated": {
+        description:
+          "Refusal: the copy has translations made on it, so it cannot be joined (joining " +
+          "removes the copy).",
+        placeholders: { name: "The copy's file name \u2014 never translated." },
+      },
+      "projectSettings.sourceLink.joinNoMatch": {
+        description:
+          "Refusal in the join dialog when fewer than half of the lines are identical: the " +
+          "two files are not the same text, so the copy cannot be joined into this file.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.sourceLink.joinConfirm": { description: "Confirm button of the join dialog." },
+      "projectSettings.sourceLink.joinJoining": { description: "Confirm button while the join runs." },
+      "projectSettings.sourceLink.joinIncomplete": {
+        description: "The join was recorded but the sync has not finished it yet (a big file).",
+      },
+      "projectSettings.sourceLink.joinNoConnection": {
+        description:
+          "Join pressed while the request could not reach the server (no connection). " +
+          "Nothing was joined and nothing is retried later: the person presses Join again.",
+      },
       "projectSettings.sourceLink.chooseFilesButton": {
         description:
           "Button on the Source link card (Project Settings) that opens a list of the " +
@@ -3195,9 +3283,52 @@ export const projectSettings = defineNamespace({
           "project already has exactly one file of the same name. On: the link " +
           "follows into that existing file \u2014 its source text is replaced by the " +
           "source project's and its translations stay \u2014 instead of adding a second " +
-          "file of that name. Off by default.",
+          "file of that name. Ticked by default when exactly one file of this project " +
+          "shares the name; a picker under it lets the lead choose another file.",
         placeholders: {
           name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceStillImporting": {
+        description:
+          "Shown under replaceOption instead of the comparison when the source " +
+          "project is still importing the file, so there is nothing to compare yet. " +
+          "It is a wait, not a mismatch.",
+      },
+      "projectSettings.linkSource.replaceOptionChoose": {
+        description:
+          "Checkbox under an upstream file in the link confirm step and in Choose files, " +
+          "when no file of this project has been picked yet for it to replace. On: a " +
+          "file picker appears to choose which of the project's files follows the link.",
+      },
+      "projectSettings.linkSource.replaceTargetLabel": {
+        description:
+          "Accessible name of the file picker under replaceOption: which of this " +
+          "project's files the upstream file replaces the source of.",
+        placeholders: {
+          name: "The source project's file name — never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceTargetPlaceholder": {
+        description: "Empty state of the file picker under replaceOption.",
+      },
+      "projectSettings.linkSource.replaceTargetTaken": {
+        description:
+          "Shown under replaceOption when two upstream files are set to replace the " +
+          "same file of this project. One file can follow only one upstream file, so " +
+          "the link waits until the lead picks another.",
+        placeholders: {
+          name: "The project's file both rows picked — never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceRenames": {
+        description:
+          "Under replaceOption (link confirm step, Choose files) and in the join dialog, when " +
+          "the project's file picked has another name than the source project's file: the " +
+          "project's file takes the source file's name once it follows it.",
+        placeholders: {
+          from: "The project's own file name as it is now \u2014 never translated.",
+          to: "The source project's file name it takes \u2014 never translated.",
         },
       },
       "projectSettings.linkSource.replaceComparing": {

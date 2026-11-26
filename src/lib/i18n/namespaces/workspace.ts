@@ -146,6 +146,8 @@ export const workspace = defineNamespace({
     "workspace.trash.empty": "No recently deleted files.",
     "workspace.trash.deleteForever": "Delete forever",
     "workspace.trash.retentionNote": "Files are kept for 30 days. \"Delete forever\" permanently wipes media.",
+    // AQU-2549: a copy joined into the project's own file cannot be restored.
+    "workspace.trash.joinedInto": "Joined into {name}, so it can't be restored.",
 
     // -- ProjectWorkspace: MoveToCorpusDialog --
     "workspace.moveToCorpus.dialogTitle": "Move to corpus",
@@ -308,6 +310,9 @@ export const workspace = defineNamespace({
 
     // -- CellTranscribeBadge --
     "workspace.transcribeBadge.loadShort": "load",
+    // ── AQU-2740: copy that was hard-coded in English at the call site ──
+    "workspace.transcribeBadge.loadingModelNote": "Loading transcription model…",
+    "workspace.transcribeBadge.downloadingModelNote": "Downloading transcription model ({percent}%)…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
     "workspace.transcribeBadge.changeModel": "Change model",
     "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
@@ -587,6 +592,17 @@ export const workspace = defineNamespace({
       screenshot: "workspace-nav",
     },
     keys: {
+      "workspace.transcribeBadge.loadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is still loading in the browser, before it can transcribe.",
+      },
+      "workspace.transcribeBadge.downloadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is downloading into the browser, before it can transcribe.",
+        placeholders: {
+          percent: "Whole number from 0 to 100: how much of the model has downloaded. Keep the % sign after it as your language writes percentages.",
+        },
+      },
       "workspace.diarize.discardWarning": {
         description:
           "Body of the browser confirm() shown before diarizing a file that already " +
@@ -937,6 +953,14 @@ export const workspace = defineNamespace({
           "permanently purges a soft-deleted file's data (as opposed to " +
           "common.delete, the everyday delete action elsewhere).",
         maxLength: 24,
+      },
+      "workspace.trash.joinedInto": {
+        description:
+          "Shown under a row of the 'Recently deleted' dialog in place of its Restore " +
+          "button: the file was a copy from the source project that was joined into " +
+          "one of the project's own files (projectSettings.sourceLink.joinButton), so " +
+          "restoring it would bring back a second file that no longer follows the source.",
+        placeholders: { name: "The project's own file it was joined into \u2014 never translated." },
       },
       "workspace.trash.retentionNote": {
         description:

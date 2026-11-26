@@ -2,27 +2,48 @@
 // the playback mixer applies (lib/audio/mixer.ts), so an export sounds like
 // the timeline. Applied to a clip's KEPT part (after its trim), whose start and
 // end are where the fades run from and to.
+//
+// AQU-2664: the volume is the take's GAIN as lib/audio/take-gain.ts works it
+// out, in its stage order — the evening-out correction, then its own volume —
+// the one rule the mixer reads too; then its fades; and the peak guard holds
+// the sum under full scale, as the mixer's limiter does on playback.
 
-export interface ClipLevelFields {
-  gainDb?: number | null
+import { takeGainDb, type TakeGainFields } from "@/lib/audio/take-gain"
+
+export interface ClipLevelFields extends TakeGainFields {
   fadeInMs?: number | null
   fadeOutMs?: number | null
+  /** AQU-2664: the take's TRACK volume, dB (the header's fader), stamped on
+   *  by `withTrackVolumes` for an export. Playback never reads it: there the
+   *  mixer's track node applies it. */
+  trackGainDb?: number | null
+}
+
+/** The gain an export applies: the take's stages, then its track's volume
+ *  (−∞ = silence). The one helper every export path goes through. */
+export function exportGainDb(att: ClipLevelFields): number {
+  return takeGainDb(att) + (att.trackGainDb ?? 0)
 }
 
 /** Does this take play at anything other than its recorded level? */
 export function hasClipLevel(att: ClipLevelFields | null | undefined): boolean {
-  return Boolean(att && ((att.gainDb ?? 0) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
+  return Boolean(att && (exportGainDb(att) !== 0 || (att.fadeInMs ?? 0) > 0 || (att.fadeOutMs ?? 0) > 0))
 }
 
-/** Just the level fields, for carrying on an export's own clip records. */
+/** Just the level fields, for carrying on an export's own clip records: the
+ *  take's gain as it plays (evening out already in it), the TRACK's volume
+ *  on its own (review M3: folded together, a track at −∞ read as 0 dB, since
+ *  a take's gain must be finite), and the fades. `exportGainDb` adds the two. */
 export function levelFields(att: ClipLevelFields | null | undefined): ClipLevelFields {
-  return hasClipLevel(att) ? { gainDb: att!.gainDb ?? null, fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null } : {}
+  return hasClipLevel(att)
+    ? { gainDb: takeGainDb(att), trackGainDb: att!.trackGainDb ?? null, fadeInMs: att!.fadeInMs ?? null, fadeOutMs: att!.fadeOutMs ?? null }
+    : {}
 }
 
 /** The kept part with its volume and fades applied (a copy); untouched when flat. */
 export function applyClipLevelPcm(kept: Float32Array, rate: number, att: ClipLevelFields | null | undefined): Float32Array {
   if (!hasClipLevel(att)) return kept
-  const g = Math.pow(10, (att!.gainDb ?? 0) / 20)
+  const g = Math.pow(10, exportGainDb(att!) / 20)
   const fin = Math.round(((att!.fadeInMs ?? 0) / 1000) * rate)
   const fout = Math.round(((att!.fadeOutMs ?? 0) / 1000) * rate)
   const n = kept.length
@@ -31,7 +52,7 @@ export function applyClipLevelPcm(kept: Float32Array, rate: number, att: ClipLev
     let f = g
     if (fin > 0 && i < fin) f *= i / fin
     if (fout > 0 && i > n - fout) f *= Math.max(0, (n - i) / fout)
-    out[i] = kept[i] * f
+    out[i] = guardPeak(kept[i] * f)
   }
   return out
 }

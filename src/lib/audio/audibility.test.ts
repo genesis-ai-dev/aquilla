@@ -14,9 +14,9 @@
 
 import { beforeEach, describe, expect, it } from "vitest"
 
-import { audibilityKey, loadAudibility, toggleAudibility, trackAudible } from "./audibility"
+import { audibilityKey, loadAudibility, setDrawnRows, sourceHeard, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed } from "./audibility"
 import { getQueueAudibility, setQueueAudibility } from "./play-queue"
-import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 
 /** A user-added track's slot is its own uuidv7 id. */
 const ADDED = "01a043cd-1517-758d-9647-70d82c4551c9"
@@ -83,5 +83,96 @@ describe("trackAudible — the reader agrees with the writer", () => {
     expect(trackAudible(reloaded, "target")).toBe(false)
     expect(trackAudible(reloaded, ADDED)).toBe(false)
     expect(trackAudible(reloaded, "source")).toBe(true)
+  })
+})
+
+describe("solo (AQU-2664)", () => {
+  it("starts with nothing soloed, and every row heard", () => {
+    for (const row of EVERY_ROW) {
+      expect(trackSoloed(getQueueAudibility(), row), row).toBe(false)
+      expect(trackHeard(getQueueAudibility(), row), row).toBe(true)
+    }
+  })
+
+  it.each(EVERY_ROW)("soloing %s silences every other row, and is reversible", (row) => {
+    toggleSolo(FILE, row)
+    const state = getQueueAudibility()
+    expect(trackSoloed(state, row)).toBe(true)
+    expect(trackHeard(state, row)).toBe(true)
+    for (const other of EVERY_ROW) {
+      if (other === row) continue
+      // The default row answers to three names; they are one row.
+      const same = ["target", RECORDING_SLOT, GENERATED_VOICE_SLOT].includes(row) && ["target", RECORDING_SLOT, GENERATED_VOICE_SLOT].includes(other)
+      expect(trackHeard(state, other), other).toBe(same)
+      // Their own mute is untouched.
+      expect(trackAudible(state, other), other).toBe(true)
+    }
+    toggleSolo(FILE, row)
+    for (const other of EVERY_ROW) expect(trackHeard(getQueueAudibility(), other)).toBe(true)
+  })
+
+  it("lets several rows be soloed at once", () => {
+    toggleSolo(FILE, "source")
+    toggleSolo(FILE, ADDED)
+    const state = getQueueAudibility()
+    expect(trackHeard(state, "source")).toBe(true)
+    expect(trackHeard(state, ADDED)).toBe(true)
+    expect(trackHeard(state, "target")).toBe(false)
+  })
+
+  it("a muted row stays silent while soloed", () => {
+    toggleAudibility(FILE, ADDED)
+    toggleSolo(FILE, ADDED)
+    expect(trackHeard(getQueueAudibility(), ADDED)).toBe(false)
+  })
+
+  it("the play queue's slot rule agrees (overlays)", () => {
+    toggleSolo(FILE, ADDED)
+    const state = getQueueAudibility()
+    expect(slotAudible(state, ADDED)).toBe(true)
+    expect(slotAudible(state, RECORDING_SLOT)).toBe(false)
+    expect(sourceHeard(state)).toBe(false)
+  })
+
+  it("round-trips through the disk copy with the mutes", () => {
+    toggleAudibility(FILE, "target")
+    toggleSolo(FILE, ADDED)
+    const reloaded = loadAudibility(FILE)
+    expect(trackSoloed(reloaded, ADDED)).toBe(true)
+    expect(trackAudible(reloaded, "target")).toBe(false)
+  })
+})
+
+// Review M4: a soloed track that is deleted or hidden must not leave the rest
+// silent with nothing lit to undo it. Solo entries for rows not drawn are
+// ignored (kept, so the solo comes back with the row).
+describe("solo on a row that is no longer drawn (review M4)", () => {
+  it("is ignored: every drawn row and the film are heard", () => {
+    toggleSolo(FILE, ADDED)
+    setDrawnRows(["source", "target"])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, "target")).toBe(true)
+    expect(trackHeard(state, "source")).toBe(true)
+    expect(slotAudible(state, RECORDING_SLOT)).toBe(true)
+    expect(sourceHeard(state)).toBe(true)
+  })
+
+  it("counts again once the row is drawn again", () => {
+    toggleSolo(FILE, ADDED)
+    setDrawnRows(["source", "target"])
+    setDrawnRows(["source", "target", ADDED])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, ADDED)).toBe(true)
+    expect(trackHeard(state, "target")).toBe(false)
+    expect(sourceHeard(state)).toBe(false)
+  })
+
+  it("keeps a drawn row's solo working beside an ignored one", () => {
+    toggleSolo(FILE, ADDED)
+    toggleSolo(FILE, "target")
+    setDrawnRows(["source", "target"])
+    const state = getQueueAudibility()
+    expect(trackHeard(state, "target")).toBe(true)
+    expect(trackHeard(state, "source")).toBe(false)
   })
 })

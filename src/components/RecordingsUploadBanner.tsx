@@ -32,7 +32,12 @@ const FAILURE_KEY: Record<BulkFailureCode, MessageKey> = {
   other: "recordingsUpload.failures.other",
 }
 
-export function RecordingsUploadBanner() {
+/**
+ * Re-check S2: `evenOutTrack` is given when the track the takes landed on is
+ * evened out. A bulk upload never evens its own takes (it would download each
+ * again); its finish offers to even the track instead.
+ */
+export function RecordingsUploadBanner({ evenOutTrack }: { evenOutTrack?: () => void } = {}) {
   const state = useBulkUploadState()
   const stateRef = useRef(state)
   useInsertionEffect(() => {
@@ -44,7 +49,7 @@ export function RecordingsUploadBanner() {
     id: state ? `recordings-upload:${state.finished ? "done" : "run"}` : "recordings-upload",
     active: state != null,
     type: !state || !state.finished ? "loading" : problem ? "warning" : "success",
-    body: state ? <RecordingsStatus state={state} onShowFailures={() => setShowFailures(true)} /> : null,
+    body: state ? <RecordingsStatus state={state} onShowFailures={() => setShowFailures(true)} evenOutTrack={evenOutTrack} /> : null,
     onClose: () => {
       const current = stateRef.current
       if (!current) return
@@ -58,9 +63,11 @@ export function RecordingsUploadBanner() {
 function RecordingsStatus({
   state,
   onShowFailures,
+  evenOutTrack,
 }: {
   state: BulkUploadState
   onShowFailures: () => void
+  evenOutTrack?: () => void
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -105,6 +112,11 @@ function RecordingsStatus({
               {t("recordingsUpload.banner.tryAgain")}
             </Button>
           </>
+        )}
+        {evenOutTrack && done > 0 && (
+          <Button type="button" size="xs" variant="outline" onClick={evenOutTrack} data-testid="recordings-even-out">
+            {t("recordingsUpload.banner.evenOutTrack")}
+          </Button>
         )}
         {dismiss}
       </div>

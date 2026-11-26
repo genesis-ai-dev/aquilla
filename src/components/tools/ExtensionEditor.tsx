@@ -11,12 +11,9 @@ import { EditWithMenu } from "./EditWithMenu"
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import type { EditorTableHandle } from "@/components/EditorTable"
 import type { ToolFrameControl } from "./useToolHost"
-import { Link } from "react-router-dom"
-import { ShieldCheck, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { NoteOnClick } from "@/components/ui/info-note"
 import type { ToolHostServices } from "@/lib/tools/live-data"
-import { useScopeLabel } from "./scope-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   STANDARD_EDITOR,
@@ -61,9 +58,9 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
   }
   const [failures, setFailures] = useState<ReadonlyMap<string, string>>(() => new Map())
   const failedIds = useMemo(() => new Set(failures.keys()), [failures])
-  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null, failedIds) : STANDARD_EDITOR
+  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id), failedIds) : STANDARD_EDITOR
   // What the user would have had without the failure (the failed editor).
-  const intended = fileId && failedIds.size > 0 ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null) : null
+  const intended = fileId && failedIds.size > 0 ? resolveEditor(state, fileId, editors.map((e) => e.id)) : null
   const failure = intended && failures.has(intended)
     ? { toolId: intended, name: editors.find((e) => e.id === intended)?.name ?? intended, reason: failures.get(intended) ?? "" }
     : null
@@ -72,7 +69,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     setFailures((prev) => (prev.has(toolId) ? prev : new Map(prev).set(toolId, reason)))
   }, [])
   const retry = useCallback(() => setFailures(new Map()), [])
-  const projectDefault = resolveEditor({ project: state.project, files: {} }, "", editors.map((e) => e.id), ctx?.defaultEditorId ?? null, failedIds)
+  const projectDefault = resolveEditor({ project: state.project, files: {} }, "", editors.map((e) => e.id), failedIds)
   const choose = useCallback(
     (editorId: string, wholeProject: boolean) => {
       if (!fileId) return
@@ -84,14 +81,17 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     },
     [fileId, username, projectId],
   )
-  const explicitStandard = fileId ? (state.files[fileId] ?? state.project) === STANDARD_EDITOR : false
-  const pending = Boolean(fileId && ctx?.defaultEditorEnabled && ctx.session && !ctx.toolsReady && !explicitStandard)
+  // Native Aquilla editor is always the default, so there is no wait for
+  // extensions before rendering the editor unless the user explicitly saved a
+  // custom extension editor for this file or project.
+  const savedCustom = Boolean(fileId && ((state.files[fileId] && state.files[fileId] !== STANDARD_EDITOR) || (!state.files[fileId] && state.project && state.project !== STANDARD_EDITOR)))
+  const pending = Boolean(savedCustom && ctx?.session && !ctx.toolsReady)
   return { editors, selected, choose, pending, projectDefault, failure, reportFailure, retry }
 }
 
 /** The "Edit with" menu above the editor (EditWithMenu.tsx). */
-export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
-  return <EditWithMenu choice={choice} />
+export function ExtensionEditorSwitcher({ choice, fileId }: { choice: ExtensionEditorChoice; fileId?: string | null }) {
+  return <EditWithMenu choice={choice} fileId={fileId} />
 }
 
 /** The extension editor failed to load, so the original editor is open. */
@@ -165,7 +165,6 @@ export function ExtensionEditorSurface({
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="extension-editor-surface">
       {bar}
-      <FirstPartyNotice toolId={choice.selected} />
       <MountedTool
         key={`${choice.selected}:${file.fileId}`}
         toolId={choice.selected}
@@ -179,40 +178,6 @@ export function ExtensionEditorSurface({
         // The original editor is the fallback whenever the extension fails to load.
         onFailure={(reason) => choice.reportFailure(choice.selected, reason)}
       />
-    </div>
-  )
-}
-
-/** Explicit, visible auto-grant: a first-party extension is granted its
- *  scopes without the install dialog, so the editor says so (and links to
- *  where it can be revoked). Right after the auto-grant it is a full notice
- *  row; after that a compact badge in the extensions bar that carries the
- *  same sentence (tooltip + accessible text), so the editor keeps the same
- *  vertical rhythm as the built-in one. */
-function FirstPartyNotice({ toolId }: { toolId: string }) {
-  const t = useT()
-  const scopeLabel = useScopeLabel()
-  const ctx = useToolsMount()
-  const tool = ctx?.tools.find((x) => x.id === toolId)
-  const [dismissed, setDismissed] = useState(false)
-  if (!ctx || !tool?.firstParty || ctx.autoGranted.length === 0 || dismissed) return null
-  const scopes = tool.grantedScopes.map(scopeLabel).join(", ")
-  return (
-    <div
-      className="flex items-center gap-2 border-b bg-muted/20 px-3 py-1 text-[11px] leading-4 text-muted-foreground"
-      data-testid="first-party-notice"
-      role="note"
-    >
-      <ShieldCheck className="size-3.5 shrink-0 text-emerald-600" aria-hidden />
-      <p className="min-w-0 flex-1 truncate" title={t("extensions.firstParty.autoGranted", { name: tool.name, scopes })}>
-        {t("extensions.firstParty.autoGranted", { name: tool.name, scopes: scopes || t("extensions.firstParty.none") })}{" "}
-        <Link className="underline" to={`/project/${ctx.projectId}/extensions`}>
-          {t("extensions.firstParty.manage")}
-        </Link>
-      </p>
-      <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted" aria-label={t("common.dismiss")} onClick={() => setDismissed(true)}>
-        <X className="size-3" aria-hidden />
-      </button>
     </div>
   )
 }

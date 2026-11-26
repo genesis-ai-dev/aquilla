@@ -63,6 +63,9 @@ export interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null when active. */
   deletedAt?: number | null
+  /** AQU-2549: Recently deleted only — the project's own file this copy was
+   *  joined into. Such a copy cannot be restored. */
+  joinedInto?: { fileId: string; name: string }
   /** AQU-656: original import blob exists. Absent on older sync-workers. */
   hasOriginalSource?: boolean
   /** AQU-2459: the source side is a revision chain; refresh it with a

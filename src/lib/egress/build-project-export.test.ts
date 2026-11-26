@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { CellData } from "@/hooks/useCells"
 import type { AudioAssemblyArgs, AudioAssemblyResult } from "@/lib/export/audio-assembly"
+import { assembleAudioEntries } from "@/lib/export/audio-assembly"
 import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
 import { SourceExportError } from "@/lib/sync/source-export"
 import {
@@ -685,5 +686,53 @@ describe("buildProjectExport — hidden lines in Word and PowerPoint files", () 
       }),
     )
     expect(await textOf(entries[0].data, SLIDE_XML)).toBe("Un. Deux. Trois.")
+  })
+})
+
+// Re-check S5: the org egress zip applies each file's track volume through
+// the one gain helper, as every export from the editor does: a track at −∞
+// is silent in the zip too.
+describe("buildProjectExport — track volume (AQU-2664)", () => {
+  const listing = listingWith("c1", "take1")
+  const deps = (over: Partial<BuildProjectExportDeps> = {}) => makeDeps({
+    fetchAudioAttachments: async () => listing,
+    loadCellFiles: async ({ projectFiles }) =>
+      projectFiles.map((f) => ({ fileId: f.id, fileName: f.name, cells: [cell({ id: "c1", fileId: f.id })] })),
+    fetchAudioBytes: async () => new Uint8Array([1, 2, 3]),
+    decodeAudio: async () => new Float32Array(480).fill(0.5),
+    ...over,
+  })
+  const samples = async (blob: Blob) => {
+    const v = new DataView(await blob.arrayBuffer())
+    const out: number[] = []
+    for (let o = 44; o + 1 < v.byteLength; o += 2) out.push(v.getInt16(o, true))
+    return out
+  }
+
+  it("stamps every take with its track's volume", async () => {
+    const assembleAudio = vi.fn(async (_args: AudioAssemblyArgs) => ({ entries: [], skipped: [], peakPcmBytes: 0 }))
+    await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm", trackOverrides: { "target-audio": { volumeDb: "-inf" } } }]),
+      opts({ textMode: "none", audioMode: "separate-clips", useCache: false }),
+      deps({ assembleAudio }),
+    )
+    const att = assembleAudio.mock.calls[0][0].cells[0].attachments!.take1 as { trackGainDb?: number }
+    expect(att.trackGainDb).toBe(-Infinity)
+  })
+
+  it("writes a track at −∞ as silence, and one at 0 dB as recorded", async () => {
+    const run = async (trackOverrides?: EgressFileRef["trackOverrides"]) => {
+      const { entries, report } = await buildProjectExport(
+        sel([{ id: "f1", name: "GEN.SFM", type: "usfm", ...(trackOverrides ? { trackOverrides } : {}) }]),
+        opts({ textMode: "none", audioMode: "separate-clips", audioFormat: "wav", useCache: false }),
+        // The real assembler, so the samples are what the zip holds.
+        deps({ assembleAudio: assembleAudioEntries }),
+      )
+      const wav = entries.find((e) => e.path.endsWith(".wav"))
+      if (!wav) throw new Error(`no wav: ${JSON.stringify(report)}`)
+      return samples(wav.data as Blob)
+    }
+    expect((await run({ "target-audio": { volumeDb: "-inf" } })).every((v) => v === 0)).toBe(true)
+    expect((await run()).some((v) => v !== 0)).toBe(true)
   })
 })

@@ -3,6 +3,7 @@ export const DEFAULT_WATCH_MINUTES: number
 export const MIN_REQUESTS: number
 export const RATE_FLOOR: number
 export const RATE_FACTOR: number
+export const EARLY_EXIT_RATE: number
 
 /** Invocation counts for one Worker over a window. */
 export interface InvocationSample {
@@ -10,10 +11,13 @@ export interface InvocationSample {
   errors: number
 }
 
-export type WorkerVerdict = { verdict: "ok" | "bad" | "quiet" | "no-signal"; why: string }
+export type WorkerVerdict = { verdict: "ok" | "bad" | "quiet" | "no-signal"; why: string; rate?: number }
 
 /** One Worker's verdict from its failed-invocation counts before and after the deploy. */
 export function workerVerdict(samples: { before?: InvocationSample | null; after?: InvocationSample | null }): WorkerVerdict
+
+/** Whether a mid-watch reading is bad enough to stop watching and decide now. */
+export function decisiveEarly(workers: WorkerVerdict[]): boolean
 
 /** The release's decision from every Worker's verdict and the live probe. */
 export function decideRollback(input: {

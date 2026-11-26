@@ -354,7 +354,7 @@ export function ArchivedProjects() {
                     loadingLabel={t("org.archivedProjects.loadingLabel")}
                     getRowId={(p) => p.id}
                     initialSorting={[{ id: "archivedAt", desc: true }]}
-                    searchPlaceholder="Search archived projects…"
+                    searchPlaceholder={t("org.archivedProjects.searchPlaceholder")}
                     globalFilterFn={(row, _columnId, filterValue) => {
                       const q = String(filterValue).trim().toLowerCase()
                       if (!q) return true
@@ -407,7 +407,7 @@ export function ArchivedProjects() {
                     loadingLabel={t("org.archivedProjects.loadingDeletedFilesLabel")}
                     getRowId={(f) => f.fileId}
                     initialSorting={[{ id: "deletedAt", desc: true }]}
-                    searchPlaceholder="Search deleted files…"
+                    searchPlaceholder={t("org.archivedProjects.deletedFilesSearchPlaceholder")}
                     globalFilterFn={(row, _columnId, filterValue) => {
                       const q = String(filterValue).trim().toLowerCase()
                       if (!q) return true

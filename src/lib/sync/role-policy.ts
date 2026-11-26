@@ -87,6 +87,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.trim": ROLE.CONTRIBUTOR,
   // AQU-2327: volume and fades need what a trim needs.
   "cell.audio.gain": ROLE.CONTRIBUTOR,
+  "cell.audio.even": ROLE.CONTRIBUTOR,
   "cell.audio.place": ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   "cell.audio.cut": ROLE.CONTRIBUTOR,
@@ -244,6 +245,16 @@ export const SOURCE_AUDIO_ATTACH_FLOOR: number = ROLE.PROJECT_LEAD
 /** Same fail-open contract as `canPerform`: an unknown role is let through. */
 export function canAttachSourceAudio(roleLevel: number | null | undefined): boolean {
   return roleLevel == null || roleLevel >= SOURCE_AUDIO_ATTACH_FLOOR
+}
+
+/**
+ * AQU-2664 (Sam, Nov 19): may this person move a track's volume fader? A
+ * `file.track.set` that sets ONLY `volumeDb` is held to a take's volume floor
+ * (`cell.audio.gain`); every other track setting keeps `file.track.set`'s.
+ * Mirrors sync-worker/src/events/track-editing-authority.ts `trackPatchRoleFloor`.
+ */
+export function canSetTrackVolume(roleLevel: number | null | undefined): boolean {
+  return canPerform("cell.audio.gain", roleLevel)
 }
 
 /**

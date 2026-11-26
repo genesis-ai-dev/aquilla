@@ -14,6 +14,7 @@
 
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellData } from "@/hooks/useCells"
+import { levelBeforeCut } from "@/lib/audio/cut-take"
 import { buildAudioId, fetchCellAudio, parseFrontierAudioUrl, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
@@ -26,6 +27,11 @@ import { recordTakeAdded } from "@/lib/history/take-steps"
 export interface JoinPiece {
   audioId: string
   url: string
+  /** AQU-2494 (browser pass, Nov 12): its volume and fades; the joined take
+   *  is given the level undoing the cut would give it (`levelBeforeCut`). */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
   trimStartMs?: number | null
   trimEndMs?: number | null
   durationMs?: number | null
@@ -165,6 +171,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
     slot: args.slot,
     username: args.username,
     label: args.label,
+    level: levelBeforeCut(args.pieces),
     surface: "recording-tab" as const,
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
   }

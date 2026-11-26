@@ -38,7 +38,7 @@ test("typing a translation into a repeated segment fills the other repetitions o
 
   // …and the two repetitions receive the same text, with the toast that
   // offers to take it back.
-  await expect(alice.getByText("Applied to 2 repeated segments")).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText("Applied to 2 repeated rows")).toBeVisible({ timeout: 10_000 })
   await expect.poll(() => ws.readTargetText(2), { timeout: 10_000 }).toBe(TRANSLATION)
   await expect.poll(() => ws.readTargetText(3), { timeout: 10_000 }).toBe(TRANSLATION)
 
@@ -85,7 +85,7 @@ test("the fill toast's Validate all signs the filled repetitions off", async ({ 
   const [first, , second, third] = seeded.cellIds
 
   await ws.editCell(0, TRANSLATION)
-  await expect(alice.getByText("Applied to 2 repeated segments")).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText("Applied to 2 repeated rows")).toBeVisible({ timeout: 10_000 })
   await expect(ws.modalDialogs()).toHaveCount(0)
   await alice.getByRole("button", { name: "Validate all", exact: true }).click()
   // AQU-2176: the outcome is a dialog that NAMES the rows it signed off and

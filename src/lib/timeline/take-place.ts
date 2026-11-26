@@ -181,7 +181,7 @@ function placeMsFor(layout: TimelineLayout, take: PlacedTake, anchorSec: number)
  * its own place, else its line's (the pre-AQU-646-stage-3 rungs). Following
  * the recordings: its own place there, else its place following the source.
  */
-function placeNowMs(cell: CellData, audioId: string, timing: Timing): number {
+export function placeNowMs(cell: CellData, audioId: string, timing: Timing): number {
   const att = cell.attachments?.[audioId]
   if (timing === "recordings") {
     const ms = att?.recordingsOffsetMs

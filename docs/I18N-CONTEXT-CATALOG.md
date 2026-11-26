@@ -69,7 +69,10 @@ unchanged; the one pre-existing gap this shipped with has since been filled, so
 | `src/lib/i18n/namespaces/duplicate-exceptions.ts` | Reviewed same-English-different-meaning exceptions |
 | `src/lib/i18n/catalog-export.ts` | Interchange: catalog ⇄ Aquilla project ⇄ `messages/<locale>.ts` |
 | `src/lib/i18n/messages/<locale>.ts` | **Generated** per-locale catalogs (do not hand-edit) |
-| `scripts/i18n-catalog.ts` | CLI: `check` / `export` / `import` |
+| `src/lib/i18n/coverage.ts` | **Translation ratchet** — which keys each locale falls back on, checked against the baseline |
+| `src/lib/i18n/translation-baseline.json` | **Generated** — the keys each locale may still show in English; only shrinks |
+| `scripts/i18n-catalog.ts` | CLI: `check` / `export` / `import` / `import-todo` / `baseline` |
+| `scripts/i18n-todo.ts` | CLI: per-locale packets of what is left to translate (`--new`: only this branch's) |
 
 The sidecar is authored in TypeScript rather than JSON on purpose: `tsc` then rejects an
 entry for a key that doesn't exist and a reference to a screenshot surface that isn't
@@ -324,7 +327,8 @@ apart, and only one of its two failure modes still blocks `pnpm test`.
    - otherwise it needs an entry of its own; see **When a per-key entry is required, not
      just allowed** above.
 3. Document any `{placeholder}` the string uses.
-4. Run `pnpm i18n:check` (or just `pnpm test`).
+4. Translate it into every locale — see **Translating a branch's new strings** below.
+5. Run `pnpm i18n:check` (or just `pnpm test`).
 
 **This is enforced, not advisory.** `catalogContextIssues()` runs in
 `src/lib/i18n/context.test.ts`, so `pnpm test` — the CI gate — fails on an uncovered key
@@ -352,6 +356,75 @@ The lint checks:
 A key can also be carried as a named, reviewed exception via `LEGACY_CONTEXT_GAPS` in
 `context.ts` — see **When a per-key entry is required** above. It's the only escape hatch,
 it's self-verifying, and it's empty today.
+
+## Translation coverage — the ratchet (AQU-2740)
+
+A key a locale leaves out falls back to English (`translate.ts`), which keeps the UI
+working and hid the problem for months: nothing ever made a translation land. Locale
+catalogs only grew when someone ran a sweep, so every feature that added English shipped in
+English everywhere else. On 2026-11-19, 40% of the Chinese UI (4,059 of 10,218 keys) was
+English, and the locales swept most recently in late October were already 1,650 keys behind.
+A partner (ETEN) asked how often the Chinese UI is updated after a release; the honest answer
+was "whenever someone remembers".
+
+So the catalogs now have the same kind of ratchet as `eslint-suppressions.json`:
+
+- **`translation-baseline.json`** lists, per key, the locales still allowed to fall back. It
+  is the backlog as it stood when the ratchet landed, plus anything deliberately kept in
+  English. It is keyed by message key, one key per line, so branches touching different keys
+  merge cleanly.
+- **Every key outside it must be translated, against its current English, in every locale.**
+  A gap is either *untranslated* (no value) or *stale* (`source-hashes.json` says the
+  translation was made against English that has since changed). Rewording a string counts
+  the same as adding one, because a translator has to see it.
+- **It only shrinks.** `pnpm i18n:import` and `i18n:import-todo` prune the entries they fill,
+  so a backlog sweep needs no extra step. A baseline entry that is no longer a gap fails the
+  check (`pnpm i18n:baseline` prunes it), so nothing can quietly slip back to English. Growing
+  it takes an explicit command (below) and shows up in review.
+
+Keys are checked whole. A plural key with a current translation passes even if a locale's
+extra plural category is missing; `selectPluralForm` falls back within the key, and `pnpm
+i18n:todo` still lists the leaf.
+
+`pnpm i18n:check` (CI's lint job, on every PR to `dev`) and `src/lib/i18n/coverage.test.ts`
+(`pnpm test`) both run the comparison. The failure names each key, its locales, and the fix.
+
+### Translating a branch's new strings
+
+```bash
+pnpm i18n:todo --new        # i18n-todo/<locale>.todo.json: only what this branch added or reworded
+# fill every value in each packet, using <locale>.todo.notes.json for context
+pnpm i18n:import-todo       # imports every packet; prunes nothing it did not fill
+pnpm i18n:check
+```
+
+A packet is seeded with English, and the importer treats a value still equal to English as
+skipped. A packet you didn't fill is a no-op, and the check keeps failing until it's done.
+Translate each locale on its own terms; the variety notes at the top of
+`src/lib/i18n/locales.ts` and `docs/swarm/I18N-TRANSLATION-PROVENANCE.md` say what each
+locale's catalog is written in. Do not derive one locale from another (Malay from Indonesian,
+Traditional from Simplified Chinese).
+
+The machine translations land as unreviewed drafts, the same as every catalog today. A
+native-speaker review replaces them through the same import.
+
+### When the baseline may grow
+
+- **A string that reads the same in every language** (a product name, a format, a label a
+  partner's brief keeps in English): `pnpm i18n:baseline --allow <key>… [--locale <code>…]`.
+  Nothing else can record "deliberately English", because the importer drops a value equal
+  to English.
+- **A wholesale reset**: `pnpm i18n:baseline --rebuild` allows every current gap. It exists
+  for an emergency (a branch must land before its translations can) and belongs in a commit
+  of its own that says why. Never use it to make a check pass.
+
+### How often each locale is updated
+
+Every release carries its own strings translated in every locale, because a PR can't merge
+until they are. The backlog in the baseline shrinks whenever someone runs a sweep: `pnpm
+i18n:todo --locale <code>` lists every string a locale still shows in English, with the English
+and the context note. That file is also the answer when a partner asks which strings still
+need translating.
 
 ## Dogfooding: the catalog is an Aquilla project
 

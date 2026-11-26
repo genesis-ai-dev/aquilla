@@ -76,15 +76,25 @@ test("describe → watch it build → try it on sample verses → add it → it 
   const preview = review.getByTestId("extension-preview-frame").contentFrame().frameLocator(EXTENSION_DOCUMENT)
   await expect(preview.locator("body")).toContainText("words", { timeout: 30_000 })
 
-  // 3 Add to project → its page, then the editor's side panel.
-  await tools.addCandidate()
-  await alice.waitForURL(/\/extensions\/[0-9a-f-]{36}$/)
+  // 3 Add to project → back in the editor, where they work, with the
+  // extension already open beside the verses: they chose "Side panel", so
+  // Add returns them to the file instead of the extension's own page
+  // (AQU-2772) and shows the panel without another click.
+  const toolId = await tools.addCandidate()
+  await alice.waitForURL(new RegExp(`/project/${seeded.projectId}/editor/file/${seeded.fileId}$`))
+  const ws = new Workspace(alice)
+  await ws.waitForEditor()
+  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
+  await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
+
+  // Its own page still runs it on the project's real verses.
+  await alice.goto(`/project/${seeded.projectId}/extensions/${toolId}`)
   await expect(tools.toolFrame("Word Count").locator("body")).toContainText("MAT 1:1", { timeout: 30_000 })
 
+  // On a later visit the editor's palette opens it in the side panel.
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  await new Workspace(alice).waitForEditor()
+  await ws.waitForEditor()
   await tools.openInSidePanelFromPalette("Word Count")
-  const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
 })
 
@@ -99,13 +109,7 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
     await route.fulfill({ json: { ok: true, source: FOCUS_EDITOR_SOURCE, manifest, model: "anthropic/claude-opus-5.5", usage } })
   })
   const tools = new ToolsPage(alice)
-  // The product default (the first-party editor extension), so the file view
-  // shows "Edit with"; "Build a new editor…" is the menu's footer item.
-  await tools.optIntoDefaultEditorExtension()
-  await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  await tools.editWithTrigger().click()
-  await alice.getByTestId("build-own-editor").click()
-  await alice.waitForURL(/\/extensions\?where=editor$/)
+  await alice.goto(`/project/${seeded.projectId}/extensions?where=editor`)
   await expect(alice.getByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")
 
   const name = await tools.buildExtension("Show one verse at a time in large text, with the source above it")
@@ -120,4 +124,6 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   await tools.switchEditor("One Verse Editor")
   await expect(tools.toolFrame("One Verse Editor").getByLabel("Translation")).toBeVisible({ timeout: 30_000 })
+  await tools.editWithTrigger().click()
+  await expect(alice.getByTestId("build-own-editor")).toBeVisible()
 })

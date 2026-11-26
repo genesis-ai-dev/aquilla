@@ -695,7 +695,7 @@ export function OrgHome() {
                         getRowId={(s) => String(s.org.id)}
                         onRowClick={(s) => openOrg(s.org.id)}
                         initialSorting={[{ id: "organization", desc: false }]}
-                        searchPlaceholder="Filter organizations…"
+                        searchPlaceholder={t("org.orgHome.organizationsPanel.filterPlaceholder")}
                         globalFilterFn={(row, _columnId, filterValue) => {
                           const q = String(filterValue).trim().toLowerCase()
                           if (!q) return true

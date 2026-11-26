@@ -50,7 +50,7 @@ export function WorkspaceHeaderActions({
           triggerVariant="outline"
           triggerSize="icon"
           triggerClassName="bg-card shadow-xs"
-          ariaLabel="More"
+          ariaLabel={t("nav.workspaceActions.moreAria")}
           testId="workspace-more-menu"
         />
       ) : null}

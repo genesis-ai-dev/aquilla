@@ -87,7 +87,7 @@ export function isDocsOrTestOnly(files: string[]): boolean
 /**
  * True when every file is a generated locale catalog
  * (`src/lib/i18n/messages/<locale>.ts`, never `en.ts`, `index.ts` or `all.ts`)
- * or the source-hash sidecar beside them. The one kind of direct commit the
+ * or the source-hash sidecar and translation baseline beside them. The one kind of direct commit the
  * release line picks without a person.
  */
 export function isLocaleCatalogOnly(files: string[]): boolean

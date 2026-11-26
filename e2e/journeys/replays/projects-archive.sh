@@ -8,8 +8,9 @@ ab find role button click --name "New project" >/dev/null || fail "New project b
 ab wait --text "Create new project" >/dev/null || fail "dialog"
 ab find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
 ab find label "Project name" fill "$NAME" >/dev/null && ab find label "Source language" fill "en" >/dev/null && ab find label "Language lanes" fill "fr" >/dev/null || fail "fill"
+ab wait '[role="dialog"] button[type="submit"]:enabled' >/dev/null || fail "Create project did not become enabled"
 ab find role button click --name "Create project" >/dev/null || fail "Create project button"
-ab wait --text "Open project" >/dev/null || fail "overview did not load"
+ab wait --text "$NAME" >/dev/null || fail "overview did not load"
 overview=$(ab get url)
 # Header overflow menu, then the Archive item and its confirm dialog.
 ab find role button click --name "More actions" >/dev/null || fail "More actions button"

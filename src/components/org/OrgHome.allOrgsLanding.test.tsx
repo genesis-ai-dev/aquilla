@@ -52,6 +52,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 
 // The dashboard chrome is irrelevant to the landing decision and drags in the
 // whole sidebar/settings stack; stub it so these stay focused unit tests.
+vi.mock("@/hooks/useProjectNameIndex", () => ({ useProjectNameIndex: () => null }))
 vi.mock("./OrgSidebar", () => ({ OrgSidebar: () => <nav /> }))
 vi.mock("./OrgBreadcrumb", () => ({ OrgBreadcrumb: () => <div /> }))
 vi.mock("@/hooks/useOrgSettings", () => ({

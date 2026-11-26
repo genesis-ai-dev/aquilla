@@ -826,6 +826,16 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(firstBody.projects).toEqual([expect.objectContaining({ id: "pc", name: "Acts" })])
     expect(firstBody.nextCursor).toBeTruthy()
 
+    const url = "/api/v2/orgs/1/portfolio?limit=1&revision="
+    const headers = authHeader(await jwtFor("wendi"))
+    const initial = await app.request(url, { headers }, env)
+    const validated = await initial.json() as { revision: string }
+    expect(validated.revision).toMatch(/^[a-f0-9]{64}$/)
+    const match = await app.request(url + validated.revision, { headers }, env)
+    expect(await match.json()).toEqual({ unchanged: true, revision: validated.revision })
+    const stale = await app.request(url + "outdated", { headers }, env)
+    expect(await stale.json()).toMatchObject({ projects: firstBody.projects, revision: validated.revision })
+
     const second = await app.request(
       `/api/v2/orgs/1/portfolio?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
       { headers: authHeader(await jwtFor("wendi")) },

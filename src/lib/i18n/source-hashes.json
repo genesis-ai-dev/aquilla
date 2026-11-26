@@ -3219,7 +3219,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -5019,7 +5019,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -8245,7 +8247,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -10023,7 +10025,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -13232,7 +13236,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -15014,7 +15018,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -18240,7 +18246,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -20031,7 +20037,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -23994,7 +24002,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -26322,7 +26330,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -30285,7 +30295,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -32615,7 +32625,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -37315,7 +37327,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -38980,7 +38992,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -43781,7 +43795,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -45392,7 +45406,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -50117,7 +50133,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -51719,7 +51735,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -58082,7 +58100,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -59993,7 +60011,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -66362,7 +66382,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -68272,7 +68292,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -74948,7 +74970,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -76949,7 +76971,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -83370,7 +83394,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -85282,7 +85306,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -91989,7 +92015,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -93978,7 +94004,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -100670,7 +100698,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -102668,7 +102696,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -109383,7 +109413,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -111393,7 +111423,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -118099,7 +118131,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -120105,7 +120137,9 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -126806,7 +126840,7 @@
     "billing.settings.preferences": "66962f72a0888373",
     "billing.settings.identity": "999f23fcd7bec707",
     "billing.settings.security": "8f6fb4eb7f42c0e2",
-    "billing.settings.billing": "1691cc5b218c63b5",
+    "billing.settings.billing": "3ac8bbca9a74cfbd",
     "billing.settings.providers": "134ebcb1013a9e4e",
     "billing.settings.peopleProjects": "7b14b271db3bf11a",
     "billing.settings.teams": "1e1a1c078af2887a",
@@ -128809,6 +128843,8 @@
     "settings.orgSettingsIndex.hintProjectDefaults": "c56744a20fd91904",
     "agent.run.failedFallback": "c158c615648cb740",
     "workspace.transcribeBadge.loadingModelNote": "0ed57a4a5c36731f",
-    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972"
+    "workspace.transcribeBadge.downloadingModelNote": "ae3e4b1db718e972",
+    "projectSettings.hint.untitled": "f59ab8d1331b7b16",
+    "projectSettings.hint.rolesInvites": "f10ec0d40bd68714"
   }
 }

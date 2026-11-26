@@ -88,8 +88,8 @@ const baseProject: ProjectRecord = {
   members: [],
 }
 
-const projectAt = (level: number): ProjectRecord =>
-  ({ ...baseProject, syncRole: { level } }) as ProjectRecord
+const projectAt = (level: number, over: Partial<ProjectRecord> = {}): ProjectRecord =>
+  ({ ...baseProject, sourceTextFloor: "project_lead", syncRole: { level }, ...over }) as ProjectRecord
 
 function row(
   cellId: string,
@@ -217,10 +217,38 @@ describe("EditorTable — Hide cell / Show cell", () => {
     renderTable({ project: projectAt(ROLE.CONTRIBUTOR), cellStore: makeStore() }, { onSetCellHidden: () => {} })
     await screen.findByText("First cue")
 
-    // A contributor on an editable untimed file has nothing else to offer
-    // either, so the trigger itself does not render.
-    expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
+    // Copy source text is still offered. Hide is not, even as a disabled row.
+    openMenu("cue-a")
+    expect(await screen.findByTestId("cell-menu-copy-source")).toBeInTheDocument()
     expect(screen.queryByTestId("cell-menu-toggle-hidden")).toBeNull()
+  })
+
+  it("follows the same floor as editing source text", async () => {
+    const { unmount } = renderTable(
+      { project: projectAt(ROLE.PROJECT_LEAD, { sourceTextFloor: "maintainer" }), cellStore: makeStore() },
+      { onSetCellHidden: () => {} },
+    )
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    expect(screen.queryByTestId("cell-menu-toggle-hidden")).toBeNull()
+    unmount()
+
+    const { unmount: unmountLane } = renderTable(
+      { project: projectAt(100, { sourceTextFloor: "project_lead", laneGrantLevels: [ROLE.PROJECT_LEAD] }), cellStore: makeStore() },
+      { onSetCellHidden: () => {} },
+    )
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    expect(await hiddenEntry()).not.toHaveAttribute("data-disabled")
+    unmountLane()
+
+    renderTable(
+      { project: projectAt(ROLE.CONTRIBUTOR, { sourceTextFloor: "contributor" }), cellStore: makeStore() },
+      { onSetCellHidden: () => {} },
+    )
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    expect(await hiddenEntry()).not.toHaveAttribute("data-disabled")
   })
 
   it("stays absent for a contributor even on a DCS-pinned project, where a reason exists", async () => {

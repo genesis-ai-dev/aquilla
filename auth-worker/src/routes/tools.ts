@@ -50,7 +50,7 @@ import {
 import { readToolActivity } from "../lib/tools/activity"
 import { buildToolRoute } from "./tools-build"
 import { webFetchRoute } from "./tools-web"
-import { FIRST_PARTY_TOOLS, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
+import { FIRST_PARTY_TOOLS, firstPartyToolId } from "../../../shared/tools/first-party/index"
 
 const tools = new Hono<AuthHonoEnv>()
 

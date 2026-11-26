@@ -22,6 +22,9 @@ import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import type { DraftingSettings } from "../../../db/shared/drafting-settings"
 import { milestoneFloorLevel } from "../../../db/shared/milestone-floor"
+import type { SourceTextTier } from "../../../db/shared/source-text-floor"
+
+export type { SourceTextTier }
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -226,6 +229,13 @@ export interface ProjectWideSettings {
    */
   milestoneFloor?: MilestoneFloor
   /**
+   * AQU-2647: who may edit source text, hide a cell, and split a line at
+   * quotes. Absent = the organization's tier, and if that is absent too,
+   * maintainer. A project may set a looser or a stricter tier than its org.
+   * The events route enforces the same floor.
+   */
+  sourceTextFloor?: SourceTextTier
+  /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
    *
@@ -307,6 +317,14 @@ export interface ProjectWideSettings {
    * in Import. Maintainer (600)+, the ordinary settings floor.
    */
   smartExtensionsEnabled?: boolean
+  /**
+   * Smart edits for the whole project: underlines on wordings the team has
+   * corrected elsewhere, with the correction offered. Absent / true = on;
+   * false = no member's editor asks for them. Maintainer (600)+, the ordinary
+   * settings floor. The suggestions are computed in auth-worker
+   * (routes/ai-smart-edits.ts) from the project's own commit history.
+   */
+  smartEditsEnabled?: boolean
   /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
@@ -638,6 +656,12 @@ export interface ProjectSettingsResponse {
    * the org's; the server gates resolve the same way.
    */
   orgMediaDefaults?: MediaDefaults
+  /**
+   * AQU-2647: the organization's source-text floor, used when `settings`
+   * carries no `sourceTextFloor` of its own. Null when the org set none (or
+   * the project has no org); then the floor is Maintainer.
+   */
+  orgSourceTextFloor?: SourceTextTier | null
   /**
    * AQU-1771: the rest of the org's policy this project's surfaces apply —
    * both visibility floors, assignment authority, the repetition default, the

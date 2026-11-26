@@ -428,7 +428,7 @@ describe("AutopilotActivityInspector", () => {
     expect(await screen.findByText("Waiting draft")).toBeInTheDocument()
     expect(screen.queryByText("Previously applied")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Draft history/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/Open Activity to inspect non-proposed draft history/)).toBeInTheDocument()
+    expect(screen.getByText(/Open Activity to view draft history/)).toBeInTheDocument()
   })
 
   it("pages past 50 recent runs to the review owner and shows returned drafts against the authoritative total", async () => {

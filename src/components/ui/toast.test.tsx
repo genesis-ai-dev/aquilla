@@ -76,7 +76,7 @@ describe("toast button row (AQU-2175)", () => {
     expect(row).not.toContainElement(message)
 
     // The close X stays out of the button row, in the message row.
-    const close = screen.getByLabelText("Close toast")
+    const close = screen.getByLabelText("Close notification")
     expect(rowOf(close)).toBeNull()
   })
 

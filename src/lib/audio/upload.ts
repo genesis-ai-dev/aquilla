@@ -223,6 +223,8 @@ export interface FetchCellAudioArgs {
   audioId: string
   ext: string
   getSyncToken: SyncTokenForFile
+  /** AQU-2664: stops the download (Cancel, a timeout). */
+  signal?: AbortSignal
 }
 
 export interface DeleteCellAudioArgs {
@@ -276,6 +278,7 @@ export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Arr
 
   const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
     headers: { Authorization: `Bearer ${token}` },
+    ...(args.signal ? { signal: args.signal } : {}),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")

@@ -291,6 +291,55 @@ function adjacentIdmlSlotEdgeChar(resolved: ResolvedPos, side: "before" | "after
 }
 
 /**
+ * The character of the paragraph beside `pos`, for AQU-758 in a plain editor.
+ * A paragraph edge or a line break reads as "", the way a slot edge does.
+ */
+function plainBoundaryChar(doc: ProseMirrorNode, pos: number, side: "before" | "after"): string {
+  const resolved = doc.resolve(pos)
+  const offset = resolved.parentOffset
+  if (side === "before") {
+    return offset > 0 ? resolved.parent.textBetween(offset - 1, offset, "", "") : ""
+  }
+  return offset < resolved.parent.content.size
+    ? resolved.parent.textBetween(offset, offset + 1, "", "")
+    : ""
+}
+
+/**
+ * AQU-758 for a plain editor: write `text` over `from`–`to` with the run
+ * editor's whitespace rules applied. Line breaks become hard breaks. Returns
+ * false when the rules leave the text as it is, so the editor's own input
+ * handling (and its input rules) still runs.
+ */
+function writeSanitizedPlainText(
+  view: EditorView,
+  from: number,
+  to: number,
+  text: string,
+  mode: "paste" | "type",
+): boolean {
+  const { state } = view
+  const sanitized = sanitizeIdmlSlotInsertion(
+    text,
+    plainBoundaryChar(state.doc, from, "before"),
+    plainBoundaryChar(state.doc, to, "after"),
+    mode,
+  )
+  if (mode === "type" && sanitized === text) return false
+  if (sanitized === "" && from === to) return true
+  const hardBreak = state.schema.nodes.hardBreak
+  const lines = sanitized.split("\n")
+  const tr = lines.length === 1 || !hardBreak
+    ? state.tr.insertText(lines.join(" "), from, to)
+    : state.tr.replaceWith(from, to, lines.flatMap((line, index) => [
+        ...(index > 0 ? [hardBreak.create()] : []),
+        ...(line ? [state.schema.text(line)] : []),
+      ]))
+  view.dispatch(tr.scrollIntoView())
+  return true
+}
+
+/**
  * The slot text a write should land in. A selection is cut down to the editable
  * parts it covers, so text spanning protected anchors is replaced slot by slot
  * instead of dragging the IDML structure with it.
@@ -420,6 +469,12 @@ interface TranslatedEditorProps {
   /** Receives actionable protected-anchor errors for the parent row banner. */
   onIdmlValidationError?: (message: string | null) => void
   /**
+   * AQU-758 for a plain editor: drop the leading, trailing and doubled spaces
+   * the IDML run editor refuses at entry. Set for an IDML preview, whose
+   * sentence "Pass to style segments" later moves into the runs unchanged.
+   */
+  sanitizeEntryWhitespace?: boolean
+  /**
    * AQU-667: the current authoritative value is an AI draft (sparkle / batch
    * "Draft all") that the store — not this editor — produced. When set and the
    * value changes, the editor absorbs it *even while focused* so the prediction
@@ -481,7 +536,7 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
-  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+  /** Smart edits for this cell (`isSmartEditsEnabled`). Offsets are into the
    *  committed plain text; see smart-edit-decoration-plugin.ts. */
   smartEdits?: SmartEditSuggestion[]
   onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
@@ -556,6 +611,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   initialIdmlSelection = null,
   onInitialIdmlSelectionApplied,
   onIdmlValidationError,
+  sanitizeEntryWhitespace = false,
   aiDrafted = false,
   onCommit,
   pendingInputRef,
@@ -696,6 +752,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     onIdmlValidationErrorRef.current = onIdmlValidationError
   }, [onIdmlValidationError])
+  // The editor's handlers are built once per mount; read the flag through a ref.
+  const sanitizeEntryWhitespaceRef = useRef(sanitizeEntryWhitespace)
+  useEffect(() => {
+    sanitizeEntryWhitespaceRef.current = sanitizeEntryWhitespace
+  }, [sanitizeEntryWhitespace])
   useEffect(() => {
     setIdmlError(preparedIdmlContent?.error ?? null)
     if (preparedIdmlContent?.error) {
@@ -723,8 +784,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const isReadOnly = !editable || Boolean(heldByLabel) || Boolean(preparedIdmlContent?.error)
   const isReadOnlyRef = useRef(isReadOnly)
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
-  // Visible style segments lock a placed IDML cell so a bold or italic edge
-  // can be dragged without the caret taking the pointer. The preview sentence,
+  // Visible style segments lock a placed IDML cell so a bold, italic, or
+  // small-caps edge can be dragged without the caret taking the pointer. The preview sentence,
   // before it is passed into the runs, never mounts this IDML editor.
   const visibleStyleSegments = useVisibleStyleSegments()
   const segmentEdgeMode = Boolean(idmlContext) && !isReadOnly && visibleStyleSegments
@@ -997,8 +1058,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       transformPastedHTML(html: string) {
         return idmlContext ? sanitizeIdmlEditorHtml(html) : sanitizeEditorHtml(html)
       },
-      handleTextInput(view, _from, _to, text) {
-        if (!idmlContext) return false
+      handleTextInput(view, from, to, text) {
+        if (!idmlContext) {
+          if (!sanitizeEntryWhitespaceRef.current || view.composing) return false
+          return writeSanitizedPlainText(view, from, to, text, "type")
+        }
         // AQU-810: composed text is applied by ProseMirror's native DOM-change
         // path, which the click handlers have already anchored inside an
         // editable slot. Redirecting it here would dispatch during the
@@ -1008,7 +1072,17 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         return true
       },
       handlePaste(view, event, slice) {
-        if (!idmlContext) return false
+        if (!idmlContext) {
+          if (!sanitizeEntryWhitespaceRef.current) return false
+          // A preview is a plain sentence: its formatting never reaches the
+          // runs, so the paste is taken as text under the AQU-758 rules.
+          const plainText = event.clipboardData?.getData("text/plain")
+            ?? slice.content.textBetween(0, slice.content.size, "\n")
+          event.preventDefault()
+          const { from, to } = view.state.selection
+          writeSanitizedPlainText(view, from, to, plainText, "paste")
+          return true
+        }
         // IDML accepts only literal text and bare line breaks inside a slot.
         // Rich clipboard markup, including forged data-idml-* attributes, is
         // deliberately discarded before the transaction reaches the guards.

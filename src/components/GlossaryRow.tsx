@@ -9,7 +9,7 @@
  *   deprecated → Restore (rendered dimmed)
  * Presentational only; all mutations bubble through callbacks.
  */
-import { memo, useEffect, useState } from "react"
+import { memo, useState } from "react"
 import { ChevronDown, ChevronRight, Archive, RotateCcw, Check, X, Plus, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -166,9 +166,14 @@ function ExpanderRenderingRow({
   const [draft, setDraft] = useState(rendering.rendering)
   const statusOptions = renderingStatusOptions(t)
 
-  useEffect(() => {
-    setDraft(rendering.rendering)
-  }, [rendering.rendering])
+  // Follow the saved rendering when it changes, but never over text the
+  // person has typed and not yet left: a re-read landing mid-word used to
+  // replace what they were typing.
+  const [seen, setSeen] = useState(rendering.rendering)
+  if (seen !== rendering.rendering) {
+    setSeen(rendering.rendering)
+    if (draft === seen) setDraft(rendering.rendering)
+  }
 
   return (
     <div className="flex items-center gap-2">

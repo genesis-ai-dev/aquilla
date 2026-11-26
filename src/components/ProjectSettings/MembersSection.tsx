@@ -133,6 +133,11 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   {sourceKey ? t(sourceKey) : m.role.source}
                 </span>
               )}
+              {m.createdThisProject && (
+                <span className="truncate text-xs font-normal text-muted-foreground">
+                  {t("org.membersPage.createdThisProject")}
+                </span>
+              )}
             </UsernameWithAvatar>
           )
         },
@@ -236,7 +241,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
             data={tableData}
             getRowId={(m) => String(m.userId)}
             initialSorting={[{ id: "name", desc: false }]}
-            searchPlaceholder="Search by name or email"
+            searchPlaceholder={t("org.membersTable.searchPlaceholder")}
             globalFilterFn={(row, _columnId, filterValue) => {
               const q = String(filterValue).trim().toLowerCase()
               if (!q) return true

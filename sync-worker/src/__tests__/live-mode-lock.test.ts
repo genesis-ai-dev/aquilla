@@ -26,7 +26,7 @@ interface EventsResponse {
   rejected: Array<{ id: string; status: number; reason: string }>
 }
 
-async function postEvents(db: AquillaDb, events: RawEvent[], role = 500): Promise<EventsResponse> {
+async function postEvents(db: AquillaDb, events: RawEvent[], role = 600): Promise<EventsResponse> {
   const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role })
   const req = new Request("https://worker/events", {
     method: "POST",
@@ -56,6 +56,10 @@ describe("live-mode lock", () => {
     try {
       await t.pg.query(
         `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode) VALUES ($1, 'B', 1, 'proj-up', 'live')`,
+        [PROJECT],
+      )
+      await t.pg.query(
+        `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1)`,
         [PROJECT],
       )
       await apply(t, {
@@ -99,6 +103,10 @@ describe("live-mode lock", () => {
         `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode) VALUES ($1, 'B', 1, 'proj-up', 'live')`,
         [PROJECT],
       )
+      await t.pg.query(
+        `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1)`,
+        [PROJECT],
+      )
       await apply(t, {
         id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: null, parentId: null,
         kind: "file.create", author: "importer", payload: { name: "F", fileType: "codex" }, clientTs: 1, serverTs: 1, serverSeq: 1,
@@ -136,6 +144,10 @@ describe("live-mode lock", () => {
     try {
       await t.pg.query(
         `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode) VALUES ($1, 'B', 1, 'proj-up', 'clone')`,
+        [PROJECT],
+      )
+      await t.pg.query(
+        `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ($1, 1, 700, 1)`,
         [PROJECT],
       )
       await apply(t, {

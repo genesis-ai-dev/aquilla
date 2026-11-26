@@ -88,6 +88,20 @@ export interface UserFacingError {
 }
 
 /**
+ * AQU-2357: removing the last project Owner is a 409 with `error: "last_owner"`.
+ * Org leave uses the same code and handles it before this mapper.
+ */
+function lastProjectOwnerMessage(raw: string): string | null {
+  try {
+    const body = JSON.parse(raw) as { error?: unknown }
+    if (body.error === "last_owner") return t("error.network.lastProjectOwner")
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
  * Map an HTTP status code to a human-readable message.
  *
  * The optional `context` names what failed (e.g. `"project"`, `"invite"`) and is
@@ -134,13 +148,15 @@ export function messageForStatus(
         category: "not-found",
         status,
       }
-    case 409:
+    case 409: {
+      const lastOwner = lastProjectOwnerMessage(raw)
       return {
-        message: t("error.network.conflict", { contextSuffix }),
+        message: lastOwner ?? t("error.network.conflict", { contextSuffix }),
         raw,
         category: "conflict",
         status,
       }
+    }
     case 410:
       return {
         message: t("error.network.gone", { contextSuffix }),
@@ -184,6 +200,16 @@ export function isElevationRequiredBody(raw: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * AQU-2728: true when a 403 means the caller lacks the role, so a dialog may
+ * swap the message for its own "only owners can…" line. The admin step-up 403
+ * shares the `forbidden` category but is not a denial: the admin may make the
+ * change once verified, and its own message says so.
+ */
+export function isRoleDenial(error: UserFacingError): boolean {
+  return error.category === "forbidden" && !isElevationRequiredBody(error.raw)
 }
 
 // AQU-1352 §3.9 rule 2: badge labels reused from the access-model legend so the

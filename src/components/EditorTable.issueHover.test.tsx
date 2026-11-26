@@ -176,12 +176,12 @@ describe("EditorTable — integrity flag hover (AQU-757)", () => {
     const flag = screen.getByTestId("cell-issue-flag")
     expect(flag).toHaveAccessibleName(/Number integrity — Number from source missing in translation/)
     expect(flag).toHaveAccessibleName(/End punctuation — Terminal punctuation differs from source/)
-    expect(flag).toHaveAccessibleName(/No foo — target contains forbidden pattern/)
+    expect(flag).toHaveAccessibleName(/No foo — Translation contains a forbidden pattern/)
 
     const flagTip = await noteOf(flag)
     expect(flagTip).toHaveTextContent("Number integrity — Number from source missing in translation")
     expect(flagTip).toHaveTextContent("End punctuation — Terminal punctuation differs from source")
-    expect(flagTip).toHaveTextContent("No foo — target contains forbidden pattern")
+    expect(flagTip).toHaveTextContent("No foo — Translation contains a forbidden pattern")
 
     const ribbon = screen.getByTestId("health-ribbon")
     expect(ribbon).toHaveAccessibleName(/End punctuation — Terminal punctuation differs from source/)

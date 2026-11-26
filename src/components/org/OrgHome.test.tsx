@@ -649,9 +649,11 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // Projects page uses OrgProjectsDataTable sortable headers (not ProjectTable's icon headers).
-    for (const name of [/^Translated$/i, /^Validated$/i, /^Audio$/i]) {
+    for (const name of [/^Text$/i, /^Audio$/i]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument()
     }
+    const legacyRow = screen.getByText("Legacy Translation").closest("tr")!
+    expect(within(legacyRow).getByRole("button", { name: "10% translated, 10% validated" })).toBeInTheDocument()
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {
@@ -1024,6 +1026,17 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       </MemoryRouter>,
     )
   }
+
+  it("keeps the projects panel usable through a slow and failed totals request", async () => {
+    const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+    let fail!: (error: Error) => void
+    vi.mocked(getPortfolioAggregates).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+    await renderAllOrgs()
+    expect(await screen.findByTestId("project-table")).toBeInTheDocument()
+    await act(async () => fail(new Error("Totals unavailable")))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Totals unavailable")
+    expect(screen.getByTestId("project-table")).toBeInTheDocument()
+  })
 
   // AQU-1488. WHY: a member invited to one project but never to its org read
   // "Projects 0" in these totals beside a table listing that project: the totals

@@ -20,6 +20,7 @@ export const SDK_DATA = String.raw`
     bts: Object.create(null), terms: Object.create(null), termsAsked: Object.create(null),
     selection: Object.create(null), selCount: 0, selAnchor: null, voicing: Object.create(null),
     activeId: null, focusRowId: null, claimed: null, drafts: Object.create(null), saved: Object.create(null), errors: Object.create(null), liveHs: Object.create(null),
+    nativeActiveCell: null,
     expanded: Object.create(null),
     pendingReveal: ctx.file && ctx.file.revealCellId ? ctx.file.revealCellId : null,
     username: ctx.user ? ctx.user.username : "",
@@ -35,7 +36,7 @@ export const SDK_DATA = String.raw`
 
   // ── Reactivity: painters bound to a cell id (or "*" for file-level state).
   var painters = Object.create(null);
-  var listeners = { cells: [], file: [], selection: [], presence: [] };
+  var listeners = { cells: [], file: [], selection: [], presence: [], activeCell: [] };
   function bindCell(id, node, fn) {
     if (!booted) boot();
     (painters[id] || (painters[id] = [])).push({ node: node, fn: fn, dirty: false });
@@ -190,6 +191,7 @@ export const SDK_DATA = String.raw`
         loadSections(); loadSignals(); loadComments(); refreshAudio(); loadPericopes();
         aquilla.presence.list(S.fileId).then(function (h) { Object.keys(h || {}).forEach(function (id) { S.locks[id] = h[id].username; }); notify(Object.keys(h || {})); emit("presence"); }, noop);
         aquilla.presence.peers(S.fileId).then(applyPeers, noop);
+        if (declared("read:cells")) aquilla.editor.activeCell().then(function (ac) { if (ac && !S.nativeActiveCell) { S.nativeActiveCell = ac; emit("activeCell", ac); } }, noop);
         if (S.cfg.backtranslation.configured) loadBts();
         bootExtras.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
       } catch (err) {
@@ -332,6 +334,10 @@ export const SDK_DATA = String.raw`
     }, noop);
   });
   aquilla.on("editor.reveal", function (e) { if (e.cellId) reveal(e.cellId, e.focus !== false); });
+  aquilla.on("editor.activeCell", function (e) {
+    S.nativeActiveCell = e && e.cellId ? { fileId: e.fileId || null, cellId: e.cellId, ref: e.ref || null, source: e.source || "", target: e.target || "" } : null;
+    emit("activeCell", S.nativeActiveCell);
+  });
 
   // ── Selection (drives the host's bulk-actions bar) ───────────────────────
   function pushSelection() {

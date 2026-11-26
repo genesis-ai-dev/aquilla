@@ -31,6 +31,7 @@ import { MemoryRouter } from "react-router-dom"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { StaffLanePopover } from "./StaffLanePopover"
+import { OverviewLaneTable } from "@/components/org/OverviewLaneTable"
 import { CATALOGS } from "@/lib/i18n/messages/all"
 
 // The popover links out to the project's invite page (AQU-607), so every
@@ -244,6 +245,9 @@ vi.mock("@/lib/sync/assignments", () => ({
   unassignAssignment: mockUnassignAssignment,
 }))
 
+// The Languages table mounts one Assign dialog; it has its own suite.
+vi.mock("@/components/AssignModal", () => ({ AssignModal: () => null }))
+
 function openPopover() {
   fireEvent.click(screen.getByRole("button", { name: /staff spanish/i }))
 }
@@ -368,9 +372,9 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    const preview = /maria stays a project lead on mark, spanish language lane only/i
+    const preview = /maria remains project lead on mark, spanish language lane only/i
     expect(screen.getByTestId("staff-lane-popover")).toHaveTextContent(preview)
-    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as a reviewer/i)
+    expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as reviewer/i)
   })
 
   it("filters the org roster by the search query", async () => {
@@ -1040,5 +1044,38 @@ describe("StaffLanePopover", () => {
       expect(onRowClick).toHaveBeenCalledTimes(1)
       expect(onRowClick).toHaveBeenCalledWith({ lane: "es", label: "Spanish (es)" })
     })
+  })
+
+  // AQU-2322: the walk of PR 2180 clicked Add and got no dialog. The table's
+  // columns depend on which lane's popover is open, so closing the popover
+  // rebuilds the actions cell and remounts it; a request held in the popover
+  // was gone before the launcher could read it. The real table, not a stand-in.
+  it("in the project's Languages table, Add opens Give access though the table remounts the popover as it closes (AQU-2322)", async () => {
+    render(
+      <MemoryRouter>
+        <OverviewLaneTable
+          projectId="proj-1"
+          projectName="Mark"
+          orgId={1}
+          jwt="jwt-pm"
+          lanes={[{ lane: "es", laneId: "ln-es", name: "Spanish", role: "target", totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null }]}
+          defaultLanguageLabel="English"
+          extraLanes={[]}
+          files={[]}
+          roleLevel={700}
+          author="pm"
+          canManageLanes
+          canAddLanguage={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId("overview-lane-people-es"))
+    pickMaria()
+    fireEvent.click(await screen.findByRole("button", { name: /spanish language lane only/i }))
+
+    const launch = await screen.findByTestId("give-access-launch")
+    expect(launch).toHaveAttribute("data-user", "10")
+    expect(launch).toHaveAttribute("data-place", "lane:ln-es")
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
   })
 })

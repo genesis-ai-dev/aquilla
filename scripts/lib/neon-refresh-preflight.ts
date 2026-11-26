@@ -1,6 +1,7 @@
-// Pure helpers for scripts/refresh-neon-branch.ts: how the Neon CLI is invoked
-// and how its failures are explained. No I/O here so the explanations can be
-// unit-tested against the exact stderr a failed GitHub run produced.
+// Pure helpers for scripts/refresh-neon-branch.ts: how the Neon CLI is invoked,
+// how its failures are explained, and how the restore is planned around the
+// branches other people forked from the target. No I/O here so each can be
+// unit-tested against what a failed GitHub run actually produced.
 
 export const DEFAULT_NEON_CLI_VERSION = "2.30.0"
 
@@ -114,7 +115,7 @@ export function preflightFailureMessage(input: PreflightFailureInput): string {
   return lines.join("\n")
 }
 
-interface BranchSummary {
+export interface BranchSummary {
   id: string
   name: string
   lastResetAt: string | null
@@ -139,4 +140,118 @@ export function summarizeBranchJson(stdout: string): BranchSummary {
   if (!id || !name) throw new Error("Neon CLI branch object is missing id or name")
   const lastResetAt = typeof branch.last_reset_at === "string" ? branch.last_reset_at : null
   return { id, name, lastResetAt }
+}
+
+// ── Child branches ──────────────────────────────────────────────────────────
+//
+// Neon refuses to restore a branch that has children unless it is told where
+// to keep the old state: "Branch has children, preserve_under_name is
+// required". With a name, the old target survives as a backup branch and its
+// children move onto that backup, untouched. Without this the refresh stopped
+// for as long as any child existed — every 09:07 UTC run from 2026-11-13 to
+// 2026-11-23 (e.g. run 44709111635), after two PR previews forked isolated QA
+// branches from dev, one of them with no expiry.
+
+export interface NeonBranchRef {
+  id: string
+  name: string
+  parentId: string | null
+  /** When Neon deletes the branch by itself; null means it stays until someone deletes it. */
+  expiresAt: string | null
+  /** Default, primary or protected: never a branch this script may delete. */
+  guarded: boolean
+}
+
+/** Read `neon branches list --output json`: a bare array, or a `{ branches }` envelope. */
+export function parseBranchList(stdout: string): NeonBranchRef[] {
+  const parsed: unknown = JSON.parse(stdout)
+  const rows =
+    parsed && typeof parsed === "object" && "branches" in parsed ? parsed.branches : parsed
+  if (!Array.isArray(rows)) throw new Error("Neon CLI returned no branch list")
+  return rows.map((row: unknown) => {
+    const branch = (row && typeof row === "object" ? row : {}) as Record<string, unknown>
+    if (typeof branch.id !== "string" || typeof branch.name !== "string") {
+      throw new Error("Neon CLI branch list has an entry without id or name")
+    }
+    return {
+      id: branch.id,
+      name: branch.name,
+      parentId: typeof branch.parent_id === "string" ? branch.parent_id : null,
+      expiresAt: typeof branch.expires_at === "string" ? branch.expires_at : null,
+      guarded: branch.default === true || branch.primary === true || branch.protected === true,
+    }
+  })
+}
+
+const BACKUP_INFIX = "-pre-refresh-"
+const BACKUP_STAMP = /^\d{4}(-\d{2}){5}$/
+
+/** A sortable name for the old target a restore keeps: `dev-pre-refresh-2026-11-21-09-16-25`. */
+export function backupBranchName(target: string, now: Date): string {
+  return `${target}${BACKUP_INFIX}${now.toISOString().slice(0, 19).replace(/[:T]/g, "-")}`
+}
+
+function isBackupOf(target: string, name: string): boolean {
+  const prefix = `${target}${BACKUP_INFIX}`
+  return name.startsWith(prefix) && BACKUP_STAMP.test(name.slice(prefix.length))
+}
+
+export interface RestorePlan {
+  /** Branches forked from the target. The restore moves them onto the backup. */
+  children: NeonBranchRef[]
+  /** Name to keep the old target under; null when nothing depends on it. */
+  preserveUnderName: string | null
+  /** Backups from earlier refreshes that nothing hangs off any more: safe to delete. */
+  staleBackups: NeonBranchRef[]
+  /** Backups that still carry someone's branch, with those branches. */
+  heldBackups: { backup: NeonBranchRef; children: NeonBranchRef[] }[]
+}
+
+/**
+ * Decide how to restore `target` given every branch in the project.
+ *
+ * A backup is deleted only when all of this holds: its name is exactly one
+ * `backupBranchName` produces for this target, nothing has it as a parent, and
+ * it is not the target, the source, or a default/primary/protected branch. A
+ * backup without children is the old target and nothing else, which is what a
+ * restore without children throws away anyway.
+ */
+export function planRestore(input: {
+  branches: readonly NeonBranchRef[]
+  target: { id: string; name: string }
+  sourceId: string
+  now: Date
+}): RestorePlan {
+  const { branches, target, sourceId, now } = input
+  const childrenOf = (id: string) => branches.filter((branch) => branch.parentId === id)
+
+  const children = childrenOf(target.id)
+  const staleBackups: NeonBranchRef[] = []
+  const heldBackups: RestorePlan["heldBackups"] = []
+  for (const branch of branches) {
+    if (branch.id === target.id || branch.id === sourceId || branch.guarded) continue
+    if (!isBackupOf(target.name, branch.name)) continue
+    const dependants = childrenOf(branch.id)
+    if (dependants.length === 0) staleBackups.push(branch)
+    else heldBackups.push({ backup: branch, children: dependants })
+  }
+
+  return {
+    children,
+    preserveUnderName: children.length > 0 ? backupBranchName(target.name, now) : null,
+    staleBackups,
+    heldBackups,
+  }
+}
+
+/** Positional and option args for `neon branches restore`, before `neonCliArgs` wraps them. */
+export function restoreArgs(input: {
+  target: string
+  source: string
+  projectId: string
+  preserveUnderName: string | null
+}): string[] {
+  const args = ["branches", "restore", input.target, input.source, "--project-id", input.projectId]
+  if (input.preserveUnderName) args.push("--preserve-under-name", input.preserveUnderName)
+  return [...args, "--output", "json"]
 }

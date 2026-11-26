@@ -98,7 +98,7 @@ describe("termFindingHeadline", () => {
   it("handles the zero-consistent case without a bogus usage list", () => {
     expect(
       termFindingHeadline({ ...finding, consistentCount: 0, renderingUsage: [] }, en, DEFAULT_LOCALE),
-    ).toBe("none of 18 occurrences use an approved rendering")
+    ).toBe("none of the 18 occurrences use an approved rendering")
   })
 })
 

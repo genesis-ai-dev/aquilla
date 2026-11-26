@@ -57,6 +57,15 @@ async function roster(viewer: FixtureUser = "owner") {
     tree: Node[]
   }
 }
+/**
+ * A pending invite's People-lens row id, as the owner's roster names it. Since
+ * the AQU-2318 follow-up the id carries a hash of the token, never the token.
+ */
+async function inviteRowId(projectId: string): Promise<string> {
+  const row = (await roster("owner")).people.find((p) => p.userId.startsWith(`invite:project:${projectId}:`))
+  if (!row) throw new Error(`no invite row on ${projectId}`)
+  return row.userId
+}
 interface Node { scope: { type: string; id: string }; children: Node[]; directGrantees: { userId: string; roleLevel: number }[]; inherited: { userId?: string; roleLevel: number; from: { type: string; id: string } }[] }
 const flat = (n: Node): Node[] => [n, ...n.children.flatMap(flat)]
 
@@ -133,7 +142,7 @@ describe("AQU-2321 Remove dry run", () => {
       `INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at)
        VALUES ('inv-x', 'p1', 300, 1, 'x@example.com', now() + interval '3 days')`,
     ).run()
-    const { status, body } = await removal("owner", { person: { inviteId: "invite:project:p1:inv-x" } })
+    const { status, body } = await removal("owner", { person: { inviteId: await inviteRowId("p1") } })
     expect(status).toBe(200)
     expect(body.preview).toMatchObject({ invite: true, keeps: [], loses: [{ type: "project", id: "p1" }] })
   })
@@ -158,6 +167,7 @@ describe("AQU-2321 Remove dry run", () => {
       `INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at)
        VALUES ('inv-hidden', 'p2', 300, 1, 'h@example.com', now() + interval '3 days')`,
     ).run()
+    const hiddenInvite = await inviteRowId("p2")
     const p1 = { type: "project", id: "p1" }
     const answers = await Promise.all([
       removal("direct_above", { person: who("direct_below"), grants: [{ type: "project", id: "p2" }] }), // hidden place
@@ -165,7 +175,7 @@ describe("AQU-2321 Remove dry run", () => {
       removal("direct_above", { person: who("external"), grants: [p1] }), // person only on p2
       removal("direct_above", { person: who("personal"), grants: [p1] }), // person in another org
       removal("direct_above", { person: { userId: "999999" }, grants: [p1] }), // no such person
-      removal("direct_above", { person: { inviteId: "invite:project:p2:inv-hidden" } }), // invite on a hidden project
+      removal("direct_above", { person: { inviteId: hiddenInvite } }), // invite on a hidden project
       removal("direct_above", { person: who("direct_below"), grants: [p1] }, 2), // foreign org
       removal("direct_above", { person: who("direct_below"), grants: [p1] }, 999999), // no such org
     ])

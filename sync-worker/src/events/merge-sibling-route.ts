@@ -50,6 +50,7 @@ import {
   retryingLaneIdCollision,
 } from '../../../db/shared/lanes'
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import {
   chooseDonorLane,
@@ -142,6 +143,12 @@ export async function mergeSibling(
      * guessed. See {@link chooseDonorLane}.
      */
     donorLaneId?: string | null
+    /**
+     * [Pen test 2026-11-26] Donor lane ids the caller may read. `null` means
+     * every lane (wall off, Maintainer+, platform). A lane outside the set is
+     * treated as if it did not exist: never folded, never named in a refusal.
+     */
+    readableDonorLaneIds?: ReadonlySet<string> | null
   },
 ): Promise<MergeSiblingResult> {
   const { hostProjectId, donorProjectId, lane } = args
@@ -157,6 +164,7 @@ export async function mergeSibling(
       legacyTag: row.legacyTag,
       archivedAt: row.archivedAt,
     }))
+    .filter((row) => args.readableDonorLaneIds == null || args.readableDonorLaneIds.has(row.id))
   const chosen = chooseDonorLane({ lanes: donorLanes, donorLaneId: args.donorLaneId })
   if (!chosen.ok) throw new MergeSiblingRefusal(chosen.reason, chosen.candidates)
   const donorLane = chosen.lane
@@ -376,6 +384,8 @@ const MERGE_MIN_ROLE = 500
 export interface MergeSiblingRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  /** AQU-730: "1" or "true" turns the lane read wall on. */
+  LANE_READ_WALL?: string
 }
 
 export async function handleMergeSiblingRequest(
@@ -428,6 +438,7 @@ export async function handleMergeSiblingRequest(
   // other tenant's translations into their own project. Platform operators
   // (`src: "platform"`) have no membership rows and are exempt, matching the
   // write perimeter. Fail closed: a missing/low donor role is a 403.
+  let readableDonorLaneIds: ReadonlySet<string> | null = null
   if (auth.claims.src !== 'platform') {
     const donor = await checkProjectMembershipDetailed(
       env.AQUILLA_PG,
@@ -439,6 +450,19 @@ export async function handleMergeSiblingRequest(
         status: 403,
       })
     }
+    // [Pen test 2026-11-26] Project Lead (500) sits below the read wall's
+    // Maintainer floor, so a lane-walled donor lead must not fold (and so
+    // read, via the host they own or `skipped[].preview`) a donor lane they
+    // were never granted. The same grants every walled read route uses.
+    readableDonorLaneIds = (
+      await visibleTagsForMember(
+        env.AQUILLA_PG,
+        env.LANE_READ_WALL,
+        donorProjectId,
+        auth.claims.userId,
+        donor.roleLevel,
+      )
+    ).visible
   }
 
   let result: MergeSiblingResult
@@ -448,6 +472,7 @@ export async function handleMergeSiblingRequest(
       donorProjectId,
       lane,
       donorLaneId: donorLaneId || undefined,
+      readableDonorLaneIds,
     })
   } catch (err) {
     // AQU-1602: an unchoosable donor lane is the caller's to resolve, not a

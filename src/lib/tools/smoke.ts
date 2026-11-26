@@ -12,11 +12,12 @@
 
 import { createBridgeHost, type RenderReport, type ToolErrorReport } from "./host-bridge"
 import { createToolHandlers, type ToolAudioEntry, type ToolCellView, type ToolHostData, type ToolPresence } from "./host-handlers"
-import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
+import { TOOL_SANDBOX, buildToolShellSrcdoc, buildToolSrcdoc, toolWindowOf } from "./srcdoc"
 import type { ToolManifest, ToolMount } from "../../../shared/tools/manifest"
 import { stubEditorData } from "./smoke-editor"
 import { stubRev4Data } from "./smoke-rev4"
 import { stubFilesData } from "./smoke-files"
+import { stubNativeEditorData } from "./host-handlers-native"
 import { uiStrings } from "./ui-strings"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
@@ -59,12 +60,13 @@ export function createIframeSmokeFrame(label: string): SmokeFrame {
   Object.assign(iframe.style, { position: "fixed", left: "-10000px", top: "0", width: "1024px", height: "768px", border: "0" })
   return {
     get toolWindow() {
-      return iframe.contentWindow
+      return toolWindowOf(iframe)
     },
     hostWindow: window,
     start: (srcdoc, width) => {
       if (width) iframe.style.width = `${width}px`
-      iframe.srcdoc = srcdoc
+      // Generated code runs here before anyone has read it: same shell as a real mount.
+      iframe.srcdoc = buildToolShellSrcdoc(srcdoc, iframe.title)
       document.body.appendChild(iframe)
     },
     dispose: () => iframe.remove(),
@@ -90,6 +92,7 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     ...stubEditorData(populated),
     ...stubRev4Data(populated),
     ...stubFilesData(populated),
+    ...stubNativeEditorData(populated),
     listFiles: async () =>
       populated
         ? [

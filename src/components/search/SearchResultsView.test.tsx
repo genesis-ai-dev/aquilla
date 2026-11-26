@@ -152,3 +152,20 @@ describe("SearchResultsView", () => {
     expect(onJump).toHaveBeenCalledTimes(1)
   })
 })
+
+// AQU-2732: "Expand all" drew the side panel's 50 and called it all.
+describe("SearchResultsView — a cut list says so (AQU-2732)", () => {
+  const results = Array.from({ length: 3 }, (_, i) => makeResult({ cellId: `c${i}` }))
+
+  it("says how many of the matches are listed when the search has more", () => {
+    render(<SearchResultsView query="God" results={results} total={596} onJumpToResult={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Showing first 3 of 596 matches — narrow the search to see more",
+    )
+  })
+
+  it("says nothing when the list is all of them", () => {
+    render(<SearchResultsView query="God" results={results} total={3} onJumpToResult={vi.fn()} onClose={vi.fn()} />)
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+})

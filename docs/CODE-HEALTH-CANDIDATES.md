@@ -189,21 +189,24 @@ reopen without a *new* `rules.*` orphan.
 
 > **Status: `terminology.page.*` (16 keys) swept on 2026-10-16, `candidates.*` (11) on
 > 2026-10-19, `libraryStats.*` (7) + `conceptDialog.*` (2) on 2026-10-26, `reviewQueue.*` (6)
-> on 2026-11-09** — see those runs' entries at the bottom of this file for the proof and the
-> per-slice recipe. **9 of the 51 remain**: `importDialog.*` (6), `common.*` (3), plus the 6
-> already-orphaned keys listed below. Three of the four `duplicate-exceptions.ts` entries
-> went with the 2026-10-26 slice; **the fourth, `terminology.common.statusLabel`, is still
-> there and its key is still orphaned**, so the `common.*` slice still has to touch that file
-> (its pair, `org.orgHome.projectsPanel.statusLabel`, carries no exception of its own —
-> re-confirmed 2026-11-09 — so that is the two-key check the 2026-10-26 entry predicted).
+> on 2026-11-09, `importDialog.*` (6) on 2026-11-23** — see those runs' entries at the bottom
+> of this file for the proof and the per-slice recipe. **3 of the 51 remain**: `common.*` (3),
+> plus the 6 already-orphaned keys listed below. Three of the four `duplicate-exceptions.ts`
+> entries went with the 2026-10-26 slice; **the fourth, `terminology.common.statusLabel`, is
+> still there and its key is still orphaned**, so the `common.*` slice is the one that still
+> has to touch that file (its pair, `org.orgHome.projectsPanel.statusLabel`, carries no
+> exception of its own — re-confirmed 2026-11-09 — so that is the two-key check the
+> 2026-10-26 entry predicted). The `importDialog.*` slice needed no change there at all, which
+> re-confirms the rule: **check `duplicate-exceptions.ts` per slice, do not carry an
+> expectation into one.**
 > The swept lists below are kept as the record of what went; do not re-derive them. Note
 > `candidates.ngramLength` was NOT one of the 11 — it is live in `CellTranscribeBadge.tsx`;
 > see the 2026-10-19 entry. **The catalog is 18 locales now, not 11** (`fr`, `ru`, `sw`,
 > `hi`, `ha`, `bn`, `am`, `pa`, `id` joined since 2026-10-26), so budget **~40 lines per
-> key**, not ~30 — `importDialog.*` is ~240 lines and `common.*` ~130, which is why they
-> must stay two separate runs. Every slice touches **20 files** minimum (1 namespace + 18
-> locales + `source-hashes.json`) regardless of key count; that is catalog breadth, and the
-> line budget is the binding one.
+> key**, not ~30 — the `importDialog.*` slice came in at 261 lines for 6 keys (~43 each),
+> so the remaining `common.*` (3) should land near ~130 and is one run on its own. Every
+> slice touches **20 files** minimum (1 namespace + 18 locales + `source-hashes.json`)
+> regardless of key count; that is catalog breadth, and the line budget is the binding one.
 
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
@@ -4537,17 +4540,20 @@ pure move costs double its line count in `git diff --stat` and the budget is ~30
   doing, but as its own slice. *Proof it would need*: the same two byte-diffs as above, plus
   a check that each type is still exported from `lane-batch-backfill.ts` (the ops script
   imports `LaneBatchPlan`/`LaneBatchSnapshot` from there).
-- **The apply preconditions** — `LANE_BATCH_MIGRATIONS` (`:37`), `LANE_BATCH_READ_ONLY_OPTIONS`,
+- **The apply preconditions** — **done 2026-11-25**, see that run's entry at the bottom of
+  this file. `LANE_BATCH_MIGRATIONS` (`:37`), `LANE_BATCH_READ_ONLY_OPTIONS`,
   `laneBatchClientConfig`, `LaneBatchColumnPresence`, `laneBatchApplyRefusal` and
   `LANE_BATCH_SQL` (through `:127`), ~91 lines. These are about connecting and refusing, not
   planning: each one's only in-file occurrences are its own declaration (and, for two of
-  them, one internal use), so the planner does not read them either. *Why deferred*: ~180
-  changed lines on top of this run's 235. *Proof it would need*: the existing
+  them, one internal use), so the planner does not read them either. *Why it was deferred in
+  2026-11-20*: ~180 changed lines on top of that run's 235. *Proof it needed*: the existing
   `describe("lane batch apply gate")` block (already covers `laneBatchApplyRefusal` and
-  `laneBatchClientConfig`) plus `pnpm build`.
+  `laneBatchClientConfig`) plus `pnpm build` — both produced, plus two extra byte-diffs the
+  entry below records.
 
 Taking both would put the file near ~880 lines. Doing all three at once was never in budget;
-doing them one per run is the point.
+doing them one per run is the point. **One of the two is now taken** — the report shapes are
+the one left, and `lane-batch-backfill.ts` is 1,038 lines.
 
 ### Themes surveyed and rejected this run, with the reason
 
@@ -4678,3 +4684,266 @@ The 2026-11-16/18 notes all still hold and were all needed again, plus one new o
   baseline is contaminated for the touched file. A `git worktree add … origin/dev` with
   `node_modules` symlinked from the main checkout runs a single test file in ~1 s and settles it
   (15/15, 920 ms here). The 2026-09-07 entry already recommended this; treat it as mandatory.
+
+## 2026-11-23 — dead-key run: the `terminology.importDialog.*` slice (6 of the queued 9)
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 20 files,
+**261 deleted lines, 0 inserted**, no test file touched): the 6 orphaned keys under
+`terminology.importDialog.*` — `title`, `parsing`, `dropZoneText`, `chooseFileButton`,
+`csvColumnsHint`, `tbxDialectsHint` — orphaned since the 2026-09-21 deletion of
+`TerminologyPage.tsx`, which is where `TermbaseImportDialog` lived. **3 of the original 51
+remain**: `common.*` (`managed`, `notesLabel`, `statusLabel`), plus the 6 keys the
+2026-09-21 plan entry lists separately as already-orphaned-before-that-deletion.
+
+- **The `── TerminologyPage.tsx: TermbaseImportDialog ──` section header went whole**,
+  section and all — every key under it was in the slice, so no survivor needed re-pointing
+  (the 2026-10-26 / 2026-11-09 precedent, not the `rules.ts` re-point one).
+- **`duplicate-exceptions.ts` is untouched this slice** and that is now proven rather than
+  assumed: `grep -n importDialog` over that file returns nothing, and the simulation below
+  shows none of the 6 sits in a collision group at all. The one exception the 2026-09-21
+  plan still owes — `terminology.common.statusLabel` — belongs to the `common.*` slice,
+  which is therefore still the slice that has to touch that file.
+- **All 6 keys carry a per-key `context.keys` entry**, 36 lines of it (two of them with
+  `placeholders` blocks for `{format}`). That is 6-of-6, where `reviewQueue.*` was 3-of-6 —
+  the 2026-10-26 warning holds: **find the context entries, do not predict them**.
+- **Cost per key was ~43 lines**, close to the ~40 the 2026-11-09 entry projected: 108
+  catalog lines (18 locales × 6) + 108 `source-hashes.json` lines + 45 in the namespace
+  (9 messages incl. the section header and its blank line, 36 context).
+
+**Proof** (all of it run, none argued):
+
+- **Orphan status verified per key** with the recipe the five prior slices used: the full
+  dotted key, the `importDialog.`-prefixed suffix and the bare suffix, over `src e2e scripts
+  worker auth-worker/src sync-worker/src agent-worker/src parity packages shared tools
+  smart-tests monitor-worker` outside `src/lib/i18n/`. All 6 miss on the dotted form. The
+  prefixed-suffix sweep hits only **`rules.importDialog.title` / `.dropZoneText`** in
+  `src/components/RuleImportDialog.tsx:303,327` — a different, live namespace — and the bare
+  suffix hits only a local `chooseFileButton` helper in
+  `src/components/agent/AgentChooseFileFocus.test.tsx`. No `` `terminology.…${ `` template
+  exists anywhere, so a literal search is sufficient.
+- **The English strings are unreferenced too**, not just the keys: "Import term base",
+  "Parsing…", "Drop a .", "Choose {format} file", "source_lemma · target_lemma", "TBX-Basic"
+  over the same roots plus `docs/`. The only hits are prose in `src/lib/terminology/tbx.ts`
+  and `csv.ts` (the parsers, which describe the formats and are **live**, reached from the
+  glossary's own importer) and the two `docs/FEATURE-STORIES.csv` rows below.
+- **The feature itself is not gone, it was re-keyed, and the live surface uses other keys.**
+  `GlossaryEditor.tsx:65,652` imports `importTermbaseFile` from
+  `@/lib/terminology/import-format` and renders its outcomes through
+  `terminology.editor.importAdded` / `.importAlreadyListed` / `.importNothingNew` /
+  `.errorImportFailed` — a plain file picker, no drop zone, no format tabs. The deleted keys
+  were the retired dialog's chrome, which has no counterpart on the live surface.
+- **The e2e spec those keys' feature stories cite does not exist.**
+  `docs/FEATURE-STORIES.csv` rows T-11 and T-12 ("Import concepts from CSV/TBX") both point
+  at `e2e/specs/projects/terminology-import-dialog.smoke.spec.ts` and at
+  `src/components/TerminologyPage.tsx:373-496`; **neither file is in the tree.** Those two
+  rows join the 28 stale `T-*` rows the 2026-09-21 entry already logged — re-pointing them
+  stays a feature-by-feature check against the live surface, not this run's business, and
+  `docs/FEATURE-STORIES.csv` is untouched here.
+- **The i18n hard guards were simulated before the edit** — a scratchpad `tsx` script
+  importing the real `NAMESPACES`, `DUPLICATE_EXCEPTIONS` and `plurals`, re-implementing
+  `no-duplicates.test.ts`'s three hard assertions against the catalog with the 6 keys removed
+  **in memory**:
+
+  | | before | after |
+  | --- | --- | --- |
+  | catalog keys | 10328 | 10322 |
+  | strings (plural forms flattened) | 10940 | 10934 |
+  | unexcused duplicate groups (the non-blocking warning) | 372 | **372** |
+  | `DUPLICATE_EXCEPTIONS` entries | 131 | **131** |
+  | exceptions for a missing key | 0 | **0** |
+  | exceptions whose key no longer collides | 0 | **0** |
+  | groups left with ≥2 unexcused keys beside an excused one | 0 | **0** |
+
+  **None of the 6 is in a collision group at all** (the simulation prints each doomed key's
+  group and printed nothing), so the warning count does not move.
+- **`source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, asserted byte-identical to the sidecar's own writer** on the
+  untouched file **before any key was dropped** (an assertion inside the strip script, not an
+  eyeball) — `scripts/i18n-catalog.ts` writes `JSON.stringify(all, null, 2) + "\n"`. All 18
+  locales carried all 6 keys, so the diff there is a clean 108 deleted lines, zero added.
+- **Every locale line was proven self-contained before deleting it**: the strip script
+  asserts each of the 18 catalogs holds exactly 6 matching lines, each a complete
+  `"key": value,` on one line, **and** that the file contains exactly 6 occurrences of the
+  `terminology.importDialog.` prefix in total, so a line filter cannot truncate a multi-line
+  value or miss a stray mention. The namespace edits are two exact-match block replacements
+  with `count == 1` assertions, then an assertion that neither
+  `terminology.importDialog.` nor `TermbaseImportDialog` appears in the file at all.
+- **The whole `terminology` namespace still declares no `screenshot`** (`grep -n screenshot
+  src/lib/i18n/namespaces/terminology.ts` is empty), so no screenshot surface loses its only
+  linker and `context.test.ts`'s "covers each major surface" assertion cannot move.
+- **The edit was rehearsed in a `git worktree` at pristine `origin/dev` first**, not on the
+  working tree: the strip script ran there, its diff was read line by line, and a first
+  version that left a double blank line where the section header had been was caught and
+  fixed there. Only the corrected script touched the real checkout. Cheap, and it keeps a
+  half-applied edit off the branch.
+
+### Baseline and final gate — 2026-11-23 (`origin/dev` `025f6f67`)
+
+All gates run **serially** (never lint alongside vitest — the 2026-11-16 note still holds),
+with `rm -rf packages/*/dist` before both lints so the two logs are comparable.
+
+| Gate | Baseline (clean tree, before any edit) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1077 problems (0 errors, 1077 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2542 files passed / **1 failed** / 2 skipped (2545); 30082 tests passed / **1 failed** / 1 expected fail / 23 skipped (30107), 1179.62s | exit 1 — **identical counts, identical single failure** (2542 passed / 1 failed / 2 skipped; 30082 passed / 1 failed / 1 expected fail / 23 skipped, 1220.69s) |
+| `pnpm test:e2e:smoke` | the documented pre-existing sets below | exit 1 — **s1 42 passed / 3 failed, s2 33 passed, s3 38 passed**; the 3 are the documented pre-existing set |
+
+Worker suites were **not** run and are not required: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+**The one root-suite failure is pre-existing and environmental**, the same one the
+2026-11-09/18/20 entries recorded: `scripts/release-cut.test.ts` → *"fails loud when the pick
+cannot commit, and leaves nothing in progress"*. It sets `commit.gpgsign=true` with a
+deliberately bogus `gpg.program` and expects `buildReleaseBranch` to throw; in this container
+git commits anyway, so nothing is thrown. Identical before and after, `scripts/` is nowhere
+near this run's files, and that file is frozen by the routine's own rule. Out of scope —
+**not fixed**. That is now five consecutive runs recording it; it still wants a human, since
+the fix has to touch the test file.
+
+**The 3 smoke failures are the documented pre-existing set**, and this is now the **seventh
+consecutive run** failing exactly this way on clean `dev`: all three are
+`editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a `locator.click` timeout on
+`Play all`. Nothing an i18n key deletion can reach — that spec imports YouTube captions and
+waits on media playback, and none of the six deleted keys has ever had a reader.
+
+**Two differences from the 2026-11-20 entry's smoke numbers, both improvements, both noted so
+the next run does not read them as drift**: shard 3 is **38 specs now, not 37** (`dev` added
+one since), and the `projects/admin-console-billing.smoke.spec.ts:51` `ENOENT … scandir
+'auth-worker/.wrangler/tmp/email'` harness artifact that the last three entries recorded **did
+not reproduce** — s3 was fully green. So the s3 failure is intermittent harness noise, not a
+standing failure; do not treat its absence as a fix or its presence as a regression.
+
+### Sandbox notes — 2026-11-23
+
+The 2026-11-16/18/20 notes all still hold and were all needed again. Two refinements:
+
+- The Playwright revision gap has **widened**: `playwright-core` now wants chromium **1254** /
+  chromium-headless-shell **1254** / ffmpeg **1013** against the image's 1243/1243/1011. Same
+  three symlinks, different numbers — read the wanted revisions out of
+  `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json` every run
+  rather than trusting any entry's numbers, this one included.
+- **`npm install` in `worker/` fails and is supposed to.** `worker/` is a **pnpm workspace
+  member** (`EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"`), so the root `pnpm i`
+  already provides it. Only `auth-worker/`, `sync-worker/` and `agent-worker/` take their own
+  `npm install` — `auth-worker` still needing `--legacy-peer-deps` for the `vitest@5` /
+  `@cloudflare/vitest-pool-workers` peer conflict the 2026-11-09 entry filed. And when
+  restoring the lockfiles afterwards, `git checkout -- <paths>` **fails as a whole** if one
+  listed path does not exist (`worker/package-lock.json` does not), silently restoring none of
+  them — list only the three that exist, and re-check `git status` before committing.
+
+## 2026-11-25 — oversized-file split: the apply preconditions leave the planner
+
+Second run of **theme 5**, taking the smaller of the two seams the 2026-11-20 entry deferred,
+on that entry's own terms: *"These are about connecting and refusing, not planning: each
+one's only in-file occurrences are its own declaration (and, for two of them, one internal
+use), so the planner does not read them either."*
+
+- **Done this run** (2 files, 120 insertions / 91 deletions, no test file touched):
+  `src/lib/lanes/lane-batch-backfill.ts` 1,117 → 1,038 lines; the six apply-precondition
+  symbols now live in **`src/lib/lanes/lane-batch-apply.ts`** (107 lines), which the
+  planner's module re-exports beside the `renderLaneBatchReport` re-export the 2026-11-20
+  run added: `export { LANE_BATCH_MIGRATIONS, LANE_BATCH_READ_ONLY_OPTIONS, LANE_BATCH_SQL,
+  laneBatchApplyRefusal, laneBatchClientConfig, type LaneBatchColumnPresence } from
+  "./lane-batch-apply"`.
+- **Zero importer churn.** The only two importers are
+  `scripts/neon-backfill-lane-batch.ts:23-32` and
+  `src/lib/lanes/lane-batch-backfill.test.ts:4-7`, and both import these names from
+  `./lane-batch-backfill` (resp. `../src/lib/lanes/lane-batch-backfill`). The re-export keeps
+  those paths resolving; neither file is in the diff.
+- **No runtime import cycle, in either direction.** Unlike `lane-batch-report.ts`, the new
+  module imports *nothing at all* — the block's only dependencies are `Set`, `Array.filter`
+  and string literals, so there is not even an erased `import type` edge back to the planner.
+  The split script asserts this: it fails if the moved block mentions any of the planner's
+  twelve imported names.
+- **`LANE_BATCH_MIGRATIONS` has no external reader** (its only use anywhere is
+  `laneBatchApplyRefusal`'s own `.filter`), so it is a dead-export candidate for a future
+  theme-1 run. Left exported and re-exported here on purpose: narrowing the public surface
+  is a different theme, and this run's whole claim is that the surface did not move.
+
+### Proof of preservation
+
+The 2026-11-20 entry asked for *"the existing `describe("lane batch apply gate")` block
+(already covers `laneBatchApplyRefusal` and `laneBatchClientConfig`) plus `pnpm build`."*
+Both were produced, plus two mechanical byte-diffs that are stronger than either:
+
+1. **The moved block is byte-identical.** `git show origin/dev:…/lane-batch-backfill.ts |
+   sed -n '37,127p'` diffed against the new file minus its 16-line header is **empty**.
+   Nothing inside the block was reworded, reordered or reformatted.
+2. **The planner's runtime export surface is byte-identical at 2,972 bytes.** A scratchpad
+   `tsx` script (never committed) dynamically imports
+   `<tree>/src/lib/lanes/lane-batch-backfill.ts` and prints the sorted `Object.keys` of the
+   module namespace with each value's `typeof`, then `LANE_BATCH_MIGRATIONS`,
+   `LANE_BATCH_READ_ONLY_OPTIONS`, the whole `LANE_BATCH_SQL` map as indented JSON,
+   `laneBatchClientConfig` for both `readOnly` values, and `laneBatchApplyRefusal` over five
+   column/migration combinations chosen to hit every `return` it has (no migrations; one
+   migration; both migrations with three schema gaps; both migrations with all three
+   later-columns missing; fully ready → `null`). Run against a `git worktree` at pristine
+   `origin/dev` and against the working tree, the two outputs `diff` **empty**. All nine
+   runtime exports are present with the same types and the same values, every refusal string
+   included.
+3. **The module still never reaches the SPA bundle.** After a green `pnpm build`, a `grep`
+   for `laneBatchApplyRefusal`, `LANE_BATCH_READ_ONLY` and `planLaneBatch` over all **419**
+   built `dist/assets/*.js` chunks finds nothing — the same check the 2026-10-12 and
+   2026-11-20 entries ran. The planner and its new sibling are reached only by the ops script
+   and the test, so a browser-visible regression is not merely unlikely, it is unreachable.
+4. **The file's own 15 tests pass in isolation** (15/15, 622 ms), and the full root suite is
+   identical before and after — see the table below.
+5. **`pnpm run check:doc-pins` → `✓ 204 doc pins resolve across 420 docs`.** No pin named a
+   symbol that moved (`grep -rn lane-batch docs/decisions/` was already empty).
+6. **The edit was rehearsed in a `git worktree` at pristine `origin/dev` first**, per the
+   2026-11-23 note: the split script ran there, its diff was read line by line, and only then
+   did it touch the real checkout. The script derives its block boundaries from content
+   (`export const LANE_BATCH_MIGRATIONS = [` … the next `} as const`) rather than from line
+   numbers, asserts the block is exactly 91 lines, asserts a blank line on each side and
+   `export interface LaneBatchLane` immediately after, and asserts that none of the six
+   symbols appears anywhere in the file outside the block before moving it.
+
+### Baseline and final gate — 2026-11-25 (`origin/dev` `1f2a5f21`)
+
+All gates run **serially** (never lint alongside build or vitest — see the sandbox note
+below, which this run learned the hard way again), with `rm -rf packages/*/dist` before both
+lints so the two logs are comparable.
+
+| Gate | Baseline (clean tree, before any edit) | After the diff |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — **1076 problems (0 errors, 1076 warnings)** | exit 0 — **byte-identical output** (`diff` of the two logs is empty) |
+| `pnpm build` | exit 0 | exit 0 |
+| `pnpm test` | exit 1 — 2553 files passed / **1 failed** / 2 skipped (2556); 30250 tests passed / **1 failed** / 1 expected fail / 23 skipped (30275), 1125.62s | exit 1 — **identical counts, identical single failure** (2553 / 1 / 2; 30250 / 1 / 1 / 23), 1155.93s |
+| `pnpm test:e2e:smoke` | the documented pre-existing set below | exit 1 — **s1 42 passed / 3 failed, s2 33 passed, s3 38 passed**; the 3 are that set |
+
+Worker suites were **not** run and are not required: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+**The one root-suite failure is pre-existing and environmental** — the same one the
+2026-11-09/18/20/23 entries recorded, now **six consecutive runs**:
+`scripts/release-cut.test.ts` → *"fails loud when the pick cannot commit, and leaves nothing
+in progress"*. It sets `commit.gpgsign=true` with a deliberately bogus `gpg.program` and
+expects `buildReleaseBranch` to throw; in this container git commits anyway, so nothing is
+thrown. Identical before and after, `scripts/` is nowhere near this run's files, and that
+file is frozen by the routine's own rule. Out of scope — **not fixed**. It still wants a
+human, because the fix has to touch the test file.
+
+**The 3 smoke failures are the documented pre-existing set, and this is the eighth
+consecutive run failing exactly this way on clean `dev`**: all three are
+`editor/import-and-edit.smoke.spec.ts:339` (srt, vtt, sbv), each a `locator.click` timeout on
+`Play all`. The three shard counts match the 2026-11-23 entry exactly (42/3, 33/0, 38/0), and
+the `projects/admin-console-billing.smoke.spec.ts:51` `ENOENT … scandir` harness artifact did
+not reproduce again — two runs clean now, so treat it as settled noise. Nothing a caption
+import spec touches can reach a module that proof 3 shows is absent from every built chunk.
+
+### Sandbox notes — 2026-11-25
+
+The 2026-11-16/18/20/23 notes all still hold and were all needed again. Two refinements:
+
+- **"Serialize lint and vitest" is too narrow — serialize lint and `pnpm build` too.** This
+  run started the baseline `pnpm lint` and `pnpm build` in parallel to save wall-clock and
+  the kernel OOM-killed eslint (**exit 137**) while the build survived. `pnpm lint` runs with
+  `--max-old-space-size=8192` and `vite build` is not cheap; they do not fit together. Run
+  **one gate at a time, always**, and re-run lint on its own after a build so the
+  `packages/*/dist` state is the one you controlled.
+- The Playwright revision gap is unchanged from 2026-11-23 (`playwright-core` wants chromium
+  **1254** / chromium-headless-shell **1254** / ffmpeg **1013**; the image carries
+  1243/1243/1011), and the three symlinks were needed again. Still read the wanted revisions
+  out of `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
+  every run rather than trusting any entry's numbers, this one included.

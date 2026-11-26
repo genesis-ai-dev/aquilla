@@ -738,6 +738,11 @@ export interface ProjectRecord {
    *  above (`MilestoneFloor` in `@/lib/sync/project-settings`);
    *  `resolveMilestoneFloor` maps it. */
   milestoneFloor?: "maintainer" | "project_lead"
+  /** AQU-2647: who may edit source text, hide a cell, and split a line at
+   *  quotes. Absent = the organization's tier, else maintainer. Spelled out
+   *  for the same reason as `cellEditingFloor` (`SourceTextTier` in
+   *  `@/lib/sync/project-settings`). */
+  sourceTextFloor?: "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
    *  SECOND gate on top of the maintainer floor, so with it off the write is
@@ -780,6 +785,11 @@ export interface ProjectRecord {
    * device-local grandfather is honoured with it.
    */
   autopilotEnabled?: boolean
+  /**
+   * Project-wide smart edits switch (ProjectWideSettings.smartEditsEnabled).
+   * Absent → on. Read through `isSmartEditsEnabled`.
+   */
+  smartEditsEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -902,6 +912,12 @@ export interface ProjectRecord {
     source: string
     fetchedAt: string
   }
+  /**
+   * AQU-2647: role levels from the sync token's lane grants. Source text is
+   * shared, so any language lane counts. Absent until a token is minted;
+   * until then only the project role is known.
+   */
+  laneGrantLevels?: readonly number[]
   usage?: ProjectUsage
   /** Project terminology / glossary concepts. Persisted and synced via
    *  ProjectWideSettings (same mechanism as `rules`). Active concepts are

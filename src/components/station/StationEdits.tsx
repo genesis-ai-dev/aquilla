@@ -140,6 +140,7 @@ export function StationSave({
   places,
   openLine,
   saving,
+  locked = false,
   onSave,
   menuOpen,
   onMenuOpen,
@@ -148,6 +149,8 @@ export function StationSave({
   places: readonly string[]
   openLine: string
   saving: boolean
+  /** AQU-2493 (review, Nov 9): Record now is running; Save waits for Stop. */
+  locked?: boolean
   onSave(how: SaveHow): void
   menuOpen: boolean
   onMenuOpen(open: boolean): void
@@ -162,14 +165,14 @@ export function StationSave({
           type="button"
           size="sm"
           data-testid="station-save"
-          disabled={saving}
+          disabled={saving || locked}
           onClick={() => onSave({ mode: "over", scope: "all" })}
           className={`${cls} rounded-e-none`}
         >
           {saving ? t("editor.station.saving") : t("editor.station.save")}
         </Button>
       </AppTooltip>
-      <DropdownMenu open={menuOpen} onOpenChange={(o) => onMenuOpen(o)}>
+      <DropdownMenu open={menuOpen && !locked} onOpenChange={(o) => onMenuOpen(o)}>
         <DropdownMenuTrigger
           render={
             <Button
@@ -178,7 +181,7 @@ export function StationSave({
               data-testid="station-save-more"
               aria-label={t("editor.station.saveMenu")}
               title={t("editor.station.saveMenu")}
-              disabled={saving}
+              disabled={saving || locked}
               className="rounded-s-none border-s border-primary-foreground/25 px-1.5"
             >
               <ChevronDown className="size-3.5" />

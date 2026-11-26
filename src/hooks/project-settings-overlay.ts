@@ -5,6 +5,7 @@ import { readBibleEnrichments } from "../../db/shared/bible-enrichments"
 import { readDraftingSettings } from "../../db/shared/drafting-settings"
 import { applyDraftingSettings } from "@/lib/completion/drafting-settings"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+import type { SourceTextTier } from "../../db/shared/source-text-floor"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -31,6 +32,13 @@ export function overlaySettings(
      * what the server enforces.
      */
     media?: MediaDefaults
+    /**
+     * AQU-2647: the org's source-text floor. Same rule as the counts: the
+     * Project settings form leaves this out so it can tell "inherit" from an
+     * explicit tier. The editor passes it, so the record carries the tier in
+     * force.
+     */
+    sourceTextFloor?: SourceTextTier | null
   },
 ): ProjectRecord {
   let next: ProjectRecord | null = null
@@ -104,6 +112,10 @@ export function overlaySettings(
   assign("cellEditingFloor", settings.cellEditingFloor ?? orgDefaults?.media?.cellEditingFloor)
   // AQU-2408: who may type a cell's label. No org default: absent = maintainer.
   assign("cellLabelFloor", settings.cellLabelFloor)
+  // AQU-2647: the project's own tier, else the organization's. Absent on both
+  // reads as maintainer where the floor is resolved, so nothing is assigned
+  // until one of them is set.
+  assign("sourceTextFloor", settings.sourceTextFloor ?? orgDefaults?.sourceTextFloor)
   // AQU-2309: who may set milestones. No org default: absent = maintainer.
   assign("milestoneFloor", settings.milestoneFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
@@ -118,6 +130,9 @@ export function overlaySettings(
   // see no Autopilot at all — the surfaces render only when this is on (or the
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
+  // Must reach the workspace: a stored false is the only thing that turns
+  // smart edits off, and the editor reads it from the record.
+  assign("smartEditsEnabled", settings.smartEditsEnabled)
   // AQU-2041: the voice-management switch. Absent stays off; a stored false
   // must still reach the workspace or a lead keeps the controls after a
   // maintainer turns them off.

@@ -145,6 +145,14 @@ export interface StaffLanePopoverProps {
    * row ⋯ menu and only needs an anchor in the actions cell.
    */
   anchorOnly?: boolean
+  /**
+   * AQU-2322: take the Give access request instead of opening the dialog from
+   * here. A caller that can remount this popover when it closes must pass it
+   * and hold the launcher itself: OverviewLaneTable rebuilds its actions cell
+   * when the open lane changes, and a request kept in this component's state
+   * was gone before the dialog could open. Absent, the popover opens it.
+   */
+  onGiveAccess?: (request: GiveAccessRequest) => void
 }
 
 /**
@@ -192,6 +200,7 @@ export function StaffLanePopover({
   open: openProp,
   onOpenChange,
   anchorOnly = false,
+  onGiveAccess,
 }: StaffLanePopoverProps) {
   const { t, locale } = useI18n()
   const location = useLocation()
@@ -479,12 +488,14 @@ export function StaffLanePopover({
    */
   function handleConfirm() {
     if (!selected || seesEveryLane || orgId == null) return
-    setGiving({
+    const request: GiveAccessRequest = {
       userId: String(selected.userId),
       roleLevel: role,
       place: laneId ? { type: "lane", id: laneId } : undefined,
       nonce: Date.now(),
-    })
+    }
+    if (onGiveAccess) onGiveAccess(request)
+    else setGiving(request)
     handleOpenChange(false)
   }
 
@@ -733,7 +744,7 @@ export function StaffLanePopover({
         )}
       </PopoverContent>
     </Popover>
-    {orgId != null && (
+    {orgId != null && !onGiveAccess && (
       <GiveAccessLauncher orgId={orgId} request={giving} onClose={() => setGiving(null)} onGranted={handleGranted} />
     )}
     {orgId != null && removingGrant?.grantLaneId && (

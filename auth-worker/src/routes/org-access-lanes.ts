@@ -31,6 +31,7 @@ import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { hasActiveElevation } from "../middleware/platform-admin"
 import { ViewerScope } from "../services/access-payload"
 import { auditMembershipChange } from "../services/admin-audit"
 import { projectElevationDenial } from "../services/elevation-gate"
@@ -64,7 +65,7 @@ async function gate(c: Context<AuthHonoEnv>, laneIdValue: string, userIdValue: s
   const user = c.get("user")
   const vs = new ViewerScope(c.env, user)
   const hidden = () => c.json({ error: "no access to this roster" }, 403)
-  const access = await buildOrgAccess(c.env, vs, orgId)
+  const access = await buildOrgAccess(c.env, vs, orgId, () => hasActiveElevation(c))
   if (!access.ok) return hidden()
   const { grantable, people } = access.payload
   if (!(`lane:${laneIdValue}` in grantable)) return hidden()

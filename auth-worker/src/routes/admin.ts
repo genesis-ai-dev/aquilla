@@ -33,7 +33,6 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { loadPlatformAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
-import { countTargetLanesByOrg } from "../lib/billing/words"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
@@ -45,8 +44,14 @@ import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../uti
 import { loadRetentionMetrics } from "../lib/retention-load"
 import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
-import { countedFileSql, inCountedFileSql } from "../../../db/shared/counted-files"
-import { lessStructural } from "../services/org-permissions"
+import {
+  getAdminOrgRecord,
+  listAdminOrgs,
+  listAdminProjects,
+  listAdminTeams,
+  listAdminUsers,
+  readAdminListParams,
+} from "../lib/admin-directory"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -366,7 +371,7 @@ admin.get("/overview", async (c) => {
   const db = c.env.AQUILLA_PG
   // One round-trip per scalar; we issue one statement per round-trip, but these are
   // cheap COUNT(*)s. active7d = users with org activity in the last 7 days.
-  const [orgs, teams, users, projects, archived, active7d] = await Promise.all([
+  const [orgs, teams, users, projects, archived, active7d, newUsers7d] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS n FROM organizations").first<{ n: number }>(),
     db.prepare("SELECT COUNT(*) AS n FROM groups").first<{ n: number }>(),
     db.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>(),
@@ -377,6 +382,7 @@ admin.get("/overview", async (c) => {
         "SELECT COUNT(DISTINCT user_id) AS n FROM org_members WHERE last_active_at IS NOT NULL AND last_active_at >= now() - interval '7 days'",
       )
       .first<{ n: number }>(),
+    db.prepare("SELECT COUNT(*) AS n FROM users WHERE created_at >= now() - interval '7 days'").first<{ n: number }>(),
   ])
   return c.json({
     orgs: orgs?.n ?? 0,
@@ -385,46 +391,33 @@ admin.get("/overview", async (c) => {
     activeProjects: projects?.n ?? 0,
     archivedProjects: archived?.n ?? 0,
     activeUsers7d: active7d?.n ?? 0,
+    newUsers7d: newUsers7d?.n ?? 0,
   })
 })
 
-/** GET /api/v2/admin/orgs — every org with owner + member/project/lane counts. */
+/**
+ * GET /api/v2/admin/orgs — orgs with owner + member/project/team/lane counts.
+ * Without `limit`, every org (callers that pick from the full list). With
+ * `limit` (and optional `offset`, `q`, `sort`, `dir`), one page plus `total`.
+ * Search matches the name shown in the table and the owner, across every org.
+ */
 admin.get("/orgs", async (c) => {
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    `SELECT o.id, o.name, o.created_at,
-            u.username AS owner_username,
-            (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id) AS member_count,
-            (SELECT COUNT(*) FROM projects p WHERE p.org_id = o.id AND p.archived_at IS NULL) AS project_count
-       FROM organizations o
-       LEFT JOIN users u ON u.id = o.owner_user_id
-      ORDER BY o.created_at DESC`,
-  ).all<{
-    id: number
-    name: string | null
-    created_at: string
-    owner_username: string | null
-    member_count: number
-    project_count: number
-  }>()
-  // AQU-1071: the billing band was only legible one org at a time, on the
-  // Billing tab. One grouped query gives the whole tenants list its active
-  // target-lane count — deliberately not a per-row subquery, which would add a
-  // query per org to a cross-tenant table.
-  const { byOrg } = await countTargetLanesByOrg(
-    c.env.AQUILLA_PG,
-    results.map((r) => r.id),
-  )
+  const params = readAdminListParams((name) => c.req.query(name))
+  const { orgs, total } = await listAdminOrgs(c.env.AQUILLA_PG, params)
   return c.json({
-    orgs: results.map((r) => ({
-      id: r.id,
-      name: r.name,
-      createdAt: r.created_at,
-      ownerUsername: r.owner_username,
-      memberCount: r.member_count,
-      projectCount: r.project_count,
-      activeLanguageCount: byOrg.get(r.id) ?? 0,
-    })),
+    orgs,
+    total,
+    ...(params.limit != null ? { limit: params.limit, offset: params.offset } : {}),
   })
+})
+
+/** GET /api/v2/admin/orgs/:orgId — one org, for a drill-down that is not on the current page. */
+admin.get("/orgs/:orgId", async (c) => {
+  const orgId = parseNumericId(c.req.param("orgId"))
+  if (orgId === null) return c.json({ error: "Org not found" }, 404)
+  const org = await getAdminOrgRecord(c.env.AQUILLA_PG, orgId)
+  if (!org) return c.json({ error: "Org not found" }, 404)
+  return c.json({ org })
 })
 
 /** A path id that must be a positive whole number, else null (the route 404s). */
@@ -475,78 +468,33 @@ admin.get("/orgs/:orgId/members", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/teams — every group ("team") with org + member/grant counts. */
+/**
+ * GET /api/v2/admin/teams — every group ("team") with org + member/grant counts.
+ * `limit` pages the list; `q` searches the team, org, project lead, and owner.
+ */
 admin.get("/teams", async (c) => {
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    `SELECT g.id, g.name, g.created_at, g.org_id,
-            o.name AS org_name,
-            (SELECT u.username
-               FROM group_members gm
-               JOIN users u ON u.id = gm.user_id
-               JOIN org_members om ON om.org_id = g.org_id AND om.user_id = gm.user_id
-              WHERE gm.group_id = g.id AND om.role_level = 500
-              ORDER BY LOWER(u.username)
-              LIMIT 1) AS project_lead_username,
-            ou.username AS owner_username,
-            (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
-            (SELECT COUNT(*) FROM group_project_grants gp WHERE gp.group_id = g.id) AS project_count
-       FROM groups g
-       LEFT JOIN organizations o ON o.id = g.org_id
-       LEFT JOIN users ou ON ou.id = o.owner_user_id
-      ORDER BY o.name, g.name`,
-  ).all<{
-    id: number
-    name: string
-    created_at: string
-    org_id: number
-    org_name: string | null
-    project_lead_username: string | null
-    owner_username: string | null
-    member_count: number
-    project_count: number
-  }>()
+  const params = readAdminListParams((name) => c.req.query(name))
+  const { teams, total } = await listAdminTeams(c.env.AQUILLA_PG, params)
   return c.json({
-    teams: results.map((r) => ({
-      id: r.id,
-      name: r.name,
-      createdAt: r.created_at,
-      orgId: r.org_id,
-      orgName: r.org_name,
-      projectLeadUsername: r.project_lead_username,
-      ownerUsername: r.owner_username,
-      memberCount: r.member_count,
-      projectCount: r.project_count,
-    })),
+    teams,
+    total,
+    ...(params.limit != null ? { limit: params.limit, offset: params.offset } : {}),
   })
 })
 
-/** GET /api/v2/admin/users — every user (no password hashes). */
+/**
+ * GET /api/v2/admin/users — every user (no password hashes). `limit` pages
+ * the list; `q` matches username, display name, email, and the "platform
+ * admin" role label, across the whole directory.
+ */
 admin.get("/users", async (c) => {
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    `SELECT u.id, u.username, u.email, u.display_name, u.created_at,
-            (SELECT COUNT(*) FROM org_members m WHERE m.user_id = u.id) AS org_count,
-            (SELECT MAX(last_active_at) FROM org_members m WHERE m.user_id = u.id) AS last_active_at
-       FROM users u
-      ORDER BY u.created_at DESC`,
-  ).all<{
-    id: number
-    username: string
-    email: string
-    display_name: string | null
-    created_at: string
-    org_count: number
-    last_active_at: string | null
-  }>()
+  const params = readAdminListParams((name) => c.req.query(name))
+  const emails = Array.from(await loadPlatformAdminEmails(c.env))
+  const { users, total } = await listAdminUsers(c.env.AQUILLA_PG, params, emails)
   return c.json({
-    users: results.map((r) => ({
-      id: r.id,
-      username: r.username,
-      email: r.email,
-      displayName: r.display_name,
-      createdAt: r.created_at,
-      orgCount: r.org_count,
-      lastActiveAt: r.last_active_at,
-    })),
+    users,
+    total,
+    ...(params.limit != null ? { limit: params.limit, offset: params.offset } : {}),
   })
 })
 
@@ -635,101 +583,21 @@ function asBool(value: boolean | number | null | undefined): boolean {
   return value === true || value === 1
 }
 
-/** GET /api/v2/admin/projects — every project with org/creator + rollup + shared flag. */
+/**
+ * GET /api/v2/admin/projects — projects with org/creator + rollup + shared flag.
+ * `limit` pages them. `q` searches name, org, creator, and the shared label.
+ * `lens` is all | active | archived | needs-attention. `orgId` scopes to one
+ * org. A page that can be chosen before the file rollup aggregates only that
+ * page (AQU-2722).
+ */
 admin.get("/projects", async (c) => {
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    // AQU-1911: the cell counts follow the project's "count headings" answer,
-    // else its org's (the org dashboard's `lessStructural`), so a project
-    // reads the same validated % here as on its dashboards. Words never do,
-    // as on the dashboard. `filled_cells` and `last_activity_at` feed the
-    // dashboard's activity rule (portfolioActivityStatus): a project nobody
-    // has started translating is not stalled, and validating or recording is
-    // work. `file_section_progress.updated_at` is restamped by every
-    // counter-moving event, validations and takes included, where
-    // `files.last_edit_at` moves only on a cell write (AQU-950).
-    `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
-            o.name AS org_name,
-            u.username AS creator_username,
-            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
-            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
-            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
-            COALESCE(SUM(f.word_count), 0) AS word_count,
-            MAX(f.last_edit_at) AS last_edit_at,
-            GREATEST(
-              MAX(f.last_edit_at),
-              (SELECT MAX(fsp.updated_at) FROM file_section_progress fsp
-                WHERE fsp.project_id = p.id AND fsp.scope = 'file'
-                  AND ${inCountedFileSql('fsp', 'uncounted_activity_file')})
-            ) AS last_activity_at,
-            (
-              EXISTS (
-                SELECT 1 FROM project_members pm
-                 WHERE pm.project_id = p.id
-                   AND p.org_id IS NOT NULL
-                   AND NOT EXISTS (
-                     SELECT 1 FROM org_members om
-                      WHERE om.org_id = p.org_id AND om.user_id = pm.user_id
-                   )
-              ) OR EXISTS (
-                SELECT 1
-                  FROM group_project_grants gpg
-                  JOIN group_members gm ON gm.group_id = gpg.group_id
-                 WHERE gpg.project_id = p.id
-                   AND p.org_id IS NOT NULL
-                   AND NOT EXISTS (
-                     SELECT 1 FROM org_members om
-                      WHERE om.org_id = p.org_id AND om.user_id = gm.user_id
-                   )
-              )
-            ) AS shared
-       FROM projects p
-       LEFT JOIN organizations o ON o.id = p.org_id
-       LEFT JOIN users u ON u.id = p.created_by
-       -- AQU-1626: deleted files and hidden companions (cue sheets, caption
-       -- tracks) are not this project's work, so they stay out of the admin
-       -- rollup exactly as they stay out of the org dashboard's. In the JOIN,
-       -- not the WHERE: this is a LEFT join and a project whose only file is
-       -- hidden must still appear, at zero.
-       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN org_settings os ON os.org_id = p.org_id
-      GROUP BY p.id, o.name, u.username
-      ORDER BY p.created_at DESC`,
-  ).all<{
-    id: string
-    name: string
-    org_id: number | null
-    org_name: string | null
-    archived_at: string | null
-    created_at: string
-    deadline_at: string | null
-    creator_username: string | null
-    total_cells: number
-    validated_cells: number
-    filled_cells: number
-    word_count: number
-    last_edit_at: number | null
-    last_activity_at: number | string | null
-    shared: boolean | number | null
-  }>()
+  const params = readAdminListParams((name) => c.req.query(name))
+  const { projects, total, overdue } = await listAdminProjects(c.env.AQUILLA_PG, params)
   return c.json({
-    projects: results.map((r) => ({
-      id: r.id,
-      name: r.name,
-      orgId: r.org_id,
-      orgName: r.org_name,
-      archived: r.archived_at != null,
-      createdAt: r.created_at,
-      deadlineAt: r.deadline_at,
-      creatorUsername: r.creator_username,
-      totalCells: r.total_cells,
-      validatedCells: r.validated_cells,
-      filledCells: r.filled_cells,
-      wordCount: r.word_count,
-      lastEditAt: r.last_edit_at,
-      lastActivityAt: r.last_activity_at == null ? null : Number(r.last_activity_at),
-      shared: asBool(r.shared),
-    })),
+    projects,
+    total,
+    ...(overdue != null ? { overdue } : {}),
+    ...(params.limit != null ? { limit: params.limit, offset: params.offset } : {}),
   })
 })
 

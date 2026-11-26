@@ -72,7 +72,7 @@ describe("AutopilotProcessGraph", () => {
     expect(screen.getByRole("img", { name: "Autopilot process graph" })).toBeInTheDocument()
     expect(screen.getByText("Now: LUK 1:1–1:8")).toBeInTheDocument()
     expect(screen.getByText("Noted 2 parts of the meaning not to over-specify in LUK 1:1–1:8")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "What a span is" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "What a passage is" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Situation" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Not too specific" })).toBeInTheDocument()
   })
@@ -180,7 +180,7 @@ describe("AutopilotProcessGraph", () => {
 describe("AutopilotProcessGraph explanations", () => {
   it("opens what a span is in place under the title, on click, never on hover", async () => {
     render(<TooltipProvider delay={0}><AutopilotProcessGraph run={run} activity={activity} /></TooltipProvider>)
-    const info = screen.getByRole("button", { name: "What a span is" })
+    const info = screen.getByRole("button", { name: "What a passage is" })
     await userEvent.setup().hover(info)
     expect(screen.queryByRole("tooltip")).toBeNull()
     const reveal = document.getElementById(info.getAttribute("aria-controls") ?? "")

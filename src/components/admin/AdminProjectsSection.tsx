@@ -22,6 +22,7 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Badge } from "@/components/ui/badge"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { AdminDirectoryCount, type AdminTableServer } from "@/components/admin/admin-directory-ui"
 import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -44,6 +45,8 @@ export function AdminProjectsSection({
   initialLens = "all",
   hideOrg = false,
   onSelectOrg,
+  server,
+  fill = false,
 }: {
   projects: AdminProject[]
   /** Starting filter, e.g. "needs-attention" when a stat tile opened this tab. */
@@ -52,13 +55,27 @@ export function AdminProjectsSection({
   hideOrg?: boolean
   /** Makes the Org cell a link to that org's admin page. */
   onSelectOrg?: (orgId: number) => void
+  /**
+   * When set, the lens, search, and sort are the server's. The rows are shown
+   * as returned — a query is not applied again on this page. Scrolling asks
+   * for the next rows.
+   */
+  server?: AdminTableServer & {
+    lens: Lens
+    onLensChange: (lens: Lens) => void
+  }
+  /** The table fills the page and loads the next rows when its end scrolls into view. */
+  fill?: boolean
 }) {
   const t = useT()
   const navigate = useNavigate()
   const [now] = useState(() => Date.now())
-  const [lens, setLens] = useState<Lens>(initialLens)
+  const [localLens, setLocalLens] = useState<Lens>(initialLens)
+  const lens = server?.lens ?? localLens
+  const setLens = server?.onLensChange ?? setLocalLens
 
   const data = useMemo(() => {
+    if (server) return projects
     switch (lens) {
       case "needs-attention":
         return projects.filter((p) => !p.archived && attentionReasons(p, now).length > 0)
@@ -69,7 +86,7 @@ export function AdminProjectsSection({
       default:
         return projects
     }
-  }, [projects, lens, now])
+  }, [projects, lens, now, server])
 
   const columns = useMemo<ColumnDef<AdminProject>[]>(
     () => [
@@ -212,13 +229,15 @@ export function AdminProjectsSection({
     }
   }, [lens])
 
-  const emptyState = (
+  const catalogEmpty =
+    server == null || (!server.loading && server.total === 0 && !server.search.trim())
+  const emptyState = catalogEmpty ? (
     <TableEmptyState
       icon={FolderOpen}
       title={emptyCopy.title}
       description={emptyCopy.description}
     />
-  )
+  ) : undefined
 
   const initialSorting = useMemo(
     () =>
@@ -242,14 +261,28 @@ export function AdminProjectsSection({
       rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
       initialSorting={initialSorting}
       searchPlaceholder="Search projects…"
-      globalFilterFn={(row, _columnId, filterValue) => {
-        const q = String(filterValue).trim().toLowerCase()
-        if (!q) return true
-        const p = row.original
-        return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""} ${p.shared ? "shared" : ""}`
-          .toLowerCase()
-          .includes(q)
-      }}
+      searchValue={server?.search}
+      onSearchChange={server?.onSearchChange}
+      searching={server?.searching}
+      loading={server?.loading}
+      loadingMore={server?.loadingMore}
+      hasMore={server?.hasMore}
+      onLoadMore={server?.onLoadMore}
+      loadMoreTestId="admin-projects-load-more"
+      onSortingChange={server?.onSortingChange}
+      fillHeight={fill}
+      globalFilterFn={
+        server
+          ? undefined
+          : (row, _columnId, filterValue) => {
+              const q = String(filterValue).trim().toLowerCase()
+              if (!q) return true
+              const p = row.original
+              return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""} ${p.shared ? "shared" : ""}`
+                .toLowerCase()
+                .includes(q)
+            }
+      }
       toolbar={(table) => (
         <>
           <Select
@@ -270,11 +303,15 @@ export function AdminProjectsSection({
               </SelectGroup>
             </SelectContent>
           </Select>
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {table.getFilteredRowModel().rows.length === data.length
-              ? `${data.length}`
-              : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
-          </span>
+          {server ? (
+            <AdminDirectoryCount total={server.total} />
+          ) : (
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {table.getFilteredRowModel().rows.length === data.length
+                ? `${data.length}`
+                : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
+            </span>
+          )}
         </>
       )}
       emptyState={emptyState}

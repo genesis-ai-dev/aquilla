@@ -590,6 +590,8 @@ const POLICY_DIRECTION_CASES: {
   { key: 'cellLabelFloor', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
   // AQU-2309: unset reads as Maintainer, so lowering to Project lead loosens.
   { key: 'milestoneFloor', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
+  // AQU-2647: unset reads as Maintainer, so opening it to a contributor loosens.
+  { key: 'sourceTextFloor', tighten: { from: 'contributor', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'contributor' } },
   // AQU-1771: the project's own visibility floors. The org sets none here, so
   // its floor is Maintainer; clearing a stricter value goes back to it.
   { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },

@@ -54,6 +54,7 @@ import {
   resolveTokenRefresh,
   selectStaleConnections,
   stripPresenceDraft,
+  deliverableToWalledSocket,
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
@@ -858,6 +859,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     for (const [ws, conn] of this.connections) {
       if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
       if (this.presence.get(conn.connId)?.currentFileId !== fileId) continue
+      if (conn.rowsWalled && !deliverableToWalledSocket(msg)) continue
       try {
         ws.send(payload)
       } catch {
@@ -916,6 +918,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // out of a cell indefinitely. Mirrors the write-drop policy already
       // applied to actual content writes (see shouldBeReadOnly callers).
       if (shouldBeReadOnly(conn.role)) return
+      // Presence patches this socket sent BEFORE the claim may still be held
+      // by the coalescing tick. Apply them first, or a queued
+      // `focusedCell: null` from leaving the previous cell lands after the
+      // grant and wipes the new cell's focus from every peer's roster.
+      this.presenceBatcher.flush(conn.connId)
       const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       const granted = result.emit.length > 0
       this.locks = result.locks
@@ -942,6 +949,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "focus.release") {
+      this.presenceBatcher.flush(conn.connId)
       const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       const released = result.emit.length > 0
       this.locks = result.locks

@@ -386,7 +386,6 @@ export async function filterUsernamesWithProjectAccess(
        WHERE u.username IN (${placeholders})
          AND (
            EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = ? AND pm.user_id = u.id)
-           OR EXISTS (SELECT 1 FROM projects p WHERE p.id = ? AND p.created_by = u.id)
            OR EXISTS (
              SELECT 1 FROM org_members om
                JOIN projects p ON p.org_id = om.org_id
@@ -399,7 +398,7 @@ export async function filterUsernamesWithProjectAccess(
            )
          )`,
     )
-    .bind(...usernames, projectId, projectId, projectId, projectId)
+    .bind(...usernames, projectId, projectId, projectId)
     .all<{ username: string }>()
 
   return rows.results.map((r) => r.username)

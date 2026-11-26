@@ -86,6 +86,9 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 
 function withRole(level: number, overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return makeProject({
+    // This test is about the source edit's Undo step, at a floor that admits a
+    // project lead. The product default is Maintainer (AQU-2647).
+    sourceTextFloor: "project_lead",
     syncRole: { level, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
     ...overrides,
   })

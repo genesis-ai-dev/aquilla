@@ -21,20 +21,16 @@
 import { useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
 import type { LinkSourcePreviewFile } from "@/lib/sync/link-source-preview"
-import type { ReplaceMatchState } from "@/hooks/useReplaceFileChoices"
+import type { ReplaceFileChoices, ReplaceMatchState } from "@/hooks/useReplaceFileChoices"
 
 export type { ReplaceMatchState }
 
-export interface UpstreamFileReplaceChoice {
-  /** The upstream file ids set to replace the project's own same-named file. */
-  fileIds: ReadonlySet<string>
-  onToggle: (fileId: string, replace: boolean) => void
-  /** How each of those compares with the project's own file, once asked. */
-  matches: ReadonlyMap<string, ReplaceMatchState>
-}
+/** AQU-2549: the shared replace choice (useReplaceFileChoices). */
+export type UpstreamFileReplaceChoice = ReplaceFileChoices
 
 export interface UpstreamFileChoiceListProps {
   /** The upstream's files, in the upstream's own order. Empty renders nothing —
@@ -46,8 +42,9 @@ export interface UpstreamFileChoiceListProps {
   onToggleFile: (fileId: string) => void
   /** The check-all control pressed: true = every file, false = none. */
   onToggleAll: (checked: boolean) => void
-  /** AQU-1679: offer "replace the source in my existing file" on rows that
-   *  have a `clashFileId`. Omitted = never offered. */
+  /** AQU-1679: offer "replace the source in my existing file" on checked
+   *  rows (AQU-2549: any row, when the project has files to choose from).
+   *  Omitted = never offered. */
   replace?: UpstreamFileReplaceChoice
   disabled?: boolean
 }
@@ -64,6 +61,16 @@ export function UpstreamFileChoiceList({
   const { selectedCount, allSelected } = useMemo(
     () => summarizeFileSelection(files, selectedFileIds),
     [files, selectedFileIds],
+  )
+
+  // AQU-2549: two rows pointed at the same file of the project's — only one
+  // can follow into it.
+  const takenIds = useMemo(
+    () =>
+      replace
+        ? replace.takenTargets(files.filter((f) => selectedFileIds.has(f.id) && replace.replaceFileIds.has(f.id)).map((f) => f.id))
+        : new Set<string>(),
+    [replace, files, selectedFileIds],
   )
 
   if (files.length === 0) return null
@@ -103,23 +110,15 @@ export function UpstreamFileChoiceList({
                 </Badge>
               )}
             </label>
-            {/* AQU-1679: only on a row that is coming AND has one file here it
-                could stand in for — an unchecked file replaces nothing. */}
-            {replace && f.clashFileId && selectedFileIds.has(f.id) && (
-              <div className="mb-1 ml-6 space-y-1">
-                <label className="flex items-start gap-2 text-xs">
-                  <Checkbox
-                    className="mt-0.5"
-                    checked={replace.fileIds.has(f.id)}
-                    disabled={disabled}
-                    onCheckedChange={(checked) => replace.onToggle(f.id, !!checked)}
-                  />
-                  {t("projectSettings.linkSource.replaceOption", { name: f.name })}
-                </label>
-                {replace.fileIds.has(f.id) && (
-                  <ReplaceMatchNote state={replace.matches.get(f.id)} />
-                )}
-              </div>
+            {/* AQU-1679: only on a row that is coming — an unchecked file
+                replaces nothing. */}
+            {replace && selectedFileIds.has(f.id) && replaceOfferedFor(f, replace) && (
+              <ReplaceFileOption
+                file={f}
+                choices={replace}
+                taken={takenIds.has(f.id)}
+                disabled={disabled}
+              />
             )}
           </li>
         ))}
@@ -128,10 +127,111 @@ export function UpstreamFileChoiceList({
   )
 }
 
+/** AQU-2549: whether a row can offer the replace at all — it shares a name
+ *  with one file here, or the project has files the lead can pick from. */
+export function replaceOfferedFor(
+  file: Pick<LinkSourcePreviewFile, "clashFileId">,
+  choices: Pick<ReplaceFileChoices, "ownFiles">,
+): boolean {
+  return file.clashFileId !== undefined || choices.ownFiles.length > 0
+}
+
+/**
+ * AQU-1679 / AQU-2549: "replace the source in my existing file", with the
+ * project's file it follows into. The file starts as the one sharing the
+ * row's name, if exactly one does, and the lead can pick any other of his
+ * files; the comparison under it is for the file now picked. Shared by the
+ * link flow and "Choose files" (ChooseLinkedFilesDialog).
+ */
+export function ReplaceFileOption({
+  file,
+  choices,
+  taken,
+  disabled,
+}: {
+  file: Pick<LinkSourcePreviewFile, "id" | "name" | "clashFileId">
+  choices: ReplaceFileChoices
+  /** Another row has picked the same file. */
+  taken: boolean
+  disabled?: boolean
+}) {
+  const t = useT()
+  const on = choices.replaceFileIds.has(file.id)
+  const target = choices.targetOf(file.id)
+  const targetName =
+    choices.ownFiles.find((f) => f.id === target)?.name ?? (target !== undefined && target === file.clashFileId ? file.name : undefined)
+  return (
+    <div className="mb-1 ml-6 space-y-1">
+      <label className="flex items-start gap-2 text-xs">
+        <Checkbox
+          className="mt-0.5"
+          checked={on}
+          disabled={disabled}
+          onCheckedChange={(checked) => choices.toggleReplace(file.id, !!checked)}
+        />
+        {targetName
+          ? t("projectSettings.linkSource.replaceOption", { name: targetName })
+          : t("projectSettings.linkSource.replaceOptionChoose")}
+      </label>
+      {on && choices.ownFiles.length > 0 && (
+        <div className="ml-6">
+          <Select
+            items={choices.ownFiles.map((f) => ({ value: f.id, label: f.name }))}
+            value={target ?? null}
+            onValueChange={(value) => {
+              if (typeof value === "string" && value) choices.chooseTarget(file.id, value)
+            }}
+            disabled={disabled}
+          >
+            <SelectTrigger
+              size="sm"
+              className="h-7 w-full max-w-xs text-xs"
+              aria-label={t("projectSettings.linkSource.replaceTargetLabel", { name: file.name })}
+            >
+              <SelectValue placeholder={t("projectSettings.linkSource.replaceTargetPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {choices.ownFiles.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      {on && target &&
+        (taken ? (
+          <p className="text-xs text-destructive" role="alert">
+            {t("projectSettings.linkSource.replaceTargetTaken", { name: targetName ?? "" })}
+          </p>
+        ) : (
+          <>
+            <ReplaceMatchNote state={choices.matches.get(file.id)} />
+            {/* AQU-2549: the file follows the source under the source file's
+                name, so the lead hears it before he links. */}
+            {targetName && targetName !== file.name && (
+              <p className="text-xs text-muted-foreground">
+                {t("projectSettings.linkSource.replaceRenames", { from: targetName, to: file.name })}
+              </p>
+            )}
+          </>
+        ))}
+    </div>
+  )
+}
+
 /** AQU-1679: what replacing this file's source will do, in the server's own
  *  numbers — or why it cannot be done. Shared with "Choose files"
  *  (ChooseLinkedFilesDialog), which offers the same option on an existing link. */
-export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefined }) {
+export function ReplaceMatchNote({
+  state,
+  join,
+}: {
+  state: ReplaceMatchState | undefined
+  /** AQU-2549: in the join dialog, where there is no option to turn off. */
+  join?: boolean
+}) {
   const t = useT()
   if (!state || state.status === "loading") {
     return (
@@ -148,11 +248,22 @@ export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefin
     )
   }
   const { match } = state
+  // AQU-2549: a staged import is a wait, not "only 0 of 0 lines match".
+  if (match.importing) {
+    return (
+      <p className="text-xs text-muted-foreground" role="status">
+        {t("projectSettings.linkSource.replaceStillImporting")}
+      </p>
+    )
+  }
   const lines = Math.max(match.upstreamLines, match.localLines)
   if (!match.canReplace) {
     return (
       <p className="text-xs text-destructive" role="alert">
-        {t("projectSettings.linkSource.replaceNoMatch", { same: match.same, count: lines })}
+        {t(join ? "projectSettings.sourceLink.joinNoMatch" : "projectSettings.linkSource.replaceNoMatch", {
+          same: match.same,
+          count: lines,
+        })}
       </p>
     )
   }

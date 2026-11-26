@@ -25,24 +25,54 @@ import { classifyFiles, holdingAreas } from "./release-risk.mjs"
 
 export { classifyFiles }
 
+// What a walk has to say for a PR to ride the line (WALK_POLICY, a repository
+// variable release-cut.yml passes through):
+//
+//   fail-only (default, 2026-11-19)  only a walk that tried and could not
+//       prove the claim holds: FAIL, FLAKY, BLOCKED (all read as `fail`).
+//       A PR nobody walked (`unknown`) and a PASS at test level only
+//       (`partial`) ship.
+//   strict    the rule until 2026-11-19: anything but PASS or `none` holds.
+//
+// Why the default moved. "Nobody saw it in a browser" is not one of the
+// outcomes that cannot be fixed forward (RELEASE-RISK-GATES.md §1), and for
+// two weeks it was the hold on three PRs in four: 36 of the 47 PRs waiting
+// on 2026-11-19 had no walk or a test-level one, against 6 held by a risk
+// area. The walks were missing for reasons unrelated to the changes (a
+// comment format the planner could not read, then previews the walker could
+// not sign in to), so the hold measured the walker, and people cleared it by
+// labelling every PR `release:approved` in batches. What stands behind an
+// unwalked PR now is the release slice's own full suite and smart Jev, and
+// the rollback watch after the deploy (release-rollback.mjs). `strict` is
+// the switch back, with no code change.
+export const WALK_POLICIES = ["fail-only", "strict"]
+export const DEFAULT_WALK_POLICY = "fail-only"
+
+export function walkPolicy(env = process.env) {
+  return WALK_POLICIES.includes(env.WALK_POLICY) ? env.WALK_POLICY : DEFAULT_WALK_POLICY
+}
+
+/** Whether this walk verdict keeps a PR off the line under `policy`. */
+export function walkHolds(walk, policy = DEFAULT_WALK_POLICY) {
+  if (walk === "PASS" || walk === "none") return false
+  return policy === "strict" ? true : walk !== "unknown" && walk !== "partial"
+}
+
 // A PR is off the automatic line when a holding area it touches has no
 // green gate (release-risk.mjs AREA_GATES; `gates` is the list of areas
 // whose gate check passed on the PR's head, from release-plan-walk.mjs),
-// or its walk is not proven: FAIL, FLAKY and BLOCKED all mean the bot
-// could not prove the outcome, and `unknown` (no matching walk comment
-// yet) and `partial` (a PASS the bot qualified as test level only: no
-// live preview walk) hold too. The `release:approved` label is a person's sign-off
-// after the manual QA path, and clears both: once a person has signed,
-// the line picks the PR like any other.
+// or its walk holds under the policy above. The `release:approved` label is
+// a person's sign-off after the manual QA path, and clears both: once a
+// person has signed, the line picks the PR like any other.
 //
 // A direct commit (`direct: true`, no PR number) has no walk, no gate run
 // and no PR to carry the label, so none of that is read for it: it is ready
 // only when every file it touches is a generated locale catalog, and held
 // otherwise until a person picks it onto a release branch by hand.
-export function prHolds(pr) {
+export function prHolds(pr, policy = DEFAULT_WALK_POLICY) {
   if (pr.direct) return !isLocaleCatalogOnly(pr.files ?? [])
   if (pr.approved) return false
-  return holdingAreas(pr.areas ?? [], pr.gates).length > 0 || (pr.walk !== "PASS" && pr.walk !== "none")
+  return holdingAreas(pr.areas ?? [], pr.gates).length > 0 || walkHolds(pr.walk, policy)
 }
 
 // The reason a held direct commit carries. release-cut.mjs keys the notes'
@@ -88,7 +118,10 @@ export function isDocsOrTestOnly(files) {
 //
 // en.ts (the English source barrel), index.ts and all.ts (the registries a
 // new locale edits) are code, not catalogs, and so are the tests beside them.
-const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
+//
+// The import also prunes translation-baseline.json (AQU-2740: the keys each
+// locale may still show in English), so that file is part of the same push.
+const LOCALE_CATALOG_FILE = /^src\/lib\/i18n\/(source-hashes\.json$|translation-baseline\.json$|messages\/(?!(?:en|index|all)\.ts$)[A-Za-z-]+\.ts$)/
 
 export function isLocaleCatalogOnly(files) {
   return files.length > 0 && files.every((file) => LOCALE_CATALOG_FILE.test(file))
@@ -138,15 +171,18 @@ function branchName(now, usedSuffixes) {
 // `prs` is every unreleased entry in dev order, direct commits among them:
 // a ready one is picked in its dev position like a PR, a held one is listed
 // with the rest of `held`. prCount counts the PRs, directCount the rest.
-export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], base }) {
+export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], base, policy = DEFAULT_WALK_POLICY }) {
   const directCount = prs.filter((pr) => pr.direct).length
-  const common = { openReleases, prCount: prs.length - directCount, directCount, base }
-  if (openReleases.length) {
-    return { ...common, cut: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [], held: [] }
-  }
   const strip = ({ pathHolds, behindFloor, ...pr }) => pr
-  const held = prs.filter((pr) => prHolds(pr)).map((pr) => ({ ...strip(pr), why: holdReason(pr) }))
-  const ready = prs.filter((pr) => !prHolds(pr)).map(strip)
+  // The held list is reported whether or not this run cuts: the hold nudge
+  // (release-hold-nudge.mjs) reads it on every run, and a release in flight
+  // is no reason to stop saying which PRs wait for a person.
+  const held = prs.filter((pr) => prHolds(pr, policy)).map((pr) => ({ ...strip(pr), why: holdReason(pr) }))
+  const ready = prs.filter((pr) => !prHolds(pr, policy)).map(strip)
+  const common = { openReleases, prCount: prs.length - directCount, directCount, base, walkPolicy: policy }
+  if (openReleases.length) {
+    return { ...common, cut: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [], held }
+  }
   if (!prs.length) return { ...common, cut: false, reason: "no unreleased PRs", prs: [], held }
   if (!ready.length) {
     return { ...common, cut: false, reason: `${tally(held)} waiting on a person, none ready`, prs: [], held }
@@ -308,8 +344,8 @@ async function main() {
   const unreleased = unreleasedPrs()
   let { prs } = unreleased
   // Without a token this stays the git-only command: every non-docs/test PR
-  // reports walk: unknown, which holds, so cuts still happen but nothing
-  // deploys itself until the lookup can run.
+  // reports walk: unknown and no gate result, so only PRs with no holding
+  // area are ready.
   const token = process.env.GITHUB_TOKEN
   if (token) {
     const { fillWalks } = await import("./release-plan-walk.mjs")
@@ -321,6 +357,7 @@ async function main() {
     now,
     usedSuffixesToday: usedSuffixesToday(now),
     base: unreleased.base,
+    policy: walkPolicy(),
   })
   console.log(JSON.stringify(plan, null, 2))
 }

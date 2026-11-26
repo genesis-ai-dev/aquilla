@@ -35,7 +35,8 @@ import { moveDestinations, useProjectMove, type MoveDestination } from "./usePro
 import { RemoveAccessDialog } from "./RemoveAccessDialog"
 
 const KIND_LABEL = {
-  org: "org.access.places.kindOrg",
+  // "Organization" is onboarding.apiTokens.orgLabel (no new key for the same word).
+  org: "onboarding.apiTokens.orgLabel",
   team: "org.access.tree.kindFolder",
   project: "org.access.scope.project",
   // The shared "Language" string; the row shows every kind in lower case.

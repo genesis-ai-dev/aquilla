@@ -73,6 +73,8 @@ function renderTable(opts: {
   placement?: "text" | "media"
   /** AQU-1681: present = the workspace offers rows from the video's sound. */
   linkedVideoSound?: LinkedVideoSoundActions
+  /** AQU-2682: why the workspace withheld the upload from a Project Lead. */
+  sourceMediaNote?: string | null
 } = {}) {
   const qc = new QueryClient()
   return render(
@@ -104,6 +106,7 @@ function renderTable(opts: {
           onAttachCaptions={opts.onAttachCaptions}
           onUseCaptionTrackAsRows={opts.onUseCaptionTrackAsRows}
           linkedVideoSound={opts.linkedVideoSound}
+          sourceMediaNote={opts.sourceMediaNote}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -177,6 +180,34 @@ describe("EditorTable — empty time-ordered file", () => {
     // with no rows there is nothing to record on, and no import to make.
     expect(screen.getByText("This file's recording hasn't been added yet. A project lead can add it.")).toBeInTheDocument()
     expect(screen.queryByText(/Import an audio or video file/)).toBeNull()
+  })
+
+  // AQU-2682: a Project Lead whose access does not cover every language is
+  // refused source audio by the server. The workspace withholds the upload
+  // and hands down the reason, which replaces the "a project lead can add it"
+  // line (he is one) on both empty states.
+  describe("a Project Lead missing a language", () => {
+    const NOTE = "Adding this file's recording needs access to every language in this project."
+
+    it("a file with no linked video says why instead of offering the upload", async () => {
+      renderTable({ withAttach: false, sourceMediaNote: NOTE })
+      expect(await screen.findByText(NOTE)).toBeInTheDocument()
+      expect(screen.queryByLabelText("Media URL")).toBeNull()
+      expect(screen.queryByText(/A project lead can add it/)).toBeNull()
+    })
+
+    it("a linked video says why where the recording link would be", async () => {
+      renderTable({ linkedVideoEmptyState: { isYouTube: false, captionTracks: [] }, withAttach: false, sourceMediaNote: NOTE })
+      await screen.findByTestId("linked-video-empty")
+      expect(screen.getByText(NOTE)).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /audio or video file/ })).toBeNull()
+    })
+
+    it("a lead with every language (no note) keeps the upload", async () => {
+      renderTable({ sourceMediaNote: null })
+      expect(await screen.findByLabelText("Media URL")).toBeInTheDocument()
+      expect(screen.queryByText(NOTE)).toBeNull()
+    })
   })
 
   it("lets a long caption track name wrap instead of spilling out of the column", async () => {

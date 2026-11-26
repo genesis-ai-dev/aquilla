@@ -353,7 +353,7 @@ export async function parseArtifactToCells(
   }
 
   // Full read (unlike /inspect's 64KB range) — the parsers need the whole text.
-  // Bounded by the 25MB upload cap, which the worker already buffers on upload.
+  // Bounded by the MAX_ARTIFACT_BYTES (64 MiB) upload cap, which the worker already buffers on upload.
   const obj = await env.SNAPSHOTS.get(row.r2_key)
   if (!obj) {
     return { ok: false, response: errorResponse('not_found', 'artifact bytes missing from storage') }

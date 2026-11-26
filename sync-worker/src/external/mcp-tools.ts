@@ -1459,6 +1459,30 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'create_upload_url',
+    description:
+      'Get a signed, single-use URL for uploading a source or audio file too large for ' +
+      'upload_artifact (up to 64 MiB). PUT the raw file bytes to uploadUrl from a shell, ' +
+      'e.g. curl --data-binary @file, within 15 minutes; no Authorization header is ' +
+      'needed. The PUT response is { artifactId, sha256, sizeBytes, kind }, the same as ' +
+      'upload_artifact, for preview_import / prepare_import, prepare_link_media or ' +
+      'transcribe_audio. Creating the URL stores nothing. The same project scope, write ' +
+      'access, contributor permissions and upload rate limits apply, and are checked ' +
+      'again when the bytes arrive. Treat the URL as a secret: anyone holding it can ' +
+      'upload one file to this project as you until it expires.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        name: { type: 'string', description: 'Original filename, including its extension.' },
+        kind: { type: 'string', enum: ['source', 'audio'] },
+        contentType: { type: 'string', description: 'MIME type; audio requires a supported audio MIME type. Use application/octet-stream when unsure for a source file.' },
+      },
+      required: ['projectId', 'name', 'kind', 'contentType'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'upload_artifact',
     description:
       'Upload a source or audio artifact through MCP without replaying OAuth on REST. ' +
@@ -1467,8 +1491,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'does not import content, attach audio, or spend transcription credits. ' +
       'Returns artifactId for preview_import / prepare_import, prepare_link_media or ' +
       'transcribe_audio. Existing project scope, write access, contributor permissions ' +
-      'and upload rate limits apply. For larger files use Aquilla or a separately ' +
-      'authorized REST client; never replay an MCP OAuth token on REST.',
+      'and upload rate limits apply. For larger files, or any file you can reach from a ' +
+      'shell, use create_upload_url instead; never replay an MCP OAuth token on REST.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1803,6 +1827,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   list_org_members: 'read',
   prepare_translations: 'stage',
   upload_artifact: 'upload',
+  create_upload_url: 'upload',
   preview_import: 'read',
   prepare_import: 'stage',
   export_file: 'read',

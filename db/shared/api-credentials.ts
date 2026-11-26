@@ -220,6 +220,29 @@ interface CredentialRow {
   support_window_open: boolean | null
 }
 
+/** Shared by token validation and the upload-ticket re-check below. */
+const CREDENTIAL_SELECT = `SELECT ac.id AS id, ac.user_id AS user_id, ac.mode AS mode,
+              ac.access AS access, ac.oauth_resource AS oauth_resource,
+              ac.org_id AS org_id, ac.project_id AS project_id,
+              ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
+              ac.last_used_at AS last_used_at, u.username AS username,
+              ac.pii AS pii, ac.support_access AS support_access,
+              (ac.support_access_until IS NOT NULL
+                 AND ac.support_access_until > now()) AS support_window_open,
+              CASE WHEN ac.org_ids IS NULL THEN NULL ELSE COALESCE((
+                SELECT jsonb_agg(o.id::text ORDER BY o.id)
+                FROM organizations o
+                WHERE jsonb_exists(ac.org_ids, o.id::text) AND (
+                  o.owner_user_id::text = ac.user_id OR EXISTS (
+                    SELECT 1 FROM org_members om
+                    WHERE om.org_id = o.id AND om.user_id::text = ac.user_id
+                      AND om.role_level >= ${OAUTH_ORG_ALLOWLIST_FLOOR}
+                  )
+                )
+              ), '[]'::jsonb) END AS org_ids
+         FROM api_credentials ac
+         JOIN users u ON u.id::text = ac.user_id`
+
 /**
  * Validate an inbound API token. Returns the credential context, or null when
  * the token is malformed, unknown, revoked, or expired.
@@ -263,36 +286,13 @@ export async function validateApiCredential(
   const tokenHash = await sha256Hex(token)
   const row = await db
     .prepare(
-      `SELECT ac.id AS id, ac.user_id AS user_id, ac.mode AS mode,
-              ac.access AS access, ac.oauth_resource AS oauth_resource,
-              ac.org_id AS org_id, ac.project_id AS project_id,
-              ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
-              ac.last_used_at AS last_used_at, u.username AS username,
-              ac.pii AS pii, ac.support_access AS support_access,
-              (ac.support_access_until IS NOT NULL
-                 AND ac.support_access_until > now()) AS support_window_open,
-              CASE WHEN ac.org_ids IS NULL THEN NULL ELSE COALESCE((
-                SELECT jsonb_agg(o.id::text ORDER BY o.id)
-                FROM organizations o
-                WHERE jsonb_exists(ac.org_ids, o.id::text) AND (
-                  o.owner_user_id::text = ac.user_id OR EXISTS (
-                    SELECT 1 FROM org_members om
-                    WHERE om.org_id = o.id AND om.user_id::text = ac.user_id
-                      AND om.role_level >= ${OAUTH_ORG_ALLOWLIST_FLOOR}
-                  )
-                )
-              ), '[]'::jsonb) END AS org_ids
-         FROM api_credentials ac
-         JOIN users u ON u.id::text = ac.user_id
+      `${CREDENTIAL_SELECT}
         WHERE ac.token_hash = ?`,
     )
     .bind(tokenHash)
     .first<CredentialRow>()
 
-  if (!row) return fail()
-  if (row.revoked_at) return fail()
-  if (row.oauth_resource != null && !oauthResourceAccepted(row.oauth_resource, expectedResource)) return fail()
-  if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return fail()
+  if (!row || !credentialRowUsable(row, expectedResource)) return fail()
 
   // Throttled last-used bump: only when the row hasn't been touched in 5min.
   // Single set-based UPDATE — no read-modify-write. Fire-and-forget: a failed
@@ -312,6 +312,18 @@ export async function validateApiCredential(
     console.warn("[validateApiCredential] last_used_at bump failed (non-fatal):", err)
   }
 
+  return credentialContext(db, row)
+}
+
+/** Revoked, expired or wrong-audience rows never authenticate. */
+function credentialRowUsable(row: CredentialRow, expectedResource: string | undefined): boolean {
+  if (row.revoked_at) return false
+  if (row.oauth_resource != null && !oauthResourceAccepted(row.oauth_resource, expectedResource)) return false
+  if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) return false
+  return true
+}
+
+async function credentialContext(db: AquillaDb, row: CredentialRow): Promise<ApiCredentialContext> {
   // AQU-2504: the grant and its window are necessary but not sufficient — the
   // owner must ALSO still be on the platform-admin allowlist, which is a
   // separate guarded read so a missing `platform_admins` table can never break
@@ -339,6 +351,27 @@ export async function validateApiCredential(
     // Only an explicit true opts in, exactly like `pii` above.
     ...(supportAccess ? { supportAccess: true } : {}),
   }
+}
+
+/**
+ * Re-check a credential that already authenticated, by its id, when the caller
+ * no longer holds its token: a signed upload URL (sync-worker
+ * external/upload-tickets.ts) is used after the MCP call that minted it ended.
+ * Applies the same revoked / expired / audience checks as a token, so revoking
+ * the credential also kills every upload URL it minted.
+ */
+export async function revalidateApiCredentialById(
+  db: AquillaDb,
+  credentialId: string,
+  expectedResource: string | undefined,
+): Promise<ApiCredentialContext | null> {
+  const row = await db
+    .prepare(`${CREDENTIAL_SELECT}
+        WHERE ac.id::text = ?`)
+    .bind(credentialId)
+    .first<CredentialRow>()
+  if (!row || !credentialRowUsable(row, expectedResource)) return null
+  return credentialContext(db, row)
 }
 
 /** Both the legacy scope and an OAuth allowlist constrain access. */

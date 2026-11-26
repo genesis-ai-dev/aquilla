@@ -44,7 +44,6 @@ import {
   listPlatformAdminOrgsPage,
   countVisibleActiveLanguages,
   listOrgPortfolioPage,
-  projectNameVisibleSql,
   listUserOrgs,
   summarizeVisiblePortfolios,
   findPersonalOrg,
@@ -389,7 +388,6 @@ async function directoryResponse(c: Context<AuthHonoEnv>, body: object, known?: 
 }
 
 const portfolioBatchBody = z.object({
-  projectIds: z.array(z.string()).min(1).max(40).optional(),
   revision: z.string().optional(),
   orgIds: portfolioOrgIdsField,
   q: z.string().max(200).optional(),
@@ -440,35 +438,6 @@ async function resolvePortfolioOrgIds(
   return { orgIds: uniqueOrgIds, isAdmin }
 }
 
-// The index depends only on the names this viewer can open in this scope.
-// Compute the validator and replacement from one database snapshot.
-orgs.post("/project-name-index", zValidator("json", z.object({
-  orgIds: z.array(z.number().int().positive()),
-  revision: z.string().optional(),
-})), async c => {
-  const { orgIds, revision } = c.req.valid("json")
-  const user = c.get("user")
-  const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
-  if ("error" in scope) return c.json({ error: scope.error }, 403)
-  if (!scope.orgIds.length) return c.json({ projects: [] })
-  const visible = projectNameVisibleSql({ userId: user.id, isAdmin: scope.isAdmin })
-  const page = await c.env.AQUILLA_PG.prepare(
-    `WITH names AS (
-       SELECT COALESCE(json_agg(json_build_array(p.id, p.name, p.org_id)
-         ORDER BY lower(p.name), p.id), '[]')::text AS payload
-       FROM projects p
-       WHERE p.org_id IN (${scope.orgIds.map(() => "?").join(",")})
-         AND p.archived_at IS NULL AND ${visible.sql}
-     ), hashed AS MATERIALIZED (
-       SELECT payload, encode(sha256(convert_to(payload, 'UTF8')), 'hex') AS revision FROM names
-     )
-     SELECT revision, CASE WHEN revision = ? THEN NULL ELSE payload END AS payload FROM hashed`,
-  ).bind(...scope.orgIds, ...visible.binds, revision ?? "").first<{ revision: string; payload: string | null }>()
-  if (!page) throw new Error("Project name index unavailable")
-  if (page.payload === null) return c.json({ unchanged: true, revision: page.revision })
-  return c.json({ revision: page.revision, projects: JSON.parse(page.payload) })
-})
-
 /** POST /api/v2/orgs/portfolio/summary — overview totals, not the project list. */
 orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async (c) => {
   const user = c.get("user")
@@ -485,18 +454,18 @@ orgs.post("/portfolio/summary", zValidator("json", portfolioSummaryBody), async 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
-  const { orgIds, projectIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
+  const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
   const scope = await resolvePortfolioOrgIds(c.env, user, orgIds)
   if ("error" in scope) return c.json({ error: scope.error }, 403)
   const { orgIds: uniqueOrgIds, isAdmin } = scope
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
 
   const q = (qRaw ?? "").trim().toLowerCase()
-  const pickerMode = projectIds != null || limitNum != null || cursorRaw != null || q !== ""
+  const pickerMode = limitNum != null || cursorRaw != null || q !== ""
   const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
   if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
   const page = pickerMode
-    ? { q, projectIds, limit: clampProjectDirectoryLimit(limitNum != null ? String(limitNum) : undefined), cursor }
+    ? { q, limit: clampProjectDirectoryLimit(limitNum != null ? String(limitNum) : undefined), cursor }
     : null
 
   // AQU-745: scope each org's rollup to the projects this caller can actually

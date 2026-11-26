@@ -104,7 +104,6 @@ function projectUpdateLabel(at: number, now: number, locale: string): string {
 }
 
 export type OrgProjectRow = PortfolioProject & {
-  nameOnly?: boolean
   orgId?: number
   orgName?: string | null
   origin?: "member" | "shared"
@@ -705,11 +704,6 @@ export function OrgProjectsDataTable({
         })
       }
 
-      for (const col of cols) {
-        if (col.id === "name" || col.id === "org" || typeof col.cell !== "function") continue
-        const render = col.cell
-        col.cell = context => context.row.original.nameOnly ? "—" : render(context)
-      }
       return cols
     },
     [
@@ -809,7 +803,7 @@ export function OrgProjectsDataTable({
                 // offline to edit. None of that belongs on an archive, and the
                 // workspace can't be opened while archived anyway, so the row
                 // carries no menu at all rather than a menu of dead ends.
-                p.archivedAt || p.nameOnly ? null : (
+                p.archivedAt ? null : (
                 <>
                   <MenuGroup>
                     {roleByProjectId?.get(p.id)?.name && (

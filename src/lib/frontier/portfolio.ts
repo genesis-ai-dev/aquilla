@@ -320,7 +320,6 @@ export async function getPortfoliosPage(
   jwt: string,
   orgIds: number[],
   opts: {
-    projectIds?: string[]
     q?: string
     limit?: number
     cursor?: string | null
@@ -338,7 +337,6 @@ export async function getPortfoliosPage(
     body: JSON.stringify({
       revision: opts.validate ? opts.cached?.revision ?? "" : undefined,
       orgIds: uniqueOrgIds,
-      projectIds: opts.projectIds,
       q: opts.q?.trim() || undefined,
       limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
       cursor: opts.cursor || undefined,

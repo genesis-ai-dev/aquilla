@@ -13,7 +13,6 @@ ab find testid "project-source-scratch" click >/dev/null || fail "Start from scr
 ab find label "Project name" fill "$NAME" >/dev/null || fail "name field"
 ab find label "Source language" fill "en" >/dev/null || fail "source field"
 ab find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"
-ab wait '[role="dialog"] button[type="submit"]:enabled' >/dev/null || fail "Create project did not become enabled"
 ab find role button click --name "Create project" >/dev/null || fail "Create project button"
 # The overview is /projects/<id>, headed by the project's name (no "Open project" text any more).
 ab wait --load networkidle >/dev/null

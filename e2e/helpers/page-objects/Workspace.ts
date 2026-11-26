@@ -101,7 +101,6 @@ export class Workspace {
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
     await dialog.getByLabel("Use original audio or video", { exact: true }).check()
-    await expect(dialog.getByTestId("youtube-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
     await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
@@ -131,7 +130,7 @@ export class Workspace {
 
   /** Import media without companion or embedded captions. */
   async importMediaFile(filePath: string): Promise<void> {
-    await this.chooseImportFiles(filePath, { media: true })
+    await this.chooseImportFiles(filePath)
     await this.waitForImportSettled()
   }
 
@@ -146,7 +145,7 @@ export class Workspace {
    * would only add a second, flakier copy of it.
    */
   async startMediaImport(filePath: string, fileName: string): Promise<void> {
-    await this.chooseImportFiles(filePath, { media: true })
+    await this.chooseImportFiles(filePath)
     await this.waitForFileInSidebar(fileName)
   }
 
@@ -155,13 +154,13 @@ export class Workspace {
     media: FilePayload,
     captions: FilePayload,
   ): Promise<void> {
-    await this.chooseImportFiles([media, captions], { media: true })
+    await this.chooseImportFiles([media, captions])
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
-    await this.chooseImportFiles(media, { media: true })
+    await this.chooseImportFiles(media)
     await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
@@ -389,7 +388,6 @@ export class Workspace {
    * ImportDialog's Upload Files panel, and select `filePath`. */
   private async chooseImportFiles(
     filePath: string | FilePayload | string[] | FilePayload[],
-    { media = false } = {},
   ): Promise<void> {
     await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
@@ -405,9 +403,6 @@ export class Workspace {
     // has hydrated, which trips Playwright's strict mode.
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
-    if (media) {
-      await expect(this.page.getByTestId("upload-media-disabled")).toBeHidden({ timeout: EDITOR_READY_TIMEOUT_MS })
-    }
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 

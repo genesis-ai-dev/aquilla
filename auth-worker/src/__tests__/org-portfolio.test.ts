@@ -5,37 +5,6 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { getOrgPortfolios } from "../services/org-permissions"
 import type { Env } from "../types"
 
-describe("project name index", () => {
-  it("replaces stale names, respects visibility on validation and restricts detail hydration", async () => {
-    await seedUser(1, "owner")
-    await seedUser(2, "reader")
-    const db = env.AQUILLA_PG
-    await db.prepare("INSERT INTO organizations (id,name,owner_user_id) VALUES (1,'One',1)").run()
-    await db.prepare("INSERT INTO org_members (org_id,user_id,role_level,granted_by) VALUES (1,1,700,1),(1,2,300,1)").run()
-    await db.prepare("INSERT INTO projects (id,name,org_id,created_by) VALUES ('p','First',1,1),('q','Hidden',1,1)").run()
-    await db.prepare("INSERT INTO project_members(project_id,user_id,role_level,granted_by) VALUES ('p',2,400,1)").run()
-    const headers = { ...authHeader(await jwtFor("reader")), "Content-Type": "application/json" }
-    const post = async (path: string, args: object) => {
-      const res = await app.request("/api/v2/orgs/" + path, {
-        method: "POST", headers, body: JSON.stringify({ orgIds: [1], ...args }),
-      }, env)
-      expect(res.status).toBe(200)
-      return res.json() as Promise<{ revision: string; projects?: unknown[] }>
-    }
-    const first = await post("project-name-index", {})
-    expect(first.projects).toEqual([["p", "First", 1]])
-    await db.prepare("UPDATE projects SET deadline_at='2030-01-01' WHERE id='p'").run()
-    expect(await post("project-name-index", { revision: first.revision })).toEqual({ unchanged: true, revision: first.revision })
-    await db.prepare("UPDATE projects SET name='Renamed' WHERE id='p'").run()
-    const changed = await post("project-name-index", { revision: first.revision })
-    expect(changed.projects).toEqual([["p", "Renamed", 1]])
-    expect(await post("portfolio", { projectIds: ["q"], limit: 1 })).toMatchObject({ portfolios: [{ projects: [] }] })
-    expect(await post("portfolio", { projectIds: ["p"], limit: 1 })).toMatchObject({ portfolios: [{ projects: [{ id: "p" }] }] })
-    await db.prepare("DELETE FROM project_members WHERE user_id=2").run()
-    expect((await post("project-name-index", { revision: changed.revision })).projects).toEqual([])
-  })
-})
-
 describe("GET /api/v2/orgs/:orgId/portfolio", () => {
   it("returns per-project rollup (validated cells + last activity) for org projects", async () => {
     await seedUser(1, "wendi")

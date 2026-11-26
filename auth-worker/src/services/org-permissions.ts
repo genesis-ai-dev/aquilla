@@ -2201,7 +2201,6 @@ const portfolioCtes = (orgPredicate: string) => `
      )`
 
 export type PortfolioPageOpts = {
-  projectIds?: string[]
   q: string
   limit: number
   cursor: { id: string; name: string } | null
@@ -2481,23 +2480,8 @@ export async function listOrgPortfolioPage(
   if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
 
   const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // Limit detail work to visible requested ids, including inside the expensive
-  // audio and unit aggregates; unrelated projects must not enter those CTEs.
-  const ids = page?.projectIds
-  const rollupScope = ids
-    ? `id IN (SELECT p.id FROM projects p WHERE p.org_id IN (${placeholders})
-         AND p.id IN (${ids.map(() => "?").join(",")})
-         AND p.archived_at IS NULL AND ${PORTFOLIO_VISIBILITY_PREDICATE})`
-    : `org_id IN (${placeholders})`
-  const rollupBinds = ids
-    ? [...uniqueOrgIds, ...ids, viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId]
-    : uniqueOrgIds
   const extraWhere: string[] = []
   const extraBinds: unknown[] = []
-  if (page?.projectIds) {
-    extraWhere.push(`p.id IN (${page.projectIds.map(() => "?").join(",")})`)
-    extraBinds.push(...page.projectIds)
-  }
   if (page?.q) {
     extraWhere.push("strpos(lower(p.name), ?) > 0")
     extraBinds.push(page.q)
@@ -2524,7 +2508,7 @@ export async function listOrgPortfolioPage(
   //  - pu (AQU-1097): plan-unit counts per project, same 1:1 MATERIALIZED
   //    shape as au, bounded to the same org set.
   const rows = await env.AQUILLA_PG.prepare(
-    `${portfolioCtes(rollupScope)}
+    `${portfolioCtes(`org_id IN (${placeholders})`)}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(p.created_by)                       AS created_by,
@@ -2542,8 +2526,8 @@ export async function listOrgPortfolioPage(
     // Org scopes in CTE order: the AQU-1083 policy, the audio scope inside it,
     // the plan-unit counts (preceded by their AoE cutoff date), then the outer
     // WHERE.
-    ...rollupBinds, ...rollupBinds,
-    aoeTodayIso(now), ...rollupBinds,
+    ...uniqueOrgIds, ...uniqueOrgIds,
+    aoeTodayIso(now), ...uniqueOrgIds,
     ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId,
     ...extraBinds,
@@ -2552,7 +2536,6 @@ export async function listOrgPortfolioPage(
   const list = rows.results ?? []
   const hasMore = page != null && list.length > page.limit
   const pageRows = hasMore ? list.slice(0, page.limit) : list
-  if (page?.projectIds && pageRows.length === 0) return { projects: [], nextCursor: null }
   const last = pageRows[pageRows.length - 1]
   const { lanes: lanesByProject, sourceActivity } = await fetchPortfolioLanes(
     env,

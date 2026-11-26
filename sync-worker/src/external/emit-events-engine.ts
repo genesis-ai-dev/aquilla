@@ -36,6 +36,7 @@ import { uuidv7 } from './uuid'
 import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authorize'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
+import { sourceTextPrepareRefusal } from '../events/source-text-authority'
 import { resolveCommentFloors } from '../events/comment-floors'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
@@ -267,6 +268,16 @@ export async function prepareEmitEvents(
     }
     cmd = { ...requested, events }
   }
+  // AQU-2647: HideCell and a hand-built source commit share the project's
+  // source-text floor. The static gate above is only Contributor.
+  const sourceRefusal = await sourceTextPrepareRefusal(
+    db,
+    projectId,
+    { role: callerRoleLevel, userId: Number(cred.userId) },
+    cmd.events.map((event) => event.kind),
+  )
+  if (sourceRefusal) return errorResponse('permission_denied', sourceRefusal)
+
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
   const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([

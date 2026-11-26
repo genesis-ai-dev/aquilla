@@ -90,7 +90,7 @@ import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
-import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { mayEditSourceText, sourceTextAuthority, useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { canSetMilestones } from "@/lib/milestone-gate"
 import { ROLE } from "@/lib/frontier/roles"
@@ -6890,7 +6890,7 @@ function EditorRow({
    * you are in the file, and this menu's house rule renders a disabled entry to
    * EXPLAIN an inapplicable action, not to advertise one you will never have.
    */
-  const mayParkCells = canPerform("source.cell.visibility.set", project.syncRole?.level ?? null)
+  const mayParkCells = mayEditSourceText(project)
   const hiddenDisabledReason = canEditSource ? null : sourceReadOnlyReason
   const cellHidden = cell.hidden === true
   const onToggleHidden = mayParkCells && canEditSource && onSetCellHidden
@@ -7683,7 +7683,7 @@ function EditorRow({
     if (!canEditSourceForCell || !project.id) return
     // Belt-and-suspenders role-mirror (canEditSource already encodes ≥500), in
     // case a role downgrade hasn't propagated to the capability yet.
-    if (!canPerform("source.cell.commit", project.syncRole?.level ?? null)) {
+    if (!canPerform("source.cell.commit", sourceTextAuthority(project))) {
       console.warn("[source-edit] aborting: role too low for source.cell.commit")
       return
     }

@@ -170,6 +170,13 @@ beforeEach(async () => {
     [PROJECT],
   )
   bridgeLane = lane.rows[0].id
+  // AQU-2647: these tests are about hiding, at a floor that still admits a
+  // project lead. The product default is Maintainer, covered in source-text-floor.test.ts.
+  await tdb.pg.query(
+    `INSERT INTO project_settings (project_id, settings, version, updated_at)
+     VALUES ($1, $2, 1, CURRENT_TIMESTAMP)`,
+    [PROJECT, JSON.stringify({ sourceTextFloor: 'project_lead' })],
+  )
 })
 
 let bridgeLane = ''
@@ -219,14 +226,14 @@ describe('HideCell / ShowCell — discovery', () => {
     expect(tool.description).toContain('ShowCell')
   })
 
-  it('validateCommands accepts both kinds and floors them at PROJECT_LEAD', () => {
+  it('validateCommands accepts both kinds and floors them at CONTRIBUTOR', () => {
     const result = validateCommands([
       { kind: 'HideCell', fileId: FILE, cellId: 'cell-2' },
       { kind: 'ShowCell', fileId: FILE, cellId: 'cell-1' },
     ])
     expect(result.ok).toBe(true)
-    expect(requiredRoleForCommand({ kind: 'HideCell', fileId: FILE, cellId: 'c' })).toBe(ROLE.PROJECT_LEAD)
-    expect(requiredRoleForCommand({ kind: 'ShowCell', fileId: FILE, cellId: 'c' })).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleForCommand({ kind: 'HideCell', fileId: FILE, cellId: 'c' })).toBe(ROLE.CONTRIBUTOR)
+    expect(requiredRoleForCommand({ kind: 'ShowCell', fileId: FILE, cellId: 'c' })).toBe(ROLE.CONTRIBUTOR)
     expect(isVisibilityCommandKind('HideCell')).toBe(true)
     expect(isVisibilityCommandKind('DeleteCell')).toBe(false)
   })
@@ -377,7 +384,7 @@ describe('HideCell / ShowCell — the role gate', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
-  it('a Commenter is refused too — the floor is PROJECT_LEAD, not "can comment"', async () => {
+  it('a Commenter is refused too — the static floor is Contributor, not "can comment"', async () => {
     const commenter = await memberToken(tdb, ROLE.COMMENTER)
     const out = await prepare(tdb, commenter, [{ kind: 'ShowCell', fileId: FILE, cellId: 'cell-1' }])
     expect(out.res.status).toBe(403)

@@ -86,8 +86,26 @@ describe("emitSourceCellVisibilitySet (AQU-1422)", () => {
     expect(await peekOutboxBatch(10)).toHaveLength(0)
   })
 
-  it("admits a project lead", async () => {
+  it("admits a project lead when the floor is Project Lead, and refuses one at the default", async () => {
     setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.PROJECT_LEAD })
+    await expect(
+      emitSourceCellVisibilitySet({
+        projectId: "p",
+        fileId: "f",
+        cellId: "v1",
+        hidden: true,
+        author: "u",
+      }),
+    ).rejects.toBeInstanceOf(InsufficientRoleError)
+    expect(await peekOutboxBatch(10)).toHaveLength(0)
+
+    setCqrsOutboxBridge({
+      projectId: "p",
+      activeFileId: "f",
+      username: "u",
+      roleLevel: ROLE.PROJECT_LEAD,
+      sourceTextFloor: ROLE.PROJECT_LEAD,
+    })
 
     await emitSourceCellVisibilitySet({
       projectId: "p",
@@ -97,6 +115,36 @@ describe("emitSourceCellVisibilitySet (AQU-1422)", () => {
       author: "u",
     })
 
+    expect(await peekOutboxBatch(10)).toHaveLength(1)
+  })
+
+  it("admits a contributor on one lane only when the floor is Contributor", async () => {
+    const bridge = {
+      projectId: "p",
+      activeFileId: "f",
+      username: "u",
+      roleLevel: ROLE.VIEWER,
+      sourceTextAuthority: ROLE.CONTRIBUTOR,
+    }
+    setCqrsOutboxBridge({ ...bridge, sourceTextFloor: ROLE.PROJECT_LEAD })
+    await expect(
+      emitSourceCellVisibilitySet({
+        projectId: "p",
+        fileId: "f",
+        cellId: "v1",
+        hidden: true,
+        author: "u",
+      }),
+    ).rejects.toBeInstanceOf(InsufficientRoleError)
+
+    setCqrsOutboxBridge({ ...bridge, sourceTextFloor: ROLE.CONTRIBUTOR })
+    await emitSourceCellVisibilitySet({
+      projectId: "p",
+      fileId: "f",
+      cellId: "v1",
+      hidden: true,
+      author: "u",
+    })
     expect(await peekOutboxBatch(10)).toHaveLength(1)
   })
 })

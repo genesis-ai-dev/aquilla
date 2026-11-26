@@ -38,8 +38,11 @@ describe("requiredRoleFor — source.* (importer / admin)", () => {
     expect(requiredRoleFor('source.cell.create')).toBe(ROLE.COMMENTER)
   })
 
-  it("returns PROJECT_LEAD for source.cell.commit", () => {
-    expect(requiredRoleFor('source.cell.commit')).toBe(ROLE.PROJECT_LEAD)
+  it("returns CONTRIBUTOR for source.cell.commit — the lowest sourceTextFloor can admit", () => {
+    // AQU-2647: the tier (default Maintainer) is enforced in authorize.ts.
+    // This static floor is only the lowest rung the setting can name.
+    expect(requiredRoleFor('source.cell.commit')).toBe(ROLE.CONTRIBUTOR)
+    expect(requiredRoleFor('source.cell.visibility.set')).toBe(ROLE.CONTRIBUTOR)
   })
 
   it("returns COMMENTER for source.cell.delete — the user-inserted guard lives in authorize", () => {

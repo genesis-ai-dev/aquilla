@@ -7,6 +7,7 @@ import {
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import { t } from "@/lib/i18n/standalone"
 import type { CellEditingTier } from "./project-settings"
+import type { SourceTextTier } from "../../../db/shared/source-text-floor"
 import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
 
 /**
@@ -115,6 +116,11 @@ export interface OrgWideSettings {
   timingLocked?: boolean
   allowTrackEditing?: boolean
   cellEditingFloor?: CellEditingTier
+  /**
+   * AQU-2647: who may edit source text, hide a cell, and split a line at
+   * quotes, for every project that does not set its own. Absent = maintainer.
+   */
+  sourceTextFloor?: SourceTextTier
   allowSelfValidationAudio?: boolean
   validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
   /**

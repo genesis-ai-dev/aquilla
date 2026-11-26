@@ -15,6 +15,7 @@ import {
   type ProjectSettingsResponse,
   type ProjectLaneView,
   type ProjectSettingsEditor,
+  type SourceTextTier,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
@@ -363,6 +364,11 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
+  /**
+   * AQU-2647: the org's source-text floor. Null when the org set none, or
+   * before the first response that carries it; then the floor is Maintainer.
+   */
+  orgSourceTextFloor: SourceTextTier | null
   /** AQU-2342: the legacy agent brief text from the same response ("" when
    *  none, or once the project stored its own instructions). */
   legacyProjectBriefText: string
@@ -688,6 +694,7 @@ export function useProjectSettings(
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
+  const [orgSourceTextFloor, setOrgSourceTextFloor] = useState<SourceTextTier | null>(null)
   const [legacyProjectBriefText, setLegacyProjectBriefText] = useState("")
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
@@ -702,6 +709,7 @@ export function useProjectSettings(
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
+    if (next?.orgSourceTextFloor !== undefined) setOrgSourceTextFloor(next.orgSourceTextFloor)
     if (next?.legacyProjectBriefText !== undefined) setLegacyProjectBriefText(next.legacyProjectBriefText)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
@@ -1333,6 +1341,7 @@ export function useProjectSettings(
     visibilityFloors,
     importFloor,
     orgMediaDefaults,
+    orgSourceTextFloor,
     legacyProjectBriefText,
     lanes,
     isOnline,

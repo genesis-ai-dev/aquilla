@@ -5,7 +5,7 @@
 import { ROLE } from "@/lib/frontier/roles"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { CellEditingTier, CellLabelTier, MilestoneFloor } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier, MilestoneFloor, SourceTextTier } from "@/lib/sync/project-settings"
 
 /**
  * AQU-1068: the cell-editing tiers, in the order they are offered.
@@ -86,3 +86,22 @@ export const MILESTONE_FLOOR_OPTIONS: readonly {
   { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
   { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
 ]
+
+/**
+ * AQU-2647: who may edit source text, hide a cell, and split a line at quotes.
+ * The closed trigger and the open row use the same phrase, because "Project
+ * Lead" alone would hide that a grant on any language lane counts.
+ */
+export const SOURCE_TEXT_FLOOR_OPTIONS: readonly {
+  value: SourceTextTier
+  labelKey: MessageKey
+}[] = [
+  { value: "maintainer", labelKey: "projectSettings.sourceText.optionMaintainer" },
+  { value: "project_lead", labelKey: "projectSettings.sourceText.optionProjectLead" },
+  { value: "contributor", labelKey: "projectSettings.sourceText.optionContributor" },
+]
+
+export function sourceTextTierLabel(t: (key: MessageKey) => string, tier: SourceTextTier): string {
+  const option = SOURCE_TEXT_FLOOR_OPTIONS.find((o) => o.value === tier) ?? SOURCE_TEXT_FLOOR_OPTIONS[0]
+  return t(option.labelKey)
+}

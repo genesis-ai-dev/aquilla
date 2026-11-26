@@ -279,7 +279,9 @@ import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
-import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { mayEditSourceText, sourceTextAuthority, useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { sourceTextFloorLevel } from "../../db/shared/source-text-floor"
+import { laneGrantLevelsFromSyncToken } from "@/lib/sync/lane-grant-levels"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
@@ -1975,8 +1977,9 @@ export function ProjectWorkspace() {
   // shared by both fetchers below so the route-scoped mint records the role
   // too — `patchProject` is a no-op until the record exists locally.
   const onSyncTokenRole = useCallback(
-    (role: SyncTokenResponse["role"]) => {
+    (role: SyncTokenResponse["role"], token?: string) => {
       if (!projectId) return
+      const laneGrantLevels = token ? laneGrantLevelsFromSyncToken(token) : undefined
       void patchProject(projectId, (p) => ({
         ...p,
         syncRole: {
@@ -1985,6 +1988,7 @@ export function ProjectWorkspace() {
           source: role.source,
           fetchedAt: new Date().toISOString(),
         },
+        ...(laneGrantLevels ? { laneGrantLevels } : {}),
       }))
     },
     [projectId],
@@ -2121,6 +2125,10 @@ export function ProjectWorkspace() {
       activeFileId,
       username: currentUsername,
       roleLevel: project.syncRole?.level ?? null,
+      // AQU-2647: a language-lane grant counts, and the floor (default
+      // Maintainer) is applied before the edit reaches the outbox.
+      sourceTextAuthority: sourceTextAuthority(project),
+      sourceTextFloor: sourceTextFloorLevel(project.sourceTextFloor),
       // AQU-2304: the org's import floor, so the emit layer refuses a
       // `file.create` the org reserved for maintainers before it reaches the
       // durable outbox — the same reason the static mirror exists.
@@ -2129,7 +2137,7 @@ export function ProjectWorkspace() {
       sourceAudioCoversEveryLanguage,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole, sourceAudioCoversEveryLanguage])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, project?.sourceTextFloor, project?.laneGrantLevels, carriedImportMinRole, sourceAudioCoversEveryLanguage])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -2313,10 +2321,7 @@ export function ProjectWorkspace() {
    * localStorage, so it outlives a demotion — a former lead would otherwise keep
    * seeing every hidden row in a file they can no longer park.
    */
-  const mayParkCellsInProject = canPerform(
-    "source.cell.visibility.set",
-    project?.syncRole?.level ?? null,
-  )
+  const mayParkCellsInProject = mayEditSourceText(project)
   const showHiddenCellsPref = useShowHiddenCells()
   /**
    * AQU-2308: this file's hand-set milestones.
@@ -15328,7 +15333,7 @@ export function ProjectWorkspace() {
   // AQU-1759: the row menu's split gate, for the file-wide action — rows may
   // be added here, source text may be edited, and the file has no clock.
   canSplitAtQuotesRef.current = canEditLines
-    && canPerform("source.cell.commit", project?.syncRole?.level ?? null)
+    && mayEditSourceText(project)
     && placement === "anywhere"
 
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
@@ -17763,7 +17768,7 @@ export function ProjectWorkspace() {
         },
         commitSource: async (cellId, text, parentId) => {
           const cell = getActiveCell(cellId)
-          if (!cell || !project?.id || !canPerform("source.cell.commit", project.syncRole?.level ?? null)) return null
+          if (!cell || !project?.id || !mayEditSourceText(project)) return null
           const eventId = await emitSourceCellCommit({
             projectId: project.id,
             fileId: cell.fileId,
@@ -17778,7 +17783,7 @@ export function ProjectWorkspace() {
         },
       }),
     )
-  }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, currentUsername, getTokenForProjectFile, revalidateCells])
+  }, [getActiveCell, cellStore, project?.id, project?.syncRole?.level, project?.sourceTextFloor, project?.laneGrantLevels, currentUsername, getTokenForProjectFile, revalidateCells])
   // …and lines made from a recording, in the open file or as a new file.
   const lineUntouched = useCallback(
     (cellId: string, createdEventId: string | null): boolean | null => {

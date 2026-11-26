@@ -357,7 +357,7 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       clearProjectTargetLanes(projectId)
     }
   }, [settingsEnabled, projectId, settingsLanes, settingsFetched])
-  const { orgValidationCount, orgValidationCountAudio, orgMediaDefaults, legacyProjectBriefText } = projectSettings
+  const { orgValidationCount, orgValidationCountAudio, orgMediaDefaults, orgSourceTextFloor, legacyProjectBriefText } = projectSettings
   const overlaid = useMemo(
     () => {
       if (!project) return null
@@ -365,12 +365,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         validationCount: orgValidationCount,
         validationCountAudio: orgValidationCountAudio,
         media: orgMediaDefaults,
+        sourceTextFloor: orgSourceTextFloor,
       })
       // AQU-2342: the legacy agent brief rides on the record so every SPA
       // reader resolves the instructions from the same sources the server does.
       return legacyProjectBriefText ? { ...record, legacyProjectBriefText } : record
     },
-    [project, syncedSettings, projectSettings.lanes, orgValidationCount, orgValidationCountAudio, orgMediaDefaults, legacyProjectBriefText],
+    [project, syncedSettings, projectSettings.lanes, orgValidationCount, orgValidationCountAudio, orgMediaDefaults, orgSourceTextFloor, legacyProjectBriefText],
   )
 
   return {

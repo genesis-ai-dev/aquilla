@@ -16,7 +16,7 @@ import type { CellStore } from "@/hooks/useActiveCellStore"
 import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { useSmartEditsPassage } from "@/hooks/useSmartEdits"
-import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { mayEditSourceText, sourceTextAuthority, useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { applyRowOverlays } from "@/components/EditorTable"
 import { fmtClock } from "@/components/timeline/format"
@@ -319,7 +319,7 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
         if (cap.canEditSource && !idml) out.edit = null
         else if (idml) out.edit = t("editor.source.idmlProtected")
         else if (cap.sourceReadOnlyReason) out.edit = cap.sourceReadOnlyReason
-        if (canPerform("source.cell.visibility.set", args_.project?.syncRole?.level ?? null)) {
+        if (mayEditSourceText(args_.project)) {
           out.hide = { reason: cap.canEditSource ? null : cap.sourceReadOnlyReason, hidden: cell.hidden === true }
         }
         const timed = typeof cell.startTime === "number" && typeof cell.endTime === "number"
@@ -345,7 +345,7 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
         const args_ = a()
         const cell = view(cellId)
         const idml = Boolean((cell.metadata as { idml?: unknown } | undefined)?.idml)
-        if (!capsRef.current.canEditSource || idml || !canPerform("source.cell.commit", args_.project?.syncRole?.level ?? null)) {
+        if (!capsRef.current.canEditSource || idml || !canPerform("source.cell.commit", sourceTextAuthority(args_.project))) {
           throw Object.assign(new Error(idml ? t("editor.source.idmlProtected") : capsRef.current.sourceReadOnlyReason ?? "source editing is not available"), { code: "permission_denied" })
         }
         const pending = reconcilePendingSourceCommit(pendingSource.current.get(cellId) ?? null, cell.sourceEventId ?? null)

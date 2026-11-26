@@ -97,10 +97,11 @@ const project: ProjectRecord = {
   members: [],
 }
 
-/** A cloud project at a stated rank. `canEditSource` is PROJECT_LEAD (500) and
- *  up, so the rank is what decides whether the source entry is offered. */
-const projectAt = (level: number): ProjectRecord =>
-  ({ ...project, syncRole: { level } }) as ProjectRecord
+/** A cloud project at a stated rank. The source-text floor is Project Lead, so
+ *  a rank of 500 may edit source and a rank of 400 may not — the tests that
+ *  vary the floor pass their own `sourceTextFloor`. */
+const projectAt = (level: number, over: Partial<ProjectRecord> = {}): ProjectRecord =>
+  ({ ...project, sourceTextFloor: "project_lead", syncRole: { level }, ...over }) as ProjectRecord
 
 function row(
   cellId: string,
@@ -968,7 +969,43 @@ describe("EditorTable — split at quotes", () => {
     await screen.findByText(/Where are we to buy bread/)
     openMenu("v5")
     expect(await splitEntry()).toHaveAttribute("data-disabled")
-    expect(screen.getByTestId("cell-menu-split-quotes-reason")).toHaveTextContent("only a project lead can edit")
+    expect(screen.getByTestId("cell-menu-split-quotes-reason")).toHaveTextContent("not allowed to edit")
+  })
+
+  it("follows the source-text floor for a lead or a contributor on one language lane", async () => {
+    const laneLead = projectAt(100, { sourceTextFloor: "project_lead", laneGrantLevels: [500] })
+    const { unmount } = renderTable({ project: laneLead, cellStore: quotedStore(), sourceLineEditing: untimed }, { onSplitAtQuotes: vi.fn() })
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    expect(await splitEntry()).not.toHaveAttribute("data-disabled")
+    unmount()
+
+    const { unmount: unmountClosed } = renderTable(
+      { project: projectAt(100, { sourceTextFloor: "maintainer", laneGrantLevels: [500] }), cellStore: quotedStore(), sourceLineEditing: untimed },
+      { onSplitAtQuotes: vi.fn() },
+    )
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    expect(await splitEntry()).toHaveAttribute("data-disabled")
+    unmountClosed()
+
+    const { unmount: unmountContributor } = renderTable(
+      { project: projectAt(100, { sourceTextFloor: "contributor", laneGrantLevels: [400] }), cellStore: quotedStore(), sourceLineEditing: untimed },
+      { onSplitAtQuotes: vi.fn() },
+    )
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    expect(await splitEntry()).not.toHaveAttribute("data-disabled")
+    unmountContributor()
+
+    const { unmount: unmountLeadFloor } = renderTable(
+      { project: projectAt(100, { sourceTextFloor: "project_lead", laneGrantLevels: [400] }), cellStore: quotedStore(), sourceLineEditing: untimed },
+      { onSplitAtQuotes: vi.fn() },
+    )
+    await screen.findByText(/Where are we to buy bread/)
+    openMenu("v5")
+    expect(await splitEntry()).toHaveAttribute("data-disabled")
+    unmountLeadFloor()
   })
 
   it("is not offered on a file with a clock", async () => {

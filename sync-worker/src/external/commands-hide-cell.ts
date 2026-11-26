@@ -66,10 +66,10 @@ export function isVisibilityCommand<T extends { kind: string }>(
 export const VISIBILITY_MAX_COMMANDS = 200
 
 /** Static floor — the SAME floor `source.cell.visibility.set` hits at the
- *  /events perimeter (role-policy.ts is the single source of truth), i.e.
- *  PROJECT_LEAD, the floor AQU-1422 gave the editor's own menu item. Asking
- *  role-policy rather than restating the number is what keeps this surface from
- *  drifting below the perimeter that will refuse it anyway. */
+ *  /events perimeter (role-policy.ts is the single source of truth). AQU-2647
+ *  dropped that static bar to Contributor, the lowest the source-text setting
+ *  can admit. The project's tier (default Maintainer) is enforced when the
+ *  plan is prepared and again when the event is written. */
 export function visibilityCommandFloor(): number {
   return REQUIRED_ROLE['source.cell.visibility.set']
 }

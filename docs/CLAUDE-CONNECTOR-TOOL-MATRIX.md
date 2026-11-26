@@ -6,7 +6,8 @@ The original hosted catalog has 40 tools. AQU-2135 adds `upload_artifact`;
 the later `list_style_rules` brings the live catalog to 42 tools. Claude's
 connector settings show 25 read-only and 17 write/delete entries.
 Successful hosted coverage now reaches all 42 tools. AQU-2581 adds `get_help`,
-which has no hosted Claude check yet. This counts successful
+which has no hosted Claude check yet. `create_upload_url` (signed PUT URL for
+files over the 512 KiB inline cap, up to 64 MiB) has no hosted check yet either. This counts successful
 tool paths, not every provider or optional workflow. The Omnilingual provider
 comparison below still fails; Whisper succeeds on the same stored take.
 
@@ -70,6 +71,7 @@ not live provider availability. Hosted AI tests must run after deployment.
 | `transcribe_audio` | PASS: stored Ogg take through Whisper; Omnilingual comparison fails | PASS: OAuth scope/role checks and backend request composition (AQU-2155); service-binding transport (AQU-2156). |
 | `transcription_status` | PASS: cold status with organization-scoped OAuth | PASS: scoped OAuth status, denials and warm/status request composition (AQU-2155). |
 | `upload_artifact` | PASS: exact 94-byte source upload and matching SHA-256 | PASS: OAuth text/binary upload, bounds, denial and byte preservation (AQU-2135). |
+| `create_upload_url` | Not yet checked | PASS: over-cap byte-for-byte upload, single use, revocation/role re-check at PUT, forged/raw-secret tickets refused (`external-upload-tickets.test.ts`). |
 | `wait_for_changeset` | PASS | PASS: pre-creation approval observation and confirm (AQU-2137). |
 
 Hosted `get_changeset` and `wait_for_changeset` pass for existing projects.

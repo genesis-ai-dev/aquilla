@@ -165,6 +165,10 @@ describe("AQU-2323 person inspector", () => {
         (2, 'org.member.role', '{"actor":{"userId":2,"username":"maintainer"},"target":{"userId":1,"username":"owner"},"scope":"org","orgId":1,"groupId":null,"projectId":null,"roleBefore":600,"roleAfter":700}', '2026-07-02T00:00:00Z'),
         (2, 'project.member.role', '{"actor":{"userId":2,"username":"maintainer"},"target":{"userId":1,"username":"owner"},"scope":"project","orgId":null,"groupId":null,"projectId":"r2","roleBefore":600,"roleAfter":700}', '2026-07-03T00:00:00Z')`,
     )
+    // Creation alone grants no roster visibility. Give the owner a second,
+    // lower-ranked path through the same project-visible team as Pedro.
+    expect((await inspect("lena", 1)).status).toBe(403)
+    await run("INSERT INTO group_members (group_id, user_id, added_by, role_level) VALUES (3, 1, 2, 300)")
     const { status, text, body } = await inspect("lena", 1)
     expect(status).toBe(200)
     const keys = flat(body.tree).map((n) => `${n.scope.type}:${n.scope.id}`).sort()

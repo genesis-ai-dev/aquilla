@@ -13,6 +13,7 @@
  */
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { hasActiveElevation } from "../middleware/platform-admin"
 import { ViewerScope, nameGranters, type AccessChainEntry, type ScopeRef } from "../services/access-payload"
 import { loadGrantTarget, loadGrantWorld, withLaneView } from "../services/grant-preview-load"
 import { buildPersonAccess, type PersonAccessCore } from "../services/person-access"
@@ -57,7 +58,7 @@ orgAccessPerson.get("/:orgId/access/people/:userId", authMiddleware, async (c) =
   if (!/^\d{1,18}$/.test(userId)) return hidden()
 
   const vs = new ViewerScope(c.env, c.get("user"))
-  const access = await buildOrgAccess(c.env, vs, orgId)
+  const access = await buildOrgAccess(c.env, vs, orgId, () => hasActiveElevation(c))
   if (!access.ok) return hidden()
   const row = access.payload.people.find((p) => p.userId === userId && !p.pendingInvite)
   if (!row) return hidden()

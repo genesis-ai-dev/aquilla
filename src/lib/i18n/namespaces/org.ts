@@ -110,6 +110,40 @@ export const org = defineNamespace({
       other: "{count} reach it from {from}",
     }),
 
+    // -- AQU-2319 People lens: one roster, reach columns, CSV and print --
+    "org.access.people.person": "Person",
+    "org.access.people.highestRole": "Highest role",
+    "org.access.people.grantedAt": "Granted at",
+    "org.access.people.reaches": "Reaches",
+    "org.access.people.lastActive": "Last active",
+    "org.access.people.noAccessYet": "No access yet",
+    "org.access.people.invited": "Invited",
+    "org.access.people.noActivity": "No recent activity",
+    "org.access.people.noMatches": "No one matches",
+    "org.access.people.membershipOpensNothing": "Nothing. Org membership alone opens no project.",
+    "org.access.people.everything": "Everything · {teams}, {projects}",
+    "org.access.people.teamCount": plural({
+      one: "{count} team",
+      other: "{count} teams",
+    }),
+    "org.access.people.projectCount": plural({
+      one: "{count} project",
+      other: "{count} projects",
+    }),
+    "org.access.people.laneCount": plural({
+      one: "{count} language lane",
+      other: "{count} language lanes",
+    }),
+    "org.access.people.filterEveryone": "Everyone",
+    "org.access.people.filterMembers": "Members",
+    "org.access.people.filterGuests": "Guests",
+    "org.access.people.filterInvites": "Pending invites",
+    "org.access.people.filterGranters": "Can give access",
+    "org.access.people.filterInactive": "Inactive 90 days",
+    "org.access.people.extraGrants": "+{count}",
+    "org.access.people.filtersAriaLabel": "Filter the people list",
+    "org.access.people.openPersonAriaLabel": "Open {name}",
+
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
@@ -1958,6 +1992,37 @@ export const org = defineNamespace({
           count: "Number of inherited sources at this place; also selects the plural form.",
           from: "Already-translated phrase naming the organization or the word above.",
         },
+      },
+      "org.access.people.everything": {
+        description:
+          "AQU-2319: Reaches cell when an organization Maintainer or Owner can open every place the reader can see.",
+        placeholders: {
+          teams: "Already-translated team count, such as \"2 teams\".",
+          projects: "Already-translated project count, such as \"10 projects\".",
+        },
+      },
+      "org.access.people.teamCount": {
+        description: "AQU-2319: how many teams a person reaches, used inside the Everything sentence.",
+        placeholders: { count: "Number of teams; also selects the plural form." },
+      },
+      "org.access.people.projectCount": {
+        description: "AQU-2319: how many projects a person can open. Also the whole Reaches cell when that is the reach.",
+        placeholders: { count: "Number of projects; also selects the plural form." },
+      },
+      "org.access.people.laneCount": {
+        description: "AQU-2319: Reaches cell when the person can open language lanes and no whole project.",
+        placeholders: { count: "Number of language lanes; also selects the plural form." },
+      },
+      "org.access.people.extraGrants": {
+        description: "AQU-2319: after two place breadcrumbs in Granted at, how many further direct grants are not drawn.",
+        placeholders: { count: "How many direct grants are hidden after the two that are shown." },
+      },
+      "org.access.people.filtersAriaLabel": {
+        description: "AQU-2319: accessible name of the filter chips on the People lens. The chips themselves name each filter and its count.",
+      },
+      "org.access.people.openPersonAriaLabel": {
+        description: "AQU-2319: accessible name of the link from a person on the People lens to the organization member list.",
+        placeholders: { name: "The person's username, or the invited email when they have no account yet." },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",

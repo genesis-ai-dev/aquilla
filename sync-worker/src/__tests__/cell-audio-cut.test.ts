@@ -368,3 +368,60 @@ describe('cell.audio.attach — a piece born into a group', () => {
     expect(by['dn-y'].lane_id).toBe(SPANISH)
   })
 })
+
+// AQU-2494 (review, Nov 9): a cut copied the take's trim, name and places
+// to the new piece but not its volume or fades, and left all three on the
+// first piece. So the second piece played at the recorded volume and the
+// fade-out landed at the cut instead of at the take's end.
+describe('a take with a volume change and fades', () => {
+  interface Level { audio_id: string; gain_db: string | number | null; fade_in_ms: string | number | null; fade_out_ms: string | number | null }
+  const levels = async (): Promise<Record<string, [number | null, number | null, number | null]>> =>
+    Object.fromEntries(
+      (await h.pg.query<Level>(`SELECT audio_id, gain_db, fade_in_ms, fade_out_ms FROM cell_audio ORDER BY audio_id`)).rows
+        .map((r) => [r.audio_id, [n(r.gain_db), n(r.fade_in_ms), n(r.fade_out_ms)]]),
+    )
+
+  it('gives both pieces the volume, keeps the fade-in on the first and moves the fade-out to the last', async () => {
+    await attach('take-a')
+    await project('cell.audio.gain', { audioId: 'take-a', gainDb: 6, fadeInMs: 300, fadeOutMs: 500 })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' })
+    expect(await levels()).toEqual({ 'take-a': [6, 300, null], 'take-b': [6, null, 500] })
+
+    // Cutting the last piece again moves the fade-out on to the new last piece.
+    await project('cell.audio.cut', { audioId: 'take-b', atMs: 3_000, newAudioId: 'take-c' })
+    expect(await levels()).toEqual({ 'take-a': [6, 300, null], 'take-b': [6, null, null], 'take-c': [6, null, 500] })
+
+    // Cutting the first piece leaves its fade-in at the take's start.
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 1_000, newAudioId: 'take-a2' })
+    expect(await levels()).toEqual({ 'take-a': [6, 300, null], 'take-a2': [6, null, null], 'take-b': [6, null, null], 'take-c': [6, null, 500] })
+  })
+
+  it('never leaves a fade longer than the piece it sits on', async () => {
+    await attach('take-a')
+    await project('cell.audio.gain', { audioId: 'take-a', gainDb: null, fadeInMs: 1_500, fadeOutMs: 1_500 })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 3_200, newAudioId: 'take-b' })
+    // The last 0.8 s is all the second piece has to fade over.
+    expect(await levels()).toEqual({ 'take-a': [null, 1_500, null], 'take-b': [null, null, 800] })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 1_000, newAudioId: 'take-a2' })
+    expect((await levels())['take-a']).toEqual([null, 1_000, null])
+  })
+
+  it('leaves a take with no volume change or fades as it was, and a refused cut changes no level', async () => {
+    await attach('take-a')
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' })
+    expect(await levels()).toEqual({ 'take-a': [null, null, null], 'take-b': [null, null, null] })
+
+    await attach('take-z')
+    await project('cell.audio.gain', { audioId: 'take-z', gainDb: -3, fadeInMs: null, fadeOutMs: 400 })
+    await project('cell.audio.cut', { audioId: 'take-z', atMs: 50, newAudioId: 'x1' })
+    expect((await levels())['take-z']).toEqual([-3, null, 400])
+  })
+
+  it('is replay-safe: the same cut delivered twice leaves the same levels', async () => {
+    await attach('take-a')
+    await project('cell.audio.gain', { audioId: 'take-a', gainDb: 6, fadeInMs: null, fadeOutMs: 500 })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' }, { id: 'evt-cut-lvl' })
+    await project('cell.audio.cut', { audioId: 'take-a', atMs: 2_000, newAudioId: 'take-b' }, { id: 'evt-cut-lvl' })
+    expect(await levels()).toEqual({ 'take-a': [6, null, null], 'take-b': [6, null, 500] })
+  })
+})

@@ -294,7 +294,7 @@ import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { attachmentOutFrom, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
@@ -532,7 +532,7 @@ import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import type { SyncTokenResponse } from "@/lib/sync/sync-token"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackIsLayer, takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -4875,8 +4875,13 @@ export function ProjectWorkspace() {
       const shared = attachmentOutFrom(audioId, att, slot)
       const firstVoters = pieceVoters?.first ?? []
       const secondVoters = pieceVoters?.second ?? []
+      // AQU-2494 (review, Nov 9): …and the take's volume and fades split as
+      // the server splits them: the volume on both, the fade-in on the first
+      // piece, the fade-out on the new one.
+      const levels = levelsAfterCut(att, atMs)
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
+        ...levels.first,
         trimEndMs: Math.round(atMs),
         validatorCount: firstVoters.length,
         validators: firstVoters,
@@ -4884,6 +4889,7 @@ export function ProjectWorkspace() {
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
+        ...levels.second,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
         validatorCount: secondVoters.length,
@@ -14299,6 +14305,7 @@ export function ProjectWorkspace() {
       },
       lineName,
       trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      takeIsLayer: (fileId, slot) => takeTrackIsLayer({ files: project.files, fileId, slot }),
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,

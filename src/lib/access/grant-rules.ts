@@ -88,3 +88,78 @@ export function offeredRoles(type: GrantScopeType, cap: number, opts: { invite?:
   if (inviteCap === null) return []
   return SCOPE_ROLES[type].filter((role) => role <= cap && (inviteCap === undefined || role <= inviteCap))
 }
+
+/**
+ * AQU-2321: why a grant cannot be removed or have its role changed here.
+ * The rules mirror the routes the Places lens writes through:
+ *   org     DELETE /orgs/:id/members/:u, POST /orgs/:id/members
+ *                         Owner only, never yourself
+ *   team    DELETE + PATCH /orgs/:id/groups/:g/members/:u
+ *                         org Maintainer+; a role change stays at or below
+ *                         your own and cannot touch someone above you
+ *   project DELETE /projects/:p/members/:u   Maintainer+ on the project
+ *           POST /projects/:p/members        Project lead+ (role change)
+ *                         both refuse a member at or above you unless you are Owner
+ *   lane    PUT + DELETE /orgs/:id/access/lane-grant (AQU-2322)
+ *                         Project lead+ on the project, never yourself. A
+ *                         lane carries at most Contributor, below every cap.
+ *                         Removing someone's last lane grant also ends the
+ *                         project membership it opened; the dry run then
+ *                         applies the project rule as well.
+ * Invites are cancelled by whoever may send them there (org: Owner, project
+ * and lane: Project lead+).
+ */
+export type EditDenial =
+  | GrantDenial
+  | "maintainer_on_project"
+  | "target_outranks"
+  | "self"
+
+export type EditCheck = { ok: true } | { ok: false; denial: EditDenial; cap: number | null }
+
+export interface EditTarget {
+  /** Their role on the row being changed or removed. */
+  roleLevel: number
+  /** The row is the viewer's own. */
+  isSelf: boolean
+  /** A pending invite rather than an account. */
+  invite?: boolean
+}
+
+/** May this viewer remove this row at this place? `place` is the grantable entry for it. */
+export function removalCheck(type: GrantScopeType, place: PlaceGrantability, target: EditTarget): EditCheck {
+  if (target.invite) return place.ok ? { ok: true } : { ok: false, denial: place.denial, cap: null }
+  if (type === "lane") {
+    if (!place.ok) return { ok: false, denial: place.denial, cap: null }
+    if (target.isSelf) return { ok: false, denial: "self", cap: place.cap }
+    // `roleLevel` is the higher of the lane row and their project role (the dry run passes both).
+    if (place.cap < OWNER && target.roleLevel >= place.cap) return { ok: false, denial: "target_outranks", cap: place.cap }
+    return { ok: true }
+  }
+  if (type === "team") {
+    // Removing someone from a team hands nothing out, so the pen-test cap on
+    // joining (team_above_you) does not apply; the route asks only for Maintainer+.
+    return place.ok || place.denial === "team_above_you" ? { ok: true } : { ok: false, denial: place.denial, cap: null }
+  }
+  if (!place.ok) return { ok: false, denial: place.denial, cap: null }
+  if (type === "org") return target.isSelf ? { ok: false, denial: "self", cap: place.cap } : { ok: true }
+  if (place.cap < MAINTAINER) return { ok: false, denial: "maintainer_on_project", cap: place.cap }
+  if (place.cap < OWNER && target.roleLevel >= place.cap) return { ok: false, denial: "target_outranks", cap: place.cap }
+  return { ok: true }
+}
+
+/**
+ * The roles a direct row may be changed to: the place's rungs at or below
+ * the viewer's cap there. A Project lead's list stops at Project lead.
+ */
+export function roleChangeOptions(
+  type: GrantScopeType,
+  place: PlaceGrantability,
+  target: EditTarget,
+): { ok: true; roles: number[] } | { ok: false; denial: EditDenial; cap: number | null } {
+  if (!place.ok) return { ok: false, denial: place.denial, cap: null }
+  if (target.isSelf && type !== "team") return { ok: false, denial: "self", cap: place.cap }
+  const outranked = type === "team" ? target.roleLevel > place.cap : place.cap < OWNER && target.roleLevel >= place.cap
+  if (type !== "org" && outranked) return { ok: false, denial: "target_outranks", cap: place.cap }
+  return { ok: true, roles: offeredRoles(type, place.cap) }
+}

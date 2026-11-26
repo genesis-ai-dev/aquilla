@@ -256,6 +256,8 @@ export interface AttachUploadedTakeArgs {
   /** AQU-2491 (review, Nov 9): the take's own place, written right after the
    *  attach (lib/audio/new-take-place). Absent or null: none. */
   place?: TakePlace | null
+  /** Re-check S2: bulk upload — don't start auto-even for this take. */
+  skipAutoEven?: boolean
 }
 
 /**
@@ -286,6 +288,7 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
       audioOrigin: "attach",
       surface: args.surface,
       author: username,
+      ...(args.skipAutoEven ? { skipAutoEven: true } : {}),
     })
   } catch (emitErr) {
     args.onEmitFailed?.()

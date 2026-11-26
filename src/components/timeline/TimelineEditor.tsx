@@ -47,10 +47,8 @@ import {
   MoreHorizontal,
   Plus,
   Users,
-  Volume2,
   LockOpen,
   Rows3,
-  VolumeX,
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -116,7 +114,6 @@ import {
   clampRowHeight,
   folderRowHPx,
   MIN_LABEL_SUB_H_PX,
-  MIN_SPEAKER_FULL_H_PX,
   ROW_H_DEFAULT,
   ROW_H_MAX,
   ROW_H_MIN,
@@ -192,12 +189,14 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // copy of the preference clobber one another.
 import { useQueueStateValue, useMissingClipTakes } from "@/lib/audio/play-queue"
 import { selectQueueStateForFile } from "@/lib/audio/queue-scope"
-import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, setDrawnRows, toggleAudibility, toggleSolo, trackAudible, trackHeard, trackSoloed, useQueueAudibility } from "@/lib/audio/audibility"
+import { setTrackGainDb } from "@/lib/audio/mixer"
+import { EvenOutButton, MuteSoloPair, TrackFader, type EvenState } from "./TrackMixControls"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { programmeTrackSlots, RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { usePersonPref } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
@@ -236,7 +235,6 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
-import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** A text-table row click or chapter pick, consumed once per `nonce`. */
 export type TimelineActivateRequest = {
@@ -706,6 +704,24 @@ export interface TimelineEditorProps {
    */
   onSetTrackColor?(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
   /**
+   * AQU-2664 (board 74): save a track's volume, dB (the header's fader). Shared
+   * and exported, on the maintainer clearance like colour. Absent: the fader is
+   * drawn but cannot be moved.
+   */
+  onSetTrackVolume?(trackId: string, db: number): void
+  /**
+   * AQU-2664 (boards 71, 74): Even out. `states` is each track's ≈ (only the
+   * tracks holding takes are in it); `open` opens the one Even out window on
+   * these tracks. Absent for anyone who may not even takes out.
+   */
+  evenOut?: {
+    states: ReadonlyMap<string, EvenState>
+    /** `from`: the track whose ⋯ or ≈ opened it (evidence 71F). */
+    open(trackIds: readonly string[], from?: string): void
+    /** The tracks selected here, so the file menu's window can offer them. */
+    selectionChanged?(trackIds: readonly string[]): void
+  }
+  /**
    * AQU-1566 (Sam's option b): turn this caption track into the file's own
    * rows. The workspace passes it only on a linked video with no rows, to a
    * maintainer, and asks for confirmation before anything is written. Like
@@ -763,26 +779,6 @@ export interface TimelineEditorProps {
  *  parameter list would hand every render a new array and churn every memo
  *  downstream of it. */
 const DEFAULT_TRACKS = deriveTracksForFile(null)
-
-/** Each audio track's speaker-button copy. Whole sentences per track, not one
- *  frame per state with the track's name poured in — the name inflects. */
-const SPEAKER_TOGGLE_KEYS: Record<
-  "source" | "target",
-  { mute: MessageKey; unmute: MessageKey; audibleTitle: MessageKey; mutedTitle: MessageKey }
-> = {
-  source: {
-    mute: "editor.timeline.muteSourceAudio",
-    unmute: "editor.timeline.unmuteSourceAudio",
-    audibleTitle: "editor.timeline.sourceAudioAudible",
-    mutedTitle: "editor.timeline.sourceAudioMuted",
-  },
-  target: {
-    mute: "editor.timeline.muteTargetAudio",
-    unmute: "editor.timeline.unmuteTargetAudio",
-    audibleTitle: "editor.timeline.targetAudioAudible",
-    mutedTitle: "editor.timeline.targetAudioMuted",
-  },
-}
 
 const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
 
@@ -961,9 +957,16 @@ function LaneLabel({
   selected,
   onRowClick,
   collapsed,
+  mix = false,
+  dimmed = false,
   className,
   ...rest
 }: {
+  /** AQU-2664 (board 74): the row carries the mix strip (M | S, fader, ≈),
+   *  so it takes Logic's spacing: 6px between the parts, 8px / 6px inside. */
+  mix?: boolean
+  /** AQU-2664: the track is muted — its name and kind at 55%. */
+  dimmed?: boolean
   name: string
   sub: string
   /** Drawn on the sublabel's line instead of `sub`, and gated the same way
@@ -1091,7 +1094,7 @@ function LaneLabel({
         // between them, which reads as two unrelated columns instead of one
         // track. The padding comes in to match — px-3 either side of a 44px
         // strip leaves 20px, which the speaker alone does not fit in.
-        collapsed ? "justify-center px-1.5" : "justify-between px-3",
+        collapsed ? "justify-center px-1.5" : mix ? "gap-1.5 ps-2 pe-1.5" : "justify-between px-3",
         // AQU-646 stage 4b: a folder row's height is min(28, dial) — dynamic,
         // so it arrives as an inline style below rather than this class. Both
         // columns must agree byte for byte (TimelineFolderLane computes the
@@ -1142,6 +1145,9 @@ function LaneLabel({
         className={cn(
           "flex min-w-0 flex-col gap-0.5 transition-[padding-left] duration-[180ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
           indented && !collapsed && "pl-6",
+          // Board 74: the name takes what the strip leaves, at gap 1px.
+          mix && !collapsed && "flex-1 gap-px",
+          dimmed && "opacity-55",
         )}
       >
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
@@ -1240,7 +1246,7 @@ function LaneLabel({
           "differently named tracks are leading to differently aligned
           mute/unmute buttons." Wrapped, the pair is a single child pinned to
           the right wall, and every row's speaker lands in one column. */}
-      {trailing && <span className="flex shrink-0 items-center gap-0.5">{trailing}</span>}
+      {trailing && <span className={cn("flex shrink-0 items-center", mix && !collapsed ? "gap-1.5" : "gap-0.5")}>{trailing}</span>}
     </div>
   )
 }
@@ -1408,6 +1414,8 @@ export function TimelineEditor({
   onRenameTrack,
   onPromoteTrackToRows,
   onSetTrackColor,
+  onSetTrackVolume,
+  evenOut,
   trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
@@ -1564,7 +1572,17 @@ export function TimelineEditor({
    *  alone. Before, a row with neither rename clearance nor the editing
    *  setting had no trigger, no `⋯`, nothing. */
   const canHideTracks = Boolean(fileId)
-  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks || evenOut)
+  /** AQU-2664: the tracks that hold takes Even out can act on. */
+  const evenOutStates = evenOut?.states
+  const evenOutTrackIds = useMemo(() => new Set(evenOutStates?.keys() ?? []), [evenOutStates])
+  /** AQU-2664 (board 71B): ≈ opens on this track, or on the selection when
+   *  this track is one of two or more selected. */
+  function openEvenOutFrom(trackId: string) {
+    if (!evenOut) return
+    const chosen = selectedTrackIdSet.has(trackId) ? menuTargets(trackId).filter((tr) => evenOutTrackIds.has(tr.id)).map((tr) => tr.id) : []
+    evenOut.open(chosen.length >= 2 ? chosen : [trackId], trackId)
+  }
   /** AQU-2252: "Sets line lengths" — only while the file follows its
    *  recordings, where a track's takes are what set a line's length. */
   const lineLengthsAction = audioFirst ? trackEditing?.onSetLineLengths : undefined
@@ -1660,6 +1678,23 @@ export function TimelineEditor({
 
   const selectedTrackIds = selectedIdsInOrder(trackSelection, selectableTrackIds)
   const selectedTrackIdSet = new Set(selectedTrackIds)
+  // Review M4: the rows drawn now, by their audibility keys, so a soloed track
+  // that is deleted or hidden is ignored rather than silencing every other row.
+  const drawnAudioKey = tracks
+    .filter((tr) => !hiddenTrackIds.has(tr.id))
+    .map((tr) => TRACK_RENDER[tr.kind]?.audibilityKey ?? (tr.kind === "audio" ? slotForTrack(tr.id) : null))
+    .filter((k): k is string => k != null)
+    .join("\u0000")
+  useEffect(() => {
+    setDrawnRows(drawnAudioKey ? drawnAudioKey.split("\u0000") : [])
+  }, [drawnAudioKey, fileId])
+  // AQU-2664: the workspace's Even out window offers the selection when it is
+  // opened from the file menu.
+  const selectionKey = selectedTrackIds.join("\u0000")
+  const reportSelection = evenOut?.selectionChanged
+  useEffect(() => {
+    reportSelection?.(selectionKey ? selectionKey.split("\u0000") : [])
+  }, [selectionKey, reportSelection])
 
   /** Fold a click on a track row into the selection. */
   function selectTrack(trackId: string, mods: SelectMods | undefined) {
@@ -1737,6 +1772,8 @@ export function TimelineEditor({
         canSetLengths: Boolean(lineLengthsAction),
         canMoveToFolder: Boolean(trackEditing?.onMoveToFolder),
         folders: folderTracks,
+        canEvenOut: Boolean(evenOut),
+        evenOutTrackIds: evenOutTrackIds,
       }),
     )
   }
@@ -1860,6 +1897,7 @@ export function TimelineEditor({
       onPromote: onPromoteTrackToRows,
       ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
       folders: folderTracks,
+      ...(evenOut ? { evenOut: { trackIds: evenOutTrackIds, open: (ids: readonly string[]) => evenOut.open(ids, track.id) } } : {}),
       editing: trackEditing
         ? {
             onLeaveFolder: (trackIds) => {
@@ -2196,56 +2234,6 @@ export function TimelineEditor({
     }
   }, [])
 
-  /** `name` overrides the track's own sentence for a row whose button silences
-   *  something else — see `editor.timeline.muteNamed`. */
-  // AQU-646 stage 3: `track` is a SLOT now, so every audio track can carry one
-  // — not only the two the type used to name. The two named flags keep their
-  // own whole-sentence copy; an added track borrows the target row's, with its
-  // own name poured in via `name`, because "mute Spanish VO" is the sentence
-  // its speaker should say.
-  function speakerToggle(track: string, name?: string) {
-    // ONE CLASSIFIER, shared with `toggleAudibility` — see `trackAudible`. The
-    // old `slotAudible` read here did not recognise the derived row's
-    // `"target"` key, so that button never changed state (stage 6A).
-    const audible = trackAudible(audibility, track)
-    const keys = SPEAKER_TOGGLE_KEYS[track === "source" ? "source" : "target"]
-    const compactSpeaker = rowH < MIN_SPEAKER_FULL_H_PX
-    const speakerLabel = name
-      ? t(audible ? "editor.timeline.muteNamed" : "editor.timeline.unmuteNamed", { name })
-      : t(audible ? keys.mute : keys.unmute)
-    const speakerTitle = name
-      ? t(audible ? "editor.timeline.namedAudible" : "editor.timeline.namedMuted", { name })
-      : t(audible ? keys.audibleTitle : keys.mutedTitle)
-    return (
-      <button
-        type="button"
-        data-testid={`tl-speaker-${track}`}
-        aria-label={speakerLabel}
-        aria-pressed={audible}
-        title={speakerTitle}
-        onClick={() => toggleAudibility(fileId, track)}
-        className={cn(
-          "inline-flex shrink-0 items-center rounded-md border border-border",
-          // It shrinks rather than vanishing: at 24px the full button is
-          // exactly as tall as its row, which is what put it across two of them
-          // in Sam's screenshot. See MIN_SPEAKER_FULL_H_PX — muting a track is
-          // the thing you reach for WHILE zoomed out to see several at once, so
-          // dropping the control at the very height that makes it useful would
-          // be the wrong trade.
-          compactSpeaker ? "p-0.5" : "p-1",
-          audible
-            ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-            : "bg-background text-foreground/50 hover:bg-muted",
-        )}
-      >
-        {audible ? (
-          <Volume2 className={cn(compactSpeaker ? "h-3 w-3" : "h-3.5 w-3.5")} />
-        ) : (
-          <VolumeX className={cn(compactSpeaker ? "h-3 w-3" : "h-3.5 w-3.5")} />
-        )}
-      </button>
-    )
-  }
 
   // AQU-2204: following its recordings, a book with no times lays its lines
   // out in order (see `timelineLanes`).
@@ -4738,7 +4726,7 @@ export function TimelineEditor({
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             // AQU-2235: a muted dub row's takes at half strength.
-            muted={!trackAudible(audibility, "target")}
+            muted={!trackHeard(audibility, "target")}
           />
         )
       // ── The two kinds a USER makes (stage 2) ────────────────────────────
@@ -4815,7 +4803,7 @@ export function TimelineEditor({
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
             // AQU-2235: …and an added track's, by its own slot's flag.
-            muted={!trackAudible(audibility, slotForTrack(track.id))}
+            muted={!trackHeard(audibility, slotForTrack(track.id))}
           />
         )
       }
@@ -5442,7 +5430,7 @@ export function TimelineEditor({
                       {lane}
                     </ContextMenuTrigger>
                     {!menuEmpty && (
-                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                      <ContextMenuContent className="w-[236px]">{trackMenu(row.track)}</ContextMenuContent>
                     )}
                   </ContextMenu>
                 )
@@ -5787,6 +5775,11 @@ export function TimelineEditor({
                 const speaker =
                   render.audibilityKey ?? (track.kind === "audio" ? slotForTrack(track.id) : null)
                 const renaming = renamingTrackId === track.id && onRenameTrack != null
+                // AQU-2664 (board 74): the rows whose takes are mixed — the
+                // main target track and every added audio track — carry the
+                // fader and ≈. The source row keeps M | S alone: its sound is
+                // the film's or the import's, never evened or exported.
+                const mixRow = track.kind === "target-audio" || track.kind === "audio"
                 const label = (
                   <LaneLabel
                     key={track.id}
@@ -5843,25 +5836,54 @@ export function TimelineEditor({
                         />
                       ) : undefined
                     }
+                    mix={mixRow}
+                    dimmed={speaker != null && !trackAudible(audibility, speaker)}
                     trailing={
                       <>
-                        {/* AQU-1682: only where there's something to play,
-                            or the lane is muted now (never strand a mute). */}
-                        {speaker && (laneHasSound(track) || !trackAudible(audibility, speaker))
-                          ? speakerToggle(
-                              speaker,
-                              // On a subtitle file this row's cues are timings over
-                              // the FILM's soundtrack, and that is what the button
-                              // silences. Saying "source audio" there would be
-                              // true and useless; the operator wants to know the
-                              // film is about to go quiet.
+                        {/* AQU-2664 (board 74): M | S, the fader and ≈, in
+                            Logic's order. AQU-1682 still holds for M | S: only
+                            where there's something to play, or the lane is
+                            muted or soloed now (never strand either). */}
+                        {speaker && (laneHasSound(track) || !trackAudible(audibility, speaker) || trackSoloed(audibility, speaker)) ? (
+                          <MuteSoloPair
+                            testKey={speaker}
+                            // On a subtitle file the source row's M silences the
+                            // FILM's soundtrack, and its name says so.
+                            name={
                               speaker === "source" && subtitleFileWithFootage
                                 ? "the film's own sound"
-                                : track.kind === "audio"
+                                : track.kind === "audio" || track.kind === "target-audio"
                                   ? track.name
-                                  : render.speakerName,
-                            )
-                          : null}
+                                  : render.speakerName
+                            }
+                            muted={!trackAudible(audibility, speaker)}
+                            soloed={trackSoloed(audibility, speaker)}
+                            onMute={() => toggleAudibility(fileId, speaker)}
+                            onSolo={() => toggleSolo(fileId, speaker)}
+                            muteOnly={gutterCollapsed}
+                          />
+                        ) : null}
+                        {mixRow && !gutterCollapsed ? (
+                          <TrackFader
+                            testKey={track.id}
+                            name={track.name}
+                            db={track.volumeDb ?? 0}
+                            disabled={!onSetTrackVolume}
+                            // Live: the mixer's track node, on every slot the
+                            // track plays on, with no write.
+                            onLive={(db) => { for (const slot of slotsForTrack(track.id)) setTrackGainDb(slot, db) }}
+                            onCommit={(db) => {
+                              if ((track.volumeDb ?? 0) !== db) onSetTrackVolume?.(track.id, db)
+                            }}
+                          />
+                        ) : null}
+                        {mixRow && !gutterCollapsed && evenOut && evenOutStates?.has(track.id) ? (
+                          <EvenOutButton
+                            testKey={track.id}
+                            state={evenOutStates.get(track.id) ?? "none"}
+                            onClick={() => openEvenOutFrom(track.id)}
+                          />
+                        ) : null}
                         {/* AQU-646 stage 2: the same items right-click offers,
                             on a control you can SEE and TAB TO. Base UI's
                             context menus expose no keyboard path of their own
@@ -5955,12 +5977,12 @@ export function TimelineEditor({
                     <ContextMenu onOpenChange={(open) => { if (open) onTrackContextMenu(track.id) }}>
                       <ContextMenuTrigger render={label} />
                       {!menuEmpty && (
-                        <ContextMenuContent className="w-48">{trackMenu(track)}</ContextMenuContent>
+                        <ContextMenuContent className="w-[236px]">{trackMenu(track)}</ContextMenuContent>
                       )}
                     </ContextMenu>
                     {!menuEmpty && (
                       <DropdownMenu handle={menuHandleFor(track.id)}>
-                        <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuContent align="end" className="w-[236px]">
                           {trackMenu(track)}
                         </DropdownMenuContent>
                       </DropdownMenu>

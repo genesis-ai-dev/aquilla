@@ -11,6 +11,7 @@
 // somewhere honest for that default to live.
 
 import { RepetitionPropagationSection } from "@/components/settings/RepetitionPropagationSection"
+import { SourceTextFloorDefault } from "@/components/settings/SourceTextFloorDefault"
 import { MediaDefaultsSection } from "@/components/settings/MediaDefaultsSection"
 import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
 import { ValidationDefaultsSection } from "@/components/settings/ValidationDefaultsSection"
@@ -57,6 +58,9 @@ export function OrgSettingsProjectDefaults() {
           MAINTAINER gate, and projects may override each. */}
       <SettingsGroup label={t("settings.mediaDefaults.groupLabel")}>
         <MediaDefaultsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
+      </SettingsGroup>
+      <SettingsGroup label={t("settings.sourceText.groupLabel")}>
+        <SourceTextFloorDefault orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

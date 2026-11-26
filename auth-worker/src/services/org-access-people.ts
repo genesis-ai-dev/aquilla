@@ -8,6 +8,7 @@
 import type { AccessChainEntry, NamedGrant, ScopeRef } from "./access-payload"
 import { toEntry } from "./access-payload"
 import type { AccessTreeNode, PlaceExtras, PlaceGrant } from "./org-access-places"
+import type { LaneShape } from "./lane-shape"
 
 export interface OrgAccessPerson {
   userId: string
@@ -50,6 +51,8 @@ export function assembleOrgPeople(input: {
   org: ScopeRef
   tree: readonly AccessTreeNode[]
   extras: PlaceExtras
+  /** AQU-2322: which lane rows are lane grants, and whose project row is drawn as lanes. */
+  laneShape: LaneShape
 }): OrgAccessPerson[] {
   const people = new Map<string, OrgAccessPerson>()
 
@@ -72,14 +75,24 @@ export function assembleOrgPeople(input: {
     return person
   }
 
+  const places = indexPlaces(input.tree)
+  // AQU-2322: the lane grants this response may name.
+  const shownLaneGrants = input.extras.laneGrants.filter(
+    (row) => places.lanes.has(row.laneId) && places.projects.has(row.projectId) && input.laneShape.isLaneGrant(row),
+  )
+
   for (const grant of input.grants) {
-    addAccount(grant.userId, grant.userName, grant.email).grants.push(toEntry(grant))
+    const person = addAccount(grant.userId, grant.userName, grant.email)
+    // A project row drawn as lanes is listed as those lanes, so Reaches reads
+    // "1 lane" rather than "1 project". Lanes this viewer cannot see leave the
+    // plain project row, as before.
+    const asLanes = grant.scopeType === "project" && grant.source === "direct" &&
+      input.laneShape.narrowed(grant.userId, grant.scopeId) &&
+      shownLaneGrants.some((row) => row.userId === grant.userId && row.projectId === grant.scopeId)
+    if (!asLanes) person.grants.push(toEntry(grant))
   }
 
-  const places = indexPlaces(input.tree)
-
-  for (const row of input.extras.laneGrants) {
-    if (!places.lanes.has(row.laneId) || !places.projects.has(row.projectId)) continue
+  for (const row of shownLaneGrants) {
     const lane = input.extras.lanes.find((item) => item.id === row.laneId && item.projectId === row.projectId)
     const projectName = places.projects.get(row.projectId)
     if (!lane || !projectName) continue

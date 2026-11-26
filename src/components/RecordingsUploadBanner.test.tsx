@@ -1,6 +1,6 @@
 // The bulk upload's banner, read from the engine's store.
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { BulkUploadState } from "@/lib/audio/bulk-upload/engine"
 
 let state: BulkUploadState | null = null
@@ -60,5 +60,27 @@ describe("RecordingsUploadBanner: counts files, not failures", () => {
     state = { ...finished({ total: 10, done: 7, failed: [failure(3)] }), finished: false }
     render(<RecordingsUploadBanner />)
     expect(screen.getByTestId("recordings-banner-count").textContent).toBe("10/10")
+  })
+})
+
+// Re-check S2: a bulk upload doesn't even its takes by itself. When the track
+// it landed on is evened, its finish says how to bring them in line.
+describe("RecordingsUploadBanner: an evened track", () => {
+  it("offers to even out the track to match, and opens it", () => {
+    state = finished({})
+    const evenOutTrack = vi.fn()
+    render(<RecordingsUploadBanner evenOutTrack={evenOutTrack} />)
+    fireEvent.click(screen.getByRole("button", { name: "Even out the track to match" }))
+    expect(evenOutTrack).toHaveBeenCalledOnce()
+  })
+
+  it("offers nothing when nothing landed, or the track isn't evened", () => {
+    state = finished({ done: 0 })
+    const { unmount } = render(<RecordingsUploadBanner evenOutTrack={() => {}} />)
+    expect(screen.queryByRole("button", { name: "Even out the track to match" })).toBeNull()
+    unmount()
+    state = finished({})
+    render(<RecordingsUploadBanner />)
+    expect(screen.queryByRole("button", { name: "Even out the track to match" })).toBeNull()
   })
 })

@@ -6,6 +6,7 @@
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
+import { sourceTextPrepareRefusal } from '../events/source-text-authority'
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
@@ -623,6 +624,17 @@ export async function prepareChangesetCore(
         'validation_failed',
         `${structure.kind} must be the only command in a changeset`,
       )
+    }
+    // AQU-2647: SplitCell rewrites source text, so it takes the same floor as
+    // a source commit. Insert and delete keep their own static floor.
+    if (structure.kind === 'SplitCell') {
+      const sourceRefusal = await sourceTextPrepareRefusal(
+        db,
+        projectId,
+        { role: resolvedRole.level, userId: Number(cred.userId) },
+        ['source.cell.commit'],
+      )
+      if (sourceRefusal) return errorResponse('permission_denied', sourceRefusal)
     }
     return prepareStructure(db, cred, projectId, id, autonomyMode, structure, env)
   }

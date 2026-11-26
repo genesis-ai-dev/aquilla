@@ -121,6 +121,15 @@ export async function loadInheritedPolicyDefaults(
   for (const key of ["cellEditingFloor", "allowSelfValidationAudio", "validationRoleFloorAudio"] as const) {
     if (media[key] !== undefined) out[key] = media[key]
   }
+  // AQU-2647: who may edit source text. Not a media setting. An agent
+  // tightening a project that inherits Biblica's Project Lead must be judged
+  // against that tier, not against the built-in Maintainer default.
+  const sourceTextFloor = orgSettings && typeof orgSettings === "object"
+    ? (orgSettings as { sourceTextFloor?: unknown }).sourceTextFloor
+    : undefined
+  if (sourceTextFloor === "contributor" || sourceTextFloor === "project_lead" || sourceTextFloor === "maintainer") {
+    out.sourceTextFloor = sourceTextFloor
+  }
   return out
 }
 

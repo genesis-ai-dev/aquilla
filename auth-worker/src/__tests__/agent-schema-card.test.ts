@@ -29,11 +29,13 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("comment.create")
   })
 
-  it("CONTRIBUTOR (400): contains target.cell.commit but no source.* or assignment.*", () => {
+  it("CONTRIBUTOR (400): contains target.cell.commit and the static source-edit floor, but not source creates", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.CONTRIBUTOR })
     expect(prompt).toContain("target.cell.commit")
+    // AQU-2647: the static floor is Contributor. The project's sourceTextFloor
+    // (default Maintainer) is enforced when the event is written.
+    expect(prompt).toContain("source.cell.commit")
     expect(prompt).not.toContain("source.cell.create")
-    expect(prompt).not.toContain("source.cell.commit")
     expect(prompt).not.toContain("assignment.create")
     expect(prompt).not.toContain("file.delete")
   })
@@ -333,7 +335,7 @@ describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
     expect(AGENT_REQUIRED_ROLE["target.cell.commit"]).toBe(400)
     expect(AGENT_REQUIRED_ROLE["cell.validate"]).toBe(300)
     expect(AGENT_REQUIRED_ROLE["comment.create"]).toBe(200)
-    expect(AGENT_REQUIRED_ROLE["source.cell.commit"]).toBe(500)
+    expect(AGENT_REQUIRED_ROLE["source.cell.commit"]).toBe(400)
     expect(AGENT_REQUIRED_ROLE["assignment.create"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["file.delete"]).toBe(500)
     // AQU-1569: a reorder relayouts the sidebar for every member of the

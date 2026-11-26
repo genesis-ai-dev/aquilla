@@ -24,6 +24,7 @@ import {
 } from "@/lib/frontier/portfolio"
 import { displayLanes } from "@/components/org/project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 
 export interface EgressFileRow {
   fileId: string
@@ -43,6 +44,8 @@ export interface EgressFileRow {
   hasAudio: boolean
   /** The project's most recent edit (portfolio; null when unavailable). */
   lastEditAt: number | null
+  /** AQU-2664 re-check S5: the file's track deltas, for its tracks' volumes. */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 export interface EgressLaneOption {
@@ -193,6 +196,7 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
             lanes,
             hasAudio: (pf?.audioCells ?? 0) > 0,
             lastEditAt: pf?.lastEditAt ?? null,
+            ...(f.trackOverrides ? { trackOverrides: f.trackOverrides } : {}),
           })
         }
       }

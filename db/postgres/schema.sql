@@ -369,6 +369,10 @@ CREATE TABLE project_settings (
     -- milestones. Absent reads as maintainer (db/shared/milestone-floor.ts).
     -- The events route reads this column instead of the settings blob.
     wp_milestone_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'milestoneFloor') STORED,
+    -- AQU-2647 (0212): who may edit source text, hide a cell, and split a line
+    -- at quotes. Absent reads as maintainer (db/shared/source-text-floor.ts).
+    -- The events route reads this column instead of the settings blob.
+    wp_source_text_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'sourceTextFloor') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -1184,6 +1188,17 @@ CREATE TABLE cell_audio (
     gain_db            REAL,
     fade_in_ms         BIGINT,
     fade_out_ms        BIGINT,
+    -- AQU-2664 (0211): the recording's loudness (LUFS, -70 = silent) and true
+    -- peak (dBTP), measured once by cell.audio.measure (fill-only); and the
+    -- loudness it is evened out to, only by cell.audio.even (NULL = not evened;
+    -- its own stage before gain_db and the fades, which it never writes).
+    -- The correction is worked out from these; the recording never changes.
+    loudness_lufs      REAL,
+    true_peak_db       REAL,
+    -- the window of the recording the reading measured (to NULL = the end)
+    loudness_from_ms   BIGINT,
+    loudness_to_ms     BIGINT,
+    even_target_lufs   REAL,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

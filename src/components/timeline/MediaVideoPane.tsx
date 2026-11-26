@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
-import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, sourceHeard, useQueueAudibility } from "@/lib/audio/audibility"
 import { queueClockIsFileTime, stopQueue, useQueueForFile } from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
@@ -267,7 +267,8 @@ export function MediaVideoPane({
   const [soundMenuOpen, setSoundMenuOpen] = useState(false)
   /** Whether the film's soundtrack is on. Only bites in the standalone
    *  arrangement — a slaved picture is already silent. */
-  const sourceAudible = useQueueAudibility().source
+  // AQU-2664: a soloed track elsewhere quiets the film too.
+  const sourceAudible = sourceHeard(useQueueAudibility())
   // Put this file's stored preference into the play-queue store, which is where
   // every surface reads it from. Keyed on the file ALONE: re-seeding on
   // anything else would re-read the value on disk and undo a mute made this

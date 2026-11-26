@@ -158,6 +158,26 @@ describe('policyWriteDirection — per-key table', () => {
     })
   })
 
+  // AQU-2647: who may edit source text. Unset admits maintainers only, after
+  // the organization's tier. A project may be looser than its org.
+  describe('sourceTextFloor (contributor < project_lead < maintainer; unset ⇒ maintainer)', () => {
+    it('raising the rung tightens, including a no-op write of the default', () => {
+      expect(policyWriteDirection('sourceTextFloor', 'contributor', 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection('sourceTextFloor', 'project_lead', 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection('sourceTextFloor', undefined, 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection('sourceTextFloor', 'contributor', null).direction).toBe('tighten')
+    })
+    it('lowering the rung loosens, and an inherited Project Lead is the current value', () => {
+      expect(policyWriteDirection('sourceTextFloor', undefined, 'project_lead').direction).toBe('loosen')
+      expect(policyWriteDirection('sourceTextFloor', 'maintainer', 'contributor').direction).toBe('loosen')
+      expect(policyWriteDirection('sourceTextFloor', undefined, 'contributor', 'project_lead').direction).toBe('loosen')
+      expect(policyWriteDirection('sourceTextFloor', undefined, 'maintainer', 'project_lead').direction).toBe('tighten')
+    })
+    it('a tier outside the ladder is invalid', () => {
+      expect(policyWriteDirection('sourceTextFloor', 'maintainer', 'reviewer').direction).toBe('invalid')
+    })
+  })
+
   // AQU-2309: who may set milestones. Unset admits maintainers only.
   describe('milestoneFloor (project_lead < maintainer; unset ⇒ maintainer)', () => {
     it('project_lead → maintainer tightens; unset → maintainer and project_lead → null (clear) tighten', () => {

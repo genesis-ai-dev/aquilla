@@ -39,6 +39,7 @@ describe("inherited settings vocabulary (AQU-1075)", () => {
     // project; copying it would let an upstream maintainer decide who may
     // divide the next project's files.
     expect(INHERIT_NEVER_KEYS).toContain("milestoneFloor")
+    expect(INHERIT_NEVER_KEYS).toContain("sourceTextFloor")
     expect(copied.has("validationNamedUsers")).toBe(false)
     expect(copied.has("rules")).toBe(false)
   })

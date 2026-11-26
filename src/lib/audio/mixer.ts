@@ -19,6 +19,7 @@
 // and every element keeps `volume`, exactly as before.
 
 import { getOutputContext, peekOutputContext } from "./output-context"
+import { takeGainDb, type TakeGainFields } from "./take-gain"
 
 /** A take's level on its own clock: its volume, its fades, its kept part. */
 export interface ClipLevel {
@@ -33,17 +34,18 @@ export interface ClipLevel {
 
 export const FLAT_LEVEL: ClipLevel = { gainDb: 0, fadeInSec: 0, fadeOutSec: 0, startSec: 0, endSec: null }
 
-/** A take's stored level (CodexCellAttachment fields), or null when it has none. */
-export function clipLevelOf(att: {
-  gainDb?: number | null
+/** A take's stored level (CodexCellAttachment fields), or null when it has none.
+ *  AQU-2664: its volume is the take's gain (take-gain.ts) — its own volume plus
+ *  its evening-out correction — the same number every export applies. */
+export function clipLevelOf(att: (TakeGainFields & {
   fadeInMs?: number | null
   fadeOutMs?: number | null
   trimStartMs?: number | null
   trimEndMs?: number | null
   durationMs?: number | null
-} | null | undefined): ClipLevel | null {
+}) | null | undefined): ClipLevel | null {
   if (!att) return null
-  const gainDb = att.gainDb ?? 0
+  const gainDb = takeGainDb(att)
   const fadeInSec = (att.fadeInMs ?? 0) / 1000
   const fadeOutSec = (att.fadeOutMs ?? 0) / 1000
   if (!gainDb && !fadeInSec && !fadeOutSec) return null
@@ -579,6 +581,11 @@ export function setTrackGainDb(trackKey: string, db: number): void {
   trackDb.set(trackKey, db)
   const n = graph?.tracks.get(trackKey)
   if (n && graph) n.gain.setValueAtTime(Math.pow(10, db / 20), graph.ctx.currentTime)
+}
+
+/** A track's volume as the mixer holds it, dB (0 when never set). */
+export function trackGainDbOf(trackKey: string): number {
+  return trackDb.get(trackKey) ?? 0
 }
 
 /** Where a one-off player (the chip's play button) connects: the main volume

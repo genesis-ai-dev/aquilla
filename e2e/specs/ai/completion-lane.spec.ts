@@ -71,6 +71,12 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
   await expect(alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'))
     .toContainText("English default draft", { timeout: 15_000 })
 
+  // The lane that draft landed in. A seeded project's first target lane is
+  // tagged with its language, not "" (AQU-1594 / AQU-1595), so read the tag
+  // off the switcher instead of assuming one.
+  const firstLane = await ws.readActiveLane()
+  expect(firstLane).not.toBe("es")
+
   // Add a second target lane ("es") from Project Settings → Languages.
   mockLLM.setNextResponse("Hola lane draft")
   const settings = new ProjectSettings(alice)
@@ -109,8 +115,8 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
     `target-side GET /cells since reload:\n${JSON.stringify(cellReads, null, 2)}`)
     .toContainText("Hola lane draft", { timeout: 15_000 })
 
-  // The default lane's target keeps its own draft, untouched by the lane draft.
-  await ws.switchLane("")
+  // The first lane's target keeps its own draft, untouched by the lane draft.
+  await ws.switchLane(firstLane)
   await expect(targetCell).toContainText("English default draft", { timeout: 15_000 })
   await expect(targetCell).not.toContainText("Hola lane draft")
 })

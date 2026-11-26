@@ -1,6 +1,29 @@
 import { useMemo } from "react";
 import type { ProjectRecord, ProjectPermissions } from "@/lib/parsers/types";
 import { ROLE } from "@/lib/frontier/roles";
+import {
+  meetsSourceTextFloor,
+  sourceTextAuthorityLevel,
+  sourceTextFloorLevel,
+} from "../../db/shared/source-text-floor";
+
+/**
+ * Clearance compared with the source-text floor: the project role, or a
+ * higher grant on any language lane. Null when this is not a cloud project.
+ * Until a sync token arrives, only the project role is known.
+ */
+export function sourceTextAuthority(project: ProjectRecord | null | undefined): number | null {
+  const projectRole = project?.syncRole?.level
+  if (projectRole == null || !Number.isFinite(projectRole)) return null
+  return sourceTextAuthorityLevel({ projectRole, laneLevels: project?.laneGrantLevels })
+}
+
+/** True when this person meets the source-text floor. Live links and a DCS pin are separate. */
+export function mayEditSourceText(project: ProjectRecord | null | undefined): boolean {
+  const authority = sourceTextAuthority(project)
+  if (authority == null) return false
+  return meetsSourceTextFloor(authority, sourceTextFloorLevel(project?.sourceTextFloor))
+}
 
 export const defaultLocalPermissions: ProjectPermissions = {
   source: "local",
@@ -103,11 +126,11 @@ export function resolveEditorCapabilities(
   const level = project?.syncRole?.level ?? null
   const hasDcsUpstream = opts?.hasDcsUpstream === true
   const archivedLaneLabel = opts?.archivedLaneLabel ?? null
-  // Source editing: cloud project_lead+ (500), never on a live-linked
-  // downstream, never while pinned to a DCS upstream (see EditorCapabilityOpts).
+  // AQU-2647: the project's source-text floor (default Maintainer). A lane
+  // grant counts. Never on a live-linked downstream, never while pinned to a
+  // DCS upstream (see EditorCapabilityOpts).
   const canEditSource =
-    level !== null &&
-    level >= ROLE.PROJECT_LEAD &&
+    mayEditSourceText(project) &&
     project?.sourceLinkMode !== "live" &&
     !hasDcsUpstream
   const sourceReadOnlyReason = hasDcsUpstream ? DCS_SOURCE_LOCK_REASON : null

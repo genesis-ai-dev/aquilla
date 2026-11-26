@@ -54,6 +54,8 @@ export interface ChapterClip {
   trimEndMs?: number | null
   /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
   gainDb?: number | null
+  /** AQU-2664 (review M3): its track's volume, apart from the take's (−∞ = silence). */
+  trackGainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
   /**
@@ -86,7 +88,7 @@ export type ChapterClipPart =
   /** AQU-2432: the take after this starts this long before the take before
    *  it ends, mixed with it. */
   | { kind: "overlap"; ms: number }
-  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">)
+  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "trackGainDb" | "fadeInMs" | "fadeOutMs">)
 
 export interface GroupAudioByChapterOptions {
   /**
@@ -453,7 +455,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
    */
   const takeSamples = async (
     cell: CellData,
-    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">,
+    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "trackGainDb" | "fadeInMs" | "fadeOutMs">,
   ): Promise<{ samples: Float32Array; silenced: boolean } | null> => {
     // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
     // around it stay where the reader heard them. Written straight from the

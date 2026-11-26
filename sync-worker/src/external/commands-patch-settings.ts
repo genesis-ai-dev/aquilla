@@ -93,6 +93,10 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   // widens who can rename a division the whole team navigates by, so an
   // agent may only raise it.
   'milestoneFloor',
+  // AQU-2647: who may edit source text. Lowering it admits more people to
+  // change the text every translation is made from, so an agent may only
+  // raise it.
+  'sourceTextFloor',
   // AQU-1180: the switch that hides translator identity from agents. An agent
   // able to flip this could talk a human into approving a settings changeset
   // that turns its own team's names back on.

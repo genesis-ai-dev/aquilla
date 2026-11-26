@@ -42,6 +42,14 @@ export interface AudioAttachmentOut {
   gainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
+  /** AQU-2664 (0211): the recording's loudness (LUFS) and true peak (dBTP),
+   *  measured once; and the target it is evened out to. Absent = none. */
+  loudnessLufs?: number | null
+  truePeakDb?: number | null
+  /** The window of the recording the reading measured, ms. */
+  loudnessFromMs?: number | null
+  loudnessToMs?: number | null
+  evenTargetLufs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the
    *  server. Never sent by the server; UI renders a "saving…" hint from it so

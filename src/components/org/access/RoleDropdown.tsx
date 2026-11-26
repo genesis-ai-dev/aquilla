@@ -39,6 +39,8 @@ export interface RoleDropdownProps {
   person: { userId: string; displayName: string; username: string | null }
   roleLevel: number
   origin?: GrantOrigin
+  /** AQU-2322: a project row that is lane grants names them on the pill. */
+  lanes?: readonly string[]
   /** From rowEdit(): the roles to offer, or why this pill is not a dropdown. */
   edit: RowEdit
   /** After the write succeeded. */
@@ -46,7 +48,7 @@ export interface RoleDropdownProps {
 }
 
 
-export function RoleDropdown({ orgId, place, path, person, roleLevel, origin = { kind: "direct" }, edit, onChanged }: RoleDropdownProps) {
+export function RoleDropdown({ orgId, place, path, person, roleLevel, origin = { kind: "direct" }, lanes, edit, onChanged }: RoleDropdownProps) {
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -56,12 +58,11 @@ export function RoleDropdown({ orgId, place, path, person, roleLevel, origin = {
   const shown = override && override.from === roleLevel ? override.to : roleLevel
   const grant = rowGrant(place)
 
-  if (!edit.ok || !grant) {
-    const reason = edit.ok ? "lane_needs_staffing" : edit.reason
+  if (!edit.ok) {
     return (
-      <AppTooltip content={editDeniedText(t, reason, edit.ok ? null : edit.cap)}>
-        <span data-testid="role-static" data-reason={reason} className="inline-flex">
-          <RoleBadge roleLevel={roleLevel} origin={origin} />
+      <AppTooltip content={editDeniedText(t, edit.reason, edit.cap)}>
+        <span data-testid="role-static" data-reason={edit.reason} className="inline-flex">
+          <RoleBadge roleLevel={roleLevel} origin={origin} lanes={lanes} />
         </span>
       </AppTooltip>
     )

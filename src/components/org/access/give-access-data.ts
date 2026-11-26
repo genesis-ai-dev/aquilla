@@ -9,7 +9,9 @@
  *     team     POST /orgs/:id/groups/:g/members, then PATCH its team role
  *     project  POST /projects/:p/members with every current lane
  *              (or /projects/:p/invites for an email)
- *     lane     the same two routes, narrowed to that one lane
+ *     lane     PUT /orgs/:id/access/lane-grant (AQU-2322): one lane row,
+ *              added beside the lanes they hold; an email still goes to
+ *              /projects/:p/invites narrowed to that lane
  */
 import { addOrgMember, createOrgInvite } from "@/lib/frontier/orgs"
 import { addProjectMember } from "@/lib/frontier/members"
@@ -36,6 +38,8 @@ export interface GrantPreview {
   redundant: boolean
   guest: { before: boolean; after: boolean }
   includesFutureProjects: boolean
+  /** AQU-2322, lane grants: does some other lane stay closed to them, and is the read wall on. Absent before AQU-2322. */
+  lane?: { wallOn: boolean; siblingsClosed: boolean } | null
 }
 
 export type PreviewResult =
@@ -101,15 +105,39 @@ export async function submitGrant(
     await setTeamMemberRole(jwt, orgId, teamId, Number(person.userId), roleLevel)
     return
   }
+  if (type === "lane") {
+    // AQU-2322: by userId, through the additive lane route; the server checks the person is on this viewer's lenses.
+    await putLaneGrant(jwt, orgId, { laneId: id, userId: person.userId, roleLevel })
+    return
+  }
   const projectId = place.projectId ?? id
   const written = await addProjectMember(
     jwt,
     projectId,
     username,
     roleLevel,
-    type === "lane" ? { scopeLanes: [id] } : { allCurrentLanes: true },
+    { allCurrentLanes: true },
   )
   sameAccount(person, written, "project")
+}
+
+async function laneGrantCall(jwt: string, orgId: number, method: "PUT" | "DELETE", body: object): Promise<void> {
+  const res = await fetch(`${FRONTIER_API_URL}/api/v2/orgs/${orgId}/access/lane-grant`, {
+    method,
+    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new UserError(res.status, await res.text().catch(() => ""), "project")
+}
+
+/** AQU-2322: give, or change the role of, one lane grant. Their other lanes are left as they are. */
+export function putLaneGrant(jwt: string, orgId: number, grant: { laneId: string; userId: string; roleLevel: number }): Promise<void> {
+  return laneGrantCall(jwt, orgId, "PUT", grant)
+}
+
+/** AQU-2322: remove one lane grant (the last one of a lane-only member also ends their membership). */
+export function deleteLaneGrant(jwt: string, orgId: number, grant: { laneId: string; userId: string }): Promise<void> {
+  return laneGrantCall(jwt, orgId, "DELETE", grant)
 }
 
 /** The lookup key for a write by name. Missing means the payload cannot say who this is. */

@@ -44,6 +44,8 @@ const tree: AccessTreeNode[] = [{
       { userId: "2", displayName: "Member", roleLevel: 400, source: "direct" },
       { userId: "3", displayName: "Peer", roleLevel: 500, source: "direct" },
       { userId: "5", displayName: "Lead", roleLevel: 500, source: "direct" },
+      // AQU-2322: someone whose way into the project is a lane grant.
+      { userId: "7", displayName: "Lucía", roleLevel: 400, source: "direct", isGuest: true, lanes: [{ id: "fr", name: "French", roleLevel: 400 }] },
     ],
     inherited: [{ kind: "person", userId: "1", displayName: "Ruth", roleLevel: 700, from: org }],
     children: [{
@@ -60,6 +62,7 @@ const people: OrgAccessPerson[] = [
   { userId: "3", displayName: "Peer", username: "peer", isGuest: false, grants: [] },
   { userId: "5", displayName: "Lead", username: "lead", isGuest: false, grants: [] },
   { userId: "6", displayName: "LaneOnly", username: "laneonly", isGuest: false, grants: [] },
+  { userId: "7", displayName: "Lucía", username: "lucia", isGuest: true, grants: [] },
 ]
 
 /** The viewer is a Project lead on p1 and holds nothing at the org. */
@@ -137,10 +140,35 @@ describe("the role dropdown on a direct row", () => {
     expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ type: "error" }))
   })
 
-  it("leaves a language row to lane staffing: no dropdown, no ×", () => {
+  it("AQU-2322: a language row is a lane grant a Project lead edits: Contributor, Reviewer, Viewer, never Project lead", async () => {
     renderLens(LEAD, "lane:fr")
-    expect(within(row("LaneOnly")).getByTestId("role-static").getAttribute("data-reason")).toBe("lane_needs_staffing")
-    expect(within(row("LaneOnly")).getByTestId("remove-grant")).toBeDisabled()
+    await userEvent.click(within(row("LaneOnly")).getByTestId("role-dropdown"))
+    expect(offered()).toEqual(["Contributor", "Reviewer", "Viewer"])
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Contributor" }))
+    expect(changeGrantRole).toHaveBeenCalledWith("jwt", 1, { userId: "6", displayName: "LaneOnly", username: "laneonly" }, { type: "lane", id: "fr" }, 400)
+    expect(within(row("LaneOnly")).getByTestId("remove-grant")).toBeEnabled()
+  })
+
+  it("AQU-2322: on the project, a lane grant is one solid pill naming the lane, changed on the lane itself", () => {
+    renderLens(LEAD)
+    const lucia = row("Lucía")
+    expect(within(lucia).getByTestId("role-badge")).toHaveTextContent("Contributor · French")
+    expect(within(lucia).getByTestId("role-badge").getAttribute("data-origin")).toBe("direct")
+    expect(within(lucia).getByTestId("role-static").getAttribute("data-reason")).toBe("lanes")
+    expect(within(lucia).getByTestId("guest-badge")).toBeInTheDocument()
+    expect(screen.getAllByTestId("granted-here-row").filter((r) => r.textContent?.includes("Lucía"))).toHaveLength(1)
+  })
+})
+
+describe("AQU-2322: lanes in the tree", () => {
+  it("a lane sits under its project with the Layers icon and counts its lane-level grants", () => {
+    renderLens(LEAD)
+    const laneNode = screen.getByTestId("access-node-lane-fr")
+    const button = within(laneNode).getAllByRole("button")[0]
+    expect(button.querySelector('[data-place-icon="lane"]')).not.toBeNull()
+    // One lane grant (LaneOnly); the inherited project row is not a lane-level grant.
+    expect(button).toHaveTextContent(/French\s*1$/)
+    expect(screen.getByTestId("access-node-project-p1")).toContainElement(laneNode)
   })
 })
 

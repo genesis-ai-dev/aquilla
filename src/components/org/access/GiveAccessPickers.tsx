@@ -154,6 +154,8 @@ export function PlaceBlank({
   const q = query.trim().toLowerCase()
   const matches = q ? rows.filter((r) => r.path.some((s) => s.name.toLowerCase().includes(q))) : rows
   const theirs = person?.kind === "account" ? matches.filter((r) => personPlaceKeys.has(r.key)) : []
+  // AQU-2322: a project lists its lanes under it; picking one narrows the grant to that lane.
+  const hasLanes = (row: PlaceRow) => row.scope.type === "project" && rows.some((r) => r.scope.type === "lane" && r.projectId === row.scope.id)
   const item = (row: PlaceRow, group: string, indent: boolean, close: () => void) => {
     const block = placeBlock(row, person)
     const Icon = PLACE_ICON[row.scope.type]
@@ -172,6 +174,9 @@ export function PlaceBlank({
             <span className="truncate">{row.scope.name}</span>
           </span>
           {block && <span className="text-xs text-muted-foreground" data-testid="give-place-reason">{t(`org.access.give.denied.${block}`)}</span>}
+          {!block && indent && hasLanes(row) && (
+            <span className="text-xs text-muted-foreground" data-testid="give-place-narrow">{t("org.access.give.narrowToLane")}</span>
+          )}
         </span>
       </CommandItem>
     )

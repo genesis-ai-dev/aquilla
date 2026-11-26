@@ -30,6 +30,7 @@ import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cancelBuild, clearJob, setCandidate, startBuild, useBuildState, watchBuilds, type BuildCandidate } from "@/lib/tools/build-jobs"
 import { composeRequest, parseWhere, postInstallTarget, stepFor, type WhereChoice } from "@/lib/tools/builder-model"
+import { requestPanelOnArrival } from "@/lib/tools/panel-handoff"
 import { grantableAtInstall } from "@/lib/tools/permissions"
 import { installTool, listTools, removeTool, setToolGrant, type ToolSummary } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
@@ -108,8 +109,10 @@ export function ToolsPage() {
       clearJob(projectId)
       setRequest("")
       await refresh()
+      // The editor mounts its own extensions context, so the request to show
+      // the panel has to travel with the navigation (panel-handoff).
       if (where === "panel" && tool.manifest.mounts.includes("panel")) {
-        mounts?.openInPanel(tool.id)
+        requestPanelOnArrival(projectId, tool.id)
       }
       navigate(postInstallTarget(projectId, tool.id, tool.manifest, { where, fileId: returnFileId }))
     } catch (err) {

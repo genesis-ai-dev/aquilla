@@ -113,7 +113,11 @@ vi.mock("./org-access-data", async (orig) => ({
   fetchOrgAccess: () => Promise.resolve(payload),
 }))
 const applyProjectMove = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
-vi.mock("./move-project-data", () => ({ applyProjectMove: (...a: unknown[]) => applyProjectMove(...a) }))
+const withLaneSelections = vi.fn((_jwt: string, _org: number, _project: string, attachments: unknown[]) => Promise.resolve(attachments))
+vi.mock("./move-project-data", () => ({
+  applyProjectMove: (...a: unknown[]) => applyProjectMove(...a),
+  withLaneSelections: (jwt: string, org: number, project: string, attachments: unknown[]) => withLaneSelections(jwt, org, project, attachments),
+}))
 const submitGrant = vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve())
 vi.mock("./give-access-data", async (orig) => ({
   ...(await orig<typeof import("./give-access-data")>()),

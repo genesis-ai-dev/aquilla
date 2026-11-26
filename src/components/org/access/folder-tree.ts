@@ -115,6 +115,12 @@ export interface FolderAttachment {
   folderId: string
   folderName: string
   roleLevel: number
+  /**
+   * The languages the folder is limited to on this project; absent means every
+   * language. The tree payload does not carry it: `withLaneSelections` reads it
+   * from each folder before a move, so a move never widens a limited folder.
+   */
+  laneIds?: string[]
 }
 
 /**
@@ -135,15 +141,16 @@ export function projectAttachments(project: AccessTreeNode): FolderAttachment[] 
 
 /** The writes behind one move: attach first, then detach, so no one loses access in between. */
 export interface MovePlan {
-  attach: { folderId: string; roleLevel: number }[]
+  attach: { folderId: string; roleLevel: number; laneIds?: string[] }[]
   detach: string[]
 }
 
 /**
  * Moving a project works like moving a file: afterwards it is in exactly the
  * destination folder (`null`: straight in the organization, in no folder).
- * The folder it moves into gives its people the same role the folder it was
- * shown in gave them; a project that was in no folder gets `defaultRole`.
+ * The folder it moves into gives its people the same role, and the same
+ * language limit, as the folder it was shown in; a project that was in no
+ * folder gets `defaultRole` on every language.
  * Returns null when the move changes nothing.
  */
 export function planProjectMove(
@@ -154,10 +161,12 @@ export function planProjectMove(
 ): MovePlan | null {
   const detach = attachments.map((a) => a.folderId).filter((id) => id !== to)
   const alreadyThere = to != null && attachments.some((a) => a.folderId === to)
-  const roleLevel =
-    attachments.find((a) => a.folderId === shownIn)?.roleLevel ??
-    Math.max(defaultRole, ...attachments.map((a) => a.roleLevel))
-  const attach = to != null && !alreadyThere ? [{ folderId: to, roleLevel }] : []
+  const source =
+    attachments.find((a) => a.folderId === shownIn) ??
+    [...attachments].sort((a, b) => b.roleLevel - a.roleLevel)[0]
+  const roleLevel = source?.roleLevel ?? defaultRole
+  const lanes = source?.laneIds ? { laneIds: source.laneIds } : {}
+  const attach = to != null && !alreadyThere ? [{ folderId: to, roleLevel, ...lanes }] : []
   if (attach.length === 0 && detach.length === 0) return null
   return { attach, detach }
 }
@@ -167,7 +176,7 @@ export function undoMovePlan(attachments: readonly FolderAttachment[], plan: Mov
   return {
     attach: plan.detach.flatMap((id) => {
       const before = attachments.find((a) => a.folderId === id)
-      return before ? [{ folderId: id, roleLevel: before.roleLevel }] : []
+      return before ? [{ folderId: id, roleLevel: before.roleLevel, ...(before.laneIds ? { laneIds: before.laneIds } : {}) }] : []
     }),
     detach: plan.attach.map((a) => a.folderId),
   }

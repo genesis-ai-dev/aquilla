@@ -18,7 +18,7 @@ import type { ScopeRef } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 import { planProjectMove, projectAttachments, projectShownIn, undoMovePlan, type FolderNode } from "./folder-tree"
-import { applyProjectMove } from "./move-project-data"
+import { applyProjectMove, withLaneSelections } from "./move-project-data"
 
 /** The role a folder gives its people on a project that was in no folder (the server's attach default, Viewer). */
 const DEFAULT_FOLDER_ROLE = 100
@@ -52,13 +52,16 @@ export function useProjectMove({ orgId, enabled, onChanged }: { orgId: number; e
   const move = async (project: FolderNode, to: MoveDestination) => {
     const jwt = session?.jwt
     if (!jwt || !enabled || moving) return
-    const attachments = projectAttachments(project.node)
-    const plan = planProjectMove(attachments, projectShownIn(project), to.id, DEFAULT_FOLDER_ROLE)
-    if (!plan) return
+    if (!planProjectMove(projectAttachments(project.node), projectShownIn(project), to.id, DEFAULT_FOLDER_ROLE)) return
     const projectId = project.node.scope.id
     const name = project.node.scope.name
     setMoving(placeParam(project.node.scope))
+    // Declared here so the Undo below sees the language limits read for this move.
+    let attachments = projectAttachments(project.node)
     try {
+      attachments = await withLaneSelections(jwt, orgId, projectId, attachments)
+      const plan = planProjectMove(attachments, projectShownIn(project), to.id, DEFAULT_FOLDER_ROLE)
+      if (!plan) return
       await applyProjectMove(jwt, orgId, projectId, plan)
       toast.add({
         type: "success",

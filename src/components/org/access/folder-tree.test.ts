@@ -95,6 +95,17 @@ describe("moving a project between folders", () => {
     expect(planProjectMove([], null, null, 100)).toBeNull()
   })
 
+  it("keeps a folder's language limit: the destination gets it, and undo gives it back", () => {
+    // A folder limited to French must not become every language by moving:
+    // that would quietly hand its people the project's other languages.
+    const attachments = [{ folderId: "a", folderName: "Asia", roleLevel: 400, laneIds: ["fr"] }]
+    const plan = planProjectMove(attachments, "a", "c", 100)!
+    expect(plan.attach).toEqual([{ folderId: "c", roleLevel: 400, laneIds: ["fr"] }])
+    expect(undoMovePlan(attachments, plan).attach).toEqual([{ folderId: "a", roleLevel: 400, laneIds: ["fr"] }])
+    // A folder with every language stays that way (no laneIds sent).
+    expect(planProjectMove([{ folderId: "a", folderName: "Asia", roleLevel: 400 }], "a", "c", 100)!.attach[0]).not.toHaveProperty("laneIds")
+  })
+
   it("undoes a move with the roles the folders had before", () => {
     const attachments = [{ folderId: "a", folderName: "Asia", roleLevel: 400 }]
     const plan = planProjectMove(attachments, "a", "c", 100)!

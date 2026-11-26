@@ -394,14 +394,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // ...but a control that lives in a different group (AI) is
     // NOT rendered at the same time. This is the core "no more one long
     // scroll" assertion — every field used to be simultaneously in the DOM.
-    expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
+    expect(screen.queryByLabelText(/reference examples/i)).toBeNull()
     expect(screen.queryByRole("switch", { name: /allow self-validation/i })).toBeNull()
   })
 
   it("a `?section=` deep link renders directly into that pane", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
+    expect(screen.getByLabelText(/reference examples/i)).toBeTruthy()
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
@@ -443,7 +443,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
       expect(document.getElementById("section-languages")).toBeTruthy()
       // ...and only General's cards are — no card from another group tags along
       // the way the keyword search used to pull in unrelated matches.
-      expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
+      expect(screen.queryByLabelText(/reference examples/i)).toBeNull()
       // ...and the deep link scrolled to the requested target, not the top.
       expect(scrolled).toEqual([{ id: elementId, block }])
 
@@ -544,8 +544,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // system-prompt textarea exists anywhere in settings anymore.
     expect(screen.getByRole("link", { name: /^instructions/i })).toBeTruthy()
     expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
-    expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
-    expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
+    expect(screen.getByLabelText(/reference examples/i)).toBeTruthy()
+    expect(screen.getByLabelText(/preceding translated cells/i)).toBeTruthy()
     expect(screen.getByText(/^voice$/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /open terminology library/i })).toBeTruthy()
 

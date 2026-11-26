@@ -82,6 +82,11 @@ export interface ChangeRoleDialogProps extends RoleDialogBase {
   grantScope?: GrantScope
   /** Adding one person to a project: its Language lanes, for roles that need them. */
   targetLanes?: readonly TargetLaneOption[]
+  /**
+   * A team's grant on a project. Owner stays off the list: project ownership
+   * is a person's grant, or an organization role (AQU-2357).
+   */
+  teamGrant?: boolean
   onSave: (level: number, laneAccess?: MemberLaneAccess) => Promise<void>
   /** The line shown when saving fails. Defaults to the error's own message. */
   errorMessage?: (error: unknown) => string
@@ -176,6 +181,7 @@ function ChangeBody({
   details,
   name,
   currentLevel,
+  teamGrant,
   where,
   grantScope,
   targetLanes,
@@ -184,7 +190,7 @@ function ChangeBody({
   remove,
 }: ChangeRoleDialogProps) {
   const { t, locale } = useI18n()
-  const options = roleChoices(level, { callerLevel, purpose: "change" })
+  const options = roleChoices(level, { callerLevel, purpose: "change", teamGrant })
   const adding = currentLevel === null
   const [picked, setPicked] = useState<number | null>(
     currentLevel ?? (options.some((o) => o.level === ROLE.CONTRIBUTOR) ? ROLE.CONTRIBUTOR : options[0]?.level ?? null),

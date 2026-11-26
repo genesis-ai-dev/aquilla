@@ -94,7 +94,6 @@ export function resolveFromGrants(
       (best, g) => (best == null || g.roleLevel > best.roleLevel ? g : best),
       null,
     )
-  const creator = onProject.find((g) => g.source === "creator") ?? null
   const org =
     ctx.orgId == null
       ? null
@@ -114,7 +113,6 @@ export function resolveFromGrants(
     hasGroupGrant: bestTeam != null,
   })
   if (orgLevel != null && org) chain.push({ source: "org", level: orgLevel, grant: org })
-  if (creator) chain.push({ source: "creator", level: 700, grant: creator })
   if (ctx.isPlatformAdmin) chain.push({ source: "platform", level: 700, grant: null })
 
   if (chain.length === 0) return null

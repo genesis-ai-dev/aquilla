@@ -118,14 +118,24 @@ function makeMultipartBucket() {
   }
 }
 
+/** A project with no takes in it yet, for the rules that ask the database
+ *  whether any take has named a recording (AQU-2682). */
+const emptyProjectDb = () => ({
+  prepare: () => ({
+    bind: () => ({ first: async () => null, all: async () => ({ results: [] }), run: async () => ({}) }),
+  }),
+}) as unknown as AquillaDb
+
 type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeMultipartBucket>
   SYNC_SECRET_KEY?: string
+  AQUILLA_PG?: AquillaDb
 }
 
 const makeEnv = (): StubEnv => ({
   SNAPSHOTS: makeMultipartBucket(),
   SYNC_SECRET_KEY: SECRET,
+  AQUILLA_PG: emptyProjectDb(),
 })
 
 async function makeToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {

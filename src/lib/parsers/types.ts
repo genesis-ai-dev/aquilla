@@ -780,6 +780,11 @@ export interface ProjectRecord {
    * device-local grandfather is honoured with it.
    */
   autopilotEnabled?: boolean
+  /**
+   * Project-wide smart edits switch (ProjectWideSettings.smartEditsEnabled).
+   * Absent → on. Read through `isSmartEditsEnabled`.
+   */
+  smartEditsEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */

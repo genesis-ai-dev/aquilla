@@ -73,21 +73,13 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     // next-passage button findable only by someone who already knew.
     default: true,
   },
-  smartEdits: {
-    labelKey: "smartEdits.flagLabel",
-    descriptionKey: "smartEdits.flagDescription",
-    // Off until the replay eval (scripts/smart-edits-eval.ts) has been run on
-    // real project history and the display thresholds tuned from it. The tiers
-    // it gates are the edit memory (free) and a Jev check (fractions of a cent).
-    default: false,
-  },
   harmonizer: {
     labelKey: "harmonizer.flagLabel",
     descriptionKey: "harmonizer.flagDescription",
     // Off until checked against real passages: it asks Jev about every passage
     // where a quotation is left open, and its suggestions sit beside smart
     // edits in the editor (it rides the same passage request, so it also needs
-    // `smartEdits` on).
+    // smart edits on for the project — see `isSmartEditsEnabled`).
     default: false,
   },
   smartEditsLlm: {
@@ -138,6 +130,17 @@ export function isAutopilotVisible(
 ): boolean {
   if (project.autopilotEnabled === true) return true
   return isFlagEnabled(project, "contextualTranslation")
+}
+
+/**
+ * Smart edits are a PROJECT-WIDE setting, on unless a maintainer turned them
+ * off (`ProjectWideSettings.smartEditsEnabled`, stored with the project's other
+ * shared settings). They were a device-local flag in the registry above, which
+ * meant the suggestions a team had earned with its own corrections showed only
+ * to whoever found the switch, one browser at a time.
+ */
+export function isSmartEditsEnabled(project: Pick<ProjectRecord, "smartEditsEnabled">): boolean {
+  return project.smartEditsEnabled !== false
 }
 
 /**

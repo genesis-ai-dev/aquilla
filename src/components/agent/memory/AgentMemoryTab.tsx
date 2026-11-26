@@ -86,18 +86,33 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const [busyMemoryIds, setBusyMemoryIds] = useState<Set<string>>(new Set())
   const [supersedePrompt, setSupersedePrompt] = useState<SupersedePrompt | null>(null)
 
+  // Verdicts sent and not yet answered, by memory id. A list read while one is
+  // in flight still says "proposed" for that row; taking it as read put the
+  // row back in the Proposed queue until the verdict's own answer arrived.
+  const pendingVerdictsRef = useRef(new Map<string, AgentMemory["status"]>())
+  const withPendingVerdicts = useCallback(
+    (list: AgentMemory[]) =>
+      pendingVerdictsRef.current.size === 0
+        ? list
+        : list.map((m) => {
+            const status = pendingVerdictsRef.current.get(m.id)
+            return status ? { ...m, status } : m
+          }),
+    [],
+  )
+
   const load = useCallback(async () => {
     if (!jwt) return
     setState("loading")
     setError(null)
     try {
-      setMemories(await listAgentMemories(jwt, projectId))
+      setMemories(withPendingVerdicts(await listAgentMemories(jwt, projectId)))
       setState("loaded")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load agent memory.")
       setState("error")
     }
-  }, [jwt, projectId])
+  }, [jwt, projectId, withPendingVerdicts])
 
   useEffect(() => {
     void load()
@@ -114,13 +129,13 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   useEffect(() => {
     if (memoryProposedCount > prevMemoryProposedCount.current && jwt) {
       listAgentMemories(jwt, projectId)
-        .then(setMemories)
+        .then((list) => setMemories(withPendingVerdicts(list)))
         .catch(() => {
           // Best-effort refresh — the next full load() will retry.
         })
     }
     prevMemoryProposedCount.current = memoryProposedCount
-  }, [memoryProposedCount, jwt, projectId])
+  }, [memoryProposedCount, jwt, projectId, withPendingVerdicts])
 
   const proposed = useMemo(() => memories.filter((m) => m.status === "proposed"), [memories])
   const approved = useMemo(() => memories.filter((m) => m.status === "approved"), [memories])
@@ -145,14 +160,15 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
       // Optimistic flip; revert only this row (by id) on failure — races-F5:
       // an absolute-snapshot revert would clobber other rows that changed
       // (from a concurrent review) while this request was in flight.
-      setMemories((cur) =>
-        cur.map((m) => (m.id === memory.id ? { ...m, status: action === "approve" ? "approved" : "rejected" } : m)),
-      )
+      const verdict = action === "approve" ? "approved" : "rejected"
+      pendingVerdictsRef.current.set(memory.id, verdict)
+      setMemories((cur) => cur.map((m) => (m.id === memory.id ? { ...m, status: verdict } : m)))
       void withBusyMemory(memory.id, async () => {
         try {
           const updated = supersedeHumanEdited
             ? await reviewAgentMemory(jwt, projectId, memory.id, action, true)
             : await reviewAgentMemory(jwt, projectId, memory.id, action)
+          pendingVerdictsRef.current.delete(memory.id)
           setMemories((cur) => cur.map((m) => (m.id === updated.id ? updated : m)))
           // mem-M5: flip the matching memory.proposed chat notice, if any.
           agentSessionStore(projectId, username).markMemoryReviewed(updated.id)
@@ -161,6 +177,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           const briefProposalId = updated.provenance?.briefProposalId
           if (briefProposalId) agentSessionStore(projectId, username).markBriefReviewed(briefProposalId)
         } catch (err) {
+          pendingVerdictsRef.current.delete(memory.id)
           setMemories((cur) => cur.map((m) => (m.id === original.id ? original : m)))
           if (err instanceof SupersedesHumanEditedError) {
             setSupersedePrompt({ memory: original, path: err.path ?? original.path, existingId: err.existingId })

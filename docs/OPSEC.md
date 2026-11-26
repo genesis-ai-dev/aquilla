@@ -552,6 +552,62 @@
 > and the provider 404 is unfixed nine days on. Still reported, not fixed, for
 > 11-09's reasons; the two cross-project authorization attacks most relevant to
 > this series have not run on any commit since 11-07.
+>
+> `docs/OPSEC-REVIEW-2026-11-23.md` holds the **auth & session** Monday slot and
+> is the third pass located by the OPS-52 ledger. It found the ledger's own
+> ranking wrong: `knowledge.ts` was annotated "2 writes" but carries **six**,
+> across two routers with two floors resolved by two different resolvers — the
+> project router's upload/delete/reindex at `ROLE.PROJECT_LEAD` (500) and the
+> org router's at `ROLE.MAINTAINER` (600), both cleared by the platform
+> contribution's **700**. **OPS-58**: an un-elevated admin JWT could plant,
+> destroy and re-index knowledge-base documents on every project and every org
+> on the platform. A knowledge doc is *retrieved content*, not a setting — its
+> text is served back by `searchKnowledge` and fed to the style-rule extractor
+> that proposes a project's own drafting rules — and, uniquely among this
+> series' findings, **it copies itself across tenant boundaries**:
+> `propagateKnowledgeDocs` walks `listLiveDownstreams`, whose SQL has no org
+> predicate, and duplicates the row *and its R2 blob* into every receiving
+> downstream to a depth of 16. That is OPS-44's "escapes the session" category
+> a *sixth* time after the PAT, the integration link, the source link, the
+> termbase subscription and the lane grant, and the first where the artefact
+> makes copies of itself, so neither an elevation check at use time nor
+> deleting the original reaches them. The DELETE is irreversible and destroys
+> the R2 original, the tenant's only copy. All six writes now de-escalate
+> unless the step-up code has been redeemed; the reads stay open per AQU-2003,
+> though the pass **records a disagreement** about that, since
+> `/:docId/original` serves the tenant's uploaded file whole and resembles
+> document exfiltration more than operator support. **21 of 52** route modules
+> now decide. **OPS-59** came from running the fix's own test rather than from
+> reading code: seeding a realistic uploader made `propagateKnowledgeDocs` run
+> with a **username** where `project_settings.updated_by` is `BIGINT`, so every
+> propagation since the feature shipped has answered `22P02` and silently
+> dropped its `knowledgeDocCopies` bookkeeping — which means **an upstream
+> delete never reached the copies it had made in other orgs** (the delete arm
+> iterates exactly that map), and every propagation re-copied every doc as a
+> fresh row and a fresh R2 blob. Fixed by passing the numeric actor id and
+> coercing underneath it. Still open: the two propagation calls (route and
+> background indexer) race on load-then-write and can orphan a copy — traced
+> and reported, not patched, per the OPS-24 precedent; `_contextual-helpers.ts`
+> carries the same un-de-escalated `requireRole` shape and is the queue item
+> with real leverage; and the org knowledge **read** floor is written as the
+> literal `0`, a bound that can never bite. The pass also records **OPS-55
+> reversing**: the Adversarial Jev run on this change's own head reports
+> **1 no-evidence / 3 inconclusive / 14 passed**, against 11-16's **17 dark /
+> 1 passed**, and both cross-project authorization attacks
+> (`redteam.edit-other-project`, `redteam.viewer-wipe-file`) ran and passed
+> for the first time since 11-07 — positive adversarial evidence for OPS-58
+> itself. But the provider is **intermittent, not restored**, and this pass
+> nearly claimed otherwise: forty minutes later the next commit on the same
+> branch, a documentation-only one, came back **HARNESS UNAVAILABLE (canary
+> 2 of 2)** and took the `pr` check red — and the one after that went back to
+> **16 passed**. Three runs in 55 minutes on a branch whose only changes
+> between them were prose: 14 passed, dark, 16 passed. The provider is
+> **flapping**, not recovered and not down, so 11-09's and 11-16's order
+> stands unchanged — restore the provider, then
+> tighten — and "restored" must mean a run of runs. The pass also **narrows
+> OPS-55**: a *total* outage is caught correctly by the canary check, so the
+> `attacks.every(…)` flaw is about **partial** outages, where one returning
+> attack certifies the rest. Harder to notice, and still unhandled.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -586,6 +642,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. `GET /api/v2/orgs/:orgId/settings` redacts them below org MAINTAINER, and since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) that floor is no longer satisfied by bare platform-admin authority — an un-elevated operator received every tenant's keys in plaintext. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
+| D9 | **Knowledge-base documents** — uploaded style guides, translation guidelines, consultant notes, licensing material | Postgres `knowledge_docs` (metadata, `extracted_text`, section tree), R2 `aquilla-snapshots` (the original file) | A tenant's own reference material, uploaded whole. Two properties make it more than a file store: the text is *retrieved* — `searchKnowledge` and the style-rule extractor feed it back into the project's drafting guidance — and a project doc **replicates** down the live inheritance chain (`propagateKnowledgeDocs`), copying row and blob into projects that can belong to other orgs, to a depth of 16. Since OPS-58 (`docs/OPSEC-REVIEW-2026-11-23.md`) an un-elevated platform admin can no longer plant, destroy or re-index one: all six writes across the project and org routers had floors (500 / 600) that the platform contribution's 700 satisfied by definition, and the DELETE destroys the R2 original with no trash and no undo. The **reads stay open** to an un-elevated operator by the AQU-2003 rule, including `/:docId/original`, which serves the uploaded file whole — 11-23 flags that as the read surface least comfortable under that rule. Since OPS-59 a tenant's delete actually reaches the downstream copies; before it, the `knowledgeDocCopies` bookkeeping write had been failing on a type error since the feature shipped, so deleted documents persisted indefinitely in other orgs' projects. No `admin-audit` row is written on any of these paths. |
 
 ---
 

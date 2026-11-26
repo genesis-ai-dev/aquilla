@@ -274,3 +274,59 @@ describe("handleMergeSiblingRequest — donor authorization (pen test 2026-09-29
     expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(1)
   })
 })
+
+describe("handleMergeSiblingRequest — donor lane read wall (pen test 2026-11-26)", () => {
+  const SECRET = "test-secret"
+  async function post(body: Record<string, unknown>, wall = "1") {
+    const token = await makeTestToken(SECRET, { userId: 7, projectId: HOST, fileId: "__project__", role: 500 })
+    const req = new Request(`https://x.test/api/v1/projects/${HOST}/merge-sibling`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ donorProjectId: DONOR, lane: "fr", ...body }),
+    })
+    return handleMergeSiblingRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET, LANE_READ_WALL: wall })
+  }
+  async function seedLeadOnBoth(): Promise<string> {
+    await seedContent(t, ["c1"], ["d1"])
+    for (const p of [HOST, DONOR]) {
+      await t.pg.query(`INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, 7, 500)`, [p])
+    }
+    const lane = await t.pg.query<{ id: string }>(
+      `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target'`, [DONOR])
+    return lane.rows[0]!.id
+  }
+
+  it("refuses a walled donor lead a donor lane they were not granted, names no lane, folds nothing", async () => {
+    const donorLaneId = await seedLeadOnBoth()
+    const res = await post({ donorLaneId })
+    expect(res?.status).toBe(400)
+    const json = (await res!.json()) as { donorLanes: unknown[]; skipped?: unknown }
+    expect(json.donorLanes).toEqual([])
+    expect(JSON.stringify(json)).not.toContain("Donor d1")
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(0)
+  })
+
+  it("does not pick an ungranted lane by default either", async () => {
+    await seedLeadOnBoth()
+    const res = await post({})
+    expect(res?.status).toBe(400)
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(0)
+  })
+
+  it("folds a donor lane the lead holds a grant on", async () => {
+    const donorLaneId = await seedLeadOnBoth()
+    await t.pg.query(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ($1, 7, $2, 500)`,
+      [DONOR, donorLaneId],
+    )
+    const res = await post({ donorLaneId })
+    expect(res?.status).toBe(200)
+    expect((await cellsFor(t, HOST)).filter((c) => c.target_lang === "fr")).toHaveLength(1)
+  })
+
+  it("leaves the wall-off behaviour unchanged", async () => {
+    const donorLaneId = await seedLeadOnBoth()
+    const res = await post({ donorLaneId }, "")
+    expect(res?.status).toBe(200)
+  })
+})

@@ -9,7 +9,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronsUpDown, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -56,21 +56,6 @@ import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
-import { regenerateVoiceTake } from "./regenerate-voice"
-import { laneVoiceSettings } from "@/lib/audio/lane-voice-view"
-import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
-import { VoicePickerContent } from "@/components/voice/VoiceCombobox"
-import { getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
-import {
-  recorderVoiceChoice,
-  recorderVoiceOverride,
-  recorderVoicePicks,
-  rememberRecorderVoicePicks,
-  withRecorderVoicePick,
-  type RecorderVoicePicks,
-} from "@/lib/audio/recorder-voice"
-import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -174,26 +159,6 @@ interface Props {
     reference?: string | null
     castName?: string | null
     cameraState?: CameraState | null
-    /**
-     * AQU-646 stage 3f: how many subtitles are behind this line. ZERO is not
-     * the same as "no text" — an unlinked cue has nothing to say and needs
-     * pairing, while a linked one just needs translating, and the TTS button
-     * used to report both with the same string.
-     */
-    linkedCount?: number
-    /** Whose cast assignment picks the voice — the first linked subtitle, since
-     *  assignments are keyed by cell id and a cue has none of its own. */
-    voiceCellId?: string | null
-    /**
-     * AQU-646 stage 3g: how many heard lines share the busiest subtitle this
-     * cue performs. 1 for ~92% of lines.
-     *
-     * Above 1 the generated voice will speak the WHOLE subtitle onto this one
-     * cue — more than this line covers — and the others stay silent. The user
-     * is told before pressing, not after: once the clip exists the warning is
-     * late.
-     */
-    sharedWith?: number
   } | null
   /**
    * AQU-646 stage 4: the file whose linked picture this recording is against.
@@ -212,8 +177,7 @@ interface Props {
   /**
    * Media redesign slice 2: the line's language delivers audio and no text.
    * The performer reads the SOURCE (gap 8) — the cue's own words on a dubbing
-   * file — so the recorder never says "not translated", and there is no voice
-   * to generate from text the language will never have.
+   * file — so the recorder never says "not translated".
    */
   deliversAudioOnly?: boolean
   /**
@@ -232,7 +196,7 @@ interface Props {
 // same line — so a take that lands returns the panel to `idle` with every entry
 // point live, and the confirmation rides alongside as a note (`savedNote`)
 // instead of becoming a mode. The state it replaced disabled Record, hid
-// Generate and Upload, ignored Space, and had no transition out of itself: with
+// Upload, ignored Space, and had no transition out of itself: with
 // auto-advance switched off it was a genuine dead end, escapable only by
 // navigating to another line or closing the dialog.
 /** A stable identity per recorded blob, so the preview's trim state (and a
@@ -617,22 +581,6 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
-  /**
-   * AQU-2511: the voice Generate will speak in, named on the button before the
-   * credits are spent.
-   *
-   * Resolved through the SAME lane view the generate path itself uses
-   * (`laneVoiceSettings`, from the open lane's tag), and off the same subject —
-   * the linked subtitle's assignment on a cue file, this line's own otherwise.
-   * That is the point of reading it here rather than naming the project
-   * default: this button used to generate in one voice while the picker on the
-   * row had just assigned another.
-   */
-  const ttsVoiceName = useMemo(() => {
-    if (!activeCell) return null
-    const view = laneVoiceSettings(project.ttsSettings, project.lanes, laneTag)
-    return resolveCastVoice(view, readAloud?.voiceCellId ?? activeCell, activeCell.ttsSettings?.voiceId).name
-  }, [project.ttsSettings, project.lanes, laneTag, activeCell, readAloud?.voiceCellId])
   // Media redesign slice 2 (gap 8): an Audio language has no translation to
   // read, so the performer reads the source where the translation shows today
   // — the heard line's own words on a dubbing file.
@@ -642,26 +590,6 @@ export function AudioRecordingModal({
   const readAloudReference = deliversAudioOnly ? null : readAloud?.reference ?? null
   const readAloudCast = readAloud?.castName ?? null
   const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
-  /**
-   * AQU-646 stage 3f: TTS SPEAKS WHAT THE PERFORMER READS.
-   *
-   * It used to read `activeCell.translated` — the cue's own translation, which
-   * on a file with an audio-cue sibling is empty forever, because the words
-   * live on the subtitle cells the cue is linked to. So the button sat disabled
-   * over lines that were translated, saying "translate this line first"
-   * (Sam, 2026-08-25). Read-aloud had resolved this correctly all along, ten
-   * lines above; TTS simply never asked it.
-   *
-   * `readAloudText` already falls back to the cell's own translation when there
-   * is no cue arrangement, so every other file type is untouched.
-   */
-  const ttsText = readAloudText.trim()
-  /** A cue with no subtitle behind it — about ten an episode. There is nothing
-   *  to say, and it is a different problem from "not translated yet". */
-  const ttsUnlinked = readAloud?.linkedCount === 0
-  /** …and a subtitle performed by several heard lines: whatever is generated
-   *  here says the whole line, and the other heard lines get nothing from it. */
-  const ttsSharedWith = readAloud?.sharedWith ?? 1
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
   // rewraps and can need a smaller size. Width only: the box's height is what
   // the fit itself moves, and observing that would chase its own tail.
@@ -1215,7 +1143,7 @@ export function AudioRecordingModal({
   }, [recorder, startFlow])
 
   // Hand the line back exactly as it was before the take that just landed:
-  // Record armed, Generate and Upload beside it, the window bar showing the
+  // Record armed, Upload beside it, the window bar showing the
   // target again. The stopped blob has to go with it — leaving it in the
   // recorder would let the preview effect re-adopt it and drop the user back
   // into a review of a take they have already kept.
@@ -1231,152 +1159,6 @@ export function AudioRecordingModal({
       setSavedNote(null)
     }, 2500)
   }, [recorder])
-
-  // Round 8: durable TTS from the recording surface — the clear "regenerate"
-  // counterpart to re-recording. Uses the project engine + this cell's
-  // assigned voice; the result attaches to the generated-voice slot.
-  const [ttsBusy, setTtsBusy] = useState(false)
-  const [ttsDone, setTtsDone] = useState(false)
-  useEffect(() => {
-    setTtsDone(false)
-  }, [activeCellId])
-  /**
-   * AQU-646 stage 4c: the failure this surface has always caused and never
-   * shown (Sam, 2026-08-26).
-   *
-   * `generateCellVoice` already writes every failure into the shared per-cell
-   * status store — the same store, under the same key, that the table row's
-   * voice button reads. This modal simply never read it back: it checked the
-   * helper's boolean, and on `false` let the button fall silently to idle. So
-   * a generation that failed looked exactly like one that had never been
-   * pressed.
-   *
-   * THE STORE, NOT THE BOOLEAN, and that distinction is the whole correctness
-   * of this. `false` also means "you declined the model download", which sets
-   * an IDLE status on purpose — reddening the button for a choice the user
-   * just made would be a worse lie than saying nothing.
-   *
-   * ONE KEY FOR BOTH SURFACES. `activeCellId` is `primaryAudioHome(...)` and
-   * the row button is handed `resolveAudioHomes(...)[0]` — the same cell, so
-   * on a cue file a failure paints the recorder and the table row together
-   * rather than each keeping its own half of the story.
-   *
-   * A failure left over from before this modal opened still shows, and that is
-   * deliberate: the store is only ever overwritten by the next attempt, so an
-   * error sitting in it means the last thing that happened to this line's
-   * voice was a failure and nothing has fixed it since. Pressing the button
-   * clears it — the retry writes `loading` first.
-   */
-  const ttsStatus = useTtsStatus(activeCellId ? ttsStatusKey(activeCellId) : undefined)
-  const ttsFailure = ttsStatus.kind === "error" ? categorizeAiError(ttsStatus.message) : null
-  /**
-   * The heading and the advice, read as one sentence.
-   *
-   * SOME BODIES ALREADY OPEN WITH THEIR OWN HEADING — the daily-quota one is
-   * literally "Daily AI limit reached — resets at midnight UTC…" under the
-   * title "Daily AI limit reached" — so joining them unconditionally produces
-   * "Daily AI limit reached — Daily AI limit reached — resets at midnight".
-   * An equality guard does not catch that; the body merely STARTS with the
-   * title. Where it does, the body is already the whole sentence.
-   */
-  const ttsFailureLine = !ttsFailure
-    ? null
-    : ttsFailure.body.toLowerCase().startsWith(ttsFailure.title.toLowerCase())
-      ? ttsFailure.body
-      : `${ttsFailure.title} — ${ttsFailure.body}`
-  // Another surface generating for THIS cell counts as busy: two synths for one
-  // cell would fight over one status slot, and the row button takes the same
-  // position. Our own press is `ttsBusy`, which leads so that a retry reads as
-  // in-flight even while the previous failure is still in the store.
-  const ttsWorking = ttsBusy || ttsStatus.kind === "loading" || ttsStatus.kind === "synthesizing"
-  // Only the local engines report bytes — Inworld (the default) sends no
-  // progress at all and Gemini sends one event — so this appears exactly where
-  // the wait is long enough to look like a hang.
-  const ttsProgressPct =
-    ttsStatus.kind === "loading" && ttsStatus.total > 0
-      ? Math.round((ttsStatus.loaded / ttsStatus.total) * 100)
-      : null
-  /**
-   * Whether the button WEARS the failure — one flag, read by the glyph, the
-   * tone, the label and the line beneath, so those four can never disagree.
-   *
-   * They did: with each reading `ttsFailure` for itself, pressing retry over a
-   * stale error span a spinner underneath the word "failed", announcing the
-   * outcome of an attempt that was still running. An in-flight run always
-   * outranks the error it is trying to replace.
-   */
-  const ttsShowFailure = ttsFailure != null && !ttsWorking
-  /**
-   * AQU-2510: WHICH VOICE Generate speaks in — the pick, and what it defaults
-   * to. The resolution order and why only some answers are passed on as an
-   * override live in `@/lib/audio/recorder-voice`.
-   *
-   * The picks are React state so the panel re-renders on a pick, and written
-   * through to the session memory so reopening the modal on the next line
-   * still knows what was picked on the last one. The modal stays mounted while
-   * the active line changes, so that memory only earns its keep across a
-   * close/reopen — which is most of a session.
-   */
-  const [voicePicks, setVoicePicks] = useState<RecorderVoicePicks>(() => recorderVoicePicks(project.id))
-  const [voicePickerOpen, setVoicePickerOpen] = useState(false)
-  // Plain reads and a plain handler: these are pure and cheap, and the React
-  // Compiler memoizes them for us. Hand-written `useMemo`/`useCallback` here
-  // only made it bail ("existing memoization could not be preserved").
-  const voiceLibrary = getVoiceLibrary(project.ttsSettings)
-  // The line whose cast assignment applies: on a cue file the linked subtitle,
-  // exactly as `generateCellVoice` resolves it (a cue carries none of its own).
-  const voiceSubject = readAloud?.voiceCellId ?? activeCell
-  const voiceChoice = voiceSubject
-    ? recorderVoiceChoice({
-        settings: project.ttsSettings,
-        subject: voiceSubject,
-        cellVoiceId: activeCell?.ttsSettings?.voiceId,
-        picks: voicePicks,
-      })
-    : null
-  // One voice in the library is no choice at all — the control would only
-  // restate the project default, so it collapses (the ticket's last criterion).
-  const showVoicePicker = !deliversAudioOnly && voiceChoice != null && voiceLibrary.length > 1
-  const pickVoice = (voiceId: string) => {
-    setVoicePickerOpen(false)
-    if (!voiceSubject) return
-    setVoicePicks((prev) => {
-      const next = withRecorderVoicePick(prev, voiceSubject, voiceId)
-      rememberRecorderVoicePicks(project.id, next)
-      return next
-    })
-  }
-  const voiceOverride = recorderVoiceOverride(voiceChoice)
-  // AQU-2511 × AQU-2510: the button names the voice the press will REALLY use.
-  // A session pick (or the carried one) is handed to the generator as an
-  // override, so it outranks the lane's cast answer here exactly as it does
-  // there — otherwise the button would name one voice and generate another.
-  const generateVoiceName = voiceOverride && voiceChoice ? voiceChoice.voice.name : ttsVoiceName
-  const generateTts = useCallback(async () => {
-    if (!online) return // the disabled button + tooltip carry the message
-    if (!activeCell || !session || ttsBusy) return
-    setTtsBusy(true)
-    setTtsDone(false)
-    try {
-      // AQU-1767: shared with the timeline take's "Regenerate voice", so both
-      // name the new take and make it the one that sounds the same way.
-      const ok = await regenerateVoiceTake({
-        project, cell: activeCell, entry: audioEntry, session, username,
-        surface: "recorder",
-        targetSlot,
-        laneTag,
-        text: ttsText,
-        voiceCellId: readAloud?.voiceCellId ?? undefined,
-        // AQU-2510: only a pick overrides; a cast or default answer is left for
-        // `generateCellVoice` to resolve, so a session that never opens the
-        // picker generates through exactly the path it always did.
-        ...(voiceOverride ? { voiceId: voiceOverride } : {}),
-      })
-      if (ok) setTtsDone(true)
-    } finally {
-      setTtsBusy(false)
-    }
-  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId, voiceOverride])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -2375,39 +2157,6 @@ export function AudioRecordingModal({
                 {readAloudReference}
               </p>
             )}
-            {/* AQU-646: what a GENERATED voice just did here.
-                
-                Right beside the transcript above, which appears on exactly this
-                condition and for the neighbouring reason — that one tells the
-                performer which part of the line is theirs; this one says a
-                machine voice makes no such distinction.
-                
-                AFTER THE PRESS, NOT BEFORE (Sam, 2026-08-27), which reverses
-                the original call that it should warn first. The reason the
-                first version was wrong: it fires on "this subtitle is shared",
-                NOT on "you are about to generate" — so a performer doing mic
-                takes got a permanent paragraph about text-to-speech, on roughly
-                one line in twelve, for a button they may never press.
-                
-                Moving it costs less than it looks: generating is cheap and
-                undoable, so this never guarded against loss. It corrects a
-                mental model, and afterwards it does that better — before, it is
-                an abstract caveat; after, it is a to-do that names exactly what
-                is still silent.
-                
-                `ttsDone` is precisely the right signal and already existed: set
-                only when a generation SUCCEEDED (a failure leaves its own red
-                message and must not be told the others are silent, because
-                nothing was voiced), and cleared when the active line changes,
-                which is the "until you leave the line" rule. */}
-            {ttsSharedWith > 1 && ttsDone && (
-              <p
-                data-testid="rec-tts-shared-notice"
-                className="mt-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
-              >
-                {t("audio.recordingModal.ttsSharedNotice", { count: ttsSharedWith })}
-              </p>
-            )}
           </div>
 
           {/* With the drawer resting closed the instruments sit at the BOTTOM
@@ -2731,123 +2480,7 @@ export function AudioRecordingModal({
                 place. */}
             {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
-              // AQU-646 stage 4c: the row and the reason beneath it are one
-              // group, so the parent's `space-y-3` separates the GROUP from the
-              // anchor above while the explanation stays tucked under the
-              // button it belongs to.
-              <div className="space-y-1.5">
-              {/* AQU-2510: WHO SPEAKS, above the button that spends the
-                  credits. On a dubbing project the cloned voice IS the point,
-                  and this panel used to generate in the project default with
-                  no way to say otherwise and no mention of which voice ran.
-
-                  It sits above the row rather than inside it: Generate and
-                  Upload already share that row at half a panel each, and a
-                  third control there would crop every voice name to an
-                  initial. Full width here, the name reads in full.
-
-                  The note after the name is the DEFAULT, said out loud — the
-                  line's own cast voice, or the project's. A pick replaces it
-                  with nothing, because a pick needs no explaining. */}
-              {showVoicePicker && voiceChoice && (
-                <Popover open={voicePickerOpen} onOpenChange={setVoicePickerOpen}>
-                  <PopoverTrigger
-                    render={
-                      <button
-                        type="button"
-                        data-testid="rec-generate-voice"
-                        data-voice-source={voiceChoice.source}
-                        aria-label={t("audio.recordingModal.voicePickAriaLabel", { voice: voiceChoice.voice.name })}
-                        className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      />
-                    }
-                  >
-                    <VoiceAvatar voice={voiceChoice.voice} size={16} />
-                    <span data-testid="rec-generate-voice-name" className="min-w-0 truncate font-medium text-foreground/80">
-                      {voiceChoice.voice.name}
-                    </span>
-                    {(voiceChoice.source === "cast" || voiceChoice.source === "default") && (
-                      <span data-testid="rec-generate-voice-note" className="min-w-0 truncate text-muted-foreground/70">
-                        {t(voiceChoice.source === "cast"
-                          ? "audio.recordingModal.voicePickCastNote"
-                          : "audio.recordingModal.voicePickDefaultNote")}
-                      </span>
-                    )}
-                    <ChevronsUpDown className="ms-auto h-3 w-3 shrink-0 opacity-60" />
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-60 p-2">
-                    <VoicePickerContent
-                      voices={voiceLibrary}
-                      activeId={voiceChoice.voice.id}
-                      showLanguageBadge
-                      onPick={pickVoice}
-                    />
-                  </PopoverContent>
-                </Popover>
-              )}
               <div className="flex gap-2">
-                {!deliversAudioOnly && (
-                // Only why it is greyed out, on a click (AQU-2260): enabled, its
-                // words name it. The verbatim failure text is behind the (i) at
-                // the end of the reason line below.
-                <AppTooltip
-                  content={
-                    !online
-                      ? OFFLINE_MESSAGE
-                      : ttsUnlinked
-                        ? t("audio.recordingModal.ttsNoLinkedLine")
-                        : !ttsText
-                          ? t("audio.recordingModal.ttsNeedsTranslation")
-                          : null
-                  }
-                  disabledTriggerClassName="min-w-0 flex-1"
-                >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      data-testid="rec-generate-tts"
-                      // A FAILURE NEVER DISABLES THIS. Pressing it again IS the
-                      // retry, and the retry is what clears the state — the run
-                      // writes `loading` before it does anything else.
-                      disabled={!online || !ttsText || ttsWorking}
-                      onClick={() => void generateTts()}
-                      className={cn(
-                        "h-9 w-full min-w-0 flex-1 text-xs font-normal",
-                        // No `outline`+`destructive` variant exists, so the tone
-                        // is overridden here; `cn` is tailwind-merge, so these
-                        // win over the resting pair rather than fighting it.
-                        ttsShowFailure
-                          ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
-                          : "bg-muted/30 text-muted-foreground",
-                      )}
-                    >
-                      {ttsWorking ? (
-                        <Spinner className="mr-1.5 size-3.5" />
-                      ) : ttsShowFailure ? (
-                        <AlertCircle className="mr-1.5 h-3.5 w-3.5" />
-                      ) : (
-                        <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-                      )}
-                      {/* TWO FIXED WORDS ON FAILURE (Sam, 2026-08-26), never the
-                          reason: this control is about half the panel wide, and a
-                          reason cropped to "Gemini API key requ…" is worse than
-                          one said in full on the line below. */}
-                      <span className="truncate">
-                        {ttsWorking
-                          ? ttsProgressPct != null
-                            ? t("audio.recordingModal.ttsDownloadingPct", { percent: ttsProgressPct })
-                            : ttsStatus.kind === "synthesizing"
-                              ? t("common.synthesizing")
-                              : t("audio.recordingModal.generateButton")
-                          : ttsShowFailure
-                            ? t("audio.recordingModal.ttsFailedButton")
-                            : generateVoiceName
-                              ? t("audio.recordingModal.generateWithVoice", { voice: generateVoiceName })
-                              : t("audio.recordingModal.generateButton")}
-                      </span>
-                    </Button>
-                </AppTooltip>
-                )}
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -2874,38 +2507,6 @@ export function AudioRecordingModal({
                     <span className="truncate">{t("audio.recordingModal.uploadButton")}</span>
                   </Button>
                 </AppTooltip>
-              </div>
-              {/* THE REASON, WRITTEN OUT (Sam, 2026-08-26). Full panel width,
-                  wrapping, no hover required — the button says that it failed
-                  and this says what to do about it.
-
-                  `title` is the categorizer's translated heading and `body` its
-                  plain-language advice; the `body !== title` guard is for the
-                  branches that have no better sentence than the heading itself,
-                  where repeating it would read as a stutter. The verbatim
-                  server text is NOT here — it is in the button's tooltip, since
-                  `voice/tts failed (503): TTS not configured` is for support,
-                  not for the person trying to record a line.
-
-                  Same `text-xs font-medium text-destructive` as the recorder's
-                  own `rec-error-message` and `rec-save-error` a few elements
-                  up, so the panel has one voice for "this went wrong". */}
-              {ttsShowFailure && ttsFailureLine && (
-                <p data-testid="rec-tts-error" className="text-xs font-medium text-destructive">
-                  {ttsFailureLine}
-                  {/* The verbatim server text, for whoever they end up
-                      sending it to — on a click, never a hover (AQU-2260). */}
-                  {ttsFailure && (
-                    <InfoNote
-                      label={t("common.aboutAria", { name: t("audio.recordingModal.ttsFailedButton") })}
-                      className="ms-1 align-middle text-destructive/70 hover:text-destructive"
-                      iconClassName="h-3 w-3"
-                    >
-                      <span className="break-words">{t("audio.recordingModal.ttsFailedTooltip", { error: ttsFailure.raw })}</span>
-                    </InfoNote>
-                  )}
-                </p>
-              )}
               </div>
             )}
           </div>

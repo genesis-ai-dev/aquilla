@@ -641,7 +641,7 @@ describe("ProjectOverview load states", () => {
 
     renderOverview()
 
-    expect(await screen.findByText(/log in to see your workspace/i)).toBeInTheDocument()
+    expect(await screen.findByText(/sign in to see your workspace/i)).toBeInTheDocument()
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
 
     const signIn = screen.getByRole("link", { name: /^log in$/i })

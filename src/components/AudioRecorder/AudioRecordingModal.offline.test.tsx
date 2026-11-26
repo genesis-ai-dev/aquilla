@@ -123,11 +123,11 @@ describe("AudioRecordingModal — offline gate", () => {
     uploadSpy.mockClear()
   })
 
-  it("offline: Start and Generate TTS are disabled", () => {
+  it("offline: Start and Upload are disabled", () => {
     onlineState.value = false
     renderModal()
     expect(screen.getByTestId("rec-start")).toBeDisabled()
-    expect(screen.getByTestId("rec-generate-tts")).toBeDisabled()
+    expect(screen.getByTestId("rec-upload")).toBeDisabled()
   })
 
   it("offline: Space shows the offline message and never starts the record flow", () => {
@@ -248,11 +248,10 @@ describe("AudioRecordingModal — reasons open on click, text buttons have no ho
     expect(screen.queryByRole("tooltip")).toBeNull()
   }
 
-  it("offline: Record, Generate and Upload say they are offline on a click", async () => {
+  it("offline: Record and Upload say they are offline on a click", async () => {
     onlineState.value = false
     renderWithTooltips(modal())
     await expectDisabledNote(screen.getByTestId("rec-start"), OFFLINE_RE)
-    await expectDisabledNote(screen.getByTestId("rec-generate-tts"), OFFLINE_RE)
     await expectDisabledNote(screen.getByTestId("rec-upload"), OFFLINE_RE)
   })
 
@@ -266,10 +265,9 @@ describe("AudioRecordingModal — reasons open on click, text buttons have no ho
     await expectDisabledNote(screen.getByTestId("rec-save"), OFFLINE_RE)
   })
 
-  it("online: Record, Generate, Upload and the format switch show nothing on hover", async () => {
+  it("online: Record, Upload and the format switch show nothing on hover", async () => {
     renderWithTooltips(modal())
     await expectNoHover(screen.getByTestId("rec-start"))
-    await expectNoHover(screen.getByTestId("rec-generate-tts"))
     await expectNoHover(screen.getByTestId("rec-upload"))
     await expectNoHover(screen.getByTestId("rec-format"))
   })

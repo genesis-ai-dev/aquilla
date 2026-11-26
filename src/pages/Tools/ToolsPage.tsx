@@ -29,7 +29,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cancelBuild, clearJob, setCandidate, startBuild, useBuildState, watchBuilds, type BuildCandidate } from "@/lib/tools/build-jobs"
-import { composeRequest, parseWhere, stepFor, type WhereChoice } from "@/lib/tools/builder-model"
+import { composeRequest, parseWhere, postInstallTarget, stepFor, type WhereChoice } from "@/lib/tools/builder-model"
 import { grantableAtInstall } from "@/lib/tools/permissions"
 import { installTool, listTools, removeTool, setToolGrant, type ToolSummary } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
@@ -50,7 +50,14 @@ export function ToolsPage() {
   const [tools, setTools] = useState<ToolSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [request, setRequest] = useState(() => job?.words ?? "")
-  const [where, setWhere] = useState<WhereChoice>(() => parseWhere(params.get("where")))
+  const urlWhere = parseWhere(params.get("where"))
+  const returnFileId = params.get("fileId")
+  const [prevUrlWhere, setPrevUrlWhere] = useState<WhereChoice>(urlWhere)
+  const [where, setWhere] = useState<WhereChoice>(urlWhere)
+  if (prevUrlWhere !== urlWhere) {
+    setPrevUrlWhere(urlWhere)
+    setWhere(urlWhere)
+  }
   const [adding, setAdding] = useState(false)
   const [sheet, setSheet] = useState<Sheet>(null)
 
@@ -101,7 +108,10 @@ export function ToolsPage() {
       clearJob(projectId)
       setRequest("")
       await refresh()
-      navigate(tool.manifest.mounts.includes("editor") ? `/project/${projectId}/editor` : `/project/${projectId}/extensions/${tool.id}`)
+      if (where === "panel" && tool.manifest.mounts.includes("panel")) {
+        mounts?.openInPanel(tool.id)
+      }
+      navigate(postInstallTarget(projectId, tool.id, tool.manifest, { where, fileId: returnFileId }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -139,7 +149,7 @@ export function ToolsPage() {
   return (
     <div className="solid-primary mx-auto flex w-full max-w-3xl flex-col gap-12 px-4 pt-5 pb-16 sm:px-6">
       <header className="flex items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label={t("extensions.backToEditor")} render={<Link to={`/project/${projectId}/editor`} />}>
+        <Button variant="ghost" size="icon-sm" aria-label={t("extensions.backToEditor")} render={<Link to={returnFileId ? `/project/${projectId}/editor/file/${returnFileId}` : `/project/${projectId}/editor`} />}>
           <ArrowLeft className="size-4" aria-hidden />
         </Button>
         <h1 className="flex min-w-0 items-baseline gap-2 text-sm font-semibold">

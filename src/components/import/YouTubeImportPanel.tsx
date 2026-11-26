@@ -17,9 +17,14 @@ import { prepareYouTubeCaptionImport,
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { detectFileType, isMediaFileType, type FileReference } from "@/lib/parsers/types"
 
-export function YouTubeImportPanel({ ctx, onImported }: {
+export function YouTubeImportPanel({ ctx, onImported, mediaDisabledReason = null }: {
   ctx: ImportContext
   onImported: (refs: FileReference[]) => void | Promise<void>
+  /** AQU-2682: set when the original audio or video may not be imported: it
+   *  is stored as the file's source audio, which needs access to every
+   *  language (the reason is shown and the media is refused before it is
+   *  read or uploaded), or the answer is not in yet. Same as Upload files. */
+  mediaDisabledReason?: string | null
 }) {
   const t = useT()
   const id = useId()
@@ -70,6 +75,7 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     reset()
     try {
       if (source === "media") {
+        if (mediaDisabledReason) throw new Error(mediaDisabledReason)
         if (!media) throw new Error("Choose your original audio or video.")
         const fileType = detectFileType(media.name)
         if (!fileType || !isMediaFileType(fileType)) {
@@ -151,6 +157,12 @@ export function YouTubeImportPanel({ ctx, onImported }: {
       durationMs={mediaReview.durationMs} busy={busy}
       confirmLabel={t("importExport.youtube.importMedia")}
       onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => {
+        // The answer may have changed while the preview was open.
+        if (mediaDisabledReason) {
+          setMediaReview(null)
+          setError(mediaDisabledReason)
+          return
+        }
         const active = controller.current
         const mediaCommit = createMediaFileCommit(mediaReview.file, mediaReview.fileType, {
           ...ctx, mediaPictureUrl: mediaReview.videoUrl, mediaTextSource,
@@ -207,6 +219,9 @@ export function YouTubeImportPanel({ ctx, onImported }: {
             reset()
           }} />
         <p className="text-sm text-muted-foreground">{t("importExport.youtube.mediaHint")}</p>
+        {mediaDisabledReason && <p data-testid="youtube-media-disabled" className="text-sm text-muted-foreground">
+          {mediaDisabledReason}
+        </p>}
       </div>}
       <Button onClick={() => void read()} disabled={busy || !url.trim()
         || (source === "captions" ? !file : source === "media" ? !media : !name.trim())}>

@@ -18,7 +18,7 @@ import { toast } from "@/components/ui/toast"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { downloadBlob } from "@/lib/export/export-service"
-import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
+import { TOOL_SANDBOX, buildToolShellSrcdoc, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolDeliveredFile } from "@/lib/tools/host-handlers-files"
 import type { HeadlessCallbacks } from "@/lib/tools/live-data-files"
@@ -61,7 +61,10 @@ export interface HeadlessJob {
   onProgress?: HeadlessJobHooks["onProgress"]
   onPrompt?: HeadlessJobHooks["onPrompt"]
   actionId?: string
-  trigger?: "click" | "open"
+  trigger?: "click" | "open" | "cell" | "selection"
+  /** apiRev 8: cell / source selection context when triggered from EditorTable. */
+  cell?: { fileId: string; cellId: string; ref?: string | null }
+  selection?: { fileId: string; cellId: string; side: "source" | "target"; text: string }
   exportId?: string
   fileIds?: string[]
   lane?: string
@@ -201,7 +204,16 @@ function HeadlessRun({
         project,
         user: { username: session.username, roleLevel },
         mount: job.kind,
-        ...(job.kind === "action" ? { action: { id: job.actionId ?? "", trigger: job.trigger ?? "click" } } : {}),
+        ...(job.kind === "action"
+          ? {
+              action: {
+                id: job.actionId ?? "",
+                trigger: job.trigger ?? "click",
+                ...(job.cell ? { cell: job.cell } : {}),
+                ...(job.selection ? { selection: job.selection } : {}),
+              },
+            }
+          : {}),
         ...(job.kind === "export" ? { export: { id: job.exportId ?? "", fileIds: job.fileIds ?? [], lane: job.lane ?? "" } } : {}),
         ...(job.kind === "import"
           ? { import: { importerId: job.importerId ?? "", phase: job.phase ?? "run", options: job.options ?? {}, ...(job.fileIds ? { fileIds: job.fileIds } : {}), ...(job.field ? { field: job.field } : {}) } }
@@ -211,6 +223,10 @@ function HeadlessRun({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one frame per job
     [job.key, tool.id, tool.currentVersion],
   )
+  const frameTitle = `${tool.name} (${job.label})`
+  // The tool never mounts directly: the shell is what stops it navigating itself (srcdoc.ts).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- one frame per job
+  const shellSrcdoc = useMemo(() => buildToolShellSrcdoc(srcdoc, frameTitle), [srcdoc])
 
   // A caller that draws the prompt itself (the Import dialog) gets it handed over.
   const promptEl = prompt ? <PermissionPrompt toolName={tool.name} prompt={prompt} web={tool.manifest.web} /> : null
@@ -231,10 +247,10 @@ function HeadlessRun({
       )}
       <iframe
         ref={frameRef}
-        title={`${tool.name} (${job.label})`}
+        title={frameTitle}
         sandbox={TOOL_SANDBOX}
         referrerPolicy="no-referrer"
-        srcDoc={srcdoc}
+        srcDoc={shellSrcdoc}
         aria-hidden="true"
         tabIndex={-1}
         data-testid="headless-frame"

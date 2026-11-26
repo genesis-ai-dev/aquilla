@@ -11,15 +11,17 @@
 import { ExtensionMarker } from "./ExtensionMarker"
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { Blocks, Pin, Play, Sparkles } from "lucide-react"
+import { Blocks, Pin, Play, Plus, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { buildExtensionPath } from "@/lib/tools/builder-model"
 import type { ExtensionEditorChoice } from "./ExtensionEditor"
 import { ExtensionEditorFallbackNotice, ExtensionEditorSwitcher } from "./ExtensionEditor"
+import { ExtensionColumnToggles } from "./NativeEditorContributions"
 import { useToolsMount } from "./ToolsMountContext"
 
-export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
+export function ExtensionsBar({ choice, fileId }: { choice: ExtensionEditorChoice; fileId?: string | null }) {
   const t = useT()
   const ctx = useToolsMount()
   const navigate = useNavigate()
@@ -58,7 +60,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
     <>
     <ExtensionEditorFallbackNotice choice={choice} />
     <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs" data-testid="extensions-bar">
-      <ExtensionEditorSwitcher choice={choice} />
+      <ExtensionEditorSwitcher choice={choice} fileId={fileId} />
       {pinned.map((tool) => (
         <Button key={tool.id} size="xs" variant="outline" onClick={() => ctx.openInPanel(tool.id)} data-testid="pinned-extension">
           <Pin className="size-3" aria-hidden />
@@ -80,6 +82,17 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
           {action.label}
         </Button>
       ))}
+      <ExtensionColumnToggles />
+      <Button
+        size="xs"
+        variant="ghost"
+        className="text-muted-foreground hover:text-foreground"
+        data-testid="build-extension-column"
+        onClick={() => navigate(buildExtensionPath(ctx.projectId, { where: "column", fileId }))}
+      >
+        <Plus className="size-3" aria-hidden />
+        {t("extensions.buildFrom.column")}
+      </Button>
       <Button size="xs" variant="ghost" className="ms-auto" onClick={() => ctx.setPaletteOpen(true)}>
         <Blocks className="size-3.5" aria-hidden />
         {t("extensions.palette.button")}
@@ -118,7 +131,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
                   {t("extensions.palette.openPage", { name: tool.name })}
                 </CommandItem>,
               ])}
-              <CommandItem onSelect={() => run(() => navigate(`/project/${ctx.projectId}/extensions`))}>
+              <CommandItem onSelect={() => run(() => navigate(buildExtensionPath(ctx.projectId, { fileId })))}>
                 <Sparkles className="size-3.5" aria-hidden />
                 {t("extensions.palette.build")}
               </CommandItem>

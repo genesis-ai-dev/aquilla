@@ -16,8 +16,11 @@
 // Most real Paratext exports are one book per file.
 //
 // Inline character markers (\f...\f*, \wj...\wj*, \nd, \add, \w...) stay
-// inside the verse text. Translators see them in the cell. Round-trip is
-// preserved either way.
+// inside the verse SPAN this parser returns — that is what makes the serializer
+// able to put the file back byte-for-byte. They do NOT reach a cell: every
+// import path projects the span through `usfmContentOnly` first (AQU-2743 for
+// the source column, AQU-1363 for the target column), so what a translator sees
+// and edits is text and the markers live on in the file's stored source bytes.
 
 import { isBookTitleOrIntroMarker } from "./usfm-markers"
 

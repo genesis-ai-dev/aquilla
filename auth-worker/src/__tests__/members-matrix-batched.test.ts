@@ -12,12 +12,12 @@
  *     appears as a contribution (wendi's org owner role, 700, still does)
  *   - direct override:      anna has a direct reviewer (300) on project "pa"
  *   - group grant:          anna is in "Translators" group → contributor (400) on "pa"
- *   - creator:              anna created project "pb" → owner (700)
+ *   - direct Owner grant:   anna created project "pb" and holds Owner (700)
  *
  * max-wins for anna on "pa":  group(400) > override(300); org(100) contributes nothing
  *   winner = group, secondarySources = [override(300)]
- * max-wins for anna on "pb":  creator(700) only
- *   winner = creator, secondarySources = []
+ * max-wins for anna on "pb":  direct Owner (700) only
+ *   winner = override, secondarySources = []
  *
  * Edge: org with zero accessible projects (viewer has no grant paths on any
  * project) → matrix returns empty `projects` array without error.
@@ -57,7 +57,10 @@ async function seedFixture() {
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 2, 300, 1)",
   ).run()
 
-  // group grant: anna in "Translators" → contributor (400) on pa
+  // anna's Owner grant on the project she created (AQU-2357)
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pb', 2, 700, 2)",
+  ).run()
   await env.AQUILLA_PG.prepare(
     "INSERT INTO groups (id, org_id, name, created_by) VALUES (5, 1, 'Translators', 1)",
   ).run()
@@ -78,6 +81,7 @@ interface ApiMember {
   username: string
   role: { level: number; name: string; source: string }
   secondarySources: Array<{ source: string; level: number; name: string }>
+  createdThisProject?: boolean
 }
 
 interface PerProjectBody {
@@ -152,7 +156,7 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", ()
     expect(sources).toEqual(["override"])
   })
 
-  it("anna on 'pb' (her project) wins via creator (700), with no secondaries — sub-floor org role excluded", async () => {
+  it("anna on 'pb' holds a direct Owner grant, with no secondaries", async () => {
     await seedFixture()
     const jwt = await jwtFor("wendi")
 
@@ -166,9 +170,9 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", ()
     const anna = pb!.members.find((m) => m.username === "anna")
     expect(anna).toBeDefined()
 
-    // Creator path wins; her org viewer (100) role is sub-floor (AQU-435)
-    expect(anna!.role.source).toBe("creator")
+    expect(anna!.role.source).toBe("override")
     expect(anna!.role.level).toBe(700)
+    expect(anna!.createdThisProject).toBe(true)
 
     // no secondary paths — the org viewer role contributes nothing
     expect(anna!.secondarySources).toHaveLength(0)

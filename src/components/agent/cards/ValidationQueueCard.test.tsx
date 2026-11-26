@@ -55,7 +55,7 @@ describe("ValidationQueueCard", () => {
       expect(btn.querySelector("svg")).toBeNull()
     }
     expect(screen.queryByRole("button", { name: /all/i })).toBeNull()
-    expect(screen.getByText(/confirm each line yourself/i)).toBeInTheDocument()
+    expect(screen.getByText(/validate each line yourself/i)).toBeInTheDocument()
   })
 
   it("each click applies exactly that staged event and marks the row validated", async () => {
@@ -70,7 +70,7 @@ describe("ValidationQueueCard", () => {
     expect(onApplied).toHaveBeenCalledWith(["applied-event-id"], ["c1"])
     // The second row still awaits its own click.
     expect(screen.getByRole("button", { name: "Validate MRK 4:2" })).toBeInTheDocument()
-    expect(screen.getByText("1/2 confirmed")).toBeInTheDocument()
+    expect(screen.getByText("1/2 validated")).toBeInTheDocument()
   })
 
   // AQU-1069: cells with no canonical ref fall back to a truncated cell id.

@@ -65,7 +65,8 @@ function isSuggestion(v: unknown): v is SmartEditSuggestion {
 }
 
 export async function fetchSmartEdits(
-  input: { projectId: string; lane: string; cells: SmartEditPassageCell[] },
+  /** `only`: the cell ids to suggest for — the other cells are context. */
+  input: { projectId: string; lane: string; cells: SmartEditPassageCell[]; only?: string[] },
   identityToken: string,
   signal?: AbortSignal,
 ): Promise<SmartEditSuggestion[]> {

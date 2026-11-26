@@ -72,6 +72,7 @@ through the global \`aquilla\` object the host injects before your code runs.
     Calls needing an ungranted scope pause on a user prompt automatically; a denied call
     rejects with an Error whose .code is "permission_denied". Handle that gracefully.
 - aquilla.ui.notify(message) — show a short toast in the app.
+- aquilla.ui.openPanel() — open this extension's side panel in the editor's left dock (great after a cell/selection action).
 - aquilla.tell(message) — leave a message for the user that stays above the extension until dismissed.
 - aquilla.ai.generate(prompt, { system?, maxTokens? }) → { text }   scope ai:generate
     One completion through the app's own AI (as the user, on their credits). Use sparingly, never in a loop over every cell without the user asking.
@@ -209,21 +210,45 @@ and an exporter that writes them back out. Everything lands as ordinary, attribu
     Importer rules: work BOOK BY BOOK (one fetch and one files.upsert per book/file), report progress after each, keep every
     upsert idempotent (stable keys) so re-running RESUMES where it stopped, compare the upstream version you stored (upstream
     in files.upsert) and skip what did not change, and never fetch per verse.
-- Manifest "actions": [{ "id": "check", "label": "Check consistency", "where": ["bar","menu","settings"], "onOpen"?: true }]
-    A button that runs your extension HEADLESS: aquilla.context.mount is "action" and aquilla.context.action = { id, trigger }.
+- Manifest "actions": [{ "id": "check", "label": "Check consistency", "where": ["bar","menu","settings","cell","selection"], "onOpen"?: true }]
+    A button that runs your extension HEADLESS: aquilla.context.mount is "action" and aquilla.context.action =
+    { id, trigger, cell?: { fileId, cellId, ref }, selection?: { fileId, cellId, side, text } }.
+    where: "bar" (extensions bar), "menu" (palette), "settings" (extension card), "cell" (each row's right-click / ⋮ menu — passes action.cell),
+    "selection" (source text selection toolbar — passes action.cell + action.selection).
     Do the work, report with aquilla.action.progress(message, fraction 0..1) and finish with aquilla.action.done(message, { ok? }).
     onOpen: also run it (at most daily) when a member who may run it opens the project. Actions are for jobs (checks, reports,
-    batch fixes) — importing is an importer, refreshing is the file's "Refresh from source".
+    batch fixes, per-cell/selection lookups) — importing is an importer, refreshing is the file's "Refresh from source".
     In an action mount draw nothing; branch on aquilla.context.mount first thing.
 - Manifest "exports": [{ "id": "aligned-usfm", "label": "Aligned USFM", "extension": "usfm", "tags"?: ["uw:ult"] }]
     Offered in the export dialog (for files with one of those tags). Runs HEADLESS with aquilla.context.export =
     { id, fileIds, lane }: read cells / data / files.source, then aquilla.export.deliver([{ name, text | bytes, mime }])
     (several files are zipped for the user).
 
+### apiRev 8 — integrating directly into Aquilla's real native editor (PREFERRED over rebuilding the editor)
+Most helpful extensions work WITH Aquilla's real editor instead of replacing it. Reserve the "editor" mount for genuinely
+distinct specialized editing surfaces (e.g. a focused single-verse checker or alignment view), not a clone of Aquilla's table.
+- aquilla.editor.activeCell() → { fileId, cellId, ref, source, target } | null   scope read:cells
+    Live event: aquilla.on("editor.activeCell", (e) => …) pushes whenever the translator focuses a different cell in the native editor.
+    Use this in "panel" mounts so notes, lexicons, checkers or alignments follow the verse the translator is editing.
+- aquilla.editor.reveal(fileId, cellId, { focus?: true }) → boolean   scope read:cells
+    Scrolls, flashes and focuses that cell in Aquilla's real editor (clicking an item in your panel jumps straight to the verse).
+- aquilla.editor.annotate(fileId, { layer?: "default", cells: { [cellId]: {
+    badges?: [{ id?, label, tone?: "neutral"|"info"|"warn"|"error"|"success", tooltip?, actionId?, openPanel? }],
+    spans?: [{ id?, side: "source"|"target", start, end, tone?, label?, message, fix?: { label, replacement }, openPanel? }],
+    columns?: { [colId]: { text, badge?, tone?, dir?: "ltr"|"rtl"|"auto" } }
+  } } }) → { cells }   scope read:cells
+    Publishes declarative badges, text-span highlights with click popovers + optional one-click target fixes, and read-only column
+    cells rendered NATIVELY inside Aquilla's real EditorTable (zero iframes per row). Up to 2000 cells per call.
+- aquilla.editor.clearAnnotations({ fileId?, layer? }?) → boolean   scope read:cells
+- Manifest "columns": [{ "id": "notes", "label": "Notes", "description"?: "…", "placement"?: "before"|"after" }]
+    Declares read-only columns rendered natively in EditorTable beside Source/Target (toggleable from the extensions bar, auto-opened
+    once you write values into cells[cellId].columns[colId] via aquilla.editor.annotate).
+- aquilla.ui.openPanel() — opens your extension's left-dock panel (e.g. after a "cell" or "selection" action populates results).
+
 ### The shape of anything that works with outside resources (AQU-1937)
 Build it as up to THREE parts, each its own extension or one extension with all three:
 1. an IMPORTER contribution (manifest "importers") that brings the resource in as tagged, grouped project files;
-2. an EDITOR (mounts "editor"/"page") that opens files by tag/group (files.list, files.group, cells.byRef) and never imports;
+2. a NATIVE-EDITOR INTEGRATION ("panel" + activeCell + editor.annotate + "columns" + "cell"/"selection" actions, OR a focused "page"/"editor" view) that opens files by tag/group (files.list, files.group, cells.byRef) and never imports;
 3. an EXPORT contribution (manifest "exports") that writes the work back out.
 Options, not hard-coding: books, languages, repositories, branches, file names or any other specific a request mentions become
 importer OPTIONS (with that value as the default) or settings — never literals in the code — so the same extension serves the
@@ -251,7 +276,7 @@ a small sample fetched first, real phase progress". Then build every planned row
 [{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
 \`\`\`
 \`\`\`json
-{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1, "apiRev": ${TOOLS_API_REV}, "importers": [only to bring content in], "actions": [only for headless jobs], "exports": [only if you add export formats] }
+{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1, "apiRev": ${TOOLS_API_REV}, "importers": [only to bring content in], "actions": [only for headless jobs / cell & selection actions], "exports": [only if you add export formats], "columns": [only if you contribute native editor columns] }
 \`\`\`
 \`\`\`html
 <!doctype html>

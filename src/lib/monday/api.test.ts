@@ -59,7 +59,7 @@ describe("fetchMondayConnection", () => {
     await expect(fetchMondayConnection("jwt", 7)).rejects.toMatchObject({
       name: "MondayApiError",
       status: 403,
-      message: "Couldn't load the Monday connection status.",
+      message: "Couldn't load the Monday.com connection status.",
     })
   })
 

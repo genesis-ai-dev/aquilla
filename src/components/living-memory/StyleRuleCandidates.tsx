@@ -208,7 +208,7 @@ interface StyleRuleCandidatesProps {
    * walk the ids one at a time: a dismissal can carry dozens of rules, and
    * each verdict refetches the library.
    */
-  onDismissMany: (ids: readonly string[]) => void
+  onDismissMany: (ids: readonly string[]) => void | Promise<void>
 }
 
 export function StyleRuleCandidates({
@@ -226,6 +226,11 @@ export function StyleRuleCandidates({
   const [visibleCount, setVisibleCount] = useState(BATCH_SIZE)
   // Ids staged for dismissal: already out of the queue, not yet rejected.
   const [staged, setStaged] = useState<readonly string[]>([])
+  // Ids whose rejection has been sent and not yet answered. They stay out of
+  // the queue until the whole batch is answered: the caller rejects one at a
+  // time and re-reads the list after each, so without this every dismissed
+  // card came back and then left one by one.
+  const [sending, setSending] = useState<readonly string[]>([])
 
   // Read through a ref so the undo window is not restarted by a parent that
   // passes a fresh `onDismissMany` identity on every render.
@@ -239,13 +244,15 @@ export function StyleRuleCandidates({
     const ids = staged
     const timer = setTimeout(() => {
       setStaged([])
-      dismissRef.current(ids)
+      setSending((prev) => [...prev, ...ids])
+      const answered = () => setSending((prev) => prev.filter((id) => !ids.includes(id)))
+      void Promise.resolve(dismissRef.current(ids)).then(answered, answered)
     }, UNDO_WINDOW_MS)
     // Clearing on cleanup is deliberate: Undo and unmount both cancel.
     return () => clearTimeout(timer)
   }, [staged])
 
-  const pending = rules.filter((rule) => !staged.includes(rule.id))
+  const pending = rules.filter((rule) => !staged.includes(rule.id) && !sending.includes(rule.id))
   const shown = pending.slice(0, visibleCount)
   const remaining = pending.length - shown.length
 

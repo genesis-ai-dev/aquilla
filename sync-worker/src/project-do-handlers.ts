@@ -1001,6 +1001,27 @@ export class PresenceTier2Batcher {
     this.arm(connId)
   }
 
+  /**
+   * Apply a connection's held patch now, ahead of its tick.
+   *
+   * A held patch was SENT before whatever the socket sends next, so a frame
+   * that is handled on arrival must not overtake it. `focus.claim` is such a
+   * frame: leaving a cell queues `focusedCell: null` here, entering the next
+   * one claims at once, and a tick that fires afterwards would clear the focus
+   * the claim just granted — the peer keeps the lease but vanishes from
+   * everyone's "X is editing" until they leave the cell.
+   *
+   * The window stays open, so this adds no applies beyond one per frame that
+   * asks for it; later updates still coalesce into the same tick.
+   */
+  flush(connId: string): void {
+    const open = this.windows.get(connId)
+    if (!open?.pending) return
+    const msg = open.pending
+    open.pending = null
+    this.apply(connId, msg)
+  }
+
   /** Drop any held patch + timer for a connection (disconnect). */
   clear(connId: string): void {
     const open = this.windows.get(connId)
@@ -1218,6 +1239,19 @@ export function stripAppliedRows(msg: ProjectDoServerMessage): ProjectDoServerMe
   if (msg.t !== "event.applied" || msg.rows === undefined) return msg
   const { rows: _rows, ...rest } = msg
   return rest
+}
+
+/**
+ * [Pen test 2026-11-26] Whether a lane-walled socket may receive this frame.
+ * A `presence.draft` is a peer's uncommitted text in whatever lane they are
+ * editing, and the frame does not say which lane that is, so a walled socket
+ * gets none: it would otherwise read every lane's keystrokes on the file it
+ * has open. The caret position still arrives in `presence.diff`; only the
+ * live text is withheld. A lane-aware draft (sender's lane checked against
+ * the receiver's grants) can lift this later.
+ */
+export function deliverableToWalledSocket(msg: ProjectDoServerMessage): boolean {
+  return msg.t !== "presence.draft"
 }
 
 export function resolveTokenRefresh(

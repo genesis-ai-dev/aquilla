@@ -47,24 +47,21 @@ export function writeEditorChoice(username: string, projectId: string, state: Ed
 }
 
 /** The editor to use for `fileId`, given which editor extensions are installed.
- *  With no remembered choice the default applies: the first-party editor
- *  extension when it is installed (`defaultEditor`), else the standard editor.
- *  A remembered extension that is no longer installed falls back to it too. */
+ *  With no remembered choice, the native Aquilla editor (`STANDARD_EDITOR`) is
+ *  always the default. A remembered extension that is no longer installed or
+ *  failed to load this session falls back to the native editor. */
 export function resolveEditor(
   state: EditorChoiceState,
   fileId: string,
   installed: readonly string[],
-  defaultEditor: string | null = null,
   /** Extension editors that failed to load this session: the native editor
    *  stands in for them (never persisted — the next session tries again). */
   failed: ReadonlySet<string> = NO_FAILURES,
 ): string {
   const usable = (id: string) => installed.includes(id) && !failed.has(id)
-  const fallback = defaultEditor && usable(defaultEditor) ? defaultEditor : STANDARD_EDITOR
-  const pick = state.files[fileId] ?? state.project ?? fallback
+  const pick = state.files[fileId] ?? state.project ?? STANDARD_EDITOR
   if (pick === STANDARD_EDITOR || usable(pick)) return pick
-  // A failed editor → native; a remembered one that is gone → the default.
-  return failed.has(pick) ? STANDARD_EDITOR : fallback
+  return STANDARD_EDITOR
 }
 
 const NO_FAILURES: ReadonlySet<string> = new Set()

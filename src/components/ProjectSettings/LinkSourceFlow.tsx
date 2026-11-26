@@ -102,7 +102,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
-import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
+import { UpstreamFileChoiceList, replaceOfferedFor } from "@/components/UpstreamFileChoiceList"
 import { LinkSeedFailedNotice } from "@/components/LinkSeedFailedNotice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
@@ -114,9 +114,11 @@ import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedS
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
 import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import {
+  onlyJoinableOwnFiles,
   selectedClashNames,
   summarizeFileSelection,
 } from "@/lib/sync/link-file-selection"
+import { fetchReplaceTargets } from "@/lib/sync/link-join-copy"
 import {
   loadLinkSourcePreview,
   type LinkSourcePreview,
@@ -239,13 +241,37 @@ export function LinkSourceFlow({
   // own same-named file, and what the server said about each pair. Dropped
   // with the selection — they describe one upstream's files. The ask-and-settle
   // logic is shared with "Choose files" (useReplaceFileChoices).
+  // AQU-2549: the rows showing the option — checked, on a link that can
+  // replace (the sibling case), with a file here to follow into.
+  const replaceOfferedIds = useMemo(
+    () =>
+      new Set(
+        consumes === "source"
+          ? previewFiles
+              .filter(
+                (f) =>
+                  selectedFileIds.has(f.id) &&
+                  (f.clashFileId !== undefined || (preview?.ownFiles?.length ?? 0) > 0),
+              )
+              .map((f) => f.id)
+          : [],
+      ),
+    [consumes, previewFiles, selectedFileIds, preview],
+  )
+  const replaceChoices = useReplaceFileChoices({
+    jwt,
+    projectId,
+    sourceProjectId: reviewing,
+    files: previewFiles,
+    ownFiles: preview?.ownFiles,
+    offeredFileIds: replaceOfferedIds,
+  })
   const {
     replaceFileIds,
-    matches: replaceMatches,
-    toggleReplace,
+    targetOf: replaceTargetOf,
     reset: resetReplace,
     isUnresolved: replaceIsUnresolved,
-  } = useReplaceFileChoices({ jwt, projectId, sourceProjectId: reviewing, files: previewFiles })
+  } = replaceChoices
 
   // AQU-1605: the upstream lanes this caller may consume. Asked only for the
   // chain case — a link that consumes the upstream's SOURCE has one lane to read
@@ -286,9 +312,17 @@ export function LinkSourceFlow({
     // No reset needed on entry: `reviewing` only ever goes null → an id (the
     // picker is the one caller, and it is only on screen while `reviewing` is
     // null), and both backToPicker and the retry handler clear these first.
-    void loadLinkSourcePreview(jwt, projectId, reviewing)
-      .then((result) => {
+    // AQU-2549: the files a replace may follow into are the server's answer —
+    // never a copy an earlier link made, which the link request refuses.
+    // Unreadable (a weak network): the full list, and the server's refusal of a
+    // bad pick is the backstop.
+    void Promise.all([
+      loadLinkSourcePreview(jwt, projectId, reviewing),
+      fetchReplaceTargets(jwt, projectId, reviewing).catch(() => null),
+    ])
+      .then(([loaded, allowed]) => {
         if (cancelled) return
+        const result = allowed ? onlyJoinableOwnFiles(loaded, allowed) : loaded
         setPreview(result)
         setSelectedFileIds(new Set(result.files.map((f) => f.id)))
         resetReplace()
@@ -343,11 +377,11 @@ export function LinkSourceFlow({
       previewFiles.filter(
         (f) =>
           consumes === "source" &&
-          f.clashFileId !== undefined &&
+          replaceOfferedFor(f, replaceChoices) &&
           selectedFileIds.has(f.id) &&
           replaceFileIds.has(f.id),
       ),
-    [previewFiles, consumes, selectedFileIds, replaceFileIds],
+    [previewFiles, consumes, selectedFileIds, replaceFileIds, replaceChoices],
   )
   const clashNames = useMemo(() => {
     const replacingIds = new Set(replacing.map((f) => f.id))
@@ -373,7 +407,7 @@ export function LinkSourceFlow({
     setError(null)
     // Captured before the state below is reset: the workspace reads this list
     // to place an IDML file's kept translations into its new source.
-    const adoptedFileIds = replacing.map((f) => f.clashFileId as string)
+    const adoptedFileIds = replacing.map((f) => replaceTargetOf(f.id) as string)
     try {
       const result = await linkProjectSource(jwt, projectId, {
         sourceProjectId: reviewing,
@@ -399,7 +433,7 @@ export function LinkSourceFlow({
           ? {
               replaceFiles: replacing.map((f) => ({
                 upstreamFileId: f.id,
-                fileId: f.clashFileId as string,
+                fileId: replaceTargetOf(f.id) as string,
               })),
             }
           : {}),
@@ -524,7 +558,7 @@ export function LinkSourceFlow({
               // project already has — see the header comment.
               replace={
                 consumes === "source"
-                  ? { fileIds: replaceFileIds, onToggle: toggleReplace, matches: replaceMatches }
+                  ? replaceChoices
                   : undefined
               }
               disabled={linking}

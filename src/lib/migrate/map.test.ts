@@ -3,7 +3,14 @@ import { makeIdml } from "../../../packages/idml-roundtrip/src/test-helpers/idml
 import type { CodexNotebookFile } from "../codex-editor/types"
 import { assessIdmlPair } from "./idml"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "./map"
-import { fileIdFor, sourceCellCreateEventId, targetCommitEventId } from "./ids"
+import {
+  fileIdFor,
+  sourceCellCreateEventId,
+  targetCommitEventId,
+  validateEventId,
+  revalidateEventId,
+  REVALIDATION_IDS_SINCE,
+} from "./ids"
 
 const OPTS: MapOptions = {
   projectId: "proj-1",
@@ -425,6 +432,77 @@ describe("mapFilePairToEvents", () => {
     const validates = after.filter((e) => e.kind === "cell.validate")
     expect(validates).toHaveLength(1)
     expect(validates[0].author).toBe("reviewer1")
+  })
+
+  describe("a validator signing off a later edit of a verse they validated before", () => {
+    const fileId = fileIdFor(OPTS.projectKey, "TheChosen_101")
+    const AFTER = REVALIDATION_IDS_SINCE + 60_000
+    const vote = (username: string, at: number, isDeleted = false) =>
+      ({ username, creationTimestamp: at, updatedTimestamp: at, isDeleted })
+    const validatesOf = (input: FilePairInput) =>
+      mapFilePairToEvents(input, OPTS).filter((e) => e.kind === "cell.validate")
+    /** The fixture's verse: value edits at indexes 0 and 2, index 2 the head. */
+    const withVotes = (first: ReturnType<typeof vote>[], head: ReturnType<typeof vote>[]): FilePairInput => {
+      const input = fixture()
+      const edits = input.target!.cells[1].metadata.edits!
+      edits[0].validatedBy = first
+      edits[2].validatedBy = head
+      return input
+    }
+
+    it("keeps the id a first sign-off has always had", () => {
+      const [validate] = validatesOf(withVotes([], [vote("reviewer1", AFTER)]))
+      expect(validate.id).toBe(validateEventId(OPTS.projectId, fileId, "cue1", "reviewer1"))
+    })
+
+    it("gives the later sign-off an id of its own, on the head commit", () => {
+      const [validate] = validatesOf(withVotes([vote("reviewer1", AFTER - 5000)], [vote("reviewer1", AFTER)]))
+      expect(validate.id).toBe(revalidateEventId(OPTS.projectId, fileId, "cue1", "reviewer1", 2))
+      expect(validate.id).not.toBe(validateEventId(OPTS.projectId, fileId, "cue1", "reviewer1"))
+      expect(validate.payload).toMatchObject({ editEventId: targetCommitEventId(OPTS.projectId, fileId, "cue1", 2) })
+    })
+
+    // The regression. A verse is imported validated; it is then edited and the
+    // same reviewer validates the new text. Before, the second import derived
+    // the first validation's id again, the ingest dropped it as a replay, and
+    // the verse read unvalidated in Aquilla from then on.
+    it("is not swallowed as a replay of the first sign-off on the next import", () => {
+      const firstImport = fixture()
+      firstImport.target!.cells[1].metadata.edits!.splice(2, 1)
+      firstImport.target!.cells[1].metadata.edits![0].validatedBy = [vote("reviewer1", AFTER - 5000)]
+      const seen = new Set(mapFilePairToEvents(firstImport, OPTS).map((e) => e.id))
+      expect(seen.has(validateEventId(OPTS.projectId, fileId, "cue1", "reviewer1"))).toBe(true)
+
+      const secondImport = mapFilePairToEvents(
+        withVotes([vote("reviewer1", AFTER - 5000)], [vote("reviewer1", AFTER)]),
+        OPTS,
+      )
+      const fresh = secondImport.filter((e) => !seen.has(e.id))
+      expect(fresh.map((e) => e.kind)).toEqual(["target.cell.commit", "cell.validate"])
+      expect(fresh[1].payload).toMatchObject({ editEventId: fresh[0].id })
+    })
+
+    it("counts an earlier sign-off the validator has since withdrawn", () => {
+      // The first id may have been ingested while that entry was still live.
+      const [validate] = validatesOf(withVotes([vote("reviewer1", AFTER - 5000, true)], [vote("reviewer1", AFTER)]))
+      expect(validate.id).toBe(revalidateEventId(OPTS.projectId, fileId, "cue1", "reviewer1", 2))
+    })
+
+    it("leaves a different validator's first sign-off on that edit alone", () => {
+      const validates = validatesOf(
+        withVotes([vote("reviewer1", AFTER - 5000)], [vote("reviewer1", AFTER), vote("reviewer2", AFTER)]),
+      )
+      expect(validates.map((v) => v.id)).toEqual([
+        revalidateEventId(OPTS.projectId, fileId, "cue1", "reviewer1", 2),
+        validateEventId(OPTS.projectId, fileId, "cue1", "reviewer2"),
+      ])
+    })
+
+    it("does not re-derive sign-offs made before the cutoff, whatever edit they are on", () => {
+      const before = REVALIDATION_IDS_SINCE - 1
+      const [validate] = validatesOf(withVotes([vote("reviewer1", before - 5000)], [vote("reviewer1", before)]))
+      expect(validate.id).toBe(validateEventId(OPTS.projectId, fileId, "cue1", "reviewer1"))
+    })
   })
 
   it("emits startMs/endMs from legacy timecodes (seconds→ms), keeping cellLabel OUT of canonicalRef", () => {

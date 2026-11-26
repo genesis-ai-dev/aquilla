@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { lintToolSource } from "../../../../shared/tools/lint"
 import { TOOL_SCOPES, validateManifest } from "../../../../shared/tools/manifest"
-import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE, firstPartyToolId } from "../../../../shared/tools/first-party/default-editor"
+import { SDK_TEST_EDITOR_MANIFEST, SDK_TEST_EDITOR_SOURCE } from "./sdk-test-editor"
 import { createBridgeHost } from "../host-bridge"
 import { createToolHandlers, type ToolHostData } from "../host-handlers"
 import { HOST_SHORTCUTS } from "../host-keys"
@@ -22,15 +22,15 @@ function mount(data: ToolHostData) {
   const host = createBridgeHost({ getFrameWindow: () => pair.frame as unknown as Window, handlers: createToolHandlers(data), authorize: async () => {} })
   const stop = host.listen(pair.host as unknown as Window)
   pair.run(
-    buildToolSrcdoc(DEFAULT_EDITOR_SOURCE, {
-      tool: { id: "fp", name: "Aquilla editor (Smart Extension)", version: 1 },
+    buildToolSrcdoc(SDK_TEST_EDITOR_SOURCE, {
+      tool: { id: "fp", name: SDK_TEST_EDITOR_MANIFEST.name, version: 1 },
       project: { id: "p", name: "P" },
       user: { username: "alice", roleLevel: 400 },
       mount: "editor",
       file: { fileId: "f1", name: "MAT" },
       theme: {},
       hostShortcuts: HOST_SHORTCUTS,
-    }, { sdk: DEFAULT_EDITOR_MANIFEST.sdk }),
+    }, { sdk: SDK_TEST_EDITOR_MANIFEST.sdk }),
   )
   const q = (sel: string) => pair.doc.querySelector(sel) as HTMLElement | null
   const row = (cellId: string) => q(`.cell[data-cell-id="${cellId}"]`)
@@ -39,26 +39,19 @@ function mount(data: ToolHostData) {
 }
 
 function populated(): ToolHostData {
-  return defaultSmokeFixtures({ ...DEFAULT_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
+  return defaultSmokeFixtures({ ...SDK_TEST_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
 }
 
-describe("first-party default editor", () => {
+describe("SDK editor components (window.aq)", () => {
   it("passes the same lint, manifest and smoke gates as any extension", async () => {
-    expect(lintToolSource(DEFAULT_EDITOR_SOURCE).issues).toEqual([])
-    const m = validateManifest(DEFAULT_EDITOR_MANIFEST)
+    expect(lintToolSource(SDK_TEST_EDITOR_SOURCE).issues).toEqual([])
+    const m = validateManifest(SDK_TEST_EDITOR_MANIFEST)
     expect(m.errors).toEqual([])
     expect(m.manifest?.mounts).toContain("editor")
-    const res = await runToolSmoke(DEFAULT_EDITOR_SOURCE, DEFAULT_EDITOR_MANIFEST, { createFrame: () => fakeSmokeFrame() })
+    const res = await runToolSmoke(SDK_TEST_EDITOR_SOURCE, SDK_TEST_EDITOR_MANIFEST, { createFrame: () => fakeSmokeFrame() })
     expect(res.errors).toEqual([])
     expect(res.calls["cells.page"]).toBeGreaterThanOrEqual(1)
   }, 30_000)
-
-  it("has a deterministic, UUID-shaped id per project", async () => {
-    const a = await firstPartyToolId("p1", "default-editor")
-    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(await firstPartyToolId("p1", "default-editor")).toBe(a)
-    expect(await firstPartyToolId("p2", "default-editor")).not.toBe(a)
-  })
 
   it("renders the built-in's row anatomy: rich text, key terms, issues, signals, comments, audio, locks, peers and chapters", async () => {
     const { row, tgt, q, stop } = mount(populated())

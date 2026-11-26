@@ -1,7 +1,7 @@
-# Smart Extensions (prototype)
+# Smart Extensions
 
-Status: **prototype**, branch `dadukhankevin/aquilla-tools-prototype`. Not deployed; migration
-`0161_project_tools.sql` has not been applied to any shared database.
+Status: **feature-flagged per project** (`Project settings → Experimental → Smart Extensions`,
+`smartExtensionsEnabled`, off by default).
 
 Smart Extensions are small, sandboxed apps that run inside a project: built from a prompt by
 the builder model (Claude Opus 5.5 via OpenRouter), or installed from reviewed starters. An
@@ -102,64 +102,41 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 - **Capability twins.** `capability-contract.test.ts` keeps runtime, handlers, permission map,
   smoke stub and builder prompt in agreement.
 
-## The default editor is a Smart Extension
+## Aquilla's editor stays native; extensions plug into it (apiRev 8)
 
-The standard translation editor ships as a **first-party extension**, "Aquilla editor (Smart
-Extension)" (`shared/tools/first-party/default-editor*.ts`, on the SDK below), at feature parity
-with the built-in editor, and it is the **default editor** for anyone who has not chosen one.
-The original built-in editor — "Aquilla editor" — is always one click away. It runs exactly like
-any other extension — the same sandboxed frame, CSP, bridge, permission gate and event path,
-with tool provenance on every write. Nothing privileged: it reaches the workspace's live focus
-locks and comment panels only through the bridge calls above, which any `editor` extension gets.
+Aquilla's default translation editor is always the **native React editor** (`EditorTable`).
+The earlier first-party `default-editor` extension experiment (and `docs/SMART-EXTENSIONS-PARITY.md`)
+was retired so the team does not maintain a duplicate iframe implementation of the main editor.
+Extensions may still declare the `"editor"` mount for genuinely specialized editing views
+(such as the Focus Editor starter or an alignment workspace), selectable per file or project
+from the **"Edit with"** menu (`EditWithMenu`), with automatic fallback to the native editor
+on load failure.
 
-### Why the Smart Extension editor is the default
+Most extensions should integrate directly into the **real native `EditorTable`** via apiRev 8:
 
-Daniel, 2026-10-12: shipping the extension as the default forces every future editor change and
-decision to stay compatible with the Smart Extensions API — whatever the default editor can do,
-an extension can do — which is what makes the system useful for anything else people want to
-build with Smart Extensions. Parity is not a one-off audit; it is kept by construction. The
-safety valve is the easy switch back below.
+- **Active-cell follow & reveal** — `aquilla.editor.activeCell()` (scope `read:cells`), live
+  `"editor.activeCell"` push events, and `aq.useActiveCell()` (SDK 1.2) keep side panels in
+  sync with the verse the translator is editing. `aquilla.editor.reveal(fileId, cellId, { focus? })`
+  (and `aq.editor.reveal`) scrolls, flashes, and focuses that row in `EditorTable`.
+- **Declarative row badges, text spans & quick-fixes** — `aquilla.editor.annotate(fileId, { layer?, cells })`
+  and `aquilla.editor.clearAnnotations({ fileId?, layer? })` (scope `read:cells`) let any
+  panel, headless action, or inline mount publish per-cell badges, source/target text span
+  highlights with click popovers, and optional one-click target quick-fixes rendered natively
+  by `EditorTable` (`NativeEditorContributions.tsx`) — zero iframes per row.
+- **Cell-menu and selection actions** — `manifest.actions` accepts `"cell"` (row `⋮`/right-click
+  menu, passing `aquilla.context.action.cell`) and `"selection"` (source selection toolbar,
+  passing `aquilla.context.action.selection`). Headless actions can call `aquilla.ui.openPanel()`
+  to pop open their dock panel with results.
+- **Native read-only columns** — `manifest.columns: [{ id, label, description?, placement?: "before"|"after" }]`
+  declares read-only columns rendered natively inside `EditorTable`'s grid (toggleable from the
+  extensions bar, auto-opened once the extension writes `cells[id].columns[colId]` via
+  `editor.annotate`, and stacked cleanly on narrow viewports).
 
-- **Switch back, any user.** While the extension editor is open, "Use the original Aquilla
-  editor" sits beside the "Edit with" picker: one click opens the built-in editor for every file
-  of the project, remembered per user and project (`editor-choice.ts`, local). No role or
-  extension permission is involved, so nothing can block it. The picker lists both editors;
-  picking "Aquilla editor (Smart Extension)" there goes back to the extension.
-- **Fallback.** If the extension fails to load — its code cannot be fetched, it draws nothing
-  (render check), or it throws before drawing anything — the built-in editor opens instead for
-  that session with a notice ("… couldn't load, so the original Aquilla editor is open.") and a
-  Retry. A runtime error after it has drawn keeps the user's work on screen behind the error bar
-  (with "Heal it"); "Use the original Aquilla editor" is still one click.
-- **Names.** One name per editor, identical in the picker and on the Smart Extensions page:
-  "Aquilla editor" (built-in) and "Aquilla editor (Smart Extension)" (this extension).
-  "(default)" is appended in the picker to whichever editor is the effective default. Renaming
-  the manifest changed its code hash, so a pristine install gets one upgrade version; grants are
-  untouched by an upgrade.
-- **Install.** The SERVER installs it (`POST /tools/first-party {key:"default-editor"}`) from
-  the repo's reviewed source — a client cannot choose the bytes — whenever a project's
-  extensions load. Idempotent via a deterministic per-project tool id (no schema change).
-  Upgraded in place to the shipped code only while the current version is pristine (a project's
-  "Change it" edit is left alone). Removing it on the management page keeps it removed (the
-  built-in editor is then everyone's default there). No model is called on this path.
-- **How often.** Copied into a project once (deterministic per-project id); upgraded at most once
-  per project per shipped change (lazily, on the next open by any member, only while pristine);
-  granted once per user (all declared scopes on first ensure), plus once per scope a later
-  shipped version newly declares — never a scope the user already saw or revoked.
-- **Grants — explicit and visible.** Its declared scopes are auto-granted to each user the first
-  time only; a later revoke sticks. The editor bar says so ("… ships with Aquilla. It was given
-  these permissions automatically: …", with a Manage link) and its card on the management page
-  carries a "First party · built in" badge. Role ceilings and the server's `authorize()` apply
-  as for any extension.
-- **Overrides (testing).** `localStorage["aquilla.extensions.defaultEditor"]="off"` (per
-  browser) or build env `VITE_EXTENSION_DEFAULT_EDITOR=off` makes the built-in editor the
-  default instead. The e2e build pins the env to `off` so the native-editor journeys keep the
-  editor they were written for; `E2E_EDITOR=extension` (and the extension specs) set the
-  localStorage override back `on`. While the extension is the default the client waits for the
-  project's extensions before choosing, so the built-in editor never flashes first.
+All native editor state lives in `NativeEditorStore` (`src/lib/tools/native-editor-store.ts`),
+an external `useSyncExternalStore` owned by `ToolsMountProvider` — never in `ProjectWorkspace`
+React state.
 
-**Parity.** `docs/SMART-EXTENSIONS-PARITY.md` is the feature-by-feature matrix against the
-built-in editor (EditorTable + TranslatedEditor + the workspace around them). In short: an
-`editor` mount gets the workspace's **editor services** (apiRev 3, `src/lib/tools/editor-services.ts`,
+**Custom `editor` mounts.** An `editor` mount gets the workspace's **editor services** (apiRev 3, `src/lib/tools/editor-services.ts`,
 assembled by `useExtensionEditorServices`). The extension reads the workspace's own cell store
 (the file is read once, not twice) and writes through the host's own commit/validate pipeline
 (auto-validate own edit, repetition propagation on `cells.settle`), attributed via `tool_origin`.
@@ -362,17 +339,10 @@ model for free, with no new table and no migration.
 - Workers: `auth-worker/src/__tests__/tools-routes.test.ts`, `tools-builder.test.ts`;
   `sync-worker/src/__tests__/tool-provenance.test.ts`.
 - E2E: `e2e/specs/tools/tools-heatmap.spec.ts`, `e2e/specs/tools/extension-editor.spec.ts`,
-  `e2e/specs/tools/default-editor-extension.spec.ts` (first-party editor extension: edit, rich
-  text, validate, a second user's lock + live edit, switch to built-in and back, revert since T),
-  `e2e/specs/tools/default-editor-perf.spec.ts` (full gospel, extension vs built-in; reports).
-- Unit (apiRev 2): `api-rev2.test.ts`, `live-data-rev2.test.ts`, `default-editor.test.ts`;
-  auth-worker `tools-routes.test.ts` "first-party extensions".
-- Unit (apiRev 3): `api-rev3.test.ts` (store-backed reads, host pipeline delegation with
-  provenance, bound-file refusal, param validation, scopes, runtime round trips, ui.strings,
-  suggestion registry); `shared/tools/revert.test.ts` (re-validation).
-- E2E (apiRev 3): `e2e/specs/tools/default-editor-parity.spec.ts`; the core editor journeys run
-  against the extension editor with `E2E_EDITOR=extension` (`pnpm test:e2e:extension-editor`,
-  `e2e/helpers/editor-mode.ts`: the Workspace page object targets the extension's frame).
-- Recordings: `e2e/recordings/specs/aquilla-tools.showcase.ts` (real build),
-  `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts` (real build),
-  `default-editor-extension.showcase.ts`.
+  `e2e/specs/tools/extension-builder.spec.ts`, `e2e/specs/tools/extension-primitives.spec.ts`,
+  `e2e/specs/tools/smart-extensions-flag-importer.spec.ts`.
+- Unit (apiRev 2–8): `api-rev2.test.ts`, `api-rev3.test.ts`, `rev4.test.ts`, `rev5.test.ts`,
+  `sdk-editor-components.test.ts`, `first-party.test.ts`, `native-editor-integration.test.ts`,
+  `NativeEditorContributions.test.tsx`; auth-worker `tools-routes.test.ts` "first-party extensions".
+- Recordings: `e2e/recordings/specs/smart-extensions-native-editor.showcase.ts` (all extension kinds + apiRev 8 native editor integration),
+  `aquilla-tools.showcase.ts`, `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts`.

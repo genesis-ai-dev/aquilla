@@ -99,13 +99,7 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
     await route.fulfill({ json: { ok: true, source: FOCUS_EDITOR_SOURCE, manifest, model: "anthropic/claude-opus-5.5", usage } })
   })
   const tools = new ToolsPage(alice)
-  // The product default (the first-party editor extension), so the file view
-  // shows "Edit with"; "Build a new editor…" is the menu's footer item.
-  await tools.optIntoDefaultEditorExtension()
-  await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  await tools.editWithTrigger().click()
-  await alice.getByTestId("build-own-editor").click()
-  await alice.waitForURL(/\/extensions\?where=editor$/)
+  await alice.goto(`/project/${seeded.projectId}/extensions?where=editor`)
   await expect(alice.getByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")
 
   const name = await tools.buildExtension("Show one verse at a time in large text, with the source above it")
@@ -120,4 +114,6 @@ test("\"Build your own editor…\" builds an editor that appears in \"Edit with\
   await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   await tools.switchEditor("One Verse Editor")
   await expect(tools.toolFrame("One Verse Editor").getByLabel("Translation")).toBeVisible({ timeout: 30_000 })
+  await tools.editWithTrigger().click()
+  await expect(alice.getByTestId("build-own-editor")).toBeVisible()
 })

@@ -199,7 +199,9 @@ jobs:
   # migration files is the PR's schema.sql; and the BASE commit's replay
   # corpus and permission matrices still answer their goldens on the PR's
   # schema.sql, which is production's current code on the new schema, the
-  # state production is in between the migration and the deploy.
+  # state production is in between the migration and the deploy. The replay
+  # compares the columns the base schema has; a column the PR adds is not
+  # one the current code or its golden knows.
   # Green here lifts the `migration` hold only while the AUTO_MIGRATE
   # repository variable is `on` (release-risk.mjs GATE_SWITCHES), because
   # release-deploy.yml then applies the migration to production itself.
@@ -233,8 +235,10 @@ jobs:
       - name: Additive statements only, and the result is schema.sql
         working-directory: ${{ runner.temp }}/base
         run: pnpm exec tsx scripts/gate-migration.ts check . "$GITHUB_WORKSPACE"
-      - name: Put the PR's schema under the base commit's code
-        run: cp db/postgres/schema.sql "$RUNNER_TEMP/base/db/postgres/schema.sql"
+      - name: Put the PR's schema under the base commit's code, keeping the base's own beside it
+        run: |
+          cp "$RUNNER_TEMP/base/db/postgres/schema.sql" "$RUNNER_TEMP/base-schema.sql"
+          cp db/postgres/schema.sql "$RUNNER_TEMP/base/db/postgres/schema.sql"
       - name: Fetch the real-project corpora from R2
         working-directory: ${{ runner.temp }}/base
         env:
@@ -245,6 +249,14 @@ jobs:
         working-directory: ${{ runner.temp }}/base/sync-worker
         env:
           REPLAY_CORPUS_REQUIRED: "1"
+          # The replay hashes whole rows, and the base commit's golden was
+          # written from the base commit's columns. A column this PR adds is
+          # in neither, so the harness hashes only the columns the base
+          # schema has (helpers/replay-corpus.ts, `baselineColumns`): a value
+          # in one of those, a row count, or one of them dropped or renamed
+          # still fails. Without this, every added column on a projection
+          # table failed the leg the additive check had just passed.
+          REPLAY_BASELINE_SCHEMA: ${{ runner.temp }}/base-schema.sql
         run: pnpm exec vitest run src/__tests__/replay-corpus.test.ts src/__tests__/permission-matrix.test.ts
       - name: The base commit's auth-worker matrix, on the new schema
         working-directory: ${{ runner.temp }}/base/auth-worker

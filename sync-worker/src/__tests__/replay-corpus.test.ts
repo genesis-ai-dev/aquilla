@@ -14,9 +14,18 @@
 // fetched by `node scripts/replay-corpus.mjs fetch`. A missing r2 corpus
 // skips its case (loudly) unless REPLAY_CORPUS_REQUIRED=1, which the gate
 // workflow sets so a fetch failure can never pass as green.
+//
+// REPLAY_BASELINE_SCHEMA is the migration gate's "old code, new schema" leg
+// (risk-label.yml `migration-gate`). There this file is the BASE commit's
+// copy, running on the PR's schema.sql against the base commit's golden, and
+// the variable is the path to the base commit's own schema.sql. Only the
+// columns that schema has are hashed: a column the PR adds is one this code
+// has never heard of and the golden was not written with, so it is left out
+// and named in the log. A value in a column the base has, a row count, and a
+// base column the PR dropped or renamed all still fail.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
 import {
   CORPUS_DIR,
   OUTPUT_TABLES,
@@ -27,11 +36,14 @@ import {
   readGolden,
   readManifest,
   replayCorpus,
+  schemaColumns,
   type Golden,
+  type SchemaColumns,
 } from "./helpers/replay-corpus"
 
 const UPDATE = process.env.UPDATE_REPLAY_GOLDEN === "1"
 const REQUIRED = process.env.REPLAY_CORPUS_REQUIRED === "1"
+const BASELINE_SCHEMA = process.env.REPLAY_BASELINE_SCHEMA
 const REPLAY_TIMEOUT_MS = 10 * 60 * 1000
 
 const manifest = readManifest()
@@ -39,6 +51,17 @@ const golden: Golden = readGolden()
 const updated: Golden = { ...golden }
 
 describe("replay corpus gate", () => {
+  let baselineColumns: SchemaColumns | undefined
+  const ignoredColumns = new Set<string>()
+
+  beforeAll(async () => {
+    if (!BASELINE_SCHEMA) return
+    // A golden is every column of this build's own schema. One written from
+    // a column subset would pass here and fail the replay gate.
+    if (UPDATE) throw new Error("UPDATE_REPLAY_GOLDEN and REPLAY_BASELINE_SCHEMA cannot be set together")
+    baselineColumns = await schemaColumns(readFileSync(BASELINE_SCHEMA, "utf8"))
+  })
+
   it("has at least one corpus project, so the gate can never pass vacuously", () => {
     expect(manifest.format).toBe(1)
     expect(manifest.projects.length).toBeGreaterThan(0)
@@ -67,7 +90,15 @@ describe("replay corpus gate", () => {
       async () => {
         expect(present, `${entry.file} missing under ${CORPUS_DIR}; the gate requires every corpus`).toBe(true)
         const corpus = loadCorpus(entry)
-        const result = await replayCorpus(corpusProjectId(corpus), corpus)
+        const result = await replayCorpus(corpusProjectId(corpus), corpus, { baselineColumns })
+        const unseen = result.ignoredColumns.filter((column) => !ignoredColumns.has(column))
+        if (unseen.length) {
+          for (const column of unseen) ignoredColumns.add(column)
+          // Straight to stderr: console.info from a passing test here did
+          // not reach the run's output, and this line is for the person
+          // reading a green job.
+          process.stderr.write(`replay corpus: not in the baseline schema, left out of the hash: ${unseen.join(", ")}\n`)
+        }
         expect(result.rebuild.eventsRead).toBe(entry.events)
         if (entry.source === "synthetic") {
           // The synthetic log's sibling race is decided by chain_claims, not

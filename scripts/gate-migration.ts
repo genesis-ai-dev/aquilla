@@ -24,7 +24,10 @@
 // The third leg lives in the workflow (risk-label.yml, `migration-gate`): the
 // BASE commit's replay corpus and permission matrix run against the HEAD
 // schema.sql and must still answer their goldens. That is "production's
-// code on the new schema", measured.
+// code on the new schema", measured. The replay compares the columns the
+// BASE schema.sql has (REPLAY_BASELINE_SCHEMA): its hash is of whole rows,
+// so without that a column `additive` had just allowed changed every hash
+// of its table and failed the leg with no row different.
 //
 // Usage:
 //   tsx scripts/gate-migration.ts check <baseDir> <headDir>

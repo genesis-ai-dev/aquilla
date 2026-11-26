@@ -1,18 +1,20 @@
 /**
- * AQU-1352 §3.6: org "People & access". AQU-2318 is the Places lens. AQU-2319
- * is the People lens: one roster, shared search, and the CSV / print export
- * that replaces Access audit. The read lives in `useOrgAccess`.
+ * AQU-1352 §3.6: org "People & access", the one place people and access are
+ * managed. The first lens is a folder tree (organization → folders →
+ * projects → languages, AccessFolderTree) where people are added, changed
+ * and removed at any level, and folders, projects and languages are made. AQU-2319 is the People lens: one roster, shared search, and
+ * the CSV / print export that replaces Access audit. The read lives in
+ * `useOrgAccess`.
  */
 import { useState } from "react"
 import { Download, Printer } from "lucide-react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PeopleLens, PeoplePrintReport } from "@/components/org/access/PeopleLens"
-import { PlacesLens } from "@/components/org/access/PlacesLens"
-import { GiveAccessDialog } from "@/components/org/access/GiveAccessDialog"
-import type { ScopeRef } from "@/lib/access/types"
+import { AccessFolderTree } from "@/components/org/access/AccessFolderTree"
+import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { orgAccessCsv } from "@/components/org/access/org-access-data"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,6 +33,8 @@ import {
   type PeopleFilter,
 } from "@/lib/access/people-lens"
 import { downloadBlob } from "@/lib/export/export-service"
+import { createTeam } from "@/lib/frontier/teams"
+import { projectLanguageSettingsPath } from "@/lib/navigation/org-paths"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
@@ -59,14 +63,30 @@ const FILTER_LABEL = {
 
 export function OrgAccessPage() {
   const t = useT()
-  const { activeOrg } = useActiveOrg()
+  const { activeOrg, activeGuestOrg } = useActiveOrg()
   const state = useOrgAccess()
   const { session } = useFrontierSession()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState("")
-  // AQU-2320: the Give access dialog, with the place it was opened from.
-  const [giveAt, setGiveAt] = useState<ScopeRef | null>(null)
-  const canGive = state.status === "ready" && Object.values(state.data.grantable ?? {}).some((g) => g.ok)
+  // The folder a new project goes in (null: straight in the organization), while the dialog is open.
+  const [creatingProject, setCreatingProject] = useState<{ folderId: number | null; n: number } | null>(null)
+  // The same rule as the Projects page's New project button: any member, never a guest.
+  const canCreateProject = activeOrg != null && activeGuestOrg == null
+  // The same rule as the old Teams page's New team button: org Maintainer or above.
+  const canCreateFolder = activeOrg != null && activeGuestOrg == null && (activeOrg.role?.level ?? 0) >= 600
+  const newFolder = async (name: string) => {
+    if (!session?.jwt || !activeOrg) throw new Error("not signed in")
+    await createTeam(session.jwt, activeOrg.id, name)
+    if (state.status === "ready") state.reload()
+  }
+  // The project's own "Add language" form, over this page, as the editor header opens it.
+  const newLanguage = (projectId: string) => {
+    navigate(projectLanguageSettingsPath(projectId, "add-lane"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  }
   const lens = parseAccessLens(params.get("lens"))
   const filter = parsePeopleFilter(params.get("people"))
   const now = state.status === "ready" ? state.asOf : 0
@@ -147,18 +167,18 @@ export function OrgAccessPage() {
                     <TabsTrigger value="people">{t("org.overviewLaneTable.peopleColumn")}</TabsTrigger>
                   </TabsList>
                   <TabsContent value="places" className="mt-3">
-                    {lens === "places" && (
-                      <PlacesLens
+                    {lens === "places" && activeOrg && (
+                      <AccessFolderTree
                         tree={state.data.tree}
                         query={query}
-                        onGiveAccess={canGive ? setGiveAt : undefined}
-                        editing={activeOrg ? {
-                          orgId: activeOrg.id,
-                          grantable: state.data.grantable,
-                          people: state.data.people,
-                          viewerUsername: session?.username ?? null,
-                          onChanged: state.reload,
-                        } : undefined}
+                        orgId={activeOrg.id}
+                        grantable={state.data.grantable}
+                        people={state.data.people}
+                        viewerUsername={session?.username ?? null}
+                        onChanged={state.reload}
+                        onNewProject={canCreateProject ? (folderId) => setCreatingProject((prev) => ({ folderId, n: (prev?.n ?? 0) + 1 })) : undefined}
+                        onNewFolder={canCreateFolder ? newFolder : undefined}
+                        onNewLanguage={newLanguage}
                       />
                     )}
                   </TabsContent>
@@ -176,14 +196,14 @@ export function OrgAccessPage() {
                   </TabsContent>
                 </Tabs>
               </div>
-              {activeOrg && (
-                <GiveAccessDialog
-                  open={giveAt != null}
-                  onOpenChange={(open) => { if (!open) setGiveAt(null) }}
+              {creatingProject && activeOrg && (
+                <ProjectCreateDialog
+                  key={creatingProject.n}
                   orgId={activeOrg.id}
-                  payload={state.data}
-                  initialPlace={giveAt ?? undefined}
-                  onGranted={state.reload}
+                  open
+                  onOpenChange={(open) => { if (!open) setCreatingProject(null) }}
+                  initialTeamIds={creatingProject.folderId == null ? undefined : [creatingProject.folderId]}
+                  onCreated={() => state.reload()}
                 />
               )}
               {lens === "people" && (

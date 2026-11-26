@@ -109,6 +109,47 @@ export const org = defineNamespace({
       other: "{count} reach it from {from}",
     }),
 
+    // -- People & access folder tree: organization → projects → languages --
+    "org.access.tree.kindFolder": "folder",
+    "org.access.tree.newFolder": "New folder",
+    "org.access.tree.newIn": "Add something to {name}",
+    "org.access.tree.folderName": "Folder name",
+    "org.access.tree.createFolder": "Create folder",
+    "org.access.tree.folderFailed": "Couldn't create the folder. Nothing was changed.",
+    "org.access.tree.peopleAt": plural({
+      one: "{count} person added to {place}. Show who has access",
+      other: "{count} people added to {place}. Show who has access",
+    }),
+    "org.access.tree.nobodyHere": "No one added",
+    "org.access.tree.addedHere": plural({
+      one: "{count} person added here",
+      other: "{count} people added here",
+    }),
+    "org.access.tree.fromAbove": plural({
+      one: "{count} with access from folders above",
+      other: "{count} with access from folders above",
+    }),
+    "org.access.tree.from": "from {name}",
+    "org.access.tree.you": "You",
+    "org.access.tree.addHint.org": "They get this role in every project and language in the organization.",
+    "org.access.tree.addHint.team": "They get this role in every project in this team.",
+    "org.access.tree.addHint.project": "They get this role in this project and every language in it.",
+    "org.access.tree.addHint.lane": "They get this role in this language only.",
+    "org.access.tree.changePerson": "Change",
+    "org.access.tree.roleBlurb.700": "Everything, including billing",
+    "org.access.tree.roleBlurb.600": "Administer everything inside",
+    "org.access.tree.roleBlurb.500": "Run projects: settings, people, languages",
+    "org.access.tree.roleBlurb.400": "Translate and edit",
+    "org.access.tree.roleBlurb.300": "Review and validate",
+    "org.access.tree.roleBlurb.200": "Read and comment",
+    "org.access.tree.roleBlurb.100": "Read only",
+    "org.access.tree.addAs": "Add as {role}",
+    "org.access.tree.addFailed": "Couldn't add them. Nothing was changed.",
+    "org.access.tree.newProject": "New project",
+    "org.access.tree.newLanguage": "Add a language to {name}",
+    "org.access.tree.expand": "Expand {name}",
+    "org.access.tree.collapse": "Collapse {name}",
+
     // -- AQU-2320 Give access: "Give [person] the role [role] at [place]" + What changes --
     "org.access.give.title": "Give access",
     "org.access.give.description": "Fill in the sentence. Nothing is saved until you confirm.",
@@ -2051,6 +2092,91 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.access.tree.kindFolder": {
+        description: "Small grey label after a folder's name in the People & access tree. A folder groups projects inside an organization (stored as a team). Lower case, one word if possible.",
+      },
+      "org.access.tree.newFolder": {
+        description: "Menu item under the + button on the organization row of the People & access tree; it adds a row where a new folder is named. A folder groups projects.",
+      },
+      "org.access.tree.newIn": {
+        description: "Screen-reader label of the + button on a row that can create more than one kind of thing (a folder or a project). {name} is the row's name, not translated.",
+        placeholders: { name: "The row's name (organization, folder or project); not translated." },
+      },
+      "org.access.tree.folderName": {
+        description: "Placeholder and label of the text box where a new folder is named in the People & access tree.",
+      },
+      "org.access.tree.createFolder": {
+        description: "Button beside the folder-name box that creates the folder.",
+      },
+      "org.access.tree.folderFailed": {
+        description: "Error under the folder-name box when the folder could not be created.",
+      },
+      "org.access.tree.peopleAt": {
+        description: "Screen-reader label of the stack of avatars on a row of the People & access folder tree. {count} people were added at the place {place} (a project, language or organization name, not translated). Hovering or focusing the stack opens the full list.",
+        placeholders: { count: "How many people were added at this place.", place: "The place's name; not translated." },
+      },
+      "org.access.tree.nobodyHere": {
+        description: "Shown instead of avatars on a folder-tree row where nobody was added directly, though people may still reach it from a folder above. Very short.",
+      },
+      "org.access.tree.addedHere": {
+        description: "Heading of the first list in the folder-tree people popover: the {count} people added directly at this place.",
+        placeholders: { count: "How many people were added at this place." },
+      },
+      "org.access.tree.fromAbove": {
+        description: "Heading of the second list in the folder-tree people popover: the {count} people (or teams) who can open this place because they were added to a folder that contains it.",
+        placeholders: { count: "How many people or teams reach this place from a folder above." },
+      },
+      "org.access.tree.from": {
+        description: "Under a person's name in the folder-tree people popover: the folder their access comes from. {name} is that folder's name, not translated.",
+        placeholders: { name: "The folder, project or organization the access is set on; not translated." },
+      },
+      "org.access.tree.you": {
+        description: "Tiny pill after the signed-in person's own name in the folder-tree people popover. One short word.",
+      },
+      "org.access.tree.addHint.org": {
+        description: "Under the title of the add-person popover on the organization row: whatever role is picked applies everywhere inside the organization.",
+      },
+      "org.access.tree.addHint.team": {
+        description: "Under the title of the add-person popover on a team: the role applies to every project in the team.",
+      },
+      "org.access.tree.addHint.project": {
+        description: "Under the title of the add-person popover on a project: the role applies to the project and every language in it.",
+      },
+      "org.access.tree.addHint.lane": {
+        description: "Under the title of the add-person popover on a language: the role applies to that one language.",
+      },
+      "org.access.tree.changePerson": {
+        description: "Small button beside the chosen person in the add-person popover; it clears the choice so another person can be picked.",
+      },
+      "org.access.tree.roleBlurb.700": { description: "One-line summary under the role name Owner in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.600": { description: "One-line summary under the role name Maintainer in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.500": { description: "One-line summary under the role name Project lead in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.400": { description: "One-line summary under the role name Contributor in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.300": { description: "One-line summary under the role name Reviewer in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.200": { description: "One-line summary under the role name Commenter in the add-person popover's role list." },
+      "org.access.tree.roleBlurb.100": { description: "One-line summary under the role name Viewer in the add-person popover's role list." },
+      "org.access.tree.addAs": {
+        description: "The add-person popover's confirm button. {role} is the localized role name picked above it, e.g. \"Add as Contributor\".",
+        placeholders: { role: "Localized role name, e.g. Contributor." },
+      },
+      "org.access.tree.addFailed": {
+        description: "Error under the add-person popover when the grant could not be saved.",
+      },
+      "org.access.tree.newProject": {
+        description: "Tooltip and label of the small + button that appears when hovering the organization row in the folder tree; it opens the new-project dialog.",
+      },
+      "org.access.tree.newLanguage": {
+        description: "Tooltip and label of the small + button that appears when hovering a project row in the folder tree; it opens that project's Add language form. {name} is the project name, not translated.",
+        placeholders: { name: "The project's name; not translated." },
+      },
+      "org.access.tree.expand": {
+        description: "Screen-reader label of the chevron that opens a collapsed folder in the People & access tree. {name} is the folder's name, not translated.",
+        placeholders: { name: "The folder's name; not translated." },
+      },
+      "org.access.tree.collapse": {
+        description: "Screen-reader label of the chevron that closes an open folder in the People & access tree. {name} is the folder's name, not translated.",
+        placeholders: { name: "The folder's name; not translated." },
+      },
       "org.access.manage": {
         description:
           "AQU-2324: button or link on an older member list (organization Members, a team, a project's Members settings, a Language lane's staffing popover) that opens the People & access page on that same place. Short: it sits beside a title or in a popover.",

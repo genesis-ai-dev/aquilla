@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { CheckCircle2, Circle, Users, X } from "lucide-react"
-import { membersPath } from "@/lib/navigation/org-paths"
+import { orgAccessPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { useOrgMembers } from "@/hooks/useOrg"
@@ -100,7 +100,7 @@ export function OrgSetupChecklist({
           )}
           <span className="flex-1 text-sm">{t("org.setupChecklist.inviteTeammateStep")}</span>
           {!invitedTeammate && (
-            <Button variant="outline" onClick={() => navigate(membersPath(orgId))}>
+            <Button variant="outline" onClick={() => navigate(orgAccessPath(orgId))}>
               <Users data-icon="inline-start" /> {t("org.setupChecklist.inviteButton")}
             </Button>
           )}

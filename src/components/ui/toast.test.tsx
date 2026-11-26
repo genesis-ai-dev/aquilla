@@ -57,7 +57,7 @@ describe("toast stack", () => {
     })
     await screen.findByText("First notice")
     await screen.findByText("Second notice")
-    expect(screen.getAllByRole("button", { name: "Close toast" })).toHaveLength(2)
+    expect(screen.getAllByRole("button", { name: "Close notification" })).toHaveLength(2)
   })
 })
 

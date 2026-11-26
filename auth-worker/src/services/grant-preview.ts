@@ -126,7 +126,7 @@ const ROLE_WORD: Record<number, string> = {
   200: "Commenter",
   100: "Viewer",
 }
-const roleWord = (level: number | null | undefined) => (level == null ? "none" : (ROLE_WORD[level] ?? `level ${level}`))
+export const roleWord = (level: number | null | undefined) => (level == null ? "none" : (ROLE_WORD[level] ?? `level ${level}`))
 
 const DENIAL_REASON: Record<GrantDenial, string> = {
   owner_only: "only an Owner can grant here",
@@ -195,7 +195,7 @@ function attachedTeams(world: OrgWorld, projectId: string): string[] {
   return world.attachments.filter((a) => a.projectId === projectId).map((a) => a.teamId)
 }
 
-function resolveAt(world: OrgWorld, grants: readonly AccessGrant[], projectId: string): ResolvedRole | null {
+export function resolveAt(world: OrgWorld, grants: readonly AccessGrant[], projectId: string): ResolvedRole | null {
   return resolveFromGrants(grants, {
     projectId,
     orgId: world.org.id,
@@ -205,7 +205,7 @@ function resolveAt(world: OrgWorld, grants: readonly AccessGrant[], projectId: s
   })
 }
 
-function effectiveFrom(world: OrgWorld, resolved: ResolvedRole | null, projectRef: ScopeRef): EffectiveRole | null {
+export function effectiveFrom(world: OrgWorld, resolved: ResolvedRole | null, projectRef: ScopeRef): EffectiveRole | null {
   const top = resolved?.chain[0]
   if (!resolved || !top) return null
   if (top.source === "group") {

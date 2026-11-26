@@ -291,3 +291,68 @@ describe("Pen test 2026-08-17 — role changes notify the sync-worker", () => {
     ).toBe(false)
   })
 })
+
+// AQU-2321: the Places lens removes team and org grants too. Before this,
+// only the project-member routes told the sync-worker, so someone removed from
+// a team kept a live editor open on every project that team gave them. These
+// pin that team and org removal send the same notice — and only for projects
+// nothing else still opens.
+describe("AQU-2321 — team and org removal notify the sync-worker for each project lost", () => {
+  async function seedTeamOrg(): Promise<void> {
+    await seedUser(1, "owner")
+    await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (9, 'Org', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (9, 1, 700, 1), (9, 2, 300, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('t-a', 'A', 9, 1), ('t-b', 'B', 9, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (5, 9, 'Team', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (5, 't-a', 300, 1), (5, 't-b', 300, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id, added_by) VALUES (5, 2, 1)").run()
+    // A direct row keeps bob on t-b after the team goes.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('t-b', 2, 300, 1)",
+    ).run()
+  }
+  const notified = (spy: ReturnType<typeof vi.fn>) =>
+    spy.mock.calls
+      .map((c) => String(c[0]).match(/\/admin\/projects\/([^/]+)\/member-removed$/)?.[1])
+      .filter((id): id is string => id != null)
+      .sort()
+
+  it("leaving a team ejects them from the project it alone opened, not from one a direct grant keeps", async () => {
+    await seedTeamOrg()
+    const fetchSpy = stubFetch()
+    const res = await app.request(
+      "/api/v2/orgs/9/groups/5/members/2",
+      { method: "DELETE", headers: authHeader(await jwtFor("owner")) },
+      envWithSyncWorker(),
+    )
+    expect(res.status).toBe(200)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(notified(fetchSpy)).toEqual(["t-a"])
+  })
+
+  it("an org removal (which also takes their teams) ejects them wherever nothing else admits them", async () => {
+    await seedTeamOrg()
+    const fetchSpy = stubFetch()
+    const res = await app.request(
+      "/api/v2/orgs/9/members/2",
+      { method: "DELETE", headers: authHeader(await jwtFor("owner")) },
+      envWithSyncWorker(),
+    )
+    expect(res.status).toBe(200)
+    await new Promise((r) => setTimeout(r, 0))
+    // AQU-2357: an org removal takes the person's direct grants in that org
+    // too, so the t-b row that survives a team removal (above) does not survive
+    // this one. t-a is lost through the team, t-b through the direct grant;
+    // each project gets exactly one notice.
+    expect(notified(fetchSpy)).toEqual(["t-a", "t-b"])
+    const call = fetchSpy.mock.calls.find((c) => String(c[0]).includes("/admin/projects/t-a/member-removed"))
+    expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ userId: 2, username: "bob" })
+  })
+})

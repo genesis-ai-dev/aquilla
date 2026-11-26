@@ -20,6 +20,7 @@ import {
   visibleTo,
   type NamedGrant,
   type NamedGrantRow,
+  type ScopeRef,
 } from "../services/access-payload"
 import {
   assembleAccessTree,
@@ -33,10 +34,11 @@ import {
 import { assembleOrgPeople, type OrgAccessPerson } from "../services/org-access-people"
 import { grantableMap, previewGrant, type GrantTarget } from "../services/grant-preview"
 import { loadGrantTarget, loadGrantWorld } from "../services/grant-preview-load"
-import type { PlaceGrantability } from "../../../src/lib/access/grant-rules"
+import { removalCheck, type PlaceGrantability } from "../../../src/lib/access/grant-rules"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { getOrgMemberRole } from "../services/org-permissions"
 import { resolveProjectRole } from "../services/project-permissions"
+import { previewRemoval, type GrantRef, type RemovalPreview } from "../services/removal-preview"
 import { INVITE_MIN_ROLE, ROLE, type Env } from "../types"
 
 export type { AccessTreeNode, DirectGrantee, OrgAccessPerson }
@@ -248,6 +250,95 @@ orgAccess.post("/:orgId/access/preview", authMiddleware, zValidator("json", prev
   const { status, message, ...rest } = result.refusal
   return c.json({ error: message, ...rest }, status)
 })
+
+/**
+ * AQU-2321: POST /api/v2/orgs/:orgId/access/removal-preview — the Remove
+ * dry run. Writes nothing. 200 `{ preview }` (services/removal-preview.ts);
+ * a removal this viewer could not make is refused with
+ * `{ error, code, place, roleLevel, cap }`. The visibility gate is the
+ * grant preview's, unchanged: every place named and the person must be on
+ * this viewer's lenses, and every miss is the one identical 403.
+ */
+const removalBody = z.object({
+  person: z.union([
+    z.object({ userId: z.string().regex(/^\d{1,18}$/) }),
+    // A pending invite, by its People-lens row id (invite:org:<token> / invite:project:<id>:<token>).
+    z.object({ inviteId: z.string().regex(/^invite:(org|project):/).max(600) }),
+  ]),
+  grants: z
+    .array(z.object({ type: z.enum(["org", "team", "project", "lane"]), id: z.string().min(1).max(256) }))
+    .max(20)
+    .default([]),
+})
+
+orgAccess.post("/:orgId/access/removal-preview", authMiddleware, zValidator("json", removalBody), async (c) => {
+  const orgId = Number(c.req.param("orgId"))
+  if (!Number.isSafeInteger(orgId) || orgId <= 0) return c.json({ error: "bad org id" }, 400)
+  const vs = new ViewerScope(c.env, c.get("user"))
+  const hidden = () => c.json({ error: "no access to this roster" }, 403)
+  const access = await buildOrgAccess(c.env, vs, orgId, () => hasActiveElevation(c))
+  if (!access.ok) return hidden()
+  const body = c.req.valid("json")
+  const { grantable, people } = access.payload
+  if (body.grants.some((g) => !(`${g.type}:${g.id}` in grantable))) return hidden()
+
+  if ("inviteId" in body.person) {
+    const inviteId = body.person.inviteId
+    const row = people.find((p) => p.userId === inviteId && p.pendingInvite)
+    if (!row) return hidden()
+    const preview = invitePreview(row, grantable)
+    if ("refusal" in preview) return c.json(preview.refusal, 403)
+    return c.json({ preview })
+  }
+
+  const userId = body.person.userId
+  if (!people.some((p) => p.userId === userId && !p.pendingInvite)) return hidden()
+  if (body.grants.length === 0) return c.json({ error: "name at least one grant to remove" }, 400)
+  const lane = body.grants.find((g) => g.type === "lane")
+  if (lane) {
+    return c.json({ error: "a language's members change from the project's lane staffing", code: "lane_needs_staffing" }, 409)
+  }
+  const loaded = await loadGrantWorld(c.env, vs, orgId)
+  if (!loaded) return hidden()
+  const target = await loadGrantTarget(c.env, orgId, Number(userId))
+  if (!target) return hidden()
+  const refs = body.grants.map((g) => ({ type: g.type as GrantRef["type"], id: g.id }))
+  const result = previewRemoval(loaded.world, loaded.granter, target, refs)
+  if (result.ok) return c.json({ preview: result.preview })
+  if ("notFound" in result) return hidden()
+  const { status, message, ...rest } = result.refusal
+  return c.json({ error: message, ...rest }, status)
+})
+
+/** An invite opens only the places it names; cancelling it takes exactly those, and keeps nothing. */
+function invitePreview(
+  row: OrgAccessPerson,
+  grantable: Record<string, PlaceGrantability>,
+): RemovalPreview | { refusal: { error: string; code: string } } {
+  const removes = row.grants.map((g) => {
+    const project = g.scopePath.find((s) => s.type === "project")
+    const grant: GrantRef = project ? { type: "project", id: project.id } : { type: "org", id: g.scopePath[0]?.id ?? "" }
+    return { grant, path: g.scopePath, roleLevel: g.roleLevel }
+  })
+  for (const { grant, path } of removes) {
+    const place = grantable[`${grant.type}:${grant.id}`]
+    const check = place ? removalCheck(grant.type, place, { roleLevel: 0, isSelf: false, invite: true }) : null
+    if (!check?.ok) {
+      const name = path.find((s) => s.type === grant.type)?.name ?? ""
+      const who = grant.type === "org" ? "an Owner" : "a Project lead or above"
+      return { refusal: { error: `cannot cancel this invitation to ${grant.type} "${name}": only ${who} there can cancel it`, code: check?.denial ?? "owner_only" } }
+    }
+  }
+  return {
+    person: { userId: row.userId, displayName: row.displayName },
+    invite: true,
+    removes,
+    loses: removes.map((r) => r.path[r.path.length - 1]).filter((s): s is ScopeRef => s != null),
+    keeps: [],
+    leavesTeams: [],
+    guest: { before: false, after: false },
+  }
+}
 
 orgAccess.get("/:orgId/access", authMiddleware, async (c) => {
   const orgId = Number(c.req.param("orgId"))

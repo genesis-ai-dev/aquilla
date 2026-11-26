@@ -154,9 +154,9 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { CellEditingTier, CellLabelTier, MilestoneFloor } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier, MilestoneFloor, SourceTextTier } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
-import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, MILESTONE_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, MILESTONE_FLOOR_OPTIONS, SOURCE_TEXT_FLOOR_OPTIONS, cellEditingTierLabel, sourceTextTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -275,6 +275,8 @@ interface SavedSettings {
   cellEditingFloor: CellEditingTier | null
   /** AQU-2408: who may type a label on a cell; null = maintainer (the default). */
   cellLabelFloor: CellLabelTier | null
+  /** AQU-2647: the project's own source-text floor; null = follow the organization. */
+  sourceTextFloor: SourceTextTier | null
   /** AQU-2309: who may set milestones; null = maintainer (the default). */
   milestoneFloor: MilestoneFloor | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
@@ -343,6 +345,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     cellLabelFloor: project.cellLabelFloor ?? null,
+    sourceTextFloor: project.sourceTextFloor ?? null,
     milestoneFloor: project.milestoneFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
     filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
@@ -491,6 +494,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1768: what "Organization default" means for the media settings.
     // Defaulted for callers (and test doubles) that predate the field.
     orgMediaDefaults = NO_ORG_MEDIA_DEFAULTS,
+    orgSourceTextFloor = null,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -765,7 +769,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    cellEditingFloor, cellLabelFloor, milestoneFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
+    cellEditingFloor, cellLabelFloor, sourceTextFloor, milestoneFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
     bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   } = live
@@ -784,6 +788,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-2408: no organization default — the built-in one is maintainer.
   const effectiveCellLabelFloor: CellLabelTier = cellLabelFloor ?? "maintainer"
+  // AQU-2647: the project's own tier, else the organization's, else Maintainer.
+  const effectiveSourceTextFloor: SourceTextTier = sourceTextFloor ?? orgSourceTextFloor ?? "maintainer"
   // AQU-2309: no organization default — the built-in one is maintainer.
   const effectiveMilestoneFloor: MilestoneFloor = milestoneFloor ?? "maintainer"
   // A known role below project lead does not see the control. A project lead
@@ -1029,7 +1035,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label", "milestone", "who can set milestones"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label", "milestone", "who can set milestones", "source text", "who can edit source", "hide cell", "split"] },
     // AQU-2342: the ONE instructions text every AI draft reads (it replaced
     // the brief, the system prompt and Living Memory's instruction entries).
     // Its own section id gives it a row in the AI pane AND makes a search for
@@ -1756,6 +1762,56 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 }
               />
               )}
+              {/* AQU-2647: who may edit source text, hide a cell, and split a
+                  line at quotes. The project's own tier, or the organization's. */}
+              <SettingsRow
+                saveId="sourceTextFloor"
+                label={<label htmlFor="source-text-floor">{t("projectSettings.sourceText.label")}</label>}
+                description={t("projectSettings.sourceText.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                    <OrgDefaultSource
+                      id="source-text-floor-source"
+                      settingLabel={t("projectSettings.sourceText.label")}
+                      inherited={sourceTextFloor == null}
+                      orgOptionLabel={t("projectSettings.mediaDefaults.orgValue", {
+                        value: sourceTextTierLabel(t, orgSourceTextFloor ?? "maintainer"),
+                      })}
+                      disabled={!canChangeShared}
+                      onChange={(inherit) => setShared("sourceTextFloor", inherit ? undefined : effectiveSourceTextFloor)}
+                    />
+                    <Select
+                      items={SOURCE_TEXT_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: t(o.labelKey),
+                      }))}
+                      disabled={!canChangeShared}
+                      value={effectiveSourceTextFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveSourceTextFloor) setShared("sourceTextFloor", value as SourceTextTier)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="source-text-floor"
+                        data-testid="settings-source-text-floor"
+                        aria-label={t("projectSettings.sourceText.label")}
+                        className="w-80 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {SOURCE_TEXT_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    </div>
+                  </DisabledFieldTooltip>
+                }
+              />
               {/* AQU-2408: who may type a label on a cell. Two rungs, maintainer
                   unless opened to project leads; no organization default. The
                   tier is enforced where the Label field is drawn, like the one

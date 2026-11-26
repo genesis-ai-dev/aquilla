@@ -684,7 +684,7 @@ export class LiveFilesData implements ToolFilesHostData {
     let version: string
     if (existing) {
       if (existing.value === value) return { id, version: existing.eventId }
-      version = await emitSourceCellCommit({ projectId: this.opts.projectId, fileId, cellId, parentId: existing.eventId, value, author: this.opts.author, toolOrigin: origin })
+      version = await emitSourceCellCommit({ projectId: this.opts.projectId, fileId, cellId, parentId: existing.eventId, value, author: this.opts.author, toolOrigin: origin, sourceTextExempt: true })
     } else {
       const tail = [...rows.values()].pop()
       version = await emitSourceCellCreate({
@@ -761,7 +761,7 @@ export class LiveFilesData implements ToolFilesHostData {
           out.push({ id: pl.id, version: existing.eventId })
           continue
         }
-        version = await emitSourceCellCommit({ projectId: this.opts.projectId, fileId, cellId: pl.cellId, parentId: existing.eventId, value: pl.value, author: this.opts.author, toolOrigin: origin })
+        version = await emitSourceCellCommit({ projectId: this.opts.projectId, fileId, cellId: pl.cellId, parentId: existing.eventId, value: pl.value, author: this.opts.author, toolOrigin: origin, sourceTextExempt: true })
       } else {
         version = await emitSourceCellCreate({
           projectId: this.opts.projectId,

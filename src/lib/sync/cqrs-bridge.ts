@@ -26,6 +26,18 @@ export interface CqrsOutboxBridge {
    *  role gate) so a guaranteed-403 never enters the outbox. Null = unknown →
    *  fail open and let the server decide. */
   roleLevel?: number | null
+  /**
+   * AQU-2647: clearance for editing source text — the project role, or a
+   * higher grant on any language lane. Used only for `source.cell.commit`
+   * and `source.cell.visibility.set`. Absent falls back to `roleLevel`.
+   */
+  sourceTextAuthority?: number | null
+  /**
+   * AQU-2647: the source-text floor in force for this project (default
+   * Maintainer). Absent while the role is known reads as Maintainer, so a
+   * project lead does not queue an edit the server will refuse.
+   */
+  sourceTextFloor?: number | null
   /** AQU-2304: the org's configurable `file.create` floor for THIS project, as
    *  the project's settings response resolved it. The emit layer raises the
    *  static mirror's PROJECT_LEAD bar with it so a `file.create` the org has

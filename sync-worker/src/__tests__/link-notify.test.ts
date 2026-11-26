@@ -41,7 +41,7 @@ async function makeToken(overrides: Record<string, unknown> = {}): Promise<strin
   return makeTestToken(SECRET, {
     projectId: UPSTREAM,
     fileId: "file-x",
-    role: 500,
+    role: 600,
     ...overrides,
   } as never)
 }

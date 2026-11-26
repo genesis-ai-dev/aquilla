@@ -97,6 +97,7 @@ import {
   MEDIA_DEFAULT_SLUGS,
   isValidMediaDefault,
 } from "../../../db/shared/media-setting-defaults"
+import { isSourceTextTier } from "../../../db/shared/source-text-floor"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -687,6 +688,21 @@ orgSettings.on(
       if (!isValidMediaDefault(key, raw)) {
         return c.json({ error: `${key} has an invalid value` }, 400)
       }
+    }
+    // AQU-2647: who may edit source text. A typo would read as "no org
+    // default" and every project would silently tighten to Maintainer.
+    // The blob is replaced wholesale, so a client that loaded settings
+    // before this key existed would drop it on save. Omission keeps the
+    // stored tier (the migration's Project Lead for Biblica ETT). Sending
+    // a tier replaces it.
+    if (body.settings.sourceTextFloor === undefined) {
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const stored = (existingForPolicyCheck.settings as { sourceTextFloor?: unknown }).sourceTextFloor
+      if (isSourceTextTier(stored)) body.settings.sourceTextFloor = stored
+    }
+    const rawSourceTextFloor = body.settings.sourceTextFloor
+    if (rawSourceTextFloor !== undefined && !isSourceTextTier(rawSourceTextFloor)) {
+      return c.json({ error: "sourceTextFloor has an invalid value" }, 400)
     }
     const rawTranscription = body.settings[TRANSCRIPTION_KEY]
     if (rawTranscription !== undefined) {

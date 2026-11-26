@@ -6,11 +6,14 @@
 // grants no more than the credential that minted it, for no longer:
 //   - a file bigger than the inline cap lands byte-for-byte, attributed to the
 //     minting credential, under the name/kind the ticket fixed
-//   - a URL works once
+//   - a URL works once, for its whole life (no limiter window boundary
+//     resets it) and also when the spent-marker table is missing
 //   - revoking the credential or losing the project role kills the URL
 //   - a tampered ticket, or a sync JWT signed with the raw SYNC_SECRET_KEY,
 //     is not accepted (the ticket key is derived, so tokens cannot cross)
 //   - a credential that may not upload cannot mint one
+//   - a stored file too big to parse in a 128 MB isolate is refused before
+//     the parser reads it (storing allows 64 MiB, parsing keeps 25 MB)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
@@ -20,6 +23,8 @@ import { sign } from 'hono/jwt'
 import { handleExternalMcpRequest } from '../external/mcp-route'
 import { handleUploadTicketRequest } from '../external/upload-tickets'
 import { MCP_ARTIFACT_MAX_BYTES } from '../external/mcp-artifact-upload'
+import { parseArtifactToCells, MAX_PARSE_BYTES } from '../external/import-parse-core'
+import type { ExternalEnv } from '../external/types'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -146,6 +151,26 @@ describe('create_upload_url', () => {
     expect(await tdb.rows('artifacts')).toHaveLength(1)
   })
 
+  it('stays spent for the ticket\'s whole life, not until a window boundary', async () => {
+    const url = await mintUrl()
+    const claims = JSON.parse(atob(url.split('/uploads/')[1].split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    expect((await put(url, new Uint8Array([1])))!.status).toBe(200)
+    // The marker is keyed on the ticket's own exp. An epoch-aligned limiter
+    // window would let a ticket spent at 23:59 UTC be replayed at 00:01.
+    const { rows } = await tdb.pg.query<{ until: number }>(
+      `SELECT extract(epoch FROM window_start)::int AS until FROM rate_limit_counters
+       WHERE kind = 'artifact_upload_ticket' AND identifier = $1`, [claims.jti])
+    expect(rows).toEqual([{ until: claims.exp }])
+  })
+
+  it('refuses when the spent marker cannot be written, even if the table is missing', async () => {
+    const url = await mintUrl()
+    await tdb.pg.query('DROP TABLE rate_limit_counters')
+    const res = (await put(url, new Uint8Array([1])))!
+    expect(res.status).toBe(409)
+    expect(await tdb.rows('artifacts')).toHaveLength(0)
+  })
+
   it('dies with the credential: revoked after minting → refused', async () => {
     const url = await mintUrl()
     await tdb.pg.query('UPDATE api_credentials SET revoked_at = now() WHERE id = $1', [CRED])
@@ -185,5 +210,16 @@ describe('create_upload_url', () => {
     })
     expect(isError).toBe(true)
     expect(JSON.stringify(payload)).toMatch(/permission_denied/)
+  })
+
+  it('stores a file too big to parse, but the parser refuses it before reading', async () => {
+    const res = (await put(await mintUrl(), new Uint8Array([1, 2, 3])))!
+    const { artifactId } = await res.json() as { artifactId: string }
+    await tdb.pg.query('UPDATE artifacts SET size_bytes = $1', [MAX_PARSE_BYTES + 1])
+    const get = vi.spyOn(bucket, 'get')
+    const parsed = await parseArtifactToCells(env as unknown as ExternalEnv, PROJECT, artifactId)
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(await parsed.response.text()).toMatch(/too large to parse/)
+    expect(get).not.toHaveBeenCalled()
   })
 })

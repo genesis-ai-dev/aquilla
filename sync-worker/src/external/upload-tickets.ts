@@ -19,10 +19,8 @@
 // role are checked again, then the bytes go through the REST upload's own
 // storeArtifact (size cap, audio allowlist, per-user rate limit).
 //
-// Single use is best effort: the ticket's jti is spent through the shared
-// rate-limit counters, so a replay inside the window is refused. Even a replay
-// that got through would only add another artifact as the same credential,
-// bounded by the per-user upload limit.
+// Single use: the ticket's jti is spent with an INSERT that only one request
+// can win (see spendTicket), before any bytes are stored.
 
 import { sign, verify } from 'hono/jwt'
 import { errorResponse } from './errors'
@@ -31,7 +29,7 @@ import { uuidv7 } from './uuid'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { revalidateApiCredentialById, type ApiCredentialContext } from '../../../db/shared/api-credentials'
-import { enforceRateLimit } from '../../../db/shared/rate-limit'
+import type { AquillaDb } from '../../../db/shim/postgres'
 
 export const UPLOAD_TICKET_TTL_SECONDS = 15 * 60
 const AUDIENCE = 'artifact-upload'
@@ -110,6 +108,31 @@ async function readTicket(secret: string, ticket: string): Promise<UploadTicketC
   }
 }
 
+/** Spend a ticket's jti exactly once. A row keyed (kind, jti, exp) in
+ *  rate_limit_counters is the spent marker: the primary key makes the INSERT
+ *  the atomic check, and keying the row on the ticket's own `exp` (not an
+ *  epoch-aligned window, as enforceRateLimit does) means no window boundary
+ *  inside the ticket's life can reset it. The prune sweep drops the row an hour
+ *  after `exp`, when the ticket no longer verifies anyway. Any error refuses,
+ *  a missing table included (enforceRateLimit lets that case through). */
+async function spendTicket(db: AquillaDb, claims: UploadTicketClaims): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare(
+        `INSERT INTO rate_limit_counters (kind, identifier, window_start, hits)
+         VALUES ('artifact_upload_ticket', ?, to_timestamp(?::double precision), 1)
+         ON CONFLICT (kind, identifier, window_start) DO NOTHING
+         RETURNING hits`,
+      )
+      .bind(claims.jti, claims.exp)
+      .first<{ hits: number }>()
+    return row != null
+  } catch (err) {
+    console.warn('[upload-ticket] could not spend ticket, refusing:', err)
+    return false
+  }
+}
+
 export async function handleUploadTicketRequest(request: Request, env: ExternalEnv): Promise<Response | null> {
   const m = PATH_RE.exec(new URL(request.url).pathname)
   if (!m) return null
@@ -128,16 +151,7 @@ export async function handleUploadTicketRequest(request: Request, env: ExternalE
   const authed = await authorizeArtifactCredential(env, cred, claims.projectId, ROLE.CONTRIBUTOR, { writes: true })
   if (!authed.ok) return authed.response
 
-  // Spend the ticket. The window outlasts the ticket's TTL; fail closed so a
-  // limiter outage cannot turn one URL into many.
-  const spent = await enforceRateLimit(db, {
-    kind: 'artifact_upload_ticket',
-    identifier: claims.jti,
-    limit: 1,
-    windowMinutes: 24 * 60,
-    failMode: 'closed',
-  })
-  if (!spent.allowed) {
+  if (!(await spendTicket(db, claims))) {
     return errorResponse('conflict', 'this upload URL was already used; call create_upload_url again')
   }
 

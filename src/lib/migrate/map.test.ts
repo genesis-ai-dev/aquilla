@@ -364,6 +364,19 @@ describe("mapFilePairToEvents", () => {
     expect(lastCommit.payload.valueHtml).toBe("<p>فِي&nbsp;ٱلْبَدْءِ&nbsp;&amp;خَلَقَ</p>")
   })
 
+  it("keeps a Codex footnote in the committed plain text and html (AQU-2735)", () => {
+    const note = "Yesu Anó Tuhe, Robbi Bapó Dio dale hubunge hó istimewo."
+    const input = fixture()
+    input.target!.cells[1].metadata.edits![2].value =
+      `<p>nené moye Dio.<sup data-footnote="&lt;p&gt;${note}&lt;/p&gt;" class="footnote-marker">1</sup></p>`
+    const ev = mapFilePairToEvents(input, OPTS)
+    const lastCommit = ev.filter((e) => e.kind === "target.cell.commit").at(-1)!
+    const usfm = `\\f + \\ft ${note}\\f*`
+    expect(lastCommit.payload.value).toBe(`nené moye Dio.${usfm}`)
+    expect(lastCommit.payload.valueHtml).toBe(`<p>nené moye Dio.${usfm}</p>`)
+    expect(lastCommit.payload.valueHtml).not.toContain("data-footnote")
+  })
+
   it("is idempotent: identical input → byte-identical event stream", () => {
     expect(mapFilePairToEvents(fixture(), OPTS)).toEqual(mapFilePairToEvents(fixture(), OPTS))
   })

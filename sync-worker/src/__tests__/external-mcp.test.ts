@@ -264,10 +264,10 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects',
         // Omnilingual ASR spec §7.
         'transcribe_audio', 'transcription_status',
-        'upload_artifact', 'wait_for_changeset',
+        'upload_artifact', 'create_upload_url', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(40)
+    expect(body.result.tools).toHaveLength(41)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

@@ -1,6 +1,9 @@
-import { handleExternalArtifactsRequest } from './artifacts-route'
+import { authorizeArtifactCredential, handleExternalArtifactsRequest } from './artifacts-route'
+import { mintUploadUrl } from './upload-tickets'
+import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import type { McpToolResult } from './mcp-handlers'
+import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 
 export const MCP_ARTIFACT_MAX_BYTES = 512 * 1024
 
@@ -55,4 +58,30 @@ export async function uploadArtifact(
   const response = await handleExternalArtifactsRequest(request, env)
   if (!response) return result({ error: { code: 'not_found', message: 'artifact route did not match' } }, true)
   return result(await response.json(), !response.ok)
+}
+
+/** create_upload_url: a signed PUT URL for files too large for upload_artifact.
+ *  Checks write access, scope and role now so a refusal comes before the
+ *  transfer; the PUT checks them again (upload-tickets.ts). */
+export async function createUploadUrl(
+  env: ExternalEnv, cred: ApiCredentialContext, args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const invalid = (message: string) => result({ error: { code: 'validation_failed', message } }, true)
+  for (const key of ['projectId', 'name', 'contentType']) {
+    if (typeof args[key] !== 'string' || args[key].trim().length === 0) return invalid(`${key} is required`)
+  }
+  const { projectId, name, contentType } = args as Record<string, string>
+  if (args.kind !== 'source' && args.kind !== 'audio') return invalid('kind must be source or audio')
+  const authed = await authorizeArtifactCredential(env, cred, projectId, ROLE.CONTRIBUTOR, { writes: true })
+  if (!authed.ok) return result(await authed.response.json(), true)
+  const minted = await mintUploadUrl(env, cred, { projectId, name, kind: args.kind, contentType })
+  return result({
+    ...minted,
+    contentType,
+    instructions:
+      'PUT the raw file bytes to uploadUrl before expiresAt (one use; no Authorization header). ' +
+      'The response is { artifactId, sha256, sizeBytes, kind }: pass artifactId on, and compare ' +
+      'sha256 with the local file.',
+    curl: `curl --fail-with-body -X PUT --data-binary @<path-to-file> '${minted.uploadUrl}'`,
+  })
 }

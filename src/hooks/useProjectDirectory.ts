@@ -1,4 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useProjectNameIndex } from "./useProjectNameIndex"
+import { useIndexedProjectMatches } from "./useIndexedProjectMatches"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import {
   getPortfolioPage,
@@ -16,8 +18,8 @@ export type DirectoryProject = PortfolioProject & {
 }
 
 /**
- * Paged project directory for org / all-orgs tables. Search hits the server
- * (debounced); scroll calls `loadMore` with the keyset cursor.
+ * Paged project directory for org / all-orgs tables. Search uses a validated
+ * local name index with debounced server search as fallback; scroll calls `loadMore` with the keyset cursor.
  */
 export function useProjectDirectory(opts: {
   jwt: string | null
@@ -44,10 +46,12 @@ export function useProjectDirectory(opts: {
     () => (orgKey ? orgKey.split(",").map((id) => Number(id)) : []),
     [orgKey],
   )
-  const debouncedQuery = useDebouncedValue(query, PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS)
+  const [projects, setProjects] = useState<DirectoryProject[]>([])
+  const index = useProjectNameIndex(jwt, scopedIds, enabled, refreshKey)
+  const indexed = useIndexedProjectMatches(index, query, jwt, scopedIds, projects)
+  const debouncedQuery = useDebouncedValue(indexed ? "" : query, PROJECT_DIRECTORY_SEARCH_DEBOUNCE_MS)
   const fetchKey = `${enabled}:${jwt}:${orgKey}:${debouncedQuery}:${refreshKey}`
   const seedKey = enabled && jwt && orgKey && debouncedQuery.trim() === "" ? orgKey : null
-  const [projects, setProjects] = useState<DirectoryProject[]>([])
   const [settledKey, setSettledKey] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -138,6 +142,7 @@ export function useProjectDirectory(opts: {
     })()
   }, [enabled, jwt, scopedIds, debouncedQuery])
 
+  if (indexed) return { ...indexed, loading: false, searching: false, loadingMore: false, error: null }
   return {
     projects,
     loading,

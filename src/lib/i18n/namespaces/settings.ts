@@ -126,7 +126,7 @@ export const settings = defineNamespace({
     "settings.transcription.model.omniFast": "Omnilingual fast",
     "settings.transcription.model.omniFastDescription":
       "Fastest. A rough phonetic first pass in 1,600+ languages; best followed by the AI cleanup.",
-    "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
+    "settings.transcription.model.zeroShot": "Omnilingual zero-shot",
     "settings.transcription.model.zeroShotDescription":
       "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
     "settings.transcription.model.supports": "Supports {language}",
@@ -159,8 +159,7 @@ export const settings = defineNamespace({
     "settings.transcription.zeroShot.batchConfirm": "Transcribe",
     "settings.transcription.zeroShot.orgLabel": "Allow zero-shot transcription",
     "settings.transcription.zeroShot.orgDescription":
-      "Members can choose the Omnilingual Zero-Shot model in their Preferences. It learns a " +
-      "language from the project's own recordings, and uses more credits than the automatic model.",
+      "Members can choose the Omnilingual zero-shot model in their Preferences. It learns a language from the project's own recordings, and uses more credits than the automatic model.",
     "settings.transcription.zeroShot.orgSaveFailed": "Could not save that setting",
     "settings.transcription.zeroShot.orgBlocked": "Only organization admins can change this.",
 
@@ -239,7 +238,7 @@ export const settings = defineNamespace({
     "settings.mediaDefaults.timingLockedDescription":
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
-      "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
+      "Whether maintainers may add, group and recolor timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
     // AQU-1967 / AQU-2632: this row names CELLS, and the rung picked here is
     // the whole rule: whoever it admits can remove any cell, imported ones
     // included (it used to stop at Maintainer for imported cells, which made
@@ -283,11 +282,9 @@ export const settings = defineNamespace({
       "A contributor or above can claim a book, chapter or take for themselves. Leads and " +
       "maintainers can always assign work to anyone, whatever this is set to.",
     "settings.laneAssignmentAuthority.label": "Allow language lane coordinators to assign work",
-    "settings.laneAssignmentAuthority.summary": "Members limited to some language lanes can assign work inside them.",
+    "settings.laneAssignmentAuthority.summary": "Members limited to specific language lanes can assign work inside them.",
     "settings.laneAssignmentAuthority.info":
-      "Give a mentor or coordinator the language lanes they look after under Members, and they " +
-      "can hand out chapters there without any other admin rights. Members who aren't limited " +
-      "to some language lanes aren't affected.",
+      "Give a mentor or coordinator the language lanes they look after under Members, and they can hand out chapters there without any other admin rights. Members who aren't limited to specific language lanes aren't affected.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -407,7 +404,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project Lead — default. Project managers fix their own languages",
+      "Project Lead — default. Project managers change their own languages",
     "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
@@ -530,7 +527,7 @@ export const settings = defineNamespace({
     "settings.monday.connectFailed": "Connecting to Monday.com failed. Try again.",
     // Plain-language reasons a Monday.com connection failed, shown on the
     // /oauth/callback page and in the org settings notice (lib/monday/oauth-return.ts).
-    "settings.monday.failure.cancelled": "Connecting was cancelled in Monday.com, so nothing was connected.",
+    "settings.monday.failure.cancelled": "Connecting was canceled in Monday.com, so nothing was connected.",
     "settings.monday.failure.expired":
       "This connection request expired. It has to be approved in Monday.com within 10 minutes. Start again from Aquilla.",
     "settings.monday.failure.rejected": "Monday.com didn't accept the approval. Try connecting again.",
@@ -568,7 +565,7 @@ export const settings = defineNamespace({
     "settings.monday.notAdminOptionDescription":
       "Copy the install link and send it to your Monday admin. Once they've " +
       "installed the Aquilla app, come back here and connect.",
-    "settings.monday.addToMondayAlt": "Add to monday.com",
+    "settings.monday.addToMondayAlt": "Add to Monday.com",
     "settings.monday.disconnectConfirmTitle": "Disconnect Monday.com?",
     "settings.monday.disconnectConfirmBody":
       "This removes the connection for the whole organization. Every " +

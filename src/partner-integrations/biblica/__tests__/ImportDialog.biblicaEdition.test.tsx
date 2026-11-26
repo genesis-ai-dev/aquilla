@@ -89,7 +89,7 @@ const SPLIT = /Split long notes into one cell per sentence/i
  */
 async function openBiblicaPanel(): Promise<void> {
   render(<ImportDialog {...baseProps} />)
-  fireEvent.click(screen.getByText("Biblica Study Bible Notes"))
+  fireEvent.click(screen.getByText("Biblica Study Bible notes"))
   await waitFor(() => expect(checkbox(SPLIT)).toBeInTheDocument())
 }
 

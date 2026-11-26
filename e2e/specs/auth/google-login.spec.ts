@@ -135,10 +135,10 @@ test("first-party availability retry recovers without contacting Google", async 
     return route.fulfill(!available ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
   })
   await page.goto("/login")
-  await expect(page.getByRole("button",{name:"Retry Google login availability"})).toBeVisible()
+  await expect(page.getByRole("button",{name:"Check Google login again"})).toBeVisible()
   const failedChecks = checks
   available = true
-  await page.getByRole("button",{name:"Retry Google login availability"}).click()
+  await page.getByRole("button",{name:"Check Google login again"}).click()
   await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
   expect(checks).toBeGreaterThan(failedChecks)
   expect(providerRequests).toEqual([])

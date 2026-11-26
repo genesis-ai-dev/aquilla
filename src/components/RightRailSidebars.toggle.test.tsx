@@ -66,8 +66,8 @@ describe.each([
   {
     name: "Parallel Bibles",
     renderSidebar: renderBibles,
-    hideLabel: "Hide parallel bibles",
-    showLabel: "Show parallel bibles",
+    hideLabel: "Hide parallel Bibles",
+    showLabel: "Show parallel Bibles",
   },
   {
     name: "Verse Resources",

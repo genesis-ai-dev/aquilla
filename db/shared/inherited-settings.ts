@@ -218,19 +218,44 @@ export async function prepareInheritedSettingsWrite(
   return { settings: next, pullKnowledge }
 }
 
+/**
+ * OPS-59 (2026-11-23). `project_settings.updated_by` is BIGINT and
+ * {@link UpdateProjectSettingsInput.updatedBy} documents itself as "Writer's
+ * user id (numeric, or its string form)" — but the knowledge-base propagation
+ * paths reached here carrying a *username*, because `handleUpload` builds its
+ * `createdBy` as `user.username ?? String(user.id)` for the TEXT
+ * `knowledge_docs.created_by` column and then forwarded the same value as
+ * `updatedBy`. Postgres answered `22P02 invalid input syntax for type bigint`,
+ * `writeDownstreamSettings` returned false, and the `knowledgeDocCopies`
+ * bookkeeping was therefore NEVER persisted — so every propagation re-copied
+ * every upstream doc as a brand-new row, and the delete arm (which iterates
+ * that map) could never reach a downstream copy.
+ *
+ * The call sites now pass a numeric id. This coercion is the floor under them:
+ * a value that is not a user id becomes NULL — the column is nullable — so a
+ * caller that still gets it wrong loses the attribution, not the write.
+ */
+function settingsWriterId(updatedBy: number | string | null): number | null {
+  if (updatedBy == null) return null
+  if (typeof updatedBy === "number") return Number.isFinite(updatedBy) ? updatedBy : null
+  const trimmed = updatedBy.trim()
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : null
+}
+
 async function writeDownstreamSettings(
   db: AquillaDb,
   projectId: string,
   settings: Record<string, unknown>,
-  updatedBy: number | string,
+  updatedBy: number | string | null,
 ): Promise<boolean> {
+  const writerId = settingsWriterId(updatedBy)
   for (let attempt = 0; attempt < 2; attempt++) {
     const current = await loadProjectSettings(db, projectId)
     const result = await updateProjectSettingsShared(db, {
       projectId,
       settings,
       ifMatchVersion: current.version,
-      updatedBy,
+      updatedBy: writerId,
       inheritPropagation: true,
     })
     if (result.status === "ok") return true
@@ -250,7 +275,7 @@ export async function propagateInheritedSettings(
     upstreamProjectId: string
     before: Record<string, unknown>
     after: Record<string, unknown>
-    updatedBy: number | string
+    updatedBy: number | string | null
     visited?: Set<string>
   },
 ): Promise<{ projectId: string; version: number }[]> {
@@ -339,7 +364,7 @@ async function syncKnowledgeDocs(
   db: AquillaDb,
   upstreamProjectId: string,
   downstreamProjectId: string,
-  updatedBy: number | string,
+  updatedBy: number | string | null,
   opts: InheritWriteOptions,
 ): Promise<void> {
   const current = await loadProjectSettings(db, downstreamProjectId)
@@ -435,7 +460,7 @@ async function syncKnowledgeDocs(
 export async function propagateKnowledgeDocs(
   db: AquillaDb,
   upstreamProjectId: string,
-  opts: InheritWriteOptions & { updatedBy: number | string; visited?: Set<string> },
+  opts: InheritWriteOptions & { updatedBy: number | string | null; visited?: Set<string> },
 ): Promise<void> {
   const visited = opts.visited ?? new Set<string>()
   if (visited.has(upstreamProjectId) || visited.size >= MAX_CHAIN) return
@@ -451,7 +476,7 @@ export async function propagateKnowledgeDocs(
 async function pullKnowledgeFromUpstream(
   db: AquillaDb,
   projectId: string,
-  updatedBy: number | string,
+  updatedBy: number | string | null,
   opts: InheritWriteOptions,
 ): Promise<void> {
   const link = await loadLink(db, projectId)
@@ -473,7 +498,7 @@ export async function seedInheritedSettings(
     downstreamProjectId: string
     upstreamProjectId: string
     choice?: Partial<Record<InheritFieldId, boolean>> | null
-    updatedBy: number | string
+    updatedBy: number | string | null
   } & InheritWriteOptions,
 ): Promise<void> {
   const current = await loadProjectSettings(db, input.downstreamProjectId)
@@ -504,7 +529,7 @@ export async function seedInheritedSettings(
 export async function clearInheritedSettings(
   db: AquillaDb,
   projectId: string,
-  updatedBy: number | string,
+  updatedBy: number | string | null,
 ): Promise<void> {
   const current = await loadProjectSettings(db, projectId)
   if (!isRecord(current.settings[INHERITED_FROM_LINK_KEY]) && current.settings[INHERITED_FROM_LINK_KEY] == null) {
@@ -521,7 +546,7 @@ export async function afterInheritedSettingsWrite(
     projectId: string
     before: Record<string, unknown>
     after: Record<string, unknown>
-    updatedBy: number | string
+    updatedBy: number | string | null
     pullKnowledge: boolean
   } & InheritWriteOptions,
 ): Promise<{ projectId: string; version: number }[]> {

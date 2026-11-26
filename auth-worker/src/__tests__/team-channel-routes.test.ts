@@ -82,10 +82,11 @@ beforeEach(async () => {
   )
     .bind(PROJECT)
     .run()
+  // AQU-2357: creation writes alice's Owner row. created_by grants nothing.
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 2, 400), (?, 3, 100)",
+    "INSERT INTO project_members (project_id, user_id, role_level) VALUES (?, 1, 700), (?, 2, 400), (?, 3, 100)",
   )
-    .bind(PROJECT, PROJECT)
+    .bind(PROJECT, PROJECT, PROJECT)
     .run()
   // AQU-1050: posting addresses the orchestrator, so it rides the release
   // flag. Reads do not — see the archived-project case below, which is the
@@ -241,6 +242,9 @@ describe("team channel messages", () => {
     await post(alice, { text: "Project one" })
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, created_by) VALUES ('other', 'Other', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('other', 1, 700, 1)",
     ).run()
     const other = await call("/api/v2/projects/other/team/messages", alice)
     expect(other.status).toBe(200)

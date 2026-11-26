@@ -335,7 +335,7 @@ describe("TimelineTimingRow — overlap pills explain themselves on a click", ()
         }}
       />,
     )
-    await expectClickNote(screen.getByTestId("tl-detail-overlap"), "neighbouring verse")
+    await expectClickNote(screen.getByTestId("tl-detail-overlap"), "neighboring verse")
   })
 
   it("the start and end pills each name their neighbour", async () => {
@@ -349,6 +349,6 @@ describe("TimelineTimingRow — overlap pills explain themselves on a click", ()
         }}
       />,
     )
-    await expectClickNote(screen.getByTestId("tl-detail-overlap-start"), "PREVIOUS verse")
+    await expectClickNote(screen.getByTestId("tl-detail-overlap-start"), "previous verse")
   })
 })

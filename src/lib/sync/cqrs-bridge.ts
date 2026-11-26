@@ -45,6 +45,12 @@ export interface CqrsOutboxBridge {
    *  (an older server, or the response not landed yet) → the static bar alone,
    *  and the server stays authoritative. */
   importMinRole?: number | null
+  /** AQU-2682: the server's answer to "does this person's access cover every
+   *  language of the project?" (GET .../source-audio-access), which storing
+   *  source audio needs. Null = asked, not answered yet: refused, never an
+   *  optimistic try that leaves lines with no audio. Absent = a caller that
+   *  never asks; the role check alone applies and the server decides. */
+  sourceAudioCoversEveryLanguage?: boolean | null
 }
 
 let bridge: CqrsOutboxBridge | null = null

@@ -132,6 +132,15 @@ const UNCOVERED: Record<string, string> = {
   project_brief_history: "never granted to app_runtime",
   project_brief_proposals: "never granted to app_runtime",
   project_briefs: "never granted to app_runtime",
+  // AQU-2719 (0210): the authored living-memory entries, moved off the
+  // project_settings blob. The same call `concepts` carries — terminology's
+  // equivalent table, from the equivalent move — and for the blanket reason
+  // above: a new table is not granted to app_runtime, so a policy written
+  // `TO app_runtime` would be inert and would flip this ledger to "covered"
+  // while enforcing nothing. Written and read only through the settings
+  // perimeter (db/shared/projects.ts and db/shared/living-memory-entries.ts),
+  // which authorizes the project before it reads or writes a row.
+  project_living_memory_entries: "never granted to app_runtime",
   project_member_lane_roles: "never granted to app_runtime",
   project_member_scopes: "never granted to app_runtime",
   project_seq_counters: "never granted to app_runtime",

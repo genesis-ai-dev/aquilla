@@ -310,14 +310,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "to use the first word here and the second there.",
   "org.projectOverview.columnApproved":
     "Plain column heading over a raw cell count in the per-file breakdown table " +
-    "(sibling of 'Filled', 'Total', 'Words') — no review workflow implied, just " +
-    "a count of cells marked approved. autopilot.evidence.status.approved is one " +
-    "member of a stable enum of an AI agent's evidence-review lifecycle " +
-    "(Proposed/Applied/Rejected/Superseded/Approved/Archived/Unknown), a term of " +
-    "art for that specific workflow. A generic count-column heading and a named " +
-    "state in a review pipeline are different concepts that happen to share an " +
-    "English participle; collapsing them would leak review-workflow wording into " +
-    "a plain stats column in languages that lexicalize the two differently.",
+    "(sibling of 'Filled', 'Total', 'Words') — a nominal metric heading. " +
+    "editor.state.validated is the lower-case per-cell status adjective reused " +
+    "in badges and screen-reader names, and org.orgHome.table.validatedHeaderLabel " +
+    "heads the org-level project rollup table. A per-file count column heading " +
+    "and a lower-case cell status word take different forms in languages that " +
+    "inflect nouns vs adjectives.",
   "org.orgSidebar.archived":
     "Column heading AND date label for when a project was archived, on the org's " +
     "archived-projects page (AQU-2261 moved the sidebar link and page title onto " +
@@ -668,12 +666,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "distinction, mirroring this catalog's other heading-vs-badge splits.",
   "org.membersPanel.sourceViaGroup":
     "Lower-case inline badge fragment next to a username in MembersPanel's " +
-    "roster row ('via group'), sibling register to org.membersPage." +
-    "sourceViaOrg/sourceViaTeam on this same row. org.accessModelLegend." +
-    "viaGroup.label is a Title-Case, standalone table-cell value in " +
-    "AccessModelLegend's grant-path table, sibling of 'Direct'/'Org-wide' — " +
-    "the same heading-vs-inline-fragment split already recorded for " +
-    "org.accessModelLegend.creator.label just above.",
+    "member row ('via team'), sibling register to org.membersPage.sourceViaOrg " +
+    "on this same row. org.accessModelLegend.viaGroup.label is a capitalized, " +
+    "standalone table-cell value in AccessModelLegend's grant-path table, " +
+    "sibling of 'Direct'/'Org-wide' — the same heading-vs-inline-fragment split " +
+    "already recorded for org.accessModelLegend.creator.label just above.",
+  "org.accessModelLegend.viaGroup.label":
+    "Capitalized, standalone row heading in AccessModelLegend's grant-path table " +
+    "('Via team'), sibling of 'Direct'/'Org-wide'/'Creator'. org.membersPage." +
+    "sourceViaTeam and org.membersPanel.sourceViaGroup are lower-case inline " +
+    "badge fragments beside a username. A standalone legend table heading and an " +
+    "inline lowercase badge fragment take different forms in many languages.",
   "org.multiProjectInviteDialog.projectsFieldLabel":
     "Form-field label above a checklist of projects to invite someone to, in " +
     "the multi-project invite dialog — labels an in-dialog form control. " +
@@ -1001,4 +1004,21 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "signs off the selected lines now, with a count badge after it. A named kind " +
     "of assigned work and an imperative one-click action take different forms in " +
     "many target languages (an infinitive or noun against an imperative).",
+  "audio.makeSpeech.step3":
+    "The title of step 3 in the Make speech panel: an optional speech-to-speech " +
+    "pass that re-voices a spoken take into another voice. audio.library." +
+    "cloneEngineLabel labels a kind of voice in the Voices panel. A process step " +
+    "and a kind-of-voice label can take different forms (a verb or a noun).",
+  "projectSettings.section.decay":
+    "Card heading in Project settings for this project's health-propagation " +
+    "section (renamed from internal 'Decay' to glossary term 'Health'). " +
+    "editor.expansion.retrievalSupport is the per-cell health badge inside the " +
+    "editor expansion panel. Same settings-heading vs per-cell-badge split " +
+    "documented for projectSettings.decay.summary.",
+  "paratextBridge.project.status.not-started":
+    "Status label for a Paratext desktop project that has not yet been linked or " +
+    "imported into Aquilla. autopilot.status.notStarted is a background AI " +
+    "Autopilot run status, and org.projectOverview.plan.statusNotStarted is a " +
+    "planning-unit status. Different subjects routinely take different verbs or " +
+    "participles outside English.",
 }

@@ -13,7 +13,10 @@
  *   when adding or inviting (AQU-952): handing over a workspace is a change of
  *   someone already in it, and the email-invite route caps at Maintainer.
  * - Project: Viewer, Commenter, Reviewer, Contributor, Project lead,
- *   Maintainer. Ownership comes with creating a project; it is never picked.
+ *   Maintainer, and Owner when the person choosing is an Owner (AQU-2357).
+ *   A Maintainer does not see Owner. Invite links never offer it. A team's
+ *   grant on a project uses this list without Owner: a team does not hold
+ *   project ownership. Pass `teamGrant`.
  * - Team-scope roles are a different thing and are not here: their own three
  *   (`TEAM_ROLE_LEVELS`), set in a team's Team role column.
  *
@@ -21,12 +24,13 @@
  * level (`role_above_caller` on project members, "invalid or too-high role
  * level" on a team's project grant). A `null` caller level (not loaded yet)
  * keeps the whole list: the server stays the boundary, and a moment of null
- * must not hide choices from an owner.
+ * must not hide choices from an owner. A team grant still omits Owner.
  */
 import {
   ORG_ROLE_CHANGE_OPTIONS,
   ORG_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  ROLE,
   type RoleOption,
 } from "./roles"
 
@@ -41,16 +45,22 @@ export interface RoleChoiceContext {
    * organization list differs: Owner is a change-only rung.
    */
   purpose?: "add" | "change"
+  /**
+   * The grant is a team's, on a project. Owner stays off that list even when
+   * the person choosing is an Owner. A person's project picker still offers it.
+   */
+  teamGrant?: boolean
 }
 
 export function roleChoices(
   level: RoleChoiceLevel,
-  { callerLevel, purpose = "add" }: RoleChoiceContext,
+  { callerLevel, purpose = "add", teamGrant = false }: RoleChoiceContext,
 ): RoleOption[] {
   const list =
     level === "org"
       ? purpose === "change" ? ORG_ROLE_CHANGE_OPTIONS : ORG_ROLE_OPTIONS
       : PROJECT_ROLE_OPTIONS
-  if (callerLevel === null) return [...list]
-  return list.filter((r) => r.level <= callerLevel)
+  const capped = callerLevel === null ? [...list] : list.filter((r) => r.level <= callerLevel)
+  if (level === "project" && teamGrant) return capped.filter((r) => r.level !== ROLE.OWNER)
+  return capped
 }

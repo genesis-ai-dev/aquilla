@@ -12,7 +12,8 @@ import { ROLE } from "../types"
 import { TOOLS_API_REV } from "../../../shared/tools/manifest"
 import { verify } from "hono/jwt"
 import { TOOL_SESSION_AUDIENCE } from "../../../shared/tools/tool-session"
-import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
+import { firstPartyToolId } from "../../../shared/tools/first-party/index"
+import { DOOR43_IMPORTER_MANIFEST, DOOR43_IMPORTER_SOURCE, FIRST_PARTY_DOOR43_IMPORTER } from "../../../shared/tools/first-party/door43-importer"
 
 const PROJECT = "proj-tools"
 
@@ -227,12 +228,12 @@ describe("tools API", () => {
   })
 })
 
-// apiRev 2: the first-party default editor is installed BY THE SERVER from the
-// repo's source — idempotently, auto-granted once per user (a revoke sticks),
+// First-party extensions are installed BY THE SERVER from the repo's reviewed
+// source — idempotently, auto-granted once per user (a revoke sticks),
 // upgraded only while pristine, and a removal is respected.
 describe("first-party extensions", () => {
   interface Ensure { tool: (ToolBody["tool"] & { firstParty: string | null; origin: string; name: string }) | null; removed: boolean; created?: boolean; autoGranted: string[] }
-  const ensure = async (jwt: string, key = "default-editor") => call("/tools/first-party", jwt, { method: "POST", body: { key } })
+  const ensure = async (jwt: string, key = FIRST_PARTY_DOOR43_IMPORTER) => call("/tools/first-party", jwt, { method: "POST", body: { key } })
 
   it("installs once, auto-grants each user once, and shows up as first-party", async () => {
     await seedProject()
@@ -240,12 +241,12 @@ describe("first-party extensions", () => {
     const first = await ensure(owner)
     expect(first.status).toBe(201)
     const a = (await first.json()) as Ensure
-    expect(a.tool?.id).toBe(await firstPartyToolId(PROJECT, "default-editor"))
-    expect(a.tool?.firstParty).toBe("default-editor")
+    expect(a.tool?.id).toBe(await firstPartyToolId(PROJECT, FIRST_PARTY_DOOR43_IMPORTER))
+    expect(a.tool?.firstParty).toBe(FIRST_PARTY_DOOR43_IMPORTER)
     expect(a.tool?.origin).toBe("starter")
-    expect(a.tool?.source).toBe(DEFAULT_EDITOR_SOURCE)
-    expect(a.autoGranted.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
-    expect(a.tool?.grantedScopes.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
+    expect(a.tool?.source).toBe(DOOR43_IMPORTER_SOURCE)
+    expect(a.autoGranted.sort()).toEqual([...DOOR43_IMPORTER_MANIFEST.scopes].sort())
+    expect(a.tool?.grantedScopes.sort()).toEqual([...DOOR43_IMPORTER_MANIFEST.scopes].sort())
 
     const again = await ensure(owner)
     expect(again.status).toBe(200)
@@ -260,17 +261,20 @@ describe("first-party extensions", () => {
     expect(viewer.autoGranted.length).toBeGreaterThan(0)
 
     const list = (await (await call("/tools", owner)).json()) as { tools: { id: string; firstParty: string | null }[] }
-    expect(list.tools).toEqual([expect.objectContaining({ id: a.tool?.id, firstParty: "default-editor" })])
+    expect(list.tools).toEqual([expect.objectContaining({ id: a.tool?.id, firstParty: FIRST_PARTY_DOOR43_IMPORTER })])
+
+    // The retired default-editor first-party key is no longer shipped.
+    expect((await ensure(owner, "default-editor")).status).toBe(404)
   })
 
   it("a revoke sticks, a removal stays removed, unknown keys 404", async () => {
     await seedProject()
     const owner = await jwtFor("owner")
     const { tool } = (await (await ensure(owner)).json()) as Ensure
-    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:cells"] } })
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:web"] } })
     const after = (await (await ensure(owner)).json()) as Ensure
     expect(after.autoGranted).toEqual([])
-    expect(after.tool?.grantedScopes).toEqual(["read:cells"])
+    expect(after.tool?.grantedScopes).toEqual(["read:web"])
 
     expect((await call(`/tools/${tool!.id}`, owner, { method: "DELETE" })).status).toBe(200)
     const removed = (await (await ensure(owner)).json()) as Ensure
@@ -282,47 +286,46 @@ describe("first-party extensions", () => {
     await seedProject()
     const owner = await jwtFor("owner")
     const { tool } = (await (await ensure(owner)).json()) as Ensure
-    // Simulate the older shipped build: it did not declare read:terms or ai:draft.
-    const older = { ...DEFAULT_EDITOR_MANIFEST, scopes: DEFAULT_EDITOR_MANIFEST.scopes.filter((s) => s !== "read:terms" && s !== "ai:draft") }
+    // Simulate an older shipped build that did not declare write:data yet.
+    const older = { ...DOOR43_IMPORTER_MANIFEST, scopes: DOOR43_IMPORTER_MANIFEST.scopes.filter((s) => s !== "write:data") }
     await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ?, manifest = ?::text::jsonb, created_at = now() - interval '1 hour' WHERE tool_id = ?")
       .bind("0".repeat(64), JSON.stringify(older), tool!.id).run()
-    // The user had those older scopes, and revoked write:audio (declared then) since.
-    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: older.scopes.filter((s) => s !== "write:audio") } })
+    // The user had those older scopes, and revoked write:files since.
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: older.scopes.filter((s) => s !== "write:files") } })
     const upgraded = (await (await ensure(owner)).json()) as Ensure
     expect(upgraded.tool?.currentVersion).toBe(2)
-    expect(upgraded.autoGranted.sort()).toEqual(["ai:draft", "read:terms"])
-    expect(upgraded.tool?.grantedScopes).toEqual(expect.arrayContaining(["read:terms", "ai:draft"]))
-    expect(upgraded.tool?.grantedScopes).not.toContain("write:audio")
+    expect(upgraded.autoGranted).toEqual(["write:data"])
+    expect(upgraded.tool?.grantedScopes).toContain("write:data")
+    expect(upgraded.tool?.grantedScopes).not.toContain("write:files")
     // Offered once: a later revoke of a newly granted scope sticks.
-    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: upgraded.tool!.grantedScopes.filter((s) => s !== "read:terms") } })
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: upgraded.tool!.grantedScopes.filter((s) => s !== "write:data") } })
     const again = (await (await ensure(owner)).json()) as Ensure
     expect(again.autoGranted).toEqual([])
-    expect(again.tool?.grantedScopes).not.toContain("read:terms")
+    expect(again.tool?.grantedScopes).not.toContain("write:data")
   })
 
-  it("a shipped rename is one upgrade version that keeps every user's grants (2026-10-12 naming)", async () => {
+  it("a shipped rename is one upgrade version that keeps every user's grants", async () => {
     await seedProject()
     const owner = await jwtFor("owner")
     const viewer = await jwtFor("viewer")
     const { tool } = (await (await ensure(owner)).json()) as Ensure
     await ensure(viewer)
     // The owner narrowed their grant since; the viewer kept the auto-grant.
-    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:cells", "write:target"] } })
-    // Simulate the build before the rename: same code and scopes, the old name.
-    const older = { ...DEFAULT_EDITOR_MANIFEST, name: "Aquilla Editor" }
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:web"] } })
+    const older = { ...DOOR43_IMPORTER_MANIFEST, name: "Door43 Old" }
     await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ?, manifest = ?::text::jsonb WHERE tool_id = ?")
       .bind("0".repeat(64), JSON.stringify(older), tool!.id).run()
-    await env.AQUILLA_PG.prepare("UPDATE project_tools SET name = ? WHERE id = ?").bind("Aquilla Editor", tool!.id).run()
+    await env.AQUILLA_PG.prepare("UPDATE project_tools SET name = ? WHERE id = ?").bind("Door43 Old", tool!.id).run()
 
     const upgraded = (await (await ensure(owner)).json()) as Ensure
     expect(upgraded.tool?.currentVersion).toBe(2)
-    expect(upgraded.tool?.name).toBe("Aquilla editor (Smart Extension)")
+    expect(upgraded.tool?.name).toBe(DOOR43_IMPORTER_MANIFEST.name)
     expect(upgraded.autoGranted).toEqual([])
-    expect(upgraded.tool?.grantedScopes.sort()).toEqual(["read:cells", "write:target"])
+    expect(upgraded.tool?.grantedScopes).toEqual(["read:web"])
     const viewerAfter = (await (await ensure(viewer)).json()) as Ensure
     expect(viewerAfter.tool?.currentVersion).toBe(2)
     expect(viewerAfter.autoGranted).toEqual([])
-    expect(viewerAfter.tool?.grantedScopes.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
+    expect(viewerAfter.tool?.grantedScopes.sort()).toEqual([...DOOR43_IMPORTER_MANIFEST.scopes].sort())
     // Idempotent: no further version for the same shipped code.
     expect(((await (await ensure(owner)).json()) as Ensure).tool?.currentVersion).toBe(2)
   })
@@ -332,15 +335,16 @@ describe("first-party extensions", () => {
     const owner = await jwtFor("owner")
     const { tool } = (await (await ensure(owner)).json()) as Ensure
     // Simulate an older shipped build.
-    await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ? WHERE tool_id = ?").bind("0".repeat(64), tool!.id).run()
+    await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ?, manifest = ?::text::jsonb WHERE tool_id = ?")
+      .bind("0".repeat(64), JSON.stringify(DOOR43_IMPORTER_MANIFEST), tool!.id).run()
     const upgraded = (await (await ensure(owner)).json()) as Ensure
     expect(upgraded.tool?.currentVersion).toBe(2)
-    expect(upgraded.tool?.firstParty).toBe("default-editor")
+    expect(upgraded.tool?.firstParty).toBe(FIRST_PARTY_DOOR43_IMPORTER)
 
     // The project changes it ("Change it" → origin edit, no firstParty mark): ours now, left alone.
     const edited = await call(`/tools/${tool!.id}/versions`, owner, {
       method: "POST",
-      body: { source: DEFAULT_EDITOR_SOURCE.replace("Translate…", "Type here…"), manifest: DEFAULT_EDITOR_MANIFEST, origin: "edit" },
+      body: { source: GOOD_SOURCE, manifest: MANIFEST, origin: "edit" },
     })
     expect(edited.status).toBe(201)
     const kept = (await (await ensure(owner)).json()) as Ensure

@@ -110,6 +110,12 @@ async function seedProject(id: string, name: string, orgId: number, createdBy: n
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, ?)")
     .bind(id, name, orgId, createdBy)
     .run()
+  // AQU-2357: creation writes this Owner row. created_by grants nothing.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?)",
+  )
+    .bind(id, createdBy, createdBy)
+    .run()
 }
 
 describe("admin feedback-routes CRUD", () => {

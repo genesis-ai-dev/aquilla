@@ -43,6 +43,9 @@ export interface StationHost {
    *  version (AQU-2499: this take, not the main track's); a reason when it
    *  can't, else null. */
   changeVoice(cellId: string, audioId: string): string | null
+  /** AQU-2493 (review, Nov 9): is the take's track a layer (music, effects,
+   *  ambience)? There its sound follows its clip's start in both timings. */
+  takeIsLayer(fileId: string, slot: string | undefined): boolean
   /** How many approvals a recording needs in this project. */
   approvalsNeeded: number
   /** Stop the timeline and any other player before the Station plays. */

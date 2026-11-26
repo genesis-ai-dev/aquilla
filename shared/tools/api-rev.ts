@@ -86,6 +86,15 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
     "tool sessions: the sync-worker verifies every claimed extension identity and requires it for file and data writes",
     "SDK 1.1: aq.zip.read, aq.parse.tsv / usfm / mdBlocks",
   ],
+  8: [
+    "native editor integration: editor.activeCell() + live 'editor.activeCell' push event so side panels follow the translator's active cell",
+    "editor.reveal(fileId, cellId, { focus? }): scroll, flash and focus a cell in Aquilla's real native editor",
+    "editor.annotate(fileId, { layer?, cells }) / editor.clearAnnotations({ fileId?, layer? }): publish declarative row badges, source/target text span highlights with optional one-click fixes, and extension column values rendered natively by EditorTable",
+    "ui.openPanel(): open this extension's side panel in the left dock (e.g. from a headless cell/selection action)",
+    "manifest.actions where adds 'cell' (cell menu) and 'selection' (source selection toolbar), passing context.action.cell / context.action.selection",
+    "manifest.columns: declare read-only columns rendered natively in EditorTable beside Source/Target",
+    "SDK 1.2: aq.useActiveCell(), aq.editor.annotate / clearAnnotations / reveal, aq.ui.openPanel",
+  ],
 }
 
 export function removedApi(method: string): RemovedApi | null {

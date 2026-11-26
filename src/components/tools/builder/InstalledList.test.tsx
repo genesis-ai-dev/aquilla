@@ -12,7 +12,7 @@ const tool = {
   id: "t1", projectId: "p1", name: "Aquilla editor", description: "", currentVersion: 1, upstreamToolId: null,
   createdBy: 1, createdAt: "x", updatedAt: "x", codeHash: "h", apiRev: 7,
   manifest: { name: "Aquilla editor", description: "", scopes: [], mounts: ["editor"], apiRev: 7 },
-  origin: "built", grantedScopes: [], firstParty: "default-editor",
+  origin: "built", grantedScopes: [], firstParty: "door43-importer",
 } as unknown as ToolSummary
 
 describe("InstalledList first-party mark", () => {

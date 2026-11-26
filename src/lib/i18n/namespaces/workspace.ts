@@ -310,6 +310,9 @@ export const workspace = defineNamespace({
 
     // -- CellTranscribeBadge --
     "workspace.transcribeBadge.loadShort": "load",
+    // ── AQU-2740: copy that was hard-coded in English at the call site ──
+    "workspace.transcribeBadge.loadingModelNote": "Loading transcription model…",
+    "workspace.transcribeBadge.downloadingModelNote": "Downloading transcription model ({percent}%)…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
     "workspace.transcribeBadge.changeModel": "Change model",
     "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
@@ -592,6 +595,17 @@ export const workspace = defineNamespace({
       screenshot: "workspace-nav",
     },
     keys: {
+      "workspace.transcribeBadge.loadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is still loading in the browser, before it can transcribe.",
+      },
+      "workspace.transcribeBadge.downloadingModelNote": {
+        description:
+          "Note shown when the user clicks the amber pill on a recording while the speech-to-text model is downloading into the browser, before it can transcribe.",
+        placeholders: {
+          percent: "Whole number from 0 to 100: how much of the model has downloaded. Keep the % sign after it as your language writes percentages.",
+        },
+      },
       "workspace.diarize.discardWarning": {
         description:
           "Body of the browser confirm() shown before diarizing a file that already " +

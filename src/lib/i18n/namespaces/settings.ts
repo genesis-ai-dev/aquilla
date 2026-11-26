@@ -504,6 +504,13 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.navIdentity": "Identity",
     "settings.orgSettingsIndex.navSecurity": "Security",
     "settings.orgSettingsIndex.navGroupPeopleProjects": "People & projects",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "settings.orgSettingsIndex.hintSecurity": "Visibility & permissions",
+    "settings.orgSettingsIndex.hintBilling": "Plan & AI usage",
+    "settings.orgSettingsIndex.hintProviders": "Org keys",
+    "settings.orgSettingsIndex.hintMonday": "Board sync",
+    "settings.orgSettingsIndex.hintTeams": "Groups of members",
+    "settings.orgSettingsIndex.hintProjectDefaults": "Inherited by every project",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
     //   org.breadcrumb.organizationFallback already holds the documented exception
@@ -635,6 +642,36 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.orgSettingsIndex.hintSecurity": {
+        description:
+          "Short grey hint at the right of the 'Security' row on the Organization settings index, saying what the page covers. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintBilling": {
+        description:
+          "Short grey hint at the right of the 'Billing' row on the Organization settings index: the page shows the org's plan and its AI usage. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProviders": {
+        description:
+          "Short grey hint at the right of the AI provider keys row on the Organization settings index: the API keys the organization supplies for AI providers.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintMonday": {
+        description:
+          "Short grey hint at the right of the Monday.com row on the Organization settings index: the page sets up syncing project progress to a Monday.com board.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintTeams": {
+        description:
+          "Short grey hint at the right of the 'Teams' row on the Organization settings index: a team is a named group of org members that can be added to projects together.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProjectDefaults": {
+        description:
+          "Short grey hint at the right of the 'Project defaults' row on the Organization settings index: settings made there apply to every project unless the project sets its own.",
+        maxLength: 32,
+      },
       "settings.locked.section": {
         description:
           "One line at the top of a settings card the reader cannot change, saying who can. " +

@@ -2323,8 +2323,8 @@ export function ProjectOverview() {
                       ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects.`
                       : "Archive this project? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects."
                   }
-                  confirmLabel="Archive"
-                  checkboxLabel="I understand this project will be hidden from the active list."
+                  confirmLabel={t("org.projectOverview.archive")}
+                  checkboxLabel={t("org.projectOverview.archiveConfirmCheckbox")}
                   variant="destructive"
                   onConfirm={() => {
                     void handleArchive()

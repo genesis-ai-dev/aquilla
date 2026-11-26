@@ -76,7 +76,7 @@ How conflicts in this repo usually resolve:
 | Both sides built the same thing (add/add, stacked slices whose parent already landed) | Take the copy that already has callers - normally the base's, because the base's other code adopted it since. Port any fix the losing copy has that the winner lacks. Then look for a leftover duplicate from the branch that auto-merged alongside it (double-firing handlers). |
 | The sides want different behaviour, or their tests cannot both pass | A product question, not a merge question - see "Deciding a real disagreement" below. |
 | `db/postgres/schema.sql` | Usually keep both; comments that cite a migration number follow the final filename. |
-| Locale catalogs, `source-hashes.json`, `pnpm-lock.yaml` | Generated - see `references/traps.md`; do not hand-merge line by line. |
+| Locale catalogs, `source-hashes.json`, `translation-baseline.json`, `pnpm-lock.yaml` | Generated - see `references/traps.md`; do not hand-merge line by line. |
 | Git reports a *binary* conflict on a source file | The file holds raw NUL bytes. Pull the stages (`git show :1:<f>`, `:2:`, `:3:`) and merge by hand; use `grep -a` to search it. |
 
 ### Deciding a real disagreement

@@ -32,6 +32,12 @@ from`. Resolve as a key-level union, the base's hash winning on overlap, and dro
 longer exist. Re-serialise with `JSON.stringify(all, null, 2) + "\n"`; a byte-identical
 round-trip proves there are no duplicate keys.
 
+**`src/lib/i18n/translation-baseline.json`.** The keys each locale may still show in English
+(AQU-2740). Never hand-merge or union it: take the base's side whole, finish resolving the
+catalogs and `source-hashes.json`, then run `pnpm i18n:baseline` (prune only). `pnpm
+i18n:check` then says whether the merged branch still has untranslated keys of its own; those
+get translated (`pnpm i18n:todo --new`), never added to the baseline to make the check pass.
+
 **`eslint-suppressions.json`.** Counts are per file and all-or-nothing: one violation over the
 count un-suppresses every violation in that file. A branch can therefore appear to introduce
 dozens of lint errors it did not write. Attribute by running eslint on the same files in the

@@ -40,6 +40,7 @@ interface Payload {
   people: {
     userId: string
     displayName: string
+    username: string | null
     email: string | null
     isGuest: boolean
     lastActiveAt: string | null
@@ -225,7 +226,25 @@ describe("AQU-1352 §3.6 org People & access", () => {
     expect(invite?.pendingInvite?.expiresAt).toEqual(expect.any(String))
     const person = body.people.find((p) => p.email === "soon@example.com")
     expect(person?.pendingInvite?.roleLevel).toBe(300)
+    // AQU-2320: an invite has no account, so nothing may be written for it by name.
+    expect(person?.username).toBeNull()
+    // Every account row carries its own username: the key the write routes look it up by.
+    const external = body.people.find((p) => p.userId === "9")
+    expect(external?.username).toBe("external")
     expect(person?.grants.some((g) => g.scopePath.some((scope) => scope.id === "p1"))).toBe(true)
+  })
+
+  it("AQU-2320: each place says whether this viewer may give access there, by the rule the dry run applies", async () => {
+    type G = Record<string, { ok: true; cap: number } | { ok: false; denial: string }>
+    const owner = ((await (await orgAccess("owner")).json()) as { grantable: G }).grantable
+    expect(owner["org:1"]).toEqual({ ok: true, cap: 700 })
+    expect(owner["project:p1"]).toEqual({ ok: true, cap: 700 })
+    const maintainer = ((await (await orgAccess("maintainer")).json()) as { grantable: G }).grantable
+    // The dialog greys the org with "Only an Owner can grant here" from this.
+    expect(maintainer["org:1"]).toEqual({ ok: false, denial: "owner_only" })
+    expect(maintainer["team:1"]).toEqual({ ok: true, cap: 600 })
+    // fixture/leads holds Owner on p3: joining it would hand a Maintainer's grantee more than they hold.
+    expect(maintainer["team:2"]).toEqual({ ok: false, denial: "team_above_you" })
   })
 
   it("a missing org and an invisible org return the identical 403 (no id enumeration)", async () => {

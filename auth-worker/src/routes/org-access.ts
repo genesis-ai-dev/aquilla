@@ -10,6 +10,8 @@
  */
 
 import { Hono } from "hono"
+import { zValidator } from "@hono/zod-validator"
+import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   ViewerScope,
@@ -29,13 +31,21 @@ import {
   type PlaceGrant,
 } from "../services/org-access-places"
 import { assembleOrgPeople, type OrgAccessPerson } from "../services/org-access-people"
+import { grantableMap, previewGrant, type GrantTarget } from "../services/grant-preview"
+import { loadGrantTarget, loadGrantWorld } from "../services/grant-preview-load"
+import type { PlaceGrantability } from "../../../src/lib/access/grant-rules"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { getOrgMemberRole } from "../services/org-permissions"
 import { resolveProjectRole } from "../services/project-permissions"
 import { INVITE_MIN_ROLE, ROLE, type Env } from "../types"
 
 export type { AccessTreeNode, DirectGrantee, OrgAccessPerson }
-export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
+export interface OrgAccessPayload {
+  tree: AccessTreeNode[]
+  people: OrgAccessPerson[]
+  /** AQU-2320: per place (`type:id`), may this viewer give access there, and up to which role. */
+  grantable: Record<string, PlaceGrantability>
+}
 
 type Row = NamedGrantRow & { user_id: number | string; user_name: string; user_email: string | null }
 
@@ -178,10 +188,66 @@ export async function buildOrgAccess(
     if (entry.origin.from) entry.origin = { ...entry.origin, from: redactUnseenPlaces(entry.origin.from, seesOrg, visibleTeamIds) }
   }
   await nameGranters(env, list.flatMap((p) => p.grants))
-  return { ok: true, payload: { tree, people: list } }
+  const grantable = grantableMap(
+    tree,
+    { userId: String(vs.viewer.id), orgRole: await vs.orgRole(orgId), projectRoles: viewerProjectRole },
+    extras.attachments,
+  )
+  return { ok: true, payload: { tree, people: list, grantable } }
 }
 
 const orgAccess = new Hono<AuthHonoEnv>()
+
+/**
+ * AQU-2320: POST /api/v2/orgs/:orgId/access/preview — the Give access dry
+ * run. Writes nothing. 200 `{ preview }`; a grant this viewer could not make
+ * is refused with `{ error, code, place, roleLevel, cap }` (the message names
+ * the place, the role and the cap); a place or person outside what the
+ * Places / People lenses show this viewer is 404.
+ */
+const previewBody = z.object({
+  place: z.object({ type: z.enum(["org", "team", "project", "lane"]), id: z.string().min(1).max(256) }),
+  roleLevel: z.number().int(),
+  person: z.union([
+    z.object({ userId: z.string().regex(/^\d{1,18}$/) }),
+    z.object({ email: z.string().trim().toLowerCase().email().max(320) }),
+  ]),
+})
+
+orgAccess.post("/:orgId/access/preview", authMiddleware, zValidator("json", previewBody), async (c) => {
+  const orgId = Number(c.req.param("orgId"))
+  if (!Number.isSafeInteger(orgId) || orgId <= 0) return c.json({ error: "bad org id" }, 400)
+  const vs = new ViewerScope(c.env, c.get("user"))
+  // One answer for every "not yours to ask about": an org this viewer sees
+  // nothing of (or that does not exist), a place their Places lens does not
+  // show, a person their People lens does not show. Identical to the GET's
+  // 403, so none of the three can be told apart or used to enumerate.
+  const hidden = () => c.json({ error: "no access to this roster" }, 403)
+  // The lenses' own visibility rule, reused rather than restated: the place
+  // must be a node of this viewer's tree (grantable carries one key per node,
+  // lanes after the read wall), the person a row of this viewer's roster.
+  const access = await buildOrgAccess(c.env, vs, orgId, () => hasActiveElevation(c))
+  if (!access.ok) return hidden()
+  const body = c.req.valid("json")
+  if (!(`${body.place.type}:${body.place.id}` in access.payload.grantable)) return hidden()
+  const loaded = await loadGrantWorld(c.env, vs, orgId)
+  if (!loaded) return hidden()
+  let target: GrantTarget
+  if ("email" in body.person) {
+    target = { kind: "invite", email: body.person.email }
+  } else {
+    const userId = body.person.userId
+    if (!access.payload.people.some((p) => p.userId === userId && !p.pendingInvite)) return hidden()
+    const account = await loadGrantTarget(c.env, orgId, Number(userId))
+    if (!account) return hidden()
+    target = account
+  }
+  const result = previewGrant(loaded.world, loaded.granter, target, { place: body.place, roleLevel: body.roleLevel })
+  if (result.ok) return c.json({ preview: result.preview })
+  if ("notFound" in result) return hidden()
+  const { status, message, ...rest } = result.refusal
+  return c.json({ error: message, ...rest }, status)
+})
 
 orgAccess.get("/:orgId/access", authMiddleware, async (c) => {
   const orgId = Number(c.req.param("orgId"))

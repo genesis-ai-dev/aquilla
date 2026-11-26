@@ -146,6 +146,8 @@ export const workspace = defineNamespace({
     "workspace.trash.empty": "No recently deleted files.",
     "workspace.trash.deleteForever": "Delete forever",
     "workspace.trash.retentionNote": "Files are kept for 30 days. \"Delete forever\" permanently wipes media.",
+    // AQU-2549: a copy joined into the project's own file cannot be restored.
+    "workspace.trash.joinedInto": "Joined into {name}, so it can't be restored.",
 
     // -- ProjectWorkspace: MoveToCorpusDialog --
     "workspace.moveToCorpus.dialogTitle": "Move to corpus",
@@ -937,6 +939,14 @@ export const workspace = defineNamespace({
           "permanently purges a soft-deleted file's data (as opposed to " +
           "common.delete, the everyday delete action elsewhere).",
         maxLength: 24,
+      },
+      "workspace.trash.joinedInto": {
+        description:
+          "Shown under a row of the 'Recently deleted' dialog in place of its Restore " +
+          "button: the file was a copy from the source project that was joined into " +
+          "one of the project's own files (projectSettings.sourceLink.joinButton), so " +
+          "restoring it would bring back a second file that no longer follows the source.",
+        placeholders: { name: "The project's own file it was joined into \u2014 never translated." },
       },
       "workspace.trash.retentionNote": {
         description:

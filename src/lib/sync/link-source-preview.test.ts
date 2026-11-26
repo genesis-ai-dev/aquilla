@@ -198,6 +198,9 @@ describe("loadLinkSourcePreview", () => {
 
     expect(preview).toEqual({
       upstreamName: "English Source",
+      // AQU-2549: this project's files, for the lead to pick which one a row
+      // replaces when the names differ.
+      ownFiles: [{ id: "f-MRK", name: "MRK" }],
       files: [
         { id: "f-MAT", name: "MAT", clashes: false },
         // AQU-1679: this project's one MRK is the file the row could replace.

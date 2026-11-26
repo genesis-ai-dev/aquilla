@@ -35,6 +35,7 @@ import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
+import { RecentlyDeletedRow } from "@/components/RecentlyDeletedRow"
 import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
 import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
 import { TabStrip as TabStripImpl } from "./TabStrip"
@@ -21764,25 +21765,12 @@ export function ProjectWorkspace() {
               <p className="px-1 py-1 text-sm text-muted-foreground">{t("workspace.trash.empty")}</p>
             )}
             {trashFiles.map((f) => (
-              <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
-                <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                {/* AQU-2260: labelled buttons say nothing on hover; what
-                    Delete forever does is the retention note below. */}
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                  onClick={() => void handleRestoreFile(f.fileId)}
-                >
-                  {t("common.restore")}
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                  onClick={() => void handlePurgeFile(f.fileId)}
-                >
-                  {t("workspace.trash.deleteForever")}
-                </button>
-              </div>
+              <RecentlyDeletedRow
+                key={f.fileId}
+                file={f}
+                onRestore={() => void handleRestoreFile(f.fileId)}
+                onPurge={() => void handlePurgeFile(f.fileId)}
+              />
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
               {t("workspace.trash.retentionNote")}

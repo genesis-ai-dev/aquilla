@@ -3992,6 +3992,15 @@ case 'cell.audio.attach': {
       const applyGuard = p.adopt === true
         ? ''
         : 'WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq'
+      // AQU-2549: the join keeps an unchanged line's event id, as a re-import
+      // keeps an `equal` unit's (file-revision-apply.ts). A target is pinned to
+      // that id, and a file imported in one step pins every line to its
+      // `file.revision`, which carries no per-line text — so a moved id read as
+      // "source changed" on every translated line. A line whose text the join
+      // changes takes the mirror's id and is flagged, as any upstream edit is.
+      const eventIdAssign = p.adopt === true
+        ? 'CASE WHEN cells.value IS NOT DISTINCT FROM excluded.value THEN cells.event_id ELSE excluded.event_id END'
+        : 'excluded.event_id'
       stmts.push(
         db
           .prepare(
@@ -4014,7 +4023,7 @@ case 'cell.audio.attach': {
               type              = COALESCE(excluded.type, cells.type),
               canonical_ref     = COALESCE(excluded.canonical_ref, cells.canonical_ref),
               anchor_cell_id    = COALESCE(excluded.anchor_cell_id, cells.anchor_cell_id),
-              event_id          = excluded.event_id,
+              event_id          = ${eventIdAssign},
               last_editor       = excluded.last_editor,
               last_edit_at      = excluded.last_edit_at,
               word_count        = excluded.word_count,

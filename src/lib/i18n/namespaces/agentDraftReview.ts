@@ -11,7 +11,7 @@ export const agentDraftReview = defineNamespace({
     "agentDraftReview.previous": "Previous draft",
     "agentDraftReview.next": "Next draft",
     "agentDraftReview.scope": "Pending suggestions from this task only.",
-    "agentDraftReview.defaultLane": "Project-default language",
+    "agentDraftReview.defaultLane": "Project-default language lane",
     "agentDraftReview.stored": "Saved translation",
     "agentDraftReview.noTranslation": "No saved translation yet.",
     "agentDraftReview.source": "Source context",
@@ -36,10 +36,10 @@ export const agentDraftReview = defineNamespace({
     "agentDraftReview.comments": "Review comments",
     "agentDraftReview.noFindings": "No findings",
     "agentDraftReview.approveClean": plural({
-      one: "Approve {count} draft without findings",
-      other: "Approve {count} drafts without findings",
+      one: "Accept {count} draft without findings",
+      other: "Accept {count} drafts without findings",
     }),
-    "agentDraftReview.approveCleanProgress": "Approving {done} of {total}…",
+    "agentDraftReview.approveCleanProgress": "Accepting {done} of {total}…",
     "agentDraftReview.approveCleanStopped": "Stopped at {ref}: {message}",
   },
   context: {

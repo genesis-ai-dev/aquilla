@@ -10,9 +10,44 @@ import type { AccessChainEntry, ScopeRef } from "@/lib/access/types"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { originLabel, roleLabel } from "@/components/access/labels"
 
-export interface DirectGrantee { userId: string; displayName: string; roleLevel: number }
-export interface AccessTreeNode { scope: ScopeRef; children: AccessTreeNode[]; directGrantees: DirectGrantee[] }
-export interface OrgAccessPerson { userId: string; displayName: string; isGuest: boolean; grants: AccessChainEntry[] }
+export interface DirectGrantee {
+  userId: string
+  displayName: string
+  roleLevel: number
+  email?: string | null
+  isGuest?: boolean
+  source?: "direct" | "creator" | "invite"
+  pendingInvite?: { expiresAt: string | null }
+}
+
+/** An ancestor grant that resolves to this place. One person, or one team. */
+export interface InheritedSource {
+  kind: "person" | "team"
+  roleLevel: number
+  from: ScopeRef
+  userId?: string
+  displayName?: string
+  email?: string | null
+  isGuest?: boolean
+  memberCount?: number
+}
+
+export interface AccessTreeNode {
+  scope: ScopeRef
+  children: AccessTreeNode[]
+  directGrantees: DirectGrantee[]
+  /** Absent on payloads from before AQU-2318. The lens treats that as none. */
+  inherited?: InheritedSource[]
+}
+export interface OrgAccessPerson {
+  userId: string
+  displayName: string
+  isGuest: boolean
+  email?: string | null
+  lastActiveAt?: string | null
+  pendingInvite?: { expiresAt: string | null; roleLevel: number }
+  grants: AccessChainEntry[]
+}
 export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
 
 export async function fetchOrgAccess(jwt: string, orgId: number, apiUrl: string = FRONTIER_API_URL): Promise<OrgAccessPayload> {

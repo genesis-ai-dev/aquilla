@@ -132,7 +132,7 @@ const UNCOVERED: Record<string, string> = {
   project_brief_history: "never granted to app_runtime",
   project_brief_proposals: "never granted to app_runtime",
   project_briefs: "never granted to app_runtime",
-  // AQU-2719 (0207): the authored living-memory entries, moved off the
+  // AQU-2719 (0210): the authored living-memory entries, moved off the
   // project_settings blob. The same call `concepts` carries — terminology's
   // equivalent table, from the equivalent move — and for the blanket reason
   // above: a new table is not granted to app_runtime, so a policy written

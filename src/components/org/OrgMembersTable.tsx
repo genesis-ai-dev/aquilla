@@ -23,7 +23,7 @@ import { TableEmptyState } from "@/components/ui/page"
 import { toast } from "@/components/ui/toast"
 import { NoteOnClick } from "@/components/ui/info-note"
 import { RoleLabel } from "@/components/RoleLabel"
-import { toUserFacingError } from "@/lib/errors/user-error"
+import { isRoleDenial, toUserFacingError } from "@/lib/errors/user-error"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import {
@@ -249,7 +249,7 @@ export function OrgMembersTable({
           }}
           errorMessage={(e) => {
             const uf = toUserFacingError(e, "org")
-            return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+            return isRoleDenial(uf) ? t("org.roleDialog.orgChangeForbidden") : uf.message
           }}
         />
       )}
@@ -287,7 +287,7 @@ export function OrgMembersTable({
               },
               onBatchErrorMessage: (e) => {
                 const uf = toUserFacingError(e, "org")
-                return uf.category === "forbidden" ? t("org.roleDialog.orgAddForbidden") : uf.message
+                return isRoleDenial(uf) ? t("org.roleDialog.orgAddForbidden") : uf.message
               },
             },
           }}
@@ -305,7 +305,7 @@ export function OrgMembersTable({
           loading={loading}
           loadingLabel={t("org.membersPage.loadingMembers")}
           getRowId={(m) => String(m.userId)}
-          getRowAttributes={(m) => ({ "data-user-id": String(m.userId) })}
+          getRowAttributes={(m) => ({ "data-user-id": String(m.userId), id: `member-${m.userId}` })}
           initialSorting={[{ id: "name", desc: false }]}
           searchPlaceholder="Search by name or email"
           globalFilterFn={(row, _columnId, filterValue) => {
@@ -384,6 +384,7 @@ export function OrgMembersTable({
               <MemberAccessSubRow
                 orgId={orgId}
                 userId={m.userId}
+                orgRoleLevel={m.role.level}
                 callerOrgRoleLevel={callerOrgRoleLevel}
                 colSpan={4}
               />

@@ -120,6 +120,68 @@ export async function minePass(db: AquillaDb, projectId: string, now = Date.now(
   return { events: rows.length, observations, minedThrough: upper, more }
 }
 
+/** A project is mined at most once per interval, however many people have it
+ *  open. Edits wait out SETTLE_WINDOW_MS before they are mined at all, so a
+ *  minute more changes nothing a translator can see. */
+export const MINE_INTERVAL_MS = 60_000
+/** Passes one claim may run: 2000 commits each, so a long history is folded
+ *  in over a few claims rather than in one request's lifetime. */
+const PASSES_PER_CLAIM = 5
+
+async function minePasses(db: AquillaDb, projectId: string, passes: number): Promise<void> {
+  for (let i = 0; i < passes; i++) {
+    const r = await minePass(db, projectId)
+    if (!r.more) return
+  }
+}
+
+/**
+ * Keep a project's edit memory current without putting the work on every
+ * reader's request. `smart_edit_state.updated_at` is the claim: one reader per
+ * interval wins it with a conditional UPDATE and its mining runs in
+ * `background`; the rest pay for one primary-key read. Before this, every
+ * suggestion request ran a pass and rewrote the state row, so a team in one
+ * project queued on that row and read the same commits once each.
+ *
+ * `background` must run the work on a connection that outlives the response
+ * (lib/post-response-db.ts) — the request's own is closed as it returns.
+ *
+ * Only a project's very first pass is awaited — otherwise its first reader
+ * would get nothing until they asked again.
+ */
+export async function mineIfDue(
+  db: AquillaDb,
+  projectId: string,
+  background: (work: (db: AquillaDb) => Promise<void>) => void,
+): Promise<void> {
+  const state = await db
+    .prepare("SELECT EXTRACT(EPOCH FROM clock_timestamp() - updated_at) AS age_s FROM smart_edit_state WHERE project_id = ?")
+    .bind(projectId)
+    .first<{ age_s: number | string }>()
+
+  if (!state) {
+    const won = await db
+      .prepare("INSERT INTO smart_edit_state (project_id) VALUES (?) ON CONFLICT (project_id) DO NOTHING RETURNING project_id")
+      .bind(projectId)
+      .first<{ project_id: string }>()
+    if (!won) return
+    const first = await minePass(db, projectId)
+    if (first.more) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM - 1))
+    return
+  }
+
+  if (Number(state.age_s) * 1000 < MINE_INTERVAL_MS) return
+  const won = await db
+    .prepare(
+      `UPDATE smart_edit_state SET updated_at = clock_timestamp()
+        WHERE project_id = ? AND updated_at < clock_timestamp() - make_interval(secs => ${MINE_INTERVAL_MS / 1000})
+        RETURNING project_id`,
+    )
+    .bind(projectId)
+    .first<{ project_id: string }>()
+  if (won) background((own) => minePasses(own, projectId, PASSES_PER_CLAIM))
+}
+
 async function mineCells(
   db: AquillaDb,
   projectId: string,

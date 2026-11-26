@@ -36,6 +36,7 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artifact"
 import { safeAudioContentType } from "./audio-content-type"
+import { fileScopeRefusal, firstWriteRefusal, isDerivedSidecar, siblingOwner, siblingRefusal } from "./audio-write-guard"
 // Type-only: erased at runtime, so this does not create an import cycle
 // with `audio.ts` (which imports this module).
 import type { AudioEnv } from "./audio"
@@ -116,6 +117,9 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
   if (verified.claims.role < WRITE_ROLE_LEVEL) {
     return new Response("insufficient role", { status: 403 })
   }
+  // AQU-2682: within the caller's files.
+  const outOfScope = await fileScopeRefusal(env.AQUILLA_PG, verified.claims, projectId, fileId)
+  if (outOfScope) return new Response(outOfScope, { status: 403 })
 
   const expectedMethod = phase === "part" ? "PUT" : phase === "abort" ? "DELETE" : "POST"
   if (request.method !== expectedMethod) {
@@ -140,6 +144,26 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
     }
     // The final object's type travels in its own header: this request's
     // Content-Type describes the (empty) create call, not the media.
+    // AQU-2682: a waveform sidecar is small and goes up whole, checked.
+    if (isDerivedSidecar(audioId)) {
+      return new Response("a peaks sidecar is not uploaded in parts", { status: 400 })
+    }
+    // A large upload is always a fresh recording. It may not start over one
+    // already stored.
+    if (await env.SNAPSHOTS.head(key)) {
+      return new Response("audio already stored under this id", { status: 409 })
+    }
+    // Nor under a name a take has named, nor as someone else's voice's WAV.
+    if (!env.AQUILLA_PG) return new Response("AQUILLA_PG binding not configured", { status: 500 })
+    const taken = await firstWriteRefusal(env.AQUILLA_PG, projectId, fileId, audioId)
+    if (taken) return new Response(taken.reason, { status: taken.status })
+    const owned = await siblingOwner(
+      // A neighbour's key: this key with its own name swapped.
+      env.AQUILLA_PG, env.SNAPSHOTS, (name) => key.slice(0, key.length - audioId.length) + name,
+      projectId, fileId, audioId,
+    )
+    const notTheirs = await siblingRefusal(env.AQUILLA_PG, verified.claims, projectId, owned, env.LANE_READ_WALL)
+    if (notTheirs) return new Response(notTheirs.reason, { status: notTheirs.status })
     const contentType = safeAudioContentType(request.headers.get("X-Upload-Content-Type"))
     const upload = await env.SNAPSHOTS.createMultipartUpload(key, {
       httpMetadata: { contentType },
@@ -262,6 +286,24 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
   }
 
   const upload = env.SNAPSHOTS.resumeMultipartUpload(key, uploadId)
+  // AQU-2682: both refusals BEFORE the parts are assembled, which is what
+  // replaces the stored object: a name taken since the upload began (it may
+  // not be overwritten), and an artifact id that belongs to other media (the
+  // client declares the sha256, so the check needs nothing assembled).
+  if (await env.SNAPSHOTS.head(key)) {
+    await upload.abort().catch(() => {})
+    return new Response("audio already stored under this id", { status: 409 })
+  }
+  let artifactCheck: Awaited<ReturnType<typeof loadAudioArtifactConflict>> | null = null
+  if (artifactId) {
+    artifactCheck = await loadAudioArtifactConflict(env.AQUILLA_PG!, {
+      artifactId, projectId, fileId, audioId, sha256: sha256!,
+    })
+    if (artifactCheck.conflict) {
+      await upload.abort().catch(() => {})
+      return new Response("artifact id already belongs to different media", { status: 409 })
+    }
+  }
   let object: R2Object
   try {
     object = await upload.complete(parts)
@@ -288,19 +330,8 @@ export async function handleAudioMultipart(args: AudioMultipartArgs): Promise<Re
     )
   }
 
-  if (artifactId) {
-    // Unlike the single-shot path, the identity check can only run after
-    // `complete()` — the object's bytes (and so its sha256) do not exist until
-    // R2 assembles the parts. On conflict the assembled object is left in
-    // place rather than deleted: the conflicting artifact row may point at
-    // this very key, and deleting it would destroy media that is still
-    // referenced. An unreferenced object is picked up by the R2 sweep instead.
-    const checked = await loadAudioArtifactConflict(env.AQUILLA_PG!, {
-      artifactId, projectId, fileId, audioId, sha256: sha256!,
-    })
-    if (checked.conflict) {
-      return new Response("artifact id already belongs to different media", { status: 409 })
-    }
+  if (artifactId && artifactCheck) {
+    const checked = artifactCheck
     const written = await writeAudioArtifactRows({
       env,
       projectId,

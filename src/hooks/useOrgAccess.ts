@@ -38,12 +38,17 @@ export type OrgAccessState =
   | {
       status: "ready"
       data: OrgAccessPayload
+      /** Clock for the inactive filter, taken when this payload arrived. */
+      asOf: number
       /** The org at the root of the tree, when the viewer can see it. */
       org: ScopeRef | undefined
       grants: OrgAccessGrantRow[]
     }
 
-type LoadState = { status: "loading" } | { status: "ready"; data: OrgAccessPayload } | { status: "error" }
+type LoadState =
+  | { status: "loading" }
+  | { status: "ready"; data: OrgAccessPayload; asOf: number }
+  | { status: "error" }
 /** Keyed by the org it was loaded for: a result for another org is never shown. */
 type KeyedState = { orgId: number | null; state: LoadState }
 const LOADING: LoadState = { status: "loading" }
@@ -58,7 +63,7 @@ export function useOrgAccess(): OrgAccessState {
     if (!jwt || activeOrgId == null) return
     let cancelled = false
     fetchOrgAccess(jwt, activeOrgId).then(
-      (data) => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "ready", data } }) },
+      (data) => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "ready", data, asOf: Date.now() } }) },
       () => { if (!cancelled) setLoaded({ orgId: activeOrgId, state: { status: "error" } }) },
     )
     return () => { cancelled = true }
@@ -85,5 +90,8 @@ export function useOrgAccess(): OrgAccessState {
   )
 
   if (state.status !== "ready" || !data) return state.status === "error" ? { status: "error" } : { status: "loading" }
-  return { status: "ready", data, org: data.tree[0]?.scope, grants }
+  // A walled viewer's tree has no organization node (AQU-2318). The people
+  // tab still needs a place to open the inspector from, so it uses the root.
+  const org = data.tree.find((node) => node.scope.type === "org")?.scope ?? data.tree[0]?.scope
+  return { status: "ready", data, asOf: state.asOf, org, grants }
 }

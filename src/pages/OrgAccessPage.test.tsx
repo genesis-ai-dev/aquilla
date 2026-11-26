@@ -15,14 +15,17 @@ vi.mock("@/components/org/OrgBreadcrumb", () => ({ OrgBreadcrumb: () => null }))
 // single stale commit (invisible to post-act DOM assertions) is still caught.
 let currentOrg: number | null = null
 const renders: string[] = []
-vi.mock("@/components/org/access/AccessTreeView", () => ({
-  AccessTreeView: ({ tree }: { tree: OrgAccessPayload["tree"] }) => {
+vi.mock("@/components/org/access/PlacesLens", () => ({
+  PlacesLens: ({ tree }: { tree: OrgAccessPayload["tree"] }) => {
     const names = tree.map((n) => n.scope.name).join(",")
     renders.push(`${names}@${currentOrg}`)
     return <div>{names}</div>
   },
 }))
-vi.mock("@/components/org/access/AccessPeopleView", () => ({ AccessPeopleView: () => null }))
+vi.mock("@/components/org/access/PeopleLens", () => ({
+  PeopleLens: () => null,
+  PeoplePrintReport: () => null,
+}))
 
 let jwt: string | null = "jwt"
 vi.mock("@/hooks/useFrontierSession", () => ({

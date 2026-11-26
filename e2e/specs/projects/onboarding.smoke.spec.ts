@@ -17,7 +17,7 @@ test("welcome and privacy choice lead to signup and the app without workspace se
   await page.getByRole("button", { name: /agree and continue/i }).click()
   await page.getByRole("link", { name: /^log in$/i }).click()
   await page.getByRole("link", { name: /create an account/i }).click()
-  await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Create an Aquilla account" })).toBeVisible()
   await expect(page.getByRole("button", { name: /skip for now/i })).toHaveCount(0)
   await expect(page.getByRole("progressbar")).toHaveCount(0)
   const username = `signup${Date.now()}`
@@ -69,7 +69,7 @@ test("signup survives denied progress and consent storage across login navigatio
   await page.getByRole("button", { name: /continue without sharing/i }).click()
   await page.getByRole("link", { name: /^log in$/i }).click()
   await page.getByRole("link", { name: /create an account/i }).click()
-  await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Create an Aquilla account" })).toBeVisible()
   await page.getByRole("button", { name: /back/i }).click()
   await expect(sharing).not.toBeChecked()
   await page.getByRole("button", { name: /continue without sharing/i }).click()

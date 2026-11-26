@@ -9,7 +9,13 @@
  * Prototype hosting: `<iframe sandbox="allow-scripts" srcdoc=…>` — no
  * allow-same-origin, so the frame has an OPAQUE origin (no cookies, no storage,
  * no access to the app's DOM or IndexedDB) — plus a meta CSP that forbids
- * every network fetch. Production plan: serve tools from a dedicated origin
+ * every network fetch.
+ *
+ * The tool document is never mounted directly: it sits inside a SHELL frame
+ * (`buildToolShellSrcdoc`) whose only job is to stop the tool navigating
+ * itself. See TOOL_SHELL_CSP for why that needs a second frame.
+ *
+ * Production plan: serve tools from a dedicated origin
  * (tools.aquilla.app) with the CSP as a response header, and add that origin
  * to `frame-src` in public/_headers, worker/security-headers.ts and the Tauri
  * CSP; srcdoc then becomes a `src=` to that origin. See docs/SMART-EXTENSIONS.md.
@@ -29,6 +35,67 @@ export const TOOL_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
   "img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; " +
   "base-uri 'none'"
+
+/**
+ * The CSP of the shell document every tool frame is nested in.
+ *
+ * TOOL_CSP stops fetch, XHR, images and form posts, but a sandboxed frame may
+ * still navigate ITSELF (`location.href = …`, a clicked link, a meta refresh),
+ * and the query string of that request carries whatever the tool has read. A
+ * document's own CSP has no say over where it navigates to; only the
+ * `frame-src` of the document that EMBEDS it does. Mounted straight into the
+ * app, that embedder is the app page, whose `frame-src` is report-only on the
+ * web build and has to list every site the app itself embeds.
+ *
+ * So the host puts a shell in between: a script-free srcdoc document carrying
+ * `frame-src 'none'`, which holds the tool frame and nothing else. Every
+ * navigation of the tool frame is then refused by the browser before a request
+ * is made, whatever the app page allows. The shell repeats TOOL_CSP because a
+ * srcdoc document inherits its embedder's policy: the tool gets the same rules
+ * twice, and nothing in the shell is looser than the tool.
+ */
+export const TOOL_SHELL_CSP = `${TOOL_CSP}; frame-src 'none'`
+
+/** For a double-quoted HTML attribute value. */
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+}
+
+/**
+ * Wraps a tool document (`buildToolSrcdoc`) in the shell described at
+ * TOOL_SHELL_CSP. This is what goes in the iframe's `srcdoc`; the tool's own
+ * window is then `toolWindowOf(iframe)`, one level down.
+ *
+ * `color-scheme: light dark` keeps the shell transparent and passes the app's
+ * light/dark preference through to the tool unchanged.
+ */
+export function buildToolShellSrcdoc(toolSrcdoc: string, title = ""): string {
+  return (
+    `<!doctype html><html><head><meta charset="utf-8">` +
+    `<meta http-equiv="Content-Security-Policy" content="${TOOL_SHELL_CSP}">` +
+    `<meta name="color-scheme" content="light dark">` +
+    `<style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}` +
+    `iframe{display:block;width:100%;height:100%;border:0}</style></head><body>` +
+    `<iframe sandbox="${TOOL_SANDBOX}" referrerpolicy="no-referrer" title="${escapeAttr(title)}" srcdoc="${escapeAttr(toolSrcdoc)}"></iframe>` +
+    `</body></html>`
+  )
+}
+
+/**
+ * The tool's window inside a frame built with `buildToolShellSrcdoc`: the
+ * shell's only child. This is the window bridge messages must come from and
+ * go to. Null until the shell has parsed. Reading a child by index is one of
+ * the few things allowed on a cross-origin window.
+ */
+export function toolWindowOf(frame: HTMLIFrameElement | null | undefined): Window | null {
+  const shell = frame?.contentWindow
+  if (!shell) return null
+  try {
+    return (shell[0] as Window | undefined) ?? null
+  } catch {
+    return null
+  }
+}
 
 /**
  * JSON for embedding inside an inline `<script>`. `JSON.stringify` alone is not
@@ -58,8 +125,13 @@ export interface ToolBoot {
   mount: "page" | "panel" | "inline" | "editor" | "smoke" | "action" | "export" | "import"
   /** AQU-1937, import mounts: the importer, the phase and the options. */
   import?: { importerId: string; phase: "run" | "refresh" | "choices"; options: Record<string, unknown>; fileIds?: string[]; field?: string }
-  /** apiRev 7, action mounts: which manifest action ran, and why. */
-  action?: { id: string; trigger: "click" | "open" }
+  /** apiRev 7/8, action mounts: which manifest action ran, why, and optional target cell/selection. */
+  action?: {
+    id: string
+    trigger: "click" | "open" | "cell" | "selection"
+    cell?: { fileId: string; cellId: string; ref?: string | null }
+    selection?: { fileId: string; cellId: string; side: "source" | "target"; text: string }
+  }
   /** apiRev 7, export mounts: the format and the files to export. */
   export?: { id: string; fileIds: string[]; lane: string }
   /** Editor mounts: the file being edited (`revealCellId`: a deep-linked

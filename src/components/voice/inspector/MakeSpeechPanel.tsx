@@ -1,31 +1,27 @@
-// "Make speech" (AQU-2577): the panel the Voices rail shows for lines that
-// have no speech yet.
+// "Make speech" (AQU-2577): the Voices rail's panel for making speech from
+// text. Generating speech lives here and nowhere else.
 //
-// It is the whole pipeline, read top to bottom, for the lines picked:
+// It runs on the selected lines (select on the timeline; Shift/⌘-click adds
+// more, as does Shift-clicking an empty line's sparkle):
 //
-//   the text  →  1 translate it  →  2 a reader speaks it  →  3 change it into
-//   a character's voice
+//   1 translate  automatic, for a line with no text; a person checks the
+//                drafts before any speech is made
+//   2 speak      one voice for every selected line
+//   3 clone      optional: re-voice the take into a character's voice
 //
-// Each step is one row: what it will do to these lines, and the one choice it
-// needs (a voice), made by clicking a chip. Then one button. Nothing is
-// generated until that button is pressed.
-//
-// The lines come from the timeline: a click on a line's sparkle (beside its mic) picks it,
-// and Shift-click adds more. Opened from the roster instead, with nothing
-// picked, the panel offers the selected line or every line with no speech.
-//
-// The panel owns the recipe (remembered per project on this device) and the
-// progress list. The steps themselves are the workspace's, handed in as
-// `actions`; the order they run in is make-speech.ts.
+// The panel owns the recipe (remembered per project on this device), the
+// review and the progress list. The steps themselves are the workspace's,
+// handed in as `actions`; the order they run in is make-speech.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { LineTagChips } from "./LineTagChips"
+import { MakeSpeechReview, type MakeSpeechReviewLine } from "./MakeSpeechReview"
 import {
   DEFAULT_ELEVENLABS_MODEL,
   ELEVENLABS_SPEED_MAX,
@@ -34,14 +30,17 @@ import {
   elevenLabsSettingsOf,
 } from "@/lib/audio/elevenlabs/settings"
 import { voiceTakesLineDelivery } from "@/lib/audio/line-delivery"
+import { voiceConversionKey } from "@/lib/audio/change-voice"
 import {
   loadMakeSpeechRecipe,
   runMakeSpeech,
   saveMakeSpeechRecipe,
+  translateMissing,
   type MakeSpeechActions,
   type MakeSpeechLineState,
   type MakeSpeechRecipe,
 } from "@/lib/audio/make-speech"
+import type { VoiceBlocker } from "@/lib/audio/voice-usable"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { LineDelivery, Voice } from "@/lib/parsers/types"
 
@@ -49,11 +48,19 @@ export interface MakeSpeechLine {
   cellId: string
   /** What names the line in the lists: its text, or its source when it has none yet. */
   label: string
+  /** The line's source text, shown beside its draft in the review. */
+  source: string
   /** The line has target text; without it, step 1 translates it first. */
   hasText: boolean
   hasSpeech: boolean
-  /** The voice cast on the line: who reads it when the recipe names no reader. */
+  /** The voice cast on the line. */
   voiceId?: string
+}
+
+/** What the review needs on top of the steps: the drafted text, and a way to save an edit. */
+export interface MakeSpeechTextActions {
+  textOf(cellId: string): string
+  saveText(cellId: string, text: string): Promise<void>
 }
 
 export interface MakeSpeechPanelProps {
@@ -61,16 +68,11 @@ export interface MakeSpeechPanelProps {
   voices: Voice[]
   /** The file's lines, in order. */
   lines: MakeSpeechLine[]
-  /** The line selected in the editor, if any. */
-  selectedCellId: string | null
-  /**
-   * The lines picked on the timeline (their sparkles). When there are any,
-   * the panel is about exactly these lines and offers no other choice of lines.
-   */
+  /** The lines selected on the timeline, in file order. */
+  selectedCellIds: readonly string[]
+  /** Empty lines picked by their sparkle (Shift-click adds more). */
   picked?: readonly string[]
-  /** The language lines are translated into, as a person reads it ("Arabic"). */
-  targetLanguage?: string
-  actions: MakeSpeechActions
+  actions: MakeSpeechActions & Partial<MakeSpeechTextActions>
   /**
    * Keep the delivery set here (speed, tags) on the lines it was run on, so the
    * clip inspector shows it afterwards. Absent: delivery is not offered.
@@ -78,10 +80,10 @@ export interface MakeSpeechPanelProps {
   onSaveDelivery?: (cellIds: readonly string[], delivery: LineDelivery) => Promise<void> | void
   /** Each line's state as the run goes, for whoever draws the lines (the timeline's sparkles). */
   onLineState?: (cellId: string, state: MakeSpeechLineState) => void
+  /** Why a voice can't speak these lines right now; null when it can. Such a voice can't be picked. */
+  blockerOf?: (voice: Voice) => VoiceBlocker | null
   onBack: () => void
 }
-
-type Target = "line" | "missing"
 
 const STATE_KEYS: Record<MakeSpeechLineState["kind"], MessageKey> = {
   waiting: "audio.makeSpeech.stateWaiting",
@@ -91,6 +93,12 @@ const STATE_KEYS: Record<MakeSpeechLineState["kind"], MessageKey> = {
   skipped: "audio.makeSpeech.stateSkipped",
   failed: "audio.makeSpeech.stateFailed",
 }
+const BLOCKER_KEYS = {
+  "elevenlabs-key": "audio.makeSpeech.blockedElevenLabsKey",
+  "gemini-key": "audio.makeSpeech.blockedGeminiKey",
+  training: "audio.makeSpeech.blockedTraining",
+  "training-failed": "audio.makeSpeech.blockedTrainingFailed",
+} as const satisfies Record<Exclude<VoiceBlocker["kind"], "language">, MessageKey>
 const STEP_KEYS = {
   translate: "audio.makeSpeech.stepTranslating",
   speak: "audio.makeSpeech.stepSpeaking",
@@ -98,102 +106,147 @@ const STEP_KEYS = {
 } as const satisfies Record<string, MessageKey>
 
 export function MakeSpeechPanel({
-  projectId, voices, lines, selectedCellId, picked, targetLanguage, actions, onSaveDelivery, onLineState, onBack,
+  projectId, voices, lines, selectedCellIds, picked, actions, onSaveDelivery, onLineState, blockerOf, onBack,
 }: MakeSpeechPanelProps) {
   const t = useT()
+  const { locale } = useI18n()
   const [recipe, setRecipe] = useState<MakeSpeechRecipe>(() => loadMakeSpeechRecipe(projectId))
   const update = (patch: Partial<MakeSpeechRecipe>) => setRecipe((cur) => {
     const next = { ...cur, ...patch }
     saveMakeSpeechRecipe(projectId, next)
     return next
   })
-  // A voice that was deleted since the recipe was saved is no voice at all.
-  const reader = voices.some((v) => v.id === recipe.readerVoiceId) ? recipe.readerVoiceId : null
-  const character = voices.some((v) => v.id === recipe.characterVoiceId) ? recipe.characterVoiceId : null
-  const effective = useMemo<MakeSpeechRecipe>(
-    () => ({ ...recipe, readerVoiceId: reader, characterVoiceId: character }),
-    [recipe, reader, character],
-  )
 
   const byId = useMemo(() => new Map(lines.map((l) => [l.cellId, l])), [lines])
-  const missing = useMemo(() => lines.filter((l) => !l.hasSpeech).map((l) => l.cellId), [lines])
-  // A picked line that has its speech now has no ghost left: it drops out of
-  // the pick, while the panel (and the run's progress) stays where it is.
-  const pickedIds = useMemo(() => (picked ?? []).filter((id) => byId.get(id)?.hasSpeech === false), [picked, byId])
-  const hasPicked = pickedIds.length > 0
-  const [target, setTarget] = useState<Target>(selectedCellId ? "line" : "missing")
-  const targetIds = useMemo(
-    () => (hasPicked ? pickedIds : target === "line" ? (selectedCellId ? [selectedCellId] : []) : missing),
-    [hasPicked, pickedIds, target, selectedCellId, missing],
-  )
-  // What step 1 will do to these lines.
+  // The selected lines and the picked ones, in file order.
+  const targetIds = useMemo(() => {
+    const chosen = new Set([...selectedCellIds, ...(picked ?? [])])
+    return lines.filter((l) => chosen.has(l.cellId)).map((l) => l.cellId)
+  }, [lines, selectedCellIds, picked])
   const untranslated = targetIds.filter((id) => byId.get(id)?.hasText === false).length
 
-  // ── Delivery: how the reader says these lines, before any of them has a take ──
-  // The voices that will read: the recipe's reader, or each line's own.
-  const speakers = useMemo(() => {
-    const ids = reader ? [reader] : [...new Set(targetIds.map((id) => byId.get(id)?.voiceId))]
-    return ids.map((id) => voices.find((v) => v.id === id)).filter((v): v is Voice => v != null)
-  }, [reader, targetIds, byId, voices])
-  const tunable = speakers.filter(voiceTakesLineDelivery)
-  const allReadTags = tunable.every((v) => elevenLabsModelReadsTags(v.elevenLabs?.modelId ?? DEFAULT_ELEVENLABS_MODEL))
-  const [speed, setSpeed] = useState<number | null>(null)
-  const [tags, setTags] = useState<string[]>([])
-  // What the slider rests on until it is moved: the one reader's own speed.
-  const ownSpeed = tunable.length === 1 ? elevenLabsSettingsOf(tunable[0]).speed : 1
-  const delivery = useMemo<LineDelivery | undefined>(
-    () => (tunable.length > 0 && (speed != null || tags.length > 0)
-      ? { settings: speed != null ? { speed } : {}, tags }
-      : undefined),
-    [tunable.length, speed, tags],
+  // ── The voices ──
+  // A voice that can't speak these lines (no key, still training, made for
+  // another language) is shown but can't be picked, and never chosen for you.
+  const blocked = useMemo(
+    () => new Map(voices.flatMap((v) => {
+      const why = blockerOf?.(v)
+      return why ? [[v.id, why] as const] : []
+    })),
+    [voices, blockerOf],
+  )
+  const usable = useMemo(() => voices.filter((v) => !blocked.has(v.id)), [voices, blocked])
+  // One voice reads every selected line: the last one chosen, else the first
+  // line's own, else the project's first.
+  const firstCast = targetIds.map((id) => byId.get(id)?.voiceId).find((id) => id && usable.some((v) => v.id === id))
+  const reader = usable.some((v) => v.id === recipe.readerVoiceId)
+    ? recipe.readerVoiceId
+    : firstCast ?? usable[0]?.id ?? null
+  // Only a trained voice or an ElevenLabs voice can take a clone; an Inworld
+  // or Gemini voice can read text but cannot re-voice a take.
+  const cloneable = useMemo(() => usable.filter((v) => voiceConversionKey(v) != null), [usable])
+  const blockedReason = (voice: Voice): string | undefined => {
+    const why = blocked.get(voice.id)
+    if (!why) return undefined
+    if (why.kind === "language") {
+      let language = why.language
+      try {
+        language = new Intl.DisplayNames([locale], { type: "language" }).of(why.language) ?? why.language
+      } catch { /* malformed tag: show it as is */ }
+      return t("audio.makeSpeech.blockedLanguage", { name: voice.name, language })
+    }
+    return t(BLOCKER_KEYS[why.kind], { name: voice.name })
+  }
+  const character = cloneable.some((v) => v.id === recipe.characterVoiceId && v.id !== reader)
+    ? recipe.characterVoiceId
+    : cloneable.find((v) => v.id !== reader)?.id ?? null
+  const cloning = recipe.clone && character != null
+  const effective = useMemo<MakeSpeechRecipe>(
+    () => ({ readerVoiceId: reader, clone: cloning, characterVoiceId: character }),
+    [reader, cloning, character],
   )
 
+  // ── Delivery: how the reader says these lines ──
+  const readerVoice = voices.find((v) => v.id === reader)
+  const tunable = readerVoice && voiceTakesLineDelivery(readerVoice) ? readerVoice : null
+  const readsTags = tunable ? elevenLabsModelReadsTags(tunable.elevenLabs?.modelId ?? DEFAULT_ELEVENLABS_MODEL) : true
+  const [speed, setSpeed] = useState<number | null>(null)
+  const [tags, setTags] = useState<string[]>([])
+  const ownSpeed = tunable ? elevenLabsSettingsOf(tunable).speed : 1
+  const delivery = useMemo<LineDelivery | undefined>(
+    () => (tunable && (speed != null || tags.length > 0)
+      ? { settings: speed != null ? { speed } : {}, tags }
+      : undefined),
+    [tunable, speed, tags],
+  )
+
+  // ── The run ──
   const [progress, setProgress] = useState<Map<string, MakeSpeechLineState> | null>(null)
   const [running, setRunning] = useState(false)
+  const [review, setReview] = useState<MakeSpeechReviewLine[] | null>(null)
+  const reviewDone = useRef<((texts: Map<string, string> | null) => void) | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => () => {
+    abortRef.current?.abort()
+    reviewDone.current?.(null)
+  }, [])
+
   const run = useCallback(async () => {
     if (running || targetIds.length === 0) return
     const abort = new AbortController()
     abortRef.current = abort
     setRunning(true)
     setProgress(new Map())
-    // Progress is at the top of the panel; the button that started it is at the bottom.
     panelRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+    const failed = new Set<string>()
+    const setLine = (cellId: string, state: MakeSpeechLineState) => {
+      if (state.kind === "failed") failed.add(cellId)
+      setProgress((cur) => new Map(cur ?? []).set(cellId, state))
+      onLineState?.(cellId, state)
+    }
     try {
-      // The run is handed the delivery itself, so it does not wait on the save.
+      // 1. Translate the lines with no text, then let a person check the drafts.
+      const drafted = await translateMissing(targetIds, actions, setLine, abort.signal)
+      if (drafted.length > 0 && actions.textOf && actions.saveText) {
+        const textOf = actions.textOf
+        const texts = await new Promise<Map<string, string> | null>((resolve) => {
+          reviewDone.current = resolve
+          setReview(drafted.map((cellId) => ({ cellId, source: byId.get(cellId)?.source ?? "", text: textOf(cellId) })))
+        })
+        reviewDone.current = null
+        setReview(null)
+        if (!texts || abort.signal.aborted) return
+        for (const [cellId, text] of texts) {
+          if (text.trim() === textOf(cellId).trim()) continue
+          try {
+            await actions.saveText(cellId, text.trim())
+          } catch (e) {
+            setLine(cellId, { kind: "failed", step: "translate", reason: e instanceof Error ? e.message : String(e) })
+          }
+        }
+      }
+      // 2 and 3. Speak, then clone.
       if (delivery) await Promise.resolve(onSaveDelivery?.(targetIds, delivery)).catch(() => {})
-      await runMakeSpeech(targetIds, { ...effective, delivery }, actions, (cellId, state) => {
-        setProgress((cur) => new Map(cur ?? []).set(cellId, state))
-        onLineState?.(cellId, state)
-      }, abort.signal)
+      await runMakeSpeech(targetIds.filter((id) => !failed.has(id)), { ...effective, delivery }, actions, setLine, abort.signal)
     } finally {
       setRunning(false)
     }
-  }, [running, targetIds, effective, delivery, actions, onSaveDelivery, onLineState])
+  }, [running, targetIds, effective, delivery, actions, byId, onSaveDelivery, onLineState])
 
   const done = progress ? [...progress.values()].filter((s) => s.kind !== "waiting" && s.kind !== "running").length : 0
   const labelOf = (cellId: string) => byId.get(cellId)?.label ?? cellId
 
-  const targets: { value: Target; label: string; count: number }[] = [
-    { value: "line", label: t("audio.makeSpeech.targetLine"), count: selectedCellId ? 1 : 0 },
-    { value: "missing", label: t("audio.makeSpeech.targetMissing", { count: missing.length }), count: missing.length },
-  ]
-
   return (
     <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden" data-testid="make-speech-panel" data-showcase="voice.make-speech">
-      <div className="space-y-1 border-b p-3">
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="icon-sm" aria-label={t("audio.inspector.backToVoices")} onClick={onBack}>
-            <ArrowLeft />
-          </Button>
-          <h2 className="text-sm font-semibold">{t("audio.makeSpeech.title")}</h2>
-        </div>
-        <p className="text-xs text-muted-foreground">{t("audio.makeSpeech.intro")}</p>
+      <div className="flex items-center gap-2 border-b p-3">
+        <Button type="button" variant="outline" size="icon-sm" aria-label={t("audio.inspector.backToVoices")} onClick={onBack}>
+          <ArrowLeft />
+        </Button>
+        <h2 className="text-sm font-semibold">{t("audio.makeSpeech.title")}</h2>
       </div>
 
-      {progress && (
+      {progress && progress.size > 0 && (
         <div className="space-y-2 border-b p-3" data-testid="make-speech-progress">
           <div className="flex items-baseline justify-between text-xs">
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.progress")}</h3>
@@ -207,97 +260,76 @@ export function MakeSpeechPanel({
           </div>
           <ul className="divide-y text-xs">
             {[...progress.entries()].map(([cellId, state]) => (
-              <li key={cellId} className="flex items-center gap-2 py-1.5">
-                <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(cellId)}</span>
-                <span
-                  className={cn(
-                    "shrink-0",
-                    state.kind === "done" ? "font-medium text-emerald-700 dark:text-emerald-400"
-                      : state.kind === "failed" ? "font-medium text-destructive"
-                        : state.kind === "running" ? "font-medium text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  {state.kind === "running" ? t(STEP_KEYS[state.step]) : t(STATE_KEYS[state.kind])}
-                </span>
+              <li key={cellId} className="space-y-0.5 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(cellId)}</span>
+                  <span
+                    className={cn(
+                      "shrink-0",
+                      state.kind === "done" ? "font-medium text-emerald-700 dark:text-emerald-400"
+                        : state.kind === "failed" ? "font-medium text-destructive"
+                          : state.kind === "running" ? "font-medium text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {state.kind === "running" ? t(STEP_KEYS[state.step]) : t(STATE_KEYS[state.kind])}
+                  </span>
+                </div>
+                {state.kind === "failed" && (
+                  <p className="break-words text-[11px] text-destructive" data-testid="make-speech-failure">
+                    {t(STEP_KEYS[state.step])}: {state.reason ?? t("audio.makeSpeech.noReason")}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* The lines this is about. */}
+      {/* The lines this runs on. */}
       <div className="space-y-2 border-b p-3">
-        {hasPicked ? (
+        {targetIds.length > 0 ? (
           <>
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("audio.makeSpeech.pickedCount", { count: pickedIds.length })}
+              {t("audio.makeSpeech.selectedCount", { count: targetIds.length })}
             </h3>
             <ul className="max-h-32 divide-y overflow-y-auto rounded-lg border text-xs" data-testid="make-speech-picked">
-              {pickedIds.map((id) => (
-                <li key={id} className="flex items-center gap-2 px-2 py-1.5">
-                  <span dir="auto" className="min-w-0 flex-1 truncate">{labelOf(id)}</span>
+              {targetIds.map((id) => (
+                <li key={id} className="px-2 py-1.5">
+                  <span dir="auto" className="block truncate">{labelOf(id)}</span>
                 </li>
               ))}
             </ul>
-            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.shiftHint")}</p>
           </>
         ) : (
-          <>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("audio.makeSpeech.runOn")}</h3>
-            <div role="group" aria-label={t("audio.makeSpeech.runOn")} className="flex flex-col overflow-hidden rounded-lg border text-xs">
-              {targets.map((option, i) => (
-                <button
-                  key={option.value} type="button" aria-pressed={target === option.value}
-                  disabled={running || option.count === 0}
-                  className={cn(
-                    "h-8 px-2.5 text-start disabled:opacity-40",
-                    i > 0 && "border-t",
-                    target === option.value ? "bg-foreground font-medium text-background" : "hover:bg-accent",
-                  )}
-                  onClick={() => setTarget(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.ghostHint")}</p>
-          </>
+          <p className="text-xs text-muted-foreground" data-testid="make-speech-none">{t("audio.makeSpeech.noLines")}</p>
         )}
+        <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.shiftHint")}</p>
       </div>
 
-      {/* The pipeline, in the order it runs. */}
       <div className="space-y-2.5 border-b p-3">
         <Step n={1} title={t("audio.makeSpeech.step1")}>
           <p className="text-xs text-muted-foreground" data-testid="make-speech-translate-note">
             {untranslated === 0
               ? t("audio.makeSpeech.translateNone")
-              : !recipe.translate
-                ? t("audio.makeSpeech.translateSkipped", { count: untranslated })
-                : t("audio.makeSpeech.translateSome", { count: untranslated })}
+              : t("audio.makeSpeech.translateSome", { count: untranslated })}
           </p>
-          <label className="flex items-start gap-2 text-xs">
-            <Checkbox checked={recipe.translate} onCheckedChange={(v) => update({ translate: v === true })} disabled={running} />
-            <span>{targetLanguage ? t("audio.makeSpeech.translateInto", { language: targetLanguage }) : t("audio.makeSpeech.translate")}</span>
-          </label>
-          <label className="flex items-start gap-2 text-xs text-muted-foreground">
-            <Checkbox
-              checked={recipe.reviewTranslation} disabled={running || !recipe.translate}
-              onCheckedChange={(v) => update({ reviewTranslation: v === true })}
-            />
-            <span>{t("audio.makeSpeech.review")}</span>
-          </label>
         </Step>
 
         <Step n={2} title={t("audio.makeSpeech.step2")}>
           <VoiceChips
             ariaLabel={t("audio.makeSpeech.readerAriaLabel")}
-            voices={voices} value={reader} disabled={running}
-            noneLabel={t("audio.makeSpeech.readerLineVoice")}
+            voices={voices} value={reader} disabled={running} blockedReason={blockedReason}
             onPick={(voiceId) => update({ readerVoiceId: voiceId })}
           />
-          {onSaveDelivery && (tunable.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.deliveryNeedsElevenLabs")}</p>
-          ) : (
+          {reader == null && voices.length > 0 && (
+            <p className="text-[11px] text-destructive" data-testid="make-speech-no-usable">{t("audio.makeSpeech.noUsableVoice")}</p>
+          )}
+          {blocked.size > 0 && (
+            <ul className="space-y-0.5 text-[11px] text-muted-foreground" data-testid="make-speech-blocked">
+              {voices.filter((v) => blocked.has(v.id)).map((v) => <li key={v.id}>{blockedReason(v)}</li>)}
+            </ul>
+          )}
+          {onSaveDelivery && tunable && (
             <div className="space-y-2.5 border-t pt-2.5" data-testid="make-speech-delivery">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2 text-xs">
@@ -329,64 +361,86 @@ export function MakeSpeechPanel({
                 <p className="text-xs font-medium">{t("audio.makeSpeech.tags")}</p>
                 <LineTagChips tags={tags} disabled={running} onChange={setTags} testId="make-speech-tags" />
                 <p className="text-[11px] text-muted-foreground">
-                  {allReadTags ? t("audio.inspector.tagsNote") : t("audio.makeSpeech.tagsSomeSkipped")}
+                  {readsTags ? t("audio.inspector.tagsNote") : t("audio.makeSpeech.tagsSomeSkipped")}
                 </p>
               </div>
             </div>
-          ))}
+          )}
         </Step>
 
-        <Step n={3} title={t("audio.makeSpeech.step3")} strong={character != null}>
-          <VoiceChips
-            ariaLabel={t("audio.makeSpeech.characterAriaLabel")}
-            voices={voices} value={character} disabled={running}
-            noneLabel={t("audio.makeSpeech.noCharacter")}
-            onPick={(voiceId) => update({ characterVoiceId: voiceId })}
-          />
-          <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.characterNote")}</p>
+        <Step
+          n={3} title={t("audio.makeSpeech.step3")} strong={cloning}
+          action={(
+            <Switch
+              size="sm"
+              aria-label={t("audio.makeSpeech.cloneToggle")}
+              checked={cloning}
+              disabled={running || character == null}
+              onCheckedChange={(on) => update({ clone: on, ...(on && character ? { characterVoiceId: character } : {}) })}
+              data-testid="make-speech-clone-toggle"
+            />
+          )}
+        >
+          {character == null ? (
+            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.cloneNoVoices")}</p>
+          ) : cloning ? (
+            <VoiceChips
+              ariaLabel={t("audio.makeSpeech.characterAriaLabel")}
+              voices={cloneable.filter((v) => v.id !== reader)} value={character} disabled={running}
+              onPick={(voiceId) => update({ characterVoiceId: voiceId })}
+            />
+          ) : (
+            <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.cloneOff")}</p>
+          )}
         </Step>
       </div>
 
       <div className="space-y-2 p-3">
         {running ? (
-          <Button type="button" variant="outline" className="w-full" onClick={() => abortRef.current?.abort()}>
+          <Button type="button" variant="outline" className="w-full" onClick={() => { abortRef.current?.abort(); reviewDone.current?.(null) }}>
             <Square data-icon="inline-start" />
             {t("common.stop")}
           </Button>
         ) : (
-          <Button type="button" className="w-full" disabled={targetIds.length === 0} onClick={() => void run()} data-testid="make-speech-run">
+          <Button type="button" className="w-full" disabled={targetIds.length === 0 || reader == null} onClick={() => void run()} data-testid="make-speech-run">
             <Play data-icon="inline-start" />
             {t("audio.makeSpeech.run", { count: targetIds.length })}
           </Button>
         )}
         <p className="text-[11px] text-muted-foreground">{t("audio.makeSpeech.newTakeNote")}</p>
       </div>
+
+      {review && (
+        <MakeSpeechReview
+          lines={review}
+          onConfirm={(texts) => reviewDone.current?.(texts)}
+          onCancel={() => reviewDone.current?.(null)}
+        />
+      )}
     </div>
   )
 }
 
-/** One voice out of the project's, picked by a click; the first chip is "none of them". */
-function VoiceChips({ ariaLabel, voices, value, noneLabel, disabled, onPick }: {
+/** One voice out of the project's, picked by a click. */
+function VoiceChips({ ariaLabel, voices, value, disabled, blockedReason, onPick }: {
   ariaLabel: string
   voices: Voice[]
   value: string | null
-  noneLabel: string
   disabled: boolean
-  onPick: (voiceId: string | null) => void
+  /** Why a voice can't be picked; such a chip is disabled. */
+  blockedReason?: (voice: Voice) => string | undefined
+  onPick: (voiceId: string) => void
 }) {
-  const chip = (selected: boolean) => cn(
-    "flex h-7 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-50",
-    selected ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-accent",
-  )
   return (
     <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-1.5">
-      <button type="button" aria-pressed={value == null} disabled={disabled} className={chip(value == null)} onClick={() => onPick(null)}>
-        <span className="truncate">{noneLabel}</span>
-      </button>
       {voices.map((voice) => (
         <button
-          key={voice.id} type="button" aria-pressed={value === voice.id} disabled={disabled}
-          className={cn(chip(value === voice.id), "ps-1")}
+          key={voice.id} type="button" aria-pressed={value === voice.id}
+          disabled={disabled || blockedReason?.(voice) != null} title={blockedReason?.(voice)}
+          className={cn(
+            "flex h-7 max-w-full items-center gap-1.5 rounded-full border ps-1 pe-2.5 text-xs disabled:opacity-50",
+            value === voice.id ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-accent",
+          )}
           onClick={() => onPick(voice.id)}
         >
           <VoiceAvatar voice={voice} size={20} className="rounded-full" />
@@ -397,7 +451,14 @@ function VoiceChips({ ariaLabel, voices, value, noneLabel, disabled, onPick }: {
   )
 }
 
-function Step({ n, title, strong, children }: { n: number; title: string; strong?: boolean; children: React.ReactNode }) {
+function Step({ n, title, strong, action, children }: {
+  n: number
+  title: string
+  strong?: boolean
+  /** A control at the end of the step's title row (the clone toggle). */
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <div className={cn("space-y-2 rounded-xl border p-2.5", strong && "border-primary/60 bg-primary/5")}>
       <div className="flex items-center gap-2">
@@ -410,7 +471,8 @@ function Step({ n, title, strong, children }: { n: number; title: string; strong
         >
           {n}
         </span>
-        <span className="text-xs font-semibold">{title}</span>
+        <span className="flex-1 text-xs font-semibold">{title}</span>
+        {action}
       </div>
       {children}
     </div>

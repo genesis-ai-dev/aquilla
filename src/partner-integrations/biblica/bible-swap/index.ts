@@ -36,15 +36,19 @@ export {
 } from "./structureSwap";
 
 export { buildChapterBlockIndex } from "./chapterBlocks";
+export { keepStudyBoxesTogether } from "./studyBoxKeeps";
 
 export { normalizeBibleStoryXmlGlyphs } from "./bibleTextNormalization";
 export {
     mergeBibleHeadingStylesIntoStudyStylesXml,
     mergeBibleSmallCapsCharacterStylesIntoStudyStylesXml,
+    stampPortugueseHyphenationLanguage,
+    retargetFootnoteCharacterFonts,
 } from "./headingStyleMerge";
 export {
     characterStyleBlockIsSmallCaps,
     isDivineNameCharacterStyle,
+    rewriteAllCapsSenhor,
 } from "./divineNameStyles";
 export { canonicalizeParagraphStyle, isHeadingRoleTitleStyle } from "./paragraphStyleRoles";
 
@@ -107,6 +111,7 @@ import {
     applyStructureSwapToStudyXml,
     buildBibleChapterBlockIndex,
 } from "./structureSwap";
+import { keepStudyBoxesTogether } from "./studyBoxKeeps";
 import type { VersificationPlan } from "./versificationPlan";
 import { buildVersificationPlanFromIndices } from "./versificationPlan";
 import {
@@ -176,21 +181,23 @@ export function applyBibleSwapWithShared(
         );
     }
 
-    if (effectiveMode === "structure") {
-        const chapterIndex =
-            shared.bibleChapterIndex ??
-            buildBibleChapterBlockIndex(bibleStoryXml, strategy.chapterBlockOptions);
-        return applyStructureSwapToStudyXml(studyStoryXml, chapterIndex, {
-            bibleStoryXml,
-            versificationPlan,
-            bibleVerseIndex: shared.bibleVerseIndex,
-        });
-    }
-
-    return applySurgicalSwapToStudyXml(studyStoryXml, shared.bibleVerseIndex, {
-        versificationPlan,
-        studyScan,
-    });
+    const swapped =
+        effectiveMode === "structure"
+            ? applyStructureSwapToStudyXml(
+                  studyStoryXml,
+                  shared.bibleChapterIndex ??
+                      buildBibleChapterBlockIndex(bibleStoryXml, strategy.chapterBlockOptions),
+                  {
+                      bibleStoryXml,
+                      versificationPlan,
+                      bibleVerseIndex: shared.bibleVerseIndex,
+                  }
+              )
+            : applySurgicalSwapToStudyXml(studyStoryXml, shared.bibleVerseIndex, {
+                  versificationPlan,
+                  studyScan,
+              });
+    return { xml: keepStudyBoxesTogether(swapped.xml), stats: swapped.stats };
 }
 
 /** @deprecated Use applySurgicalSwapToStudyXml or applyBibleSwap with mode. */

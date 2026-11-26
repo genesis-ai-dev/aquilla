@@ -172,4 +172,33 @@ describe("style segment edge", () => {
     }
     expect(validateIdmlTranslation(html, moved ?? "", metadata).valid).toBe(true)
   })
+
+  it("drags the small-caps divine-name run onto SENHOR and leaves that run's style in place", () => {
+    const html =
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/$ID/[No character style]" data-idml-protected="slot">Quando o SENHOR </span>`
+      + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/nd" data-idml-protected="slot">Deus</span>`
+      + `<span data-idml-slot="2" data-idml-character-style="CharacterStyle/$ID/[No character style]" data-idml-protected="slot"> fez</span>`
+      + `</p>`
+    const pieces = readSegmentPiecesFromHtml(html)
+    expect(pieces[1]).toMatchObject({ kind: "slot", emphasis: true, text: "Deus" })
+    expect(pieces[0]).toMatchObject({ emphasis: false })
+
+    const pulled = reflowSegmentEdge(pieces, 1, "start", 9)
+    expect(texts(pulled)).toEqual({ 0: "Quando o ", 1: "SENHOR Deus" })
+
+    const placed = pieces.map((piece) => {
+      if (piece.kind !== "slot" || !pulled?.has(piece.index)) return piece
+      return { ...piece, text: pulled.get(piece.index) ?? piece.text }
+    })
+    expect(texts(reflowSegmentEdge(placed, 1, "end", 6))).toEqual({ 1: "SENHOR", 2: " Deus fez" })
+
+    const rewritten = rewriteIdmlSlotTexts(html, new Map([
+      [0, "Quando o "],
+      [1, "SENHOR"],
+      [2, " Deus fez"],
+    ]))
+    expect(rewritten).toMatch(/data-idml-character-style="CharacterStyle\/nd"[^>]*>SENHOR</)
+    expect(rewritten).not.toContain("idml-style-")
+  })
 })

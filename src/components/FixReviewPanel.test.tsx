@@ -60,13 +60,13 @@ describe("FixReviewPanel", () => {
     expect(onAmend).toHaveBeenCalled()
   })
 
-  it("shows 'Cached regex' mode badge when any preview is cached", () => {
+  it("shows 'Saved regex' mode badge when any preview is cached", () => {
     const proposal: FixProposal = {
       kind: "regex-replace", pattern: "foo", replacement: "bar", flags: "g",
       previews: [{ cellId: "c1", fileId: "f1", before: "foo", after: "bar", source: "cached-regex" }],
     }
     render(<FixReviewPanel open={true} rule={rule} proposal={proposal}
       onClose={() => {}} onApply={vi.fn()} onAmendRule={() => {}} />)
-    expect(screen.getByText(/cached regex/i)).toBeInTheDocument()
+    expect(screen.getByText(/saved regex/i)).toBeInTheDocument()
   })
 })

@@ -86,17 +86,66 @@ describe("mediaEmptyGates", () => {
   const PROJECT_LEAD = 500
   const MAINTAINER = 600
   const gates = (roleLevel: number | null, captionRowsMode: boolean, canEditTracks = false) =>
-    mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks })
+    mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks, coversEveryLanguage: true })
 
   it("offers captions as rows to maintainers only, with track editing off", () => {
     expect(gates(MAINTAINER, true)).toEqual({
       offerCaptionRows: true, canImportCaptions: true, canUploadSourceMedia: true, offerVideoSoundRows: false,
+      sourceMediaNote: null,
     })
     expect(gates(PROJECT_LEAD, true)).toEqual({
       offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: true, offerVideoSoundRows: false,
+      sourceMediaNote: null,
     })
     expect(gates(CONTRIBUTOR, true)).toEqual({
       offerCaptionRows: false, canImportCaptions: false, canUploadSourceMedia: false, offerVideoSoundRows: false,
+      sourceMediaNote: null,
+    })
+  })
+
+  // AQU-2682: the recording is the file's source audio, which the server
+  // takes only from someone whose access covers every language. The app asks
+  // the server (useSourceAudioAccess) and offers the upload only on its yes.
+  describe("access to every language", () => {
+    const FILM = "https://cdn.thechosen.media/videos/ep101/master.m3u8"
+    const withAccess = (roleLevel: number | null, coversEveryLanguage: boolean | null) =>
+      mediaEmptyGates({ roleLevel, captionRowsMode: true, canEditTracks: false, linkedVideoUrl: FILM, coversEveryLanguage })
+
+    it("withholds the upload from a Project Lead missing a language, and says why", () => {
+      expect(withAccess(PROJECT_LEAD, false)).toMatchObject({
+        canUploadSourceMedia: false, sourceMediaNote: "needsEveryLanguage",
+      })
+    })
+
+    it("still offers it to a Project Lead with every language, and to Maintainers and up", () => {
+      expect(withAccess(PROJECT_LEAD, true)).toMatchObject({ canUploadSourceMedia: true, sourceMediaNote: null })
+      expect(withAccess(MAINTAINER, true)).toMatchObject({
+        canUploadSourceMedia: true, offerVideoSoundRows: true, sourceMediaNote: null,
+      })
+      expect(withAccess(700, true)).toMatchObject({ canUploadSourceMedia: true, sourceMediaNote: null })
+    })
+
+    it("offers nothing that stores source audio before the answer arrives (slow or no network)", () => {
+      for (const role of [PROJECT_LEAD, MAINTAINER, null]) {
+        expect(withAccess(role, null)).toMatchObject({
+          canUploadSourceMedia: false, offerVideoSoundRows: false, sourceMediaNote: "checking",
+        })
+      }
+    })
+
+    it("keeps the film's sound from a Maintainer the server says is limited", () => {
+      expect(withAccess(MAINTAINER, false)).toMatchObject({
+        offerVideoSoundRows: false, canUploadSourceMedia: false, sourceMediaNote: "needsEveryLanguage",
+      })
+    })
+
+    it("adds no note below Project Lead, where the waiting line already says who can", () => {
+      expect(withAccess(CONTRIBUTOR, false).sourceMediaNote).toBeNull()
+      expect(withAccess(CONTRIBUTOR, null).sourceMediaNote).toBeNull()
+    })
+
+    it("leaves the caption actions alone", () => {
+      expect(withAccess(MAINTAINER, false)).toMatchObject({ offerCaptionRows: true, canImportCaptions: true })
     })
   })
 
@@ -122,7 +171,7 @@ describe("mediaEmptyGates", () => {
   // page cannot read (and whose terms forbid downloading it).
   describe("rows from the video's own sound", () => {
     const sound = (roleLevel: number | null, captionRowsMode: boolean, linkedVideoUrl: string | null) =>
-      mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks: false, linkedVideoUrl }).offerVideoSoundRows
+      mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks: false, linkedVideoUrl, coversEveryLanguage: true }).offerVideoSoundRows
     const FILM = "https://cdn.thechosen.media/videos/ep101/master.m3u8"
 
     it("offers a streamed film or a direct file link to a maintainer on an empty file", () => {

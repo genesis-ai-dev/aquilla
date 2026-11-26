@@ -2,7 +2,7 @@
 
 Spec for AQU-2719 step 2. Written 2026-11-21 alongside step 1, which moved the
 first large collection to rows (decision record
-`docs/decisions/0017-settings-collections-move-to-rows.md`). **Nothing here is
+`docs/decisions/0019-settings-collections-move-to-rows.md`). **Nothing here is
 built.** Step 2 gets its own ticket; this is the written design that ticket
 starts from, so the decisions it has to make are visible before anyone writes
 a migration.
@@ -95,7 +95,7 @@ gate. A row whose key is not in the registry is not readable as a setting.
 ## Migrating existing projects
 
 The same rules step 1 proved, so there is one pattern and not two
-(decision record 0017):
+(decision record 0019):
 
 - **The rows are a union with the blob, never a cutover.** A key with no row
   falls back to the document. No reader may assume the row exists.

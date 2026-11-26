@@ -394,7 +394,7 @@ CREATE TABLE project_settings (
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
--- 0207 (AQU-2719): the authored living-memory entries, moved OFF the blob
+-- 0210 (AQU-2719): the authored living-memory entries, moved OFF the blob
 -- above and onto rows — the same move terminology made onto `concepts` in
 -- 0084, and for the same reasons: a whole-array key can only ever express
 -- "here is the entire list", so every save rewrote it from the writer's stale
@@ -1517,6 +1517,11 @@ CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE delete
 -- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
 -- per-file audio read and the progress audio CTE both filter on the lane now.
 CREATE INDEX idx_cell_audio_lane ON cell_audio(project_id, file_id, lane_id) WHERE deleted = 0;
+-- AQU-2682 (0206, 0207): has any take, live or removed, named this recording?
+-- By its id, and by the stored recording its url plays (only `frontier-audio://`
+-- urls name one, so an outside link of any length is never in the index).
+CREATE INDEX idx_cell_audio_name ON cell_audio(project_id, file_id, audio_id);
+CREATE INDEX idx_cell_audio_stored_url ON cell_audio(project_id, file_id, url) WHERE url LIKE 'frontier-audio://%';
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
@@ -2958,6 +2963,7 @@ ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_l
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
 -- Lane and file scopes are not included. Platform admin is env-driven, not a row.
 -- 0121: security_invoker (keeps the AQU-289 RLS backstop) + team-scope rows.
+-- AQU-2357: created_by is history. The creator's Owner grant is a project_members row.
 CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
   SELECT om.user_id::BIGINT            AS user_id,
          'org'::TEXT                   AS scope_type,
@@ -2979,12 +2985,6 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gpg.granted_by::BIGINT, gpg.granted_at
     FROM group_project_grants gpg
     JOIN group_members gm ON gm.group_id = gpg.group_id
-  UNION ALL
-  SELECT p.created_by::BIGINT, 'project'::TEXT, p.id::TEXT,
-         700::INT, 'creator'::TEXT, NULL::BIGINT,
-         NULL::BIGINT, p.created_at
-    FROM projects p
-   WHERE p.created_by IS NOT NULL
   UNION ALL
   SELECT gm.user_id::BIGINT, 'team'::TEXT, gm.group_id::TEXT,
          gm.role_level::INT, 'direct'::TEXT, NULL::BIGINT,

@@ -62,7 +62,7 @@ it('rejects a response for another workspace and allows an explicit retry', asyn
   await user.click(await screen.findByRole('button', { name: 'Review Team' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Plan review is unavailable')
   fetch.mockResolvedValueOnce(Response.json(review))
-  await user.click(screen.getByRole('button', { name: 'Try review again' }))
+  await user.click(screen.getByRole('button', { name: 'Reload plan review' }))
   expect(await screen.findByText('Translation team')).toBeVisible()
 })
 it('discards a pending review on workspace navigation', async () => {

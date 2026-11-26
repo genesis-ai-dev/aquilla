@@ -59,6 +59,16 @@ export const SDK_API = String.raw`
     h.lockedBy = function (id) { return S.locks[id] || null; };
     return h;
   }
+  /** apiRev 8: the cell focused in Aquilla's real native editor (live in side panels). */
+  function useActiveCell() {
+    var h = handle(["activeCell"], function () { return S.nativeActiveCell; });
+    h.ready = (declared("read:cells") ? aquilla.editor.activeCell().then(function (ac) {
+      if (ac) { S.nativeActiveCell = ac; emit("activeCell", ac); }
+      return S.nativeActiveCell;
+    }, function () { return S.nativeActiveCell; }) : Promise.resolve(S.nativeActiveCell));
+    return h;
+  }
+  ui.openPanel = function () { return aquilla.ui.openPanel(); };
   /** Render into the page (replacing it). A layout holding a CellList fills
    *  the frame (the list scrolls); anything else scrolls as a page. */
   function mount(node, opts) {
@@ -82,8 +92,13 @@ export const SDK_API = String.raw`
     version: SDK_VERSION,
     h: el, icon: icon, t: t, strings: loadStrings,
     mount: mount, Layout: Layout,
-    useFile: useFile, useCells: useCells, useCell: useCell, useSelection: useSelection, usePresence: usePresence,
+    useFile: useFile, useCells: useCells, useCell: useCell, useSelection: useSelection, usePresence: usePresence, useActiveCell: useActiveCell,
     actions: actions,
+    editor: {
+      annotate: function (fileId, spec) { return aquilla.editor.annotate(fileId || S.fileId, spec); },
+      clearAnnotations: function (opts) { return aquilla.editor.clearAnnotations(opts); },
+      reveal: function (fileId, cellId, opts) { return aquilla.editor.reveal(fileId || S.fileId, cellId, opts); },
+    },
     CellList: CellList, CellRow: CellRow, SourceText: SourceText, TargetEditor: TargetEditor, ValidateButton: ValidateButton,
     CommentBadge: CommentBadge, AudioBadge: AudioBadge, StatusBadges: StatusBadges, CellNumber: CellNumber, SelectBox: SelectBox,
     HealthRibbon: HealthRibbon, PresenceStack: PresenceStack, CellNotes: CellNotes, FootnoteLine: FootnoteLine, VoiceCard: VoiceCard,

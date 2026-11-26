@@ -9,36 +9,26 @@ import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missi
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { TableEmptyState } from "@/components/ui/empty"
 import { UserChip } from "@/components/UserChip"
-import { AdminProjectsSection } from "@/components/admin/AdminProjectsSection"
+import { AdminProjectsSection, type Lens } from "@/components/admin/AdminProjectsSection"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { adminUserHref } from "@/lib/admin/drilldown-paths"
 import { roleDisplayLabel } from "@/lib/frontier/roles"
-import {
-  getAdminOrgMembers,
-  type AdminOrg,
-  type AdminOrgMember,
-  type AdminProject,
-  type AdminTeam,
-} from "@/lib/frontier/admin"
+import { getAdminOrgMembers, getAdminProjectsPage, type AdminOrg, type AdminOrgMember } from "@/lib/frontier/admin"
+import { useAdminDirectory } from "@/components/admin/useAdminDirectory"
 
 /**
  * One org, seen by a platform admin: header, the org's projects, and its
- * people. Projects come from the list the console already loaded; people are
- * fetched here. Teams are only a count.
+ * people. Projects are a page of this org; people are fetched here.
  */
 export function AdminOrgView({
   jwt,
   org,
-  projects,
-  teams,
   tenantsHref,
   onOpenInApp,
   onSelectUser,
 }: {
   jwt: string
   org: AdminOrg
-  projects: AdminProject[]
-  teams: AdminTeam[]
   /** Where the back link goes: the Tenants list. */
   tenantsHref: string
   onOpenInApp: (orgId: number) => void
@@ -46,6 +36,13 @@ export function AdminOrgView({
 }) {
   const [members, setMembers] = useState<AdminOrgMember[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lens, setLens] = useState<Lens>("all")
+  const projects = useAdminDirectory({
+    load: (query) => getAdminProjectsPage(jwt, { ...query, orgId: org.id, lens }),
+    queryKey: `${org.id}:${lens}`,
+    initialSort: lens === "needs-attention" ? { id: "status", desc: true } : { id: "name", desc: false },
+  })
+  const teamCount = org.teamCount ?? 0
 
   useEffect(() => {
     let alive = true
@@ -61,8 +58,6 @@ export function AdminOrgView({
     }
   }, [jwt, org.id])
 
-  const orgProjects = useMemo(() => projects.filter((p) => p.orgId === org.id), [projects, org.id])
-  const teamCount = useMemo(() => teams.filter((t) => t.orgId === org.id).length, [teams, org.id])
   const name = org.name ?? `#${org.id}`
 
   const columns = useMemo<ColumnDef<AdminOrgMember>[]>(
@@ -138,7 +133,23 @@ export function AdminOrgView({
       </div>
 
       <Section title="Projects" description="Projects in this org, archived included.">
-        <AdminProjectsSection projects={orgProjects} hideOrg />
+        <AdminProjectsSection
+          projects={projects.rows}
+          hideOrg
+          server={{
+            total: projects.total,
+            search: projects.search,
+            onSearchChange: projects.setSearch,
+            searching: projects.searching,
+            loading: projects.loading,
+            loadingMore: projects.loadingMore,
+            hasMore: projects.hasMore,
+            onLoadMore: projects.loadMore,
+            onSortingChange: projects.setSorting,
+            lens,
+            onLensChange: setLens,
+          }}
+        />
       </Section>
 
       <Section title="People" description="Members of this org and their org role.">

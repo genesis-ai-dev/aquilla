@@ -43,7 +43,7 @@ describe("publishTermbase", () => {
     expect(err).toMatchObject({
       name: "TermbaseApiError",
       status: 409,
-      message: "Couldn't share this termbase with the organization.",
+      message: "Couldn't share this term base with the organization.",
     })
     expect(String((err as Error).cause)).toContain("not org-owned")
   })

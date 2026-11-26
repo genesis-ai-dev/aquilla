@@ -26,8 +26,8 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
     await screen.findByRole("alert")
     if (enabled === false) {
       expect(screen.getByText(/isn’t set up for this environment/)).toBeVisible()
-      expect(screen.queryByRole("button", {name:"Retry Google login availability"})).toBeNull()
-    } else expect(screen.getByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+      expect(screen.queryByRole("button", {name:"Check Google login again"})).toBeNull()
+    } else expect(screen.getByRole("button",{name:"Check Google login again"})).toBeEnabled()
     expect(screen.getByRole("button", {name:"Continue with Google"})).toBeDisabled()
     expect(screen.queryByText("or")).toBeNull()
   }
@@ -36,7 +36,7 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
 it.each(["button","online"])("recovers capability without provider contact via %s", async trigger => {
   mocks.request.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({enabled:true})
   render(<GoogleLoginButton />)
-  const retry = await screen.findByRole("button",{name:"Retry Google login availability"})
+  const retry = await screen.findByRole("button",{name:"Check Google login again"})
   if (trigger === "button") fireEvent.click(retry)
   else fireEvent(window,new Event("online"))
   await screen.findByRole("button",{name:"Continue with Google"})
@@ -50,7 +50,7 @@ it("keeps Google visible but disabled in CI without requesting availability or c
   const button = screen.getByRole("button", { name: "Continue with Google" })
   expect(button).toBeDisabled()
   expect(screen.getByText(/Google login is disabled in CI previews/)).toBeVisible()
-  expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Check Google login again" })).toBeNull()
   fireEvent.click(button)
   fireEvent(window, new Event("online"))
   expect(mocks.request).not.toHaveBeenCalled()

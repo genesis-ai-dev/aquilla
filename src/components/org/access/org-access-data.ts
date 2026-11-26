@@ -39,7 +39,15 @@ export interface AccessTreeNode {
   /** Absent on payloads from before AQU-2318. The lens treats that as none. */
   inherited?: InheritedSource[]
 }
-export interface OrgAccessPerson { userId: string; displayName: string; isGuest: boolean; grants: AccessChainEntry[] }
+export interface OrgAccessPerson {
+  userId: string
+  displayName: string
+  isGuest: boolean
+  email?: string | null
+  lastActiveAt?: string | null
+  pendingInvite?: { expiresAt: string | null; roleLevel: number }
+  grants: AccessChainEntry[]
+}
 export interface OrgAccessPayload { tree: AccessTreeNode[]; people: OrgAccessPerson[] }
 
 export async function fetchOrgAccess(jwt: string, orgId: number, apiUrl: string = FRONTIER_API_URL): Promise<OrgAccessPayload> {

@@ -38,13 +38,13 @@ describe("sidebar re-import can switch importer", () => {
     renderReimport({})
     expect(screen.getByRole("heading", { name: "Re-import Lesson.idml" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy()
-    expect(screen.queryByText("Biblica Study Bible Notes")).toBeNull()
+    expect(screen.queryByText("Biblica Study Bible notes")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Back to import types" }))
 
     expect(onOpenChange).not.toHaveBeenCalled()
     expect(screen.getByRole("heading", { name: "Re-import Lesson.idml" })).toBeTruthy()
-    fireEvent.click(screen.getByText("Biblica Study Bible Notes"))
+    fireEvent.click(screen.getByText("Biblica Study Bible notes"))
 
     expect(await screen.findByRole("group", { name: "Which Biblica title is this?" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Update this file" })).toBeTruthy()

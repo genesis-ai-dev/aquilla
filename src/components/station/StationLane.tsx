@@ -53,13 +53,12 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
   const pct = (x: number) => pctOf(x, va, w)
   const inView = (x: number) => x >= va - 1e-6 && x <= vb + 1e-6
 
-  // Item 11: one peak per 2 px, against the recording's loudest sample with
-  // 5% headroom, drawn as it plays: the volume scales all of it, past Start
-  // and End too, as Pro Tools and Ableton draw clip gain (Sam, Nov 2), and
-  // the fades shape the kept part.
+  // Item 11: one peak per 2 px, drawn as it plays against a fixed headroom
+  // (AQU-2664 evidence 72D/E/G): the volume and evening out set its height,
+  // never past the lane, and the fades shape the kept part.
   const bins = Math.max(8, Math.round(size.width / 2))
   const peaks = useMemo(
-    () => (ed.pcm ? viewPeaks(ed.placed, ed.lookup, va, vb, bins, ed.pcm.peak * 1.05, ed.clip) : null),
+    () => (ed.pcm ? viewPeaks(ed.placed, ed.lookup, va, vb, bins, ed.pcm.peak, ed.clip) : null),
     [ed.pcm, ed.placed, ed.lookup, va, vb, bins, ed.clip],
   )
 

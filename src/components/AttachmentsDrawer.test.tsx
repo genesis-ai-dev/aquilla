@@ -92,7 +92,7 @@ describe("AttachmentsDrawer", () => {
   it("falls back to a stand-in label when the cell has no canonical ref", () => {
     renderDrawer({ attachments: [makeRecord({ cellRef: null, cellId: "cell-xyz" })] })
     expect(screen.getByRole("region")).toHaveAccessibleName("cell-xyz")
-    expect(screen.getByText(/Unlabelled cell/i)).toBeInTheDocument()
+    expect(screen.getByText(/Unlabeled cell/i)).toBeInTheDocument()
   })
 
   it("takes a group's label from whichever row carries one", () => {

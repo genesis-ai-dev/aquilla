@@ -1058,6 +1058,8 @@ describe('isChainMutatingKind', () => {
     'cell.audio.trim': false,
     // AQU-2327: a take's volume and fades; never the text chain.
     'cell.audio.gain': false,
+    // AQU-2664: a take's evened-out loudness; never the text chain.
+    'cell.audio.even': false,
     'cell.audio.place': false,
     // AQU-1767: a cut makes a second take row; it never moves the text chain.
     'cell.audio.cut': false,

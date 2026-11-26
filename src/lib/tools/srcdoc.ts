@@ -125,8 +125,13 @@ export interface ToolBoot {
   mount: "page" | "panel" | "inline" | "editor" | "smoke" | "action" | "export" | "import"
   /** AQU-1937, import mounts: the importer, the phase and the options. */
   import?: { importerId: string; phase: "run" | "refresh" | "choices"; options: Record<string, unknown>; fileIds?: string[]; field?: string }
-  /** apiRev 7, action mounts: which manifest action ran, and why. */
-  action?: { id: string; trigger: "click" | "open" }
+  /** apiRev 7/8, action mounts: which manifest action ran, why, and optional target cell/selection. */
+  action?: {
+    id: string
+    trigger: "click" | "open" | "cell" | "selection"
+    cell?: { fileId: string; cellId: string; ref?: string | null }
+    selection?: { fileId: string; cellId: string; side: "source" | "target"; text: string }
+  }
   /** apiRev 7, export mounts: the format and the files to export. */
   export?: { id: string; fileIds: string[]; lane: string }
   /** Editor mounts: the file being edited (`revealCellId`: a deep-linked

@@ -126,7 +126,7 @@ export const settings = defineNamespace({
     "settings.transcription.model.omniFast": "Omnilingual fast",
     "settings.transcription.model.omniFastDescription":
       "Fastest. A rough phonetic first pass in 1,600+ languages; best followed by the AI cleanup.",
-    "settings.transcription.model.zeroShot": "Omnilingual Zero-Shot",
+    "settings.transcription.model.zeroShot": "Omnilingual zero-shot",
     "settings.transcription.model.zeroShotDescription":
       "Any language — learns from your project's recorded takes. Slower, and uses more credits.",
     "settings.transcription.model.supports": "Supports {language}",
@@ -159,8 +159,7 @@ export const settings = defineNamespace({
     "settings.transcription.zeroShot.batchConfirm": "Transcribe",
     "settings.transcription.zeroShot.orgLabel": "Allow zero-shot transcription",
     "settings.transcription.zeroShot.orgDescription":
-      "Members can choose the Omnilingual Zero-Shot model in their Preferences. It learns a " +
-      "language from the project's own recordings, and uses more credits than the automatic model.",
+      "Members can choose the Omnilingual zero-shot model in their Preferences. It learns a language from the project's own recordings, and uses more credits than the automatic model.",
     "settings.transcription.zeroShot.orgSaveFailed": "Could not save that setting",
     "settings.transcription.zeroShot.orgBlocked": "Only organization admins can change this.",
 
@@ -229,10 +228,17 @@ export const settings = defineNamespace({
 
     // ── MediaDefaultsSection ── AQU-1768
     "settings.mediaDefaults.groupLabel": "Timeline and recordings",
+    // AQU-2647: org default for who may edit source text. Projects may override.
+    "settings.sourceText.groupLabel": "Source text",
+    "settings.sourceText.label": "Who can edit source text",
+    "settings.sourceText.description":
+      "Who may change the source text in a project that does not set its own. The same people may hide a cell and split a line at quotation marks. Maintainers and owners always may.",
+    "settings.sourceText.saveFailed": "Couldn’t save who may edit source text.",
+    "settings.sourceText.blocked": "You need to be a maintainer to change this.",
     "settings.mediaDefaults.timingLockedDescription":
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
-      "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
+      "Whether maintainers may add, group and recolor timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
     // AQU-1967 / AQU-2632: this row names CELLS, and the rung picked here is
     // the whole rule: whoever it admits can remove any cell, imported ones
     // included (it used to stop at Maintainer for imported cells, which made
@@ -276,11 +282,9 @@ export const settings = defineNamespace({
       "A contributor or above can claim a book, chapter or take for themselves. Leads and " +
       "maintainers can always assign work to anyone, whatever this is set to.",
     "settings.laneAssignmentAuthority.label": "Allow language lane coordinators to assign work",
-    "settings.laneAssignmentAuthority.summary": "Members limited to some language lanes can assign work inside them.",
+    "settings.laneAssignmentAuthority.summary": "Members limited to specific language lanes can assign work inside them.",
     "settings.laneAssignmentAuthority.info":
-      "Give a mentor or coordinator the language lanes they look after under Members, and they " +
-      "can hand out chapters there without any other admin rights. Members who aren't limited " +
-      "to some language lanes aren't affected.",
+      "Give a mentor or coordinator the language lanes they look after under Members, and they can hand out chapters there without any other admin rights. Members who aren't limited to specific language lanes aren't affected.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -400,7 +404,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project Lead — default. Project managers fix their own languages",
+      "Project Lead — default. Project managers change their own languages",
     "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
@@ -507,6 +511,13 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.navIdentity": "Identity",
     "settings.orgSettingsIndex.navSecurity": "Security",
     "settings.orgSettingsIndex.navGroupPeopleProjects": "People & projects",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "settings.orgSettingsIndex.hintSecurity": "Visibility & permissions",
+    "settings.orgSettingsIndex.hintBilling": "Plan & AI usage",
+    "settings.orgSettingsIndex.hintProviders": "Org keys",
+    "settings.orgSettingsIndex.hintMonday": "Board sync",
+    "settings.orgSettingsIndex.hintTeams": "Groups of members",
+    "settings.orgSettingsIndex.hintProjectDefaults": "Inherited by every project",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
     //   org.breadcrumb.organizationFallback already holds the documented exception
@@ -523,7 +534,7 @@ export const settings = defineNamespace({
     "settings.monday.connectFailed": "Connecting to Monday.com failed. Try again.",
     // Plain-language reasons a Monday.com connection failed, shown on the
     // /oauth/callback page and in the org settings notice (lib/monday/oauth-return.ts).
-    "settings.monday.failure.cancelled": "Connecting was cancelled in Monday.com, so nothing was connected.",
+    "settings.monday.failure.cancelled": "Connecting was canceled in Monday.com, so nothing was connected.",
     "settings.monday.failure.expired":
       "This connection request expired. It has to be approved in Monday.com within 10 minutes. Start again from Aquilla.",
     "settings.monday.failure.rejected": "Monday.com didn't accept the approval. Try connecting again.",
@@ -561,7 +572,7 @@ export const settings = defineNamespace({
     "settings.monday.notAdminOptionDescription":
       "Copy the install link and send it to your Monday admin. Once they've " +
       "installed the Aquilla app, come back here and connect.",
-    "settings.monday.addToMondayAlt": "Add to monday.com",
+    "settings.monday.addToMondayAlt": "Add to Monday.com",
     "settings.monday.disconnectConfirmTitle": "Disconnect Monday.com?",
     "settings.monday.disconnectConfirmBody":
       "This removes the connection for the whole organization. Every " +
@@ -638,6 +649,36 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.orgSettingsIndex.hintSecurity": {
+        description:
+          "Short grey hint at the right of the 'Security' row on the Organization settings index, saying what the page covers. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintBilling": {
+        description:
+          "Short grey hint at the right of the 'Billing' row on the Organization settings index: the page shows the org's plan and its AI usage. Keep it a short noun phrase.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProviders": {
+        description:
+          "Short grey hint at the right of the AI provider keys row on the Organization settings index: the API keys the organization supplies for AI providers.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintMonday": {
+        description:
+          "Short grey hint at the right of the Monday.com row on the Organization settings index: the page sets up syncing project progress to a Monday.com board.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintTeams": {
+        description:
+          "Short grey hint at the right of the 'Teams' row on the Organization settings index: a team is a named group of org members that can be added to projects together.",
+        maxLength: 32,
+      },
+      "settings.orgSettingsIndex.hintProjectDefaults": {
+        description:
+          "Short grey hint at the right of the 'Project defaults' row on the Organization settings index: settings made there apply to every project unless the project sets its own.",
+        maxLength: 32,
+      },
       "settings.locked.section": {
         description:
           "One line at the top of a settings card the reader cannot change, saying who can. " +
@@ -906,6 +947,22 @@ export const settings = defineNamespace({
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
           "(timing lock, track editing, who may add and remove cells, recording validation).",
+      },
+      "settings.sourceText.groupLabel": {
+        description: "Heading of the group on the organization's Project defaults page for who may edit source text.",
+      },
+      "settings.sourceText.label": {
+        description: "Row label for the dropdown in that group. The same words as the project setting.",
+      },
+      "settings.sourceText.description": {
+        description:
+          "Help text under that row. Says projects follow this unless they set their own, and that the same people may hide a cell and split a line at quotation marks.",
+      },
+      "settings.sourceText.saveFailed": {
+        description: "Error shown when saving the organization's source-text floor fails.",
+      },
+      "settings.sourceText.blocked": {
+        description: "Error shown when someone below maintainer tries to change the organization's source-text floor.",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",

@@ -141,6 +141,63 @@ describe("take.cut", () => {
     expect(ctx.uncut).not.toHaveBeenCalled()
   })
 
+  // AQU-2494 (review, Nov 9): a cut moves the take's fade-out to the new
+  // piece, so undoing it has to give the fade-out back to the whole take.
+  describe("a take with a volume change and fades", () => {
+    const withLevel = (): CutRecord => ({
+      cellId: "c1", audioId: "a", atMs: 2500, newAudioId: "b",
+      before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, level: { gainDb: 6, fadeInMs: 300, fadeOutMs: 500 } },
+      renamed: false,
+    })
+    const asCut: Takes = {
+      a: { durationMs: 5000, trimEndMs: 2500, gainDb: 6, fadeInMs: 300 },
+      b: { durationMs: 5000, trimStartMs: 2500, pieceOf: "a", gainDb: 6, fadeOutMs: 500 },
+    }
+
+    it("undo joins the halves while both still have the levels the cut gave them", async () => {
+      const { ctx, handlers } = ctxFor(structuredClone(asCut))
+      expect(await handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "done" })
+      expect(ctx.uncut).toHaveBeenCalledWith(expect.objectContaining(withLevel()))
+    })
+
+    it("is skipped once someone has changed a piece's volume or fades since", async () => {
+      const louder = structuredClone(asCut)
+      louder.b = { ...louder.b, gainDb: 3 }
+      const a = ctxFor(louder)
+      expect(await a.handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "skipped", reason: "changed" })
+      expect(a.ctx.uncut).not.toHaveBeenCalled()
+      const faded = structuredClone(asCut)
+      faded.a = { ...faded.a, fadeOutMs: 200 }
+      const b = ctxFor(faded)
+      expect(await b.handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "skipped", reason: "changed" })
+    })
+
+    // AQU-2494 (review, Nov 9), finding 5: with the web app deployed before
+    // the sync worker, an old worker stores a fresh cut the old way — every
+    // level left on the first piece, none on the new one. Its undo was
+    // skipped as "changed since" and lost for good.
+    it("a cut stored by a worker from before levels went with a cut (all on the first piece) is joined too", async () => {
+      const oldWorker: Takes = {
+        a: { durationMs: 5000, trimEndMs: 2500, gainDb: 6, fadeInMs: 300, fadeOutMs: 500 },
+        b: { durationMs: 5000, trimStartMs: 2500, pieceOf: "a" },
+      }
+      const { ctx, handlers } = ctxFor(structuredClone(oldWorker))
+      expect(await handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "done" })
+      expect(ctx.uncut).toHaveBeenCalledWith(expect.objectContaining(withLevel()))
+      // …and still skipped once a piece's level was changed since.
+      const changed = structuredClone(oldWorker)
+      changed.b = { ...changed.b, gainDb: 3 }
+      const c = ctxFor(changed)
+      expect(await c.handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "skipped", reason: "changed" })
+    })
+
+    it("a cut recorded before levels went with it is joined as it always was, whatever the pieces' levels", async () => {
+      const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500, gainDb: 6, fadeOutMs: 500 }, b: { trimStartMs: 1500, pieceOf: "a" } })
+      expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "done" })
+      expect(ctx.uncut).toHaveBeenCalledTimes(1)
+    })
+  })
+
   // AQU-2492 (review, Nov 9; Sam's call the same day): the Redo names the
   // piece the Undo removed, which the server brings back with its approvals.
   it("redo cuts again naming the same piece, only while the take is whole", async () => {

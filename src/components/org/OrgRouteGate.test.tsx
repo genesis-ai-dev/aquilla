@@ -164,7 +164,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     sessionState.session = null
     renderGate("/orgs/1")
 
-    expect(screen.getByText("Log in to see your workspace")).toBeInTheDocument()
+    expect(screen.getByText("Sign in to see your workspace")).toBeInTheDocument()
     expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
     expect(screen.queryByText("ORG INDEX")).not.toBeInTheDocument()
     // The gate's not-found chrome (header account switcher) must not be used.
@@ -201,7 +201,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     renderGate("/orgs/1")
 
     expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
-    expect(screen.queryByText("Log in to see your workspace")).not.toBeInTheDocument()
+    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
     expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
   })
 
@@ -210,7 +210,7 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
     renderGate("/orgs/999")
 
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
-    expect(screen.queryByText("Log in to see your workspace")).not.toBeInTheDocument()
+    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
   })
 })
 

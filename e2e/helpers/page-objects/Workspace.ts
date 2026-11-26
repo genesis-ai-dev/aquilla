@@ -88,7 +88,7 @@ export class Workspace {
     const dialog = this.page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^YouTube video/i }).click()
     await dialog.getByLabel("YouTube video link").fill(url)
-    await dialog.getByLabel("Video name", { exact: true }).fill(name)
+    await dialog.getByLabel("Film name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
     await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()
@@ -772,6 +772,16 @@ export class Workspace {
 
   cellRow(index = 0): Locator {
     return this.root.locator("[data-cell-id]").nth(index)
+  }
+
+  /**
+   * AQU-599: the always-visible badge on a row that carries an open thread
+   * ("1 open comment — view comments"). The hover rail's comment button is
+   * named only "1 open comment", so the "— view comments" tail is what tells
+   * the two apart.
+   */
+  commentBadge(index = 0): Locator {
+    return this.cellRow(index).getByRole("button", { name: /open comments? — view comments$/i })
   }
 
   private editableTarget(index: number): Locator {

@@ -31,6 +31,8 @@ export interface ReplaceFilePair {
 export interface LinkFileMatch extends ReplaceFilePair {
   /** One of the two files no longer exists (or is in Recently deleted). */
   missing: boolean
+  /** AQU-2549: missing only because the source project is still importing it. */
+  importing?: true
   upstreamLines: number
   localLines: number
   /** Lines with identical text in both files. */

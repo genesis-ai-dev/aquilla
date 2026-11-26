@@ -232,6 +232,9 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   if (att.gainDb !== undefined && (server.gainDb ?? null) !== att.gainDb) return false
   if (att.fadeInMs !== undefined && (server.fadeInMs ?? null) !== att.fadeInMs) return false
   if (att.fadeOutMs !== undefined && (server.fadeOutMs ?? null) !== att.fadeOutMs) return false
+  // AQU-2664: an even-out (or clear) overlay, and a loudness reading, by the same rule.
+  if (att.evenTargetLufs !== undefined && (server.evenTargetLufs ?? null) !== att.evenTargetLufs) return false
+  if (att.loudnessLufs !== undefined && att.loudnessLufs !== null && server.loudnessLufs == null) return false
   return true
 }
 
@@ -719,6 +722,12 @@ export function mergeCellsWithAudio(
         ...(a.gainDb != null ? { gainDb: a.gainDb } : {}),
         ...(a.fadeInMs != null ? { fadeInMs: a.fadeInMs } : {}),
         ...(a.fadeOutMs != null ? { fadeOutMs: a.fadeOutMs } : {}),
+        // AQU-2664: its loudness reading and evened-out target.
+        ...(a.loudnessLufs != null ? { loudnessLufs: a.loudnessLufs } : {}),
+        ...(a.truePeakDb != null ? { truePeakDb: a.truePeakDb } : {}),
+        ...(a.loudnessFromMs != null ? { loudnessFromMs: a.loudnessFromMs } : {}),
+        ...(a.loudnessToMs != null ? { loudnessToMs: a.loudnessToMs } : {}),
+        ...(a.evenTargetLufs != null ? { evenTargetLufs: a.evenTargetLufs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."

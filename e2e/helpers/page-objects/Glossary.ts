@@ -183,7 +183,7 @@ export class Glossary {
 
   async acceptSuggestedTerm(sourceTerm: string): Promise<void> {
     const row = this.row(sourceTerm)
-    await row.getByRole("button", { name: "Accept term" }).click()
+    await row.getByRole("button", { name: "Approve term" }).click()
     await expect(row).toHaveAttribute("data-status", "active", { timeout: 8_000 })
   }
 }

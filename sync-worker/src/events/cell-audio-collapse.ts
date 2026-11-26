@@ -33,6 +33,12 @@ interface AudioRowRaw {
   gain_db?: number | null
   fade_in_ms?: number | null
   fade_out_ms?: number | null
+  /** AQU-2664 (0211): loudness, true peak, evened-out target. Optional, absent = none. */
+  loudness_lufs?: number | null
+  true_peak_db?: number | null
+  loudness_from_ms?: number | string | null
+  loudness_to_ms?: number | string | null
+  even_target_lufs?: number | null
   timings_json: string | null
   selected: number
   created_ts: number
@@ -88,6 +94,13 @@ export interface AttachmentOut {
   gainDb?: number
   fadeInMs?: number
   fadeOutMs?: number
+  /** AQU-2664: present only when set — LUFS, dBTP, LUFS. */
+  loudnessLufs?: number
+  truePeakDb?: number
+  /** The window the reading measured, ms (to absent = the end). */
+  loudnessFromMs?: number
+  loudnessToMs?: number
+  evenTargetLufs?: number
   /**
    * AQU-490: how many people have validated this take, and who.
    *
@@ -256,6 +269,11 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       ...(r.gain_db != null ? { gainDb: Number(r.gain_db) } : {}),
       ...(r.fade_in_ms != null ? { fadeInMs: Number(r.fade_in_ms) } : {}),
       ...(r.fade_out_ms != null ? { fadeOutMs: Number(r.fade_out_ms) } : {}),
+      ...(r.loudness_lufs != null ? { loudnessLufs: Number(r.loudness_lufs) } : {}),
+      ...(r.true_peak_db != null ? { truePeakDb: Number(r.true_peak_db) } : {}),
+      ...(r.loudness_from_ms != null ? { loudnessFromMs: Number(r.loudness_from_ms) } : {}),
+      ...(r.loudness_to_ms != null ? { loudnessToMs: Number(r.loudness_to_ms) } : {}),
+      ...(r.even_target_lufs != null ? { evenTargetLufs: Number(r.even_target_lufs) } : {}),
       // AQU-490. The defaults are the pre-0096 reading of a row: no votes, a
       // dub, no known recorder. `role` is narrowed rather than cast, so a
       // value the schema's CHECK could not produce still lands on 'dub' — the

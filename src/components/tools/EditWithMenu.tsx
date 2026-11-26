@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { buildExtensionPath } from "@/lib/tools/builder-model"
 import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
 import { cn } from "@/lib/utils"
 import type { ExtensionEditorChoice } from "./ExtensionEditor"
@@ -46,7 +47,7 @@ function DefaultBadge({ label }: { label: string }) {
   )
 }
 
-export function EditWithMenu({ choice }: { choice: ExtensionEditorChoice }) {
+export function EditWithMenu({ choice, fileId }: { choice: ExtensionEditorChoice; fileId?: string | null }) {
   const t = useT()
   const ctx = useToolsMount()
   const navigate = useNavigate()
@@ -136,7 +137,7 @@ export function EditWithMenu({ choice }: { choice: ExtensionEditorChoice }) {
         {projectId && (
           <DropdownMenuItem
             className={cn("gap-2 text-muted-foreground")}
-            onClick={() => navigate(`/project/${projectId}/extensions?where=editor`)}
+            onClick={() => navigate(buildExtensionPath(projectId, { where: "editor", fileId }))}
             data-testid="build-own-editor"
           >
             <Plus className="size-4" aria-hidden />

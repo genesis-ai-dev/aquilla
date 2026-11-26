@@ -8,7 +8,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, missingTakeKey, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
-import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
+import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible, sourceHeard } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type BuildProgrammeOptions, type Programme, type ProgrammePiece, type ProgrammeSlot } from "@/lib/timeline/programme"
@@ -25,7 +25,8 @@ import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
-import { clipLevelOf, isMixed, mixElement, setMixerVolume } from "./mixer"
+import { clipLevelOf, joinedLevelsOf, mixElement, playUnmixed, setMixerVolume, setPlayerVolume } from "./mixer"
+import { takeLevelsOf } from "./take-level"
 import { selectQueueForFile, selectQueueStateForFile, type QueueForFile, type QueueStateForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
@@ -364,6 +365,18 @@ export interface TrackAudibility {
    * only ever be there because someone switched it off.
    */
   bySlot?: Record<string, boolean>
+  /**
+   * AQU-2664 (board 74): the tracks played ALONE — "source", "target" (the
+   * default row) or an added track's slot. Empty or absent: nothing soloed,
+   * every track heard by its own mute. Personal, kept with the mutes.
+   */
+  solo?: string[]
+  /**
+   * Review M4: the audibility keys of the rows drawn now (the timeline says).
+   * Solo entries for anything else are ignored (track-slots `activeSolo`).
+   * Not persisted.
+   */
+  drawn?: string[]
 }
 
 let audibility: TrackAudibility = { source: true, target: true }
@@ -374,8 +387,10 @@ export function setQueueAudibility(next: TrackAudibility): void {
     source: Boolean(next.source),
     target: Boolean(next.target),
     ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+    ...(next.solo && next.solo.length > 0 ? { solo: [...next.solo] } : {}),
+    ...(next.drawn ? { drawn: [...next.drawn] } : {}),
   }
-  if (currentAudio) currentAudio.muted = !audibility.source
+  if (currentAudio) currentAudio.muted = !sourceHeard(audibility)
   // PER ENTRY now, not one blanket flag. Adding `slot` to `OverlayEntry` is
   // what gave this sweep something to discriminate on — before it, every
   // overlay in the pool followed the single `target` boolean and there was no
@@ -437,6 +452,10 @@ interface OverlayEntry {
   stopAtClipSec: number | null
   /** AQU-1767: dubbing's timer aimed at `stopAtClipSec`, between timeupdate ticks. */
   endStopTimer?: ReturnType<typeof setTimeout> | null
+  /** AQU-2494 (review, Nov 9): a cut take played as ONE joined copy (following
+   *  the recordings): its pieces, so each is mixed at its own volume and fades
+   *  where it sits in the copy. Absent on every other entry. */
+  joinedPieces?: readonly { audioId: string; start: number; end: number; gapBeforeSec?: number }[]
   /**
    * AQU-2252: a LAYER — a take on an added track, sounding on its own while
    * the file follows its recordings — and the programme second it was fired
@@ -725,8 +744,10 @@ export function setQueueRate(rate: number): void {
 export function setQueueVolume(vol: number): void {
   const v = Math.max(0, Math.min(1, vol))
   setMixerVolume(v)
-  if (currentAudio) currentAudio.volume = isMixed(currentAudio) ? 1 : v
-  for (const e of overlayPool) if (e.element) e.element.volume = isMixed(e.element) ? 1 : v
+  // AQU-2494 (review, Nov 9): a player straight to the output carries its
+  // take's own level on its volume too (mixLineElement, wireOverlayElement).
+  if (currentAudio) setPlayerVolume(currentAudio, v)
+  for (const e of overlayPool) if (e.element) setPlayerVolume(e.element, v)
   setProgress({ volume: v })
 }
 
@@ -736,10 +757,20 @@ export function setQueueVolume(vol: number): void {
  * Unroutable elements (a cross-origin stream, no AudioContext) keep `volume`.
  */
 function mixLineElement(audio: HTMLAudioElement, cell: CellData | undefined, url: string | null, slot?: string): void {
-  const att = cell && url
-    ? Object.values(cell.attachments ?? {}).find((a) => a.url === url && !a.isDeleted && a.role !== "source")
+  const found = cell && url
+    ? Object.entries(cell.attachments ?? {}).find(([, a]) => a.url === url && !a.isDeleted && a.role !== "source")
     : undefined
-  if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), clipLevelOf(att))) audio.volume = 1
+  const att = found?.[1]
+  // AQU-2494 (review, Nov 9): every piece of a cut take shares its URL, so
+  // the take is levelled with all its pieces, each at its own volume and
+  // fades on the recording's clock (take-level.ts) — not by whichever piece
+  // is listed first.
+  const level = found ? takeLevelsOf(cell?.attachments, found[0], 0) : null
+  if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), level)) audio.volume = 1
+  // AQU-2494 (review, Nov 9): a stream (a take not on this device) cannot go
+  // through the mixer; it carries its level on the player, as far as a
+  // player's volume goes (it cannot raise a take above as recorded).
+  else playUnmixed(audio, level, progress.volume)
 }
 
 // ── Per-cell audio resolution ───────────────────────────────────────────────
@@ -2125,7 +2156,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   currentAttachmentUrl = src.url
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.source
+  audio.muted = !sourceHeard(audibility)
   mixLineElement(audio, cell, currentAttachmentUrl)
   pendingStartSeconds = atClipSec
 
@@ -3555,8 +3586,14 @@ function wireOverlayElement(
   audio.muted = !slotAudible(audibility, entry.slot)
   // AQU-2327: the take's volume and fades, through the app's one mixer.
   {
-    const att = activeContext?.cells.find((c) => c.id === entry.cellId)?.attachments?.[entry.audioId]
-    if (mixElement(audio, entry.slot, clipLevelOf(att))) audio.volume = 1
+    const atts = activeContext?.cells.find((c) => c.id === entry.cellId)?.attachments
+    // AQU-2494 (review, Nov 9): a joined copy is levelled piece by piece on
+    // its own clock, not by its first piece's level on the recording's clock.
+    const level = entry.joinedPieces
+      ? joinedLevelsOf(entry.joinedPieces.map((p) => ({ ...p, att: atts?.[p.audioId] })))
+      : clipLevelOf(atts?.[entry.audioId])
+    if (mixElement(audio, entry.slot, level)) audio.volume = 1
+    else playUnmixed(audio, level, progress.volume) // AQU-2494 (review, Nov 9): as mixLineElement
   }
   const applySeek = () => {
     const d = audio.duration
@@ -3830,6 +3867,7 @@ function progCueTarget(
     element: null,
     url: null,
     stopAtClipSec: win.end,
+    ...(slot.targetPieces ? { joinedPieces: slot.targetPieces } : {}),
   }
   overlayPool.push(entry)
   const startAtClipSec = win.start + into
@@ -4106,7 +4144,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   openingSeek = null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.source
+  audio.muted = !sourceHeard(audibility)
   mixLineElement(audio, cell, currentAttachmentUrl)
   setProgress({ currentTime: pendingStartSeconds ?? currentTrim?.start ?? 0, duration: 0 })
 

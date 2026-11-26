@@ -297,7 +297,7 @@ export function AgentRunView({
               text one click away (copyable) instead of inline. */}
           <MarkerContent>
             <InlineAiError
-              message={run.errorMessage || "Agent run failed."}
+              message={run.errorMessage || t("agent.run.failedFallback")}
               announce={false}
               className="text-inherit"
             />

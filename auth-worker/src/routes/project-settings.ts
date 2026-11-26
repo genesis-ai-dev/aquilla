@@ -130,6 +130,7 @@ import { loadOrgValidationDefaults } from "../../../db/shared/validation-thresho
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 import { castNameFromCellMetadata, copyCastsOntoSplitPieces, splitPieceBelongsTo, type SplitCastSource } from "../../../src/lib/audio/split-cast"
 import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
+import { isSourceTextTier, type SourceTextTier } from "../../../db/shared/source-text-floor"
 import { readLegacyServerInstructions } from "../../../db/shared/load-translation-instructions"
 import { storedTranslationInstructions } from "../../../db/shared/translation-instructions"
 
@@ -243,9 +244,10 @@ async function withOrgDefaults(
   visibilityFloors: VisibilityFloorsView
   importFloor: ImportFloorView
   orgMediaDefaults: MediaDefaults
+  orgSourceTextFloor: SourceTextTier | null
   legacyProjectBriefText: string
 }> {
-  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults, legacyProjectBriefText] = await Promise.all([
+  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults, orgSourceTextFloor, legacyProjectBriefText] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
     // here for the same reason as countStructuralCells: a project member who
@@ -257,6 +259,7 @@ async function withOrgDefaults(
     getProjectOrgPolicy(env, projectId, response.settings),
     // AQU-1768: and its media defaults, for the same reason.
     loadOrgMediaDefaults(env, projectId),
+    loadOrgSourceTextFloor(env, projectId),
     // AQU-2342: the agent's legacy free-text brief, a migrate-on-read source of
     // the project instructions the browser cannot read itself. Only while the
     // project has stored no instructions — after that no reader uses it.
@@ -289,7 +292,34 @@ async function withOrgDefaults(
     // row needs all three to say what "Organization default" means today.
     importFloor: importFloorView(policy.orgPolicy.importMinRole, response.settings[IMPORT_MIN_ROLE_KEY]),
     orgMediaDefaults,
+    orgSourceTextFloor,
     legacyProjectBriefText,
+  }
+}
+
+/**
+ * AQU-2647: the source-text floor the project's org set. Null when it set
+ * none, the value is not a rung this build knows, or the project has no org.
+ * A failed read reports none, so the floor stays the built-in Maintainer.
+ */
+async function loadOrgSourceTextFloor(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+): Promise<SourceTextTier | null> {
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT os.settings
+         FROM projects p
+         JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id = ?`,
+    ).bind(projectId).first<{ settings: string | null }>()
+    const parsed: unknown = row?.settings ? JSON.parse(row.settings) : null
+    const tier = parsed && typeof parsed === "object"
+      ? (parsed as { sourceTextFloor?: unknown }).sourceTextFloor
+      : undefined
+    return isSourceTextTier(tier) ? tier : null
+  } catch {
+    return null
   }
 }
 

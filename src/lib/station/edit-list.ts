@@ -149,9 +149,14 @@ export interface ClipMix {
   /** Fade lengths, seconds; 0 = none. */
   fadeIn: number
   fadeOut: number
-  /** Volume in dB; 0 = as recorded. */
+  /** The take's own volume in dB (the volume line); 0 = as evened (or as recorded). */
   gainDb: number
+  /** AQU-2664: the evening-out correction, dB, applied before the volume line. */
+  correctionDb?: number
 }
+
+/** AQU-2664: the clip's stages added up, dB (correction, then its own volume). */
+export const clipDb = (clip: ClipMix): number => (clip.correctionDb ?? 0) + (clip.gainDb || 0)
 
 export function dbToGain(db: number): number {
   return Math.pow(10, (db || 0) / 20)
@@ -159,7 +164,7 @@ export function dbToGain(db: number): number {
 
 /** The clip's level at time `t`: its volume, then the fades inside the kept part. */
 export function gainAt(t: number, clip: ClipMix): number {
-  let g = dbToGain(clip.gainDb)
+  let g = dbToGain(clipDb(clip))
   if (clip.fadeIn > 0 && t < clip.trimA + clip.fadeIn) g *= Math.max(0, (t - clip.trimA) / clip.fadeIn)
   if (clip.fadeOut > 0 && t > clip.trimB - clip.fadeOut) g *= Math.max(0, (clip.trimB - t) / clip.fadeOut)
   return g

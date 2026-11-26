@@ -50,7 +50,7 @@ it('drops a previous account’s late workspace response', async () => {
   jwt = 'second'
   list.mockResolvedValueOnce([])
   rerender(view())
-  expect(await screen.findByText(/No workspace grants you billing authority/)).toBeVisible()
+  expect(await screen.findByText(/You don't have billing permission in any workspace/)).toBeVisible()
   await act(async () => resolve([{ id: 8, name: 'Old account', role: { level: 700 } }]))
   expect(screen.queryByRole('button', { name: 'Review for Old account' })).not.toBeInTheDocument()
 })

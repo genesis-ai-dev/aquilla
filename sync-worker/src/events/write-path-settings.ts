@@ -45,6 +45,14 @@ export interface WritePathSettings {
    * including an absent key, reads as maintainer (db/shared/milestone-floor.ts).
    */
   milestoneFloor?: unknown
+  /**
+   * AQU-2647: who may edit source text, hide a cell, and split a line at
+   * quotes. Honoured only when it is exactly `contributor`, `project_lead`,
+   * or `maintainer`; anything else, including an absent key, reads as
+   * maintainer (db/shared/source-text-floor.ts). The organization's value
+   * fills a project that sets none.
+   */
+  sourceTextFloor?: unknown
 }
 
 /**
@@ -64,6 +72,7 @@ export const WRITE_PATH_COLUMNS: Readonly<Record<string, keyof WritePathSettings
   wp_harmonize_min_role: 'harmonize_min_role',
   wp_import_min_role: 'importMinRole',
   wp_milestone_floor: 'milestoneFloor',
+  wp_source_text_floor: 'sourceTextFloor',
 }
 
 /** The projected columns, in SELECT order. */

@@ -50,13 +50,18 @@ export class ToolsPage {
     return ((await candidate.getByRole("heading", { level: 2 }).textContent()) ?? "").trim()
   }
 
-  /** Step 3: "Add to project" from Try it. */
-  async addCandidate(): Promise<void> {
+  /** Step 3: "Add to project" from Try it. Resolves to the installed
+   *  extension's id (its page is /project/:id/extensions/<that id>). */
+  async addCandidate(): Promise<string> {
     const installed = this.page.waitForResponse(
       (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
     )
     await this.page.getByTestId("candidate-add").click()
-    expect((await installed).status()).toBe(201)
+    const response = await installed
+    expect(response.status()).toBe(201)
+    const { tool } = (await response.json()) as { tool: { id: string } }
+    expect(tool.id, "the install response names the new extension").toBeTruthy()
+    return tool.id
   }
 
   /** The "Edit with" menu button above the editor; `data-editor` holds the

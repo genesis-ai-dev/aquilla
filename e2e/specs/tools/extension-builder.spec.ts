@@ -76,16 +76,19 @@ test("describe → watch it build → try it on sample verses → add it → it 
   const preview = review.getByTestId("extension-preview-frame").contentFrame().frameLocator(EXTENSION_DOCUMENT)
   await expect(preview.locator("body")).toContainText("words", { timeout: 30_000 })
 
-  // 3 Add to project → its page, then the editor's side panel.
-  await tools.addCandidate()
-  await alice.waitForURL(/\/extensions\/[0-9a-f-]{36}$/)
-  await expect(tools.toolFrame("Word Count").locator("body")).toContainText("MAT 1:1", { timeout: 30_000 })
-
-  await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
+  // 3 Add to project → back in the editor, where they work: they chose
+  // "Side panel", so Add returns them to the file instead of the extension's
+  // own page (AQU-2772). The palette opens it beside the verses.
+  const toolId = await tools.addCandidate()
+  await alice.waitForURL(new RegExp(`/project/${seeded.projectId}/editor/file/${seeded.fileId}$`))
   await new Workspace(alice).waitForEditor()
   await tools.openInSidePanelFromPalette("Word Count")
   const panel = alice.getByTestId("tools-dock-panel").frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await expect(panel.locator("body")).toContainText("words", { timeout: 30_000 })
+
+  // Its own page still runs it on the project's real verses.
+  await alice.goto(`/project/${seeded.projectId}/extensions/${toolId}`)
+  await expect(tools.toolFrame("Word Count").locator("body")).toContainText("MAT 1:1", { timeout: 30_000 })
 })
 
 test("\"Build your own editor…\" builds an editor that appears in \"Edit with\"", async ({ alice }) => {

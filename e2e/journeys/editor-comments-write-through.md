@@ -19,7 +19,7 @@ Smoke twin: `e2e/specs/editor/comments.smoke.spec.ts`
 ## Expected end state
 
 - The comment text appears in the comments panel, attributed to `alice`.
-- The first row now carries an open-comment badge (button named **1 open comment — open comments**), visible without hovering.
+- The first row now carries an open-comment badge (button named **1 open comment — view comments**), visible without hovering.
 - The sidebar's **Comments** nav button now reads **Comments 1**.
 
 ## Counts as a failure

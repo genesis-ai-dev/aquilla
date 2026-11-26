@@ -308,8 +308,25 @@ today:
   every test green. *Old code, new schema*: the BASE commit's replay
   corpus and both permission matrices still answer their goldens on the
   PR's `schema.sql`. That is the state production is in between the
-  migration and the deploy. An edited or removed migration file, or a
-  statement off the list, is a person's call. Measured on the four
+  migration and the deploy. The replay in this leg hashes only the columns
+  the BASE commit's `schema.sql` has for each projection table
+  (`REPLAY_BASELINE_SCHEMA`, the base schema the job keeps beside the
+  PR's; `baselineColumns` in the harness). The harness hashes whole rows
+  and the base golden was written from the base columns, so a column the
+  PR adds, NULL or defaulted on every row, changed every hash of its
+  table and failed this leg for exactly the migration the additive leg
+  allows; no change inside the PR could turn it green (first seen on
+  AQU-2664, five nullable columns on `cell_audio`). An added column is
+  now left out and named in the job log. What the base commit's code can
+  know about is still compared: a different value in a column the base
+  has, a different row count, and a base column the PR dropped or renamed
+  (an error by name, even on a table with no rows) all fail, pinned in
+  `sync-worker/src/__tests__/replay-corpus-baseline.test.ts`. The
+  `replay-gate` and `deps-gate` runs set no baseline and hash every
+  column, as `golden.json` was written. The harness is the base
+  commit's, so a PR gets this once its base has it. An edited or removed
+  migration file, or a statement off the list, is a person's call.
+  Measured on the four
   migrations merged 2026-11-12 to 2026-11-18 (0201, 0202, 0203, 0205): all
   four pass the first two legs.
 - **`release-tooling` → `plan-diff`** (`risk-label.yml`,

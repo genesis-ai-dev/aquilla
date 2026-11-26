@@ -47,6 +47,15 @@ vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
 }))
 
+// AQU-2549: the confirm step also asks the server which own files a replace may
+// follow into. Unreadable here (as in LinkSourceSection.test.tsx): the picker
+// falls back to every own file, so these cases read exactly as they did.
+const fetchReplaceTargets = vi.fn()
+
+vi.mock("@/lib/sync/link-join-copy", () => ({
+  fetchReplaceTargets: (...args: unknown[]) => fetchReplaceTargets(...args),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "lead" }, loading: false }),
 }))
@@ -143,6 +152,7 @@ const tile = () => screen.getByText(TILE).closest("[role=button]")!
 beforeEach(() => {
   vi.clearAllMocks()
   resetLinkSeedStatusForTests()
+  fetchReplaceTargets.mockRejectedValue(new Error("not readable"))
   // AQU-1559: the confirm step's rows — one per upstream file, all checked on
   // arrival, which is the whole-project link this dialog has always made.
   loadLinkSourcePreview.mockResolvedValue({

@@ -389,7 +389,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom, canAttachSourceAudio } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -556,6 +556,7 @@ import { useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
+import { useSourceAudioAccess } from "@/hooks/useSourceAudioAccess"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -1996,6 +1997,18 @@ export function ProjectWorkspace() {
 
   const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
+  // AQU-2682: the server's answer to "does this person's access cover every
+  // language?", which storing the file's source audio needs ("Upload a
+  // recording to make lines", attaching media by url, the film's sound).
+  // Null until it arrives; nothing that stores source audio is offered
+  // before then. Not asked below Project Lead, where those are withheld.
+  const sourceAudioCoversEveryLanguage = useSourceAudioAccess({
+    projectId: project?.id,
+    fileId: activeFileId,
+    getToken: getTokenForFile,
+    enabled: canAttachSourceAudio(project?.syncRole?.level ?? null),
+  })
+
   // AQU-1006 follow-up: this project's concepts, read from the sync-worker
   // projection. `project.terminology` (the settings-blob key) is retired — it
   // could only express "here is the entire termbase", so every add rewrote the
@@ -2074,9 +2087,11 @@ export function ProjectWorkspace() {
       // `file.create` the org reserved for maintainers before it reaches the
       // durable outbox — the same reason the static mirror exists.
       importMinRole: carriedImportMinRole,
+      // AQU-2682: attach-media refuses source audio without the server's yes.
+      sourceAudioCoversEveryLanguage,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole, sourceAudioCoversEveryLanguage])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -15209,10 +15224,15 @@ export function ProjectWorkspace() {
    * govern. It needs Project Lead on EVERY empty media file, not only a
    * linked video's, because the clip is stored as the file's source audio.
    */
-  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows } = mediaEmptyGates({
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows, sourceMediaNote: sourceMediaNoteKind } = mediaEmptyGates({
     roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
     linkedVideoUrl: activeFile?.coreMediaUrl,
+    coversEveryLanguage: sourceAudioCoversEveryLanguage,
   })
+  // AQU-2682: the plain reason shown where the upload would be.
+  const sourceMediaNote = sourceMediaNoteKind === "needsEveryLanguage"
+    ? t("editor.empty.mediaNeedsEveryLanguage")
+    : sourceMediaNoteKind === "checking" ? t("editor.empty.mediaAccessChecking") : null
   /**
    * AQU-1681: make an empty linked video's rows from its own sound. The sound
    * is fetched (a streamed film's audio track, or a direct file), stored as
@@ -20211,6 +20231,7 @@ export function ProjectWorkspace() {
                     canEdit={extensionEditorConfig?.canEdit ?? false}
                     onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
                     onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
+                    sourceMediaNote={sourceMediaNote}
                     onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
                     onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
                     onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
@@ -20372,6 +20393,7 @@ export function ProjectWorkspace() {
             onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
             onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
             linkedVideoSound={linkedVideoSound}
+            sourceMediaNote={sourceMediaNote}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -21055,6 +21077,11 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
+          // AQU-2682: an audio or video import stores the file's source audio,
+          // held to the same "every language" answer as the empty file's upload.
+          mediaDisabledReason={sourceMediaNoteKind === "needsEveryLanguage"
+            ? t("importExport.upload.mediaNeedsEveryLanguage")
+            : sourceMediaNoteKind === "checking" ? t("importExport.upload.mediaAccessChecking") : null}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an
             // upload, through the same review the three-dot entry used to open.

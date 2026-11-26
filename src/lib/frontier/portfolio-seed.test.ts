@@ -56,7 +56,7 @@ describe("portfolio seeds", () => {
   it("drops one refused project from the list paint, the org summary, and the row", () => {
     const alpha = row("alpha", "PMR Alpha")
     const beta = row("beta", "Beta Notes")
-    rememberDirectoryPage("jwt-a", "7", { projects: [alpha, beta], nextCursor: "c1" })
+    rememberDirectoryPage("jwt-a", "7", { revision: "before-removal", projects: [alpha, beta], nextCursor: "c1" })
     rememberOrgPortfolio("jwt-a", 7, { projects: [alpha, beta], activeLanguageCount: 2 })
     rememberDirectoryPage("jwt-a", "7,8", { projects: [alpha], nextCursor: null })
 

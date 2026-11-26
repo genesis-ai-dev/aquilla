@@ -185,13 +185,52 @@ export const targetCommitEventId = (
 /** event id for a `cell.validate`, keyed by (cell, validator). The validated
  *  edit's event id is deliberately EXCLUDED from the seed so re-syncs converge
  *  on the same id even as the chain head advances (mirrors the proven design's
- *  CP-6 alignment). */
+ *  CP-6 alignment).
+ *
+ *  That holds for a validator's FIRST sign-off of a cell and for nothing after
+ *  it: see `revalidateEventId`. */
 export const validateEventId = (
   projectId: string,
   fileId: string,
   cellId: string,
   validator: string,
 ): string => u5(`cell-validate:${projectId}:${fileId}:${cellId}:${validator}`)
+
+/**
+ * event id for a validator's sign-off of a LATER edit of a cell they had
+ * already signed off once, keyed by the edit as well as (cell, validator).
+ *
+ * A new commit resets a cell to unvalidated, so validating the new edit is a
+ * new fact. Under `validateEventId` it derived the id the first sign-off had
+ * already used, the ingest dropped it as a replay, and the cell read
+ * unvalidated in Aquilla while Codex showed it validated. No later import could
+ * change that, because every later run derived the same id again.
+ *
+ * `editIdx` is the index `targetCommitEventId` takes, so the two agree on which
+ * edit they mean.
+ */
+export const revalidateEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  validator: string,
+  editIdx: number,
+): string => u5(`cell-validate:${projectId}:${fileId}:${cellId}:${validator}:edit:${editIdx}`)
+
+/**
+ * Sign-offs made in Codex before this moment (2026-11-24T00:00Z) keep
+ * `validateEventId` whatever edit they are on.
+ *
+ * Their ids are already in production logs, some carrying the edit the
+ * validator last signed off and some an older one, and nothing in a notebook
+ * says which. Re-deriving them would send one more validation for every cell
+ * whose validator is on two or more of its edits. For most that changes
+ * nothing. For a cell since edited and validated in Aquilla it would move that
+ * person's vote back onto the older Codex text. So history is left to a
+ * deliberate, per-project repair, and only sign-offs made from here on get the
+ * id that says which edit they are for.
+ */
+export const REVALIDATION_IDS_SINCE = Date.UTC(2026, 10, 24)
 
 /** event id for a `comment.create`, keyed by the legacy comment id. */
 export const commentCreateEventId = (projectId: string, legacyCommentId: string): string =>

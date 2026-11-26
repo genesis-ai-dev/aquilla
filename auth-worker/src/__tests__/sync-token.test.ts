@@ -7,13 +7,16 @@ import { seedUser, jwtFor, authHeader } from "./helpers/db"
 const SYNC_SECRET = "sync-secret"
 
 describe("POST /api/v2/sync-token", () => {
-  it("mints a sync token for the project creator", async () => {
+  it("mints a sync token for a direct Owner grant", async () => {
     await seedUser(42, "alice")
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 42)",
     )
       .bind("proj-1", "Test")
       .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-1', 42, 700, 42)",
+    ).run()
     const res = await app.request(
       "/api/v2/sync-token",
       {
@@ -30,7 +33,7 @@ describe("POST /api/v2/sync-token", () => {
       role: { level: number; name: string; source: string }
     }
     expect(body.expiresIn).toBe(900)
-    expect(body.role).toEqual({ level: 700, name: "owner", source: "creator" })
+    expect(body.role).toEqual({ level: 700, name: "owner", source: "override" })
 
     const claims = (await verify(body.token, SYNC_SECRET, "HS256")) as {
       userId: number

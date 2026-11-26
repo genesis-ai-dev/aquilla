@@ -7,7 +7,7 @@ import {
 } from "@/lib/org/project-list-sort"
 import { useNavigate, useLocation } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { UserPlus, Users, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
+import { Check, UserPlus, Users, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
@@ -23,6 +23,9 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   attentionRank,
   audioPct,
+  audioDenominator,
+  portfolioText,
+  latestActivityAt,
   portfolioDeliversText,
   translatedPct,
   validatedPct,
@@ -30,11 +33,13 @@ import {
 } from "@/lib/frontier/portfolio"
 import { ROLE } from "@/lib/frontier/roles"
 import { portfolioAttentionReasons } from "@/lib/project-status"
-import { ProjectStatus } from "@/components/ProjectStatus"
+import { ProjectStatus, ProjectAttentionStatuses } from "@/components/ProjectStatus"
 import {
   ADMIN_TABLE_CLASS,
   ADMIN_TABLE_PANEL_CLASS,
 } from "@/components/admin/shared"
+import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
+import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 import { RoleLabel } from "@/components/RoleLabel"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
@@ -44,7 +49,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { LangQuestListMark } from "@/components/langquest/LangQuestListMark"
 import { TableEmptyState } from "@/components/ui/page"
-import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
+import { MenuGroup, MenuLabel, MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
@@ -56,7 +61,47 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
-import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
+import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
+
+function ProjectProgress({ project, medium }: { project: PortfolioProject; medium: "text" | "audio" }) {
+  const { t } = useI18n()
+  const audio = medium === "audio"
+  if (audio ? audioDenominator(project) <= 0 : !portfolioDeliversText(project)) {
+    return <span className="text-muted-foreground">—</span>
+  }
+  const counts = audio
+    ? { total: audioDenominator(project), filled: project.audioCells, validated: project.validatedAudioCells }
+    : portfolioText(project)
+  const started = progressPercent(counts.filled, counts.total)
+  const validated = progressPercent(counts.validated, counts.total)
+  const detail = audio
+    ? t("nav.fileRow.audioProgressAriaLabel", { recorded: started, audioValidated: validated })
+    : t("nav.fileRow.progressAriaLabel", { translated: started, validated })
+  const segments = audio
+    ? audioProgressSegments({ recorded: started, validated, total: 100 })
+    : textProgressSegments({ translated: started, validated, total: 100 })
+  return (
+    <span className="block" onClick={(event) => event.stopPropagation()}>
+      <NoteOnClick note={detail} label={detail} className="w-full gap-1.5 tabular-nums">
+        <span>{started}%</span>
+        <ProgressSplitBar segments={segments} height={6} className="min-w-5 flex-1" />
+      </NoteOnClick>
+    </span>
+  )
+}
+
+function projectUpdateLabel(at: number, now: number, locale: string): string {
+  // Compare local calendar days, including across daylight-saving changes.
+  const day = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  const delta = (day(new Date(at)) - day(new Date(now))) / 86_400_000
+  if (delta <= 0 && delta > -7) {
+    return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(delta, "day")
+  }
+  return new Intl.DateTimeFormat(locale, {
+    month: "short", day: "numeric",
+    year: new Date(at).getFullYear() === new Date(now).getFullYear() ? undefined : "numeric",
+  }).format(at)
+}
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -270,7 +315,7 @@ export function OrgProjectsDataTable({
   onLoadMore?: () => void
   loadingMore?: boolean
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const navigate = useNavigate()
   const location = useLocation()
   const [tableNow] = useState(() => now)
@@ -324,6 +369,7 @@ export function OrgProjectsDataTable({
               <span className="flex min-w-0 items-center gap-2">
                 <span
                   data-testid="project-table-name"
+                  title={p.name}
                   className="min-w-0 truncate font-medium text-foreground"
                 >
                   {p.name}
@@ -373,12 +419,12 @@ export function OrgProjectsDataTable({
         })
       }
 
-      cols.push(
+      if (embedded) cols.push(
         {
           id: "languages",
           enableSorting: false,
           header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
-          meta: { className: embedded ? "min-w-[9rem] whitespace-nowrap" : "min-w-0" },
+          meta: { className: "min-w-[9rem] whitespace-nowrap" },
           cell: ({ row }) => {
             const p = row.original
             return (
@@ -387,14 +433,15 @@ export function OrgProjectsDataTable({
                   projectId={p.id}
                   lanes={displayLanes(p)}
                   defaultLaneLabel={resolveDefaultLaneLabel(p)}
-                  onOverflowClick={embedded ? undefined : () => toggleExpand(p.id)}
-                  maxVisible={embedded ? 2 : undefined}
-                  className={cn("w-full", embedded && "flex-nowrap")}
+                  maxVisible={2}
+                  className="w-full flex-nowrap"
                 />
               </div>
             )
           },
         },
+      )
+      cols.push(
         {
           id: "translated",
           // Media redesign slice 1: a project with no text to translate sorts
@@ -404,13 +451,14 @@ export function OrgProjectsDataTable({
           header: ({ column }) => (
             <DataTableColumnHeader
               column={column}
-              title={t("org.orgHome.table.translatedHeaderLabel")}
-              className="justify-end"
+              title={embedded ? t("org.orgHome.table.translatedHeaderLabel") : t("editor.lens.text")}
+              className={embedded ? "justify-end" : undefined}
               data-testid="project-table-translated-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
+          meta: { align: embedded ? "right" : undefined, className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
+            if (!embedded) return <ProjectProgress project={row.original} medium="text" />
             if (!portfolioDeliversText(row.original)) {
               return (
                 <div
@@ -445,7 +493,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-validated-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
+          meta: { hidden: !embedded, align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
             const pct = progressPercentOfFraction(validatedPct(row.original))
             return (
@@ -466,12 +514,13 @@ export function OrgProjectsDataTable({
             <DataTableColumnHeader
               column={column}
               title={t("nav.lens.audio")}
-              className="justify-end"
+              className={embedded ? "justify-end" : undefined}
               data-testid="project-table-audio-header"
             />
           ),
           meta: { align: "right", className: embedded ? "w-[4.5rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
+            if (!embedded) return <ProjectProgress project={row.original} medium="audio" />
             const pct = progressPercentOfFraction(audioPct(row.original))
             return (
               <div
@@ -500,7 +549,7 @@ export function OrgProjectsDataTable({
               data-testid="project-table-units-header"
             />
           ),
-          meta: { align: "right", className: embedded ? "w-[5rem] whitespace-nowrap" : "w-[7rem]" },
+          meta: { align: "right", className: embedded ? "w-[5rem] whitespace-nowrap" : "w-[4.75rem] whitespace-nowrap" },
           cell: ({ row }) => {
             const p = row.original
             const total = p.unitsTotal ?? 0
@@ -522,7 +571,8 @@ export function OrgProjectsDataTable({
                 className="flex items-center justify-end gap-1.5 text-right tabular-nums text-muted-foreground"
                 aria-label={t("org.orgProjectsDataTable.unitsDoneAria", { done, total })}
               >
-                <span>{t("org.orgProjectsDataTable.unitsDoneValue", { done, total })}</span>
+                {!embedded && done === total && <Check aria-hidden className="size-3.5 text-emerald-600" />}
+                <span>{embedded ? t("org.orgProjectsDataTable.unitsDoneValue", { done, total }) : `${done}/${total}`}</span>
                 {/* AQU-2260: what the flag counts opens on click, never on
                     hover; the click stays on the flag, not the row. */}
                 {overdue > 0 && (
@@ -549,29 +599,13 @@ export function OrgProjectsDataTable({
       if (!embedded) {
         cols.push(
           {
-            id: "role",
-            accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
-            enableSorting: false,
-            header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
-            meta: { className: "w-[7.5rem] whitespace-nowrap" },
-            cell: ({ row }) => {
-              const name = roleByProjectId?.get(row.original.id)?.name
-              if (!name) {
-                return <span className="text-sm text-muted-foreground">—</span>
-              }
-              return (
-                <RoleLabel name={name} />
-              )
-            },
-          },
-          {
             // AQU-507: designated Project Manager. Unassigned sorts last in both
             // directions via sortUndefined (direction-immune).
             id: "pm",
             accessorFn: (p) => missingLast(p.pm?.username?.toLowerCase()),
             sortUndefined: SORT_MISSING_LAST,
             header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
-            meta: { className: "min-w-0 w-[9rem]" },
+            meta: { className: "min-w-0 w-[7.25rem] whitespace-nowrap" },
             cell: ({ row }) => {
               const username = row.original.pm?.username
               if (!username) {
@@ -606,16 +640,25 @@ export function OrgProjectsDataTable({
         id: "status",
         accessorFn: (p) => attentionRank(p, tableNow),
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.projectsPanel.statusLabel")} />,
-        meta: { className: embedded ? "w-[6.75rem] whitespace-nowrap" : "w-[9.5rem] whitespace-nowrap" },
+        meta: { className: embedded ? "w-[6.75rem] whitespace-nowrap" : "w-[7.75rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const p = row.original
+          const reasons = portfolioAttentionReasons(p, tableNow)
+          const compact = !embedded && !p.archivedAt && reasons.length > 1
           return (
-            <span data-testid="project-table-deadline-status" className="block min-w-0 overflow-hidden">
+            <span data-testid="project-table-deadline-status" className="flex min-w-0 items-center gap-1">
               <ProjectStatus
                 archived={Boolean(p.archivedAt)}
-                reasons={portfolioAttentionReasons(p, tableNow)}
+                reasons={compact ? reasons.slice(0, 1) : reasons}
                 deadlineAt={p.deadlineAt}
               />
+              {compact && (
+                <span onClick={(event) => event.stopPropagation()}>
+                  <NoteOnClick note={<ProjectAttentionStatuses reasons={reasons.slice(1)} deadlineAt={p.deadlineAt} />}>
+                    +{reasons.length - 1}
+                  </NoteOnClick>
+                </span>
+              )}
             </span>
           )
         },
@@ -623,17 +666,19 @@ export function OrgProjectsDataTable({
 
       cols.push({
         id: "edited",
-        accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
+        accessorFn: (p) => missingLast(latestActivityAt(p) ?? undefined),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgProjectsDataTable.updatedColumn")} />,
-        meta: { className: "w-[7.5rem] whitespace-nowrap", ...(embedded ? { hidden: true } : {}) },
-        cell: ({ row }) => (
-          <DateTooltip
-            value={row.original.lastEditAt}
-            label={t("org.orgProjectsDataTable.updatedColumn")}
-            className="text-sm text-muted-foreground"
-          />
-        ),
+        meta: { className: "sticky end-0 z-[1] w-[6.75rem] whitespace-nowrap bg-card", ...(embedded ? { hidden: true } : {}) },
+        cell: ({ row }) => {
+          const at = latestActivityAt(row.original)
+          if (at == null) return <span className="text-muted-foreground">—</span>
+          return (
+            <DateTooltip value={at} label={t("org.orgProjectsDataTable.updatedColumn")} className="text-muted-foreground">
+              {projectUpdateLabel(at, tableNow, locale)}
+            </DateTooltip>
+          )
+        },
       })
 
       if (!embedded) {
@@ -662,10 +707,9 @@ export function OrgProjectsDataTable({
       return cols
     },
     [
-      roleByProjectId,
       showOrg,
       tableNow,
-      toggleExpand,
+      locale,
       embedded,
       viewerUsername,
       t,
@@ -697,13 +741,14 @@ export function OrgProjectsDataTable({
         rowClassName={(p) => cn("group", p.archivedAt && "opacity-60")}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
-        initialSorting={[{ id: startSort.column, desc: startSort.desc }]}
+        initialSorting={[{ id: !embedded && startSort.column === "validated" ? "translated" : startSort.column, desc: startSort.desc }]}
         onSortingChange={rememberSort ? rememberProjectSort : undefined}
         searchPlaceholder={t("org.multiProjectInviteDialog.searchPlaceholder")}
         searchValue={searchValue}
         onSearchChange={onSearchChange}
         searching={searching}
         fillHeight
+        stickyColumns={!embedded}
         loading={loading}
         loadingLabel={loadingLabel}
         hasMore={hasMore}
@@ -728,7 +773,7 @@ export function OrgProjectsDataTable({
           </>
         }
         renderSubRow={
-          embedded
+          embedded || expanded.size === 0
             ? undefined
             : (p) =>
                 expanded.has(p.id) ? (
@@ -760,6 +805,14 @@ export function OrgProjectsDataTable({
                 // carries no menu at all rather than a menu of dead ends.
                 p.archivedAt ? null : (
                 <>
+                  <MenuGroup>
+                    {roleByProjectId?.get(p.id)?.name && (
+                      <MenuLabel><RoleLabel name={roleByProjectId.get(p.id)!.name} plain /></MenuLabel>
+                    )}
+                    <MenuItem onClick={() => toggleExpand(p.id)}>
+                      {t("org.orgHome.table.languageHeader")}
+                    </MenuItem>
+                  </MenuGroup>
                   {canAssignProject(p.id) && (
                     <MenuItem
                       // AQU-1977: open on the project's first live language, not
@@ -819,10 +872,17 @@ export function OrgProjectsDataTable({
                 "mx-0 min-w-0 w-full",
                 "[&_[data-slot=table-container]]:min-w-0 [&_[data-slot=table-container]]:overflow-visible",
               )
-            : ADMIN_TABLE_PANEL_CLASS
+            : cn(ADMIN_TABLE_PANEL_CLASS, "[&_[data-slot=table-container]]:overflow-visible")
         }
+        tableClassName={embedded ? undefined : "min-w-[48rem] table-fixed"}
         dense
       />
+      {!embedded && projects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 py-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><i aria-hidden className="h-2 w-3 rounded-sm bg-linear-to-b from-progress-text-translated from-50% to-progress-audio-recorded to-50%" />{t("org.orgProjectsDataTable.awaitingValidation")}</span>
+          <span className="inline-flex items-center gap-1.5"><i aria-hidden className="h-2 w-3 rounded-sm bg-linear-to-b from-progress-text-validated from-50% to-progress-audio-validated to-50%" />{t("org.orgHome.table.validatedHeaderLabel")}</span>
+        </div>
+      )}
       {assignTarget && assignProject && jwt && author != null && (
         <OrgLaneAssignModal
           projectId={assignTarget.projectId}

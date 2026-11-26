@@ -35,6 +35,7 @@ import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ProjectNoAccess } from "@/components/ProjectNoAccess"
+import { RecentlyDeletedRow } from "@/components/RecentlyDeletedRow"
 import { useRevokedOpenProject } from "@/hooks/useRevokedOpenProject"
 import { isLostProjectAccess, leaveRevokedOpenProject } from "@/lib/sync/lost-project-access"
 import { TabStrip as TabStripImpl } from "./TabStrip"
@@ -285,14 +286,16 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, recordingLinesOf, recordingSharedBy } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { plainTextHtml, runMakeSpeech, type MakeSpeechActions, type MakeSpeechLineState } from "@/lib/audio/make-speech"
+import { setTimelineSelection } from "@/lib/audio/timeline-selection"
+import type { MakeSpeechTextActions } from "@/components/voice/inspector/MakeSpeechPanel"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { takeStory } from "@/lib/audio/take-story"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { attachmentOutFrom, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
@@ -387,7 +390,7 @@ import { createVideoSeekStore } from "@/components/timeline/video-seek-store"
 import { createPlayingCueStore, type PlayingCueStore } from "@/components/editor-playing-cue"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor, canDownloadOriginals, resolveExportFloor, canMutateComment, commentFloorsFrom, canAttachSourceAudio } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -462,6 +465,8 @@ import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen 
 import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { documentPreviewKind } from "@/lib/document-preview/build"
+import { useDocumentPreviewOpen, writeDocumentPreviewOpen } from "@/lib/document-preview/open-state"
 import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
 import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -528,7 +533,7 @@ import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import type { SyncTokenResponse } from "@/lib/sync/sync-token"
-import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { takeTrackIsLayer, takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -552,6 +557,7 @@ import { useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
+import { useSourceAudioAccess } from "@/hooks/useSourceAudioAccess"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIndexes, overlayPendingSortIndexes, settlePendingSortIndexes } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -762,6 +768,9 @@ const ImportTimelineTextDialog = lazy(() =>
 )
 const WhosWhoSidebar = lazy(() =>
   import("./bible-data/WhosWhoSidebar").then((m) => ({ default: m.WhosWhoSidebar })),
+)
+const DocumentPreviewSidebar = lazy(() =>
+  import("./document-preview/DocumentPreviewSidebar").then((m) => ({ default: m.DocumentPreviewSidebar })),
 )
 const CharacterCheckDrawer = lazy(() =>
   import("./timeline/CharacterCheckDrawer").then((m) => ({ default: m.CharacterCheckDrawer })),
@@ -1862,6 +1871,7 @@ export function ProjectWorkspace() {
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
+  /** Every line selected on the timeline (Shift/⌘-click adds more): what Make speech runs on. */
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
@@ -1988,6 +1998,18 @@ export function ProjectWorkspace() {
 
   const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
+  // AQU-2682: the server's answer to "does this person's access cover every
+  // language?", which storing the file's source audio needs ("Upload a
+  // recording to make lines", attaching media by url, the film's sound).
+  // Null until it arrives; nothing that stores source audio is offered
+  // before then. Not asked below Project Lead, where those are withheld.
+  const sourceAudioCoversEveryLanguage = useSourceAudioAccess({
+    projectId: project?.id,
+    fileId: activeFileId,
+    getToken: getTokenForFile,
+    enabled: canAttachSourceAudio(project?.syncRole?.level ?? null),
+  })
+
   // AQU-1006 follow-up: this project's concepts, read from the sync-worker
   // projection. `project.terminology` (the settings-blob key) is retired — it
   // could only express "here is the entire termbase", so every add rewrote the
@@ -2066,9 +2088,11 @@ export function ProjectWorkspace() {
       // `file.create` the org reserved for maintainers before it reaches the
       // durable outbox — the same reason the static mirror exists.
       importMinRole: carriedImportMinRole,
+      // AQU-2682: attach-media refuses source audio without the server's yes.
+      sourceAudioCoversEveryLanguage,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole, sourceAudioCoversEveryLanguage])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -4852,8 +4876,13 @@ export function ProjectWorkspace() {
       const shared = attachmentOutFrom(audioId, att, slot)
       const firstVoters = pieceVoters?.first ?? []
       const secondVoters = pieceVoters?.second ?? []
+      // AQU-2494 (review, Nov 9): …and the take's volume and fades split as
+      // the server splits them: the volume on both, the fade-in on the first
+      // piece, the fade-out on the new one.
+      const levels = levelsAfterCut(att, atMs)
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
+        ...levels.first,
         trimEndMs: Math.round(atMs),
         validatorCount: firstVoters.length,
         validators: firstVoters,
@@ -4861,6 +4890,7 @@ export function ProjectWorkspace() {
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
+        ...levels.second,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
         validatorCount: secondVoters.length,
@@ -9748,6 +9778,11 @@ export function ProjectWorkspace() {
   const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
     projectId ? readWhosWhoOpen(projectId) : false,
   )
+  // The document preview: a Word or PowerPoint file drawn as the document it
+  // is, in the same rail. Offered on the editor for a file it can render.
+  const documentPreviewOpen = useDocumentPreviewOpen(projectId)
+  const activeDocumentPreviewKind = centerSurface === "editor" ? documentPreviewKind(activeFile?.type) : null
+  const documentPreviewShown = activeDocumentPreviewKind !== null && documentPreviewOpen
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -14226,7 +14261,8 @@ export function ProjectWorkspace() {
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
-    checkOpen
+    checkOpen ||
+    documentPreviewShown
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
@@ -14270,6 +14306,7 @@ export function ProjectWorkspace() {
       },
       lineName,
       trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      takeIsLayer: (fileId, slot) => takeTrackIsLayer({ files: project.files, fileId, slot }),
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
@@ -14384,8 +14421,20 @@ export function ProjectWorkspace() {
    * change the take into another voice. Run quietly — the panel shows each
    * line's progress itself.
    */
-  const makeSpeechActions = useMemo<MakeSpeechActions>(() => ({
+  // Read after an await, so through refs: the closure's copies are a render old.
+  const completionErrorsRef = useRef(errors)
+  completionErrorsRef.current = errors
+  const translateReadyRef = useRef(false)
+  translateReadyRef.current = isConfigured && isCompletionAvailable
+  /** Save a line's text as the person typed it (the Make speech review). Set below, once the commit path exists. */
+  const saveLineTextRef = useRef<((cellId: string, text: string) => Promise<void>) | null>(null)
+  const makeSpeechActions = useMemo<MakeSpeechActions & MakeSpeechTextActions>(() => ({
     hasText: (cellId) => Boolean(resolveTakeCellRef.current(cellId)?.cell.translated?.trim()),
+    textOf: (cellId) => resolveTakeCellRef.current(cellId)?.cell.translated?.trim() ?? "",
+    saveText: async (cellId, text) => {
+      if (!saveLineTextRef.current) throw new Error(t("audio.makeSpeech.saveUnavailable"))
+      await saveLineTextRef.current(cellId, text)
+    },
     translate: async (cellId) => {
       const owner = resolveTakeCellRef.current(cellId)
       return owner ? Boolean(await handleCompleteSingle(owner.cell)) : false
@@ -14398,9 +14447,33 @@ export function ProjectWorkspace() {
       }),
     revoice: async (cellId, characterVoiceId) => {
       const voice = findVoice(tts.laneSettings, characterVoiceId)
-      return voice ? handleChangeTimelineVoice(cellId, { voice, quiet: true }) : false
+      if (!voice) throw new Error(t("audio.makeSpeech.cloneVoiceGone"))
+      // The take just spoken reaches the line on the next read of its takes,
+      // not at once: wait for it, or the clone finds no take (or the old one).
+      const deadline = Date.now() + 15_000
+      for (;;) {
+        const cell = resolveTakeCellRef.current(cellId)?.cell
+        const take = cell ? changeVoiceSourceTake(cell) : null
+        if (take && take.attachment.voiceId !== characterVoiceId) break
+        if (Date.now() > deadline) throw new Error(t("audio.makeSpeech.cloneNoTake"))
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      const blocker = cell ? changeVoiceBlocker(cell, voice) : "no-take"
+      if (blocker === "not-trained") throw new Error(t("audio.makeSpeech.cloneNotCloneable", { name: voice.name }))
+      if (blocker === "no-take") throw new Error(t("audio.makeSpeech.cloneNoTake"))
+      return handleChangeTimelineVoice(cellId, { voice, quiet: true })
     },
-  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings])
+    failureReason: (cellId, step) => {
+      if (step === "translate") {
+        return completionErrorsRef.current.get(cellId)
+          ?? (translateReadyRef.current ? undefined : t("audio.makeSpeech.translateUnavailable"))
+      }
+      // Speaking and cloning both write their failure to the line's voice status.
+      const status = getTtsStatus(ttsStatusKey(cellId))
+      return status.kind === "error" && status.message ? status.message : undefined
+    },
+  }), [handleCompleteSingle, handleRegenerateTimelineVoice, handleChangeTimelineVoice, tts.laneSettings, t])
   const loadInspectedTake = useCallback(async (att: CodexCellAttachment): Promise<Blob> => {
     const ref = parseFrontierAudioUrl(att.url)
     if (!project || !inspectedTake || !ref || !frontierSession) throw new Error("audio fetch: this clip has no stored audio")
@@ -14419,7 +14492,7 @@ export function ProjectWorkspace() {
     toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
     void runMakeSpeech(
       [inspectedTake.cellId],
-      { translate: false, reviewTranslation: false, readerVoiceId: story.reader?.id ?? null, characterVoiceId: story.character?.id ?? null },
+      { readerVoiceId: story.reader?.id ?? null, clone: story.character != null, characterVoiceId: story.character?.id ?? null },
       makeSpeechActions,
       () => {},
     ).then((result) => {
@@ -14490,6 +14563,7 @@ export function ProjectWorkspace() {
       .map((c) => ({
         cellId: c.id,
         label: (c.translated?.trim() || c.original?.trim() || c.id).slice(0, 80),
+        source: effectiveSourceText(c).trim(),
         hasText: Boolean(c.translated?.trim()),
         hasSpeech: lineTake(c).audioId != null,
         voiceId: resolveCastVoice(tts.laneSettings, c, c.ttsSettings?.voiceId).id,
@@ -14500,7 +14574,8 @@ export function ProjectWorkspace() {
     () => (lens === "audio" && activeLaneDelivers !== "audio"
       ? {
           lines: makeSpeechLines,
-          selectedCellId: timelineSelectedCellId,
+          // The sidebar prefers the timeline's whole selection (timeline-selection.ts).
+          selectedCellIds: timelineSelectedCellId ? [timelineSelectedCellId] : [],
           actions: makeSpeechActions,
           picked: pickedGhostIds,
           onClearPicked: clearPickedGhosts,
@@ -15150,10 +15225,15 @@ export function ProjectWorkspace() {
    * govern. It needs Project Lead on EVERY empty media file, not only a
    * linked video's, because the clip is stored as the file's source audio.
    */
-  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows } = mediaEmptyGates({
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia, offerVideoSoundRows, sourceMediaNote: sourceMediaNoteKind } = mediaEmptyGates({
     roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
     linkedVideoUrl: activeFile?.coreMediaUrl,
+    coversEveryLanguage: sourceAudioCoversEveryLanguage,
   })
+  // AQU-2682: the plain reason shown where the upload would be.
+  const sourceMediaNote = sourceMediaNoteKind === "needsEveryLanguage"
+    ? t("editor.empty.mediaNeedsEveryLanguage")
+    : sourceMediaNoteKind === "checking" ? t("editor.empty.mediaAccessChecking") : null
   /**
    * AQU-1681: make an empty linked video's rows from its own sound. The sound
    * is fetched (a streamed film's audio track, or a direct file), stored as
@@ -17851,6 +17931,9 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit,
     resolveTargetCommitParentId,
   ])
+  saveLineTextRef.current = async (cellId, text) => {
+    await handleAgentTargetCommit(cellId, { value: text, valueHtml: plainTextHtml(text) })
+  }
 
   const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean, toolOrigin?: ToolOrigin) => {
     const action = validated ? "cell.validate" : "cell.unvalidate"
@@ -18997,6 +19080,8 @@ export function ProjectWorkspace() {
     parallelBiblesOpen,
     verseResourcesOpen,
     whosWhoOpen,
+    documentPreviewAvailable: activeDocumentPreviewKind !== null,
+    documentPreviewOpen,
   })
   // The rail's buttons act like tabs: opening one panel closes the other two,
   // and `null` closes whichever is open.
@@ -19005,6 +19090,7 @@ export function ProjectWorkspace() {
       bibles: panel === "bibles",
       resources: panel === "resources",
       people: panel === "people",
+      preview: panel === "preview",
     }
     setParallelBiblesOpen(next.bibles)
     setVerseResourcesOpen(next.resources)
@@ -19013,6 +19099,7 @@ export function ProjectWorkspace() {
       writeParallelBiblesOpen(projectId, next.bibles)
       writeVerseResourcesOpen(projectId, next.resources)
       writeWhosWhoOpen(projectId, next.people)
+      writeDocumentPreviewOpen(projectId, next.preview)
     }
   }
 
@@ -19680,7 +19767,7 @@ export function ProjectWorkspace() {
             className="relative flex h-full w-full flex-col"
             {...(timelineStacked ? { "data-media-editor": "" } : {})}
           >
-            <ExtensionsBar choice={extensionEditorChoice} />
+            <ExtensionsBar choice={extensionEditorChoice} fileId={activeFile?.id ?? null} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
@@ -19979,6 +20066,7 @@ export function ProjectWorkspace() {
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
+                    onSelectionChange={setTimelineSelection}
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
@@ -20144,6 +20232,7 @@ export function ProjectWorkspace() {
                     canEdit={extensionEditorConfig?.canEdit ?? false}
                     onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
                     onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
+                    sourceMediaNote={sourceMediaNote}
                     onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
                     onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
                     onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
@@ -20305,6 +20394,7 @@ export function ProjectWorkspace() {
             onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
             onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
             linkedVideoSound={linkedVideoSound}
+            sourceMediaNote={sourceMediaNote}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -20482,6 +20572,24 @@ export function ProjectWorkspace() {
                     setWhosWhoOpen(next)
                     if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
+                />
+                </Suspense>
+              )}
+              {/* The document preview: the open Word or PowerPoint file as the
+                  document an export writes now — open panel only. */}
+              {rightRail.openPanel === "preview" && activeDocumentPreviewKind && activeFileId && project && (
+                <Suspense fallback={null}>
+                <DocumentPreviewSidebar
+                  key={`${activeFileId}:${activeLane ?? ""}`}
+                  kind={activeDocumentPreviewKind}
+                  projectId={project.id}
+                  fileId={activeFileId}
+                  lane={activeLane}
+                  targetLanguage={laneLanguageCodeForTag(activeLane, laneRows)}
+                  cells={legacyCells}
+                  cellsLoading={cellsLoading}
+                  getToken={getTokenForFile}
+                  onClose={() => selectRightRailPanel(null)}
                 />
                 </Suspense>
               )}
@@ -20970,6 +21078,11 @@ export function ProjectWorkspace() {
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
+          // AQU-2682: an audio or video import stores the file's source audio,
+          // held to the same "every language" answer as the empty file's upload.
+          mediaDisabledReason={sourceMediaNoteKind === "needsEveryLanguage"
+            ? t("importExport.upload.mediaNeedsEveryLanguage")
+            : sourceMediaNoteKind === "checking" ? t("importExport.upload.mediaAccessChecking") : null}
           translation={{
             // AQU-1365: "A translation" — fills a file's target lane from an
             // upload, through the same review the three-dot entry used to open.
@@ -21679,25 +21792,12 @@ export function ProjectWorkspace() {
               <p className="px-1 py-1 text-sm text-muted-foreground">{t("workspace.trash.empty")}</p>
             )}
             {trashFiles.map((f) => (
-              <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
-                <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                {/* AQU-2260: labelled buttons say nothing on hover; what
-                    Delete forever does is the retention note below. */}
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                  onClick={() => void handleRestoreFile(f.fileId)}
-                >
-                  {t("common.restore")}
-                </button>
-                <button
-                  type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                  onClick={() => void handlePurgeFile(f.fileId)}
-                >
-                  {t("workspace.trash.deleteForever")}
-                </button>
-              </div>
+              <RecentlyDeletedRow
+                key={f.fileId}
+                file={f}
+                onRestore={() => void handleRestoreFile(f.fileId)}
+                onPurge={() => void handlePurgeFile(f.fileId)}
+              />
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
               {t("workspace.trash.retentionNote")}

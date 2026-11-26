@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE } from "../../../../shared/tools/first-party/default-editor"
+import { SDK_TEST_EDITOR_MANIFEST, SDK_TEST_EDITOR_SOURCE } from "./sdk-test-editor"
 import { TOOL_SCOPES } from "../../../../shared/tools/manifest"
 import { createBridgeHost } from "../host-bridge"
 import { createToolHandlers, type ToolHostData } from "../host-handlers"
@@ -17,15 +17,15 @@ import { buildToolSrcdoc } from "../srcdoc"
 import { createFakeFramePair } from "./fake-frame"
 
 function data(): ToolHostData {
-  return defaultSmokeFixtures({ ...DEFAULT_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
+  return defaultSmokeFixtures({ ...SDK_TEST_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
 }
 
 function mount(d: ToolHostData) {
   const pair = createFakeFramePair()
   const host = createBridgeHost({ getFrameWindow: () => pair.frame as unknown as Window, handlers: createToolHandlers(d), authorize: async () => {} })
   const stop = host.listen(pair.host as unknown as Window)
-  pair.run(buildToolSrcdoc(DEFAULT_EDITOR_SOURCE, {
-    tool: { id: "fp", name: "Aquilla editor (Smart Extension)", version: 1 },
+  pair.run(buildToolSrcdoc(SDK_TEST_EDITOR_SOURCE, {
+    tool: { id: "fp", name: SDK_TEST_EDITOR_MANIFEST.name, version: 1 },
     project: { id: "p", name: "P" },
     user: { username: "alice", roleLevel: 400 },
     mount: "editor",
@@ -49,7 +49,7 @@ describe("apiRev 4 handlers", () => {
     expect(METHOD_SCOPES["audio.validate"]).toBe("write:validation")
     expect(METHOD_SCOPES["audio.trim"]).toBe("write:audio")
     expect(METHOD_SCOPES["ai.reviewContextual"]).toBe("write:target")
-    expect(DEFAULT_EDITOR_MANIFEST.scopes).toContain("write:source")
+    expect(SDK_TEST_EDITOR_MANIFEST.scopes).toContain("write:source")
   })
 })
 

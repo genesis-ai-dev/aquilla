@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { BridgeError, createBridgeHost, type BridgeHandler } from "../host-bridge"
 import { buildToolSrcdoc } from "../srcdoc"
-import { createFakeFramePair, type FakeFramePair } from "./fake-frame"
+import { FakeWindow, createFakeFramePair, type FakeFramePair } from "./fake-frame"
 
 interface AquillaLike {
   files: { list: () => Promise<unknown> }
@@ -139,6 +139,21 @@ describe("tool bridge", () => {
     const got = vi.fn()
     aquilla.on("cells.changed", got)
     pair.frame.deliverFrom({ fake: "parent" }, { channel: "aquilla-host", type: "event", event: { type: "cells.changed" } })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(got).not.toHaveBeenCalled()
+  })
+
+  it("reaches the app past the shell frame, and the shell cannot speak for the app", async () => {
+    const { pair } = setup({ "files.list": async () => [{ fileId: "f1", name: "MAT", cellCount: 3 }] })
+    // As mounted for real: app > shell > tool (srcdoc.ts, TOOL_SHELL_CSP).
+    const shell = new FakeWindow()
+    shell.parent = pair.host
+    pair.frame.parent = shell
+    const aquilla = boot(pair)
+    await expect(aquilla.files.list()).resolves.toEqual([{ fileId: "f1", name: "MAT", cellCount: 3 }])
+    const got = vi.fn()
+    aquilla.on("cells.changed", got)
+    pair.frame.deliverFrom(shell, { channel: "aquilla-host", type: "event", event: { type: "cells.changed" } })
     await new Promise((r) => setTimeout(r, 10))
     expect(got).not.toHaveBeenCalled()
   })

@@ -77,6 +77,129 @@ export const org = defineNamespace({
     "org.access.page.csvGrantedBy": "Granted by",
     "org.access.page.csvGrantedAt": "Granted at",
 
+    // -- AQU-2318 Places lens: one selected place, direct grants and what reaches it --
+    "org.access.places.tab": "Places",
+    "org.access.places.search": "Search people or places",
+    "org.access.places.giveAccess": "Give access",
+    "org.access.places.grantedHere": "Granted here",
+    "org.access.places.reachesHere": "Reaches here from above",
+    "org.access.places.noReaches": "No one reaches this place from above",
+    "org.access.places.noMatches": "No people or places match",
+    "org.access.places.invitePending": "Invite pending",
+    // Organization kind in the place summary → onboarding.apiTokens.orgLabel
+    // (identical text). org.breadcrumb.organizationFallback already holds the
+    // exception against that key, so a third key for the same word reopens it.
+    "org.access.places.viaProject": "Via project {name}",
+    "org.access.places.fromOrg": "From {name}",
+    "org.access.places.fromTeam": "From the {name} team",
+    "org.access.places.fromPlace": "From {name}",
+    "org.access.places.reachesFrom": "{name} or a team",
+    "org.access.places.reachesFromAbove": "above",
+    "org.access.places.openPlaceAriaLabel": "Show the grant at {name}",
+    "org.access.places.openPeople": plural({
+      one: "{count} person can open this {place}.",
+      other: "{count} people can open this {place}.",
+    }),
+    "org.access.places.grantedCount": plural({
+      one: "{count} is granted here",
+      other: "{count} are granted here",
+    }),
+    "org.access.places.reachesCount": plural({
+      one: "{count} reaches it from {from}",
+      other: "{count} reach it from {from}",
+    }),
+
+    // -- AQU-2320 Give access: "Give [person] the role [role] at [place]" + What changes --
+    "org.access.give.title": "Give access",
+    "org.access.give.description": "Fill in the sentence. Nothing is saved until you confirm.",
+    "org.access.give.wordGive": "Give",
+    "org.access.give.wordRole": "the role",
+    "org.access.give.wordAt": "at",
+    "org.access.give.personBlank": "person",
+    "org.access.give.roleBlank": "role",
+    "org.access.give.placeBlank": "place",
+    "org.access.give.personLabel": "Person",
+    "org.access.give.roleLabel": "Role",
+    "org.access.give.placeLabel": "Place",
+    "org.access.give.personSearch": "Search people or type an email",
+    "org.access.give.placeSearch": "Search places",
+    "org.access.give.noPeople": "No one matches. Type a full email address to invite them.",
+    "org.access.give.noPlaces": "No places match",
+    "org.access.give.noRoles": "No role you can give fits this place",
+    "org.access.give.inviteEmail": "Invite {email}",
+    "org.access.give.theirPlaces": "Where {name} has access",
+    "org.access.give.allPlaces": "All places",
+    "org.access.give.denied.owner_only": "Only an Owner can grant here",
+    "org.access.give.denied.maintainer_only": "Only a Maintainer can grant on a team",
+    "org.access.give.denied.lead_only": "Only a Project lead can grant here",
+    "org.access.give.denied.team_above_you": "This team holds a role above yours",
+    "org.access.give.denied.no_team_invite": "Invitations go to an organization, project or language, not a team",
+    "org.access.give.reset.not_offered": "{role} isn't a role on a {place}, so the role was cleared.",
+    "org.access.give.reset.above_cap": "{role} is above your own role there ({cap}), so the role was cleared.",
+    "org.access.give.reset.above_invite_cap": "An invitation carries at most {cap}, so the role was cleared.",
+    "org.access.give.whatChanges": "What changes",
+    "org.access.give.previewIdle": "Choose a person, a role and a place to see what changes.",
+    "org.access.give.previewLoading": "Checking what changes…",
+    "org.access.give.previewError": "Couldn't check this grant. Close the dialog and try again.",
+    "org.access.give.redundant": "Already {role} here via {via}; this adds nothing.",
+    "org.access.give.gainsHere": "Gets {role} at {path}",
+    "org.access.give.replaces": "Replaces their {role} grant here",
+    "org.access.give.raises": plural({
+      one: "Raises {from} to {to} on {count} project",
+      other: "Raises {from} to {to} on {count} projects",
+    }),
+    "org.access.give.lowers": plural({
+      one: "Lowers {from} to {to} on {count} project",
+      other: "Lowers {from} to {to} on {count} projects",
+    }),
+    "org.access.give.opens": plural({
+      one: "Opens {count} project as {role}",
+      other: "Opens {count} projects as {role}",
+    }),
+    "org.access.give.staysGuest": "Stays a Guest: no organization membership",
+    "org.access.give.becomesMember": "Becomes a member of the organization",
+    "org.access.give.futureProjects": "Projects attached to {team} later are included",
+    "org.access.give.inviteNote": "Sends an invitation to {email}. It expires in 30 days.",
+    "org.access.give.submit": "Give access",
+    "org.access.give.submitInvite": "Send invite",
+    "org.access.give.done": "{name} is now {role} at {path}",
+    "org.access.give.invited": "Invited {email} as {role} at {path}",
+    "org.access.give.submitError": "Couldn't give access. Nothing was changed.",
+
+    // -- AQU-2319 People lens: one roster, reach columns, CSV and print --
+    "org.access.people.person": "Person",
+    "org.access.people.highestRole": "Highest role",
+    "org.access.people.grantedAt": "Granted at",
+    "org.access.people.reaches": "Reaches",
+    "org.access.people.lastActive": "Last active",
+    "org.access.people.noAccessYet": "No access yet",
+    "org.access.people.invited": "Invited",
+    "org.access.people.noActivity": "No recent activity",
+    "org.access.people.noMatches": "No one matches",
+    "org.access.people.membershipOpensNothing": "Nothing. Org membership alone opens no project.",
+    "org.access.people.everything": "Everything · {teams}, {projects}",
+    "org.access.people.teamCount": plural({
+      one: "{count} team",
+      other: "{count} teams",
+    }),
+    "org.access.people.projectCount": plural({
+      one: "{count} project",
+      other: "{count} projects",
+    }),
+    "org.access.people.laneCount": plural({
+      one: "{count} language lane",
+      other: "{count} language lanes",
+    }),
+    "org.access.people.filterEveryone": "Everyone",
+    "org.access.people.filterMembers": "Members",
+    "org.access.people.filterGuests": "Guests",
+    "org.access.people.filterInvites": "Pending invites",
+    "org.access.people.filterGranters": "Can give access",
+    "org.access.people.filterInactive": "Inactive 90 days",
+    "org.access.people.extraGrants": "+{count}",
+    "org.access.people.filtersAriaLabel": "Filter the people list",
+    "org.access.people.openPersonAriaLabel": "Open {name}",
+
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
@@ -125,7 +248,7 @@ export const org = defineNamespace({
     "org.egress.options.text.original.label": "Original format (round-trip)",
     "org.egress.options.text.original.description": "Each file in the format it was imported as; formats without a round-trip exporter use the conversion format below.",
     "org.egress.options.text.convert.label": "Convert to…",
-    "org.egress.options.text.convert.description": "Every file re-serialized to one uniform format.",
+    "org.egress.options.text.convert.description": "Every file converted to one uniform format.",
     "org.egress.options.text.none.label": "Text off",
     "org.egress.options.text.none.description": "No text entries in the export.",
     "org.egress.options.conversionFormat": "Conversion format",
@@ -198,9 +321,9 @@ export const org = defineNamespace({
     "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
-    "org.orgHome.signedOut.heading": "Log in to see your workspace",
+    "org.orgHome.signedOut.heading": "Sign in to see your workspace",
     "org.orgHome.signedOut.description":
-      "Your session has ended or you are not logged in. Log in to access your projects and translation data.",
+      "Your session has ended or you are not signed in. Sign in to access your projects and translation data.",
     "org.orgHome.loadingDashboard": "Loading dashboard",
 
     "org.orgHome.pendingInvitations.heading": "Pending invitations",
@@ -281,8 +404,7 @@ export const org = defineNamespace({
     // AQU-1771: the org overview's Team workload / Team usage cards list
     // people by name, so they can never be more open than the member list.
     "org.orgHome.teamVisibilityRosterFloorHint":
-      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower " +
-      "the member list in Organization settings → Security first.",
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list setting in Organization settings → Security first.",
 
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
     "org.orgHome.lens.attentionDescription":
@@ -336,7 +458,7 @@ export const org = defineNamespace({
     // "Done" → common.done (identical text)
     "org.membersPage.revokeAllAccessTitle": "Revoke all access",
     "org.membersPage.revokeAllExplanation":
-      "This will remove {username}'s direct membership grant from this project. Any access they have via org, group, or creator status will remain.",
+      "This will remove {username}'s direct membership grant from this project. Any access they have via org, team, or creator status will remain.",
     "org.membersPage.currentGrantPathsFor": "Current grant paths for {username}:",
     "org.membersPage.typeToConfirm": "Type {username} to confirm",
     // "Revoking…" → common.revoking (identical text)
@@ -347,6 +469,7 @@ export const org = defineNamespace({
     "org.membersPage.sourceViaTeam": "via team",
     "org.membersPage.sourceViaOrg": "via org",
     "org.membersPage.sourceProjectCreator": "project creator",
+    "org.membersPage.createdThisProject": "Created this project",
     "org.membersPage.changeRoleAria": "Change role",
     "org.membersPage.inviteLinkReadyHeading": "Invite link ready",
     "org.membersPage.inviteLinkReadyBody":
@@ -395,7 +518,7 @@ export const org = defineNamespace({
     "org.teamsList.noTeamsAdminDescription":
       "Create a team to group members and grant project access together.",
     "org.teamsList.noTeamsNonAdminDescription":
-      "An org admin can create teams to group members and grant project access together.",
+      "An organization owner or maintainer can create teams to group members and grant project access together.",
     "org.teamsList.noTeamsMatchQuery": "No teams match “{query}”",
     "org.teamsList.noPublicTeams": "No public teams in this organization",
     "org.teamsList.noInternalTeams": "No internal teams in this organization",
@@ -458,7 +581,7 @@ export const org = defineNamespace({
     "org.teamDetail.roleDescriptionContributor":
       "Contributor — can edit project content. Maximum level grantable via share link.",
     "org.teamDetail.roleDescriptionProjectLead":
-      "Project Lead — can add members to projects, mint share-link invites, and lead project work.",
+      "Project Lead — can add members to projects, create share-link invites, and lead project work.",
     "org.teamDetail.roleDescriptionMaintainer":
       "Maintainer — can create/manage teams, rename the org, set project deadlines, and remove " +
       "project members.",
@@ -476,10 +599,10 @@ export const org = defineNamespace({
       "Attach a project to grant this team access at a chosen role.",
     "org.teamDetail.detachButton": "Detach",
     "org.teamDetail.detachAriaLabel": "Detach {name}",
-    "org.teamDetail.searchMembersPlaceholder": "Search members...",
+    "org.teamDetail.searchMembersPlaceholder": "Search members…",
     "org.teamDetail.selectedCount": plural({ one: "{count} selected", other: "{count} selected" }),
     "org.teamDetail.membersToAddAriaLabel": "Members to add",
-    "org.teamDetail.searchOrgMembersPlaceholder": "Search org members...",
+    "org.teamDetail.searchOrgMembersPlaceholder": "Search org members…",
     "org.teamDetail.searchOrgMembersAriaLabel": "Search org members",
     "org.teamDetail.noMembersMatch": "No available members match.",
     "org.teamDetail.orgMembersGroupAriaLabel": "Org members",
@@ -515,15 +638,15 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindSourceCellCreate": "Created a source cell",
     "org.memberActivityPanel.kindSourceCellCommit": "Edited a source cell",
     "org.memberActivityPanel.kindCellValidate": "Validated a cell",
-    "org.memberActivityPanel.kindCellUnvalidate": "Un-validated a cell",
+    "org.memberActivityPanel.kindCellUnvalidate": "Unvalidated a cell",
     "org.memberActivityPanel.kindCellWaive": "Waived a QA flag",
-    "org.memberActivityPanel.kindCellUnwaive": "Un-waived a QA flag",
+    "org.memberActivityPanel.kindCellUnwaive": "Unwaived a QA flag",
     "org.memberActivityPanel.kindCommentCreate": "Left a comment",
     "org.memberActivityPanel.kindCommentEdit": "Edited a comment",
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
     "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
-    "org.memberActivityPanel.kindCellLabelSet": "Labelled a cell",
+    "org.memberActivityPanel.kindCellLabelSet": "Labeled a cell",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -573,13 +696,13 @@ export const org = defineNamespace({
     "org.projectOverview.showStats": "Show stats",
     "org.projectOverview.aiDrafted": "AI drafted",
     "org.projectOverview.aiDraftedTooltip":
-      "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits.",
+      "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells saved after this marker was introduced are tracked — earlier AI drafts are indistinguishable from human edits.",
     "org.projectOverview.hasAudioTooltip":
       "Percentage of cells that have at least one audio recording attached. This is coverage, not " +
       "validation — see 'Audio validated' for review status.",
     "org.projectOverview.audioValidated": "Audio validated",
     "org.projectOverview.audioValidatedTooltip":
-      "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
+      "Share of all cells whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip":
@@ -610,14 +733,14 @@ export const org = defineNamespace({
     "org.projectOverview.sortFilesByAria": "Sort files by",
     "org.projectOverview.noFilesMatch": "No files match “{query}”.",
     "org.projectOverview.columnFilled": "Filled",
-    "org.projectOverview.columnApproved": "Approved",
+    "org.projectOverview.columnApproved": "Validated",
     "org.projectOverview.columnTotal": "Total",
     "org.projectOverview.columnWords": "Words",
     "org.projectOverview.expandFileAria": "Expand {fileName}",
     "org.projectOverview.collapseFileAria": "Collapse {fileName}",
-    "org.projectOverview.fileStatsTooltip": "Cells filled / cells approved / total cells · word count",
+    "org.projectOverview.fileStatsTooltip": "Cells filled / cells validated / total cells · word count",
     "org.projectOverview.fileStatsAria":
-      "{filled} filled, {approved} approved, {total} total cells, {words} words",
+      "{filled} filled, {approved} validated, {total} total cells, {words} words",
     "org.projectOverview.moreFilesShowAll": plural({
       one: "+{count} more file — show all",
       other: "+{count} more files — show all",
@@ -694,7 +817,7 @@ export const org = defineNamespace({
     "org.projectOverview.audioRecordedSummary": "{minutes} min recorded · {percent} of cells have audio",
 
     // -- hooks/useProjectLifecycle: freeze/reactivate toggle re-entrancy guard --
-    "org.projectLifecycle.toggleInProgressError": "A freeze/reactivate toggle is already in progress.",
+    "org.projectLifecycle.toggleInProgressError": "A status change is already in progress.",
 
     // -- lib/sync/org-settings.ts AND lib/sync/project-settings.ts: shared
     // fallback for a 409 response whose body is missing the expected
@@ -721,7 +844,7 @@ export const org = defineNamespace({
     "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
     "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
     "org.role.descriptionProjectLead":
-      "Can add members to projects, mint share-link invites, and lead project work.",
+      "Can add members to projects, create share-link invites, and lead project work.",
     "org.role.descriptionMaintainer":
       "Can create/manage teams, rename the org, set project deadlines, and remove project members.",
     "org.role.descriptionOwner":
@@ -831,15 +954,15 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.description": "People in this organization and their access.",
     "org.membersPage.orgPage.loadErrorTitle": "Couldn't load your organization",
     "org.membersPage.orgPage.loadErrorHint":
-      "Common causes: the Aquilla worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
+      "Common causes: the server is unreachable, your session expired, or the request timed out. Check your network and try again.",
     "org.membersPage.orgPage.signInTitle": "Sign in to manage members",
     "org.membersPage.orgPage.selectOrgDescription":
       "Member access is managed within a single organization. Choose one from the switcher to continue.",
     "org.membersPage.orgPage.signInDescription":
-      "Member access requires a Aquilla session. Sign in from the dashboard and come back to this page.",
+      "Member access requires an Aquilla session. Sign in from the dashboard and come back to this page.",
     "org.membersPage.orgPage.pageDescriptionPrefix": "People in",
     "org.membersPage.orgPage.pageDescriptionSuffix":
-      ". Org-level roles apply across every project; per-project access can be granted separately via the Add-to-projects flow.",
+      ". Org-level roles apply across every project; per-project access can be granted separately using Add to projects.",
     "org.membersPage.orgPage.addToProjectsTooltip":
       "Add someone to specific projects without granting org-wide access.",
     "org.membersPage.orgPage.addToProjectsButton": "Add to projects",
@@ -881,7 +1004,7 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.targetedInviteTooltip":
       "Targeted invite: sign-up form will be prefilled with this email",
     // "open link" connector → projectSettings.share.openLinkConnector (identical text)
-    "org.membersPage.orgPage.openLinkTooltip": "Open link: anyone holding the URL can redeem",
+    "org.membersPage.orgPage.openLinkTooltip": "Open link: anyone with the link can join",
     "org.membersPage.orgPage.orgOwnerHint": "Org owner",
 
     // -- Shared: DataTableRowActionsButton accessible name, the "Actions for
@@ -1020,7 +1143,7 @@ export const org = defineNamespace({
     "org.workloadRollup.assignedLabel": "Assigned",
     "org.workloadRollup.assignedDate": "Assigned {date}",
     "org.workloadRollup.removeErrorGeneric":
-      "Can't remove this assignment — it has no resolved cells to route through.",
+      "Can't remove this assignment — it has no matching cells.",
 
     // -- UsageRollup: org Overview per-member usage manager rollup --
     "org.usageRollup.title": "Team usage",
@@ -1034,15 +1157,15 @@ export const org = defineNamespace({
     "org.accessModelLegend.badgeColumn": "Badge",
     "org.accessModelLegend.pathColumn": "Grant path",
     "org.accessModelLegend.meaningColumn": "Meaning",
-    "org.accessModelLegend.maxWinsHeading": "Effective role = max-wins",
+    "org.accessModelLegend.maxWinsHeading": "Effective role: highest role wins",
     "org.accessModelLegend.maxWinsDescription":
       "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To remove someone, all contributing grant paths must be cleared.",
     "org.accessModelLegend.direct.label": "Direct",
     "org.accessModelLegend.direct.description":
       "A role granted explicitly to this person on this project only. The most specific path — adding or removing it affects only this project.",
-    "org.accessModelLegend.viaGroup.label": "Via group",
+    "org.accessModelLegend.viaGroup.label": "Via team",
     "org.accessModelLegend.viaGroup.description":
-      "A role inherited because a group this person belongs to has access to this project. Edit the group's membership to change or remove this grant.",
+      "A role inherited because a team this person belongs to has access to this project. Edit the team's membership to change or remove this grant.",
     "org.accessModelLegend.orgWide.label": "Org-wide",
     "org.accessModelLegend.orgWide.description":
       "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
@@ -1089,7 +1212,7 @@ export const org = defineNamespace({
     }),
     "org.memberAccessDrillDown.noAccessEmptyTitle": "{username} has no access to any project in this org.",
     "org.memberAccessDrillDown.pathDirect": "direct · {role}",
-    "org.memberAccessDrillDown.pathGroup": "group \"{group}\" · {role}",
+    "org.memberAccessDrillDown.pathGroup": "team \"{group}\" · {role}",
     "org.memberAccessDrillDown.pathOrgLevel": "org-level · {role}",
 
     // -- MemberLaneScopeEditor: freeform lane/file scope editor popover (matrix) --
@@ -1109,8 +1232,7 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.grantsLegend": "Language lanes they can read",
     "org.memberLaneScopeEditor.laneNoAccess": "no access",
     "org.memberLaneScopeEditor.grantGapWarning":
-      "This member is unscoped, but has no grant for every language lane. The language lanes marked " +
-      "“no access” read as empty for them.",
+      "This member is unscoped, but doesn't have a grant for every language lane. The language lanes marked “no access” read as empty for them.",
     "org.memberLaneScopeEditor.grantAllButton": "Grant all current language lanes",
     "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
     "org.memberLaneScopeEditor.visibleByRole":
@@ -1127,15 +1249,13 @@ export const org = defineNamespace({
     "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
     "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
     "org.membersMatrixCellEditor.creatorGrantDescription":
-      "This person created the project. Their Owner role is permanent until project ownership is " +
-      "transferred. The effective role here is Owner (max-wins). Manage it in Project settings → " +
-      "Members.",
-    "org.membersMatrixCellEditor.viaGroupHeading": "Effective role: via group (max-wins)",
+      "This person created the project. Their Owner role is permanent until project ownership is transferred. The effective role here is Owner (highest role wins). Manage it in Project settings → Members.",
+    "org.membersMatrixCellEditor.viaGroupHeading": "Effective role: via team (highest role wins)",
     "org.membersMatrixCellEditor.viaGroupDescription":
-      "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
-    "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
+      "This role comes from a team attached to this project. Edit the team's membership to change or remove this grant. To override for this project only, add a direct grant below.",
+    "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (highest role wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
-      "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
+      "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (the highest role still wins — only a higher direct role changes the effective role).",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
     "org.membersMatrixCellEditor.editRoleAriaLabel": "Edit {username}'s role on this project",
@@ -1146,14 +1266,14 @@ export const org = defineNamespace({
     "org.membersMatrixView.memberColumnHeader": "Member",
     "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
     "org.membersMatrixView.accessResolutionExplanation":
-      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, a Maintainer+ org role, or creator status. Adding a lower grant never reduces access — to remove someone, all contributing paths must be cleared.",
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any team attached to this project, a Maintainer or Owner org role, or creator status. Adding a lower grant never reduces access — to remove someone, all contributing paths must be cleared.",
     "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
     "org.membersMatrixView.orgInheritedTooltip":
       "Access on every project comes from a Maintainer or Owner org role; no per-project overrides.",
 
     // -- MembersPanel: shared roster list (per-project and org membership) --
     // "via org" badge → org.membersPage.sourceViaOrg (identical text)
-    "org.membersPanel.sourceViaGroup": "via group",
+    "org.membersPanel.sourceViaGroup": "via team",
     // "creator" badge → org.memberAccessPanel.creatorGrantLabel (identical text)
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
     // AQU-2054: a project lead can be limited to lanes, and can grant only
@@ -1276,12 +1396,12 @@ export const org = defineNamespace({
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
-    "org.grantScope.sentence.person": "{name} will join as a {role} {scope}",
+    "org.grantScope.sentence.person": "{name} will join as {role} {scope}",
     // AQU-2027: the person is already on the project at this role and keeps it.
-    "org.grantScope.sentence.personStays": "{name} stays a {role} {scope}",
+    "org.grantScope.sentence.personStays": "{name} remains {role} {scope}",
     "org.grantScope.sentence.people": "{names} will join as {role} {scope}",
-    "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
-    "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
+    "org.grantScope.sentence.link": "Anyone with this link will join as {role} {scope}",
+    "org.grantScope.sentence.unset": "They will join as {role} {scope}",
     "org.grantScope.scope.organization": "of the whole organization — every project",
     // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
     "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
@@ -1395,6 +1515,7 @@ export const org = defineNamespace({
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
     // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
     // episode or a document depending on the project.
+    "org.orgProjectsDataTable.awaitingValidation": "Awaiting validation",
     "org.orgProjectsDataTable.unitsColumn": "Done",
     "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
     "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
@@ -1824,6 +1945,10 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.membersPage.createdThisProject": {
+        description:
+          "AQU-2357: extra note on a member who created this project. It is history, not the source of their role. The role source is Direct, Organization, or a team.",
+      },
       "org.membersTable.searchPlaceholder": {
         description:
           "Placeholder in the search box above a list of people (org members, project members, a team's members). Typing filters the list by display name or email address.",
@@ -1912,6 +2037,170 @@ export const org = defineNamespace({
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project Lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.places.viaProject": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the project, shown when a language lane is selected.",
+        placeholders: { name: "The project's name. Not translated." },
+      },
+      "org.access.places.fromOrg": {
+        description: "AQU-2318: one-line reason on an inherited row whose grant is set on the organization.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.fromTeam": {
+        description: "AQU-2318: one-line reason on an inherited row that is a team grant.",
+        placeholders: { name: "The team's name. Not translated." },
+      },
+      "org.access.places.fromPlace": {
+        description: "AQU-2318: one-line reason on an inherited row when the source is not an organization, team, or project.",
+        placeholders: { name: "The place's name. Not translated." },
+      },
+      "org.access.places.reachesFrom": {
+        description: "AQU-2318: the tail of the summary sentence naming where inherited access comes from, when the organization is visible.",
+        placeholders: { name: "The organization's name. Not translated." },
+      },
+      "org.access.places.openPlaceAriaLabel": {
+        description: "AQU-2318: accessible name of the chevron that selects the place an inherited grant is set at.",
+        placeholders: { name: "The source place's name. Not translated." },
+      },
+      "org.access.places.openPeople": {
+        description: "AQU-2318: first sentence of the selected place's summary. The count is the number of rows in the two lists, not expanded team membership.",
+        placeholders: {
+          count: "How many rows can open this place; also selects the plural form.",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.places.grantedCount": {
+        description: "AQU-2318: the summary clause whose count equals the Granted here rows.",
+        placeholders: { count: "Number of direct grants at this place; also selects the plural form." },
+      },
+      "org.access.places.reachesCount": {
+        description: "AQU-2318: the summary clause whose count equals the Reaches here from above rows.",
+        placeholders: {
+          count: "Number of inherited sources at this place; also selects the plural form.",
+          from: "Already-translated phrase naming the organization or the word above.",
+        },
+      },
+      "org.access.give.inviteEmail": {
+        description: "AQU-2320: Give access person list item that turns a typed email address into an invitation.",
+        placeholders: { email: "The typed email address; never translated." },
+      },
+      "org.access.give.theirPlaces": {
+        description: "AQU-2320: heading of the place list group showing places the chosen person already has access to.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.give.reset.not_offered": {
+        description: "AQU-2320: notice when choosing a place clears a role that kind of place does not have.",
+        placeholders: {
+          role: "Localized role label that was cleared, e.g. \"Project Lead\".",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.give.reset.above_cap": {
+        description: "AQU-2320: notice when choosing a place clears a role above the granter's own role there.",
+        placeholders: {
+          role: "Localized role label that was cleared.",
+          cap: "Localized label of the granter's own role at that place.",
+        },
+      },
+      "org.access.give.reset.above_invite_cap": {
+        description: "AQU-2320: notice when an invitation clears a role above what an invitation may carry.",
+        placeholders: { cap: "Localized label of the highest role an invitation carries there." },
+      },
+      "org.access.give.redundant": {
+        description: "AQU-2320: What changes line when the person already holds this role or more at the place.",
+        placeholders: {
+          role: "Localized role label they already hold.",
+          via: "Name of the place that already gives it (organization, team or project); never translated.",
+        },
+      },
+      "org.access.give.gainsHere": {
+        description: "AQU-2320: What changes line naming the role the person gets at the chosen place.",
+        placeholders: {
+          role: "Localized role label being given.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani › Spanish\"; never translated.",
+        },
+      },
+      "org.access.give.replaces": {
+        description: "AQU-2320: What changes line when the grant overwrites a row the person already holds at this place.",
+        placeholders: { role: "Localized role label of the row being replaced." },
+      },
+      "org.access.give.raises": {
+        description: "AQU-2320: What changes line grouping projects whose role goes up from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.lowers": {
+        description: "AQU-2320: What changes line grouping projects whose role goes down from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.opens": {
+        description: "AQU-2320: What changes line grouping projects the person could not open before and now opens.",
+        placeholders: {
+          count: "How many projects; also selects the plural form.",
+          role: "Localized role label they open them with.",
+        },
+      },
+      "org.access.give.futureProjects": {
+        description: "AQU-2320: What changes line for a team grant: projects attached to the team later are opened too.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.give.inviteNote": {
+        description: "AQU-2320: What changes line for an invitation to an email address.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.give.done": {
+        description: "AQU-2320: toast after access is given to an existing account.",
+        placeholders: {
+          name: "The person's name or username.",
+          role: "Localized role label given.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.give.invited": {
+        description: "AQU-2320: toast after an invitation is sent from Give access.",
+        placeholders: {
+          email: "The invited email address; never translated.",
+          role: "Localized role label the invitation carries.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.people.everything": {
+        description:
+          "AQU-2319: Reaches cell when an organization Maintainer or Owner can open every place the reader can see.",
+        placeholders: {
+          teams: "Already-translated team count, such as \"2 teams\".",
+          projects: "Already-translated project count, such as \"10 projects\".",
+        },
+      },
+      "org.access.people.teamCount": {
+        description: "AQU-2319: how many teams a person reaches, used inside the Everything sentence.",
+        placeholders: { count: "Number of teams; also selects the plural form." },
+      },
+      "org.access.people.projectCount": {
+        description: "AQU-2319: how many projects a person can open. Also the whole Reaches cell when that is the reach.",
+        placeholders: { count: "Number of projects; also selects the plural form." },
+      },
+      "org.access.people.laneCount": {
+        description: "AQU-2319: Reaches cell when the person can open language lanes and no whole project.",
+        placeholders: { count: "Number of language lanes; also selects the plural form." },
+      },
+      "org.access.people.extraGrants": {
+        description: "AQU-2319: after two place breadcrumbs in Granted at, how many further direct grants are not drawn.",
+        placeholders: { count: "How many direct grants are hidden after the two that are shown." },
+      },
+      "org.access.people.filtersAriaLabel": {
+        description: "AQU-2319: accessible name of the filter chips on the People lens. The chips themselves name each filter and its count.",
+      },
+      "org.access.people.openPersonAriaLabel": {
+        description: "AQU-2319: accessible name of the link from a person on the People lens to the organization member list.",
+        placeholders: { name: "The person's username, or the invited email when they have no account yet." },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",
@@ -2797,6 +3086,9 @@ export const org = defineNamespace({
           "on the project overview, marking that language lane as archived (retired). It " +
           "describes the lane, so where the word must agree with a noun it agrees with " +
           "the word used for a language lane.",
+      },
+      "org.orgProjectsDataTable.awaitingValidation": {
+        description: "Legend for translated text or recorded audio still awaiting validation.",
       },
       "org.orgProjectsDataTable.unitsColumn": {
         description:

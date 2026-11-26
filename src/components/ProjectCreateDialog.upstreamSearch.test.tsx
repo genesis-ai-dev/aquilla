@@ -181,7 +181,7 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     await pickComboboxOption(UPSTREAM, "Swahili Pilot", { search: "Pilot", searchName: SEARCH })
 
     // Picking an upstream still reveals the corpus follow-up question.
-    const corpus = await screen.findByText(/Which corpus should become this project's source\?/i)
+    const corpus = await screen.findByText(/What should become this project's source\?/i)
     expect(corpus).toBeInTheDocument()
     fireEvent.click(screen.getByText(/One of its targets/i))
     // AQU-1605: and waits for the lane list, which is pre-filled at one lane.
@@ -227,7 +227,7 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     // same corpus question.
     await pickComboboxOption(UPSTREAM, "English Source", { searchName: SEARCH })
     expect(
-      await screen.findByText(/Which corpus should become this project's source\?/i),
+      await screen.findByText(/What should become this project's source\?/i),
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole("combobox", { name: UPSTREAM }))
@@ -235,7 +235,7 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
 
     await waitFor(() =>
       expect(
-        screen.queryByText(/Which corpus should become this project's source\?/i),
+        screen.queryByText(/What should become this project's source\?/i),
       ).not.toBeInTheDocument(),
     )
   })

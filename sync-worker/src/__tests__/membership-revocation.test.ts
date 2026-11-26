@@ -110,7 +110,7 @@ async function post(
 const projectRow = (overrides: Record<string, unknown> = {}) => ({
   id: PROJECT,
   name: 'Revocation test',
-  created_by: 999, // someone else — creator path must not mask the removal
+  created_by: 999, // history only — created_by does not grant access (AQU-2357)
   ...overrides,
 })
 
@@ -183,13 +183,15 @@ describe('AQU-346 — membership re-check on POST /events', () => {
     expect(result.rejected).toHaveLength(0)
   })
 
-  it('keeps accepting the project creator (creator path has no row to delete)', async () => {
+  it('rejects a creator who holds no Owner grant', async () => {
     const { db } = await makeTestDb({
       projects: [projectRow({ created_by: 1 })],
     })
     const result = await post(db, [commitEvent('evt-creator', 1)], await tokenFor(1))
-    expect(result.accepted.map((a) => a.id)).toContain('evt-creator')
-    expect(result.rejected).toHaveLength(0)
+    expect(result.accepted).toHaveLength(0)
+    expect(result.rejected).toEqual([
+      { id: 'evt-creator', status: 403, reason: 'membership revoked' },
+    ])
   })
 
   it('exempts src:"platform" tokens — the documented platform-admin exemption', async () => {
@@ -315,8 +317,11 @@ describe('AQU-1787 — the write perimeter resolves through the shared role reso
       expected: 400,
     },
     {
-      name: 'creator',
-      seed: { projects: [projectRow({ created_by: 1 })] },
+      name: 'creator Owner grant',
+      seed: {
+        projects: [projectRow({ created_by: 1 })],
+        project_members: [{ project_id: PROJECT, user_id: 1, role_level: 700 }],
+      },
       expected: 700,
     },
   ]

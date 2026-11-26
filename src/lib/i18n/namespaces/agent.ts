@@ -71,7 +71,7 @@ export const agent = defineNamespace({
     "agent.run.tokenUsage": "{promptTokens} prompt + {completionTokens} completion tokens",
 
     // ── Run timeline tool-chip labels (AgentRunView's TOOL_LABEL) ────────
-    "agent.run.tool.sql": "sql",
+    "agent.run.tool.sql": "SQL",
     "agent.run.tool.stage": "stage",
     "agent.run.tool.docs": "docs",
     "agent.run.tool.bibleReference": "Bible reference",
@@ -131,7 +131,7 @@ export const agent = defineNamespace({
       "Fetches outside reference material such as notes and dictionaries.",
     "agent.card.tool.sql.label": "Check the project records",
     "agent.card.tool.sql.description":
-      "Read-only lookups over project data — this route cannot write anything.",
+      "Reads project records in read-only mode — it cannot change anything.",
     "agent.card.tool.emit.label": "Stage changes for review",
     "agent.card.tool.emit.description":
       "Prepares edits as a proposal; staging is not the same as applying.",
@@ -176,7 +176,7 @@ export const agent = defineNamespace({
     "agent.team.emptyTitle": "The team posts its work here",
     "agent.team.emptyBody":
       "When Autopilot runs, each file becomes a thread where the team narrates its work — what it read, what it drafted, and what is waiting for you.",
-    "agent.team.emptyHint": "Start Autopilot from its pill in the editor to see the team at work.",
+    "agent.team.emptyHint": "Start Autopilot from the Autopilot button in the editor to see the team at work.",
     "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
     "agent.team.showActivityUpdates": plural({
       one: "Show {count} activity update",
@@ -315,7 +315,7 @@ export const agent = defineNamespace({
     "agent.mode.initiativeDescription": "The team may pick up new passages on its own.",
     "agent.mode.react": "React loop",
     "agent.mode.reactDescription":
-      "The team watches the edits you commit and follows up on them.",
+      "The team watches the edits you save and follows up on them.",
     "agent.mode.scopeTitle": "What it may work on",
     "agent.mode.scope.full": "Everything",
     "agent.mode.scope.qa": "Checks only",
@@ -387,7 +387,7 @@ export const agent = defineNamespace({
     "agent.changeset.importedFrom": "Imported from {fileName}",
     "agent.changeset.approveAgentChanges": "Approve agent changes",
     "agent.changeset.signInNotice": "Sign in to review and approve this changeset.",
-    "agent.changeset.approvedFull": "Approved — return to your agent, it can now commit.",
+    "agent.changeset.approvedFull": "Approved — return to your agent; it can now commit.",
     // AQU-1673: shown instead of approvedFull when the approval also applied
     // the changes, because no agent was waiting to commit them.
     "agent.changeset.appliedFull": "Approved and applied — the changes are now in the file.",
@@ -415,8 +415,8 @@ export const agent = defineNamespace({
       other: "Applied {count} changes.",
     }),
     "agent.changeset.receiptStale": plural({
-      one: "{count} was stale and skipped.",
-      other: "{count} were stale and skipped.",
+      one: "{count} was outdated and skipped.",
+      other: "{count} were outdated and skipped.",
     }),
 
     // ── AQU-CMDREG-P1 review surface (docs/COMMAND-REGISTRY-P1.md §5).
@@ -536,7 +536,7 @@ export const agent = defineNamespace({
     "agent.workingSet.keyboardHelp":
       "j/k move · Enter accept & next · type to edit · x reject · Shift+A accept remaining",
     "agent.workingSet.openLink": "open",
-    "agent.workingSet.editingHelp": "Enter accept & next · Esc revert to draft · Shift+Enter newline",
+    "agent.workingSet.editingHelp": "Enter accept & next · Esc revert to draft · Shift+Enter new line",
     "agent.workingSet.draftDiscarded": "draft discarded — cell left untranslated",
     "agent.workingSet.inFileTooltip": "In {fileName}",
     "agent.workingSet.editDraftAriaLabel": "Edit draft for {ref}",
@@ -577,9 +577,9 @@ export const agent = defineNamespace({
       one: "{count} validation prepared",
       other: "{count} validations prepared",
     }),
-    "agent.validation.confirmedCount": "{done}/{total} confirmed",
+    "agent.validation.confirmedCount": "{done}/{total} validated",
     "agent.validation.testimonyNotice":
-      "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
+      "Validation is your testimony — validate each line yourself. There is no validate-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
     "agent.validation.roleCannotValidate": "Your role can't validate in this project",
     "agent.validation.selfValidationBlocked":
@@ -589,7 +589,7 @@ export const agent = defineNamespace({
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
     //    are typed literals the parser matches — never translated; only their
     //    descriptions below are. ────────────────────────────────────────────
-    "agent.slashCommands.draftDescription": "Draft the untranslated cells in a scope",
+    "agent.slashCommands.draftDescription": "Draft untranslated cells in a file or passage",
     "agent.slashCommands.checkDescription": "Review translated cells against their source",
     "agent.slashCommands.findDescription": "Search the project and summarize usage",
     "agent.slashCommands.statusDescription": "Progress summary for the open file",

@@ -251,7 +251,7 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
   it("draftContext.precedingTargetCells", () => {
     currentSettings = { draftContext: { precedingTargetCells: 7 } }
     renderSettings("ai")
-    expect(screen.getByRole("spinbutton", { name: "Preceding committed-target cells" })).toHaveValue(7)
+    expect(screen.getByRole("spinbutton", { name: "Preceding translated cells" })).toHaveValue(7)
   })
 
   it("termMatching", () => {

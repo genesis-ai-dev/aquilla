@@ -32,7 +32,7 @@ export const bibleDocument = defineNamespace({
       one: "{count} verse replaces notes or styles in the source",
       other: "{count} verses replace notes or styles in the source",
     }),
-    "bibleDocument.preview.hint": "The USFM file an export writes now. Marked lines carry your translation.",
+    "bibleDocument.preview.hint": "Preview of the exported USFM file. Marked lines carry your translation.",
     "bibleDocument.preview.forbidden": "Your role cannot export this project, so there is no export preview.",
     "bibleDocument.preview.unsupported": "There is no export preview for this file.",
     "bibleDocument.preview.error": "The export preview could not load.",

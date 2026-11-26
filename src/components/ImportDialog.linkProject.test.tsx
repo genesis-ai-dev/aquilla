@@ -47,6 +47,15 @@ vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
 }))
 
+// AQU-2549: the confirm step also asks the server which own files a replace may
+// follow into. Unreadable here (as in LinkSourceSection.test.tsx): the picker
+// falls back to every own file, so these cases read exactly as they did.
+const fetchReplaceTargets = vi.fn()
+
+vi.mock("@/lib/sync/link-join-copy", () => ({
+  fetchReplaceTargets: (...args: unknown[]) => fetchReplaceTargets(...args),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "lead" }, loading: false }),
 }))
@@ -143,6 +152,7 @@ const tile = () => screen.getByText(TILE).closest("[role=button]")!
 beforeEach(() => {
   vi.clearAllMocks()
   resetLinkSeedStatusForTests()
+  fetchReplaceTargets.mockRejectedValue(new Error("not readable"))
   // AQU-1559: the confirm step's rows — one per upstream file, all checked on
   // arrival, which is the whole-project link this dialog has always made.
   loadLinkSourcePreview.mockResolvedValue({
@@ -225,7 +235,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
     // AQU-1528: the corpus question is part of the shared flow, so it stands
     // between the pick and the review here too.
     expect(
-      screen.getByText("Which corpus should become this project's source?"),
+      screen.getByText("What should become this project's source?"),
     ).toBeTruthy()
     expect(
       screen.getByRole("button", { name: "Review what will be added" }).hasAttribute("disabled"),

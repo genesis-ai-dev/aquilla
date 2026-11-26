@@ -25,7 +25,7 @@ export interface ToolSummary {
   manifest: ToolManifest
   origin: ToolVersionOrigin
   grantedScopes: ToolScope[]
-  /** A first-party extension Aquilla ships ("default-editor"), while its
+  /** A first-party extension Aquilla ships (e.g. "door43-importer"), while its
    *  current version is the shipped code. Absent from older workers. */
   firstParty?: string | null
 }

@@ -96,7 +96,7 @@ describe("role resolution under DB outage (AQU-996)", () => {
     expect(await res.json()).toMatchObject({ error: "No access to project" })
   })
 
-  it("a path that needs no membership query (creator) still resolves during the outage", async () => {
+  it("a creator with no Owner grant is denied when membership queries fail", async () => {
     await seedUser(9004, "outage-creator")
     await seedProject("p-creator", 9004)
 
@@ -110,9 +110,7 @@ describe("role resolution under DB outage (AQU-996)", () => {
       },
       { ...env, AQUILLA_PG: membershipOutageDb() },
     )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { role: { level: number; source: string } }
-    expect(body.role).toMatchObject({ level: 700, source: "creator" })
+    expect(res.status).toBe(503)
   })
 
   it("resolveProjectRole throws RoleLookupError (never null) when denial would rest on failed queries", async () => {

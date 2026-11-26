@@ -128,7 +128,7 @@ beforeEach(() => {
 describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
   it("sends the drafting settings to the server, never the AI key", async () => {
     renderSettings()
-    const box = screen.getByLabelText(/examples retrieved/i)
+    const box = screen.getByLabelText(/reference examples/i)
     fireEvent.change(box, { target: { value: "17" } })
     fireEvent.blur(box)
 
@@ -150,7 +150,7 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
   it("shows the team's values, not this browser's", async () => {
     sharedBlob = { draftingSettings: { top_k: 6, model: "team/model", temperature: 0.55 } }
     renderSettings()
-    await waitFor(() => expect(screen.getByLabelText(/examples retrieved/i)).toHaveValue(6))
+    await waitFor(() => expect(screen.getByLabelText(/reference examples/i)).toHaveValue(6))
   })
 
   it("keeps the project's AI key on this device", async () => {
@@ -174,7 +174,7 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
   // health engine went, so the slider that set it is gone.
   it("has no Health penalty slider", () => {
     renderSettings()
-    expect(screen.getByLabelText(/examples retrieved/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/reference examples/i)).toBeInTheDocument()
     expect(screen.queryByText(/health penalty/i)).toBeNull()
   })
 
@@ -182,7 +182,7 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
     canEdit = false
     roleLevel = 400
     renderSettings()
-    expect(screen.getByLabelText(/examples retrieved/i)).toBeDisabled()
+    expect(screen.getByLabelText(/reference examples/i)).toBeDisabled()
   })
 })
 

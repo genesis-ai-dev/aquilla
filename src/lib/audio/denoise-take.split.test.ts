@@ -12,6 +12,15 @@ vi.mock("@/lib/sync/events-emit", () => ({
     emitted.events.push({ kind: "place", input })
     return `ev-${emitted.events.length}`
   }),
+  emitCellAudioGain: vi.fn(async (input: Record<string, unknown>) => {
+    emitted.events.push({ kind: "gain", input })
+    return `ev-${emitted.events.length}`
+  }),
+}))
+const painted = vi.hoisted(() => ({ atts: [] as Array<Record<string, unknown>> }))
+vi.mock("./audio-attachments-bus", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  injectOptimisticAudioAttachment: vi.fn((_f: string, _c: string, att: Record<string, unknown>) => { painted.atts.push(att) }),
 }))
 vi.mock("./upload", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -114,5 +123,53 @@ describe("denoiseSplitTake — a piece's place in both timings (AQU-2267)", () =
     })
     const places = emitted.events.filter((e) => e.kind === "place").map((e) => e.input)
     expect(places).toEqual([expect.objectContaining({ targetOffsetMs: null, recordingsOffsetMs: 300 })])
+  })
+})
+
+// AQU-2494 (review, Nov 9): the cleaned take is the same performance, so each
+// cleaned piece keeps the volume and fades its piece had, and an AI voice
+// stays marked as one. It used to come back at the recorded volume, with no
+// fades, counted as a person's recording.
+describe("denoiseSplitTake — each piece keeps its level and its AI-voice mark", () => {
+  it("gives each cleaned piece its own piece's volume and fades, and the voice", async () => {
+    emitted.events = []
+    painted.atts = []
+    const out = await denoiseSplitTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "sam",
+      session: { jwt: "j", username: "sam", createdAt: "" },
+      pieces: [
+        piece("audio-c1-1.webm", { trimEndMs: 1500, voiceId: "v-ana", gainDb: -6, fadeInMs: 200 }),
+        piece("audio-c1-2.webm", { trimStartMs: 1500, pieceOf: "audio-c1-1.webm", voiceId: "v-ana", gainDb: -6, fadeOutMs: 400 }),
+      ],
+    })
+    const attaches = emitted.events.filter((e) => e.kind === "attach").map((e) => e.input)
+    expect(attaches.map((a) => a.voiceId)).toEqual(["v-ana", "v-ana"])
+    const gains = emitted.events.filter((e) => e.kind === "gain").map((e) => e.input)
+    expect(gains).toEqual([
+      expect.objectContaining({ audioId: out.audioId, gainDb: -6, fadeInMs: 200, fadeOutMs: null }),
+      expect.objectContaining({ audioId: attaches[1].audioId, gainDb: -6, fadeInMs: null, fadeOutMs: 400 }),
+    ])
+    // Painted that way while it saves.
+    expect(painted.atts).toEqual([
+      expect.objectContaining({ audioId: out.audioId, voiceId: "v-ana", gainDb: -6, fadeInMs: 200 }),
+      expect.objectContaining({ audioId: attaches[1].audioId, voiceId: "v-ana", gainDb: -6, fadeOutMs: 400 }),
+    ])
+    expect(painted.atts[0]).not.toHaveProperty("fadeOutMs")
+  })
+
+  it("sends no level for pieces that play as recorded, and no voice for a person's take", async () => {
+    emitted.events = []
+    painted.atts = []
+    await denoiseSplitTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "sam",
+      session: { jwt: "j", username: "sam", createdAt: "" },
+      pieces: [
+        piece("audio-c1-1.webm", { trimEndMs: 1500 }),
+        piece("audio-c1-2.webm", { trimStartMs: 1500, pieceOf: "audio-c1-1.webm" }),
+      ],
+    })
+    expect(emitted.events.filter((e) => e.kind === "gain")).toHaveLength(0)
+    for (const e of emitted.events.filter((x) => x.kind === "attach")) expect(e.input).not.toHaveProperty("voiceId")
+    expect(painted.atts.map((a) => a.voiceId)).toEqual([null, null])
   })
 })

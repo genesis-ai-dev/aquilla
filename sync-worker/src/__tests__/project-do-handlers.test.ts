@@ -13,6 +13,7 @@ import {
   releaseUserLocks,
   resolveTokenRefresh,
   stripAppliedRows,
+  deliverableToWalledSocket,
   presenceFrameOwnerConnId,
   presenceFrameAudience,
   presenceSnapshotFor,
@@ -1678,5 +1679,18 @@ describe("stripAppliedRows", () => {
     expect(stripAppliedRows(bare)).toBe(bare)
     const released: ProjectDoServerMessage = { t: "lock.released", cellId: "c1", by: { userId: "alice", ts: 1 } }
     expect(stripAppliedRows(released)).toBe(released)
+  })
+})
+
+describe("deliverableToWalledSocket (pen test 2026-11-26)", () => {
+  it("withholds a peer's live draft text from a lane-walled socket", () => {
+    expect(
+      deliverableToWalledSocket({
+        t: "presence.draft", userId: "u", connId: "c", cellId: "x", draftText: "walled lane text", ts: 1,
+      }),
+    ).toBe(false)
+  })
+  it("still delivers caret-only presence diffs", () => {
+    expect(deliverableToWalledSocket({ t: "presence.diff", user: { connId: "c", userId: "u", ts: 1 } })).toBe(true)
   })
 })

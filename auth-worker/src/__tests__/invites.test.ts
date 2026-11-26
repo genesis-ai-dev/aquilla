@@ -3,6 +3,15 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
+/** The Owner row project creation writes. created_by is history and grants nothing. */
+async function grantCreatorOwner(projectId: string, userId: number): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?)",
+  )
+    .bind(projectId, userId, userId)
+    .run()
+}
+
 describe("POST /api/v2/projects/:id/invites", () => {
   it("creates an invite for the project creator and caps role at contributor", async () => {
     await seedUser(1, "alice")
@@ -11,6 +20,7 @@ describe("POST /api/v2/projects/:id/invites", () => {
     )
       .bind("proj-1", "Test", 1)
       .run()
+    await grantCreatorOwner("proj-1", 1)
     const res = await app.request(
       "/api/v2/projects/proj-1/invites",
       {
@@ -629,6 +639,7 @@ describe("GET /api/v2/projects/:id/invites (AQU-283)", () => {
     )
       .bind("p-list", "Test")
       .run()
+    await grantCreatorOwner("p-list", 1)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -656,6 +667,7 @@ describe("GET /api/v2/projects/:id/invites (AQU-283)", () => {
     )
       .bind("p-list2", "Test")
       .run()
+    await grantCreatorOwner("p-list2", 1)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
     )
@@ -710,6 +722,7 @@ describe("AQU-323: add-member round-trip — invited user sees project in projec
     )
       .bind("proj-fro323", "Genesis Project")
       .run()
+    await grantCreatorOwner("proj-fro323", 100)
 
     // Maintainer adds invitee directly
     const addRes = await app.request(
@@ -813,6 +826,7 @@ describe("POST /api/v2/projects/:id/invites: expires_in_days (AQU-283)", () => {
     )
       .bind("p-ttl1", "Test")
       .run()
+    await grantCreatorOwner("p-ttl1", 1)
 
     const before = Date.now()
     const res = await app.request(
@@ -841,6 +855,7 @@ describe("POST /api/v2/projects/:id/invites: expires_in_days (AQU-283)", () => {
     )
       .bind("p-ttl2", "Test")
       .run()
+    await grantCreatorOwner("p-ttl2", 1)
 
     const res = await app.request(
       "/api/v2/projects/p-ttl2/invites",
@@ -864,6 +879,7 @@ describe("POST /api/v2/projects/:id/invites: expires_in_days (AQU-283)", () => {
     )
       .bind("p-ttl3", "Test")
       .run()
+    await grantCreatorOwner("p-ttl3", 1)
 
     const before = Date.now()
     const res = await app.request(
@@ -1059,6 +1075,7 @@ describe("AQU-364: magic-link invite accept — real redeem path via JoinPage's 
     )
       .bind("p-fro364", "AQU-364 project")
       .run()
+    await grantCreatorOwner("p-fro364", 20)
 
     // Mint the magic-link invite exactly as POST /:projectId/invites does:
     // email-bound, 7-day expiry (mirrors the ticket's "expires in 7 days").

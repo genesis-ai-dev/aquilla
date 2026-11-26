@@ -150,7 +150,7 @@ describe("ApiTokensSection", () => {
   it("labels an OAuth grant as a connected app, revocable but with no agent setup", async () => {
     mockListCredentials.mockResolvedValue([{ ...ASK_CREDENTIAL, name: "Zapier", oauth: true }])
     render(<ApiTokensSection />)
-    expect(await screen.findByText("connected app")).toBeInTheDocument()
+    expect(await screen.findByText("Connected app")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Agent setup" })).not.toBeInTheDocument()
   })
@@ -567,11 +567,11 @@ describe("ApiTokensSection", () => {
 
       const readOnlyRow = screen.getByText(/aqk_ro1234/).closest("li")!
       const writeRow = screen.getByText(/aqk_rw1234/).closest("li")!
-      expect(readOnlyRow).toHaveTextContent("read-only")
+      expect(readOnlyRow).toHaveTextContent("Read-only")
       // "ask" would suggest writes are merely gated on approval, not impossible.
       expect(readOnlyRow).not.toHaveTextContent(/\bask\b/)
       expect(writeRow).toHaveTextContent("ask")
-      expect(writeRow).not.toHaveTextContent("read-only")
+      expect(writeRow).not.toHaveTextContent("Read-only")
     })
   })
   // AQU-2102: the closed trigger used to print whatever was stored — a numeric org

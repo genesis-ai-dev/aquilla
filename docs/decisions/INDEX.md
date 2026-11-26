@@ -71,6 +71,8 @@ pinned symbol gets renamed and the check goes red.
 | 0015 | [A release hold is a gate to build, not a label to add](0015-a-release-hold-is-a-gate-to-build.md) | what may keep a merged PR out of production, how an area gets a gate, and what watches a release nobody walked |
 | 0016 | [Smart edits are project-wide, on by default, and cheap per reader](0016-smart-edits-are-project-wide-and-on.md) | where the switch lives, why a project is mined once a minute after the response, and why the editor asks only about cells it has no answer for |
 | 0017 | [Search matches words, or text, by script](0017-search-matches-words-or-text-by-script.md) | Chinese, Japanese, Thai, Burmese, Korean and similar queries are matched as text and ranked by occurrences; every other script stays on the word index |
+| 0018 | [Example retrieval and confidence compare text by character n-grams](0018-retrieval-covers-text-by-character-ngrams.md) | the branching search covers a verse by character trigrams (bigrams in Han, Kana and Hangul), so it works the same in scripts with no spaces |
+| 0019 | [A settings collection moves to rows, and the key never leaves the API](0019-settings-collections-move-to-rows.md) | how a large `project_settings` key leaves the multi-MB blob without any reader being able to tell |
 
 ## Adding a record
 

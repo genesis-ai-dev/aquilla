@@ -39,6 +39,18 @@ import {
   CaptionsOff,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
+import { useToolsMount } from "@/components/tools/ToolsMountContext"
+import {
+  CellExtensionActions,
+  ExtensionColumnHeaders,
+  ExtensionColumnsProvider,
+  ExtensionRowAnnotations,
+  ExtensionRowColumns,
+  ExtensionRowColumnStack,
+  SelectionExtensionActions,
+  useHasSelectionExtensionActions,
+  useNativeExtensionColumns,
+} from "@/components/tools/NativeEditorContributions"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import type { RepetitionGesture } from "@/lib/workflow/repetition-validation"
@@ -1051,6 +1063,10 @@ interface EditorTableProps {
   /** AQU-1681: on that empty state, make this file's rows from the linked
    *  video's own sound. Maintainers only, never for a YouTube video. */
   linkedVideoSound?: LinkedVideoSoundActions
+  /** AQU-2682: why the workspace withheld the recording upload from a Project
+   *  Lead (his access does not cover every language, or that is still being
+   *  checked). Shown where the upload would be. */
+  sourceMediaNote?: string | null
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1423,7 +1439,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
   isAnonymous, onJumpToCell,
   castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
-  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound,
+  onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound, sourceMediaNote,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onLinkConceptToEntity, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -2382,6 +2398,44 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     }
   }, [scrollToDisplayCell])
 
+  // Smart Extensions apiRev 8: connect native EditorTable to ToolsMountContext's
+  // external store (zero ProjectWorkspace state) so side panels follow the active
+  // cell and extensions can reveal/focus cells in the real editor.
+  const toolsMountCtx = useToolsMount()
+  const nativeExtensionStore = toolsMountCtx?.nativeEditor ?? null
+  useEffect(() => {
+    if (!nativeExtensionStore) return
+    nativeExtensionStore.registerReveal((fileId, cellId, focus) => {
+      if (audioFileId && fileId && fileId !== audioFileId) return false
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      scrollToDisplayCell(cellId, { flash: true })
+      if (focus) focusCellEditorByIndex(index)
+      return true
+    })
+    return () => nativeExtensionStore.registerReveal(null)
+  }, [nativeExtensionStore, audioFileId, scrollToDisplayCell, focusCellEditorByIndex])
+
+  useEffect(() => {
+    if (!nativeExtensionStore) return
+    if (!activeEditorCellId) {
+      nativeExtensionStore.setActiveCell(null)
+      return
+    }
+    const view = readAtVersion(cellStoreVersion, () => cellStore.getCellView(activeEditorCellId))
+    if (!view) {
+      nativeExtensionStore.setActiveCell(null)
+      return
+    }
+    nativeExtensionStore.setActiveCell({
+      fileId: view.fileId,
+      cellId: view.id,
+      ref: namedCellRef(view) ?? (view.group.trim() || null),
+      source: cellTextForDisplay(effectiveSourceText(view)),
+      target: cellTextForDisplay(view.translated),
+    })
+  }, [nativeExtensionStore, activeEditorCellId, cellStore, cellStoreVersion])
+
   useImperativeHandle(ref, () => ({
     scrollToCellId: scrollToDisplayCell,
     getTopVisibleCellId: () => {
@@ -2883,7 +2937,15 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     gutterPx: editorGutterPx(castGutter),
   })
   const bibleTrackCount = bibleColumns?.layout === "columns" ? bibleColumns.columns.length : 0
-  const extraTrackCount = bibleTrackCount + btTrack
+  const extensionColumns = useNativeExtensionColumns({
+    widthRef: tableRootRef,
+    gutterPx: editorGutterPx(castGutter),
+    extraTracks: bibleTrackCount + btTrack,
+  })
+  const extBeforeTrackCount = extensionColumns?.layout === "columns" ? extensionColumns.before.length : 0
+  const extAfterTrackCount = extensionColumns?.layout === "columns" ? extensionColumns.after.length : 0
+  const extraTrackCount = bibleTrackCount + btTrack + extBeforeTrackCount + extAfterTrackCount
+  const trailingTrackCount = btTrack + extAfterTrackCount
   const gridCols: EditorGridCols = editorGridCols(castGutter, extraTrackCount)
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
@@ -3777,10 +3839,11 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     <SmartEditsProvider value={smartEditsContext}>
     <BibleColumnsProvider value={bibleColumns}>
     <BacktranslationColumnProvider value={btColumn}>
+    <ExtensionColumnsProvider value={extensionColumns}>
     <div
       ref={tableRootRef}
       className="flex h-full min-h-0 flex-col"
-      style={editorGridStyle(castGutter, extraTrackCount, btTrack > 0)}
+      style={editorGridStyle(castGutter, extraTrackCount, trailingTrackCount)}
       onMouseUp={handleMouseUp}
     >
       {showStripNav && stripNavSlot
@@ -3874,6 +3937,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             <AddBibleMenu />
           </div>
           <BibleColumnHeaders />
+          <ExtensionColumnHeaders placement="before" />
           {/* AQU-2288: ltr like the rows' target column (EditorTargetCellColumn),
               so in an rtl UI the marks stay on the side the checks are on. */}
           <div data-testid="table-target-header" dir="ltr" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
@@ -3994,6 +4058,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
             <BacktranslationColumnToggle />
           </div>
           <BacktranslationColumnHeader />
+          <ExtensionColumnHeaders placement="after" />
         </div>
         )}
       </div>
@@ -4080,11 +4145,13 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
           onAttachCaptions={onAttachCaptions}
           onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
           videoSound={linkedVideoSound}
+          sourceMediaNote={sourceMediaNote}
         />
       ) : (
         <div className="flex-1" />
       )}
     </div>
+    </ExtensionColumnsProvider>
     </BacktranslationColumnProvider>
     </BibleColumnsProvider>
     </SmartEditsProvider>
@@ -4377,7 +4444,9 @@ function CellMenuAnchorSlot() {
  */
 function CellSourceMenu({
   children,
+  fileId,
   cellId,
+  cellRef,
   sourceText,
   /** Insert after this row. */
   onInsertBelow,
@@ -4420,7 +4489,9 @@ function CellSourceMenu({
 }: {
   /** The source column. It becomes the menu's trigger. */
   children: React.ReactElement
+  fileId: string
   cellId: string
+  cellRef: string | null
   /** This cell's source text, already unwrapped for display. */
   sourceText: string
   onInsertBelow?: () => void
@@ -4660,6 +4731,7 @@ function CellSourceMenu({
               />
             </>
           )}
+          <CellExtensionActions fileId={fileId} cellId={cellId} cellRef={cellRef} />
         </ContextMenuContent>
       </ContextMenu>
     </CellMenuAnchorContext.Provider>
@@ -6419,6 +6491,7 @@ function EditorRow({
   const t = useT()
   // Aquilla Tools (prototype): inline tool mounts under this cell.
   const hasInlineTools = useHasInlineTools()
+  const hasSelectionExtensionActions = useHasSelectionExtensionActions()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
   // speech-bubble badge below already say "this row has an open comment" once
@@ -7760,7 +7833,7 @@ function EditorRow({
   // Add-from-selection: capture a source-side text selection so the
   // translator can add it to terminology without leaving the editor.
   const handleSourceMouseUp = useCallback(() => {
-    if (!onAddConceptFromSelection && !onAskAiFromSelection) return
+    if (!onAddConceptFromSelection && !onAskAiFromSelection && !hasSelectionExtensionActions) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
     // A collapsed mouseup must not wipe a prior capture. The add-term popover
@@ -7775,7 +7848,7 @@ function EditorRow({
     if (anchorEl?.closest("[data-selection-ignore]")) return
     capturedSelectionRef.current = text
     setSourceSelection(text)
-  }, [onAddConceptFromSelection, onAskAiFromSelection])
+  }, [onAddConceptFromSelection, onAskAiFromSelection, hasSelectionExtensionActions])
 
   const handleAddTermOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -8062,7 +8135,13 @@ function EditorRow({
         return
       }
       if (document.activeElement !== pm) {
-        pm.focus()
+        // The activation window made the row an editing host with the caret
+        // parked inside it. Left open, the browser hands focus straight back
+        // to the row: an IDML editor, which keeps the caret where it is below,
+        // never focused and its typing went to the row. The buffered text is
+        // already in pendingActivationInputRef; the editor drains it on focus.
+        closeActivationCapture()
+        pm.focus({ preventScroll: true })
         // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
         if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
@@ -8086,7 +8165,7 @@ function EditorRow({
       // unmounts, another row takes over) — that settles the edit too.
       settleOwedRepetitions()
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
+  }, [isEditorActive, cell.id, closeActivationCapture, idmlConfiguration, onReleaseCell, settleOwedRepetitions])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -9354,7 +9433,9 @@ function EditorRow({
             wrapper renders no DOM of its own, so this div stays the grid
             item. */}
         <CellSourceMenu
+          fileId={cell.fileId}
           cellId={cell.id}
+          cellRef={cellRef}
           sourceText={cellTextForDisplay(effectiveSourceText(cell))}
           sourceEditing={sourceEditing}
           onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
@@ -9404,7 +9485,7 @@ function EditorRow({
           data-editor-cell-surface="source"
           data-cell-type="source"
           style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
-          onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
+          onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection || hasSelectionExtensionActions)) ? handleSourceMouseUp : undefined}
         >
           {/* Source-selection toolbar. Appears when source text is selected:
               "Ask AI" pushes the selection into the agent as a context chip,
@@ -9425,6 +9506,18 @@ function EditorRow({
               onViewConcept={onOpenTerminologyConcept}
               onToolbarMouseDown={handleToolbarMouseDown}
               onToolbarMouseUp={handleToolbarMouseUp}
+              extensionActions={
+                <SelectionExtensionActions
+                  fileId={cell.fileId}
+                  cellId={cell.id}
+                  cellRef={cellRef}
+                  selectionText={sourceSelection ?? capturedSelectionRef.current ?? ""}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleToolbarMouseDown()
+                  }}
+                />
+              }
             />
           )}
           {sourceWarningOpen && (
@@ -9690,6 +9783,13 @@ function EditorRow({
 
         {/* Bible columns: read-only, one track each between source and target. */}
         <BibleRowCells row={bibleRow} />
+        <ExtensionRowColumns
+          fileId={cell.fileId}
+          cellId={cell.id}
+          placement="before"
+          fontSize={sourceFontSize}
+          dir={sourceCellDirection}
+        />
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions
@@ -9787,6 +9887,7 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
                     idmlConfiguration={idmlPreview ? null : idmlConfiguration}
+                    sanitizeEntryWhitespace={idmlPreview}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null
@@ -10101,6 +10202,16 @@ function EditorRow({
               error={backtranslationError}
               onOpenDetails={openBacktranslationDetails}
             />
+            <ExtensionRowAnnotations
+              fileId={cell.fileId}
+              cellId={cell.id}
+              cellRef={cellRef}
+              sourceText={cellTextForDisplay(effectiveSourceText(cell))}
+              targetText={cellTextForDisplay(visibleTranslated ?? "")}
+              editable={editable && !idmlConfiguration && !lockHolderLabel}
+              onApplyTargetFix={handleInsertExampleTarget}
+            />
+            <ExtensionRowColumnStack fileId={cell.fileId} cellId={cell.id} />
             {hasInlineFootnotes && (
               <FootnoteInline
                 sourceFootnotes={sourceFootnotes}
@@ -10213,6 +10324,13 @@ function EditorRow({
           onBacktranslate={onBacktranslate}
           onSave={onSaveBacktranslation}
           onOpenDetails={openBacktranslationDetails}
+        />
+        <ExtensionRowColumns
+          fileId={cell.fileId}
+          cellId={cell.id}
+          placement="after"
+          fontSize={sourceFontSize}
+          dir={sourceCellDirection}
         />
 
         {/* Floating action rail — anchored to the row's right edge, aligned

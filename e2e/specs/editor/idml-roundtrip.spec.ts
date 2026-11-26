@@ -12,6 +12,8 @@ const TALL_SOURCE = [
   "Chapter One.",
   "This deliberately long source paragraph makes the opposite empty target well taller than one line. ".repeat(12),
 ].join(" ")
+const PROBE_SOURCE = "Probe line."
+const PROBE_TEXT = "Sonde"
 
 async function writeIdmlFixture(
   filePath: string,
@@ -47,6 +49,11 @@ async function writeIdmlFixture(
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content></CharacterStyleRange>',
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>LORD</Content></CharacterStyleRange>',
       "</ParagraphStyleRange>",
+      // One run, so its preview is placed without a model call. The slot-editor
+      // probes below run here and leave it untranslated.
+      '<ParagraphStyleRange Self="probe" AppliedParagraphStyle="ParagraphStyle/Body">',
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${PROBE_SOURCE}</Content></CharacterStyleRange>`,
+      "</ParagraphStyleRange>",
       "</Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },
@@ -76,65 +83,77 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("Chapter One")
   await expect(ws.cellRow(1)).toContainText("the LORD")
+  await expect(ws.cellRow(2)).toContainText(PROBE_SOURCE)
   await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
   const navigator = alice.getByRole("combobox", {
-    name: /Current story: Story 1, cells 1–2/,
+    name: /Current story: Story 1, cells 1–3/,
   })
-  await expect(navigator).toContainText("(1–2)")
+  await expect(navigator).toContainText("(1–3)")
   await navigator.click()
-  await expect(alice.getByRole("option", { name: /1–2 0% translated 0% validated/ }))
+  await expect(alice.getByRole("option", { name: /1–3 0% translated 0% validated/ }))
     .toBeVisible()
   await alice.keyboard.press("Escape")
 
-  // AQU-758 sanitizes whitespace at entry: the deliberately doubled space
-  // typed before "Un" collapses to a single space in the committed cell.
+  // An untranslated cell is typed as a preview, outside the style runs.
+  // AQU-758 sanitizes whitespace at entry there too: the deliberately doubled
+  // space typed before "Un" collapses to one.
   await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un", "Chapitre Un")
+  // One run: the preview goes into it without a model call, and the cell
+  // opens the protected slot editor from then on. The run holds exactly the
+  // sanitized sentence.
+  await ws.passIdmlPreviewToStyleSegments(0, "Chapitre Un")
   // The first click on a populated cell happens on the cheap read surface.
   // Preserve its exact slot offset across the ProseMirror remount (offset 9
   // is the boundary before "U"), then insert at that clicked position.
   await ws.editIdmlCellAtTextOffset(0, 9, "X", "Chapitre XUn")
   // Re-enter the populated IDML target through its read view. The activation
   // fallback must append at the real ProseMirror slot end, not jump to the
-  // beginning as the browser-recorded AQU-740 regression did.
-  await ws.editCell(0, " — suite")
+  // beginning as the browser-recorded AQU-740 regression did. The run editor
+  // applies AQU-758 as well: the doubled space typed here reaches the exported
+  // story as one (asserted on the artifact below).
+  await ws.editCell(0, "  — suite")
   await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
 
+  // The slot-editor probes need a placed cell: the probe paragraph's preview
+  // is passed into its one run first. Each probe starts after PROBE_TEXT and
+  // puts it back; the last one deletes it, leaving the cell untranslated so
+  // the export assertions below still hold.
+  await ws.editCell(2, PROBE_TEXT)
+  await ws.passIdmlPreviewToStyleSegments(2, PROBE_TEXT)
   // AQU-810: IME composition (Japanese romaji → kanji) must land exactly
   // once. The regression echoed every intermediate update and leaked raw
   // romaji ("k小日小日子にch子にc…") because the editor intercepted
   // non-cancelable insertCompositionText events and re-dispatched their text.
-  // Driven through Chromium's real IME pipeline; ends untranslated.
+  // Driven through Chromium's real IME pipeline.
   // The update sequence mirrors a real IME session: romaji keystrokes build
   // the kana reading and Enter commits it (kana commits without kanji
   // conversion are an everyday Japanese flow). Kanji candidate replacement is
   // covered at the unit level — CDP's synthetic IME cannot reproduce a real
   // IME's candidate-swap event timing.
   await ws.composeIdmlImeDraft(
-    1,
+    2,
+    PROBE_TEXT,
     ["k", "か", "かn", "かん", "かんし", "かんしゃ"],
     "かんしゃ",
   )
-  // AQU-740: deleting a slot's final character must not trip the protected-
-  // formatting guard (native deletion used to drop the emptied slot span).
-  // The second cell is typed into and backspaced empty again, ending exactly
-  // as it started — untranslated — so the export assertions below still hold.
-  await ws.deleteIdmlDraftToEmpty(1, "xy", 2)
   // AQU-740: a line break typed at a slot's end keeps a caret line box, so the
-  // cursor no longer parks at the cell's first line after Enter. Also ends
-  // with the cell untranslated.
-  await ws.verifyIdmlTrailingBreakCaret(1)
+  // cursor no longer parks at the cell's first line after Enter.
+  await ws.verifyIdmlTrailingBreakCaret(2, PROBE_TEXT)
   // AQU-740 manual QA found that word deletion stopped at trailing whitespace,
   // requiring a second keypress for the word itself. One modifier press owns
-  // both pieces and the probe restores the untranslated state.
-  await ws.deleteIdmlWordPastTrailingSpace(1)
+  // both pieces.
+  await ws.deleteIdmlWordPastTrailingSpace(2, PROBE_TEXT)
   // A committed hard break must count as one position when the cheap read view
   // hands a line-two click to ProseMirror. The appended character proves the
   // caret did not land between the final two existing characters.
-  await ws.verifyIdmlMultilineReentry(1)
+  await ws.verifyIdmlMultilineReentry(2, PROBE_TEXT)
+  // AQU-740: deleting a slot's final character must not trip the protected-
+  // formatting guard (native deletion used to drop the emptied slot span).
+  await ws.deleteIdmlDraftToEmpty(2, PROBE_TEXT, "xy", 1)
 
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve
@@ -190,6 +209,9 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   )
   expect(story).toContain(
     'AppliedCharacterStyle="CharacterStyle/Bold"><Content>LORD</Content>',
+  )
+  expect(story).toContain(
+    `AppliedCharacterStyle="CharacterStyle/Plain"><Content>${PROBE_SOURCE}</Content>`,
   )
   await expect(dialog.getByText(/1 paragraph translated/i)).toBeVisible()
 })

@@ -57,20 +57,24 @@ export function editorHeaderGridCols(castGutter: boolean, extraTracks: number): 
  * edge only while Target is the last track. With one more track after it, the
  * rail moves in by that track's width plus the gap, so it stays over Target.
  */
-export function editorGridStyle(castGutter: boolean, extraTracks: number, trailingColumn = false): CSSProperties | undefined {
+export function editorGridStyle(castGutter: boolean, extraTracks: number, trailingColumn: boolean | number = false): CSSProperties | undefined {
   if (extraTracks <= 0) return undefined
   const count = extraTracks + 2
   const tracks = Array.from({ length: count }, () => "minmax(0,1fr)").join(" ")
   const style: Record<string, string> = { "--editor-grid-cols": `${editorGutterPx(castGutter)}px ${tracks}` }
-  if (trailingColumn) {
+  const trailingTracks = typeof trailingColumn === "number" ? Math.max(0, trailingColumn) : trailingColumn ? 1 : 0
+  if (trailingTracks > 0) {
     // The rail is an absolutely positioned grid child starting at the Source
     // track (`col-start-2`), so its containing block — what 100% means here —
     // runs from the Source track's start to the row's padding edge: the
     // `count` text tracks, the 8px gaps between them, and the row's 16px end
     // padding. One track is therefore (100% - 16px - gaps) / count, and the
     // rail ends flush with Target's end edge: the row's padding (16px), the
-    // back-translation track, and the gap before it (8px).
-    style["--editor-rail-end"] = `calc((100% - ${16 + 8 * (count - 1)}px) / ${count} + 24px)`
+    // trailing track(s) (Back-translation and/or trailing extension columns),
+    // and the 8px gap before each one.
+    const trackExpr = `(100% - ${16 + 8 * (count - 1)}px) / ${count}`
+    const widthExpr = trailingTracks === 1 ? trackExpr : `${trailingTracks} * (${trackExpr})`
+    style["--editor-rail-end"] = `calc(${widthExpr} + ${16 + 8 * trailingTracks}px)`
   }
   return style as CSSProperties
 }

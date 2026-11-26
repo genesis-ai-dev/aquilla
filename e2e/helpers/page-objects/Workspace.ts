@@ -774,6 +774,16 @@ export class Workspace {
     return this.root.locator("[data-cell-id]").nth(index)
   }
 
+  /**
+   * AQU-599: the always-visible badge on a row that carries an open thread
+   * ("1 open comment — view comments"). The hover rail's comment button is
+   * named only "1 open comment", so the "— view comments" tail is what tells
+   * the two apart.
+   */
+  commentBadge(index = 0): Locator {
+    return this.cellRow(index).getByRole("button", { name: /open comments? — view comments$/i })
+  }
+
   private editableTarget(index: number): Locator {
     return this.targetColumn(index).locator(EDITABLE_TARGET_SELECTOR).first()
   }

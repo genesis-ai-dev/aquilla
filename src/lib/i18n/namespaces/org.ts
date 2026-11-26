@@ -2003,6 +2003,7 @@ export const org = defineNamespace({
     // -- AQU-2323: the person inspector (/orgs/:id/access/people/:userId) --
     "org.access.person.title": "{name}'s access",
     "org.access.person.back": "Back to People & access",
+    "org.access.person.member": "Member",
     "org.access.person.lastActive": "Last active {time}",
     "org.access.person.grantCount": plural({
       one: "{count} grant",
@@ -4765,6 +4766,7 @@ export const org = defineNamespace({
         placeholders: { name: "The person's name or username; never translated." },
       },
       "org.access.person.back": { description: "AQU-2323: link from the person inspector back to the People & access page." },
+      "org.access.person.member": { description: "AQU-2323: badge in the person inspector header: the person holds an organization membership (the opposite of Guest)." },
       "org.access.person.lastActive": {
         description: "AQU-2323: header line in the person inspector.",
         placeholders: { time: "Relative time, already localized, e.g. \"3 days ago\"." },

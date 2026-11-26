@@ -79,7 +79,7 @@ export function OrgAccessPersonPage() {
             )}
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
               <Badge variant="outline" data-testid="person-status">
-                {person.isGuest ? t("org.access.inspector.guest") : t("org.teamsList.memberBadge")}
+                {person.isGuest ? t("org.access.inspector.guest") : t("org.access.person.member")}
               </Badge>
               <span>{lastActive ? t("org.access.person.lastActive", { time: lastActive }) : t("org.access.people.noActivity")}</span>
               <span data-testid="person-counts">

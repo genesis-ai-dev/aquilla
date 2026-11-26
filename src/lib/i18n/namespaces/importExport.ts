@@ -599,6 +599,12 @@ export const importExport = defineNamespace({
     "importExport.upload.zipOrFolder": ".zip or folder",
     "importExport.upload.categoryOtherFormats": "Other formats",
     "importExport.upload.otherFormatsHint": "AI-assisted when configured, always reviewed before import",
+    // AQU-2682: the Upload files panel for a Project Lead the server will not
+    // take source audio from (his access does not cover every language), and
+    // the moment before the server has answered.
+    "importExport.upload.mediaNeedsEveryLanguage":
+      "Importing audio or video adds the recording every language shares, so it needs access to every language in this project. A maintainer can import it.",
+    "importExport.upload.mediaAccessChecking": "Checking whether you can import audio or video. Try again in a moment.",
 
     // — Main ImportDialog shell (title bar + top-level error frames) —
     "importExport.dialog.titleDirection": "Set translation direction",
@@ -2453,6 +2459,18 @@ export const importExport = defineNamespace({
           fileName: "Name of the file being processed — not translated.",
           count: "Optional pre-rendered '(n/m)' progress suffix, or empty string.",
         },
+      },
+      "importExport.upload.mediaNeedsEveryLanguage": {
+        description:
+          "Line on the Upload files panel, and its error when an audio or video file is dropped, for a " +
+          "Project Lead who may not import media: an imported recording is shared by every language, so it " +
+          "needs access to every language of the project, and his does not cover them all. 'Maintainer' is " +
+          "the project role name; match the members screen.",
+      },
+      "importExport.upload.mediaAccessChecking": {
+        description:
+          "Same place, shown briefly (or while offline) while the app asks the server whether this person " +
+          "may import audio or video.",
       },
       "importExport.upload.readingFile": {
         description: "Parse-phase progress label on the Upload files panel for a file whose format is recognized.",

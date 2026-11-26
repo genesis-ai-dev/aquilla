@@ -13639,7 +13639,10 @@ export function ProjectWorkspace() {
           },
         })
         if (outcome === "timeout") {
-          showBatchSyncTimeoutToast(t("editor.batch.syncTimedOut"), readingId)
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            readingId,
+          )
           return
         }
         const firstName = names.get(choices.fileIds[0] ?? "") ?? ""
@@ -13796,7 +13799,10 @@ export function ProjectWorkspace() {
           },
         })
         if (outcome === "timeout") {
-          showBatchSyncTimeoutToast(t("editor.batch.syncTimedOut"), waitingId)
+          showBatchSyncTimeoutToast(
+            t(request === "validate" ? "editor.batch.syncTimedOutValidate" : "editor.batch.syncTimedOutDraft"),
+            waitingId,
+          )
           return
         }
         if (waitingId) toast.close(waitingId)

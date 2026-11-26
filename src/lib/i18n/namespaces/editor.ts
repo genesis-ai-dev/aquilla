@@ -1014,7 +1014,8 @@ export const editor = defineNamespace({
     "editor.batchBooks.menuDraft": "Draft books…",
     "editor.batchBooks.reading": "Reading {name}…",
     "editor.batch.waitingForSync": "Waiting for sync to complete.",
-    "editor.batch.syncTimedOut": "Sync did not finish, so nothing was changed.",
+    "editor.batch.syncTimedOutValidate": "Batch validation did not start. Sync did not finish.",
+    "editor.batch.syncTimedOutDraft": "Batch draft did not start. Sync did not finish.",
     "editor.batchBooks.loadFailed": "Could not read {name}. Nothing was changed.",
     "editor.batchBooks.historyName": plural({
       one: "{count} book",
@@ -8027,11 +8028,17 @@ export const editor = defineNamespace({
           "being saved. Shown only when something is still syncing. The run " +
           "starts once those edits have landed.",
       },
-      "editor.batch.syncTimedOut": {
+      "editor.batch.syncTimedOutValidate": {
         description:
-          "Error toast when those edits do not finish syncing in time. The " +
-          "batch does not start, so nothing is validated or drafted. It stays " +
-          "until the reader closes it.",
+          "Error toast when Batch validate text or Validate books is confirmed " +
+          "and the edits still syncing do not finish in time. The run does not " +
+          "start. It stays until the reader closes it.",
+      },
+      "editor.batch.syncTimedOutDraft": {
+        description:
+          "Error toast when Draft AI text or Draft books is confirmed and the " +
+          "edits still syncing do not finish in time. The run does not start. " +
+          "It stays until the reader closes it.",
       },
       "editor.batchBooks.loadFailed": {
         description: "Error toast when a book could not be read. Nothing was validated or drafted.",

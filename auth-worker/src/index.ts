@@ -83,6 +83,7 @@ import meRoutes from "./routes/me"
 import accessRoutes from "./routes/access"
 import orgAccessRoutes from "./routes/org-access"
 import orgAccessLaneRoutes from "./routes/org-access-lanes"
+import orgAccessPersonRoutes from "./routes/org-access-person"
 import accessAuditRoutes from "./routes/access-audit"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
@@ -331,6 +332,7 @@ app.route("/api/v2/users", accessRoutes)
 app.route("/api/v2/me", meRoutes)
 app.route("/api/v2/orgs", orgAccessRoutes)
 app.route("/api/v2/orgs", orgAccessLaneRoutes)
+app.route("/api/v2/orgs", orgAccessPersonRoutes)
 app.route("/api/v2/orgs", accessAuditRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes

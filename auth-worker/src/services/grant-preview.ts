@@ -65,7 +65,7 @@ export type GrantTarget =
       /** Their access_grants rows inside this org. */
       grants: AccessGrant[]
       /** project_member_lane_roles rows inside this org. */
-      laneGrants: { projectId: string; laneId: string; roleLevel: number }[]
+      laneGrants: { projectId: string; laneId: string; roleLevel: number; grantedBy?: string | null; grantedAt?: string | null }[]
     }
   | { kind: "invite"; email: string }
 

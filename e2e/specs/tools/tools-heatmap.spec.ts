@@ -138,7 +138,7 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await alice.keyboard.press("Escape")
   const activity = await tools.openActivity(TOOL)
   await expect(activity.getByTestId("tool-activity-row")).toHaveCount(3)
-  await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension write (v1)")
+  await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension change (v1)")
 
   await tools.revertSince(activity)
   await expect(activity.getByRole("status").first()).toContainText("Undone: 2 cell(s) are back")

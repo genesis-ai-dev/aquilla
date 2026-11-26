@@ -1,5 +1,5 @@
 import type { InfractionSpan } from "@/lib/parsers/types"
-import { readNumbers } from "./number-integrity"
+import { readVerseNumbers } from "./number-integrity"
 
 export const MESSAGE = "Number in translation not found in source"
 
@@ -9,8 +9,9 @@ export const MESSAGE = "Number in translation not found in source"
 // no longer slips through. (A changed number was already caught: the source's
 // number goes missing.)
 //
-// It reads numbers exactly as Number integrity does (`readNumbers`): any
+// It reads numbers exactly as Number integrity does (`readVerseNumbers`): any
 // script's decimal digits compared by value, so ٤٠ against 40 is not an extra.
+// Digits inside a `\f…\f*` footnote are not verse numbers.
 //
 // Unlike the source direction, occurrences count. A source with 40 once and a
 // translation with 40 twice has one extra 40, and the underline goes on the
@@ -22,11 +23,11 @@ export const MESSAGE = "Number in translation not found in source"
 // number is sometimes legitimate (an added verse reference, "forty" in the
 // source written as "40"), which is also why it defaults to minor.
 export function runCheck(source: string, target: string): InfractionSpan[] | null {
-  const targetNumbers = readNumbers(target)
+  const targetNumbers = readVerseNumbers(target)
   if (targetNumbers.length === 0) return null
 
   const unused = new Map<string, number>()
-  for (const n of readNumbers(source)) unused.set(n.value, (unused.get(n.value) ?? 0) + 1)
+  for (const n of readVerseNumbers(source)) unused.set(n.value, (unused.get(n.value) ?? 0) + 1)
 
   const extra: InfractionSpan[] = []
   for (const n of targetNumbers) {

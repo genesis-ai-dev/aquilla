@@ -30,3 +30,14 @@ export async function openMediaView(page: Page): Promise<void> {
   await page.getByRole("tab", { name: "Media" }).click()
   await expect(page.getByRole("button", { name: /^Take Play this clip/ }).first()).toBeVisible({ timeout: 20_000 })
 }
+
+/** The demo organization: the first one the demo sign-in makes. */
+export const DEMO_ORG = "/orgs/1"
+
+/** Start a take on another page than the editor (off camera, in its setup). */
+export function startOn(path: string, ready: (page: Page) => Promise<unknown>) {
+  return async (page: Page): Promise<void> => {
+    await page.goto(path)
+    await ready(page)
+  }
+}

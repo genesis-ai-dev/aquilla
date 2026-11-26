@@ -31,6 +31,15 @@ finish.
 | Trim and cut a recording | translators | `trim-and-cut` |
 | Set a recording's volume and fades | translators | `volume-and-fades` |
 | Link a project to a source project | leads | `link-a-source` |
+| Create a project | leads | `create-a-project` |
+| Set your personal preferences | everyone | `preferences` |
+| Add people to a project | leads | `invite-people` |
+| Change someone's role | leads | `change-a-role` |
+| Remove someone from a project | leads | `remove-someone` |
+| Add a language lane | leads | `add-a-language-lane` |
+| Put someone on a language lane | leads | `staff-a-lane` |
+| Manage a language lane | leads | `manage-a-language-lane` |
+| See who can access what | leads | `who-has-access` |
 
 Every take starts from the same demo project. The demo sign-in
 (`auth-worker/src/routes/marketing-seed.ts`) drops whatever an earlier take
@@ -45,6 +54,12 @@ The source-projects video links a second demo project, "Jean — Kreyòl Draft",
 which the sign-in seeds empty and unlinked, to the demo's French translation.
 The source project's revision is made in a second page, off camera, so the
 video shows the linked project following it live.
+
+The admin videos work on three made-up teammates the demo sign-in adds to the
+organization (amara.okafor, lena.hartmann, tomas.reyes; no password, so they
+cannot sign in). Each sign-in puts them back on their seeded roles, drops any
+project or language lane a take added, and restores the seeded lane. Teams are
+left out on purpose.
 
 Not filmed yet: making AI voices and dubbing. They need the voice keys
 (`INWORLD_API_KEY`, `VOICE_FORGE_URL`, `VOICE_FORGE_TOKEN`) on the stack that

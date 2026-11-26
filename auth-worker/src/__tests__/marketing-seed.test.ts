@@ -83,6 +83,48 @@ describe("marketing seed", () => {
     expect(files.results.map((row) => row.id)).toEqual(["demo-john-1"])
   })
 
+  it("a re-seed puts the teammates, lanes and projects back as seeded, for the admin videos", async () => {
+    await seed()
+    const db = env.AQUILLA_PG
+    const lena = await db.prepare("SELECT id FROM users WHERE username = 'lena.hartmann'").first<{ id: number }>()
+    // What the admin videos change: a role, a removal, a new lane, a renamed lane, a new project.
+    await db.prepare("UPDATE project_members SET role_level = 500 WHERE project_id = 'demo-john' AND user_id = ?").bind(lena!.id).run()
+    await db.prepare("DELETE FROM project_members WHERE project_id = 'demo-john' AND user_id = (SELECT id FROM users WHERE username = 'amara.okafor')").run()
+    await db.prepare("INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES ('ab12cd34', 'demo-john', 'target', 'sw', 'sw', 5)").run()
+    await db
+      .prepare("INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('demo-john', ?, 'ab12cd34', 400)")
+      .bind(lena!.id)
+      .run()
+    await db.prepare("UPDATE lanes SET name = 'Français (Afrique)' WHERE project_id = 'demo-john' AND legacy_tag = 'fr'").run()
+    await db
+      .prepare("INSERT INTO projects (id, name, org_id, created_by) SELECT 'made-in-a-take', 'Marc', org_id, created_by FROM projects WHERE id = 'demo-john'")
+      .run()
+
+    await seed()
+
+    const members = await db
+      .prepare(
+        `SELECT u.username, m.role_level FROM project_members m JOIN users u ON u.id = m.user_id
+         WHERE m.project_id = 'demo-john' ORDER BY u.username`,
+      )
+      .all<{ username: string; role_level: number }>()
+    expect(members.results.map((m) => [m.username, Number(m.role_level)])).toEqual([
+      ["amara.okafor", 400],
+      ["demo", 700],
+      ["lena.hartmann", 300],
+    ])
+    const lanes = await db
+      .prepare("SELECT language, name FROM lanes WHERE project_id = 'demo-john' AND role = 'target'")
+      .all<{ language: string; name: string | null }>()
+    expect(lanes.results).toEqual([{ language: "French", name: null }])
+    const made = await db.prepare("SELECT COUNT(*) AS n FROM projects WHERE id = 'made-in-a-take'").first<{ n: number }>()
+    expect(Number(made?.n)).toBe(0)
+    const teammate = await db
+      .prepare("SELECT password_hash FROM users WHERE username = 'tomas.reyes'")
+      .first<{ password_hash: string | null }>()
+    expect(teammate?.password_hash).toBeNull()
+  })
+
   it("a re-seed leaves the chain project there and unlinked, for the source-projects video", async () => {
     await seed()
     await env.AQUILLA_PG

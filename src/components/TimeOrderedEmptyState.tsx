@@ -28,6 +28,7 @@ export function TimeOrderedEmptyState({
   onAttachCaptions,
   onUseCaptionTrackAsRows,
   videoSound,
+  sourceMediaNote,
 }: {
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
   placement: LinkedProps["placement"]
@@ -39,6 +40,10 @@ export function TimeOrderedEmptyState({
   onUseCaptionTrackAsRows?: LinkedProps["onUseCaptionTrackAsRows"]
   /** AQU-1681: make the rows from the linked video's own sound. */
   videoSound?: LinkedProps["videoSound"]
+  /** AQU-2682: why the upload is withheld from someone who otherwise could
+   *  add the recording (his access does not cover every language, or that is
+   *  still being checked). Replaces the "a project lead can add it" line. */
+  sourceMediaNote?: string | null
 }) {
   const t = useT()
   if (linkedVideoEmptyState) {
@@ -53,6 +58,7 @@ export function TimeOrderedEmptyState({
           onAttachCaptions={canEdit ? onAttachCaptions : undefined}
           onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
           videoSound={canEdit ? videoSound : undefined}
+          recordingNote={canEdit && !onAttachMediaFile ? sourceMediaNote : null}
         />
       </div>
     )
@@ -75,7 +81,7 @@ export function TimeOrderedEmptyState({
         // upload (below Project Lead, or read-only), and a file with no rows
         // has nothing to record a take on, so "import or record" would send
         // them nowhere.
-        description={t("editor.empty.mediaLayerWaiting")}
+        description={(canEdit ? sourceMediaNote : null) ?? t("editor.empty.mediaLayerWaiting")}
       />
     </div>
   )

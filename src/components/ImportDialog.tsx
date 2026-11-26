@@ -461,6 +461,14 @@ interface ImportDialogProps {
   alignReimportedIdml?: IdmlReimportAlignHost
   /** AQU-981: "Recordings" — bulk audio upload onto lines already here. */
   recordings?: RecordingsImportHost
+  /**
+   * AQU-2682: why an audio or video upload is refused for this caller, or
+   * null. Importing one stores the file's source audio, which every language
+   * shares, and the server takes that only from someone whose access covers
+   * every language. Set, the upload screens say so and refuse media files
+   * before anything is read or uploaded; text files import as before.
+   */
+  mediaDisabledReason?: string | null
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -493,6 +501,7 @@ export function ImportDialog({
   translation,
   alignReimportedIdml,
   recordings,
+  mediaDisabledReason = null,
 }: ImportDialogProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
@@ -1459,6 +1468,7 @@ export function ImportDialog({
             ctx={{ projectId, author: username, sourceLanguage,
               targetLanguage, targetLang, getToken }}
             onImported={handleChildImported}
+            mediaDisabledReason={mediaDisabledReason}
           />
         )}
 
@@ -1510,6 +1520,7 @@ export function ImportDialog({
             alignReimportedIdml={alignReimportedIdml}
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("upload")}
+            mediaDisabledReason={mediaDisabledReason}
           />
         )}
 
@@ -1562,6 +1573,7 @@ export function ImportDialog({
             alignReimportedIdml={alignReimportedIdml}
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("gdrive")}
+            mediaDisabledReason={mediaDisabledReason}
           />
         )}
 
@@ -2404,6 +2416,8 @@ interface UploadPanelProps {
   ) => Promise<boolean>
   /** IDML re-import that keeps translations places them into the new style runs. */
   alignReimportedIdml?: IdmlReimportAlignHost
+  /** AQU-2682: see ImportDialogProps.mediaDisabledReason. */
+  mediaDisabledReason?: string | null
 }
 
 /** AQU-1365: one parsed text upload, as the translation check sees it. */
@@ -2514,7 +2528,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget = null }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget = null, mediaDisabledReason = null }: UploadPanelProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
   const [importing, setImporting] = useState(false)
@@ -2648,10 +2662,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }
       }
 
-      setImporting(true)
-      setProgress(null)
-      setError(null)
-
       // ── Phase 1: parse ────────────────────────────────────────────────────
       // Separate text files (previewable) from media files (upload directly).
       const textFiles: File[] = []
@@ -2664,6 +2674,17 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           textFiles.push(file)
         }
       }
+      // AQU-2682: an audio or video file becomes the file's source audio,
+      // which the server refuses from this caller; say why before anything
+      // is read, staged or uploaded.
+      if (mediaFiles.length > 0 && mediaDisabledReason) {
+        setError(mediaDisabledReason)
+        return
+      }
+
+      setImporting(true)
+      setProgress(null)
+      setError(null)
 
       // Parse text files client-side for the preview.
       const preparedByFile = new Map<File, PreparedImportFile>()
@@ -2831,7 +2852,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics, mediaDisabledReason]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -3176,6 +3197,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — {t("importExport.upload.formatsSubtitles")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryParatextProject")}</span> — {t("importExport.upload.zipOrFolder")}</p>
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryOtherFormats")}</span> — {t("importExport.upload.otherFormatsHint")}</p>
+            {mediaDisabledReason && <p data-testid="upload-media-disabled">{mediaDisabledReason}</p>}
           </div>
         </>
       )}

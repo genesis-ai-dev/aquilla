@@ -278,6 +278,7 @@ export async function getPortfolio(jwt: string, orgId: number): Promise<Portfoli
 export const PORTFOLIO_PAGE_SIZE = 40
 
 export interface PortfolioDirectoryPage {
+  revision?: string
   projects: PortfolioProject[]
   nextCursor: string | null
 }
@@ -289,6 +290,8 @@ export async function getPortfolioPage(
     q?: string
     limit?: number
     cursor?: string | null
+    cached?: PortfolioDirectoryPage
+    validate?: boolean
     signal?: AbortSignal
   } = {},
 ): Promise<PortfolioDirectoryPage> {
@@ -297,14 +300,20 @@ export async function getPortfolioPage(
   if (q) params.set("q", q)
   params.set("limit", String(opts.limit ?? PORTFOLIO_PAGE_SIZE))
   if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.validate) params.set("revision", opts.cached?.revision ?? "")
   const res = await fetchWithTimeout(
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio?${params}`,
     { headers: { Authorization: `Bearer ${jwt}` }, signal: opts.signal },
   )
   if (!res.ok) throw new UserError(res.status, "", "org")
-  const body = (await res.json()) as { projects: PortfolioProject[]; nextCursor?: string | null }
+  const body = (await res.json()) as { unchanged?: boolean; revision?: string; projects: PortfolioProject[]; nextCursor?: string | null }
+  if (body.unchanged) {
+    if (opts.cached?.revision && opts.cached.revision === body.revision) return opts.cached
+    if (opts.validate) return getPortfolioPage(jwt, orgId, { ...opts, validate: false })
+    throw new Error("Missing project directory page")
+  }
   rememberPortfolioRows(jwt, body.projects ?? [])
-  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
+  return { revision: body.revision, projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
 export async function getPortfoliosPage(
@@ -314,9 +323,11 @@ export async function getPortfoliosPage(
     q?: string
     limit?: number
     cursor?: string | null
+    cached?: PortfolioDirectoryPage
+    validate?: boolean
     signal?: AbortSignal
   } = {},
-): Promise<{ projects: Array<PortfolioProject & { orgId: number }>; nextCursor: string | null }> {
+): Promise<PortfolioDirectoryPage> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
@@ -324,6 +335,7 @@ export async function getPortfoliosPage(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
     signal: opts.signal,
     body: JSON.stringify({
+      revision: opts.validate ? opts.cached?.revision ?? "" : undefined,
       orgIds: uniqueOrgIds,
       q: opts.q?.trim() || undefined,
       limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
@@ -332,14 +344,21 @@ export async function getPortfoliosPage(
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
   const body = (await res.json()) as {
+    unchanged?: boolean
+    revision?: string
     portfolios: OrgPortfolio[]
     nextCursor?: string | null
+  }
+  if (body.unchanged) {
+    if (opts.cached?.revision && opts.cached.revision === body.revision) return opts.cached
+    if (opts.validate) return getPortfoliosPage(jwt, orgIds, { ...opts, validate: false })
+    throw new Error("Missing project directory page")
   }
   const projects = (body.portfolios ?? []).flatMap((portfolio) =>
     portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
   )
   rememberPortfolioRows(jwt, projects)
-  return { projects, nextCursor: body.nextCursor ?? null }
+  return { revision: body.revision, projects, nextCursor: body.nextCursor ?? null }
 }
 
 export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {

@@ -10,11 +10,12 @@
 import { useEffect, useState, type MutableRefObject, type ReactNode } from "react"
 import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
-import { ExternalLink, Settings2 } from "lucide-react"
+import { ExternalLink, Plus, Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { buildExtensionPath } from "@/lib/tools/builder-model"
 import type { ToolSummary } from "@/lib/tools/tools-api"
 import type { ToolMount } from "../../../shared/tools/manifest"
 import { ToolFrame } from "./ToolFrame"
@@ -116,10 +117,21 @@ export function ToolsDockPanel({ file }: { file?: { fileId: string; name: string
   const setPicked = (id: string) => ctx?.setDockSelection(id)
   const selected = panelTools.find((tool) => tool.id === picked)?.id ?? panelTools[0]?.id ?? null
   if (!ctx) return null
+  const buildPanelUrl = buildExtensionPath(ctx.projectId, { where: "panel", fileId: file?.fileId })
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="tools-dock-panel">
       <div className="flex items-center gap-1 border-b p-2">
         {panelTools.length > 0 && <ToolPicker tools={panelTools} value={selected} onChange={setPicked} />}
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={t("extensions.buildFrom.panel")}
+          title={t("extensions.buildFrom.panel")}
+          data-testid="build-extension-panel"
+          render={<Link to={buildPanelUrl} />}
+        >
+          <Plus className="size-3.5" aria-hidden />
+        </Button>
         {selected && (
           <Button size="icon-xs" variant="ghost" aria-label={t("extensions.open")} render={<Link to={`/project/${ctx.projectId}/extensions/${selected}`} />}>
             <ExternalLink className="size-3.5" />
@@ -132,7 +144,13 @@ export function ToolsDockPanel({ file }: { file?: { fileId: string; name: string
       {selected ? (
         <MountedTool key={selected} toolId={selected} mount="panel" {...(file ? { file } : {})} className="flex min-h-0 flex-1 flex-col" />
       ) : (
-        <p className="p-3 text-xs text-muted-foreground">{t("extensions.dock.empty")}</p>
+        <div className="flex flex-col items-start gap-2.5 p-3">
+          <p className="text-xs text-muted-foreground">{t("extensions.dock.empty")}</p>
+          <Button size="xs" variant="outline" data-testid="build-extension-panel-empty" render={<Link to={buildPanelUrl} />}>
+            <Plus className="size-3" aria-hidden />
+            {t("extensions.buildFrom.panel")}
+          </Button>
+        </div>
       )}
     </div>
   )
@@ -144,18 +162,39 @@ export function InlineToolsTab({ fileId, cellId }: { fileId: string; cellId: str
   const inlineTools = toolsFor(ctx?.tools ?? [], "inline")
   const [picked, setPicked] = useState<string | null>(null)
   const selected = inlineTools.find((tool) => tool.id === picked)?.id ?? inlineTools[0]?.id ?? null
-  if (!selected) return <p className="text-xs text-muted-foreground">{t("extensions.inline.empty")}</p>
+  const buildInlineUrl = ctx ? buildExtensionPath(ctx.projectId, { where: "inline", fileId }) : null
+  if (!selected) {
+    return (
+      <div className="flex flex-col items-start gap-2 py-1" data-testid="tools-inline-empty">
+        <p className="text-xs text-muted-foreground">{t("extensions.inline.empty")}</p>
+        {buildInlineUrl && (
+          <Button size="xs" variant="outline" data-testid="build-extension-inline" render={<Link to={buildInlineUrl} />}>
+            <Plus className="size-3" aria-hidden />
+            {t("extensions.buildFrom.inline")}
+          </Button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-2" data-testid="tools-inline-tab">
-      {inlineTools.length > 1 && <ToolPicker tools={inlineTools} value={selected} onChange={setPicked} />}
+      <div className="flex items-center gap-2">
+        {inlineTools.length > 1 && <ToolPicker tools={inlineTools} value={selected} onChange={setPicked} />}
+        {buildInlineUrl && (
+          <Button size="xs" variant="ghost" className="ms-auto text-muted-foreground" data-testid="build-extension-inline" render={<Link to={buildInlineUrl} />}>
+            <Plus className="size-3" aria-hidden />
+            {t("extensions.buildFrom.inline")}
+          </Button>
+        )}
+      </div>
       <MountedTool key={`${selected}:${cellId}`} toolId={selected} mount="inline" cell={{ fileId, cellId }} className="flex h-72 flex-col overflow-hidden rounded border" />
     </div>
   )
 }
 
-/** Whether the inline tab should be offered at all (keeps rows unchanged for
- *  projects with no inline tool). */
+/** Whether the inline tab should be offered at all (keeps rows unchanged when
+ *  Smart Extensions are turned off). */
 export function useHasInlineTools(): boolean {
   const ctx = useToolsMount()
-  return (ctx?.tools ?? []).some((t) => t.manifest.mounts.includes("inline"))
+  return Boolean(ctx && (ctx.extensionsEnabled === true || ctx.tools.some((t) => t.manifest.mounts.includes("inline"))))
 }

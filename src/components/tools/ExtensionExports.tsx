@@ -7,8 +7,9 @@
  */
 
 import { ExtensionMarker } from "./ExtensionMarker"
+import { BuildExtensionTrigger } from "./BuildExtensionLink"
 import { useEffect, useState } from "react"
-import { Blocks } from "lucide-react"
+import { Blocks, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -20,11 +21,13 @@ export function ExtensionExports({
   fileId,
   lane,
   getToken,
+  onBeforeNavigate,
 }: {
   projectId: string
   fileId: string | null
   lane: string
   getToken: (fileId: string) => Promise<string | null>
+  onBeforeNavigate?: () => void
 }) {
   const t = useT()
   const ctx = useToolsMount()
@@ -50,7 +53,8 @@ export function ExtensionExports({
 
   if (!ctx || !fileId) return null
   const offered = formats.filter(({ format }) => !format.tags?.length || format.tags.some((tag) => tags?.includes(tag)))
-  if (offered.length === 0) return null
+  const canBuildExporter = ctx.extensionsEnabled === true
+  if (offered.length === 0 && !canBuildExporter) return null
 
   return (
     <section className="flex flex-col gap-2" data-testid="extension-exports" aria-label={t("extensions.export.groupLabel")}>
@@ -80,6 +84,19 @@ export function ExtensionExports({
             </Button>
           )
         })}
+        {canBuildExporter && (
+          <BuildExtensionTrigger
+            projectId={projectId}
+            where="exporter"
+            fileId={fileId}
+            onBeforeNavigate={onBeforeNavigate}
+            testId="build-extension-exporter"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-dashed px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground"
+          >
+            <Plus className="size-3.5" aria-hidden />
+            {t("extensions.buildFrom.exporter")}
+          </BuildExtensionTrigger>
+        )}
       </div>
       {busy && <p className="text-xs text-muted-foreground">{t("extensions.export.running", { extension: offered.find((o) => `${o.tool.id}:${o.format.id}` === busy)?.tool.name ?? "" })}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}

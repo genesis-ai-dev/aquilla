@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest"
 import {
   EXAMPLE_PROMPTS,
+  WHERE_CHOICES,
+  WHERE_PLACEHOLDERS,
+  buildExtensionPath,
   composeRequest,
+  examplesForWhere,
   formatElapsed,
   groupScopes,
   parseWhere,
+  postInstallTarget,
   primaryMount,
   progressSteps,
   provenanceOf,
@@ -18,13 +23,23 @@ import { extensions } from "../../i18n/namespaces/extensions"
 const states = (phase: Parameters<typeof progressSteps>[0]) => progressSteps(phase).map((s) => `${s.id}:${s.state}`)
 
 describe("parseWhere", () => {
-  it("accepts the three placements and falls back to auto", () => {
-    expect(parseWhere("editor")).toBe("editor")
-    expect(parseWhere("panel")).toBe("panel")
-    expect(parseWhere("page")).toBe("page")
-    expect(parseWhere("inline")).toBe("auto")
+  it("accepts all supported placements and falls back to auto", () => {
+    for (const w of WHERE_CHOICES) {
+      expect(parseWhere(w)).toBe(w)
+    }
+    expect(parseWhere("unknown")).toBe("auto")
     expect(parseWhere(null)).toBe("auto")
     expect(parseWhere(undefined)).toBe("auto")
+  })
+})
+
+describe("buildExtensionPath", () => {
+  it("omits default where=auto and builds clean query strings", () => {
+    expect(buildExtensionPath("p1")).toBe("/project/p1/extensions")
+    expect(buildExtensionPath("p1", { where: "auto" })).toBe("/project/p1/extensions")
+    expect(buildExtensionPath("p1", { where: "importer" })).toBe("/project/p1/extensions?where=importer")
+    expect(buildExtensionPath("p1", { where: "exporter", fileId: "f1" })).toBe("/project/p1/extensions?where=exporter&fileId=f1")
+    expect(buildExtensionPath("p1", { where: "auto", fileId: "f1" })).toBe("/project/p1/extensions?fileId=f1")
   })
 })
 
@@ -32,8 +47,13 @@ describe("composeRequest", () => {
   it("sends the user's words untouched when the AI chooses", () => {
     expect(composeRequest("  count words  ", "auto")).toBe("count words")
   })
-  it("appends one placement sentence naming the mount", () => {
+  it("appends one placement sentence naming the mount or apiRev 8 surface", () => {
     expect(composeRequest("count words", "panel")).toBe("count words\n\nIt should appear in the editor's side panel (mount: panel).")
+    expect(composeRequest("study notes", "column")).toContain("manifest.columns")
+    expect(composeRequest("study notes", "column")).toContain("aq.editor.annotate()")
+    expect(composeRequest("verse check", "inline")).toContain("mount: inline")
+    expect(composeRequest("tsv glossary", "importer")).toContain("manifest.importers")
+    expect(composeRequest("study tsv", "exporter")).toContain("manifest.exports")
     expect(composeRequest("one verse at a time", "editor")).toMatch(/\(mount: editor\)\.$/)
     expect(composeRequest("a chart", "page")).toMatch(/\(mount: page\)\.$/)
   })
@@ -42,13 +62,29 @@ describe("composeRequest", () => {
   })
 })
 
-describe("example prompts", () => {
-  it("are translation-specific catalog strings, including term consistency across books", () => {
-    for (const ex of EXAMPLE_PROMPTS) {
-      expect(extensions.keys[ex.prompt]).toBeTruthy()
-      expect(String(extensions.keys[ex.title]).length).toBeLessThan(28)
+describe("example prompts and placeholders", () => {
+  it("has valid catalog strings for every placement", () => {
+    for (const w of WHERE_CHOICES) {
+      expect(extensions.keys[WHERE_PLACEHOLDERS[w] as keyof typeof extensions.keys]).toBeTruthy()
+      const list = examplesForWhere(w)
+      expect(list.length).toBeGreaterThanOrEqual(2)
+      for (const ex of list) {
+        expect(extensions.keys[ex.prompt as keyof typeof extensions.keys]).toBeTruthy()
+        expect(String(extensions.keys[ex.title as keyof typeof extensions.keys]).length).toBeLessThan(28)
+      }
     }
+    expect(EXAMPLE_PROMPTS.length).toBe(4)
     expect(extensions.keys["extensions.examples.graceAcrossBooks"]).toBe("Check that my term for 'grace' is used consistently across all books")
+  })
+})
+
+describe("postInstallTarget", () => {
+  it("returns to the open file for editor-integrated placements and extensions", () => {
+    expect(postInstallTarget("p1", "t1", { mounts: ["page", "panel"] }, { where: "panel", fileId: "f9" })).toBe("/project/p1/editor/file/f9")
+    expect(postInstallTarget("p1", "t1", { mounts: ["page"] }, { where: "importer", fileId: "f9" })).toBe("/project/p1/editor/file/f9")
+    expect(postInstallTarget("p1", "t1", { mounts: ["page"] }, { where: "exporter" })).toBe("/project/p1/editor")
+    expect(postInstallTarget("p1", "t1", { mounts: ["page", "editor"] }, {})).toBe("/project/p1/editor")
+    expect(postInstallTarget("p1", "t1", { mounts: ["page", "panel"] }, { where: "auto" })).toBe("/project/p1/extensions/t1")
   })
 })
 

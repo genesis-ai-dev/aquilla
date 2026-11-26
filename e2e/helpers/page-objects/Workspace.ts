@@ -1582,7 +1582,12 @@ export class Workspace {
     return this.page.getByTestId("lane-switcher")
   }
 
-  /** Switch the active target lane. Pass `""` for the default lane. */
+  /**
+   * Switch the active target lane by its tag. Since AQU-1594 a project's first
+   * target lane is tagged with its language ("fr"; "Swahili" on a project from
+   * `seedProjectWithFile`), not `""`. Read the tag with `readActiveLane()`
+   * before switching away if the spec needs to come back to it.
+   */
   async switchLane(tag: string): Promise<void> {
     await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
     await this.laneSwitcher().click()

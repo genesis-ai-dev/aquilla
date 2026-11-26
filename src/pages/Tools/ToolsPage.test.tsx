@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { BuildFlowResult } from "@/lib/tools/build-flow"
 import { resetBuildJobs } from "@/lib/tools/build-jobs"
+import { takePanelRequest } from "@/lib/tools/panel-handoff"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 
 /**
@@ -168,6 +169,23 @@ describe("Smart Extensions builder", () => {
     const review = await screen.findByTestId("built-candidate")
     await userEvent.click(within(review).getByTestId("candidate-add"))
     await screen.findByText("editor file")
+  })
+
+  it("?where=panel: Add returns to the editor and leaves it a request to open the side panel", async () => {
+    runBuildFlow.mockResolvedValue(ok(BUILT))
+    installTool.mockResolvedValue({ id: "t-panel", manifest: BUILT })
+    renderAt("/project/p1/extensions?where=panel")
+
+    await userEvent.type(await box(), "Count the words in each verse")
+    await userEvent.click(screen.getByTestId("builder-build"))
+    const review = await screen.findByTestId("built-candidate")
+    await userEvent.click(within(review).getByTestId("candidate-add"))
+    await screen.findByText("editor")
+    // The editor mounts its own extensions context; the request crosses in
+    // panel-handoff, for this project only, and is read once.
+    expect(takePanelRequest("p2")).toBeNull()
+    expect(takePanelRequest("p1")).toBe("t-panel")
+    expect(takePanelRequest("p1")).toBeNull()
   })
 
   it("the build button waits for a description", async () => {

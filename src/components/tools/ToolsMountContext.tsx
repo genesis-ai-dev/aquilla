@@ -18,6 +18,7 @@ import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileImportProvenance } from "../../../shared/tools/file-extension"
 import { dueOnOpenActions, markOnOpenRun } from "@/lib/tools/on-open-actions"
+import { takePanelRequest } from "@/lib/tools/panel-handoff"
 import {
   NativeEditorStore,
   readExtensionColumnPrefs,
@@ -185,6 +186,13 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     },
     [setDockSelection],
   )
+  // "Add to project" on the builder page asked for the side panel (AQU-2772).
+  // That page has a provider of its own, so its request waits in
+  // panel-handoff for the workspace's provider to mount.
+  useEffect(() => {
+    const toolId = takePanelRequest(projectId)
+    if (toolId) openInPanel(toolId)
+  }, [projectId, openInPanel])
 
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
   // AQU-1937: nothing about extensions loads (not even the first-party

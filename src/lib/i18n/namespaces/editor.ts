@@ -1579,8 +1579,16 @@ export const editor = defineNamespace({
     "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
     "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
     "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
+    "editor.station.insertLost": "Not saved: audio you inserted is no longer on this device, so it would be saved as silence. Select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertFailed": "Not saved: audio you inserted couldn't be loaded, so it would be saved as silence. Try again, or select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertRetry": "Try again",
+    "editor.station.insertLoading": "Not saved yet: the audio you inserted is still loading. Try Save again in a moment.",
     "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
     "editor.station.undoUnsaved": "Undo the last unsaved change",
+    "editor.station.undoWhileRecording": "Stop the recording first",
+    "editor.station.versionsWhileRecording": "Stop the recording first",
+    "editor.station.undoAfterCut": "This take was cut on the timeline since your last change here: press {mod}Z to undo the cut first.",
+    "editor.station.undoAfterMove": "This take was moved on the timeline since your last change here: press {mod}Z to take the move back first.",
     "editor.station.fileLabel": "the file “{name}”",
     "editor.station.fadeIn": "Fade in",
     "editor.station.fadeOut": "Fade out",
@@ -3794,6 +3802,18 @@ export const editor = defineNamespace({
           name: "The file's name.",
         },
       },
+      "editor.station.insertLost": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload (a file, or a recording made there) is no longer on this device. Nothing is saved. The inserted audio shows as a silent stretch in the waveform; deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertFailed": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload could not be loaded this time (for example part of another recording, fetched over the network while offline). Nothing is saved. 'Try again' is the button beside the message; the inserted audio shows as a silent stretch in the waveform, and deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertRetry": {
+        description: "Button beside the Station's 'couldn't be loaded' message: loads the inserted audio again.",
+      },
+      "editor.station.insertLoading": {
+        description: "Message when Save is pressed in the Station before audio inserted earlier has finished loading again after a reload. Nothing is saved yet.",
+      },
       "editor.station.keptForLater": {
         description: "Message when switching away from a recording with unsaved changes.",
         placeholders: {
@@ -3802,6 +3822,20 @@ export const editor = defineNamespace({
       },
       "editor.station.undoUnsaved": {
         description: "Tooltip of the Station's Undo button while there are unsaved changes to the sound.",
+      },
+      "editor.station.undoWhileRecording": {
+        description: "Tooltip and accessible name of the Station's Undo button while 'Record now' is counting in or recording: Undo is greyed until the recording is stopped.",
+      },
+      "editor.station.versionsWhileRecording": {
+        description: "Second line of the Station's ⋯ menu items Remove noise and Change the voice while 'Record now' is counting in or recording: both are greyed until the recording is stopped, as Save is.",
+      },
+      "editor.station.undoAfterCut": {
+        description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was cut on the timeline after the Station's last change to it. A cut is not the Station's to undo, so the person undoes the cut first with the project-wide Undo shortcut; then the Station's Undo works again.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
+      },
+      "editor.station.undoAfterMove": {
+        description: "Tooltip of the Station's Undo button, and the message it shows when pressed, when the open take was moved on the timeline after the Station's last change to it. A move is not the Station's to undo, so the person takes the move back first with the project-wide Undo shortcut; then the Station's Undo works again.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
       },
       "editor.station.fileLabel": {
         description: "How an inserted file is named in the History row and the inserted mark's tooltip.",

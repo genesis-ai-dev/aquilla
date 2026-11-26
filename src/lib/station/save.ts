@@ -32,6 +32,9 @@ export interface VersionPlacement {
   /** The take it replaces on that line. */
   fromAudioId: string
   slot: string
+  /** AQU-2494 (review, Nov 9): the voice an AI take was made with — on an
+   *  added track its only mark — so the new version is still marked AI. */
+  voiceId?: string | null
   label: string | null
   /** Its kept part in the NEW recording, ms; null = the edge. */
   trimStartMs: number | null
@@ -47,6 +50,9 @@ export interface VersionPlacement {
    * their approvals.
    */
   pieceOf?: string | null
+  /** AQU-2493 (review, Nov 9): with `pieceOf`, the take's other live pieces,
+   *  so Undo of the save knows they were there before it. */
+  otherPieces?: readonly string[]
   /** Its volume and fades (AQU-2327), carried over to the new take. */
   level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
   /** AQU-2492 (review, Nov 9), finding 8: who had approved the take it
@@ -122,6 +128,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             url,
             slot: p.slot,
             mimeType: "audio/wav",
+            ...(p.voiceId ? { voiceId: p.voiceId } : {}),
             referenceAudioId: p.fromAudioId,
             durationMs,
             ...(p.label ? { label: p.label } : {}),
@@ -159,7 +166,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               url,
               slot: p.slot,
               mimeType: "audio/wav",
-              voiceId: null,
+              voiceId: p.voiceId ?? null,
               referenceAudioId: p.fromAudioId,
               durationMs,
               trimStartMs: p.trimStartMs,
@@ -177,7 +184,15 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
           recordTakeAdded(
             "station",
             {
-              cellId: p.cellId, audioId, slot: p.slot, selectedBefore: p.selectedBefore,
+              cellId: p.cellId,
+              audioId,
+              slot: p.slot,
+              selectedBefore: p.selectedBefore,
+              // AQU-2493 (review, Nov 9): a piece saved in place joins the
+              // pieces already there (the one it replaces comes back on Undo
+              // before this step runs), so its Undo doesn't read them as a
+              // change made since and leave both pieces on the line.
+              ...(p.pieceOf ? { joined: [p.fromAudioId, ...(p.otherPieces ?? [])] } : {}),
               // AQU-2492 (review, round 2): a new piece stands for the stretch
               // of the piece it replaces, which its Redo takes away again.
               ...(p.pieceOf && p.replacedStretch

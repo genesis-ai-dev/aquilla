@@ -6,6 +6,8 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Run the type-check as `pnpm typecheck`, in scripts and workflows too. It is the same `tsc -b` under a 6 GiB heap; a bare `tsc -b` gets Node's default ceiling (about 4 GiB at best), which the app project (about 4.8 GB) fits only while GC keeps up, and when it stops fitting every PR's preview, the dev deploy and release-verify go red together.
+
 Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
 plus environment/artifact checks. They run no tests, lint, or secret scans.
 QA tests the published preview; its green check proves compilation only.

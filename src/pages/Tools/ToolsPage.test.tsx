@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { BuildFlowResult } from "@/lib/tools/build-flow"
 import { resetBuildJobs } from "@/lib/tools/build-jobs"
+import { takePanelRequest } from "@/lib/tools/panel-handoff"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 
 /**
@@ -37,6 +38,7 @@ function renderAt(url = "/project/p1/extensions") {
         <Route path="/project/:id/extensions" element={<ToolsPage />} />
         <Route path="/project/:id/extensions/:toolId" element={<p>extension page</p>} />
         <Route path="/project/:id/editor" element={<p>editor</p>} />
+        <Route path="/project/:id/editor/file/:fileId" element={<p>editor file</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -144,6 +146,46 @@ describe("Smart Extensions builder", () => {
   it("?where=editor (the editor's 'Build your own editor…') preselects the placement", async () => {
     renderAt("/project/p1/extensions?where=editor")
     expect(await screen.findByRole("radio", { name: "As an editor" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("?where=exporter&fileId=f42 adapts suggestions, sends exporter guidance, and returns to the file on Add", async () => {
+    const exporterManifest: ToolManifest = {
+      name: "Annotated TSV",
+      description: "Exports annotated TSV",
+      scopes: ["read:cells"],
+      mounts: ["page"],
+      exports: [{ id: "tsv", label: "Annotated TSV", extension: "tsv" }],
+      apiRev: 8,
+    }
+    runBuildFlow.mockResolvedValue(ok(exporterManifest))
+    installTool.mockResolvedValue({ id: "t-exp", manifest: exporterManifest })
+    renderAt("/project/p1/extensions?where=exporter&fileId=f42")
+
+    expect(await screen.findByRole("radio", { name: "Exporter" })).toHaveAttribute("aria-checked", "true")
+    await userEvent.click(screen.getByRole("button", { name: /Annotated TSV export/ }))
+    await userEvent.click(screen.getByTestId("builder-build"))
+    expect(runBuildFlow.mock.calls[0][0]).toContain("manifest.exports")
+
+    const review = await screen.findByTestId("built-candidate")
+    await userEvent.click(within(review).getByTestId("candidate-add"))
+    await screen.findByText("editor file")
+  })
+
+  it("?where=panel: Add returns to the editor and leaves it a request to open the side panel", async () => {
+    runBuildFlow.mockResolvedValue(ok(BUILT))
+    installTool.mockResolvedValue({ id: "t-panel", manifest: BUILT })
+    renderAt("/project/p1/extensions?where=panel")
+
+    await userEvent.type(await box(), "Count the words in each verse")
+    await userEvent.click(screen.getByTestId("builder-build"))
+    const review = await screen.findByTestId("built-candidate")
+    await userEvent.click(within(review).getByTestId("candidate-add"))
+    await screen.findByText("editor")
+    // The editor mounts its own extensions context; the request crosses in
+    // panel-handoff, for this project only, and is read once.
+    expect(takePanelRequest("p2")).toBeNull()
+    expect(takePanelRequest("p1")).toBe("t-panel")
+    expect(takePanelRequest("p1")).toBeNull()
   })
 
   it("the build button waits for a description", async () => {

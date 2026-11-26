@@ -42,6 +42,9 @@ describe("neon-target hands the backfill its flags", () => {
       .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
     expect(childArgs("repair-lane-grants", ["--out", "report.json", "--project", "p1"]))
       .toEqual(["scripts/neon-repair-lane-grants.ts", "--out", "report.json", "--project", "p1"])
+    // AQU-2357: --apply is the write. Dropping it would grant Owner rows on a dry run.
+    expect(childArgs("repair-creator-owner-grants", ["--apply"]))
+      .toEqual(["scripts/neon-repair-creator-owner-grants.ts", "--apply"])
     // AQU-2658: --apply and --production are the cell-metadata repair's write
     // gate, and --only is what keeps it to one project.
     expect(childArgs("repair-cell-metadata", ["--apply", "--production", "--only", "p1"]))

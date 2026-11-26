@@ -120,15 +120,23 @@ interface ParsedNumber {
 
 const NUMBER_RUN = /^\s*(\d+)(?:\s*[-–]\s*(\d+))?([a-zA-Z]?)/
 
+/** No book has a chapter or verse number near this. A longer run of digits is
+ *  a slip of the keyboard, not a number: it is reported as invalid and never
+ *  counted with. Counting matters: past 2^53 `n + 1 === n`, so a loop over a
+ *  verse range starting there never ends, and the import froze on a real book
+ *  with a key held down after `\v 1`. Below that, a `\v 1-90000000` bridge
+ *  would still walk ninety million numbers. */
+const MAX_NUMBER = 9999
+
 function parseNumberAfter(tokens: UsfmToken[], index: number): ParsedNumber {
   const next = tokens[index + 1]
   const text = next?.type === "text" ? next.text : ""
   const m = NUMBER_RUN.exec(text)
-  if (!m) {
+  const first = m ? Number(m[1]) : 0
+  const last = m?.[2] ? Number(m[2]) : first
+  if (!m || first > MAX_NUMBER || last > MAX_NUMBER) {
     return { first: 0, last: 0, raw: text.trim().split(/\s+/)[0] ?? "", numeric: false }
   }
-  const first = Number(m[1])
-  const last = m[2] ? Number(m[2]) : first
   return { first, last, raw: `${m[1]}${m[2] ? `-${m[2]}` : ""}${m[3]}`, numeric: true }
 }
 

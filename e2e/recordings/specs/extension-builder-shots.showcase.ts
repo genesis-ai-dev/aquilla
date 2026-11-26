@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { ensureAuthState, injectSession } from "../../helpers/auth"
+import { EXTENSION_DOCUMENT } from "../../helpers/editor-mode"
 import { resetBackend } from "../../helpers/seed"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
@@ -116,7 +117,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
   await expect(page.getByTestId("installed-tool").filter({ hasText: "Word Count" })).toBeVisible({ timeout: 20_000 })
   await shot(page, "06-installed-list", true)
   await page.goto(`/project/${seeded.projectId}/extensions/${wordCount}`)
-  await expect(page.frameLocator('iframe[title="Word Count (sandboxed extension)"]').locator("body")).toContainText(/\d/, { timeout: 30_000 })
+  await expect(page.frameLocator('iframe[title="Word Count (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT).locator("body")).toContainText(/\d/, { timeout: 30_000 })
   await page.waitForTimeout(800)
   await shot(page, "07-detail-page")
 
@@ -129,7 +130,7 @@ test("Smart Extensions builder — every state", async ({ page }) => {
   // 8. The permission prompt (first write).
   const filler = await install(jwt, seeded.projectId, { source: FILLER, manifest: { name: "Verse Filler", description: "Fills the first verse.", scopes: ["read:cells", "write:target"], mounts: ["page"], apiRev: 5 }, origin: "builder", grant: ["read:cells"] })
   await page.goto(`/project/${seeded.projectId}/extensions/${filler}`)
-  const fillerFrame = page.frameLocator('iframe[title="Verse Filler (sandboxed extension)"]')
+  const fillerFrame = page.frameLocator('iframe[title="Verse Filler (sandboxed extension)"]').frameLocator(EXTENSION_DOCUMENT)
   await fillerFrame.getByRole("button", { name: "Fill the first verse" }).click()
   await expect(page.getByRole("alertdialog")).toBeVisible({ timeout: 20_000 })
   await shot(page, "09-permission-prompt")

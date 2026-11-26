@@ -67,7 +67,12 @@ interface Attachment {
   laneIds: string[]
 }
 interface Invite {
-  token: string
+  /**
+   * Stable, non-redeemable id for the row: a hash of the token. The token is a
+   * bearer credential (an open link is redeemable by any account), so it never
+   * leaves loadPlaceExtras.
+   */
+  ref: string
   roleLevel: number
   email: string | null
   expiresAt: string | null
@@ -114,6 +119,11 @@ function asIso(value: string | Date | null): string | null {
   if (value == null) return null
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+async function inviteRef(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))
+  return [...new Uint8Array(digest).slice(0, 12)].map((b) => b.toString(16).padStart(2, "0")).join("")
 }
 
 function parseLaneList(raw: string | null): string[] {
@@ -225,7 +235,7 @@ export async function loadPlaceExtras(env: Env, orgId: number, viewerId: string)
   const projectInvites = new Map<string, Invite[]>()
   for (const row of projectInviteRes.results ?? []) {
     const invite: Invite = {
-      token: row.token,
+      ref: await inviteRef(row.token),
       roleLevel: Number(row.role_level),
       email: row.email,
       expiresAt: asIso(row.expires_at),
@@ -248,13 +258,13 @@ export async function loadPlaceExtras(env: Env, orgId: number, viewerId: string)
     memberCount: new Map((countRes.results ?? []).map((row) => [String(row.group_id), Number(row.n)])),
     viewerTeamIds: new Set((memberRes.results ?? []).map((row) => String(row.group_id))),
     laneUsers: await laneUsersMissing(env, laneGrants),
-    orgInvites: (orgInviteRes.results ?? []).map((row) => ({
-      token: row.token,
+    orgInvites: await Promise.all((orgInviteRes.results ?? []).map(async (row) => ({
+      ref: await inviteRef(row.token),
       roleLevel: Number(row.role_level),
       email: row.email,
       expiresAt: asIso(row.expires_at),
       lanes: [],
-    })),
+    }))),
     projectInvites,
   }
 }
@@ -285,8 +295,9 @@ export function redactUnseenPlaces(
 
 function inviteGrantee(invite: Invite): DirectGrantee {
   return {
-    userId: `invite:${invite.token}`,
-    displayName: invite.email ?? invite.token,
+    userId: `invite:${invite.ref}`,
+    // An open link has no name; never fall back to the token.
+    displayName: invite.email ?? "Invite link",
     email: invite.email,
     roleLevel: invite.roleLevel,
     isGuest: false,

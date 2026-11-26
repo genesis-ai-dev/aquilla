@@ -56,6 +56,7 @@ import { type EmailService } from '../notification-email'
 import { dispatchCommentNotification } from '../side-effects/queue'
 import type { SideEffectMessage } from '../side-effects/types'
 import { collectLaneTouches, notifyLiveDownstreamsOfUpstreamChanges } from './link-notify'
+import { loadJoinedCopies, joinedCopyRestoreReason, type JoinedInto } from './joined-copies'
 import {
   coalesceFileCounterRecompute,
   type CounterImpact,
@@ -793,6 +794,8 @@ export async function handleEventsWriteRequest(
   // omitted for a large batch.
   let appliedRowsWalled = false
   const rejected: RejectedEntry[] = []
+  // AQU-2549: read once per request, on the first file.restore.
+  let joinedCopies: Map<string, JoinedInto> | undefined
   // Chain-mutating events that were accepted (logged) but did NOT advance
   // the projection — stale siblings. Keyed by event id so we can `has`-check
   // when assembling the response; the value carries enough context for the
@@ -1703,6 +1706,18 @@ export async function handleEventsWriteRequest(
             }
           }
         }
+      }
+    }
+
+    // AQU-2549: a copy that was joined into one of the project's own files
+    // stays in Recently deleted. Restored, it would be a second file that no
+    // longer follows the source and cannot be joined again.
+    if (rawEvent.kind === 'file.restore' && rawEvent.fileId) {
+      joinedCopies ??= await loadJoinedCopies(db, rawEvent.projectId)
+      const into = joinedCopies.get(rawEvent.fileId)
+      if (into) {
+        rejected.push({ id: rawEvent.id ?? '(unknown)', status: 409, reason: joinedCopyRestoreReason(into) })
+        continue
       }
     }
 

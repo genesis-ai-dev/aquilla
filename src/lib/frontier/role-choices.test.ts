@@ -27,7 +27,7 @@ describe("roleChoices", () => {
     ])
   })
 
-  it("offers a project role from the project list of six, never Owner", () => {
+  it("offers Owner on a project only to an Owner", () => {
     expect(levels(roleChoices("project", { callerLevel: ROLE.OWNER }))).toEqual([
       ROLE.VIEWER,
       ROLE.COMMENTER,
@@ -35,7 +35,21 @@ describe("roleChoices", () => {
       ROLE.CONTRIBUTOR,
       ROLE.PROJECT_LEAD,
       ROLE.MAINTAINER,
+      ROLE.OWNER,
     ])
+    expect(levels(roleChoices("project", { callerLevel: ROLE.MAINTAINER }))).not.toContain(ROLE.OWNER)
+  })
+
+  it("keeps Owner off a team's grant on a project, even when an Owner is choosing", () => {
+    expect(levels(roleChoices("project", { callerLevel: ROLE.OWNER, teamGrant: true }))).toEqual([
+      ROLE.VIEWER,
+      ROLE.COMMENTER,
+      ROLE.REVIEWER,
+      ROLE.CONTRIBUTOR,
+      ROLE.PROJECT_LEAD,
+      ROLE.MAINTAINER,
+    ])
+    expect(levels(roleChoices("project", { callerLevel: null, teamGrant: true }))).not.toContain(ROLE.OWNER)
   })
 
   it("never offers more than the person choosing may grant", () => {
@@ -55,6 +69,6 @@ describe("roleChoices", () => {
   })
 
   it("keeps the whole list while the caller's own role is not known yet", () => {
-    expect(roleChoices("project", { callerLevel: null })).toHaveLength(6)
+    expect(roleChoices("project", { callerLevel: null })).toHaveLength(7)
   })
 })

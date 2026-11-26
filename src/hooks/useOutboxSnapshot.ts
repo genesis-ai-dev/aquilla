@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { peekOutboxBatch, readOutboxCounts, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
+import { peekOutboxShared, readOutboxCounts, subscribeToOutbox, type OutboxRecord } from "@/lib/sync/outbox"
 import { recordsEqual } from "@/hooks/usePendingOutboxRecords"
 
 /** Rows read per notification. A longer queue is counted with a second read. */
@@ -68,7 +68,7 @@ export function useOutboxSnapshot(options: Options): OutboxSnapshot {
       try {
         do {
           again = false
-          const all = await peekOutboxBatch(READ_LIMIT)
+          const all = await peekOutboxShared(READ_LIMIT)
           const counts = all.length < READ_LIMIT
             ? { count: all.length, failed: all.filter((r) => r.status === "failed").length }
             : await readOutboxCounts().catch(() => ({ count: all.length, failed: all.filter((r) => r.status === "failed").length }))

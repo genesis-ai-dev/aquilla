@@ -20,7 +20,7 @@ import {
   MAX_SOURCE_ARTIFACT_BYTES,
   sourceArtifactDescriptor,
 } from "../../../shared/import-contract"
-import { buildSourceArtifactPersistenceStatements } from "./source-artifact-persistence"
+import { blankTargetBridgeStmts, buildSourceArtifactPersistenceStatements } from "./source-artifact-persistence"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-bindings$/
@@ -196,7 +196,7 @@ async function handleSourceBindingRequest(
 
   try {
     const conflictColumn = await artifactBindingConflictColumn(env.AQUILLA_PG)
-    await env.AQUILLA_PG.prepare(
+    const bindingInsert = env.AQUILLA_PG.prepare(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role,
          member_path, profile_id, profile_version, fidelity, manifest, lane_id
@@ -207,8 +207,13 @@ async function handleSourceBindingRequest(
          profile_version = EXCLUDED.profile_version,
          fidelity = EXCLUDED.fidelity,
          updated_at = now()`,
-      // AQU-1240 slice 8: 'support'/'target' role -> target lane by tag.
-    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
+      // AQU-2554: a 'target' binding -> its target lane by tag; 'support' -> the source lane.
+    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang))
+    // AQU-2554: a target binding with no tag creates the project's first ''
+    // lane in the same batch, as the upload does (blankTargetBridgeStmts).
+    const bridge = blankTargetBridgeStmts(env.AQUILLA_PG, projectId, bindingRole, targetLang)
+    if (bridge.length > 0) await env.AQUILLA_PG.batch([...bridge, bindingInsert])
+    else await bindingInsert.run()
   } catch (error) {
     console.error("[source-upload] artifact binding failed:", error)
     return withCors(Response.json({ error: "Artifact binding failed" }, { status: 500 }), request)

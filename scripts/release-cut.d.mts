@@ -7,6 +7,8 @@ import type { HeldPr, ReleasePlan, UnreleasedPr } from "./release-plan.mjs"
 export type ReleaseNotesPlan = Pick<ReleasePlan, "branch" | "areas"> & {
   prs: (Pick<UnreleasedPr, "walk" | "areas"> & EntryName)[]
   held?: (Pick<HeldPr, "why"> & EntryName)[]
+  /** Empty picks committed as the record that production already carries the entry. */
+  recorded?: EntryName[]
 }
 
 /**
@@ -53,9 +55,17 @@ export type UnpickedPr<T> = T & {
  */
 export function dependencyHint(pr: PickCandidate, paths: string[], candidates: PickCandidate[]): number | string | undefined
 
+/** Whether the plan's files prove an empty pick is already in the base (no PR still off the branch touches its files). */
+export function provablyInBase(pr: PickCandidate, candidates: PickCandidate[]): boolean
+
+/** An empty pick committed as the record that production already carries the PR. */
+export type RecordedPr<T> = T & { kind: "recorded"; why: string }
+
 /**
  * Picks each PR onto a new branch at base. A conflicting pick is aborted and
- * an empty one skipped; both are reported as unpicked, never fatal.
+ * an empty one skipped (both reported as unpicked, never fatal), except an
+ * empty pick the plan proves is in the base, which is committed empty and
+ * reported as recorded.
  */
 export function buildReleaseBranch<T extends PickCandidate>(input: {
   branch: string
@@ -65,7 +75,7 @@ export function buildReleaseBranch<T extends PickCandidate>(input: {
   held?: PickCandidate[]
   /** Repo to run git in; the process cwd by default. */
   cwd?: string
-}): { sha: string; picked: T[]; unpicked: UnpickedPr<T>[] }
+}): { sha: string; picked: T[]; unpicked: UnpickedPr<T>[]; recorded: RecordedPr<T>[] }
 
 /** One `- #N: <why>` line per unpicked PR; a direct commit is `- <short sha> "<subject>": <why>`. */
 export function unpickedReport(unpicked: (EntryName & { why: string })[]): string

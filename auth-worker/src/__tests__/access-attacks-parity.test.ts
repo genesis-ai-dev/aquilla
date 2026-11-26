@@ -139,7 +139,7 @@ describe("AQU-1352 attack #7 resolver parity property (seeded, role_level NULL)"
       const r = await resolveProjectRoleShared(db, { id: String(1000 + c.i) }, `par-${c.i}`, undefined, "off")
       sources.add(r?.source ?? "none")
     }
-    for (const s of ["override", "group", "org", "creator", "none"]) expect(sources, `no config produced ${s}`).toContain(s)
+    for (const s of ["override", "group", "org", "none"]) expect(sources, `no config produced ${s}`).toContain(s)
   })
 
   it("resolveProjectRoleViaGrants === legacy resolveProjectRole for every config (level and source)", async () => {

@@ -28,6 +28,15 @@ import {
   type ProjectLaneRecord,
 } from "./lanes"
 import { clampThreshold, effectiveThreshold, loadOrgValidationDefaults } from "./validation-threshold"
+import {
+  LIVING_MEMORY_KEY,
+  LIVING_MEMORY_SELECT,
+  livingMemoryRowsExist,
+  livingMemoryWriteStmts,
+  mergeLivingMemoryEntries,
+  planLivingMemoryWrite,
+  rowsToLivingMemoryEntries,
+} from "./living-memory-entries"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -41,19 +50,6 @@ export interface CreateProjectInput {
   orgId: number | null
   /** Creator's user id (numeric, or its string form). */
   createdBy: number | string
-  /**
-   * When true, also INSERT a `project_members` row at owner level (700) for the
-   * creator.
-   *
-   * The auth-worker HTTP route leaves this false: a project's creator already
-   * resolves to 700 via the resolver's implicit "creator" path
-   * (created_by = user), so writing an explicit override row would flip that
-   * attribution from source "creator" to source "override" — a behavior change
-   * the internal route must not make. The sync-worker `CreateProject` command
-   * (spec §2), whose receipt-only apply step confers the creator role through
-   * this row rather than a live resolver, passes true.
-   */
-  writeCreatorMembership?: boolean
   /**
    * AQU-1594: the language pair becomes lane rows in the same batch as the
    * project. It is NOT written into `project_settings` — new projects have no
@@ -78,57 +74,63 @@ export interface CreateProjectInput {
 }
 
 /**
- * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
- * optionally, the creator's owner-level membership row. Returns whether the
- * project row was newly inserted (false on an id collision — the caller decides
- * whether that is a conflict or a benign retry).
+ * Insert a project row and, only when THIS call inserted it, the creator's
+ * Owner grant (AQU-2357) and the project's lanes. `created_by` is history only.
+ * Returns whether the project row was newly inserted (false on an id collision
+ * — the caller decides whether that is a conflict or a benign retry).
+ *
+ * The project id is client-chosen and not secret, so on a collision nothing at
+ * all is written: an Owner grant or lane written into an existing project would
+ * hand that project to whoever guessed its id. A genuine retry by the creator
+ * needs nothing written either — the first attempt's grant and lanes committed
+ * with its project row, or none of them did and this call inserts afresh. The
+ * guard is "inserted by this call", not "created_by = caller": a creator an
+ * Owner later demoted must not get Owner back by re-posting the create.
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
  *
- * AQU-1594: the same batch writes the source lane and each requested target
- * lane. No project-level language keys are written.
+ * AQU-1594: the same transaction writes the source lane and each requested
+ * target lane. No project-level language keys are written.
  */
 export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
+  const transaction = db.transaction?.bind(db)
+  if (!transaction) throw new Error("createProjectShared needs a database handle with transactions")
   // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
-  // whole batch back, so repeating it does not insert the project twice.
-  return retryingLaneIdCollision(async () => {
-    const projectStmt = db
-      .prepare(
-        `INSERT INTO projects (id, name, org_id, created_by)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-      .bind(input.projectId, input.name, input.orgId, input.createdBy)
+  // whole transaction back, so repeating it does not insert the project twice.
+  return retryingLaneIdCollision(() =>
+    transaction(async (tx) => {
+      const created = await tx
+        .prepare(
+          `INSERT INTO projects (id, name, org_id, created_by)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO NOTHING
+           RETURNING id`,
+        )
+        .bind(input.projectId, input.name, input.orgId, input.createdBy)
+        .first<{ id: string }>()
+      if (!created) return { inserted: false }
 
-    // The project insert stays FIRST in the batch — `inserted` is read off index 0.
-    const stmts: AquillaStatement[] = [projectStmt]
-
-    if (input.writeCreatorMembership) {
-      // Atomic with the project insert so a caller relying on the membership row
-      // for its role never observes a project without its creator's grant.
-      stmts.push(
-        db
+      const stmts: AquillaStatement[] = [
+        tx
           .prepare(
             `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
              VALUES (?, ?, 700, ?)
-             ON CONFLICT(project_id, user_id) DO NOTHING`,
+             ON CONFLICT(project_id, user_id) DO UPDATE
+               SET role_level = 700
+               WHERE project_members.role_level < 700`,
           )
           .bind(input.projectId, input.createdBy, input.createdBy),
-      )
-    }
-
-    const lanes = lanesForNewProject(input)
-    stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { lanes }),
-    )
-
-    const [projectResult] = await db.batch(stmts)
-    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-  })
+        ...ensureProjectLaneStmts(tx, input.projectId, { lanes: lanesForNewProject(input) }),
+      ]
+      // Sequential: a batch inside db.transaction() cannot open its own.
+      for (const stmt of stmts) await stmt.run()
+      return { inserted: true }
+    }),
+  )
 }
 
 /** Source lane plus each requested target. The first target's tag is its language. */
@@ -177,6 +179,9 @@ interface ProjectSettingsRow {
   version: number
   updated_at: string | null
   updated_by: number | null
+  /** AQU-2719: the `LIVING_MEMORY_SELECT` aggregate. Absent (not null) on any
+   *  caller that does not select it, which reads as "fall back to the blob". */
+  living_memory_entries?: unknown
 }
 
 export interface ProjectSettingsResponse {
@@ -223,6 +228,35 @@ function validationThreshold(settings: Record<string, unknown>): number {
   return clampThreshold(settings.validationCount)
 }
 
+/**
+ * "The settings row written earlier in this batch is still the stored one."
+ * Binds (projectId, newVersion, newSettingsJson). Every statement batched
+ * alongside a settings write carries it, so a write that lost its version
+ * race changes nothing but the row it failed to update. AQU-2719 gave it a
+ * name so the projection statements and the living-memory rows cannot drift
+ * into two different guards.
+ */
+const SETTINGS_ROW_GUARD = `EXISTS (
+    SELECT 1 FROM project_settings
+     WHERE project_id = ? AND version = ? AND settings = ?
+  )`
+
+/**
+ * The settings object to STORE, with the living-memory key set to what the
+ * plan says the blob should keep (or removed when the rows carry it all).
+ * Never mutates the caller's object: `normalizedSettings` stays the value the
+ * response and the inherit cascade see.
+ */
+function applyLivingMemoryBlobValue(
+  settings: Record<string, unknown>,
+  blobValue: unknown[] | undefined,
+): Record<string, unknown> {
+  const next = { ...settings }
+  if (blobValue === undefined) delete next[LIVING_MEMORY_KEY]
+  else next[LIVING_MEMORY_KEY] = blobValue
+  return next
+}
+
 function validationProjectionStmts(
   db: AquillaDb,
   projectId: string,
@@ -233,10 +267,7 @@ function validationProjectionStmts(
   // Both statements are guarded by the settings row written earlier in the
   // same batch. If the optimistic UPDATE matched zero rows, these are no-ops;
   // the caller then returns 409 without any projection changes.
-  const guard = `EXISTS (
-    SELECT 1 FROM project_settings
-     WHERE project_id = ? AND version = ? AND settings = ?
-  )`
+  const guard = SETTINGS_ROW_GUARD
   return [
     db.prepare(
       // AQU-538: validations are per target-language lane, so each target
@@ -279,6 +310,21 @@ function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
     // read path. Clients can overwrite via PUT to repair.
     settings = {}
   }
+  // AQU-2719: livingMemoryEntries lives in `project_living_memory_entries`,
+  // not in the blob. Put it back so every reader sees the key it always saw —
+  // the rows first, then anything still in the blob that they do not carry.
+  // A caller that did not select the aggregate (and every test double) gets
+  // `undefined` here and falls back to the blob, which is the required
+  // behaviour for an un-migrated project rather than a special case.
+  const merged = mergeLivingMemoryEntries(
+    rowsToLivingMemoryEntries(row.living_memory_entries),
+    settings[LIVING_MEMORY_KEY],
+  )
+  if (merged === undefined) {
+    delete settings[LIVING_MEMORY_KEY]
+  } else {
+    settings = { ...settings, [LIVING_MEMORY_KEY]: merged }
+  }
   return {
     projectId: row.project_id,
     settings: normalizeSettings(settings),
@@ -286,6 +332,58 @@ function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   }
+}
+
+const SETTINGS_COLUMNS = `ps.project_id, ps.settings, ps.version, ps.updated_at, ps.updated_by`
+
+/**
+ * The settings row, with the living-memory entries (AQU-2719) alongside it.
+ *
+ * The aggregate rides along as a correlated subquery, so a project whose
+ * entries moved to rows costs no extra round-trip — this runs on the write
+ * path too, which loads settings up to three times per save.
+ *
+ * It falls back to the plain columns when the entries table is not there. No
+ * reader may assume the rows exist, and that has to hold in SQL too: the
+ * worker may be deployed before 0210 is applied (either order is allowed), and
+ * several test harnesses build only the tables they need. The fallback is NOT
+ * memoized and catches only "undefined table" — a transient error that got
+ * remembered as "no table" would silently read a migrated project's entries as
+ * absent, which is the one failure worse than an error.
+ */
+async function loadSettingsRow(
+  db: AquillaDb,
+  projectId: string,
+): Promise<ProjectSettingsRow | null> {
+  try {
+    return await db
+      .prepare(
+        `SELECT ${SETTINGS_COLUMNS}, ${LIVING_MEMORY_SELECT}
+           FROM project_settings ps
+          WHERE ps.project_id = ?`,
+      )
+      .bind(projectId)
+      .first<ProjectSettingsRow>()
+  } catch (err) {
+    if (!isUndefinedTableError(err)) throw err
+    console.warn("[living-memory] entries table absent; reading settings from the blob alone")
+    return await db
+      .prepare(
+        `SELECT ${SETTINGS_COLUMNS}
+           FROM project_settings ps
+          WHERE ps.project_id = ?`,
+      )
+      .bind(projectId)
+      .first<ProjectSettingsRow>()
+  }
+}
+
+/** Postgres 42P01, however the driver in use surfaces it. */
+function isUndefinedTableError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === "42P01") return true
+  const message = err instanceof Error ? err.message : String(err)
+  return /relation .* does not exist/i.test(message)
 }
 
 /**
@@ -296,14 +394,7 @@ export async function loadProjectSettings(
   db: AquillaDb,
   projectId: string,
 ): Promise<ProjectSettingsResponse> {
-  const row = await db
-    .prepare(
-      `SELECT project_id, settings, version, updated_at, updated_by
-         FROM project_settings
-        WHERE project_id = ?`,
-    )
-    .bind(projectId)
-    .first<ProjectSettingsRow>()
+  const row = await loadSettingsRow(db, projectId)
 
   if (row) {
     const response = rowToResponse(row)
@@ -328,8 +419,13 @@ export interface UpdateProjectSettingsInput {
   settings: Record<string, unknown>
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
   /**
    * AQU-1075: this write is the link copying a field into a downstream.
    * Skip the inherit prepare (it would detach the field being copied) and
@@ -383,8 +479,13 @@ export interface PatchProjectSettingsInput {
   ops: { key: string; value: unknown }[]
   /** Optimistic-concurrency guard — must equal the currently-stored version. */
   ifMatchVersion: number
-  /** Writer's user id (numeric, or its string form). */
-  updatedBy: number | string
+  /**
+   * Writer's user id (numeric, or its string form). OPS-59: `null` is
+   * accepted and stored — `project_settings.updated_by` is a nullable BIGINT,
+   * so a propagation with no resolvable writer records no attribution rather
+   * than failing the whole write with a bigint parse error.
+   */
+  updatedBy: number | string | null
 }
 
 /**
@@ -456,7 +557,29 @@ export async function updateProjectSettingsShared(
   }
 
   const normalizedSettings = normalizeSettings(settingsToStore)
-  const newSettingsJson = JSON.stringify(normalizedSettings)
+  // AQU-2719: livingMemoryEntries is stored as rows. This is also the move
+  // itself for a project that has not been backfilled yet — its next save
+  // carries the key out of the blob. `storedSettings` is what the blob gets;
+  // `normalizedSettings` stays the value callers and the inherit cascade see,
+  // so nothing downstream can tell the storage moved.
+  const livingMemory = planLivingMemoryWrite(
+    current.settings[LIVING_MEMORY_KEY],
+    normalizedSettings[LIVING_MEMORY_KEY],
+  )
+  const storedSettings = livingMemory.kind === "untouched"
+    ? normalizedSettings
+    : applyLivingMemoryBlobValue(normalizedSettings, livingMemory.blobValue)
+  // Whether the ROWS need rewriting is a separate question from what the blob
+  // stores. The SPA's save echoes every key it did not touch, so an edit to
+  // some other setting arrives carrying the same entries — and rewriting them
+  // would be one round-trip per entry (`batch()` runs sequentially) for no
+  // change. An unchanged collection only needs writing when the project has
+  // not moved yet, and this save is its move.
+  const livingMemoryChanged = JSON.stringify(current.settings[LIVING_MEMORY_KEY] ?? null)
+    !== JSON.stringify(normalizedSettings[LIVING_MEMORY_KEY] ?? null)
+  const rewriteLivingMemoryRows = livingMemory.kind === "project"
+    && (livingMemoryChanged || !(await livingMemoryRowsExist(db, input.projectId)))
+  const newSettingsJson = JSON.stringify(storedSettings)
   const newVersion = current.version + 1
   // AQU-1771: compare EFFECTIVE thresholds. A project that clears its own
   // value falls back to the org's default, which re-projects `cells.validated`
@@ -465,6 +588,19 @@ export async function updateProjectSettingsShared(
   const oldThreshold = effectiveThreshold(current.settings.validationCount, orgDefaults.validationCount)
   const newThreshold = effectiveThreshold(normalizedSettings.validationCount, orgDefaults.validationCount)
   const thresholdChanged = oldThreshold !== newThreshold
+  // AQU-2719: the entry rows ride in the SAME batch as the settings row and
+  // carry the same "the row I wrote is still stored" guard, so a lost version
+  // race leaves them untouched — the rows can never describe a blob that was
+  // never stored.
+  const livingMemoryStmts = !rewriteLivingMemoryRows || livingMemory.kind !== "project"
+    ? []
+    : livingMemoryWriteStmts(
+        db,
+        input.projectId,
+        livingMemory.entries,
+        SETTINGS_ROW_GUARD,
+        [input.projectId, newVersion, newSettingsJson],
+      )
   // AQU-2223: a settings write never creates a lane. Lanes are made by the
   // lane routes and by project create / import / migrate, from the languages
   // those callers are given — not from keys left in the blob.
@@ -485,6 +621,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
+      stmts.push(...livingMemoryStmts)
       await db.batch(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
@@ -515,6 +652,7 @@ export async function updateProjectSettingsShared(
         db, input.projectId, newThreshold, newVersion, newSettingsJson,
       ))
     }
+    stmts.push(...livingMemoryStmts)
     // H3: catch DB errors on the version-guarded UPDATE (e.g. a projection
     // statement failing) and return the discriminated `error` result rather than
     // letting the exception propagate uncaught. The caller (auth-worker route /

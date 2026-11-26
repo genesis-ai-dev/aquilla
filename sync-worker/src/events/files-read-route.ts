@@ -33,6 +33,7 @@ import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { lanesForRequestedTag, legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { laneTagAllowed, loadTargetLanes, visibleLanesForRead } from "./lane-read-wall"
 import { effectiveThresholdSql } from '../../../db/shared/validation-threshold'
+import { loadJoinedCopies, type JoinedInto } from './joined-copies'
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -152,6 +153,9 @@ interface FileSummary {
   /** Smart Extensions apiRev 7: files.meta.extension (kind, tags, group,
    *  owner, meta). Null on ordinary files. */
   extension: FileExtensionMeta | null
+  /** AQU-2549: in the Recently deleted list only — the project's own file this
+   *  copy was joined into. Such a copy cannot be restored (joined-copies.ts). */
+  joinedInto?: JoinedInto
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -510,7 +514,15 @@ export async function handleFilesReadRequest(
           id: last.id,
         })
       : null
-  return Response.json({ files: page.map(mapRow), nextCursor })
+  const files = page.map(mapRow)
+  if (trash && files.length > 0) {
+    const joined = await loadJoinedCopies(env.AQUILLA_PG, projectId)
+    for (const file of files) {
+      const into = joined.get(file.fileId)
+      if (into) file.joinedInto = into
+    }
+  }
+  return Response.json({ files, nextCursor })
 }
 
 export const FILES_MAX_PAGE = 500

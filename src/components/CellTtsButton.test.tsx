@@ -103,7 +103,7 @@ describe("CellTtsButton — the hover names it; explanations open on click", () 
   it("after a failure, the reason is behind the (i) beside it", async () => {
     setTtsStatus(ttsStatusKey("c-err2"), { kind: "error", message: "Gemini API key required" })
     renderWithTooltips(<CellTtsButton cellId="c-err2" text="Hello there" projectTtsSettings={{}} />)
-    await expectClickNote(screen.getByRole("button", { name: /^About / }), "Couldn't generate a voice — Gemini API key required")
+    await expectClickNote(screen.getByRole("button", { name: /^About / }), "Couldn't generate audio — Gemini API key required")
     setTtsStatus(ttsStatusKey("c-err2"), { kind: "idle" })
   })
 

@@ -37,4 +37,21 @@ describe("normalizeBibleStoryXmlGlyphs", () => {
         const once = normalizeBibleStoryXmlGlyphs(content("\u2015 fala"));
         expect(normalizeBibleStoryXmlGlyphs(once)).toBe(once);
     });
+
+    it.each([
+        ["en quad", content("a\u2000b"), content("a b")],
+        [
+            "soft hyphen before a hyphen",
+            content("preparou\u00AD-lhes"),
+            content("preparou\u00AD\u2011lhes"),
+        ],
+        [
+            "nbsp followed by a space run",
+            `${content("e\u00A0")}${content(" ")}${content("do")}`,
+            `${content("e\u00A0")}${content("do")}`,
+        ],
+        ["a single non-breaking space", content("e\u00A0A"), content("e\u00A0A")],
+    ])("normalizes %s inside content", (_name, input, expected) => {
+        expect(normalizeBibleStoryXmlGlyphs(input)).toBe(expected);
+    });
 });

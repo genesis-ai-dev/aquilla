@@ -53,14 +53,16 @@ export function laneIdResolveFromColSql(
 }
 
 /**
- * artifact_bindings resolution (slice 8): a 'source' binding_role -> the
- * project's single source lane; any other role -> the target lane whose
- * legacy_tag matches the inbound lane tag. Mirrors the backfill's
- * ARTIFACT_BINDINGS rule (scripts/neon-backfill-lanes.ts). AQU-1611's expand
- * step keeps `target_lang`; this resolver fills `lane_id` from the tag the
- * caller still sends. Returns NULL when the project's lanes do not exist,
- * which the NOT NULL column then rejects. The caller MUST splice
- * {@link laneIdResolveBindingBinds}.
+ * artifact_bindings resolution (slice 8; AQU-2554): a 'target' binding -> the
+ * target lane whose legacy_tag matches the inbound lane tag; every other
+ * binding ('source', and 'support': an SDBH edition, a multi-book container, a
+ * Paratext package) -> the project's single source lane.
+ * {@link laneIdResolveBindingBinds} passes that lane role, so the SQL itself
+ * only knows 'source' and the rest. A 'support' request carries no target
+ * language, and since AQU-1594 a new project has no `''` target lane, so
+ * sending 'support' through as a target role found no lane. Returns NULL when
+ * the project's lanes do not exist, which the NOT NULL column then rejects.
+ * The caller MUST splice {@link laneIdResolveBindingBinds}.
  */
 export function laneIdResolveBindingSql(): string {
   return `(SELECT id FROM public.lanes WHERE project_id = ?
@@ -82,13 +84,17 @@ export async function artifactBindingConflictColumn(
   return "lane_id"
 }
 
-/** Binds for {@link laneIdResolveBindingSql}: projectId, role, role, targetLang. */
+/**
+ * Binds for {@link laneIdResolveBindingSql}: projectId, lane role, lane role,
+ * targetLang. Only a target binding belongs to a target lane (AQU-2554).
+ */
 export function laneIdResolveBindingBinds(
   projectId: string,
   bindingRole: string,
   targetLang: string,
 ): unknown[] {
-  return [projectId, bindingRole, bindingRole, targetLang]
+  const laneRole = bindingRole === 'target' ? 'target' : 'source'
+  return [projectId, laneRole, laneRole, targetLang]
 }
 
 /**

@@ -103,8 +103,9 @@ describe("LINK_ROLE_ALLOWED", () => {
 })
 
 describe("picker subsets", () => {
-  it("PROJECT_ROLE_PICKER excludes owner", () => {
-    expect(PROJECT_ROLE_PICKER).not.toContain(ROLE.OWNER)
+  it("PROJECT_ROLE_PICKER includes owner for an owner to grant", () => {
+    expect(PROJECT_ROLE_PICKER).toContain(ROLE.OWNER)
+    expect(PROJECT_ROLE_PICKER.at(-1)).toBe(ROLE.OWNER)
   })
 
   it("ORG_ROLE_PICKER excludes commenter, reviewer, and owner", () => {
@@ -238,11 +239,11 @@ describe("AQU-832/WS-08: a role used for comparison keeps working when its label
     return template.replace(/\{(\w+)\}/g, (m, name: string) => String(vars[name] ?? m))
   }
 
-  it("PROJECT_ROLE_PICKER caps at maintainer regardless of what locale is active", () => {
+  it("PROJECT_ROLE_PICKER reaches owner regardless of what locale is active", () => {
     // level comparisons never touch the catalog at all — they operate on the
     // numeric ladder, so this is trivially locale-independent; asserted here
     // as the baseline the rest of this block builds on.
-    expect(Math.max(...PROJECT_ROLE_PICKER)).toBe(ROLE.MAINTAINER)
+    expect(Math.max(...PROJECT_ROLE_PICKER)).toBe(ROLE.OWNER)
   })
 
   it("sorting RoleOptions by level is unaffected by the active display locale", () => {

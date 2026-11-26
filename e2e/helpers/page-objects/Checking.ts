@@ -5,7 +5,7 @@ export class Checking {
   constructor(page: Page) { this.page = page }
   async openCreator(projectId: string) {
     await this.page.goto(`/project/${projectId}/settings/experimental`)
-    const toggle = this.page.getByRole("switch", { name: "Community checking (WIP)" })
+    const toggle = this.page.getByRole("switch", { name: "Community checking (experimental)" })
     await expect(toggle).toBeVisible({ timeout: 30_000 })
     await toggle.check()
     await expect(this.page.getByRole("checkbox", { name: "Whole project" })).toBeVisible({ timeout: 30_000 })

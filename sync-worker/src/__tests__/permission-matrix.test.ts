@@ -16,8 +16,9 @@
 // (UPDATE_AUTH_MATRIX=1 pnpm test permission-matrix) and let the golden diff
 // be reviewed; the gate workflow keeps the hold on while golden.json changes.
 //
-// Principals (fixture below): org 1 owns p1 (alice 400, viewer 100, lead 500
-// are members); org 2 owns p2 (bob 400). `removed` has a still-valid token for
+// Principals (fixture below): org 1 owns p1 (alice holds the backfilled Owner
+// grant at 700, viewer 100, lead 500); org 2 owns p2 (bob holds the backfilled
+// Owner grant at 700). `removed` has a still-valid token for
 // p1 and no membership row; `missing_project` has a valid token for a project
 // that has no row (the documented fail-open in events/membership.ts — pinned
 // here on purpose, see the "membership fail-open" block); `platform` carries
@@ -96,10 +97,10 @@ async function seed(): Promise<{ tdb: TestDb; tokens: Record<string, string> }> 
       { id: P2, name: "Project Two", created_by: USERS.bob, org_id: 2 },
     ],
     project_members: [
-      { project_id: P1, user_id: USERS.alice, role_level: 400 },
+      { project_id: P1, user_id: USERS.alice, role_level: 700 },
       { project_id: P1, user_id: USERS.viewer, role_level: 100 },
       { project_id: P1, user_id: USERS.lead, role_level: 500 },
-      { project_id: P2, user_id: USERS.bob, role_level: 400 },
+      { project_id: P2, user_id: USERS.bob, role_level: 700 },
     ],
     files: [{ id: FILE, project_id: P1, name: "Genesis" }],
     cells: [

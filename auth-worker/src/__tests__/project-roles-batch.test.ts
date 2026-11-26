@@ -238,10 +238,10 @@ describe("resolveProjectRoles keeps the resolver's failure rules", () => {
     ).rejects.toBeInstanceOf(RoleLookupError)
   })
 
-  it("AQU-996: a path that needs no membership query still resolves during the outage", async () => {
+  it("AQU-2357: a creator with no Owner grant is not resolved while membership queries fail", async () => {
     const creator = await loadUser(FIXTURE_USERS.creator)
-    const batch = await resolveProjectRoles(envFor("off", membershipOutageDb()), creator, ["p3", "p_archived"])
-    expect(batch.get("p3")).toEqual({ level: 700, name: "owner", source: "creator" })
-    expect(batch.get("p_archived")).toBeNull()
+    await expect(
+      resolveProjectRoles(envFor("off", membershipOutageDb()), creator, ["p3", "p_archived"]),
+    ).rejects.toBeInstanceOf(RoleLookupError)
   })
 })

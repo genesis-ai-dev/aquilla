@@ -105,12 +105,12 @@ const scenarios: Scenario[] = [
     expected: { level: 600, source: "org" },
   },
   {
-    name: "creator -> 700",
+    name: "creator -> no access without an Owner grant",
     grants: [g("project", "creator", 700)],
-    expected: { level: 700, source: "creator" },
+    expected: null,
   },
   {
-    name: "creator ties direct owner row -> override keeps attribution",
+    name: "a direct Owner row wins on its own",
     grants: [g("project", "creator", 700), g("project", "direct", 700)],
     expected: { level: 700, source: "override" },
   },
@@ -121,10 +121,10 @@ const scenarios: Scenario[] = [
     expected: { level: 700, source: "platform" },
   },
   {
-    name: "platform admin who is creator -> creator attribution",
+    name: "platform admin who only created the project -> platform",
     grants: [g("project", "creator", 700)],
     email: ADMIN,
-    expected: { level: 700, source: "creator" },
+    expected: { level: 700, source: "platform" },
   },
   {
     name: "two teams -> max team",
@@ -163,11 +163,10 @@ describe("AQU-1352 resolveFromGrants equals resolveProjectRoleShared", () => {
       { projectId: P, orgId: ORG, archivedAt: null, isPlatformAdmin: false },
     )
     expect(r?.chain.map((c) => [c.source, c.level])).toEqual([
-      ["creator", 700],
       ["org", 500],
       ["group", 400],
     ])
-    expect(r?.chain[2].grant?.viaTeamId).toBe("7")
+    expect(r?.chain[1].grant?.viaTeamId).toBe("7")
   })
 
   it("ignores grants on other projects and orgs", () => {

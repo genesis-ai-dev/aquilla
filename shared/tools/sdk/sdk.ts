@@ -32,7 +32,8 @@ import { SDK_EDITOR_STYLE } from "./sdk-style-editor"
 import { stringKeysOf } from "./string-keys"
 
 // 1.1 (apiRev 7): aq.zip and aq.parse (sdk-io.ts).
-export const AQ_SDK_VERSION = "1.1"
+// 1.2 (apiRev 8): aq.useActiveCell, aq.editor.annotate/clearAnnotations/reveal, aq.ui.openPanel.
+export const AQ_SDK_VERSION = "1.2"
 /** SDK majors this host can inject (manifest.sdk). */
 export const AQ_SDK_MAJORS: readonly number[] = [1]
 
@@ -71,7 +72,8 @@ const SDK_FALLBACK: Record<string, string> = {
  *  the builder prompt. Dotted names are members of a namespace. */
 export const AQ_SDK_EXPORTS: readonly string[] = [
   "version", "h", "icon", "t", "strings", "mount", "Layout",
-  "useFile", "useCells", "useCell", "useSelection", "usePresence",
+  "useFile", "useCells", "useCell", "useSelection", "usePresence", "useActiveCell",
+  "editor.annotate", "editor.clearAnnotations", "editor.reveal",
   "actions.commit", "actions.validate", "actions.unvalidate", "actions.draft", "actions.regenerate", "actions.draftParagraph", "actions.alignStyles",
   "actions.openHistory", "actions.openComments", "actions.openAttachments", "actions.openRule", "actions.openTerm",
   "actions.playAudio", "actions.stopAudio", "actions.recordAudio", "actions.generateVoice", "actions.backtranslate", "actions.saveBacktranslation",
@@ -82,7 +84,7 @@ export const AQ_SDK_EXPORTS: readonly string[] = [
   "ChapterPicker", "Toolbar", "ColumnHeader", "ReadOnlyBanner",
   "ui.Page", "ui.Panel", "ui.Card", "ui.Stack", "ui.Heading", "ui.Text", "ui.Button", "ui.IconButton", "ui.Badge", "ui.Stat", "ui.Progress",
   "ui.Tabs", "ui.Input", "ui.Textarea", "ui.Checkbox", "ui.Select", "ui.Spinner", "ui.Empty", "ui.Avatar", "ui.Kbd", "ui.Divider", "ui.Menu",
-  "ui.popover", "ui.closePopover", "ui.tooltip", "ui.dialog", "ui.confirm", "ui.toast",
+  "ui.popover", "ui.closePopover", "ui.tooltip", "ui.dialog", "ui.confirm", "ui.toast", "ui.openPanel",
   "zip.read", "parse.tsv", "parse.usfm", "parse.mdBlocks",
   "cell.state", "cell.refresh", "cell.ref", "cell.number", "cell.plain", "cell.words", "cell.isStructural", "cell.toggleDetails", "cell.scrollTo", "cell.focusRow",
 ]

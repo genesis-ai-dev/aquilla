@@ -258,7 +258,7 @@ describe("EditorTable — Draft paragraph rail button (p1-paragraph-ui-wiring)",
     const store = makeStore(["cell-1", "cell-2", "cell-3"], new Set(["cell-1"]))
     // cell-2 (a non-start sibling) is mid-draft; cell-1 (the start/button row)
     // has no completing entry of its own. Both cell-2's Sparkles button AND
-    // cell-1's paragraph-draft button surface a "Generating…" tooltip while
+    // cell-1's paragraph-draft button surface a "Translating…" tooltip while
     // ANY completion is in flight, so disambiguate by the row (cell-1 is the
     // only row that can host the paragraph-draft button at all).
     renderTable(store, onCompleteParagraph, new Map([["cell-2", "generating"]]))
@@ -266,9 +266,9 @@ describe("EditorTable — Draft paragraph rail button (p1-paragraph-ui-wiring)",
     await screen.findByText("target 0")
     const row = document.querySelector('[data-cell-id="cell-1"]')
     expect(row).not.toBeNull()
-    const buttons = row!.querySelectorAll('button[aria-label="Generating…"]')
+    const buttons = row!.querySelectorAll('button[aria-label="Translating…"]')
     // Exactly one — the paragraph-draft button (cell-1 itself has no own
-    // completing entry, so its Sparkles button is NOT in a "Generating…" state).
+    // completing entry, so its Sparkles button is NOT in a "Translating…" state).
     expect(buttons).toHaveLength(1)
     const button = buttons[0] as HTMLButtonElement
     expect(button).toBeDisabled()

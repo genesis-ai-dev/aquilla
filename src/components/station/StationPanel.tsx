@@ -8,16 +8,18 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { castNameOf } from "@/lib/audio/voices"
-import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
+import { historyView, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { placeHoldingStart } from "@/lib/station/hold-place"
+import { cutSinceStationStep, movedSinceStationStep, newestStationStep } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -41,7 +43,6 @@ import {
   type StationTarget,
 } from "@/lib/station/target"
 import { StationEvenLine, useEvenLineShown } from "./StationEvenLine"
-import { stationOwnsStep } from "./station-undo"
 import type { StationHost, StationTake } from "./station-host"
 import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice, type SaveHow } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
@@ -125,7 +126,7 @@ function StationNote({ children }: { children: ReactNode }) {
 }
 
 /** Item 3: the message line under the strip. */
-export function StationMessage({ text, onClose }: { text: string; onClose(): void }) {
+export function StationMessage({ text, onClose, action }: { text: string; onClose(): void; action?: { label: string; onClick(): void } }) {
   const t = useT()
   return (
     <div
@@ -134,10 +135,21 @@ export function StationMessage({ text, onClose }: { text: string; onClose(): voi
       className="flex shrink-0 items-start gap-2 border-b border-sky-200 bg-sky-50 px-2.5 py-[7px] text-xs leading-[1.4] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
     >
       <span className="min-w-0">{text}</span>
+      {/* AQU-2493 (review, Nov 9): what the message offers to do ("Try again"). */}
+      {action ? (
+        <button
+          type="button"
+          data-testid="station-message-action"
+          onClick={action.onClick}
+          className="ms-auto h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400"
+        >
+          {action.label}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onClose}
-        className="ms-auto h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400"
+        className={`${action ? "" : "ms-auto "}h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400`}
       >
         {t("common.close")}
       </button>
@@ -174,6 +186,9 @@ interface OpenProps {
 function StationOpen({ host, take, target, visible, initialMessage }: OpenProps) {
   const t = useT()
   const [message, setMessage] = useState<string | null>(initialMessage ?? null)
+  // AQU-2493 (review, Nov 9): an action offered with one message, shown only
+  // while that message is the one on screen.
+  const [messageAction, setMessageAction] = useState<{ text: string; label: string; run(): void } | null>(null)
   const ed = useStationEditor(host, take, target, visible)
   // Q10 (Sam, Oct 30): the imported source recording is everyone's timing
   // reference — it opens to listen, select and loop, its tools hidden, with a
@@ -196,10 +211,15 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // Item 2 / slice 9: the ⋯ menu's Remove noise and Change the voice, each
   // making a new version (the original is kept).
   const versionNext = versionOf(take) + 1
+  // AQU-2493 (review, Nov 9), finding 13: …never while Record now counts in,
+  // records or finishes. The Station would switch to the new version and the
+  // recording, which belongs to the take open now, would be lost mid-take.
+  const recordingRef = useRef(false)
   useEffect(() => {
     if (!editable) return
     setStationUi({
       removeNoise: () => {
+        if (recordingRef.current) return
         setMessage(t("editor.station.noiseRunning"))
         void host
           .removeNoise(target.cellId, target.audioId)
@@ -208,7 +228,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           })
           .catch((e: unknown) => setMessage(t("editor.station.saveFailed", { message: e instanceof Error ? e.message : String(e) })))
       },
-      changeVoice: () => setMessage(host.changeVoice(target.cellId, target.audioId) ?? t("editor.station.voiceStarted")),
+      changeVoice: () => {
+        if (recordingRef.current) return
+        setMessage(host.changeVoice(target.cellId, target.audioId) ?? t("editor.station.voiceStarted"))
+      },
     })
     return () => setStationUi({ removeNoise: null, changeVoice: null })
   }, [editable, host, target, line, versionNext, t])
@@ -249,6 +272,13 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // recording window (StationRecorder.tsx).
   const rec = useStationRecorder(ed, setMessage)
   const recording = rec.phase.kind === "counting" || rec.phase.kind === "recording" || rec.phase.kind === "finishing"
+  recordingRef.current = recording
+  // AQU-2493 (review, Nov 9), finding 13: the ⋯ menu's two new-version items
+  // are greyed meanwhile, with the reason.
+  useEffect(() => {
+    setStationUi({ versionsWait: recording ? t("editor.station.versionsWhileRecording") : null })
+    return () => setStationUi({ versionsWait: null })
+  }, [recording, t])
   const insertRecording = () => {
     setInsertOpen(false)
     if (ed.sel) rec.start(ed.sel.a)
@@ -279,6 +309,33 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // only or everywhere it is placed (slice 6).
   const save = async (how: SaveHow) => {
     if (!ed.pcm || !unsaved || saving) return
+    // AQU-2493 (review, Nov 9): never while Record now counts in, records or
+    // finishes. The recording so far is only its drawing; a save then wrote a
+    // click and silence in its place and the recording itself was lost.
+    if (recording) return
+    // AQU-2493 (review, Nov 9): inserted audio with no samples here (a draft
+    // brought back after a reload, its file or recording gone from this
+    // device, or not loaded again yet) would be saved as silence. Save waits,
+    // and says why.
+    if (ed.insertsMissing) {
+      setSaveMenu(false)
+      // (Review, Nov 9, finding 14) What is true: gone from this device, or
+      // not loaded this time (offered again), and that deleting the silent
+      // stretch clears it and keeps the edits made after it.
+      if (ed.insertsMissing === "failed") {
+        const text = t("editor.station.insertFailed")
+        setMessage(text)
+        setMessageAction({
+          text,
+          label: t("editor.station.insertRetry"),
+          run: () => {
+            ed.retryInserts()
+            setMessage(t("editor.station.insertLoading"))
+          },
+        })
+      } else setMessage(t(ed.insertsMissing === "lost" ? "editor.station.insertLost" : "editor.station.insertLoading"))
+      return
+    }
     setSaving(true)
     setSaveMenu(false)
     ed.pause()
@@ -291,6 +348,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       const atts = take.cell.attachments ?? {}
       const isPiece = Boolean(take.att.pieceOf) || Object.values(atts).some((a) => !a.isDeleted && a.pieceOf === target.audioId)
       const pieceRoot = take.att.pieceOf ?? target.audioId
+      // AQU-2493 (review, Nov 9): the take's other pieces, for the save's Undo.
+      const otherPieces = Object.entries(atts)
+        .filter(([id, a]) => id !== target.audioId && !a.isDeleted && (a.pieceOf ?? id) === pieceRoot)
+        .map(([id]) => id)
       const placements: VersionPlacement[] = targets.map((p) => {
         const isOpen = p.cell.id === target.cellId
         // The open clip keeps the kept part as edited; another placement keeps
@@ -303,16 +364,31 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             )
         const slot = p.att.slot ?? "recording"
         const fromAudioId = Object.entries(p.cell.attachments ?? {}).find(([, a]) => a === p.att)?.[0] ?? target.audioId
+        // AQU-2493 (review, Nov 9): a delete or an insert before Start moved
+        // Start inside the recording; the clip moves the other way, so the
+        // take still sounds where it did (lib/station/hold-place.ts). Measured
+        // from the STORED Start carried through the edits, so a Start dragged
+        // before saving stays a trim, as Keep is.
+        const startWasMs = p.att.trimStartMs ?? 0
+        const startNowMs = Math.round(mapWindow({ start: startWasMs / 1000, end: startWasMs / 1000 }, ed.ops).start * 1000)
+        // (Review, Nov 9, finding 7) The open clip's Start can be moved by hand
+        // between the edits: its shift is the one the draft kept as they were
+        // made, each from where Start was then. The other lines' clips are not
+        // trimmed here, so theirs is their stored Start's, carried through.
+        const shift = ed.draft.startShiftSec
+        const movedMs = isOpen && shift != null ? Math.round(shift * 1000) : startNowMs - startWasMs
+        const held = placeHoldingStart(p.cell, isOpen ? target.audioId : fromAudioId, movedMs, host.takeIsLayer(p.fileId, p.att.slot))
         return {
           fileId: p.fileId,
           cellId: p.cell.id,
           fromAudioId: isOpen ? target.audioId : fromAudioId,
+          // AQU-2494 (review, Nov 9): an AI voice's new version is still one.
+          voiceId: p.att.voiceId ?? null,
           slot,
           label: p.att.label ?? null,
           trimStartMs: w.start > 0.0005 ? Math.round(w.start * 1000) : null,
           trimEndMs: w.end < L - 0.0005 ? Math.round(w.end * 1000) : null,
-          targetOffsetMs: p.att.targetOffsetMs ?? null,
-          recordingsOffsetMs: p.att.recordingsOffsetMs ?? null,
+          ...held,
           selectedBefore: host.selectedIn(p.cell.id, slot),
           // Its volume and fades go with it: the clip's, not the recording's.
           level: isOpen
@@ -320,7 +396,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
           // AQU-2664: and its evening out.
           evenTargetLufs: p.att.evenTargetLufs ?? null,
-          ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
+          ...(isOpen && isPiece ? { pieceOf: pieceRoot, otherPieces } : {}),
           // AQU-2492 (review, Nov 9), finding 8: who had approved the take it replaces.
           approvedBy: p.att.validators ?? [],
           // AQU-2492 (review, round 2): and the stretch of its recording it plays.
@@ -422,10 +498,21 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     else if (k === " ") {
       if (spacebarShouldToggle(e.nativeEvent)) ed.togglePlay()
       else handled = false
-    } else if (letter === "k") void ed.keepSelection()
+    }
+    // AQU-2493 (review, Nov 9): K is the Keep button's key, so it follows the
+    // button: nothing on the imported source recording (listen only: its trim
+    // is what transcription reads as the speech bounds) and nothing for
+    // someone who may not change takes. The key still stops here.
+    else if (letter === "k") {
+      if (editable) void ed.keepSelection()
+    }
     else if ((k === "Backspace" || k === "Delete") && editable && !tooLong) ed.deleteSelection()
     else if (letter === "i" && editable && !tooLong && ed.sel) setInsertOpen(true)
-    else if (letter === "a") approve()
+    // AQU-2493 (review, Nov 9): the source recording shows no Approve button
+    // (it is never approved), so A does nothing on it either.
+    else if (letter === "a") {
+      if (!isSource) approve()
+    }
     else if (k === "=" || k === "+") ed.zoomBy(2)
     else if (k === "-") ed.zoomBy(0.5)
     else if (letter === "l") ed.toggleLoop()
@@ -459,6 +546,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       {message ? (
         <StationMessage
           text={message}
+          {...(messageAction && messageAction.text === message ? { action: { label: messageAction.label, onClick: messageAction.run } } : {})}
           onClose={() => {
             setMessage(null)
             clearStationMessage()
@@ -472,8 +560,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         places={placeLines}
         unsaved={unsaved}
         undoUnsaved={ed.undoUnsaved}
+        recording={recording}
         isSource={isSource}
         controlsInfo={editable}
+        onMessage={setMessage}
         {...(unsaved
           ? {
               notSaved: changedText(changedKinds(ed.ops)),
@@ -482,6 +572,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                   places={placeLines}
                   openLine={line}
                   saving={saving}
+                  locked={recording}
                   onSave={(how) => void save(how)}
                   menuOpen={saveMenu}
                   onMenuOpen={setSaveMenu}
@@ -564,10 +655,12 @@ export function StationHeader({
   places,
   unsaved = false,
   undoUnsaved,
+  recording = false,
   isSource = false,
   notSaved,
   save,
   controlsInfo = false,
+  onMessage,
 }: {
   host: StationHost
   take: StationTake
@@ -577,6 +670,9 @@ export function StationHeader({
   /** Unsaved sound edits: it waits again (40b), and Undo takes them back first. */
   unsaved?: boolean
   undoUnsaved?(): boolean
+  /** AQU-2493 (review, Nov 9): Record now is counting in, recording or
+   *  finishing. Undo waits: it would take an edit out from under the take. */
+  recording?: boolean
   /** Q10: the imported source recording — named as the source, with no
    *  approval status (it is never approved) and no "placed on". */
   isSource?: boolean
@@ -586,6 +682,8 @@ export function StationHeader({
   save?: ReactNode
   /** The (i) beside the name that explains the controls (Sam, Nov 2). */
   controlsInfo?: boolean
+  /** AQU-2493 (review, Nov 9): a sentence for the Station's message line. */
+  onMessage?(text: string): void
 }) {
   const t = useT()
   const [infoOpen, toggleInfo] = useInfoOpen()
@@ -616,17 +714,37 @@ export function StationHeader({
   // change to THIS recording, even if you have changed other things since;
   // ⌘Z stays the project's newest step. Unsaved edits go first.
   const view = useSyncExternalStore(subscribeHistory, historyView, historyView)
-  const mine = useMemo(() => stationOwnsStep(cellId, audioId), [cellId, audioId])
-  const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
-  const canUndo = unsaved || step != null
-  const undoTip = unsaved
-    ? t("editor.station.undoUnsaved")
-    : step
-      ? t("editor.station.undoTip")
-      : t("editor.station.nothingToUndo")
+  // AQU-2493 (review, Nov 9): only steps that change or approve THIS take;
+  // the line's text, timing and visibility are not the Station's to undo.
+  // AQU-2493 (review, Nov 9): …and a bulk change made elsewhere is not its own.
+  const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestStationStep(cellId, audioId) : null
+  const canUndo = !recording && (unsaved || step != null)
+  // AQU-2493 (review, Nov 9), finding 12: the take was cut on the timeline
+  // since the Station's last change. A cut is not the Station's to undo, and
+  // undoing the change past it would drop it as "changed since": say so.
+  const cutSince = !unsaved && step != null && STATION_PICKS.undoButton !== "project" && cutSinceStationStep(cellId, audioId, step.id)
+  // Review of 152db3f40: …and the same for a move of the take on the timeline.
+  const movedSince = !cutSince && !unsaved && step != null && STATION_PICKS.undoButton !== "project" && movedSinceStationStep(cellId, audioId, step.id)
+  const cutTip = cutSince
+    ? t("editor.station.undoAfterCut", { mod: modKey() })
+    : movedSince
+      ? t("editor.station.undoAfterMove", { mod: modKey() })
+      : null
+  const undoTip = recording
+    ? t("editor.station.undoWhileRecording")
+    : unsaved
+      ? t("editor.station.undoUnsaved")
+      : step
+        ? (cutTip ?? t("editor.station.undoTip"))
+        : t("editor.station.nothingToUndo")
   const undo = () => {
+    if (recording) return
     if (unsaved && undoUnsaved?.()) return
     if (!step) return
+    if (cutTip) {
+      onMessage?.(cutTip)
+      return
+    }
     void (STATION_PICKS.undoButton === "project" ? undoLast() : undoStepById(step.id)).then((r) => {
       if (r) host.reportHistory("undo", r)
     })

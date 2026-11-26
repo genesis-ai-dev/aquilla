@@ -94,8 +94,8 @@ describe("the Station's (i)", () => {
 
 describe("the Station's own Undo (board 73C)", () => {
   it("takes back the Station's changes and a Clear, but not a run of Even out", async () => {
-    const { stationOwnsStep } = await import("./station-undo")
-    const mine = stationOwnsStep("c694", "t2.webm")
+    const { stationStepMatch } = await import("@/lib/station/own-steps")
+    const mine = stationStepMatch("c694", "t2.webm")
     expect(mine("take.gain", { cellId: "c694", audioId: "t2.webm" })).toBe(true)
     expect(mine("take.even", { cellId: "c694", audioId: "t2.webm", before: -16, after: null })).toBe(true)
     expect(mine("take.even", { cellId: "c694", audioId: "t2.webm", before: null, after: -16, run: true })).toBe(false)

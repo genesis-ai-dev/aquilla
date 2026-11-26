@@ -60,11 +60,11 @@ it("offers all five models, defaults to Automatic, and warms zero-shot when chos
   window.history.replaceState(null, "", "/preferences/local-models?project=p1")
   const user = userEvent.setup()
   render(content())
-  for (const name of [/^Automatic/, /^Whisper/, /^Qwen3-ASR/, /^Omnilingual Meta/, /^Omnilingual Zero-Shot/]) {
+  for (const name of [/^Automatic/, /^Whisper/, /^Qwen3-ASR/, /^Omnilingual Meta/, /^Omnilingual zero-shot/]) {
     expect(screen.getByRole("radio", { name })).toBeInTheDocument()
   }
   expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked()
-  await user.click(screen.getByRole("radio", { name: /Omnilingual Zero-Shot/ }))
+  await user.click(screen.getByRole("radio", { name: /Omnilingual zero-shot/ }))
   expect(getTranscriptionModel("alice")).toBe("omni-zs")
   expect(getTranscriptionModel("bob")).toBe("auto")
   expect(warm).toHaveBeenCalledWith("jwt", "p1")
@@ -94,7 +94,7 @@ it("hides zero-shot when the org has turned it off, even for an account that cho
   org.settings = { transcription: { zeroShotEnabled: false } }
   setTranscriptionModel("alice", "omni-zs")
   render(content())
-  expect(screen.queryByRole("radio", { name: /Omnilingual Zero-Shot/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole("radio", { name: /Omnilingual zero-shot/ })).not.toBeInTheDocument()
   expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked()
 })
 

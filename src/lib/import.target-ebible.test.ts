@@ -269,7 +269,7 @@ describe("applyEBibleTargetImport — commit shape", () => {
 
     await expect(
       applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx),
-    ).rejects.toThrow(/no event to chain/i)
+    ).rejects.toThrow(/not ready to receive a translation yet/i)
 
     // Nothing was uploaded and nothing was queued — the failure is total, so
     // the caller's rollback leaves no half-import behind.
@@ -291,7 +291,7 @@ describe("applyEBibleTargetImport — commit shape", () => {
 
     await expect(
       applyEBibleTargetImport(partial, new Set(["cell-1", "cell-2"]), ctx),
-    ).rejects.toThrow(/no event to chain/i)
+    ).rejects.toThrow(/not ready to receive a translation yet/i)
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 

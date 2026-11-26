@@ -39,6 +39,20 @@ describe("useProjectDirectory", () => {
     await waitFor(() => expect(getPortfolioPage).toHaveBeenCalledTimes(1))
   })
 
+  it("discards a late page from the previous account", async () => {
+    let finish!: (page: unknown) => void
+    getPortfolioPage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    getPortfolioPage.mockResolvedValueOnce({ projects: [{ id: "new" }], nextCursor: null })
+    const { result, rerender } = renderHook(
+      ({ jwt }) => useProjectDirectory({ jwt, enabled: true, orgIds: [1], query: "" }),
+      { initialProps: { jwt: "first" } },
+    )
+    rerender({ jwt: "second" })
+    await waitFor(() => expect(result.current.projects.map(p => p.id)).toEqual(["new"]))
+    await act(async () => finish({ projects: [{ id: "old" }], nextCursor: null }))
+    expect(result.current.projects.map(p => p.id)).toEqual(["new"])
+  })
+
   it("replaces the list on a new query and appends on loadMore", async () => {
     getPortfolioPage
       .mockResolvedValueOnce({

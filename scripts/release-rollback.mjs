@@ -58,6 +58,15 @@ export const MIN_REQUESTS = 200
 export const RATE_FLOOR = 0.05
 /** …and only when the rate is this many times the hour before the deploy. */
 export const RATE_FACTOR = 3
+/**
+ * A watch ends early only on a rate this high. Anything between RATE_FLOOR
+ * and this waits for the whole window: the first minutes after a sync-worker
+ * deploy carry the reconnect burst of every socket the old version dropped,
+ * and a decision taken on the first 200-odd invocations is a decision on that
+ * burst. Release 2026.11.25.05 (i18n strings only, sync-worker byte-identical)
+ * was rolled back at minute 3 on 16 of 294.
+ */
+export const EARLY_EXIT_RATE = 0.25
 
 const rate = (sample) => (sample && sample.requests > 0 ? sample.errors / sample.requests : 0)
 
@@ -72,7 +81,12 @@ export function workerVerdict({ before, after }) {
   const now = rate(after)
   const percent = (value) => `${(value * 100).toFixed(1)}%`
   const detail = `${after.errors} of ${after.requests} invocations failed (${percent(now)}); the hour before: ${percent(rate(before))}; limit ${percent(threshold)}`
-  return now >= threshold ? { verdict: "bad", why: detail } : { verdict: "ok", why: detail }
+  return now >= threshold ? { verdict: "bad", why: detail, rate: now } : { verdict: "ok", why: detail, rate: now }
+}
+
+/** Whether a mid-watch reading is bad enough to stop watching and decide now. */
+export function decisiveEarly(workers) {
+  return workers.some((entry) => entry.verdict === "bad" && typeof entry.rate === "number" && entry.rate >= EARLY_EXIT_RATE)
 }
 
 /**
@@ -185,7 +199,8 @@ async function watch(snapshot) {
   for (const { worker } of snapshot.surfaces) baseline.set(worker, await invocations(worker, hourBefore, deployedAt.toISOString()))
 
   // Read every minute so a release that throws on most requests is rolled
-  // back in the first minutes, not at the end of the watch.
+  // back in the first minutes, not at the end of the watch. A merely bad
+  // reading waits for the full window (EARLY_EXIT_RATE says why).
   let workers = []
   for (;;) {
     workers = []
@@ -193,7 +208,7 @@ async function watch(snapshot) {
       const after = await invocations(worker, deployedAt.toISOString(), new Date().toISOString())
       workers.push({ worker, ...workerVerdict({ before: baseline.get(worker), after }) })
     }
-    if (workers.some((entry) => entry.verdict === "bad") || Date.now() >= until) break
+    if (decisiveEarly(workers) || Date.now() >= until) break
     await new Promise((resolve) => setTimeout(resolve, Math.min(60_000, Math.max(1_000, until - Date.now()))))
   }
   const probe = workers.some((entry) => entry.verdict === "bad") ? undefined : await liveProbe()

@@ -111,4 +111,30 @@ describe("Remove noise on a whole take", () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(sent.measure.filter((x) => (x.loudness as { loudnessFromMs: number }).loudnessFromMs === 400)).toHaveLength(0)
   })
+
+  // AQU-2494 (review, Nov 9): on an added track an AI voice is known only by
+  // the voice it was made with. The cleaned take lost it: no sparkle, and it
+  // counted as a person's recording.
+  it("keeps an AI voice marked as one, on an added track", async () => {
+    sent.attach.length = 0
+    const { injectOptimisticAudioAttachment } = await import("./audio-attachments-bus")
+    vi.mocked(injectOptimisticAudioAttachment).mockClear()
+    await denoiseTake({
+      projectId: "p", fileId: "f", cellId: "c", sourceAudioId: "t.webm", sourceUrl: "frontier-audio://t.webm",
+      author: "ana", session: { jwt: "j" } as never,
+      source: { slot: "track-2", label: "Take 4", voiceId: "v-ana" },
+    })
+    expect(sent.attach[0]).toMatchObject({ slot: "track-2", voiceId: "v-ana" })
+    expect(vi.mocked(injectOptimisticAudioAttachment).mock.calls[0][2]).toMatchObject({ slot: "track-2", voiceId: "v-ana" })
+  })
+
+  it("sends no voice for a person's take", async () => {
+    sent.attach.length = 0
+    await denoiseTake({
+      projectId: "p", fileId: "f", cellId: "c", sourceAudioId: "t.webm", sourceUrl: "frontier-audio://t.webm",
+      author: "ana", session: { jwt: "j" } as never,
+      source: { slot: "track-2", voiceId: null },
+    })
+    expect(sent.attach[0]).not.toHaveProperty("voiceId")
+  })
 })

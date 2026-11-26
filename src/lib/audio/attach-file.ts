@@ -16,7 +16,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -237,6 +237,19 @@ export interface AttachUploadedTakeArgs {
   targetLang?: string
   surface: TelemetrySurface
   username: string
+  /** AQU-2525: the part of the bytes it plays, when it is not all of them (a
+   *  recording placed on another line from the Library plays the part it
+   *  plays where it came from). */
+  trimStartMs?: number
+  trimEndMs?: number
+  /** AQU-2525: the AI voice that made the bytes, so an AI voice placed on
+   *  another line is still one (`isGeneratedTake`). */
+  voiceId?: string
+  /** AQU-2525 (review, Nov 11): its volume and fades, sent right after the
+   *  attach as the `cell.audio.gain` the Station's Save also sends (a take's
+   *  level is its own event, never part of the attach). A recording placed on
+   *  another line plays as it did where the person heard it. */
+  level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
   /** Runs when the attach event could not be queued, before the error is
    *  re-thrown — the caller decides whether the uploaded bytes may go. */
   onEmitFailed?: () => void
@@ -267,6 +280,9 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
       mimeType,
       durationMs,
       label,
+      ...(args.trimStartMs !== undefined ? { trimStartMs: args.trimStartMs } : {}),
+      ...(args.trimEndMs !== undefined ? { trimEndMs: args.trimEndMs } : {}),
+      ...(args.voiceId !== undefined ? { voiceId: args.voiceId } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       // AQU-1572: the originating attach gesture — this is the one that counts.
       audioOrigin: "attach",
@@ -285,6 +301,12 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     author: username,
   })
+  const level = args.level && (args.level.gainDb != null || args.level.fadeInMs != null || args.level.fadeOutMs != null) ? args.level : null
+  // Its level, after its attach, as the Station's Save sends it; the paint
+  // waits for that last event.
+  const levelEventId = level
+    ? await emitCellAudioGain({ projectId, fileId, cellId, audioId, ...level, ...(args.targetLang ? { targetLang: args.targetLang } : {}), author: username })
+    : null
 
   // Flip `hasAudio` immediately — the bus poke the caller sends refetches the
   // server projection, but that races the outbox flush and would otherwise
@@ -301,13 +323,16 @@ export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<
     // catch a hard-coded one written where a variable belongs.
     slot,
     mimeType: mimeType ?? null,
-    voiceId: null,
+    voiceId: args.voiceId ?? null,
     referenceAudioId: null,
     durationMs: durationMs ?? null,
     label,
-    trimStartMs: null,
-    trimEndMs: null,
+    trimStartMs: args.trimStartMs ?? null,
+    trimEndMs: args.trimEndMs ?? null,
     ...placedFields(args.place, placeEventId),
-  }, placeEventId ?? attachEventId)
+    ...(level?.gainDb != null ? { gainDb: level.gainDb } : {}),
+    ...(level?.fadeInMs != null ? { fadeInMs: level.fadeInMs } : {}),
+    ...(level?.fadeOutMs != null ? { fadeOutMs: level.fadeOutMs } : {}),
+  }, levelEventId ?? placeEventId ?? attachEventId)
   return attachEventId
 }

@@ -37,7 +37,16 @@ interface Node {
 }
 interface Payload {
   tree: Node[]
-  people: { userId: string; displayName: string; isGuest: boolean; grants: { scopePath: { id: string; name?: string }[] }[] }[]
+  people: {
+    userId: string
+    displayName: string
+    username: string | null
+    email: string | null
+    isGuest: boolean
+    lastActiveAt: string | null
+    pendingInvite?: { expiresAt: string | null; roleLevel: number }
+    grants: { roleLevel: number; scopePath: { type?: string; id: string; name?: string }[] }[]
+  }[]
 }
 
 async function orgAccess(viewer: FixtureUser, orgId = FIXTURE_ORG_ID): Promise<Response> {
@@ -56,6 +65,9 @@ beforeEach(async () => {
 
 describe("AQU-1352 §3.6 org People & access", () => {
   it("owner sees every team and live project, and every person", async () => {
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_members SET last_active_at = ? WHERE org_id = 1 AND user_id = 1",
+    ).bind("2026-03-01T00:00:00.000Z").run()
     const res = await orgAccess("owner")
     expect(res.status).toBe(200)
     const body = (await res.json()) as Payload
@@ -67,8 +79,14 @@ describe("AQU-1352 §3.6 org People & access", () => {
     const names = body.people.map((p) => p.displayName)
     expect(names).toContain("external")
     // Rule 5: external holds only a project row → guest.
-    expect(body.people.find((p) => p.displayName === "external")?.isGuest).toBe(true)
-    expect(body.people.find((p) => p.displayName === "owner")?.isGuest).toBe(false)
+    const guest = body.people.find((p) => p.displayName === "external")
+    expect(guest?.isGuest).toBe(true)
+    expect(guest?.email).toBe("external@example.com")
+    expect(guest?.lastActiveAt).toBeNull()
+    const owner = body.people.find((p) => p.displayName === "owner")
+    expect(owner?.isGuest).toBe(false)
+    expect(owner?.email).toBe("owner@example.com")
+    expect(new Date(owner?.lastActiveAt ?? "").toISOString()).toContain("2026-03-01")
   })
 
   it("a project lead who can see only their own team gets that subtree and nothing above or beside it", async () => {
@@ -89,6 +107,25 @@ describe("AQU-1352 §3.6 org People & access", () => {
     // external is only on p2; tim only reaches p3 — neither name ships.
     expect(text).not.toContain('"external"')
     expect(text).not.toContain('"tim"')
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES
+         ('inv-p1', 'p1', 300, 1, 'soon@example.com', now() + interval '3 days'),
+         ('inv-p2', 'p2', 300, 1, 'hidden-guest@example.com', now() + interval '3 days')`,
+    ).run()
+    const walled = (await (await orgAccess("direct_above")).json()) as Payload
+    const walledText = JSON.stringify(walled)
+    const walledNames = walled.people.map((p) => p.displayName)
+    expect(walled.people.some((p) => p.email === "soon@example.com")).toBe(true)
+    expect(walledText).not.toContain("hidden-guest@example.com")
+    expect(walledText).not.toContain('"external"')
+    expect(walledNames).not.toContain("tim")
+    expect(walledNames).not.toContain("org_lead")
+    expect(walledNames).not.toContain("org_contrib")
+    expect(walledNames).toContain("direct_below")
+    const ownerBody = (await (await orgAccess("owner")).json()) as Payload
+    const ownerText = JSON.stringify(ownerBody)
+    expect(ownerText).toContain("soon@example.com")
+    expect(ownerText).toContain("hidden-guest@example.com")
   })
 
   it("lists a person once per node even when they hold two grants there (creator + direct row)", async () => {
@@ -187,6 +224,27 @@ describe("AQU-1352 §3.6 org People & access", () => {
     const invite = findPlace(body, "project", "p1")?.directGrantees.find((g) => g.email === "soon@example.com")
     expect(invite).toMatchObject({ source: "invite", roleLevel: 300 })
     expect(invite?.pendingInvite?.expiresAt).toEqual(expect.any(String))
+    const person = body.people.find((p) => p.email === "soon@example.com")
+    expect(person?.pendingInvite?.roleLevel).toBe(300)
+    // AQU-2320: an invite has no account, so nothing may be written for it by name.
+    expect(person?.username).toBeNull()
+    // Every account row carries its own username: the key the write routes look it up by.
+    const external = body.people.find((p) => p.userId === "9")
+    expect(external?.username).toBe("external")
+    expect(person?.grants.some((g) => g.scopePath.some((scope) => scope.id === "p1"))).toBe(true)
+  })
+
+  it("AQU-2320: each place says whether this viewer may give access there, by the rule the dry run applies", async () => {
+    type G = Record<string, { ok: true; cap: number } | { ok: false; denial: string }>
+    const owner = ((await (await orgAccess("owner")).json()) as { grantable: G }).grantable
+    expect(owner["org:1"]).toEqual({ ok: true, cap: 700 })
+    expect(owner["project:p1"]).toEqual({ ok: true, cap: 700 })
+    const maintainer = ((await (await orgAccess("maintainer")).json()) as { grantable: G }).grantable
+    // The dialog greys the org with "Only an Owner can grant here" from this.
+    expect(maintainer["org:1"]).toEqual({ ok: false, denial: "owner_only" })
+    expect(maintainer["team:1"]).toEqual({ ok: true, cap: 600 })
+    // fixture/leads holds Owner on p3: joining it would hand a Maintainer's grantee more than they hold.
+    expect(maintainer["team:2"]).toEqual({ ok: false, denial: "team_above_you" })
   })
 
   it("a missing org and an invisible org return the identical 403 (no id enumeration)", async () => {

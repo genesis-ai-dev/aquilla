@@ -246,7 +246,7 @@ describe("InterlinearAlignmentPanel — confirm/reject role gate (AQU-1408)", ()
     expect(screen.queryAllByRole("button", { name: /^reject alignment:/i })).toHaveLength(0)
 
     const locked = screen.getAllByRole("button", {
-      name: /contributor\+ required to confirm or reject alignments/i,
+      name: /contributor or above required to confirm or reject alignments/i,
     })
     expect(locked.length).toBeGreaterThan(0)
     expect((locked[0] as HTMLButtonElement).disabled).toBe(true)

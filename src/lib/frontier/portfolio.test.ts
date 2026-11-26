@@ -35,6 +35,18 @@ describe("getPortfolio", () => {
 })
 
 describe("getPortfolioPage / getPortfoliosPage", () => {
+  it("reuses only a confirmed page and retries normally on an unusable validation response", async () => {
+    const cached = { projects: [project({ id: "p" })], nextCursor: null, revision: "known" }
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json({ unchanged: true, revision: "known" }))
+      .mockResolvedValueOnce(Response.json({ unchanged: true, revision: "other" }))
+      .mockResolvedValueOnce(Response.json({ portfolios: [], nextCursor: null }))
+    global.fetch = fetch
+    expect(await getPortfoliosPage("jwt", [1, 2], { validate: true, cached })).toBe(cached)
+    expect(await getPortfoliosPage("jwt", [1, 2], { validate: true, cached })).toMatchObject({ projects: [] })
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).not.toHaveProperty("revision")
+  })
+
   it("GETs …/portfolio with limit, q, and cursor", async () => {
     let calledUrl = ""
     global.fetch = vi.fn(async (input: unknown) => {

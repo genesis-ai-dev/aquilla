@@ -56,7 +56,7 @@ export const terminology = defineNamespace({
     "terminology.editor.errorOffline": "Terminology changes will sync when you reconnect.",
     "terminology.editor.errorBlocked": "Your role cannot change the terminology.",
     "terminology.editor.errorSourceAndRenderingRequired":
-      "A source term and rendering are required before the term can be active.",
+      "A source term and rendering are required before the term can be approved.",
     "terminology.editor.errorImportFailed": "Import failed",
     "terminology.editor.importNothingNew": "Every term in this file is already in the list, so nothing was added.",
     "terminology.editor.importAdded": plural({
@@ -79,8 +79,7 @@ export const terminology = defineNamespace({
     // approve one. Mirrors `terminology.addConcept.approveNoPermissionHint` on
     // the in-editor popover, which has said this since AQU-1006.
     "terminology.editor.addTermSuggestionDescription":
-      "Saved as a suggestion for review. Suggestions are not checked against " +
-      "translations until someone with termbase permission approves them.",
+      "Saved as a suggestion for review. Suggestions are not checked against translations until someone with term base permission approves them.",
     "terminology.editor.sourceTermLabel": "Source term",
     "terminology.editor.sourceTermPlaceholder": "New source term…",
     "terminology.editor.renderingLabel": "Rendering",
@@ -93,9 +92,9 @@ export const terminology = defineNamespace({
     // doubles every term once the read recovers.
     "terminology.editor.loadFailedTitle": "Couldn’t load terms",
     "terminology.editor.loadFailedDetail":
-      "The termbase could not be read, so no terms are shown. Nothing has been deleted — retry once the connection recovers.",
+      "The term base could not be read, so no terms are shown. Nothing has been deleted — retry once the connection recovers.",
     "terminology.editor.loadFailedDisabledTooltip":
-      "Terms cannot be added or imported until the termbase loads.",
+      "Terms cannot be added or imported until the term base loads.",
     "terminology.editor.refreshFailedNotice":
       "Showing the terms last loaded — the most recent read failed.",
     "terminology.editor.showArchived": plural({
@@ -115,7 +114,7 @@ export const terminology = defineNamespace({
     "terminology.row.collapseRenderingsAria": "Collapse renderings",
     "terminology.row.expandRenderingsAria": "Expand renderings",
     "terminology.row.openDetailsAria": "Open details for {term}",
-    "terminology.row.acceptTermAria": "Accept term",
+    "terminology.row.acceptTermAria": "Approve term",
     "terminology.row.dismissTermAria": "Dismiss term",
     "terminology.row.archiveTermAria": "Archive term",
     "terminology.row.restoreTermAria": "Restore term",
@@ -155,8 +154,7 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.instructionsTitle": "Instructions",
     "terminology.livingMemory.recentExamplesTitle": "Recent examples",
     "terminology.livingMemory.recentExamplesDescription":
-      "Human-validated source→target pairs the AI uses as in-context examples. These " +
-      "are the translations your team has agreed on.",
+      "Human-validated source → target pairs the AI uses as reference examples. These are the translations your team has agreed on.",
     // Settings-style IA (index → detail): section rows + pane chrome. Reused
     // keys (no duplicates added): the instructions section title is
     // instructionsTitle above, `knowledge` reuses knowledgeBase.title/
@@ -271,13 +269,13 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.styleRules.applicability.hint.book":
       "A three-letter USFM book code, for example: PSA",
     "terminology.livingMemory.styleRules.applicability.hint.file":
-      "A file id from this project's file list",
+      "A file ID from this project's file list",
     "terminology.livingMemory.styleRules.applicability.hint.section":
       "A chapter label, for example: PSA 23",
     "terminology.livingMemory.styleRules.applicability.hint.passage":
       "A verse range inside one chapter, for example: LUK 1:1-4",
     "terminology.livingMemory.styleRules.applicability.hint.segment":
-      "A single segment (cell) id",
+      "A single segment (cell) ID",
     "terminology.livingMemory.styleRules.extract.title": "Extract style rules",
     "terminology.livingMemory.styleRules.extract.description":
       "Read one knowledge-base document section by section and propose the rules it " +
@@ -391,7 +389,7 @@ export const terminology = defineNamespace({
     "terminology.termDetail.addRenderingAria": "Add a rendering to this term",
     "terminology.termDetail.addRenderingButton": "Add",
     "terminology.termDetail.renderingEditHint":
-      "Click a rendering to change required / allowed / forbidden, or remove it.",
+      "Click a rendering to switch between required, alternate, and forbidden, or remove it.",
     "terminology.termDetail.cycleStatusTitle": "Change status",
     "terminology.termDetail.cycleStatusAria":
       "{rendering} is {status} — change status",
@@ -409,15 +407,13 @@ export const terminology = defineNamespace({
     // ── TerminologyMergeDialog.tsx ───────────────────────────────────────────
     "terminology.mergeDialog.title": "Merge duplicate concepts",
     "terminology.mergeDialog.selectDescription":
-      "Select 2 or more concepts to merge. The first selected concept becomes the " +
-      "survivor and keeps its id. All renderings are combined.",
+      "Select 2 or more concepts to merge. The first selected concept becomes the survivor and keeps its ID. All renderings are combined.",
     "terminology.mergeDialog.survivorBadge": "survivor",
     "terminology.mergeDialog.mergeFailed": "Merge failed",
     "terminology.mergeDialog.previewMergeButton": "Preview merge",
     "terminology.mergeDialog.previewDescription":
-      "Review the merged concept before confirming. Merged-away concepts will be " +
-      "removed permanently.",
-    "terminology.mergeDialog.survivorLabel": "Survivor (keeps id)",
+      "Review the merged concept before confirming. The other concepts will be removed permanently.",
+    "terminology.mergeDialog.survivorLabel": "Survivor (keeps ID)",
     "terminology.mergeDialog.mergedRenderingsLabel": "Merged renderings",
     "terminology.mergeDialog.combinedNotesLabel": "Combined notes",
     "terminology.mergeDialog.conceptsToRemoveLabel": "Concepts to remove",
@@ -449,13 +445,11 @@ export const terminology = defineNamespace({
       },
     ),
     "terminology.violations.description":
-      "Terminology infractions for this project, grouped by concept. Missing-approved " +
-      "= the source bears the concept but the target has no approved rendering. " +
-      "Forbidden-present = a forbidden rendering appears in the target.",
+      "Terminology violations for this project, grouped by concept. Missing: the source has the concept, but the translation has no approved rendering. Forbidden: a forbidden rendering appears in the translation.",
     "terminology.violations.truncated":
       "This list stopped before the end of the project.",
     "terminology.editor.suggestFailed": "Could not look through the project. Try again.",
-    "terminology.violations.emptyTitle": "No terminology violations.",
+    "terminology.violations.emptyTitle": "No terminology violations",
     "terminology.violations.emptyDescriptionPre": "Only",
     "terminology.violations.emptyDescriptionPost":
       "concepts with renderings are enforced — set a concept's status to approved to " +
@@ -493,10 +487,10 @@ export const terminology = defineNamespace({
       "Maintainer (or higher) on an org-owned project is required to manage term base " +
       "sharing.",
     "terminology.sharing.subscribedLabel": "Subscribed term bases",
-    "terminology.sharing.subscribedHint": "(drag to set priority — top = highest precedence)",
+    "terminology.sharing.subscribedHint": "(drag to reorder — top has highest priority)",
     "terminology.sharing.loadingSubscriptions": "Loading subscriptions…",
     "terminology.sharing.noneSubscribed": "Not subscribed to any term bases yet.",
-    "terminology.sharing.upstreamUnpublished": "upstream unpublished",
+    "terminology.sharing.upstreamUnpublished": "no longer published",
     "terminology.sharing.unsubscribeAria": "Unsubscribe from {name}",
     "terminology.sharing.availableLabel": "Available in your org",
     "terminology.sharing.noneAvailable": "No other published term bases in your organization.",
@@ -511,8 +505,8 @@ export const terminology = defineNamespace({
       '"{rendering}" is a forbidden rendering for "{term}"',
 
     // ── src/lib/terminology/store.ts (mergeConcepts invariant guards) ────────
-    "terminology.store.mergeMinConcepts": "mergeConcepts requires at least 2 concept ids.",
-    "terminology.store.survivorNotInMergeIds": "survivorId must be one of the mergeIds.",
+    "terminology.store.mergeMinConcepts": "Merging requires at least 2 concepts.",
+    "terminology.store.survivorNotInMergeIds": "The survivor concept must be one of the concepts being merged.",
     "terminology.store.conceptNotFound": "Concept {id} not found.",
 
     // ── Shared field labels reused across TerminologyPage.tsx's own dialogs ──

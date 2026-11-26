@@ -17,6 +17,7 @@ import type { ToolManifest, ToolMount } from "../../../shared/tools/manifest"
 import { stubEditorData } from "./smoke-editor"
 import { stubRev4Data } from "./smoke-rev4"
 import { stubFilesData } from "./smoke-files"
+import { stubNativeEditorData } from "./host-handlers-native"
 import { uiStrings } from "./ui-strings"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
@@ -91,6 +92,7 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     ...stubEditorData(populated),
     ...stubRev4Data(populated),
     ...stubFilesData(populated),
+    ...stubNativeEditorData(populated),
     listFiles: async () =>
       populated
         ? [

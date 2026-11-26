@@ -98,7 +98,7 @@ describe("primaryMount", () => {
 
 describe("provenanceOf", () => {
   it("names who made it", () => {
-    expect(provenanceOf({ firstParty: "default-editor", upstreamToolId: null, origin: "starter" })).toBe("firstParty")
+    expect(provenanceOf({ firstParty: "door43-importer", upstreamToolId: null, origin: "starter" })).toBe("firstParty")
     expect(provenanceOf({ upstreamToolId: "t1", origin: "copy" })).toBe("copy")
     expect(provenanceOf({ upstreamToolId: null, origin: "starter" })).toBe("starter")
     expect(provenanceOf({ upstreamToolId: null, origin: "edit" })).toBe("edited")

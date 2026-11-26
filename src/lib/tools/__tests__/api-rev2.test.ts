@@ -61,8 +61,10 @@ function boot(handlers: ReturnType<typeof createToolHandlers>, extraBoot: Record
 }
 
 describe("apiRev 2 surfaces", () => {
-  it("is an additive revision: rev 1, 2, 3 and 4 extensions are not stale, the runtime reports the current rev", () => {
-    expect(TOOLS_API_REV).toBe(7)
+  it("is an additive revision: rev 1..8 extensions are not stale, the runtime reports the current rev", () => {
+    expect(TOOLS_API_REV).toBe(8)
+    expect(isToolStale(7)).toBe(false)
+    expect(API_REV_ADDITIONS[8].length).toBeGreaterThan(0)
     expect(isToolStale(6)).toBe(false)
     expect(API_REV_ADDITIONS[7].length).toBeGreaterThan(0)
     expect(isToolStale(5)).toBe(false)
@@ -73,7 +75,7 @@ describe("apiRev 2 surfaces", () => {
     expect(API_REV_ADDITIONS[5].length).toBeGreaterThan(0)
     expect(API_REV_ADDITIONS[2].length).toBeGreaterThan(0)
     const { aquilla, stop } = boot(createToolHandlers(stub()))
-    expect(aquilla.apiRev).toBe(7)
+    expect(aquilla.apiRev).toBe(8)
     expect(aquilla.context.file?.revealCellId).toBe("c2")
     stop()
   })

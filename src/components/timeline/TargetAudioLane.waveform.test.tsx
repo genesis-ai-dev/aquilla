@@ -160,3 +160,49 @@ describe("generated voices get one too", () => {
     expect(screen.getByTestId("tl-target-c1").getAttribute("data-kind")).toBe("generated")
   })
 })
+
+// AQU-2664 (board 72): the waveform is drawn at the level the take plays, and
+// an evened take's name bar says so.
+describe("evening out on the clip (AQU-2664, board 72)", () => {
+  function measured(extra: Record<string, unknown>): TargetAudioItem {
+    const it_ = item(10_000)
+    const att = it_.cell.attachments![it_.audioId] as unknown as Record<string, unknown>
+    Object.assign(att, extra)
+    return it_
+  }
+  const pathD = () => wave()!.querySelector("path")!.getAttribute("d")!
+  /** The tallest point the path reaches above the middle line. */
+  const height = () => {
+    const ys = pathD().match(/-?\d+(\.\d+)?/g)!.map(Number).filter((_, i) => i % 2 === 1)
+    return Math.max(...ys) - Math.min(...ys)
+  }
+
+  it("draws a quiet take shorter, and taller once evened out", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[measured({ loudnessLufs: -27, truePeakDb: -12 })]} peaksByAudioId={peaks(keyOf())} />)
+    const quiet = height()
+    unmount()
+    render(<TargetAudioLane {...base} items={[measured({ loudnessLufs: -27, truePeakDb: -12, evenTargetLufs: -16 })]} peaksByAudioId={peaks(keyOf())} />)
+    expect(height()).toBeGreaterThan(quiet * 3)
+  })
+
+  it("puts ≈ on an evened take's name bar, and the amber mark on one that couldn't go all the way", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[measured({ loudnessLufs: -20, truePeakDb: -6, evenTargetLufs: -16 })]} />)
+    const bar = screen.getByTestId("tl-target-c1-bar")
+    const mark = screen.getByTestId("tl-target-c1-evened")
+    expect(bar.contains(mark)).toBe(true)
+    expect(mark).toHaveAttribute("title", "Evened out")
+    expect(screen.queryByTestId("tl-target-c1-even-held")).toBeNull()
+    unmount()
+    render(<TargetAudioLane {...base} items={[measured({ loudnessLufs: -30.4, truePeakDb: -4, evenTargetLufs: -16 })]} />)
+    const held = screen.getByTestId("tl-target-c1-even-held")
+    expect(held).toHaveAttribute("title", "Not raised all the way")
+    expect(held.className).toContain("text-amber-900")
+    expect(screen.queryByTestId("tl-target-c1-evened")).toBeNull()
+  })
+
+  it("marks nothing on a take that isn't evened", () => {
+    render(<TargetAudioLane {...base} items={[measured({ loudnessLufs: -20, truePeakDb: -6 })]} />)
+    expect(screen.queryByTestId("tl-target-c1-evened")).toBeNull()
+    expect(screen.queryByTestId("tl-target-c1-even-held")).toBeNull()
+  })
+})

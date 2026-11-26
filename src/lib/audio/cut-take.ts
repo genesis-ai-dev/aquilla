@@ -156,6 +156,12 @@ export function attachmentOutFrom(audioId: string, att: CodexCellAttachment, slo
     ...(att.gainDb != null ? { gainDb: att.gainDb } : {}),
     ...(att.fadeInMs != null ? { fadeInMs: att.fadeInMs } : {}),
     ...(att.fadeOutMs != null ? { fadeOutMs: att.fadeOutMs } : {}),
+    // AQU-2664: or the take's evening out blinks off while a write is in flight.
+    ...(att.loudnessLufs != null ? { loudnessLufs: att.loudnessLufs } : {}),
+    ...(att.truePeakDb != null ? { truePeakDb: att.truePeakDb } : {}),
+    ...(att.loudnessFromMs != null ? { loudnessFromMs: att.loudnessFromMs } : {}),
+    ...(att.loudnessToMs != null ? { loudnessToMs: att.loudnessToMs } : {}),
+    ...(att.evenTargetLufs != null ? { evenTargetLufs: att.evenTargetLufs } : {}),
     ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
     ...(att.validators ? { validators: att.validators } : {}),
     ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),

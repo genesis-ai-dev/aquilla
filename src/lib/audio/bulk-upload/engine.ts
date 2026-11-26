@@ -293,6 +293,9 @@ async function uploadOne(ctx: RunContext, fileId: string, cellId: string, file: 
   markProjectHasAudioDataSoon(ctx.req.projectId)
   const durationMs = await probeDurationMsSafe(file)
   await attachUploadedTake({
+    // Re-check S2: a bulk upload never starts auto-even (it would download
+    // each take again); the banner offers to even the track instead.
+    skipAutoEven: true,
     ...attachFields(ctx),
     fileId,
     cellId,
@@ -326,6 +329,9 @@ async function uploadRange(ctx: RunContext, fileId: string, cellIds: readonly st
     if (from && i < from.attached) continue
     try {
       await attachUploadedTake({
+        // Re-check S2: a bulk upload never starts auto-even (it would download
+        // each take again); the banner offers to even the track instead.
+        skipAutoEven: true,
       ...attachFields(ctx),
       fileId,
       cellId,
@@ -380,6 +386,9 @@ async function uploadPieces(ctx: RunContext, fileId: string, cellId: string, fil
   try {
     if (!progress.rootAttached) {
       await attachUploadedTake({
+        // Re-check S2: a bulk upload never starts auto-even (it would download
+        // each take again); the banner offers to even the track instead.
+        skipAutoEven: true,
         ...attachFields(ctx),
         fileId,
         cellId,

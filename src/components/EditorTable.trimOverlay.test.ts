@@ -88,6 +88,23 @@ describe("applyRowOverlays — the take's volume and fades (AQU-2495)", () => {
   })
 })
 
+// AQU-2664 review M2: the evening out too — the reading and the target — or
+// the Recording tab plays the take un-evened, and a trim's overlay drops it.
+describe("applyRowOverlays — the take's loudness and evening out (AQU-2664)", () => {
+  it("forwards the reading and the target", () => {
+    const out = applyRowOverlays(mediaCell(), {
+      audioEntry: {
+        attachments: { "take-1": { audioId: "take-1", url: "frontier-audio://take-1", slot: "recording", mimeType: null, voiceId: null, referenceAudioId: null, durationMs: null, trimStartMs: null, trimEndMs: null, loudnessLufs: -24, truePeakDb: -9, evenTargetLufs: -16 } },
+        selectedBySlot: { recording: "take-1" },
+        selectedAudioId: "take-1",
+        selectedGeneratedVoiceAudioId: null,
+        audioTimings: {},
+      } as unknown as CellAudioEntry,
+    })
+    expect(out.attachments?.["take-1"]).toMatchObject({ loudnessLufs: -24, truePeakDb: -9, evenTargetLufs: -16 })
+  })
+})
+
 /**
  * AQU-490 fell into the SAME gap this file was created for, which is why the
  * tests live here rather than in a new one.

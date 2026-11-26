@@ -13,7 +13,7 @@ import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { resolveImportFloor } from './import-authority'
-import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
+import { isGatedTrackPatch, resolveAllowTrackEditing, trackPatchRoleFloor } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
 import { loadTargetLanes } from './lane-read-wall'
@@ -86,6 +86,12 @@ async function extensionWriteGate(
     return { ok: false, reason: 'extension data files can only be written by an extension' }
   }
   return { ok: true, dataFile: true }
+}
+
+/** The static role floor for one event: its kind's, except a `file.track.set`
+ *  that sets only a track's volume (AQU-2664, trackPatchRoleFloor). */
+function roleFloorFor(raw: { kind: EventKind; payload?: unknown }): number {
+  return raw.kind === 'file.track.set' ? trackPatchRoleFloor(raw.payload) : requiredRoleFor(raw.kind)
 }
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -446,7 +452,7 @@ export async function authorize<K extends EventKind>(
     const platformViewRefusal = refusePlatformView(tokenClaims)
     if (platformViewRefusal) return platformViewRefusal
 
-    if (tokenClaims.role < requiredRoleFor(raw.kind)) {
+    if (tokenClaims.role < roleFloorFor(raw)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
 
@@ -615,7 +621,7 @@ export async function authorize<K extends EventKind>(
   if (extensionGate && !extensionGate.ok) {
     return { ok: false, status: 403, reason: extensionGate.reason }
   }
-  const baseRequiredRole = assignmentAuthority?.minRole ?? requiredRoleFor(raw.kind)
+  const baseRequiredRole = assignmentAuthority?.minRole ?? roleFloorFor(raw)
   const requiredRole = extensionGate?.ok && extensionGate.dataFile && DATA_FILE_CELL_KINDS.has(raw.kind)
     ? ROLE.CONTRIBUTOR
     : baseRequiredRole

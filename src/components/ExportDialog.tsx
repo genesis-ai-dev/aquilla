@@ -79,6 +79,9 @@ import {
   unvalidatedAudioLineIds,
 } from "@/lib/export/audio-validation-scope"
 import { audioLineLabels } from "@/lib/export/audio-line-labels"
+import { trackVolumeOverrides, withTrackVolumes } from "@/lib/audio/track-volume"
+import { monoMeterHeldCount, withMonoLoudness } from "@/lib/export/mono-loudness"
+import { MonoLoudnessOption } from "@/components/MonoLoudnessOption"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -744,6 +747,8 @@ export function ExportDialog({
   /** AQU-1575, Audio by line only: copy each take as stored, or write every
    *  take as 16-bit / 48 kHz / mono WAV for a broadcast deliverable. */
   const [lineAudioFormat, setLineAudioFormat] = useState<ExportDialogMemory["lineAudioFormat"]>("original")
+  // Sam, question 93: mono loudness as heard (default) or as a meter reads it.
+  const [monoLoudness, setMonoLoudness] = useState<ExportDialogMemory["monoLoudness"]>("heard")
   /** Which audio deliverable the Audio card will produce. Mix tracks, a review
    *  folder, and a chapter stitch share a card and a button rather than
    *  competing as separate entries in the format list. */
@@ -793,6 +798,7 @@ export function ExportDialog({
       setVttIncludeSource(remembered.includeSource)
       setIncludeChapterHeadings(remembered.includeChapterHeadings)
       setLineAudioFormat(remembered.lineAudioFormat)
+      setMonoLoudness(remembered.monoLoudness)
       // The remembered format is checked against what is actually on offer —
       // ids come and go with the file type and the build, and selecting one
       // that is no longer listed would leave the radio group with no selection
@@ -1045,6 +1051,7 @@ export function ExportDialog({
       includeSource: vttIncludeSource,
       includeChapterHeadings,
       lineAudioFormat,
+      monoLoudness,
     })
   }, [
     open,
@@ -1059,6 +1066,7 @@ export function ExportDialog({
     vttIncludeSource,
     includeChapterHeadings,
     lineAudioFormat,
+    monoLoudness,
   ])
 
   /**
@@ -1416,9 +1424,25 @@ export function ExportDialog({
    * describe who is recorded in the file, which is true whatever this download
    * is allowed to contain.
    */
+  // AQU-2664: every take carries its track's volume (the header's fader), so
+  // the files sound like the timeline.
   const audioExportCells = useMemo(
-    () => scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
-    [audioSourceCells, contentMode, audioValidationRequirement],
+    // Question 93: with the meter choice, evened mono takes are stamped for the
+    // one gain rule to write 3 dB hotter (export/mono-loudness.ts).
+    () => withMonoLoudness(
+      withTrackVolumes(
+        scopeAudioCellsForExport(audioSourceCells, contentMode, audioValidationRequirement),
+        trackVolumeOverrides(timelineTracks),
+      ),
+      monoLoudness,
+    ),
+    [audioSourceCells, contentMode, audioValidationRequirement, timelineTracks, monoLoudness],
+  )
+
+  // Re-check S4: evened takes the meter reading would hold back.
+  const monoHeldCount = useMemo(
+    () => (monoLoudness === "meter" ? monoMeterHeldCount(audioExportCells) : 0),
+    [monoLoudness, audioExportCells],
   )
 
   const episodeEstimate = useMemo(
@@ -2829,6 +2853,7 @@ export function ExportDialog({
                 ))}
               </RadioGroup>
               {audioMode === "audio-by-line" && renderLineFormatOption()}
+              <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} heldCount={monoHeldCount} />
               {audioMode === "audio-episode" && renderEpisodeEstimate()}
               {/* The preview belongs WITH the button that acts on it. */}
               {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
@@ -3306,6 +3331,9 @@ export function ExportDialog({
         {!isDubbingFile && format === "audio-by-line"
           // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderLineFormatOption()}
+        {!isDubbingFile && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line" || format === "audio-chapter")
+          // i18n-exempt "file" is an ExportScope tag, not copy
+          && effectiveScope === "file" && <MonoLoudnessOption value={monoLoudness} onChange={setMonoLoudness} heldCount={monoHeldCount} />}
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-episode" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy

@@ -96,6 +96,9 @@ export type EventKind =
   | 'cell.audio.trim'
   // AQU-2327: a take's volume and fades — data on the clip, like the trim.
   | 'cell.audio.gain'
+  // AQU-2664: the loudness a take is evened out to — its OWN stage, before
+  // the take's volume and fades; it never writes them.
+  | 'cell.audio.even'
   | 'cell.audio.place'
   // AQU-1767: cut one dub piece in two at a point in its own audio. Both
   // pieces share the bytes, stay on the same row, and start unvalidated.
@@ -731,6 +734,23 @@ export interface EventPayloads {
     laneId?: string
   }
   /**
+   * AQU-2664: the loudness (LUFS) this take is evened out to, null = not
+   * evened out — always stated. Its own stage, BEFORE the take's own volume
+   * and fades (Sam, Nov 19: "I do not want normalization to override volume
+   * automation"): it sets `even_target_lufs` and nothing else, so running,
+   * re-running or clearing evening out never touches `gain_db`, the fades,
+   * the track volume or the votes. The correction itself is worked out from
+   * the target and the stored reading (src/lib/audio/take-gain.ts).
+   */
+  'cell.audio.even': {
+    audioId: string
+    evenTargetLufs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
    * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
    * fades in ms — always all three stated, null meaning none (0 dB, no fade),
    * for the reason `cell.audio.trim` states both ends. Like a trim they never
@@ -890,7 +910,17 @@ export interface EventPayloads {
   // a no-op, so the event is idempotent and can never overwrite fresher data.
   'cell.audio.measure': {
     audioId: string
-    durationMs: number
+    /** AQU-2664: may be left out (or 0) by a loudness reading whose take's
+     *  length isn't known; nothing is then stored — never a 0. */
+    durationMs?: number
+    /** AQU-2664: the recording's integrated loudness (LUFS, -70 = silent)
+     *  and true peak (dBTP), both or neither. Fill-only, like the duration. */
+    loudnessLufs?: number
+    truePeakDb?: number
+    /** AQU-2664: the window of the recording it measured, ms (to null = the
+     *  end). A reading of another window replaces the stored one. */
+    loudnessFromMs?: number | null
+    loudnessToMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -1338,6 +1368,11 @@ export interface EventPayloads {
       /** AQU-2252: false makes an added track a layer (its takes set no line's
        *  length while the file follows its recordings); null clears it. */
       setsLineLengths?: boolean | null
+      /** AQU-2664 (board 74): the track's volume, dB, −150…+6, or "-inf" for
+       *  silence — shared and exported. null clears it back to 0 dB. A look,
+       *  not a structure: an ungated key (track-editing-authority.ts), and on
+       *  its own it needs only a take's volume floor (Contributor). */
+      volumeDb?: number | '-inf' | null
     } | null
   }
 

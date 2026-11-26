@@ -13,8 +13,14 @@ import {
 import type { SourceHashes } from "./catalog-export"
 import { CATALOGS } from "./messages/all"
 import type { Catalog, MessageKey } from "./messages/en"
-import sourceHashes from "./source-hashes.json"
-import committedBaseline from "./translation-baseline.json"
+// Read as text, not as JSON modules: an `import x from "./x.json"` makes `tsc -b`
+// type every key, and source-hashes.json alone (~129k lines) took the app
+// project past Node's default heap in the Workers preview build.
+import sourceHashesRaw from "./source-hashes.json?raw"
+import committedBaselineRaw from "./translation-baseline.json?raw"
+
+const sourceHashes = JSON.parse(sourceHashesRaw) as Record<string, SourceHashes>
+const committedBaseline = JSON.parse(committedBaselineRaw) as TranslationBaseline
 
 // Three made-up keys and a hash function that is just the key's current
 // "English", so a test states staleness directly instead of computing sha256.
@@ -119,8 +125,8 @@ describe("renderBaseline", () => {
 // The gate itself, against the real catalogs. `pnpm i18n:check` runs the same
 // comparison in CI's lint job and prints the fix; this keeps `pnpm test` honest.
 describe("committed catalogs against translation-baseline.json", () => {
-  const gaps = allLocaleGaps(CATALOGS, sourceHashes as Record<string, SourceHashes>)
-  const baseline = committedBaseline as TranslationBaseline
+  const gaps = allLocaleGaps(CATALOGS, sourceHashes)
+  const baseline = committedBaseline
 
   it("translates every English message outside the baseline in every locale", () => {
     const violations = coverageViolations(gaps, baseline).map((v) => `${v.locale}: ${v.key} (${v.kind})`)

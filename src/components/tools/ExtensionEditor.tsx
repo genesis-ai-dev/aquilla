@@ -90,8 +90,8 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
 }
 
 /** The "Edit with" menu above the editor (EditWithMenu.tsx). */
-export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
-  return <EditWithMenu choice={choice} />
+export function ExtensionEditorSwitcher({ choice, fileId }: { choice: ExtensionEditorChoice; fileId?: string | null }) {
+  return <EditWithMenu choice={choice} fileId={fileId} />
 }
 
 /** The extension editor failed to load, so the original editor is open. */

@@ -1,14 +1,31 @@
 import { useId, useRef } from "react"
-import { AppWindow, ArrowUp, CircleDashed, Hash, ListChecks, PanelRight, PenLine, Sparkles } from "lucide-react"
+import {
+  AppWindow,
+  ArrowUp,
+  CircleDashed,
+  Columns3,
+  Download,
+  Hash,
+  ListChecks,
+  PanelRight,
+  PenLine,
+  Rows3,
+  Sparkles,
+  Upload,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { EXAMPLE_PROMPTS, WHERE_CHOICES, type WhereChoice } from "@/lib/tools/builder-model"
+import { examplesForWhere, WHERE_CHOICES, WHERE_PLACEHOLDERS, type WhereChoice } from "@/lib/tools/builder-model"
 import { cn } from "@/lib/utils"
 
 const WHERE = {
   auto: { icon: Sparkles, label: "extensions.where.auto" },
   panel: { icon: PanelRight, label: "extensions.where.choicePanel" },
+  column: { icon: Columns3, label: "extensions.where.choiceColumn" },
+  inline: { icon: Rows3, label: "extensions.where.choiceInline" },
+  importer: { icon: Download, label: "extensions.where.choiceImporter" },
+  exporter: { icon: Upload, label: "extensions.where.choiceExporter" },
   page: { icon: AppWindow, label: "extensions.where.choicePage" },
   editor: { icon: PenLine, label: "extensions.where.choiceEditor" },
 } as const
@@ -20,7 +37,7 @@ const SUGGESTION_ICON = [ListChecks, Hash, CircleDashed, PenLine] as const
 function WherePicker({ value, onChange, disabled }: { value: WhereChoice; onChange: (w: WhereChoice) => void; disabled: boolean }) {
   const t = useT()
   return (
-    <div role="radiogroup" aria-label={t("extensions.describe.where")} className="inline-flex items-center gap-0.5 rounded-full bg-muted p-0.5">
+    <div role="radiogroup" aria-label={t("extensions.describe.where")} className="inline-flex flex-wrap items-center gap-0.5 rounded-2xl bg-muted p-0.5">
       {WHERE_CHOICES.map((w) => {
         const { icon: Icon, label } = WHERE[w]
         const on = w === value
@@ -69,6 +86,7 @@ export function DescribeStep({
   const id = useId()
   const box = useRef<HTMLTextAreaElement | null>(null)
   const ready = value.trim().length > 0 && !disabled
+  const examples = examplesForWhere(where)
   return (
     <section className="flex flex-col items-center gap-5" data-testid="builder-describe">
       <h2 className="text-center text-2xl font-semibold tracking-[-0.02em] text-balance sm:text-[28px]">{t("extensions.hero.title")}</h2>
@@ -84,7 +102,7 @@ export function DescribeStep({
           id={`${id}-box`}
           ref={box}
           autoFocus
-          placeholder={t("extensions.describe.placeholder")}
+          placeholder={t(WHERE_PLACEHOLDERS[where])}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
@@ -97,7 +115,7 @@ export function DescribeStep({
           disabled={disabled}
           className="block max-h-80 min-h-28 w-full resize-none bg-transparent px-5 pt-4.5 pb-2 text-[15px] leading-6 outline-none [field-sizing:content] placeholder:text-muted-foreground/60 disabled:opacity-60"
         />
-        <div className="flex items-center gap-2 px-3 pb-3">
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
           <WherePicker value={where} onChange={onWhereChange} disabled={disabled} />
           <AppTooltip content={t("extensions.describe.shortcut")}>
             <span className="ms-auto hidden font-mono text-[11px] text-muted-foreground/70 select-none sm:inline">⌘↵</span>
@@ -114,8 +132,8 @@ export function DescribeStep({
         </div>
       </div>
       <ul className="flex flex-wrap justify-center gap-2" aria-label={t("extensions.describe.examples")}>
-        {EXAMPLE_PROMPTS.map((ex, i) => {
-          const Icon = SUGGESTION_ICON[i] ?? Sparkles
+        {examples.map((ex, i) => {
+          const Icon = where === "auto" ? (SUGGESTION_ICON[i] ?? Sparkles) : WHERE[where].icon
           return (
             // AQU-2260: a labelled button; a click puts its whole prompt in
             // the box, so it says nothing on hover.

@@ -111,7 +111,7 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   await bobWs.waitForEditor()
   // The row already carries alice's thread, so open it from the AQU-599
   // comment badge rather than the overflow's "Add comment" action.
-  await bobWs.cellRow(0).getByRole("button", { name: /open comments$/i }).click()
+  await bobWs.commentBadge(0).click()
   const bobDrawer = bob.locator("[data-testid='comments-drawer']").first()
   await expect(bobDrawer).toBeVisible()
   const bobComposer = bobDrawer.getByRole("textbox", { name: "New thread" })

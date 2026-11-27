@@ -493,8 +493,9 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0)
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Members" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "People & access" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
   })
 
   it("renders both project names from the portfolio", async () => {

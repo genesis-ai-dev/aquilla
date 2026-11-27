@@ -128,13 +128,14 @@ function ContextMenuContent({
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  anchor,
   collisionAvoidance = CONTEXT_MENU_COLLISION,
   children,
   ...props
 }: ContextMenuPrimitive.Popup.Props &
   Pick<
     ContextMenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset" | "collisionAvoidance"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor" | "collisionAvoidance"
   >) {
   const instant = React.useContext(ContextMenuInstantContext)
 
@@ -146,6 +147,7 @@ function ContextMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        anchor={anchor}
         collisionAvoidance={collisionAvoidance}
       >
         <ContextMenuPrimitive.Popup

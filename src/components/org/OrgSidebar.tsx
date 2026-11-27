@@ -183,9 +183,12 @@ export const OrgSidebar = memo(function OrgSidebar() {
             {t("org.access.page.title")}
           </OrgNavLink>
         )}
-        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner. */}
-        {activeOrgId != null && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
-          <OrgNavLink to={orgPath(activeOrgId, "/access-audit")} className={link}>
+        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner.
+            AQU-2324: the audit is the People lens now, so this entry only shows
+            when People & access above does not (a roster floor raised above
+            this admin) — one door, never two to the same page. */}
+        {activeOrgId != null && !showMembersNav && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access?lens=people")} className={link}>
             <NavIcon icon={ScrollText} />
             {t("org.accessAudit.title")}
           </OrgNavLink>

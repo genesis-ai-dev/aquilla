@@ -26,9 +26,9 @@ request it opened itself, and only when the diff is the four version files;
 `docs/DESKTOP-RELEASES.md`.) A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
 again. `walk-status.yml` reports the walk on the PR's head as the `qa-walk`
 status (pending until a browser walk is posted at that head).
-`scripts/release-plan.mjs` reads the same comment later and keeps the PR off
-the release line when the walk failed (`WALK_POLICY=strict`: unless it is
-`PASS` or `none`) — as it does for a PR whose files touch a holding risk area
+`scripts/release-plan.mjs` reads the same comment later, and since 2026-11-27
+no walk verdict keeps a PR off the release line (`WALK_POLICY=fail-only` or
+`strict` restores a hold; `docs/RELEASE-RISK-GATES.md` §7). What holds is a PR whose files touch a holding risk area
 (`risk:*` labels, `docs/RELEASE-RISK-GATES.md`) until that area's gate check is
 green on the PR's head or a person adds `release:approved`.
 
@@ -37,8 +37,8 @@ green on the PR's head or a person adds `release:approved`.
 | `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy. Still a required check. It does not run unit tests, lint, or the secret scan. |
 | `.github/workflows/ci.yml` | every pull request to `dev`, and `workflow_dispatch` | lint, `i18n:check`, the secret scan, unit tests, worker tests, and `pnpm neon:check`. Required on `dev` once a run there is green. Typecheck, the Vite build, Tauri, and the IDML browser suite stay on `workflow_dispatch`. |
 | Grok walk | comment on the PR, not a check | `PASS` at the head sha. `FLAKY` and `BLOCKED` are a checker bug; walk again. |
-| Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | a `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. It does not run on pull requests. |
-| Adversarial Jev | the advisory `pr` job on every non-draft PR into `dev`, plus the 09:00 UTC nightly against deployed `dev` and `workflow_dispatch` | the `pr` job attacks the PR's own preview, keeps one sticky comment, and files no tickets; it goes red only when the harness said nothing about the commit (`HARNESS UNAVAILABLE`, `NOT RUN`, `NOT VERIFIED` — AQU-1899). The nightly files Linear tickets. Neither affects the cut or the deploy. |
+| Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | advisory since 2026-11-27: the deploy neither waits for it nor holds on a `FAIL` (`docs/RELEASE-RISK-GATES.md` §7). It does not run on pull requests. |
+| Adversarial Jev | the 09:00 UTC nightly against deployed `dev`, and `workflow_dispatch`. No per-PR job since 2026-11-27 | the nightly files Linear tickets. It does not affect the cut or the deploy. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
 
 **UI text ships translated (AQU-2740).** `i18n:check` fails a branch that adds or

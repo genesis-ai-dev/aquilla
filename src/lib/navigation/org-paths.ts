@@ -83,6 +83,26 @@ export function accessPersonPath(orgId: number, userId: string): string {
   return orgPath(orgId, `/access/people/${encodeURIComponent(userId)}`)
 }
 
+/**
+ * AQU-2324: People & access opened where the reader came from — the Places
+ * lens on one place (`?place=type:id`, which PlacesLens selects), or the
+ * People lens on one filter. The page owns both params; this only spells them.
+ */
+export function orgAccessPath(
+  orgId: number,
+  open?:
+    | { place: { type: "org" | "team" | "project" | "lane"; id: string } }
+    | { people: "everyone" | "members" | "guests" | "invites" | "granters" | "inactive" },
+): string {
+  const query =
+    open && "place" in open
+      ? `?place=${open.place.type}:${encodeURIComponent(open.place.id)}`
+      : open && "people" in open
+        ? `?lens=people${open.people === "everyone" ? "" : `&people=${open.people}`}`
+        : ""
+  return orgPath(orgId, `/access${query}`)
+}
+
 export function membersPath(orgId: number, tab: "roster" | "matrix" = "roster"): string {
   return tab === "matrix" ? orgPath(orgId, "/members/matrix") : orgPath(orgId, "/members")
 }

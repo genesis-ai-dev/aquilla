@@ -55,12 +55,26 @@ export type MigrationPlan = {
   statements: string[]
 }
 
+/** A character a Postgres identifier can continue with (`$` and non-ASCII letters included). */
+function isIdentifierChar(ch: string | undefined): boolean {
+  return ch !== undefined && /[A-Za-z0-9_$\u0080-\uffff]/.test(ch)
+}
+
 /**
  * Walk the SQL once, returning:
  *  - `code`: the file with comments, string literals and dollar-quoted bodies
  *    blanked out, so a keyword can be looked for in *executable* SQL only;
  *  - `statements`: top-level statements, split on semicolons that are not
  *    inside a comment, a literal, or a dollar-quoted body.
+ *
+ * The migration gate (gate-migration.ts) reads a file through this and
+ * Postgres then runs the file's own text, so the two must agree on where a
+ * literal ends: text this takes for a literal and Postgres takes for SQL is
+ * a statement nobody classified. Two places they used to disagree:
+ *  - an escape string, `E'\''`: a backslash escapes the quote there, and the
+ *    literal ends one quote sooner than a plain string's would;
+ *  - a `$` inside an identifier, `t$x$`: identifiers may contain `$`, so that
+ *    is a name, not the opening of a dollar-quoted body.
  */
 export function scanSql(sql: string): { code: string; statements: string[] } {
   const statements: string[] = []
@@ -108,7 +122,7 @@ export function scanSql(sql: string): { code: string; statements: string[] } {
       i = j
       continue
     }
-    const dollarTag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
+    const dollarTag = isIdentifierChar(sql[i - 1]) ? null : /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))
     if (dollarTag) {
       const tag = dollarTag[0]
       const close = sql.indexOf(tag, i + tag.length)
@@ -119,8 +133,15 @@ export function scanSql(sql: string): { code: string; statements: string[] } {
     }
     const ch = sql[i]
     if (ch === "'" || ch === '"') {
+      // E'…' (and e'…'): the E is the prefix only when it stands alone, not
+      // when it ends a longer name.
+      const escapes = ch === "'" && /[Ee]/.test(sql[i - 1] ?? "") && !isIdentifierChar(sql[i - 2])
       let j = i + 1
       while (j < sql.length) {
+        if (escapes && sql[j] === "\\") {
+          j += 2
+          continue
+        }
         if (sql[j] === ch) {
           if (sql[j + 1] === ch) {
             j += 2

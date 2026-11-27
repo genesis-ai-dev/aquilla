@@ -311,7 +311,13 @@ jobs:
         id: watch
         if: steps.snapshot.outputs.taken == 'true'
         env:
-          AUTO_ROLLBACK: ${{ vars.AUTO_ROLLBACK }}
+          # Report only since 2026-11-27, whatever the AUTO_ROLLBACK variable
+          # says. The watch's one rollback (2026.11.25.05, #2212) took back a
+          # strings-only release on a reconnect burst and stopped the line
+          # for 32 hours over a holiday. It posts what it would have done; a
+          # person decides. To let it act again, pass the variable back in:
+          # AUTO_ROLLBACK: ${{ vars.AUTO_ROLLBACK }}
+          AUTO_ROLLBACK: "off"
           WATCH_MINUTES: ${{ vars.ROLLBACK_WATCH_MINUTES }}
           # Account Analytics read only. Unset, the watch asks with the deploy
           # token, and reads `no-signal` if that token cannot read analytics.

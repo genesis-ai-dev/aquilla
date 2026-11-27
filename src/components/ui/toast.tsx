@@ -1,6 +1,10 @@
 import * as React from "react"
 import { Toast as ToastPrimitive } from "@base-ui/react/toast"
-import type { ToastManagerAddOptions } from "@base-ui/react/toast"
+import type {
+  ToastManagerAddOptions,
+  ToastManagerPromiseOptions,
+  ToastManagerUpdateOptions,
+} from "@base-ui/react/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,6 +19,18 @@ const toastManager = ToastPrimitive.createToastManager()
 function toastTextKey(value: React.ReactNode | undefined): string | null {
   if (typeof value === "string" || typeof value === "number") return String(value)
   return null
+}
+
+/** A string message is the title. A function is resolved against the settlement. */
+function promiseMessage<Data extends object>(
+  options:
+    | string
+    | ToastManagerUpdateOptions<Data>
+    | ((value: never) => string | ToastManagerUpdateOptions<Data>),
+  value?: unknown,
+): ToastManagerUpdateOptions<Data> {
+  const resolved = typeof options === "function" ? options(value as never) : options
+  return typeof resolved === "string" ? { title: resolved } : resolved
 }
 
 /**
@@ -58,6 +74,33 @@ const toast = {
     if (id != null) quietUpdates.delete(id)
     return toastManager.close(id)
   }) as typeof toastManager.close,
+  /**
+   * One toast for a job. The manager's `promise` writes the store directly, so
+   * the result would pulse (AQU-2125 keeps a settled toast still). Reject to
+   * show `error`; a resolved value shows `success`.
+   */
+  promise<Value, Data extends object = object>(
+    promiseValue: Promise<Value>,
+    options: ToastManagerPromiseOptions<Value, Data>,
+  ): Promise<Value> {
+    const id = toast.add({
+      ...promiseMessage(options.loading),
+      type: "loading",
+      // Each job is its own toast. Title dedupe would let a second line reuse
+      // the first line's toast and settle it early.
+      id: `promise:${crypto.randomUUID()}`,
+    })
+    return promiseValue.then(
+      (result) => {
+        toast.update(id, { ...promiseMessage(options.success, result), type: "success" })
+        return result
+      },
+      (error: unknown) => {
+        toast.update(id, { ...promiseMessage(options.error, error), type: "error" })
+        return Promise.reject(error)
+      },
+    )
+  },
 }
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {
@@ -88,9 +131,12 @@ function Toast({ className, ...props }: ToastPrimitive.Root.Props) {
       className={cn(
         // Positioning + stack only — visual chrome lives on the pulse layer so
         // scale can transition without fighting this stacking `transform`.
+        // Each toast keeps its own height and sits fully above the one below.
+        // Hover still sets data-expanded; the same transform applies, so the
+        // pile never collapses into a peek.
         "group/toast pointer-events-auto absolute right-0 bottom-0 z-[calc(1000-var(--toast-index))] w-full origin-bottom outline-none select-none",
-        "[--gap:0.75rem] [--height:var(--toast-frontmost-height,var(--toast-height))] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))] [--peek:0.75rem] [--scale:calc(max(0,1-(var(--toast-index)*0.1)))] [--shrink:calc(1-var(--scale))]",
-        "h-(--height) [transform:translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--peek))-(var(--shrink)*var(--height))))_scale(var(--scale))] [transition:transform_500ms_cubic-bezier(0.22,1,0.36,1),opacity_500ms,height_150ms]",
+        "[--gap:0.75rem] [--offset-y:calc(var(--toast-offset-y)*-1+calc(var(--toast-index)*var(--gap)*-1)+var(--toast-swipe-movement-y))]",
+        "h-(--toast-height) [transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))] [transition:transform_500ms_cubic-bezier(0.22,1,0.36,1),opacity_500ms,height_150ms]",
         "after:absolute after:top-full after:left-0 after:h-[calc(var(--gap)+1px)] after:w-full after:content-['']",
         "data-expanded:h-(--toast-height) data-expanded:[transform:translateX(var(--toast-swipe-movement-x))_translateY(var(--offset-y))]",
         "data-limited:opacity-0 data-starting-style:[transform:translateY(150%)]",
@@ -167,6 +213,7 @@ function ToastItem({
   }, [updateKey, toastItem.id])
 
   const body = bodyFromToast(toastItem.data)
+  const hasTitle = toastItem.title != null && toastItem.title !== ""
 
   return (
     <Toast toast={toastItem}>
@@ -181,7 +228,11 @@ function ToastItem({
           >
             <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
             {body ? (
-              <ToastTitle className="min-w-0" />
+              hasTitle ? (
+                <ToastTitle className="min-w-0" />
+              ) : (
+                <div className="min-w-0">{body}</div>
+              )
             ) : (
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <ToastTitle />
@@ -189,7 +240,7 @@ function ToastItem({
               </div>
             )}
             <ToastClose className="-mt-1" />
-            {body ? <div className="col-span-2 col-start-2 min-w-0">{body}</div> : null}
+            {body && hasTitle ? <div className="col-span-2 col-start-2 min-w-0">{body}</div> : null}
           </div>
           {hasActions && (
             <div
@@ -325,7 +376,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4",
         className
       )}
       {...props}
@@ -397,6 +448,8 @@ function ToastClose({
     <ToastPrimitive.Close
       data-slot="toast-close"
       data-pressing={pressing ? "" : undefined}
+      // The stack stays open, so every toast's close button stays available.
+      aria-hidden={false}
       aria-label={t("common.closeToastAriaLabel")}
       render={render}
       className={cn(

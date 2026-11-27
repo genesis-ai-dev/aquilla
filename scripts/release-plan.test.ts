@@ -102,14 +102,14 @@ describe("planRelease", () => {
   })
 
   it("does not cut when every unreleased PR is held", () => {
-    const plan = planRelease({ openReleases: [], prs: [migration(1, recent), pr(2, recent, { walk: "fail" })], now: NOW })
+    const plan = planRelease({ openReleases: [], prs: [migration(1, recent), pr(2, recent, { walk: "fail" })], now: NOW, policy: "fail-only" })
     expect(plan.cut).toBe(false)
     expect(plan.reason).toBe("2 PR(s) waiting on a person, none ready")
     expect(plan.held.map((p) => p.why)).toEqual(["touches migration", "walk fail"])
   })
 
-  it("holds on a failed walk the same way a path hold does", () => {
-    const failed = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "fail" }), pr(2, recent)], now: NOW })
+  it("holds on a failed walk the same way a path hold does, under the fail-only policy", () => {
+    const failed = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "fail" }), pr(2, recent)], now: NOW, policy: "fail-only" })
     expect(failed.prs.map((p) => p.number)).toEqual([2])
     expect(failed.held.map((p) => p.number)).toEqual([1])
   })
@@ -117,9 +117,15 @@ describe("planRelease", () => {
   // 2026-11-19: 36 of 47 waiting PRs were held for having no walk or a
   // test-level one, and none of those is an outcome that cannot be fixed
   // forward. The default policy ships them; `strict` is the rule as it was.
-  it("ships an unwalked or test-level PR by default, and holds both under the strict policy", () => {
+  // 2026-11-27: no walk verdict holds by default (the walk is advisory).
+  it("ships every walk verdict by default, and holds by policy under fail-only and strict", () => {
     const prs = [pr(1, recent, { walk: "unknown" }), pr(2, recent, { walk: "partial" }), pr(3, recent, { walk: "fail" })]
-    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    const advisory = planRelease({ openReleases: [], prs, now: NOW })
+    expect(advisory.prs.map((p) => p.number)).toEqual([1, 2, 3])
+    expect(advisory.held).toEqual([])
+    expect(advisory.walkPolicy).toBe("advisory")
+
+    const plan = planRelease({ openReleases: [], prs, now: NOW, policy: "fail-only" })
     expect(plan.prs.map((p) => p.number)).toEqual([1, 2])
     expect(plan.held.map((p) => p.why)).toEqual(["walk fail"])
     expect(plan.walkPolicy).toBe("fail-only")
@@ -209,8 +215,9 @@ describe("prHolds", () => {
     expect(holdReason({ areas: ["events", "migration"], walk: "PASS", gates: ["events"] })).toBe("touches migration")
   })
 
-  it("a passed gate does not excuse a failed walk", () => {
-    expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] })).toBe(true)
+  it("a passed gate does not excuse a failed walk, where the policy lets a walk hold", () => {
+    expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] }, "fail-only")).toBe(true)
+    expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] })).toBe(false)
   })
 
   it("a missing walk does not excuse an ungated holding area", () => {
@@ -256,15 +263,18 @@ describe("walk policy", () => {
     ["unknown", false, true],
     ["partial", false, true],
     ["fail", true, true],
-  ])("%s: holds under fail-only %s, under strict %s", (walk, failOnly, strict) => {
+  ])("%s: never holds under advisory; holds under fail-only %s, under strict %s", (walk, failOnly, strict) => {
+    expect(walkHolds(walk, "advisory")).toBe(false)
+    expect(walkHolds(walk)).toBe(false)
     expect(walkHolds(walk, "fail-only")).toBe(failOnly)
     expect(walkHolds(walk, "strict")).toBe(strict)
   })
 
   it("reads WALK_POLICY, and anything else is the default", () => {
     expect(walkPolicy({ WALK_POLICY: "strict" })).toBe("strict")
-    expect(walkPolicy({ WALK_POLICY: "Strict" })).toBe("fail-only")
-    expect(walkPolicy({})).toBe("fail-only")
+    expect(walkPolicy({ WALK_POLICY: "fail-only" })).toBe("fail-only")
+    expect(walkPolicy({ WALK_POLICY: "Strict" })).toBe("advisory")
+    expect(walkPolicy({})).toBe("advisory")
   })
 })
 

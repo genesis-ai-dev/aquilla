@@ -334,6 +334,8 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.queryByRole("button", { name: /add to projects/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /actions for ben/i })).toBeInTheDocument()
     expect(screen.queryByText(/^remove$/i)).not.toBeInTheDocument()
+    // AQU-2324: one door to the People lens; the roster's own controls stay.
+    expect(screen.getByRole("link", { name: "Manage access" })).toHaveAttribute("href", "/orgs/42/access?lens=people")
   })
 
   it("keeps Remove in the row menu, disabled for a non-owner", async () => {

@@ -544,7 +544,7 @@ export class Workspace {
       .filter({ visible: true })
       .first()
     const moreButton = this.page.getByRole("banner")
-      .getByRole("button", { name: /^More$/i })
+      .getByRole("button", { name: /^More actions$/i })
 
     // Wait for cold project hydration before choosing the available surface.
     // An already-open dialog is also valid (for example, setup opened it).
@@ -1342,10 +1342,10 @@ export class Workspace {
     await expect(this.cellRow(index).getByRole("checkbox", { name: /^Selected cell/ })).toBeVisible()
   }
 
-  /** The selection bar's "Validate text" — bulk-validates the selected rows.
-   *  Its name carries the eligible count ("Validate text 2"). */
+  /** The selection bar's "Validate text cells" — bulk-validates the selected rows.
+   *  Its name carries the eligible count ("Validate text cells 2"). */
   async validateSelection(): Promise<void> {
-    await this.page.getByRole("button", { name: /^Validate text \d+$/ }).click()
+    await this.page.getByRole("button", { name: /^Validate text cells \d+$/ }).click()
   }
 
   /** Remove the current user's validation and wait for the row state to settle. */
@@ -1409,7 +1409,7 @@ export class Workspace {
 
   /** Open the workspace header ⋯ overflow menu (project-scoped actions). */
   async openHeaderOverflowMenu(): Promise<void> {
-    const moreBtn = this.page.getByRole("button", { name: /^More$/i })
+    const moreBtn = this.page.getByRole("button", { name: /^More actions$/i })
     await expect(moreBtn).toBeVisible({ timeout: 10_000 })
     await moreBtn.click()
   }

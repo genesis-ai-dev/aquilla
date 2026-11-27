@@ -62,9 +62,10 @@ import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { UserChip } from "@/components/UserChip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { StaffLanePopover } from "@/components/StaffLanePopover"
+import { StaffLanePopover, type RemoveGrantRequest } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
+import { RemoveAccessDialog } from "@/components/org/access/RemoveAccessDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopeView, type MemberScope, type MemberScopeView } from "@/lib/sync/member-scopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
@@ -301,6 +302,8 @@ export function OverviewLaneTable({
   // held here, not in the popover: `staffLane` is a dependency of the columns
   // below, so closing the popover rebuilds the actions cell and remounts it.
   const [giving, setGiving] = useState<GiveAccessRequest | null>(null)
+  // AQU-2324: a grant-only row's Remove, held here for the same reason.
+  const [removingGrant, setRemovingGrant] = useState<RemoveGrantRequest | null>(null)
   const [archivedOpen, setArchivedOpen] = useState(false)
   /**
    * AQU-1998: bumped after a staffing change so the per-member scope reads
@@ -309,6 +312,12 @@ export function OverviewLaneTable({
    * alone left this column showing the staffing as it was before the change.
    */
   const [scopesNonce, setScopesNonce] = useState(0)
+  /** After Give access or a grant's removal wrote: re-read the People column. */
+  function handleAccessChanged() {
+    void refreshMembers()
+    setScopesNonce((n) => n + 1)
+    onChanged?.()
+  }
 
   // Scopable members = below maintainer. Maintainers see every lane and the
   // server refuses to scope them; a project lead can be lane-limited
@@ -515,6 +524,7 @@ export function OverviewLaneTable({
                       setStaffLane(next ? laneStaffKey(row.original) : null)
                     }}
                     onGiveAccess={setGiving}
+                    onRemoveGrant={setRemovingGrant}
                     trigger={
                       <span
                         data-testid={`overview-lane-staff-${tagId}`}
@@ -708,11 +718,16 @@ export function OverviewLaneTable({
           orgId={orgId}
           request={giving}
           onClose={() => setGiving(null)}
-          onGranted={() => {
-            void refreshMembers()
-            setScopesNonce((n) => n + 1)
-            onChanged?.()
-          }}
+          onGranted={handleAccessChanged}
+        />
+      )}
+      {/* And its Remove on a grant-only row: that grant's dry run. */}
+      {removingGrant && (
+        <RemoveAccessDialog
+          open
+          onOpenChange={(next) => { if (!next) setRemovingGrant(null) }}
+          {...removingGrant}
+          onRemoved={handleAccessChanged}
         />
       )}
     </Section>

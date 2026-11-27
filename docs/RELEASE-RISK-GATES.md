@@ -34,8 +34,8 @@ Four more repository variables are the switches of the 2026-11-19 changes
 
 | Variable | Unset | Set |
 | --- | --- | --- |
-| `WALK_POLICY` | Only a failed walk holds a PR (`fail-only`). | `strict`: anything but a PASS walk holds, as before 2026-11-19. |
-| `AUTO_ROLLBACK` | The rollback watch reports what it would do. | `on`: it promotes the previous versions back and halts the line. |
+| `WALK_POLICY` | No walk verdict holds a PR (`advisory`, §7). | `fail-only`: a failed walk holds. `strict`: anything but a PASS walk holds, as before 2026-11-19. |
+| `AUTO_ROLLBACK` | The rollback watch reports what it would do. | Not read since 2026-11-27: `release-deploy.yml` passes `off` (§7). |
 | `AUTO_MIGRATE` | A migration holds for a person; the deploy stops at a pending one. | `on`: a green `migration-gate` lifts the hold, and the deploy applies additive pending migrations itself. |
 | `ROLLBACK_WATCH_MINUTES` | 10 | How long the watch runs after a deploy. |
 
@@ -302,7 +302,18 @@ today:
   Three legs. *Additive*: every statement the PR's new migration files run
   is on a short list production's current code cannot notice (a new table,
   a new nullable or defaulted column, a new index, a new type), with the
-  forms that rewrite or lock `events` and `cells` taken off it. *Schema*:
+  forms that rewrite or lock `events` and `cells` taken off it. The list
+  is also what keeps a migration from running anything else as it applies
+  (2026-11-27): `CREATE TABLE … AS` is a query and is off it, and an
+  expression Postgres evaluates over existing rows (an `ADD COLUMN`
+  default, check or generated column, an index expression or `WHERE`) may
+  call only the built-ins in `APPLY_TIME_FUNCTIONS`, because `CREATE
+  FUNCTION` is additive and those are the places a migration could call
+  what it had just created. The gate reads a file through `scanSql`
+  (`scripts/neon-migration-file.ts`) and Postgres runs the file's own
+  text, so the scanner ends a literal where Postgres does: an `E'\''`
+  escape string and a `$` inside an identifier used to hide the statement
+  after them from the list. *Schema*:
   the base commit's `schema.sql` plus the new files is, catalog for
   catalog, the PR's `schema.sql`, which is the drift that answers 500 with
   every test green. *Old code, new schema*: the BASE commit's replay
@@ -621,3 +632,29 @@ The principle this section is here to keep: when the line holds most PRs
 for the same reason, the reason is a gate to build or a gate that broke,
 and the answer is a test that proves the specific outcome, not a label.
 
+
+## 7. 2026-11-27: the holds that never decided are advisory
+
+An audit of the 1,234 PRs merged to dev from 2026-10-01, their 7,962
+workflow runs and 6,700 comments, asked of each check: did it keep a real
+problem from production, or only delay good work. Sections 1 to 6 describe
+the line as it was built; where they disagree with this section, this
+section is the line as it runs.
+
+| Check | What the record shows | Now |
+| --- | --- | --- |
+| Smart Jev on a release HEAD | 87 runs: 78 INCONCLUSIVE, 9 HARNESS UNAVAILABLE, no PASS, no FAIL | Advisory. `release-deploy-check.mjs` `decide` no longer waits for it or holds on it; the verdict is named in the reason. |
+| Walk | 68 PRs with a FAIL: 17 fixed and walked to PASS, 51 merged with no later PASS. 74 BLOCKED, 18 FLAKY | Advisory. `WALK_POLICY` unset is `advisory`: no verdict holds. `fail-only` and `strict` are the switches back. |
+| `release-verify` | 82 runs, 2 failures, one a runner setup fault | Build and type-check only (`pnpm run build`, each worker's `type-check`). The PRs ran their suites in `ci.yml`. |
+| Adversarial Jev on PRs | 2,041 runs, 234 runner-hours; all 170 red checks were the harness; one attack made 93 of 150 "failure found" comments | Nightly only. |
+| Rollback watch | One rollback, of a strings-only release, on a reconnect burst; the line stopped 32 hours (#2212) | Report only: `release-deploy.yml` passes `AUTO_ROLLBACK: "off"` whatever the variable says. |
+
+What still holds a PR: a holding area with no green gate (`replay-gate`,
+`auth-matrix`, `offline-gate`, `migration-gate`, `plan-diff`, `deps-gate`,
+and `infra` with no gate), until the gate is green or a person adds
+`release:approved`. Those are the outcomes of §1 that cannot be fixed
+forward. Everything else ships on the next cut and is fixed forward: in the
+same eight weeks dev took no revert of a bad merge.
+
+The line still stops on an open `release:halt` issue, which a person can
+open; the watch no longer opens one.

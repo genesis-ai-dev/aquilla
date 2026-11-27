@@ -1010,6 +1010,71 @@ export async function handleBulkImportRequest(
     )
   }
 
+  // AQU-2777: an import target that names no lane addresses the former default
+  // lane (legacy_tag ''), and the bridge spliced into the batch below mints
+  // that lane only on a project with NO target lane at all (AQU-1615). So on a
+  // project whose one target lane carries a real language — what picking a
+  // target language at project creation gives you — nothing resolved
+  // `cells.lane_id`, the NOT NULL column rejected the chunk, and the importer
+  // saw a 500 "DB batch failed" it then retried (the SDBH localized edition
+  // repro). AQU-2554 fixed the source side of that import; this is the target
+  // side, and it is the same family as AQU-1900 / AQU-1902.
+  //
+  // An import's targets are a bulk pre-fill sent with no file open, so the
+  // dialog has no active lane to name. With exactly one unarchived target lane
+  // there is only one lane they can mean: name it on the events BEFORE they are
+  // stored, which is where every other target write has its lane resolved
+  // (AQU-1902) — so the event log, the chain slot and the projection all agree,
+  // and a replay resolves the same lane. With more than one, the import must
+  // not choose for the user: that is a 422 the dialog can report, not a 500 it
+  // retries (AQU-1900's answer on /events).
+  if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
+    let laneRows: { id: string; legacy_tag: string | null; archived_at: string | null }[]
+    try {
+      laneRows = (
+        await db
+          .prepare(
+            `SELECT id, legacy_tag, archived_at FROM lanes
+              WHERE project_id = ? AND role = 'target'`,
+          )
+          .bind(body.projectId)
+          .all<{ id: string; legacy_tag: string | null; archived_at: string | null }>()
+      ).results
+    } catch (err) {
+      console.error('[import] target lane lookup failed:', err)
+      return withCors(Response.json({ error: 'DB batch failed' }, { status: 500 }), request)
+    }
+    // A project that has the '' lane (legacy) resolves as it always did, and one
+    // with no target lane at all gets the bridge below. Neither is touched here.
+    const hasDefaultLane = laneRows.some((lane) => (lane.legacy_tag ?? null) === '')
+    if (laneRows.length > 0 && !hasDefaultLane) {
+      const candidates = laneRows.filter(
+        (lane) => lane.archived_at == null && typeof lane.legacy_tag === 'string' && lane.legacy_tag !== '',
+      )
+      if (candidates.length !== 1) {
+        // Short enough to survive the client's 200-character detail slice
+        // (bulk-import.ts), which is what the import dialog shows the user.
+        return withCors(
+          Response.json(
+            {
+              error: candidates.length === 0
+                ? 'this project has no target language an import can fill'
+                : 'this import named no target language and this project has more than one; open a file in the language to fill, or import the source only',
+              lanes: candidates.map((lane) => lane.legacy_tag),
+            },
+            { status: 422 },
+          ),
+          request,
+        )
+      }
+      const targetLang = candidates[0]!.legacy_tag as string
+      for (const event of targetEvents) {
+        if (laneOfEvent(event.kind, event.payload) !== '') continue
+        event.payload = { ...(event.payload as Record<string, unknown>), targetLang }
+      }
+    }
+  }
+
   try {
     // One counter bump reserves a contiguous server_seq block for every event
     // in this request (file.create first, then cells in payload order — the

@@ -69,6 +69,7 @@ export const org = defineNamespace({
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
+    "org.access.manage": "Manage access",
     "org.access.page.treeView": "By scope",
     "org.access.page.noDirect": "No direct grants",
     "org.access.page.chip": "{role} @ {path}",
@@ -2056,6 +2057,10 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.access.manage": {
+        description:
+          "AQU-2324: button or link on an older member list (organization Members, a team, a project's Members settings, a Language lane's staffing popover) that opens the People & access page on that same place. Short: it sits beside a title or in a popover.",
+      },
       "org.membersPage.createdThisProject": {
         description:
           "AQU-2357: extra note on a member who created this project. It is history, not the source of their role. The role source is Direct, Organization, or a team.",

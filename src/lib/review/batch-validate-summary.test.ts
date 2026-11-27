@@ -294,6 +294,27 @@ describe("summarizeBatchValidate — machine provenance is not an eligibility ru
     expect(optedOut.outcome).toBe("nothing-eligible")
   })
 
+  it("puts a finished cell on the second box and keeps a short cell on the first", () => {
+    const cells = [
+      cell({ id: "none" }),
+      cell({ id: "one", activeValidators: ["joy"] }),
+      cell({ id: "two", activeValidators: ["joy", "sam"] }),
+    ]
+    const required = { ...base, validationCount: 2 }
+    expect(summarizeBatchValidate(cells, required).validatable.map((c) => c.id)).toEqual(["none", "one", "two"])
+    const firstOnly = summarizeBatchValidate(cells, { ...required, includeSignedByOthers: false })
+    expect(firstOnly.validatable.map((c) => c.id)).toEqual(["none", "one"])
+    expect(firstOnly.skips.notChosen).toBe(1)
+    const secondOnly = summarizeBatchValidate(cells, { ...required, includeReadyCells: false })
+    expect(secondOnly.validatable.map((c) => c.id)).toEqual(["two"])
+    expect(secondOnly.skips.notChosen).toBe(2)
+    const oneRequired = summarizeBatchValidate(
+      [cell({ id: "none" }), cell({ id: "joy", activeValidators: ["joy"] })],
+      { ...base, includeSignedByOthers: false },
+    )
+    expect(oneRequired.validatable.map((c) => c.id)).toEqual(["none"])
+  })
+
   it("keeps an AI draft someone else already checked when untouched drafts are left out", () => {
     const summary = summarizeBatchValidate(
       [cell({ id: "second", aiDrafted: true, activeValidators: ["joy"] })],
@@ -640,15 +661,25 @@ describe("summarizeBatchValidate — open check flags are a choice (AQU-2507)", 
     expect(summary.skips.flagged).toBe(0)
   })
 
-  it("reports a flagged untouched AI draft under the AI-draft box, not twice", () => {
-    const summary = summarizeBatchValidate(
+  it("reports a flagged untouched AI draft under the unresolved-checks choice, once", () => {
+    const leftOut = summarizeBatchValidate(
       [cell({ id: "ai", aiDrafted: true })],
       { ...flagged("ai"), includeUntouchedAiDrafts: false },
     )
-    expect(summary.skips.aiDraft).toBe(1)
-    expect(summary.skips.flagged).toBe(0)
-    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
-    expect(bucketed).toBe(summary.skippedTotal)
+    expect(leftOut.skips.flagged).toBe(1)
+    expect(leftOut.skips.aiDraft).toBe(0)
+    expect(leftOut.validatable).toEqual([])
+    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + leftOut.skips[r], 0)
+    expect(bucketed).toBe(leftOut.skippedTotal)
+
+    // The unresolved-checks box is enough. The AI box does not have to be on.
+    const taken = summarizeBatchValidate(
+      [cell({ id: "ai", aiDrafted: true }), cell({ id: "clean", aiDrafted: true })],
+      { ...flagged("ai"), includeUntouchedAiDrafts: false, includeFlaggedCells: true },
+    )
+    expect(taken.validatable.map((c) => c.id)).toEqual(["ai"])
+    expect(taken.skips.flagged).toBe(0)
+    expect(taken.skips.aiDraft).toBe(1)
   })
 })
 

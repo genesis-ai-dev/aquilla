@@ -190,15 +190,42 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
   }
 })
 
+// AQU-2324: the staffed list reads the scope VIEW — the same scopes, plus the
+// person's lane grants. It delegates to mockFetchMemberScopes so every scope
+// test above still drives it, and adds whatever `laneGrants` holds for a user.
+const laneGrants = vi.hoisted(() => ({ byUser: {} as Record<number, { laneId: string; name: string; level: number }[]> }))
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: mockFetchMemberScopes,
-  // The real Languages table (rendered once below) reads the scope view.
-  fetchMemberScopeView: async (jwt: string, projectId: string, userId: number) => ({
-    scopes: (await mockFetchMemberScopes(jwt, projectId, userId)) ?? [],
-    laneNames: {},
-  }),
+  // The real Languages table (rendered once below) reads the scope view too.
+  fetchMemberScopeView: async (jwt: string, projectId: string, userId: number) => {
+    const scopes = await mockFetchMemberScopes(jwt, projectId, userId)
+    const grants = laneGrants.byUser[userId]
+    return {
+      scopes: scopes ?? [],
+      laneNames: {},
+      ...(grants ? { laneAccess: { memberRoleLevel: 400, readWallEnabled: true, grants, targetLanes: [] } } : {}),
+    }
+  },
   putMemberScopes: mockPutMemberScopes,
   fetchMemberLaneAssignments: mockFetchMemberLaneAssignments,
+}))
+
+// AQU-2324: a grant-only row's Remove opens this dialog; the stub shows what for.
+vi.mock("@/components/org/access/RemoveAccessDialog", () => ({
+  RemoveAccessDialog: ({ orgId, person, grants }: { orgId: number; person: { userId?: string }; grants: { type: string; id: string }[] }) => (
+    <div
+      data-testid="remove-access-launch"
+      data-org={orgId}
+      data-user={person.userId}
+      data-grants={grants.map((g) => `${g.type}:${g.id}`).join(",")}
+    />
+  ),
+}))
+
+// AQU-2324: the "Manage access" door shows only for a member of the org.
+vi.mock("@/context/OrgContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/context/OrgContext")>()),
+  useActiveOrgOptional: () => ({ orgs: [{ id: 1 }] }),
 }))
 
 // AQU-2322: the Add opens Give access; the stub shows what it was pre-filled with.
@@ -233,6 +260,7 @@ function pickMaria() {
 beforeEach(() => {
   mockRoster = {}
   mockProjectMembers = []
+  laneGrants.byUser = {}
   mockAddProjectMember.mockClear()
   mockFetchMemberScopes.mockClear()
   mockFetchMemberScopes.mockResolvedValue([])
@@ -657,6 +685,53 @@ describe("StaffLanePopover", () => {
       ])
     })
 
+    // AQU-2324: Give access writes a lane GRANT and no scope row. A list that
+    // read scopes alone left that person off the lane they can open — and a
+    // scopes PUT for them would send an empty set, which means every lane.
+    it("lists someone on this lane through a grant alone, and removes them through the grant's dry run, never a scopes PUT", async () => {
+      staffRoster()
+      scopesByUser({ 10: [{ kind: "lane", value: "ln-es" }], 11: [] })
+      laneGrants.byUser = { 11: [{ laneId: "ln-es", name: "Spanish", level: 400 }] }
+
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-11")).toBeInTheDocument())
+      expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument()
+      // One lane grant is not "their last lane": dropping it narrows access.
+      expect(screen.queryByTestId("staff-lane-last-lane-note-11")).not.toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-remove-11")).toBeEnabled()
+
+      fireEvent.click(screen.getByTestId("staff-lane-remove-11"))
+
+      const launch = await screen.findByTestId("remove-access-launch")
+      expect(launch).toHaveAttribute("data-user", "11")
+      expect(launch).toHaveAttribute("data-grants", "lane:ln-es")
+      expect(mockPutMemberScopes).not.toHaveBeenCalled()
+    })
+
+    it("does not list a grant on another lane", async () => {
+      staffRoster()
+      scopesByUser({ 10: [], 11: [] })
+      laneGrants.byUser = { 11: [{ laneId: "ln-fr", name: "French", level: 400 }] }
+
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-empty")).toBeInTheDocument())
+    })
+
+    it("opens this lane on the Places lens from Manage access", async () => {
+      staffRoster()
+      renderPopover(1, "ln-es")
+      openPopover()
+
+      expect(await screen.findByRole("link", { name: "Manage access" })).toHaveAttribute(
+        "href",
+        "/orgs/1/access?place=lane:ln-es",
+      )
+    })
+
     // The trap the members matrix still falls into: an empty lane list means
     // EVERY lane, so removing someone's only lane grants access instead of
     // revoking it. Nothing is saved, and the note names where to go instead.
@@ -1003,5 +1078,44 @@ describe("StaffLanePopover", () => {
     expect(launch).toHaveAttribute("data-user", "10")
     expect(launch).toHaveAttribute("data-place", "lane:ln-es")
     await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+  })
+
+  // AQU-2324: the walk of PR 2198 found the same remount behind Remove. On the
+  // Languages table a grant-only row's Remove closed the popover and nothing
+  // opened: the removal was held in the popover's state, and the table threw
+  // that away as it rebuilt the cell. The org Projects table, which does not
+  // remount it, showed the dialog.
+  it("in the project's Languages table, a grant-only row's Remove opens the grant's dry run though the table remounts the popover (AQU-2324)", async () => {
+    mockProjectMembers = [
+      { userId: 11, username: "mark", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    laneGrants.byUser = { 11: [{ laneId: "ln-es", name: "Spanish", level: 400 }] }
+    render(
+      <MemoryRouter>
+        <OverviewLaneTable
+          projectId="proj-1"
+          projectName="Mark"
+          orgId={1}
+          jwt="jwt-pm"
+          lanes={[{ lane: "es", laneId: "ln-es", name: "Spanish", role: "target", totalCells: 10, filledCells: 0, validatedCells: 0, lastEditAt: null }]}
+          defaultLanguageLabel="English"
+          extraLanes={[]}
+          files={[]}
+          roleLevel={700}
+          author="pm"
+          canManageLanes
+          canAddLanguage={false}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByTestId("overview-lane-people-es"))
+    fireEvent.click(await screen.findByTestId("staff-lane-remove-11"))
+
+    await waitFor(() => expect(screen.queryByTestId("staff-lane-popover")).not.toBeInTheDocument())
+    const launch = await screen.findByTestId("remove-access-launch")
+    expect(launch).toHaveAttribute("data-org", "1")
+    expect(launch).toHaveAttribute("data-user", "11")
+    expect(launch).toHaveAttribute("data-grants", "lane:ln-es")
+    expect(mockPutMemberScopes).not.toHaveBeenCalled()
   })
 })

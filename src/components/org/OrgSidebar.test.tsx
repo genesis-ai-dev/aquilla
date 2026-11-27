@@ -335,7 +335,21 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
-    expect(screen.getByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access-audit")
+    // AQU-2324: the audit is the People lens; with People & access in the nav
+    // a second entry to the same page would only be a duplicate.
+    expect(screen.getByRole("link", { name: "People & access" })).toHaveAttribute("href", "/orgs/1/access")
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
+  })
+
+  it("keeps an Access audit door into the People lens for an admin the roster floor hides People & access from", async () => {
+    rosterSettings.canViewRoster = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access?lens=people")
+    expect(screen.queryByRole("link", { name: "People & access" })).not.toBeInTheDocument()
   })
 })
 

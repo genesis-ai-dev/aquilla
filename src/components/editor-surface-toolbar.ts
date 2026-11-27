@@ -21,6 +21,7 @@ export const EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS = "size-8 p-0 bg-card shadow-
  * agent working set.
  */
 const AGENT_SURFACE_FILE_OPTION_IDS = new Set([
+  "file-details",
   "file-rename",
   "file-move",
   "assign-work",

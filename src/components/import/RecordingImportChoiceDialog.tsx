@@ -5,7 +5,8 @@
 //   • Two choices side by side, both plain (outline), with Cancel quieter
 //     (ghost) — so neither looks like the default and Enter does nothing until
 //     one is picked.
-//   • Import whole recording(s): one Source audio line each (plus the film).
+//   • Import: the whole recording, one Source audio line each (plus the film);
+//     the note above the buttons says "whole", so the button is just the verb.
 //   • Import and transcribe…: a second step shows what it will cost — minutes,
 //     requests, roughly how long, the model, and credits — before anything
 //     runs. Back (the arrow) returns to the choice.
@@ -133,7 +134,7 @@ export function RecordingImportChoiceDialog({
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button variant="ghost" onClick={onCancel} disabled={busy}>{t("common.cancel")}</Button>
                 <Button variant="outline" onClick={onWhole} disabled={busy} data-testid="recording-import-whole">
-                  {t("importExport.recordingChoice.importWhole", { count: files.length })}
+                  {t("importExport.recordingChoice.import")}
                 </Button>
                 <span className="inline-flex items-center gap-0.5">
                   <Button variant="outline" disabled={busy || block !== null} onClick={() => setStep("cost")}

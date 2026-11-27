@@ -5420,7 +5420,7 @@ export const bn: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"এগুলোর {count}টি {maxSize}-এর বেশি, তাই এগুলোর ভেতরের ক্যাপশন দেখা হয়নি। যদি থাকে, সেগুলো এগুলোর সাথে সাবটাইটেল ফাইল হিসেবে আমদানি করুন।","other":"এগুলোর {count}টি {maxSize}-এর বেশি, তাই এগুলোর ভেতরের ক্যাপশন দেখা হয়নি। যদি থাকে, সেগুলো এগুলোর সাথে সাবটাইটেল ফাইল হিসেবে আমদানি করুন।"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "মোট",
   "importExport.recordingChoice.list": "আমদানির রেকর্ডিং",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"পুরো রেকর্ডিং আমদানি করুন","other":"পুরো রেকর্ডিং আমদানি করুন"},"countVar":"count"},
+  "importExport.recordingChoice.import": "আমদানি করুন",
   "importExport.recordingChoice.importTranscribe": "আমদানি ও প্রতিলিপি করুন…",
   "importExport.recordingChoice.whyNot": "আপনি এখানে কেন প্রতিলিপি করতে পারবেন না",
   "importExport.recordingChoice.costTitle": "{name} আমদানি ও প্রতিলিপি করুন",

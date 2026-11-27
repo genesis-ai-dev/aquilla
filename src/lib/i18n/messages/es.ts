@@ -5290,7 +5290,7 @@ export const es: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} de estos supera {maxSize}, así que no se revisó si tiene subtítulos incrustados. Si los tiene, impórtalos como archivo de subtítulos junto con él.","many":"{count} de estos superan {maxSize}, así que no se revisó si tienen subtítulos incrustados. Si los tienen, impórtalos como archivos de subtítulos junto con ellos.","other":"{count} de estos superan {maxSize}, así que no se revisó si tienen subtítulos incrustados. Si los tienen, impórtalos como archivos de subtítulos junto con ellos."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "En total",
   "importExport.recordingChoice.list": "Grabaciones para importar",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Importar la grabación entera","many":"Importar las grabaciones enteras","other":"Importar las grabaciones enteras"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Importar",
   "importExport.recordingChoice.importTranscribe": "Importar y transcribir…",
   "importExport.recordingChoice.whyNot": "Por qué no puedes transcribir aquí",
   "importExport.recordingChoice.costTitle": "Importar y transcribir {name}",

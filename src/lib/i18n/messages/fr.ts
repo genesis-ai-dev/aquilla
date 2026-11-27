@@ -4695,7 +4695,7 @@ export const fr: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} de ces fichiers dépasse {maxSize}, ses sous-titres intégrés n'ont donc pas été vérifiés. S'il en a, importez-les comme fichier de sous-titres avec lui.","many":"{count} de ces fichiers dépassent {maxSize}, leurs sous-titres intégrés n'ont donc pas été vérifiés. S'ils en ont, importez-les comme fichiers de sous-titres avec eux.","other":"{count} de ces fichiers dépassent {maxSize}, leurs sous-titres intégrés n'ont donc pas été vérifiés. S'ils en ont, importez-les comme fichiers de sous-titres avec eux."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Au total",
   "importExport.recordingChoice.list": "Enregistrements à importer",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Importer l'enregistrement entier","many":"Importer les enregistrements entiers","other":"Importer les enregistrements entiers"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Importer",
   "importExport.recordingChoice.importTranscribe": "Importer et transcrire…",
   "importExport.recordingChoice.whyNot": "Pourquoi vous ne pouvez pas transcrire ici",
   "importExport.recordingChoice.costTitle": "Importer et transcrire {name}",

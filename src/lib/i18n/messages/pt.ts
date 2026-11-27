@@ -5294,7 +5294,7 @@ export const pt: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} destes passa de {maxSize}, então não foi verificado se tem legendas dentro. Se tiver, importe-as como arquivo de legenda junto com ele.","many":"{count} destes passam de {maxSize}, então não foi verificado se têm legendas dentro. Se tiverem, importe-as como arquivos de legenda junto com eles.","other":"{count} destes passam de {maxSize}, então não foi verificado se têm legendas dentro. Se tiverem, importe-as como arquivos de legenda junto com eles."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "No total",
   "importExport.recordingChoice.list": "Gravações para importar",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Importar a gravação inteira","many":"Importar as gravações inteiras","other":"Importar as gravações inteiras"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Importar",
   "importExport.recordingChoice.importTranscribe": "Importar e transcrever…",
   "importExport.recordingChoice.whyNot": "Por que você não pode transcrever aqui",
   "importExport.recordingChoice.costTitle": "Importar e transcrever {name}",

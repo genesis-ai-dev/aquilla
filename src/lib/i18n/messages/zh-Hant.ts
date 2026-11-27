@@ -4648,7 +4648,7 @@ export const zh_Hant: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"其中 {count} 個超過 {maxSize}，所以沒有檢查其中是否內嵌字幕。如果有，請把它們當作字幕檔一起匯入。"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "合計",
   "importExport.recordingChoice.list": "要匯入的錄音",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"整段匯入錄音"},"countVar":"count"},
+  "importExport.recordingChoice.import": "匯入",
   "importExport.recordingChoice.importTranscribe": "匯入並轉錄…",
   "importExport.recordingChoice.whyNot": "為什麼無法在這裡轉錄",
   "importExport.recordingChoice.costTitle": "匯入並轉錄 {name}",

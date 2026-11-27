@@ -5407,7 +5407,7 @@ export const sw: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"{count} kati ya hizi ni zaidi ya {maxSize}, kwa hiyo haikukaguliwa kama ina manukuu ndani yake. Ikiwa nayo, yaingize kama faili ya manukuu pamoja nayo.","other":"{count} kati ya hizi ni zaidi ya {maxSize}, kwa hiyo hazikukaguliwa kama zina manukuu ndani yake. Zikiwa nayo, yaingize kama faili za manukuu pamoja nazo."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Jumla",
   "importExport.recordingChoice.list": "Rekodi za kuingiza",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"Ingiza rekodi nzima","other":"Ingiza rekodi nzima zote"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Ingiza",
   "importExport.recordingChoice.importTranscribe": "Ingiza na uandikishe…",
   "importExport.recordingChoice.whyNot": "Kwa nini huwezi kuandikisha hapa",
   "importExport.recordingChoice.costTitle": "Ingiza na uandikishe {name}",

@@ -5416,7 +5416,7 @@ export const am: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"one":"ከእነዚህ {count} ከ{maxSize} በላይ ናቸው፣ ስለዚህ በውስጣቸው ያሉ መግለጫ ጽሑፎች አልተፈተሹም። ካሏቸው፣ ከእነሱ ጋር እንደ የንዑስ ጽሑፍ ፋይሎች ያስመጧቸው።","other":"ከእነዚህ {count} ከ{maxSize} በላይ ናቸው፣ ስለዚህ በውስጣቸው ያሉ መግለጫ ጽሑፎች አልተፈተሹም። ካሏቸው፣ ከእነሱ ጋር እንደ የንዑስ ጽሑፍ ፋይሎች ያስመጧቸው።"},"countVar":"count"},
   "importExport.recordingChoice.inAll": "በአጠቃላይ",
   "importExport.recordingChoice.list": "የሚገቡ ቀረጻዎች",
-  "importExport.recordingChoice.importWhole": {"forms":{"one":"ሙሉ ቀረጻውን ያስመጡ","other":"ሙሉ ቀረጻዎቹን ያስመጡ"},"countVar":"count"},
+  "importExport.recordingChoice.import": "ያስመጡ",
   "importExport.recordingChoice.importTranscribe": "ያስመጡ እና ይገልብጡ…",
   "importExport.recordingChoice.whyNot": "እዚህ መገልበጥ የማይችሉበት ምክንያት",
   "importExport.recordingChoice.costTitle": "{name}ን ያስመጡ እና ይገልብጡ",

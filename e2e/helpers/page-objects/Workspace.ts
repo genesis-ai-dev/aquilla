@@ -116,14 +116,15 @@ export class Workspace {
 
   /**
    * AQU-2426: a recording with no subtitle file stops at a choice — nothing
-   * is cut or transcribed on its own. "whole" brings it in as one line;
-   * "transcribe" goes through the cost step and starts transcription.
+   * is cut or transcribed on its own. "whole" presses Import (the note
+   * above it says the recording comes in whole, as one line); "transcribe"
+   * goes through the cost step and starts transcription.
    */
   async answerRecordingChoice(choice: "whole" | "transcribe"): Promise<void> {
     const dialog = this.page.getByTestId("recording-import-choice")
     await expect(dialog).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     if (choice === "whole") {
-      await dialog.getByTestId("recording-import-whole").click()
+      await dialog.getByRole("button", { name: "Import", exact: true }).click()
     } else {
       await dialog.getByTestId("recording-import-transcribe").click()
       await dialog.getByTestId("recording-import-transcribe-go").click()

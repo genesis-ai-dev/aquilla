@@ -4724,7 +4724,7 @@ export const id: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"{count} di antaranya lebih dari {maxSize}, jadi tidak diperiksa apakah ada takarir di dalamnya. Jika ada, impor takarir itu sebagai file takarir bersamanya."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Total",
   "importExport.recordingChoice.list": "Rekaman yang akan diimpor",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"Impor rekaman utuh"},"countVar":"count"},
+  "importExport.recordingChoice.import": "Impor",
   "importExport.recordingChoice.importTranscribe": "Impor dan transkripsikan…",
   "importExport.recordingChoice.whyNot": "Mengapa Anda tidak dapat mentranskripsi di sini",
   "importExport.recordingChoice.costTitle": "Impor dan transkripsikan {name}",

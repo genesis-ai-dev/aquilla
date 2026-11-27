@@ -4611,7 +4611,6 @@ export const ms: Catalog = {
   "importExport.recordingChoice.captionsNotReadMany": {"forms":{"other":"{count} daripadanya melebihi {maxSize}, jadi ia tidak disemak untuk sari kata di dalamnya. Jika ada, import sari kata itu sebagai fail sari kata bersamanya."},"countVar":"count"},
   "importExport.recordingChoice.inAll": "Jumlah",
   "importExport.recordingChoice.list": "Rakaman untuk diimport",
-  "importExport.recordingChoice.importWhole": {"forms":{"other":"Import rakaman seluruhnya"},"countVar":"count"},
   "importExport.recordingChoice.importTranscribe": "Import dan transkrip…",
   "importExport.recordingChoice.whyNot": "Mengapa anda tidak boleh mentranskrip di sini",
   "importExport.recordingChoice.costTitle": "Import dan transkrip {name}",

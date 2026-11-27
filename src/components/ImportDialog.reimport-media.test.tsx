@@ -102,7 +102,7 @@ describe("Re-import with a recording or film", () => {
     })
     // AQU-2426: with no subtitle file, the import's last step asks first.
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Import" }))
       await new Promise((r) => setTimeout(r, 0))
     })
 
@@ -154,7 +154,7 @@ describe("Re-import with a recording through Google Drive", () => {
       await new Promise((r) => setTimeout(r, 0))
     })
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Import" }))
       await new Promise((r) => setTimeout(r, 0))
     })
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))

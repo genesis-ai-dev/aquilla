@@ -112,6 +112,8 @@ export interface Env {
   /** ID of the "Frontier R&D Newsletter" segment in that Resend account. */
   NEWSLETTER_RESEND_SEGMENT_ID?: string
   BASE_URL?: string
+  /** Optional: public help site read by the docs tool's help topic. Unset = https://help.aquilla.app. */
+  HELP_SITE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome
    *  email includes a "join the community" CTA; when absent the email simply

@@ -41,7 +41,7 @@ import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
-import { helpIndex, helpPage } from './help-site'
+import { helpIndex, helpPage } from '../../../db/shared/help-site'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -665,7 +665,7 @@ function getSkillTool(args: Record<string, unknown>): McpToolResult {
 
 // ── get_help ─────────────────────────────────────────────────────────────────
 
-/** AQU-2581: app help from the public help site (help-site.ts). Like get_skill,
+/** AQU-2581: app help from the public help site (db/shared/help-site.ts). Like get_skill,
  *  no role gate and no projectId: the pages are public text. The helpers never
  *  throw, so an outage is a tool error and the other tools are unaffected. */
 async function getHelpTool(env: ExternalEnv, args: Record<string, unknown>): Promise<McpToolResult> {

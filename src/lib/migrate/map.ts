@@ -31,6 +31,7 @@ import {
 } from "./ids"
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
+import { codexFootnotesToUsfm } from "./codex-footnotes"
 import { isKnownBookCode } from "../file-labeling/bible-book-names"
 import { legacyCodexFileMeta, legacyFileTypeFor } from "./file-type"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
@@ -404,9 +405,12 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       : legacyIdmlStructure(t) || t?.metadata.idml
         ? t
         : undefined
-    const srcHtml = proof
+    // Codex footnotes live in a `data-footnote` attribute. Convert them to
+    // `\f…\f*` before the plain-text projection, or the note is stripped and
+    // the caller digit is left in the verse (AQU-2735).
+    const srcHtml = codexFootnotesToUsfm(proof
       ? proof.sourceHtml
-      : s?.value ?? ordered.value ?? ""
+      : s?.value ?? ordered.value ?? "")
     const sourceMetadata = proof && carrier && idmlAssessment?.sourceSha256
       ? {
           ...canonicalIdmlCellMetadata(proof.unit, carrier, physicalOrder),
@@ -508,7 +512,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       // exists but predates the edit ledger. (Milestone cells never get here —
       // they are retracted above, AQU-930.)
       if (t.value && t.value.trim() !== "") {
-        const targetHtml = canonicalTargetWithProof(proof, s, t, t.value)
+        const targetHtml = codexFootnotesToUsfm(canonicalTargetWithProof(proof, s, t, t.value))
         events.push({
           id: targetCommitEventId(projectId, fileId, cellId, 0),
           kind: "target.cell.commit",
@@ -530,7 +534,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     let headIdx = -1
     for (const { e, i } of valueEdits) {
       const html = editValueHtml(e)
-      const targetHtml = canonicalTargetWithProof(proof, s, t, html)
+      const targetHtml = codexFootnotesToUsfm(canonicalTargetWithProof(proof, s, t, html))
       const id = targetCommitEventId(projectId, fileId, cellId, i)
       events.push({
         id,

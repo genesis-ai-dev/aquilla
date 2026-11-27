@@ -92,6 +92,8 @@ export const nav = defineNamespace({
     // -- workspace-actions/registry.ts: the file-scoped action menu (⋯) and its
     // per-action confirmation dialogs, rendered through ConfirmActionDialog. --
     "nav.workspaceActions.import": "Import",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "nav.workspaceActions.moreAria": "More actions",
     "nav.workspaceActions.runCompletions.label": "Draft next batch",
     "nav.workspaceActions.runCompletions.title": "Draft next untranslated cells",
     "nav.workspaceActions.runCompletions.description": plural(
@@ -497,6 +499,10 @@ export const nav = defineNamespace({
       maxLength: 24,
     },
     keys: {
+      "nav.workspaceActions.moreAria": {
+        description:
+          "Screen-reader name of the '⋯' icon button beside Import in the project header, which opens a menu of further project actions. Not visible text.",
+      },
       "nav.projects": {
         description:
           "Sidebar link to the list of translation projects the user belongs to. Plural " +

@@ -9,6 +9,7 @@
  * no Web Audio.
  */
 
+import { withTrackVolumes } from "@/lib/audio/track-volume"
 import type { CellData } from "@/hooks/useCells"
 import { loadProjectCellFiles } from "@/hooks/useProjectCells"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
@@ -451,7 +452,10 @@ export async function buildProjectExport(
     if (audioMode !== null) {
       try {
         const [bareCells, listing] = await Promise.all([getCells(), getAudioListing(file, lane)])
-        const cells = mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells)))
+        // AQU-2664 re-check S5: each take carries its track's volume, which the
+        // one gain helper (export/clip-level.ts exportGainDb) applies: a track
+        // at −∞ is silent here as in every editor export.
+        const cells = withTrackVolumes(mergeCellsWithAudio(bareCells, new Map(Object.entries(listing.cells))), file.trackOverrides)
         const result = await assembleAudio({
           cells,
           settings: deps.ttsSettings,

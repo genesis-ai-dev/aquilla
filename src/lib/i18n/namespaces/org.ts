@@ -20,6 +20,7 @@ export const org = defineNamespace({
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
     "org.access.roleBadge.via": "{role} · via {path}",
+    "org.access.roleBadge.lanes": "{role} · {lanes}",
     "org.access.roleBadge.origin": "{role} · {origin}",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",
@@ -81,7 +82,6 @@ export const org = defineNamespace({
     "org.access.places.tab": "Places",
     "org.access.places.search": "Search people or places",
     "org.access.places.giveAccess": "Give access",
-    "org.access.places.giveAccessSoon": "Coming next",
     "org.access.places.grantedHere": "Granted here",
     "org.access.places.reachesHere": "Reaches here from above",
     "org.access.places.noReaches": "No one reaches this place from above",
@@ -109,6 +109,158 @@ export const org = defineNamespace({
       one: "{count} reaches it from {from}",
       other: "{count} reach it from {from}",
     }),
+
+    // -- AQU-2320 Give access: "Give [person] the role [role] at [place]" + What changes --
+    "org.access.give.title": "Give access",
+    "org.access.give.description": "Fill in the sentence. Nothing is saved until you confirm.",
+    "org.access.give.wordGive": "Give",
+    "org.access.give.wordRole": "the role",
+    "org.access.give.wordAt": "at",
+    "org.access.give.personBlank": "person",
+    "org.access.give.roleBlank": "role",
+    "org.access.give.placeBlank": "place",
+    "org.access.give.personLabel": "Person",
+    "org.access.give.roleLabel": "Role",
+    "org.access.give.placeLabel": "Place",
+    "org.access.give.personSearch": "Search people or type an email",
+    "org.access.give.placeSearch": "Search places",
+    "org.access.give.noPeople": "No one matches. Type a full email address to invite them.",
+    "org.access.give.noPlaces": "No places match",
+    "org.access.give.noRoles": "No role you can give fits this place",
+    "org.access.give.inviteEmail": "Invite {email}",
+    "org.access.give.theirPlaces": "Where {name} has access",
+    "org.access.give.allPlaces": "All places",
+    "org.access.give.denied.owner_only": "Only an Owner can grant here",
+    "org.access.give.denied.maintainer_only": "Only a Maintainer can grant on a team",
+    "org.access.give.denied.lead_only": "Only a Project lead can grant here",
+    "org.access.give.denied.team_above_you": "This team holds a role above yours",
+    "org.access.give.denied.no_team_invite": "Invitations go to an organization, project or language, not a team",
+    "org.access.give.reset.not_offered": "{role} isn't a role on a {place}, so the role was cleared.",
+    "org.access.give.reset.above_cap": "{role} is above your own role there ({cap}), so the role was cleared.",
+    "org.access.give.reset.above_invite_cap": "An invitation carries at most {cap}, so the role was cleared.",
+    "org.access.give.whatChanges": "What changes",
+    "org.access.give.previewIdle": "Choose a person, a role and a place to see what changes.",
+    "org.access.give.previewLoading": "Checking what changes…",
+    "org.access.give.previewError": "Couldn't check this grant. Close the dialog and try again.",
+    "org.access.give.redundant": "Already {role} here via {via}; this adds nothing.",
+    "org.access.give.gainsHere": "Gets {role} at {path}",
+    "org.access.give.replaces": "Replaces their {role} grant here",
+    "org.access.give.raises": plural({
+      one: "Raises {from} to {to} on {count} project",
+      other: "Raises {from} to {to} on {count} projects",
+    }),
+    "org.access.give.lowers": plural({
+      one: "Lowers {from} to {to} on {count} project",
+      other: "Lowers {from} to {to} on {count} projects",
+    }),
+    "org.access.give.opens": plural({
+      one: "Opens {count} project as {role}",
+      other: "Opens {count} projects as {role}",
+    }),
+    "org.access.give.staysGuest": "Stays a Guest: no organization membership",
+    "org.access.give.becomesMember": "Becomes a member of the organization",
+    "org.access.give.futureProjects": "Projects attached to {team} later are included",
+    "org.access.give.inviteNote": "Sends an invitation to {email}. It expires in 30 days.",
+    "org.access.give.narrowToLane": "Narrow to one Language lane below",
+    "org.access.give.laneOnly": "Opens {lane} only. The project's other languages stay closed to them.",
+    "org.access.give.laneNotRestricted": "Narrowed to {lane}, but access to the project's other languages is not restricted yet.",
+    "org.access.give.submit": "Give access",
+    "org.access.give.submitInvite": "Send invite",
+    "org.access.give.done": "{name} is now {role} at {path}",
+    "org.access.give.invited": "Invited {email} as {role} at {path}",
+    "org.access.give.submitError": "Couldn't give access. Nothing was changed.",
+    "org.access.give.loadError": "Couldn't open Give access. You may not be able to see this organization's people.",
+
+    // -- AQU-2321 Places lens editing: change a direct row's role, remove a grant (keeps / loses) --
+    "org.access.edit.changeRole": "Change {name}'s role",
+    "org.access.edit.remove": "Remove {name}'s access here",
+    "org.access.edit.cancelInvite": "Cancel the invitation to {email}",
+    "org.access.edit.roleChanged": "{name} is now {role} at {path}",
+    "org.access.edit.roleError": "Couldn't change the role. Nothing was changed.",
+    "org.access.edit.denied.owner_only": "Only an Owner can change organization roles",
+    "org.access.edit.denied.maintainer_only": "Only an org Maintainer can change team members",
+    "org.access.edit.denied.lead_only": "Only a Project lead or above here can change this",
+    "org.access.edit.denied.team_above_you": "This team holds a role above yours",
+    "org.access.edit.denied.maintainer_on_project": "Only a Maintainer or above on this project can remove its members",
+    "org.access.edit.denied.target_outranks": "They hold a role at or above yours ({cap})",
+    "org.access.edit.denied.self": "You can't change your own access here",
+    "org.access.edit.denied.lanes": "This is their language access. Change it on each language below the project.",
+    "org.access.edit.denied.creator": "Creator access comes with making the project and can't be changed",
+    "org.access.edit.denied.invite": "An invitation's role is set when it's sent. Cancel it and send a new one.",
+    "org.access.remove.title": "Remove {name}'s access",
+    "org.access.remove.titleInvite": "Cancel the invitation to {email}",
+    "org.access.remove.description": "Nothing changes until you confirm.",
+    "org.access.remove.removes": "Removes {role} at {path}",
+    "org.access.remove.removesTeam": "Removes them from the team {team}",
+    "org.access.remove.removesWithLastLane": "Also ends their {role} membership of {path}: only their language grants opened it",
+    "org.access.remove.laneLoses": "Can no longer open {lane}",
+    "org.access.remove.laneOpenedNothing": "Their {lane} grant opened nothing on its own; removing it tidies the list",
+    "org.access.remove.laneStillOpens": "Still opens {lane} as {role} through their project role",
+    "org.access.remove.laneNotRestricted": "Still opens {lane}: access to a project's languages is not restricted yet",
+    "org.access.remove.loading": "Checking what changes…",
+    "org.access.remove.error": "Couldn't check this removal. Close the dialog and try again.",
+    "org.access.remove.losesHeading": "Loses",
+    "org.access.remove.loses": "Can no longer open {list}",
+    "org.access.remove.losesNothing": "Every project they open now stays open.",
+    "org.access.remove.inviteLoses": "The invitation to {list} stops working",
+    "org.access.remove.andMore": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
+    "org.access.remove.leavesTeams": "Also leaves {list}: removing someone from the organization takes them off its teams",
+    "org.access.remove.becomesGuest": "Becomes a Guest: no organization membership",
+    "org.access.remove.keepsHeading": "Keeps",
+    "org.access.remove.keepsDirect": "{role} on {project} through their direct grant there, given {date}",
+    "org.access.remove.keepsDirectUndated": "{role} on {project} through their direct grant there",
+    "org.access.remove.keepsTeam": "{role} on {project} through the team {team}",
+    "org.access.remove.keepsOrg": "{role} on {project} through their organization role",
+    "org.access.remove.keepsCreator": "{role} on {project} as its creator",
+    "org.access.remove.keepsHidden": "{role} on {project} through a grant you can't see",
+    "org.access.remove.alsoRemove": "Also remove these. Other grants are left as they are.",
+    "org.access.remove.alsoDirect": "Also remove their {role} grant on {project}",
+    "org.access.remove.alsoTeam": "Also remove them from the team {team}",
+    "org.access.remove.alsoOrg": "Also remove them from the organization",
+    "org.access.remove.confirm": "Remove access",
+    "org.access.remove.confirmInvite": "Cancel invitation",
+    "org.access.remove.keepInvite": "Keep invitation",
+    "org.access.remove.done": "{name} no longer has that access",
+    "org.access.remove.doneInvite": "Invitation to {email} cancelled",
+    "org.access.remove.failed": "Couldn't remove access. Nothing was changed.",
+    "org.access.remove.partial": "Removed {done} of {total}, then a removal failed. The list shows what changed.",
+
+    // -- AQU-2319 People lens: one roster, reach columns, CSV and print --
+    "org.access.people.person": "Person",
+    "org.access.people.highestRole": "Highest role",
+    "org.access.people.grantedAt": "Granted at",
+    "org.access.people.reaches": "Reaches",
+    "org.access.people.lastActive": "Last active",
+    "org.access.people.noAccessYet": "No access yet",
+    "org.access.people.invited": "Invited",
+    "org.access.people.noActivity": "No recent activity",
+    "org.access.people.noMatches": "No one matches",
+    "org.access.people.membershipOpensNothing": "Nothing. Org membership alone opens no project.",
+    "org.access.people.everything": "Everything · {teams}, {projects}",
+    "org.access.people.teamCount": plural({
+      one: "{count} team",
+      other: "{count} teams",
+    }),
+    "org.access.people.projectCount": plural({
+      one: "{count} project",
+      other: "{count} projects",
+    }),
+    "org.access.people.laneCount": plural({
+      one: "{count} language lane",
+      other: "{count} language lanes",
+    }),
+    "org.access.people.filterEveryone": "Everyone",
+    "org.access.people.filterMembers": "Members",
+    "org.access.people.filterGuests": "Guests",
+    "org.access.people.filterInvites": "Pending invites",
+    "org.access.people.filterGranters": "Can give access",
+    "org.access.people.filterInactive": "Inactive 90 days",
+    "org.access.people.extraGrants": "+{count}",
+    "org.access.people.filtersAriaLabel": "Filter the people list",
+    "org.access.people.openPersonAriaLabel": "Open {name}",
 
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
@@ -407,6 +559,13 @@ export const org = defineNamespace({
     "org.teamsList.pageDescription": "Group members and grant project access together.",
     "org.teamsList.newTeamButton": "New team",
     "org.teamsList.searchPlaceholder": "Search teams…",
+    // ── AQU-2740: strings that were hard-coded in English at the call site ──
+    "org.membersTable.searchPlaceholder": "Search by name or email",
+    "org.teamDetail.projectsSearchPlaceholder": "Search by name",
+    "org.archivedProjects.searchPlaceholder": "Search archived projects…",
+    "org.archivedProjects.deletedFilesSearchPlaceholder": "Search deleted files…",
+    "org.assignedToMe.searchPlaceholder": "Search assignments…",
+    "org.projectOverview.archiveConfirmCheckbox": "I understand this project will be hidden from the active list.",
     "org.teamsList.sortByAriaLabel": "Sort teams by",
     "org.teamsList.sortNameLabel": "Name (A–Z)",
     "org.teamsList.sortMembersLabel": "Members (most first)",
@@ -1841,6 +2000,55 @@ export const org = defineNamespace({
     // existing org.teamsList.* / org.teamForm.* / common.* / editor.navTitle.* /
     // nav.* keys already defined above; only one genuinely new string. --
     "org.teamsList.noTeamsMatchSearch": "No teams match your search.",
+    // -- AQU-2323: the person inspector (/orgs/:id/access/people/:userId) --
+    "org.access.person.title": "{name}'s access",
+    "org.access.person.back": "Back to People & access",
+    "org.access.person.lastActive": "Last active {time}",
+    "org.access.person.grantCount": plural({
+      one: "{count} grant",
+      other: "{count} grants",
+    }),
+    "org.access.person.reachesProjects": plural({
+      one: "Reaches {count} project",
+      other: "Reaches {count} projects",
+    }),
+    "org.access.person.removeAll": "Remove all access",
+    "org.access.person.whereHeading": "Where {name} can go",
+    "org.access.person.nowhere": "{name} cannot open any place you can see.",
+    "org.access.person.reasonDirect": "Granted here",
+    "org.access.person.reasonCreator": "Created this project",
+    "org.access.person.reasonVia": "Reaches here through {place}",
+    "org.access.person.reasonViaHidden": "Reaches here through a place you cannot see",
+    "org.access.person.reasonAlso": "{list} gives the same role",
+    "org.access.person.reasonRedundant": "The grant here adds nothing over {list}",
+    "org.access.person.hiddenPlace": "a place you cannot see",
+    "org.access.person.orgCount": plural({
+      one: "{count} organization",
+      other: "{count} organizations",
+    }),
+    "org.access.person.noAccessTitle": "No access",
+    "org.access.person.noAccessHint": "Click a place to give access there",
+    "org.access.person.giveHere": "Give access here",
+    "org.access.person.giveHereAriaLabel": "Give {name} access at {path}",
+    "org.access.person.grantsHeading": "Grants",
+    "org.access.person.noGrants": "No direct grants you can see.",
+    "org.access.person.grantedBy": "Given by {name} on {date}",
+    "org.access.person.grantedOn": "Given on {date}",
+    "org.access.person.grantedUnknown": "No record of when it was given",
+    "org.access.person.gives": "Gives {list}",
+    "org.access.person.redundant": "Redundant, safe to remove",
+    "org.access.person.creatorCard": "Creator of this project. This cannot be removed.",
+    "org.access.person.removeGrant": "Remove {role} at {path}",
+    "org.access.person.historyHeading": "History",
+    "org.access.person.historyEmpty": "Nothing recorded yet.",
+    "org.access.person.historyNote": "Shows when each grant still in place was given, and changes made by platform staff. Other changes are not recorded yet.",
+    "org.access.person.history.granted": "{by} gave {role} at {path}",
+    "org.access.person.history.grantedNoActor": "Given {role} at {path}",
+    "org.access.person.history.changed": "{by} changed {path} from {before} to {after}",
+    "org.access.person.history.changedNoActor": "{path} changed from {before} to {after}",
+    "org.access.person.history.removed": "{by} removed {role} at {path}",
+    "org.access.person.history.removedNoActor": "{role} at {path} was removed",
+
   },
   context: {
     _context: {
@@ -1851,6 +2059,30 @@ export const org = defineNamespace({
       "org.membersPage.createdThisProject": {
         description:
           "AQU-2357: extra note on a member who created this project. It is history, not the source of their role. The role source is Direct, Organization, or a team.",
+      },
+      "org.membersTable.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above a list of people (org members, project members, a team's members). Typing filters the list by display name or email address.",
+      },
+      "org.teamDetail.projectsSearchPlaceholder": {
+        description:
+          "Placeholder in the search box above a team's list of projects. Typing filters the projects by project name.",
+      },
+      "org.archivedProjects.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above the list of archived projects on the Archived projects page.",
+      },
+      "org.archivedProjects.deletedFilesSearchPlaceholder": {
+        description:
+          "Placeholder in the search box above the list of deleted files on the Archived projects page.",
+      },
+      "org.assignedToMe.searchPlaceholder": {
+        description:
+          "Placeholder in the search box above the 'Assigned to me' table, which lists the chapters and files assigned to the signed-in user.",
+      },
+      "org.projectOverview.archiveConfirmCheckbox": {
+        description:
+          "Checkbox the user must tick before the Archive button in the 'Archive project' confirmation enables. First person, the user's own acknowledgement.",
       },
       "org.roleDialog.addPersonTitle": {
         description:
@@ -1884,6 +2116,14 @@ export const org = defineNamespace({
       "org.access.origin.inheritedFrom": {
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.roleBadge.lanes": {
+        description:
+          "AQU-2322: the solid role pill on a project for someone whose access there is language-lane grants: the role, then the languages.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Contributor\".",
+          lanes: "Comma-separated language lane names, e.g. \"Spanish\"; never translated.",
+        },
       },
       "org.access.roleBadge.via": {
         description:
@@ -1958,6 +2198,268 @@ export const org = defineNamespace({
           count: "Number of inherited sources at this place; also selects the plural form.",
           from: "Already-translated phrase naming the organization or the word above.",
         },
+      },
+      "org.access.give.laneOnly": {
+        description: "AQU-2322: What changes line for a language-lane grant while the lane read wall is on.",
+        placeholders: { lane: "The language lane's name, e.g. \"Spanish\"; never translated." },
+      },
+      "org.access.give.laneNotRestricted": {
+        description:
+          "AQU-2322: What changes line for a language-lane grant while the lane read wall is off: the grant is recorded, but other languages still open.",
+        placeholders: { lane: "The language lane's name, e.g. \"Spanish\"; never translated." },
+      },
+      "org.access.remove.removesWithLastLane": {
+        description:
+          "AQU-2322: Remove dialog line when removing someone's last language-lane grant also ends the project membership it opened.",
+        placeholders: {
+          role: "Localized role label of that membership.",
+          path: "Scope breadcrumb of the project; never translated.",
+        },
+      },
+      "org.access.remove.laneLoses": {
+        description: "AQU-2322: Remove dialog line: after the removal they can no longer open this language lane.",
+        placeholders: { lane: "The language lane's name; never translated." },
+      },
+      "org.access.remove.laneOpenedNothing": {
+        description: "AQU-2322: Remove dialog line: the lane grant being removed did not open anything, because nothing opened its project.",
+        placeholders: { lane: "The language lane's name; never translated." },
+      },
+      "org.access.remove.laneStillOpens": {
+        description: "AQU-2322: Remove dialog line: the lane still opens after the removal, through the person's role on the whole project.",
+        placeholders: { lane: "The language lane's name; never translated.", role: "Localized role label they keep there." },
+      },
+      "org.access.remove.laneNotRestricted": {
+        description: "AQU-2322: Remove dialog line while the lane read wall is off: the lane still opens, because languages are not restricted yet.",
+        placeholders: { lane: "The language lane's name; never translated." },
+      },
+      "org.access.edit.changeRole": {
+        description: "AQU-2321: accessible name of the role pill on a direct grant, which opens the role dropdown.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.edit.remove": {
+        description: "AQU-2321: accessible name of the × on a direct grant row; opens the Remove dialog.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.edit.cancelInvite": {
+        description: "AQU-2321: accessible name of the × on a pending invitation row.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.edit.roleChanged": {
+        description: "AQU-2321: toast after a role change on the Places lens.",
+        placeholders: {
+          name: "The person's name or username.",
+          role: "Localized role label, e.g. \"Reviewer\".",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani\"; never translated.",
+        },
+      },
+      "org.access.edit.denied.target_outranks": {
+        description: "AQU-2321: why a role pill or × is not editable: the person holds a role at or above the viewer's own there.",
+        placeholders: { cap: "Localized label of the viewer's own role there, e.g. \"Project Lead\"." },
+      },
+      "org.access.remove.title": {
+        description: "AQU-2321: title of the Remove dialog.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.remove.titleInvite": {
+        description: "AQU-2321: title of the Remove dialog for a pending invitation.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.remove.removes": {
+        description: "AQU-2321: one line per grant the dialog removes.",
+        placeholders: {
+          role: "Localized role label of the grant being removed.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani\"; never translated.",
+        },
+      },
+      "org.access.remove.removesTeam": {
+        description: "AQU-2321: the line for removing a team membership that carries no team role of its own.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.remove.loses": {
+        description: "AQU-2321: the projects the person can no longer open after the removal.",
+        placeholders: { list: "Already-formatted list of project names, ending with \"N more\" when long, e.g. \"Genesis, Exodus and 3 more\"." },
+      },
+      "org.access.remove.inviteLoses": {
+        description: "AQU-2321: the places a cancelled invitation would have opened.",
+        placeholders: { list: "Already-formatted list of place names." },
+      },
+      "org.access.remove.andMore": {
+        description: "AQU-2321: the last item of a shortened list of names, e.g. the \"3 more\" in \"Genesis, Exodus and 3 more\".",
+        placeholders: { count: "How many names were left out; also selects the plural form." },
+      },
+      "org.access.remove.leavesTeams": {
+        description: "AQU-2321: removing someone from the organization also takes them off its teams; this names those teams.",
+        placeholders: { list: "Already-formatted list of team names." },
+      },
+      "org.access.remove.keepsDirect": {
+        description: "AQU-2321: a project the person keeps after the removal, through their own grant on it.",
+        placeholders: {
+          role: "Localized role label they keep.",
+          project: "The project's name; never translated.",
+          date: "Already-formatted date the grant was given.",
+        },
+      },
+      "org.access.remove.keepsDirectUndated": {
+        description: "AQU-2321: as keepsDirect, when the grant's date is not known.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsTeam": {
+        description: "AQU-2321: a project the person keeps through a team.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated.", team: "The team's name; never translated." },
+      },
+      "org.access.remove.keepsOrg": {
+        description: "AQU-2321: a project the person keeps through their organization role.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsCreator": {
+        description: "AQU-2321: a project the person keeps because they created it.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.keepsHidden": {
+        description: "AQU-2321: a project the person keeps through a grant the viewer is not allowed to see.",
+        placeholders: { role: "Localized role label they keep.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.alsoDirect": {
+        description: "AQU-2321: checkbox offering to remove, too, the person's own grant that keeps them on a project.",
+        placeholders: { role: "Localized role label of that grant.", project: "The project's name; never translated." },
+      },
+      "org.access.remove.alsoTeam": {
+        description: "AQU-2321: checkbox offering to remove the person from the team that keeps them on a project.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.remove.done": {
+        description: "AQU-2321: toast after a removal.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.remove.doneInvite": {
+        description: "AQU-2321: toast after an invitation is cancelled.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.remove.partial": {
+        description: "AQU-2321: a removal of several grants stopped partway; removals are separate requests and are not undone.",
+        placeholders: { done: "How many grants were removed.", total: "How many the dialog tried to remove." },
+      },
+      "org.access.give.inviteEmail": {
+        description: "AQU-2320: Give access person list item that turns a typed email address into an invitation.",
+        placeholders: { email: "The typed email address; never translated." },
+      },
+      "org.access.give.theirPlaces": {
+        description: "AQU-2320: heading of the place list group showing places the chosen person already has access to.",
+        placeholders: { name: "The person's name or username." },
+      },
+      "org.access.give.reset.not_offered": {
+        description: "AQU-2320: notice when choosing a place clears a role that kind of place does not have.",
+        placeholders: {
+          role: "Localized role label that was cleared, e.g. \"Project Lead\".",
+          place: "Localized kind of place: organization, team, project, or language lane.",
+        },
+      },
+      "org.access.give.reset.above_cap": {
+        description: "AQU-2320: notice when choosing a place clears a role above the granter's own role there.",
+        placeholders: {
+          role: "Localized role label that was cleared.",
+          cap: "Localized label of the granter's own role at that place.",
+        },
+      },
+      "org.access.give.reset.above_invite_cap": {
+        description: "AQU-2320: notice when an invitation clears a role above what an invitation may carry.",
+        placeholders: { cap: "Localized label of the highest role an invitation carries there." },
+      },
+      "org.access.give.redundant": {
+        description: "AQU-2320: What changes line when the person already holds this role or more at the place.",
+        placeholders: {
+          role: "Localized role label they already hold.",
+          via: "Name of the place that already gives it (organization, team or project); never translated.",
+        },
+      },
+      "org.access.give.gainsHere": {
+        description: "AQU-2320: What changes line naming the role the person gets at the chosen place.",
+        placeholders: {
+          role: "Localized role label being given.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani › Spanish\"; never translated.",
+        },
+      },
+      "org.access.give.replaces": {
+        description: "AQU-2320: What changes line when the grant overwrites a row the person already holds at this place.",
+        placeholders: { role: "Localized role label of the row being replaced." },
+      },
+      "org.access.give.raises": {
+        description: "AQU-2320: What changes line grouping projects whose role goes up from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.lowers": {
+        description: "AQU-2320: What changes line grouping projects whose role goes down from one level to another.",
+        placeholders: {
+          from: "Localized role label before.",
+          to: "Localized role label after.",
+          count: "How many projects; also selects the plural form.",
+        },
+      },
+      "org.access.give.opens": {
+        description: "AQU-2320: What changes line grouping projects the person could not open before and now opens.",
+        placeholders: {
+          count: "How many projects; also selects the plural form.",
+          role: "Localized role label they open them with.",
+        },
+      },
+      "org.access.give.futureProjects": {
+        description: "AQU-2320: What changes line for a team grant: projects attached to the team later are opened too.",
+        placeholders: { team: "The team's name; never translated." },
+      },
+      "org.access.give.inviteNote": {
+        description: "AQU-2320: What changes line for an invitation to an email address.",
+        placeholders: { email: "The invited email address; never translated." },
+      },
+      "org.access.give.done": {
+        description: "AQU-2320: toast after access is given to an existing account.",
+        placeholders: {
+          name: "The person's name or username.",
+          role: "Localized role label given.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.give.invited": {
+        description: "AQU-2320: toast after an invitation is sent from Give access.",
+        placeholders: {
+          email: "The invited email address; never translated.",
+          role: "Localized role label the invitation carries.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.people.everything": {
+        description:
+          "AQU-2319: Reaches cell when an organization Maintainer or Owner can open every place the reader can see.",
+        placeholders: {
+          teams: "Already-translated team count, such as \"2 teams\".",
+          projects: "Already-translated project count, such as \"10 projects\".",
+        },
+      },
+      "org.access.people.teamCount": {
+        description: "AQU-2319: how many teams a person reaches, used inside the Everything sentence.",
+        placeholders: { count: "Number of teams; also selects the plural form." },
+      },
+      "org.access.people.projectCount": {
+        description: "AQU-2319: how many projects a person can open. Also the whole Reaches cell when that is the reach.",
+        placeholders: { count: "Number of projects; also selects the plural form." },
+      },
+      "org.access.people.laneCount": {
+        description: "AQU-2319: Reaches cell when the person can open language lanes and no whole project.",
+        placeholders: { count: "Number of language lanes; also selects the plural form." },
+      },
+      "org.access.people.extraGrants": {
+        description: "AQU-2319: after two place breadcrumbs in Granted at, how many further direct grants are not drawn.",
+        placeholders: { count: "How many direct grants are hidden after the two that are shown." },
+      },
+      "org.access.people.filtersAriaLabel": {
+        description: "AQU-2319: accessible name of the filter chips on the People lens. The chips themselves name each filter and its count.",
+      },
+      "org.access.people.openPersonAriaLabel": {
+        description: "AQU-2319: accessible name of the link from a person on the People lens to the organization member list.",
+        placeholders: { name: "The person's username, or the invited email when they have no account yet." },
       },
       "org.accessAudit.generatedAt": {
         description: "Print header on the access audit: when this copy of the report was generated.",
@@ -4257,6 +4759,113 @@ export const org = defineNamespace({
         placeholders: {
           count: "How many locally queued writes haven't synced yet.",
         },
+      },
+      "org.access.person.title": {
+        description: "AQU-2323: page title of the person inspector, which lists every place one person can open.",
+        placeholders: { name: "The person's name or username; never translated." },
+      },
+      "org.access.person.back": { description: "AQU-2323: link from the person inspector back to the People & access page." },
+      "org.access.person.lastActive": {
+        description: "AQU-2323: header line in the person inspector.",
+        placeholders: { time: "Relative time, already localized, e.g. \"3 days ago\"." },
+      },
+      "org.access.person.grantCount": {
+        description: "AQU-2323: header count of the person's direct grants the viewer can see.",
+        placeholders: { count: "A number." },
+      },
+      "org.access.person.reachesProjects": {
+        description: "AQU-2323: header count of the projects the person can open, among those the viewer can see.",
+        placeholders: { count: "A number." },
+      },
+      "org.access.person.removeAll": { description: "AQU-2323: button in the person inspector header. Opens a confirmation listing every grant to remove." },
+      "org.access.person.whereHeading": {
+        description: "AQU-2323: heading of the tree of places the person can open.",
+        placeholders: { name: "The person's name or username; never translated." },
+      },
+      "org.access.person.nowhere": {
+        description: "AQU-2323: empty state of the tree when the person opens no place the viewer can see.",
+        placeholders: { name: "The person's name or username; never translated." },
+      },
+      "org.access.person.reasonDirect": { description: "AQU-2323: one-line reason under a place: the person's role is granted at this place itself." },
+      "org.access.person.reasonCreator": { description: "AQU-2323: one-line reason under a project: the person has its role because they created the project." },
+      "org.access.person.reasonVia": {
+        description: "AQU-2323: one-line reason under a place: the role comes from a grant at another place.",
+        placeholders: { place: "Name of the team, organization or project the role is set at; never translated." },
+      },
+      "org.access.person.reasonViaHidden": { description: "AQU-2323: one-line reason when the place the role comes from is hidden from the viewer." },
+      "org.access.person.reasonAlso": {
+        description: "AQU-2323: second line under a place where two grants give the same role.",
+        placeholders: { list: "Names of the other places that give the same role, comma separated; never translated." },
+      },
+      "org.access.person.reasonRedundant": {
+        description: "AQU-2323: second line under a place where the grant set here is not needed, because other places already give the same role.",
+        placeholders: { list: "Names of the places that already give the role; never translated." },
+      },
+      "org.access.person.hiddenPlace": { description: "AQU-2323: stands in for the name of a team or organization the viewer cannot see, inside a list of places." },
+      "org.access.person.orgCount": {
+        description: "AQU-2323: part of the No access summary, e.g. \"1 organization · 2 projects\".",
+        placeholders: { count: "A number." },
+      },
+      "org.access.person.noAccessTitle": { description: "AQU-2323: title of the collapsed row that holds every place the person cannot open." },
+      "org.access.person.noAccessHint": { description: "AQU-2323: hint on the No access row: choosing a place opens Give access for it." },
+      "org.access.person.giveHere": { description: "AQU-2323: button on a row of the No access list. Opens Give access with this person and place filled in." },
+      "org.access.person.giveHereAriaLabel": {
+        description: "AQU-2323: accessible name of a No access row.",
+        placeholders: {
+          name: "The person's name or username; never translated.",
+          path: "Scope breadcrumb of the place, e.g. \"Biblica › Pattani\"; never translated.",
+        },
+      },
+      "org.access.person.grantsHeading": { description: "AQU-2323: heading of the list of the person's direct grants." },
+      "org.access.person.noGrants": { description: "AQU-2323: empty state of the grants list." },
+      "org.access.person.grantedBy": {
+        description: "AQU-2323: line on a grant card.",
+        placeholders: { name: "Username of the person who gave the grant.", date: "Localized date." },
+      },
+      "org.access.person.grantedOn": {
+        description: "AQU-2323: line on a grant card when who gave it is not recorded.",
+        placeholders: { date: "Localized date." },
+      },
+      "org.access.person.grantedUnknown": { description: "AQU-2323: line on a grant card when neither who nor when is recorded." },
+      "org.access.person.gives": {
+        description: "AQU-2323: line on a grant card: the places that depend on this grant.",
+        placeholders: { list: "Counts joined with \" · \", e.g. \"1 team · 3 projects\"." },
+      },
+      "org.access.person.redundant": { description: "AQU-2323: amber note on a grant card: other grants already give everything this one gives." },
+      "org.access.person.creatorCard": { description: "AQU-2323: note on the card for a project the person created; that role cannot be removed." },
+      "org.access.person.removeGrant": {
+        description: "AQU-2323: accessible name of the Remove button on a grant card.",
+        placeholders: {
+          role: "Localized role label.",
+          path: "Scope breadcrumb of the place; never translated.",
+        },
+      },
+      "org.access.person.historyHeading": { description: "AQU-2323: heading of the person's access history." },
+      "org.access.person.historyEmpty": { description: "AQU-2323: empty state of the history list." },
+      "org.access.person.historyNote": { description: "AQU-2323: note under the history: says which changes are recorded and that others are not." },
+      "org.access.person.history.granted": {
+        description: "AQU-2323: history entry.",
+        placeholders: { by: "Username of the person who gave the grant.", role: "Localized role label.", path: "Scope breadcrumb; never translated." },
+      },
+      "org.access.person.history.grantedNoActor": {
+        description: "AQU-2323: history entry when who gave the grant is not recorded.",
+        placeholders: { role: "Localized role label.", path: "Scope breadcrumb; never translated." },
+      },
+      "org.access.person.history.changed": {
+        description: "AQU-2323: history entry for a role change.",
+        placeholders: { by: "Username of who changed it.", path: "Scope breadcrumb; never translated.", before: "Localized role label before.", after: "Localized role label after." },
+      },
+      "org.access.person.history.changedNoActor": {
+        description: "AQU-2323: history entry for a role change when who changed it is not recorded.",
+        placeholders: { path: "Scope breadcrumb; never translated.", before: "Localized role label before.", after: "Localized role label after." },
+      },
+      "org.access.person.history.removed": {
+        description: "AQU-2323: history entry for a removed grant.",
+        placeholders: { by: "Username of who removed it.", role: "Localized role label.", path: "Scope breadcrumb; never translated." },
+      },
+      "org.access.person.history.removedNoActor": {
+        description: "AQU-2323: history entry for a removed grant when who removed it is not recorded.",
+        placeholders: { role: "Localized role label.", path: "Scope breadcrumb; never translated." },
       },
     },
   },

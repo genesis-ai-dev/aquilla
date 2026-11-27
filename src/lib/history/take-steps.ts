@@ -63,6 +63,18 @@ export interface CutRecord {
 export interface TakeWindowData { cellId: string; audioId: string; before: TakeWindow; after: TakeWindow }
 /** AQU-2327: a take's volume (dB) and fades (ms), as stored (null = none). */
 export interface TakeLevel { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
+/** AQU-2664: evening a take out (or clearing it): the loudness it is evened
+ *  out to before and after, null = not evened out. Its own step, as it is its
+ *  own stage: it never carries or checks the take's volume and fades. */
+export interface TakeEvenData {
+  cellId: string
+  audioId: string
+  before: number | null
+  after: number | null
+  /** AQU-2664 (board 73C): part of a run of Even out over a file or tracks — ⌘Z's
+   *  to take back, never the Station's own Undo (a Clear there is). */
+  run?: true
+}
 /** A change to a take's volume or fades (the Station's volume line and corners). */
 export interface TakeGainData { cellId: string; audioId: string; before: TakeLevel; after: TakeLevel }
 /** AQU-2267: a take's place in each timing, as stored (null = not placed there). */
@@ -229,6 +241,8 @@ export interface TakeStepContext {
   applyTrim(cellId: string, audioId: string, w: TakeWindow): Promise<boolean | void>
   /** AQU-2327: a take's volume and fades, all three in one write. */
   applyGain?(cellId: string, audioId: string, level: TakeLevel): Promise<void>
+  /** AQU-2664: the loudness a take is evened out to (null clears), alone. */
+  applyEven?(cellId: string, audioId: string, targetLufs: number | null): Promise<void>
   /** AQU-2267: both places, in one write. */
   applyPlace(cellId: string, audioId: string, place: StoredTakePlace): Promise<void>
   /** Cut `c.audioId` at `c.atMs` into a piece `newAudioId` (AQU-2492: on a
@@ -279,6 +293,16 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     if (!ctx.applyGain) return { kind: "skipped", reason: "unavailable" }
     if ((att.gainDb ?? null) !== from.gainDb || (att.fadeInMs ?? null) !== from.fadeInMs || (att.fadeOutMs ?? null) !== from.fadeOutMs) return CHANGED
     await ctx.applyGain(d.cellId, d.audioId, to)
+    return DONE
+  }
+  // AQU-2664: the evened-out target alone; a target changed since is someone
+  // else's, and the step leaves it alone. The take's volume is never looked at.
+  const evenFlip = async (d: TakeEvenData, from: number | null, to: number | null): Promise<StepOutcome> => {
+    const att = ctx.readTake(d.cellId, d.audioId)
+    if (!att) return GONE
+    if (!ctx.applyEven) return { kind: "skipped", reason: "unavailable" }
+    if ((att.evenTargetLufs ?? null) !== from) return CHANGED
+    await ctx.applyEven(d.cellId, d.audioId, to)
     return DONE
   }
   // AQU-2267: both places together — checked together (a move since, in
@@ -508,6 +532,10 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     "take.gain": {
       undo: (d: TakeGainData) => gainFlip(d, d.after, d.before),
       redo: (d: TakeGainData) => gainFlip(d, d.before, d.after),
+    } as StepHandler<never>,
+    "take.even": {
+      undo: (d: TakeEvenData) => evenFlip(d, d.after, d.before),
+      redo: (d: TakeEvenData) => evenFlip(d, d.before, d.after),
     } as StepHandler<never>,
     "take.place": {
       undo: (d: TakePlaceData) => placeFlip(d, placeAfter(d), placeBefore(d)),

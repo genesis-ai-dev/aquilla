@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { createSameTurnCoalescer } from "@/lib/request-coalescer"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
 import { resolveImportFloor, resolveLanguageEditFloor } from "@/lib/sync/role-policy"
@@ -425,6 +426,14 @@ function carryOver<K extends keyof OrgSettingsResponse>(
 
 const REFETCH_ON_RETURN_MS = 10_000
 
+// AQU-2655: the shell's sidebar and the page under it each mount this hook for
+// the same org in the same commit, and each read the row on its own — two
+// identical GETs on every org route, four on the projects list. Instances that
+// read in the same synchronous turn share the request. A read in any later
+// turn (a reset's re-read, a return to the tab) still gets its own, so it is
+// never answered with a row fetched before the write it follows.
+const orgSettingsMountReads = createSameTurnCoalescer<OrgSettingsResponse | null>()
+
 function sameOrgSettingsResponse(a: OrgSettingsResponse, b: OrgSettingsResponse): boolean {
   if (a === b) return true
   try {
@@ -521,7 +530,7 @@ export function useOrgSettings(
   const refresh = useCallback(async (): Promise<OrgSettingsResponse | null> => {
     if (!orgId || !jwt) return null
     lastFetchAtRef.current = Date.now()
-    const got = await fetchOrgSettings(jwt, orgId)
+    const got = await orgSettingsMountReads.run(`${orgId}\n${jwt}`, () => fetchOrgSettings(jwt, orgId))
     if (!aliveRef.current) return null
     const held = serverRef.current
     if (held && held.orgId === orgId) {

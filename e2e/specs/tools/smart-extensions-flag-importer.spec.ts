@@ -20,7 +20,7 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 import { updateProjectSettings } from "../../helpers/frontier-api"
 import { jwtFor, mintSyncToken, seedProjectWithFile } from "../../helpers/seed-project"
 import { readFileSync } from "node:fs"
-import { firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
+import { firstPartyToolId } from "../../../shared/tools/first-party/index"
 
 const AUTH = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 const SYNC_BASE = process.env.E2E_SYNC_BASE ?? `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788"}`

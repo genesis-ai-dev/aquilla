@@ -3,7 +3,7 @@
 // Every source is mono at the same rate (the app decodes everything to
 // 48 kHz mono, decode-mono.ts), so a segment is a plain copy.
 
-import { dbToGain, gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
+import { clipDb, dbToGain, gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
 
 export interface PcmSource {
   data: Float32Array
@@ -33,7 +33,7 @@ export function applyClipMix(samples: Float32Array, rate: number, clip: ClipMix)
   const a = Math.max(0, Math.min(samples.length, Math.round(clip.trimA * rate)))
   const b = Math.max(a, Math.min(samples.length, Math.round(clip.trimB * rate)))
   const out = samples.slice(a, b)
-  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
   if (flat) return out
   for (let i = 0; i < out.length; i++) out[i] *= gainAt((a + i) / rate, clip)
   return out
@@ -45,10 +45,10 @@ export function applyClipMix(samples: Float32Array, rate: number, clip: ClipMix)
  * the kept part still plays, at the clip's volume.
  */
 export function mixWhole(samples: Float32Array, rate: number, clip: ClipMix): Float32Array {
-  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clipDb(clip)
   if (flat) return samples
   const out = new Float32Array(samples.length)
-  const g0 = Math.pow(10, (clip.gainDb || 0) / 20)
+  const g0 = Math.pow(10, clipDb(clip) / 20)
   const a = Math.round(clip.trimA * rate)
   const b = Math.round(clip.trimB * rate)
   for (let i = 0; i < samples.length; i++) out[i] = samples[i] * (i >= a && i <= b ? gainAt(i / rate, clip) : g0)
@@ -65,12 +65,25 @@ export function peakOf(data: Float32Array): number {
   return m
 }
 
+/** The lowest a recording's loudest moment is drawn, as a share of the lane,
+ *  so a quiet take that isn't raised still reads as a waveform (the timeline
+ *  clip's floor, take-gain `waveLevelScale`). */
+export const STATION_WAVE_FLOOR = 0.12
+/** Headroom over full scale: a waveform played at 0 dBFS stops just short of
+ *  the lane's edges. */
+const HEADROOM = 1.05
+
 /**
- * `n` columns of peaks over [va, vb] of the edited recording, each the loudest
- * moment in its slice against `norm`, drawn as mixWhole plays it: the clip's
- * volume everywhere, and its fades inside the kept part (40b: the waveform
- * shows them live). Long slices are read with a stride, so a zoomed-out hour
- * stays cheap.
+ * `n` columns of peaks over [va, vb] of the edited recording, drawn at the
+ * level it PLAYS against a fixed headroom (full scale), as board 72 draws it
+ * (evidence 72D/E/G): the recording's loudest moment sits at its played peak —
+ * the clip's volume with evening out — so a raised take is taller and an
+ * evened one is never clipped into a block, however far it was raised. Below
+ * STATION_WAVE_FLOOR it is held at the floor, so it stays readable. The fades
+ * shape the kept part (40b: shown live). Long slices are read with a stride,
+ * so a zoomed-out hour stays cheap.
+ *
+ * `peak` is the recording's loudest sample (peakOf).
  */
 export function viewPeaks(
   placed: readonly PlacedSegment[],
@@ -78,12 +91,17 @@ export function viewPeaks(
   va: number,
   vb: number,
   n: number,
-  norm: number,
+  peak: number,
   clip?: ClipMix,
 ): Float32Array {
   const out = new Float32Array(Math.max(0, n))
   const span = Math.max(1e-6, vb - va)
-  const scale = norm > 0 ? 1 / norm : 1
+  // The clip's gain where it is flat (volume + evening), and the height its
+  // loudest moment is drawn at: its played peak, held between the floor and
+  // full scale.
+  const gPlay = clip ? dbToGain(clipDb(clip)) : 1
+  const played = Math.min(1, Math.max(STATION_WAVE_FLOOR, peak * gPlay))
+  const scale = peak > 0 ? played / (peak * HEADROOM) : 1
   for (let i = 0; i < n; i++) {
     const c0 = va + (span * i) / n
     const c1 = va + (span * (i + 1)) / n
@@ -103,8 +121,9 @@ export function viewPeaks(
       }
     }
     const t = (c0 + c1) / 2
-    const g = !clip ? 1 : t >= clip.trimA && t <= clip.trimB ? gainAt(t, clip) : dbToGain(clip.gainDb)
-    out[i] = Math.min(1, m * scale * g)
+    // The fades (and anything else under the flat gain) as a share of it.
+    const shape = !clip || gPlay <= 0 ? 1 : (t >= clip.trimA && t <= clip.trimB ? gainAt(t, clip) : gPlay) / gPlay
+    out[i] = Math.min(1, m * scale * shape)
   }
   return out
 }

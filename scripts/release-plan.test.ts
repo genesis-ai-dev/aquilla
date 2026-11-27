@@ -233,6 +233,8 @@ describe("isLocaleCatalogOnly", () => {
   it.each([
     [CATALOGS, true],
     [["src/lib/i18n/source-hashes.json"], true],
+    // AQU-2740: an import prunes the translation baseline beside the catalogs.
+    [[...CATALOGS, "src/lib/i18n/translation-baseline.json"], true],
     [[], false],
     // The English source, the registries a new locale edits, and tests are code.
     [["src/lib/i18n/messages/fr.ts", "src/lib/i18n/messages/en.ts"], false],

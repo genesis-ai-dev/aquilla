@@ -10,7 +10,8 @@
 // to fake a whole DB to assert a policy decision.
 
 import { describe, it, expect } from 'vitest'
-import { isGatedTrackPatch, trackPatchRequiresExisting } from '../events/track-editing-authority'
+import { isGatedTrackPatch, trackPatchRequiresExisting, trackPatchRoleFloor } from '../events/track-editing-authority'
+import { requiredRoleFor } from '../events/role-policy'
 
 /** The payload shape `file.track.set` carries on the wire. */
 const withPatch = (patch: unknown) => ({ trackId: 'trk-1', patch })
@@ -31,6 +32,10 @@ describe('isGatedTrackPatch — the ungated half', () => {
     // Audio view offers the picker on projects that never turn editing on.
     ['recolouring', { color: 'cyan' }],
     ['clearing a colour', { color: null }],
+    // AQU-2664: a track's volume is how it sounds, on the maintainer clearance
+    // alone, like its colour.
+    ['a track volume', { volumeDb: -4.5 }],
+    ['clearing a track volume', { volumeDb: null }],
   ]
 
   for (const [label, patch] of ungated) {
@@ -147,5 +152,22 @@ describe('trackPatchRequiresExisting', () => {
   it('ignores a patch that is not an object', () => {
     expect(trackPatchRequiresExisting(ADDED, 'nope')).toBe(false)
     expect(trackPatchRequiresExisting(ADDED, [1, 2])).toBe(false)
+  })
+})
+
+// AQU-2664: a patch that sets a track's volume and nothing else is held to a
+// take's volume floor (Contributor); anything more keeps the kind's floor.
+describe('trackPatchRoleFloor — the volume key alone', () => {
+  it('is a take-volume floor for volumeDb alone (set, silence or clear)', () => {
+    for (const volumeDb of [-3, '-inf', null]) {
+      expect(trackPatchRoleFloor(withPatch({ volumeDb }))).toBe(requiredRoleFor('cell.audio.gain'))
+    }
+  })
+
+  it('is the kind floor for anything else', () => {
+    for (const patch of [{ color: 'cyan' }, { volumeDb: -3, name: 'x' }, {}, null, 'x']) {
+      expect(trackPatchRoleFloor(withPatch(patch))).toBe(requiredRoleFor('file.track.set'))
+    }
+    expect(trackPatchRoleFloor(null)).toBe(requiredRoleFor('file.track.set'))
   })
 })

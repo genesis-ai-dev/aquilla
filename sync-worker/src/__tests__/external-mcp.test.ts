@@ -264,10 +264,10 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects',
         // Omnilingual ASR spec §7.
         'transcribe_audio', 'transcription_status',
-        'upload_artifact', 'wait_for_changeset',
+        'upload_artifact', 'create_upload_url', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(40)
+    expect(body.result.tools).toHaveLength(41)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -1442,6 +1442,18 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     }
   }
 
+  // AQU-2647: these tests are about marshalling and OAuth binding, as a
+  // project lead on a floor that still admits one. The product default is
+  // Maintainer, covered in source-text-floor.test.ts.
+  async function asProjectLeadWhoMayEditSource() {
+    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await tdb.pg.query(
+      `INSERT INTO project_settings (project_id, settings, version, updated_at)
+       VALUES ($1, $2, 1, CURRENT_TIMESTAMP)`,
+      [PROJECT, JSON.stringify({ sourceTextFloor: 'project_lead' })],
+    )
+  }
+
   it('lists individual operations and refuses undeclared or generic commands', async () => {
     const token = await oauthToken()
     const list = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
@@ -1486,7 +1498,7 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
 
   it('marshals a fixed operation through the real command validator', async () => {
     const token = await oauthToken()
-    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await asProjectLeadWhoMayEditSource()
     const staged = await invoke(token, 'prepare_hide_cells', {
       projectId: PROJECT, updates: [{ fileId: FILE, cellId: 'cell-1' }],
     })
@@ -1524,7 +1536,7 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
 
   it('refuses a stored legacy operation after the credential becomes OAuth-bound', async () => {
     const token = await credToken(tdb)
-    await tdb.pg.query('UPDATE project_members SET role_level = 500 WHERE project_id = $1', [PROJECT])
+    await asProjectLeadWhoMayEditSource()
     const response = await invoke(token, 'prepare_translations', {
       projectId: PROJECT,
       commands: [{ kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'Changed source' }],

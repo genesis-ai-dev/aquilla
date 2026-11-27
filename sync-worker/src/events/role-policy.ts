@@ -60,18 +60,22 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // that hard-coded floor is now the ONLY thing holding integrations above
   // this line. There is a test pinning it for exactly that reason.
   'source.cell.create': ROLE.COMMENTER,
-  'source.cell.commit': ROLE.PROJECT_LEAD,
+  // AQU-2647: the LOWEST rung sourceTextFloor can admit. The tier in force
+  // (default Maintainer) is enforced in authorize.ts, the same way a static
+  // floor of Project Lead used to refuse a contributor before the setting
+  // could allow one. Hide sits on the same rung: it is the same decision.
+  'source.cell.commit': ROLE.CONTRIBUTOR,
   'source.cell.delete': ROLE.COMMENTER,
   'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
-  // AQU-1422: hiding a cell takes it out of translation and (AQU-1423) out of
-  // every export for EVERYONE, in every lane. That is a decision about what the
-  // file contains, so it sits with source.cell.commit at PROJECT_LEAD and NOT
-  // with the create/delete/reorder trio at COMMENTER — those are floored low
-  // because re-import, DCS repair and diarization all emit them through a
-  // user's own outbox, and nothing emits this but a person choosing it.
-  'source.cell.visibility.set': ROLE.PROJECT_LEAD,
+  // AQU-1422 / AQU-2647: hiding a cell takes it out of translation and out of
+  // every export for everyone. It shares sourceTextFloor with source.cell.commit
+  // (authorize.ts). The static floor is Contributor, the lowest that setting
+  // can admit — not the create/delete/reorder trio at Commenter, which stays
+  // low because re-import, DCS repair and diarization emit those through a
+  // user's own outbox.
+  'source.cell.visibility.set': ROLE.CONTRIBUTOR,
   // AQU-1767 phase 2: undoing a removal. The floor matches the delete it
   // reverses; authorize.ts adds the real rule — only the person who removed the
   // cell, or a maintainer, may put it back, and never through the external API.
@@ -100,6 +104,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.trim': ROLE.CONTRIBUTOR,
   // AQU-2327: a take's volume and fades need what trimming it needs.
   'cell.audio.gain': ROLE.CONTRIBUTOR,
+  // AQU-2664: whoever may set a take's volume may even it out.
+  'cell.audio.even': ROLE.CONTRIBUTOR,
   'cell.audio.place': ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   'cell.audio.cut': ROLE.CONTRIBUTOR,

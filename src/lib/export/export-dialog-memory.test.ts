@@ -6,7 +6,7 @@
 // one of those is a way for the dialog to open in a state it cannot actually
 // be in, which is worse than opening fresh.
 
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 
 import {
   DEFAULT_EXPORT_MEMORY,
@@ -131,5 +131,25 @@ describe("a stored value that cannot be trusted", () => {
   it("treats a record that is not an object at all as nothing", () => {
     expect(normalizeExportMemory(null)).toEqual(DEFAULT_EXPORT_MEMORY)
     expect(normalizeExportMemory("fold")).toEqual(DEFAULT_EXPORT_MEMORY)
+  })
+
+  // Sam, question 93: "Mono loudness", remembered per project.
+  it("remembers Mono loudness per project, as heard by default", () => {
+    expect(DEFAULT_EXPORT_MEMORY.monoLoudness).toBe("heard")
+    expect(normalizeExportMemory({}).monoLoudness).toBe("heard")
+    expect(normalizeExportMemory({ monoLoudness: "meter" }).monoLoudness).toBe("meter")
+    expect(normalizeExportMemory({ monoLoudness: "loud" }).monoLoudness).toBe("heard")
+    writeExportMemory("sam", "p1", { ...DEFAULT_EXPORT_MEMORY, monoLoudness: "meter" })
+    expect(readExportMemory("sam", "p1").monoLoudness).toBe("meter")
+    expect(readExportMemory("sam", "p2").monoLoudness).toBe("heard")
+  })
+
+  it("falls back to as heard when storage fails", () => {
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked") })
+    try {
+      expect(readExportMemory("sam", "p1").monoLoudness).toBe("heard")
+    } finally {
+      get.mockRestore()
+    }
   })
 })

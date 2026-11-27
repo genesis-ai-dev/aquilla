@@ -1,6 +1,7 @@
 import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, matchPath, type Location } from "react-router-dom"
+import { ACCESS_AUDIT_REDIRECT } from "@/lib/access/people-lens"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgOverview } from "@/components/org/OrgOverview"
@@ -169,8 +170,8 @@ const ProjectSettingsDialog = lazy(() =>
 const OrgAccessPage = lazy(() =>
   import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
 )
-const OrgAccessAuditPage = lazy(() =>
-  import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
+const OrgAccessPersonPage = lazy(() =>
+  import("@/pages/OrgAccessPersonPage").then((m) => ({ default: m.OrgAccessPersonPage })),
 )
 // AQU-1958: org-wide comments view — the project Comments page's list across
 // every project in the org the caller can see.
@@ -572,7 +573,8 @@ function AppRoutes() {
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="comments" element={<OrgLazyRoute><OrgCommentsPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
-          <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
+          <Route path="access/people/:userId" element={<OrgLazyRoute><OrgAccessPersonPage /></OrgLazyRoute>} />
+          <Route path="access-audit" element={<Navigate to={ACCESS_AUDIT_REDIRECT} replace relative="path" />} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />

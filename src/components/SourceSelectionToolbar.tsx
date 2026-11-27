@@ -2,7 +2,7 @@
 // CellActionRail aesthetic (rounded container, muted icons). Buttons:
 // Ask AI (push the selection into the agent chat as a chip) and Add to
 // terminology (popover that creates a concept without leaving the editor).
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -35,6 +35,8 @@ export interface SourceSelectionToolbarProps {
   onToolbarMouseDown?: () => void
   /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
   onToolbarMouseUp?: () => void
+  /** Smart Extensions apiRev 8: extension actions declaring `where: ["selection"]`. */
+  extensionActions?: ReactNode
 }
 
 export function SourceSelectionToolbar({
@@ -51,6 +53,7 @@ export function SourceSelectionToolbar({
   onViewConcept,
   onToolbarMouseDown,
   onToolbarMouseUp,
+  extensionActions,
 }: SourceSelectionToolbarProps) {
   const t = useT()
   // AQU-2654: the active list every source row shares, so the lookup cache is shared too.
@@ -123,6 +126,7 @@ export function SourceSelectionToolbar({
           </Button>
         </AddConceptPopover>
       )}
+      {extensionActions}
     </div>
   )
 }

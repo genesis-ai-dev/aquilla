@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
@@ -28,6 +29,13 @@ interface StatusBarProps {
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
   /**
+   * AQU-2655: cells the checks have not reached yet. A file that mentions many
+   * glossary terms for the first time is checked partly in the background
+   * (`HealthStats.infractionsPending`); until that finishes the footer says so,
+   * so a short list of findings is not read as the whole file's.
+   */
+  checksPending?: number
+  /**
    * AQU-1083: `progress` must already reflect the project's structural-cell
    * policy — this footer no longer sees cells, so it cannot apply it itself.
    * ProjectWorkspace resolves it with `applyStructuralPolicy` before passing
@@ -51,7 +59,7 @@ export function statusBarFigure(progress: FileStats): { fraction: number; audio:
 }
 
 export function StatusBar({
-  progress, getHealthByCell, nameCells, projectHealth, staleSourceCount, onJumpToCell, className,
+  progress, getHealthByCell, nameCells, projectHealth, staleSourceCount, onJumpToCell, checksPending = 0, className,
 }: StatusBarProps) {
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
@@ -130,6 +138,12 @@ export function StatusBar({
               })}
         </span>
       </span>
+      {checksPending > 0 && (
+        <span role="status" className="flex items-center gap-1.5 whitespace-nowrap text-xs" data-testid="status-bar-checking">
+          <Spinner aria-hidden aria-label={undefined} role={undefined} className="size-3" />
+          {t("workspace.statusBar.checking", { count: bidiIsolate(formatNumber(checksPending, locale)) })}
+        </span>
+      )}
       {hasLegend && (
         <span className="flex flex-wrap items-center gap-2" data-testid="status-bar-legend">
           {/* Media redesign: Text and audio says how much of each half is left. */}

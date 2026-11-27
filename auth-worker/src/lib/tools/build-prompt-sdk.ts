@@ -14,7 +14,7 @@ Start:            aq.mount(node) renders your UI (replaces the page; a layout ho
                   aq.h(tag, { class, style:{…}, text, onclick, …attrs }, [children]) makes elements. aq.icon(name, "s35")
                   draws an app icon (lucide names: sparkles, check, check-check, circle, message-circle, play, mic, history,
                   search, list, layout-grid, chart-column, settings, star, eye, clock, users, book-open, triangle-alert, …).
-                  aq.t(key) app strings; aq.strings([key…]) → Promise loads more. aq.version → "1.1". aq.Layout([children]) is a
+                  aq.t(key) app strings; aq.strings([key…]) → Promise loads more. aq.version → "1.2". aq.Layout([children]) is a
                   full-height column (toolbar on top, CellList filling the rest).
 Data (live):      const file = aq.useFile()  — file.value → { fileId, name, config, sections, loading, readOnly, cellCount };
                     file.ready → Promise of that once it is bound (the editor's/panel's file, else the first file with cells).
@@ -26,7 +26,9 @@ Data (live):      const file = aq.useFile()  — file.value → { fileId, name, 
                     peers, selected, editing, editable, error }.
                   aq.useSelection() → { value:[ids], has(id), toggle(id), set(ids), clear() } — drives the app's bulk bar.
                   aq.usePresence() → { value:{ locks, peers }, peers(id), lockedBy(id) }.
+                  aq.useActiveCell() → { value:{ fileId, cellId, ref, source, target }|null, ready, subscribe } — follows the translator's active cell in Aquilla's real editor (SDK 1.2 / apiRev 8).
                   Every handle has .subscribe(fn) → unsubscribe; fn runs after each change (also other people's edits).
+Native editor (SDK 1.2): aq.editor.annotate(fileId, spec) publishes native row badges, spans/quick-fixes & column cells; aq.editor.clearAnnotations(opts?); aq.editor.reveal(fileId, cellId, opts?) jumps the real editor to a cell; aq.ui.openPanel() opens your dock panel.
 Components (pass a cellId; they stay live):
                   aq.CellList({ row:(id)=>node, filter:(cell)=>bool, estimate:(cell)=>px, empty }) — virtualized, scrolls,
                     handles thousands of cells; default row = aq.CellRow. Methods: list.scrollToCell(id, "center"),
@@ -79,7 +81,7 @@ UI kit (Aquilla-styled; use these instead of your own CSS):
                   aq.ui.Empty({ icon, title, text }), aq.ui.Avatar({ name, color }), aq.ui.Kbd(text), aq.ui.Divider(),
                   aq.ui.Menu(anchor, [{ label, icon, run }]), aq.ui.popover(anchor, node), aq.ui.closePopover(),
                   aq.ui.tooltip(node, text), aq.ui.dialog({ title, body:[…], actions:[{ label, primary, run }] }),
-                  aq.ui.confirm({ title, text, action }) → Promise<boolean>, aq.ui.toast(text).
+                  aq.ui.confirm({ title, text, action }) → Promise<boolean>, aq.ui.toast(text), aq.ui.openPanel().
 
 Example — a side panel (mounts ["page","panel"], scopes ["read:cells"], "sdk": 1):
 \`\`\`

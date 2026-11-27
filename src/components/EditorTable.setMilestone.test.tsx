@@ -3,13 +3,14 @@
  *
  * What is pinned here, and why each one earns a test:
  *
- *   - THE ENTRY IS ABSENT, NOT DISABLED, BELOW THE GATE — and the gate is a
- *     rung ABOVE the park/edit-source one on the default floor. Naming a
- *     range relayouts the navigator for everyone who opens the file. The
- *     default tier is Maintainer, so a project lead who may park and remove
- *     rows still does not see this until the project opens the floor. That
- *     off-by-one-rung is the easiest thing for a later refactor to
- *     "simplify" into `canEditSource`.
+ *   - THE ENTRY IS ABSENT, NOT DISABLED, BELOW THE GATE — and the gate is
+ *     its own, apart from the park/edit-source one. Naming a range relayouts
+ *     the navigator for everyone who opens the file. The default tier is
+ *     Maintainer, so a project lead who may park and remove rows (the
+ *     project opened its source-text floor to project leads, AQU-2647) still
+ *     does not see this until the project opens the milestone floor too.
+ *     That gap is the easiest thing for a later refactor to "simplify" into
+ *     `canEditSource`.
  *   - A LIVE-LINKED DOWNSTREAM PROJECT SHOWS IT TO NOBODY, maintainer included.
  *     Its divisions are mirrored from upstream, so there is nothing to name.
  *   - IT IS NOT GATED ON `canEditSource`, which a DCS pin forces false for
@@ -185,7 +186,7 @@ describe("EditorTable — Set a new milestone…", () => {
   })
 
   it("hides it from a project lead, who may still park and remove rows", async () => {
-    renderTable({ project: projectAt(ROLE.PROJECT_LEAD) }, {
+    renderTable({ project: projectAt(ROLE.PROJECT_LEAD, { sourceTextFloor: "project_lead" }) }, {
       onSetMilestone: () => {},
       onSetCellHidden: () => {},
     })
@@ -210,7 +211,7 @@ describe("EditorTable — Set a new milestone…", () => {
 
   it("offers it to a project lead when the floor is opened to project leads", async () => {
     renderTable({
-      project: projectAt(ROLE.PROJECT_LEAD, { milestoneFloor: "project_lead" }),
+      project: projectAt(ROLE.PROJECT_LEAD, { milestoneFloor: "project_lead", sourceTextFloor: "project_lead" }),
     }, {
       onSetMilestone: () => {},
       onSetCellHidden: () => {},

@@ -20,4 +20,13 @@ describe("DescribeStep examples", () => {
     await user.click(example)
     expect(onChange).toHaveBeenCalledWith("A side panel with each verse's word count, updating as I type")
   })
+
+  it("adapts placeholder and example suggestions to the chosen placement", () => {
+    renderWithTooltips(
+      <DescribeStep value="" onChange={vi.fn()} where="exporter" onWhereChange={vi.fn()} onBuild={vi.fn()} disabled={false} />,
+    )
+    expect(screen.getByRole("radio", { name: "Exporter" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByPlaceholderText(/Export translated verses/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Annotated TSV export/ })).toBeInTheDocument()
+  })
 })

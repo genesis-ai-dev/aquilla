@@ -118,6 +118,31 @@ describe.each(RESOLVER_MODES)("AQU-1352 attack #5 create-target fuzz (resolver %
     expect(await count("SELECT count(*) AS n FROM projects WHERE id = 'fz-mixed'")).toBe(0)
   })
 
+  // [Pen test 2026-11-26] A replayed create is accepted for the original
+  // creator (created_by), but must not re-attach their team once the creator
+  // has lost Owner on the project: that would hand the team (and the creator,
+  // through it) Viewer access across every lane again.
+  it("a removed creator cannot replay the create to re-attach their team", async () => {
+    const body = { id: "fz-replay", name: "Replay", orgId: 1, teamIds: [3] }
+    expect((await req(mode, TEAM_LEAD.name, "/api/v2/projects", { method: "POST", body })).status).toBe(200)
+    const grants = "SELECT count(*) AS n FROM group_project_grants WHERE group_id = 3 AND project_id = 'fz-replay'"
+    expect(await count(grants)).toBe(1)
+    // An owner detaches the team and removes the creator.
+    await sql("DELETE FROM group_project_grants WHERE project_id = 'fz-replay'")
+    await sql("DELETE FROM project_members WHERE project_id = 'fz-replay' AND user_id = ?", TEAM_LEAD.id)
+    const replay = await req(mode, TEAM_LEAD.name, "/api/v2/projects", { method: "POST", body })
+    expect(replay.status).toBeLessThan(500)
+    expect(await count(grants)).toBe(0)
+  })
+
+  it("the creator's own retry while still Owner re-attaches the team", async () => {
+    const body = { id: "fz-retry", name: "Retry", orgId: 1, teamIds: [3] }
+    expect((await req(mode, TEAM_LEAD.name, "/api/v2/projects", { method: "POST", body })).status).toBe(200)
+    await sql("DELETE FROM group_project_grants WHERE project_id = 'fz-retry'")
+    expect((await req(mode, TEAM_LEAD.name, "/api/v2/projects", { method: "POST", body })).status).toBe(200)
+    expect(await count("SELECT count(*) AS n FROM group_project_grants WHERE group_id = 3 AND project_id = 'fz-retry'")).toBe(1)
+  })
+
   it("create-targets never offers a team outside the org it is listed under", async () => {
     for (const caller of CALLERS) {
       const targets = (await req(mode, caller, "/api/v2/me/create-targets")).json as Target[]

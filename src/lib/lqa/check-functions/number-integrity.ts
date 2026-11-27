@@ -46,11 +46,27 @@ export function readNumbers(text: string): CellNumber[] {
   return out
 }
 
+// A `\f … \f*` footnote carries its own numbers: the caller, a LUK 1:32
+// reference, "3,000" in the note. Those are not numbers in the verse. Both
+// directions skip them so a footnote cannot be flagged, and cannot satisfy a
+// verse number either (AQU-2734).
+const USFM_FOOTNOTE_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
+
+export function readVerseNumbers(text: string): CellNumber[] {
+  const ranges: Array<[number, number]> = []
+  for (const m of text.matchAll(USFM_FOOTNOTE_RE)) {
+    if (m.index === undefined) continue
+    ranges.push([m.index, m.index + m[0].length])
+  }
+  if (ranges.length === 0) return readNumbers(text)
+  return readNumbers(text).filter((n) => ranges.every(([start, end]) => n.start < start || n.start >= end))
+}
+
 export function runCheck(source: string, target: string): InfractionSpan[] | null {
-  const sourceNumbers = readNumbers(source)
+  const sourceNumbers = readVerseNumbers(source)
   if (sourceNumbers.length === 0) return null
 
-  const targetValues = new Set(readNumbers(target).map((n) => n.value))
+  const targetValues = new Set(readVerseNumbers(target).map((n) => n.value))
 
   const missing: InfractionSpan[] = []
   for (const n of sourceNumbers) {

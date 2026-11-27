@@ -764,6 +764,17 @@ export const importExport = defineNamespace({
       "Adds each heading's recording to its chapter file, in reading order. Off keeps the file to verses only.",
     // AQU-1575: the broadcast deliverable LOTE's vendor asked for, by name.
     "importExport.dialog.lineAudioWav": "Convert every recording to WAV (16-bit, 48 kHz, mono)",
+    // Sam, question 93: an audio export's mono loudness.
+    "importExport.dialog.monoLoudness": "Mono loudness",
+    "importExport.dialog.monoLoudnessHeard": "As heard",
+    "importExport.dialog.monoLoudnessMeter": "As a single-channel meter reads it",
+    "importExport.dialog.monoLoudnessInfoLabel": "About mono loudness",
+    "importExport.dialog.monoLoudnessInfo":
+      "A mono file plays on both speakers, so it sounds about 3 dB louder than one channel measures. Pick the meter reading if a delivery checks mono files on a loudness meter. Every export is mono today, and only evened-out takes change.",
+    "importExport.dialog.monoLoudnessHeld": plural({
+      one: "{count} take can’t go all the way up to the meter reading; it’d distort or raise too much hiss.",
+      other: "{count} takes can’t go all the way up to the meter reading; they’d distort or raise too much hiss.",
+    }),
     "importExport.dialog.lineAudioWavHint":
       "For broadcast delivery. Off copies each recording as it was saved, which may be compressed or at a lower sample rate.",
     "importExport.dialog.chapterStitchPreview":
@@ -2890,6 +2901,12 @@ export const importExport = defineNamespace({
           "the technical audio format a broadcast studio asks for — keep the numbers and units as they " +
           "are. The choice is remembered with the rest of the export dialog.",
       },
+      "importExport.dialog.monoLoudness": { description: "Label of an option in the Export dialog's audio settings: how loud evened-out mono takes are written. Two choices follow.", maxLength: 32 },
+      "importExport.dialog.monoLoudnessHeard": { description: "Choice for 'Mono loudness' (the default): mono takes at the loudness people hear them at (played on both speakers).", maxLength: 32 },
+      "importExport.dialog.monoLoudnessMeter": { description: "Choice for 'Mono loudness': mono takes written about 3 dB louder, so a loudness meter that counts the one channel once reads the target.", maxLength: 48 },
+      "importExport.dialog.monoLoudnessHeld": { description: "Shown in amber under 'Mono loudness' when the meter reading is picked: how many evened-out takes can't be raised the extra 3 dB (they would distort, or the raise would pass the 12 dB limit that keeps hiss down).", placeholders: { count: "How many takes." } },
+      "importExport.dialog.monoLoudnessInfoLabel": { description: "Screen-reader name of the (i) beside 'Mono loudness'; it opens the explanation." },
+      "importExport.dialog.monoLoudnessInfo": { description: "The explanation the (i) beside 'Mono loudness' opens: why a mono file measures 3 dB under how it sounds, and when to pick the meter reading." },
       "importExport.dialog.lineAudioWavHint": {
         description:
           "Hint under the convert-to-WAV checkbox on the Audio by line export: the WAV files are for " +

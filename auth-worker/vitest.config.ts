@@ -17,6 +17,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Builds the schema'd database once per run; every test file's PGlite is a
+    // copy of it (db/shared/test-pg-harness.ts).
+    globalSetup: ["./src/__tests__/helpers/pg-template-global-setup.ts"],
     setupFiles: ["./src/__tests__/setup-migrations.ts"],
     testTimeout: 60000,
     hookTimeout: 60000,

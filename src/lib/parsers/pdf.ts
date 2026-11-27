@@ -280,10 +280,11 @@ async function readPdfParagraphs(
   { budgetMs = READ_BUDGET_MS, loadTimeoutMs = READER_LOAD_TIMEOUT_MS }: Pick<PdfParseOptions, "budgetMs" | "loadTimeoutMs"> = {},
 ): Promise<PdfParagraphsRead> {
   const { pdfjs, port, pdfWorker } = await openReader(loadTimeoutMs)
-  // The budget, from here: the reader has loaded. In the browser pdf.js works in its own Web Worker, so a
-  // timer fires while one page is still being read: every wait on pdf.js
-  // races it. Where pdf.js runs on this thread (tests), timers wait for it,
-  // so the clock is also read after every wait.
+  // The budget, from here: the reader has loaded. In the browser pdf.js
+  // works in its own Web Worker, so a timer fires while one page is still
+  // being read: every wait on pdf.js races it. Where pdf.js runs on this
+  // thread (tests), timers wait for it, so the clock is also read after
+  // every wait.
   const tooComplex = () => new PdfReadError("too-complex", `PDF took over ${budgetMs} ms to read`)
   const deadline = performance.now() + budgetMs
   // AQU-2551 (browser run): pdf.js's own destroy() waits for its worker, and a

@@ -38,6 +38,7 @@
 // creation.
 
 import { loadVirtualSourceFile } from "../../../db/shared/virtual-source-store"
+import { ASSIGNMENT_MEMBER_CELLS_SQL } from "../../../db/shared/assignment-member-cells-sql"
 import type { Env } from "../types"
 import {
   planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
@@ -114,7 +115,7 @@ const byStructuralPolicy = (counting: string, excluding: string) =>
  *  headings. The view carries the source row's `type`, so the filter reads it
  *  off `ac` directly. */
 const cellsTotalSql = (structural: string) => `(
-  SELECT COUNT(*) FROM assignment_member_cells ac
+  SELECT COUNT(*) FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
    WHERE ac.assignment_id = a.assignment_id${structural}
 )`
 const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
@@ -152,14 +153,14 @@ const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
  */
 const TEXT_CELLS_DONE_SUBQUERY = byStructuralPolicy(
   `(
-  SELECT COUNT(*) FROM assignment_member_cells ac
+  SELECT COUNT(*) FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
     JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
    WHERE ac.assignment_id = a.assignment_id
 )`,
   `(
-  SELECT COUNT(*) FROM assignment_member_cells ac
+  SELECT COUNT(*) FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
     JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
                  AND c.cell_id = ac.cell_id AND c.side = 'target'
                  AND c.lane_id = a.lane_id AND c.validated = 1
@@ -191,12 +192,12 @@ const TEXT_VALIDATED_SQL = `EXISTS (
 
 const assignedCellsWhereSql = (predicate: string) => byStructuralPolicy(
   `(
-  SELECT COUNT(*) FROM assignment_member_cells ac
+  SELECT COUNT(*) FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
    WHERE ac.assignment_id = a.assignment_id
      AND ${predicate}
 )`,
   `(
-  SELECT COUNT(*) FROM assignment_member_cells ac
+  SELECT COUNT(*) FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
    WHERE ac.assignment_id = a.assignment_id
      AND NOT ${isStructuralSql("ac")}
      AND ${predicate}
@@ -328,7 +329,7 @@ export async function getOrgAssignmentWorkload(
             a.deadline         AS deadline,
             a.created_at       AS created_at,
             a.kind             AS kind,
-            (SELECT ac.file_id FROM assignment_member_cells ac
+            (SELECT ac.file_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
@@ -711,7 +712,7 @@ export async function getUnitAssignments(
        -- already IS that join, and carries the source row's grouping columns
        -- (canonical_ref / start_ms / type), so ac is the source cell here —
        -- joining cells again for them cost this read 5x in measurement.
-       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       JOIN ${ASSIGNMENT_MEMBER_CELLS_SQL} ac ON ac.assignment_id = a.assignment_id
        -- AQU-1609: the lane's identity, not its legacy tag. The caller
        -- resolved the lane id; a tag would re-introduce the string indirection
        -- that AQU-1611 retires.
@@ -937,7 +938,7 @@ async function fileIdsForAssignments(
   const placeholders = assignmentIds.map(() => "?").join(", ")
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT DISTINCT ac.assignment_id AS assignment_id, ac.file_id AS file_id
-       FROM assignment_member_cells ac
+       FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
       WHERE ac.assignment_id IN (${placeholders})
       ORDER BY ac.assignment_id, ac.file_id`,
   )
@@ -973,7 +974,7 @@ async function cellIdsForAssignments(
   const placeholders = assignmentIds.map(() => "?").join(", ")
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT ac.assignment_id AS assignment_id, ac.cell_id AS cell_id
-       FROM assignment_member_cells ac
+       FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
       WHERE ac.assignment_id IN (${placeholders})
       ORDER BY ac.assignment_id, ac.cell_id`,
   )
@@ -1003,9 +1004,9 @@ export async function getMyAssignments(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.kind AS kind,
-            (SELECT ac.file_id FROM assignment_member_cells ac
+            (SELECT ac.file_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_member_cells ac
+            (SELECT f.name FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
@@ -1094,7 +1095,7 @@ export async function getAssignmentsGivenBy(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.kind AS kind,
-            (SELECT ac.file_id FROM assignment_member_cells ac
+            (SELECT ac.file_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        LEFT JOIN users u ON u.id = a.assignee_user_id
@@ -1163,9 +1164,9 @@ export async function getMyAssignmentsAcrossOrg(
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.kind AS kind,
             ln.delivers AS lane_delivers,
-            (SELECT ac.file_id FROM assignment_member_cells ac
+            (SELECT ac.file_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
-            (SELECT f.name FROM assignment_member_cells ac
+            (SELECT f.name FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
                JOIN files f ON f.id = ac.file_id AND f.project_id = a.project_id
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_name
        FROM assignments a
@@ -1356,7 +1357,7 @@ export async function getProjectUnitAssignees(env: Env, projectId: string): Prom
        -- itself and carries that row's grouping columns, so this read touches
        -- cells once instead of twice (measured: twice cost it 5x and a
        -- sequential scan).
-       JOIN assignment_member_cells ac ON ac.assignment_id = a.assignment_id
+       JOIN ${ASSIGNMENT_MEMBER_CELLS_SQL} ac ON ac.assignment_id = a.assignment_id
        -- AQU-1493: a line with no reference counts toward the book it is
        -- counted in (unitBookKeyExpr: the line above it's, or for a heading the
        -- verse below it's), so its assignee belongs on that book's row. Read
@@ -1422,7 +1423,7 @@ export async function getMemberLaneAssignments(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id,
             a.scope_label   AS scope_label,
-            (SELECT ac.file_id FROM assignment_member_cells ac
+            (SELECT ac.file_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
       WHERE a.project_id = ? AND a.assignee_user_id = ? AND a.lane_id = ?

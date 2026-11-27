@@ -41,6 +41,7 @@ import { buildUsfmExportPlan } from '../events/usfm-export-plan'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { resetVirtualSourceCacheForTests } from '../../../db/shared/virtual-source-store'
+import { ASSIGNMENT_MEMBER_CELLS_SQL } from '../../../db/shared/assignment-member-cells-sql'
 
 const SECRET = 'virtual-test-secret'
 const ADMIN = 'virtual-admin-secret'
@@ -570,7 +571,7 @@ describe('AQU-2459 Phase B: pure virtual source cells', () => {
     expect(assignBody.rejected).toEqual([])
     expect(assignBody.accepted).toHaveLength(1)
     const memberCells = await db
-      .prepare(`SELECT cell_id, canonical_ref FROM assignment_member_cells WHERE assignment_id = ? ORDER BY cell_id`)
+      .prepare(`SELECT cell_id, canonical_ref FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac WHERE assignment_id = ? ORDER BY cell_id`)
       .bind('assign-gen-1')
       .all<{ cell_id: string; canonical_ref: string }>()
     expect(memberCells.results.map((r) => r.cell_id)).toEqual(['cell-gen-1-1', 'cell-gen-1-2'])
@@ -611,7 +612,7 @@ describe('AQU-2459 Phase B: pure virtual source cells', () => {
     expect(cellsAfterDelete.cells.map((c) => c.cellId)).toEqual(['cell-gen-1-1', 'cell-gen-2-1'])
 
     const memberCellsAfterDelete = await db
-      .prepare(`SELECT cell_id FROM assignment_member_cells WHERE assignment_id = ? ORDER BY cell_id`)
+      .prepare(`SELECT cell_id FROM ${ASSIGNMENT_MEMBER_CELLS_SQL} ac WHERE assignment_id = ? ORDER BY cell_id`)
       .bind('assign-gen-1')
       .all<{ cell_id: string }>()
     expect(memberCellsAfterDelete.results.map((r) => r.cell_id)).toEqual(['cell-gen-1-1'])

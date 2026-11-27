@@ -47,6 +47,7 @@ export const CELLS_RESTORE_COLUMNS = [
   'anchor_cell_id',
   'event_id',
   'source_event_id',
+  'source_content_hash',
   'last_editor',
   'last_edit_at',
   'validated',

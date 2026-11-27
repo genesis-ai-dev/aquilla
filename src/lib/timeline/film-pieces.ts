@@ -122,12 +122,19 @@ export function linkedFilmBehindLines(args: {
   filmFailed?: boolean
   /** The film's length (lib/timeline/video-duration); null while unknown. */
   durationSec: number | null | undefined
+  /**
+   * AQU-2711 x AQU-2253 (review, Nov 25): Split into milestones is on, so the
+   * timeline and Play hold one milestone, laid out from 0:00. Play ends at
+   * its last line: running on would play the film's rest over an empty
+   * timeline, and Play does not move on to the next milestone.
+   */
+  oneMilestone?: boolean
 }): { endSec: number | null; runsOn: boolean } | null {
   if (args.kind !== "linked" || !args.paneOnScreen || !args.followsRecordings || args.filmFailed) return null
   const sec = args.durationSec
   return {
     endSec: typeof sec === "number" && Number.isFinite(sec) && sec > 0 ? sec : null,
-    runsOn: true,
+    runsOn: !args.oneMilestone,
   }
 }
 

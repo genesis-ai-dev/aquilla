@@ -322,3 +322,61 @@ describe("a timeline seek", () => {
     expect(getVirtualClockSec()).toBe(9)
   })
 })
+
+// AQU-2711 x AQU-2253 (review, Nov 25): a subtitle file paired with an audio
+// cue file, split into milestones. The clock runs on the file's own time, so a
+// milestone that starts at 10:00 would play ten minutes of silence from 0:00.
+// Play from the milestone's start starts at its first heard line instead.
+describe("a clock that starts later than 0:00 (one milestone of the file)", () => {
+  it("starts at its start, and Play from before it starts there", () => {
+    startVirtualClock(660, 600)
+    expect(getVirtualClockSec()).toBe(600)
+    virtualClockSeek(0)
+    virtualClockPlay()
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(601, 3)
+  })
+
+  it("Play from a chosen line inside the milestone starts at that line", () => {
+    startVirtualClock(660, 600)
+    virtualClockSeekFromTimeline(630, { play: true, recorderOpen: false })
+    advance(1000)
+    expect(getVirtualClockSec()).toBeCloseTo(631, 3)
+  })
+
+  it("after the end, Play goes back to the start, not to 0:00", () => {
+    startVirtualClock(660, 600)
+    virtualClockSeek(660)
+    virtualClockPlay()
+    expect(getVirtualClockSec()).toBe(600)
+  })
+
+  // The workspace hands the clock back and takes it again when the milestone
+  // changes (its effect's cleanup), so a new start always meets a clock that
+  // has just started.
+  it("taken again for another milestone, it sits at that milestone's start", () => {
+    startVirtualClock(660, 600)
+    virtualClockPlay()
+    advance(1000)
+    stopVirtualClock()
+    startVirtualClock(900, 700)
+    expect(getVirtualClockSec()).toBe(700)
+    expect(getVirtualClockPlaying()).toBe(false)
+  })
+
+  it("a seek while playing never goes before the start", () => {
+    startVirtualClock(660, 600)
+    virtualClockPlay()
+    virtualClockSeek(0)
+    expect(getVirtualClockSec()).toBe(600)
+    virtualClockSeek(640)
+    expect(getVirtualClockSec()).toBeCloseTo(640, 3)
+  })
+
+  it("no start given: 0:00, as before", () => {
+    startVirtualClock(30)
+    virtualClockSeek(30)
+    virtualClockPlay()
+    expect(getVirtualClockSec()).toBe(0)
+  })
+})

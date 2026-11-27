@@ -1070,7 +1070,7 @@ export async function handleBulkImportRequest(
       const targetLang = candidates[0]!.legacy_tag as string
       for (const event of targetEvents) {
         if (laneOfEvent(event.kind, event.payload) !== '') continue
-        event.payload = { ...event.payload, targetLang }
+        event.payload = { ...(event.payload as Record<string, unknown>), targetLang }
       }
     }
   }

@@ -163,7 +163,7 @@ merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
    push             release-verify.yml (production build, auth-worker and sync-worker type-checks; §7) + smart Jev (Hetzner)
                     — fires only because the cut pushes as RELEASE_BOT_TOKEN; a GITHUB_TOKEN push starts nothing
 verify finishes     release-deploy.yml (when on; also every ten minutes): if no `release:halt` issue is open,
-                    release-verify=success and Jev≠FAIL on HEAD → apply additive migrations (when on) → deploy:aquilla → tag
+                    release-verify=success on HEAD (Jev is advisory; §7) → apply additive migrations (when on) → deploy:aquilla → tag
    tag              release-cut.yml again (dispatched; a GITHUB_TOKEN tag does not chain on its own)
    +10 minutes      rollback watch: failed invocations against the hour before, then a live check;
                     a bad release is promoted back and the line halted (when on; otherwise reported)
@@ -438,10 +438,12 @@ the new HEAD re-verifies. The held PR's approval alone does not reach a
 branch already in flight, because no new cut starts while one is open.
 
 **Deploy.** `release-deploy-check.mjs` reads, for the branch HEAD only,
-the `release-verify` check conclusion and the newest Jev marker comment's
-decision line, and whether an issue labelled `release:halt` is open. Deploy
-iff none is open, verify succeeded and Jev reported anything but FAIL. No
-Jev comment yet means wait for the next look. The workflow looks when
+the `release-verify` check conclusion and whether an issue labelled
+`release:halt` is open. Deploy iff none is open and verify succeeded.
+Since 2026-11-27 smart Jev is advisory (§7): the newest Jev marker
+comment's decision line is still read, best effort, and named in the
+reason, but the deploy neither waits for it nor holds on a FAIL. The
+workflow looks when
 Release verify finishes green and every ten minutes; the stall report for
 a red verify stays hourly, at :45. Until 2026-11-19 it looked only at :45
 and the worker suites ran back to back in one job (23 minutes of
@@ -588,11 +590,14 @@ broken gate, not a week of risky changes.
   FAIL from it holds even if a later comment says PASS. A GitHub App for
   the runner replaces the login list when it exists.
   The comments on the HEAD are read across every page, and `release-verify`
-  counts only as a check run GitHub Actions produced.
+  counts only as a check run GitHub Actions produced. Since 2026-11-27 the
+  verdict is advisory (§7): the same rule now picks the verdict the deploy
+  names in its reason, and it holds nothing.
 - **Jev cadence.** One Hetzner stack, one suite at a time, queued. A
   cut whose Jev run is slow simply deploys at a later ten-minute look; two cuts can not race because one release is in flight at
   a time. If the queue backs up, the Jev run on an older HEAD is
-  superseded and the deploy waits.
+  superseded and the deploy waits. Since 2026-11-27 the deploy does not
+  wait for Jev at all (§7).
 - **PR-level test trimming** (meeting: many PR tests belong on the
   release). `release-verify` now carries the full suite; what to drop
   from `ci.yml` on PRs is a separate change with its own review. Reversed

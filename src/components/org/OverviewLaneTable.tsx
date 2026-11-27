@@ -20,20 +20,23 @@
 //   A language that delivers no text, and one that owes no audio, print "—"
 //   under the column that does not apply rather than a misleading 0%; a project
 //   where no language owes audio has no Audio Validated column at all.
-// - People = lane-scoped members: members below maintainer whose
-//   project_member_scopes carry a { kind:'lane', value:<tag> } row. Loaded
-//   with one GET scopes per member below 600, tolerating individual failures
-//   as "unscoped". Maintainers (600+) see every lane and can't be scoped, so
-//   they are not attributed to any single row. A project lead (500) can be
-//   limited to lanes since AQU-1813, so a lane-limited lead is listed here
-//   too (AQU-2027).
+// - People = the members below maintainer who are on the lane: through a
+//   project_member_scopes { kind:'lane' } row, or through a lane grant
+//   (project_member_lane_roles). Give access (AQU-2322) writes only the grant,
+//   so a column that read scope rows alone left those people off the lane they
+//   were just given. Loaded with one GET scopes per member below 600 — the
+//   same response carries both — tolerating individual failures as "on no
+//   lane". Maintainers (600+) see every lane and can't be scoped, so they are
+//   not attributed to any single row. A project lead (500) can be limited to
+//   lanes since AQU-1813, so a lane-limited lead is listed here too
+//   (AQU-2027).
 // - Clicking a row opens the workspace at that lane (§3.1). Actions live in
 //   the row ⋯ menu (and right-click): Assign… (AssignModal pinned via
 //   defaultLane, §3.5), Staff… (StaffLanePopover, §3.4).
 // - AQU-1998: the People cell is also a way IN to that popover — clicking the
 //   avatars opens Staff… for the lane, where the people listed can be removed
-//   from it. The scope reads behind the column are re-run after any staffing
-//   change, so a removal leaves the column without a reload.
+//   from it. The reads behind the column are re-run after any staffing change
+//   (and after Give access grants), so the column follows without a reload.
 // - "+ Add language" routes to the project's settings Languages section.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -63,7 +66,7 @@ import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { GiveAccessLauncher, type GiveAccessRequest } from "@/components/org/access/GiveAccessLauncher"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { fetchMemberScopeView, type MemberScope, type MemberScopeView } from "@/lib/sync/member-scopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { ROLE } from "@/lib/frontier/roles"
 import {
@@ -137,6 +140,21 @@ function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | n
   const key = lane.laneId || lane.lane
   if (!key) return `/project/${projectId}/editor?lane=`
   return `/project/${projectId}/editor?lane=${encodeURIComponent(key)}`
+}
+
+/**
+ * The lanes one member is on, as lane-scope-shaped values: their lane scope
+ * rows, then their lane grants. A grant carries a lane id, which is what a
+ * stored lane scope is too (AQU-1607), so both read back to row tags the same
+ * way. `laneAccess` reaches a project lead only and is absent on an older
+ * server; without it this is the scope rows alone, as the column was before.
+ */
+function lanesHeld(view: MemberScopeView | null): MemberScope[] {
+  if (!view) return []
+  return [
+    ...view.scopes.filter((scope) => scope.kind === "lane"),
+    ...(view.laneAccess?.grants ?? []).map((grant) => ({ kind: "lane" as const, value: grant.laneId })),
+  ]
 }
 
 /**
@@ -272,7 +290,8 @@ export function OverviewLaneTable({
   const navigate = useNavigate()
   const location = useLocation()
   const { members, refresh: refreshMembers } = useProjectMembers(projectId)
-  const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScope[]>>({})
+  /** Per member: the lanes they are on, by scope row or by lane grant. */
+  const [lanesByUser, setLanesByUser] = useState<Record<number, MemberScope[]>>({})
 
   // AssignModal / StaffLanePopover are single instances driven by the lane row
   // they were launched from (⋯ menu), matching the workspace's one-modal pattern.
@@ -299,21 +318,21 @@ export function OverviewLaneTable({
     [members],
   )
 
-  // Load each scopable member's scopes exactly like SharePanel — tolerating an
-  // individual failure as "unscoped" so one bad fetch never blanks the column.
-  // (membersByLane filters against the live roster, so a stale scope for a
-  // member who has left never leaks into a row.)
+  // Load each scopable member's scopes and lane grants — tolerating an
+  // individual failure as "on no lane" so one bad fetch never blanks the
+  // column. (membersByLane filters against the live roster, so a stale scope
+  // for a member who has left never leaks into a row.)
   useEffect(() => {
     if (!jwt || scopableUserIds.length === 0) return
     let alive = true
     void (async () => {
       const entries = await Promise.all(
         scopableUserIds.map(async (userId) => {
-          const scopes = await fetchMemberScopes(jwt, projectId, userId)
-          return [userId, scopes ?? []] as const
+          const view = await fetchMemberScopeView(jwt, projectId, userId)
+          return [userId, lanesHeld(view)] as const
         }),
       )
-      if (alive) setScopesByUser(Object.fromEntries(entries))
+      if (alive) setLanesByUser(Object.fromEntries(entries))
     })()
     return () => { alive = false }
   }, [jwt, projectId, scopableUserIds, scopesNonce])
@@ -328,19 +347,23 @@ export function OverviewLaneTable({
     [lanes, archivedLanes],
   )
 
-  // lane tag -> members scoped to that lane.
+  // lane tag -> members on that lane. Someone with both a scope row and a
+  // grant for a lane (anyone staffed through the popover before AQU-2322) is
+  // listed once.
   const membersByLane = useMemo(() => {
     const map = new Map<string, ProjectMember[]>()
     for (const m of members) {
-      for (const scope of laneScopesAsTags(scopesByUser[m.userId] ?? [], laneIdentities)) {
-        if (scope.kind !== "lane") continue
-        const list = map.get(scope.value) ?? []
+      const tags = new Set(
+        laneScopesAsTags(lanesByUser[m.userId] ?? [], laneIdentities).map((scope) => scope.value),
+      )
+      for (const tag of tags) {
+        const list = map.get(tag) ?? []
         list.push(m)
-        map.set(scope.value, list)
+        map.set(tag, list)
       }
     }
     return map
-  }, [members, scopesByUser, laneIdentities])
+  }, [members, lanesByUser, laneIdentities])
 
   // Rows of the table: target languages only (a source lane rides along in the
   // portfolio for the language pair's label).

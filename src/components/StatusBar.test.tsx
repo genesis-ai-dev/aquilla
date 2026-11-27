@@ -415,3 +415,19 @@ describe("StatusBar layout in the status popover (AQU-2337)", () => {
     }
   })
 })
+
+// AQU-2655: a file that mentions many glossary terms for the first time is
+// checked partly in the background. Until that finishes the footer must say so,
+// or a short findings list reads as the whole file's verdict.
+describe("StatusBar background checks", () => {
+  it("says the checks are still running, and how many cells are left, until they finish", () => {
+    const { rerender } = render(<StatusBar cells={cells} healthMap={new Map()} projectHealth={50} checksPending={42} />)
+    const status = screen.getByTestId("status-bar-checking")
+    expect(status).toHaveAttribute("role", "status")
+    // The count is bidi-isolated like every other number in the footer.
+    expect(status.textContent?.replace(/[\u2066-\u2069]/g, "")).toBe("Checking… 42 left")
+
+    rerender(<StatusBar cells={cells} healthMap={new Map()} projectHealth={50} checksPending={0} />)
+    expect(screen.queryByTestId("status-bar-checking")).toBeNull()
+  })
+})

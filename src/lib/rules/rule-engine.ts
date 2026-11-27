@@ -1,6 +1,6 @@
 import type { TranslationRule, RuleInfraction, InfractionSpan } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { effectiveSourceText } from "@/lib/cell-text"
+import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 import { isBibleCheckId } from "../../../db/shared/bible-checks/types"
 import { bibleCheckInfraction, type BibleCellCheckInput } from "./bible-check-rules"
@@ -327,7 +327,7 @@ function caseInsensitiveFlag(check: TranslationRule["check"]): string {
  * passes the gate still has to be run by `checkRulesForCell` to find out
  * whether it actually infracts.
  */
-export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): boolean {
+export function ruleSourceGateMatches(rule: TranslationRule, cell: SourceTextCell): boolean {
   const check = rule.check
   if (check.type !== "source-requires-target" && check.type !== "target-forbids") return true
   const pattern = check.sourcePattern
@@ -348,7 +348,7 @@ export function ruleSourceGateMatches(rule: TranslationRule, cell: CellData): bo
  * every glossary term — about 1.5 s of main thread for 664 terms, before any
  * row could paint.
  */
-export function rulesPassingSourceGate(cell: CellData, rules: TranslationRule[]): TranslationRule[] {
+export function rulesPassingSourceGate(cell: SourceTextCell, rules: TranslationRule[]): TranslationRule[] {
   if (rules.length === 0) return rules
   const plan = planFor(rules)
   if (!plan.index) return rules.filter((rule) => ruleSourceGateMatches(rule, cell))

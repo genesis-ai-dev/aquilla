@@ -23,8 +23,9 @@
 // verdict is `memberLaneAccess`, which applies the wall's own rule, so this
 // screen cannot claim access the server denies.
 
-import { useState } from "react"
+import { createContext, useContext, useEffect, useState } from "react"
 import type { ReactNode } from "react"
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -75,21 +76,95 @@ function normalizeLaneScopes(
   })
 }
 
+/** What a trigger hands the shared popover: whose scopes, on which project. */
+type LaneScopeEditorPayload = Omit<MemberLaneScopeEditorProps, "trigger">
+
+type LaneScopeEditorHandle = PopoverPrimitive.Handle<LaneScopeEditorPayload>
+
+const LaneScopeEditorHandleContext = createContext<LaneScopeEditorHandle | null>(null)
+
+/**
+ * AQU-2655: one scope-editor popover for everything inside it. The members
+ * matrix puts a scope editor in every populated cell; with a popover root in
+ * each, a closed editor was a large share of what a cell rendered. Inside this
+ * provider an editor is only its trigger — a detached trigger of the one
+ * root here, carrying whose scopes it edits.
+ */
+export function MemberLaneScopeEditorProvider({ children }: { children: ReactNode }) {
+  const [handle] = useState<LaneScopeEditorHandle>(() => PopoverPrimitive.createHandle<LaneScopeEditorPayload>())
+  return (
+    <LaneScopeEditorHandleContext.Provider value={handle}>
+      {children}
+      <Popover handle={handle}>
+        {({ payload }) => {
+          const editor = payload as LaneScopeEditorPayload | undefined
+          return editor ? (
+            <PopoverContent
+              data-testid={`matrix-scope-editor-${editor.userId}-${editor.projectId}`}
+              className="w-64 space-y-2 p-2 text-xs"
+              side="right"
+            >
+              {/* The panel mounts each time the popover opens (the popup
+                  unmounts when it closes), so every open starts from the
+                  server's current state, as it always has. */}
+              <LaneScopeEditorPanel
+                key={`${editor.userId}:${editor.projectId}`}
+                {...editor}
+                onClose={() => handle.close()}
+              />
+            </PopoverContent>
+          ) : null
+        }}
+      </Popover>
+    </LaneScopeEditorHandleContext.Provider>
+  )
+}
+
 /** Freeform lane/file scope editor. Fetches the member's current scopes
  * fresh on open (never trusts a possibly-stale cache) so what's shown is
  * always the true server state at edit time. */
-export function MemberLaneScopeEditor({
+export function MemberLaneScopeEditor(props: MemberLaneScopeEditorProps) {
+  const handle = useContext(LaneScopeEditorHandleContext)
+  const { t } = useI18n()
+  // On its own (outside a provider) an editor brings its own popover root.
+  if (!handle) {
+    return (
+      <MemberLaneScopeEditorProvider>
+        <MemberLaneScopeEditor {...props} />
+      </MemberLaneScopeEditorProvider>
+    )
+  }
+  const { trigger, ...payload } = props
+  return (
+    <PopoverTrigger
+      handle={handle}
+      payload={payload}
+      render={
+        <button
+          type="button"
+          data-testid={`matrix-scope-trigger-${props.userId}-${props.projectId}`}
+          className="mt-0.5 block w-full truncate text-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+          aria-label={t("org.memberLaneScopeEditor.editScopesAriaLabel", { username: props.username })}
+        />
+      }
+    >
+      {trigger}
+    </PopoverTrigger>
+  )
+}
+
+/** The open editor: loads on mount, which is every time the popover opens. */
+function LaneScopeEditorPanel({
   jwt,
   projectId,
   userId,
   username,
-  trigger,
   onSaved,
-}: MemberLaneScopeEditorProps) {
+  onClose,
+}: LaneScopeEditorPayload & { onClose: () => void }) {
   const { t } = useI18n()
-  const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<MemberScope[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [newLane, setNewLane] = useState("")
   // The project's languages: `""` is the main language. Null until loaded, or
   // when the settings couldn't be read (the free-text fallback then shows).
@@ -102,15 +177,12 @@ export function MemberLaneScopeEditor({
   // means "say nothing about grants", never "no access".
   const [laneAccess, setLaneAccess] = useState<MemberLaneAccessPayload | null>(null)
 
-  function handleOpenChange(next: boolean) {
-    setOpen(next)
-    if (!next) return
-    setError(null)
-    setNewLane("")
-    setLoading(true)
-    setLaneAccess(null)
+  // Open: read the member's scopes and the project's languages fresh.
+  useEffect(() => {
+    let alive = true
     void Promise.all([fetchMemberScopeView(jwt, projectId, userId), fetchProjectSettings(jwt, projectId)]).then(
       ([view, settings]) => {
+        if (!alive) return
         const scopes = view?.scopes ?? null
         setLaneAccess(view?.laneAccess ?? null)
         // AQU-1607: a lane scope is a lane id, so the checkboxes are the
@@ -144,7 +216,8 @@ export function MemberLaneScopeEditor({
         setLoading(false)
       },
     )
-  }
+    return () => { alive = false }
+  }, [jwt, projectId, userId, t])
 
   function toggleLane(value: string) {
     setDraft((prev) =>
@@ -178,7 +251,7 @@ export function MemberLaneScopeEditor({
       // view rather than leaving a stale list behind the next open.
       if (saved.laneAccess) setLaneAccess(saved.laneAccess)
       onSaved(saved.scopes, saved.laneNames)
-      setOpen(false)
+      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -229,24 +302,7 @@ export function MemberLaneScopeEditor({
   const byRole = verdict?.kind === "unrestricted" && verdict.reason === "role"
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            data-testid={`matrix-scope-trigger-${userId}-${projectId}`}
-            className="mt-0.5 block w-full truncate text-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-            aria-label={t("org.memberLaneScopeEditor.editScopesAriaLabel", { username })}
-          />
-        }
-      >
-        {trigger}
-      </PopoverTrigger>
-      <PopoverContent
-        data-testid={`matrix-scope-editor-${userId}-${projectId}`}
-        className="w-64 space-y-2 p-2 text-xs"
-        side="right"
-      >
+    <>
         <p className="font-medium">{t("org.memberLaneScopeEditor.scopesHeading", { username })}</p>
         {loading ? (
           <div className="flex items-center text-muted-foreground">
@@ -377,7 +433,6 @@ export function MemberLaneScopeEditor({
             {error && <p className="text-destructive">{error}</p>}
           </>
         )}
-      </PopoverContent>
-    </Popover>
+    </>
   )
 }

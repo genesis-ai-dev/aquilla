@@ -8,7 +8,7 @@
  * one. Each row opens the editor its store already has, and one "Add check"
  * button starts every kind of new check.
  */
-import { useState, useMemo, useEffect, useRef, type ReactNode } from "react"
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Plus, Layers, ChevronDown, Clock, ShieldCheck } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -19,7 +19,7 @@ import { NoteOnClick } from "@/components/ui/info-note"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
-import { BuiltinCheckRow, useBuiltinCounts } from "./BuiltinChecksList"
+import { BuiltinCheckRow, useBuiltinCounts, type BuiltinCheckRowProps } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { rulesForLane, ruleLaneScope } from "@/lib/rules/rule-engine"
@@ -226,6 +226,21 @@ export function RulesSurface({
   })
   const builtinCounts = useBuiltinCounts(infractions)
   const profile = readLanguageProfile(project.languageProfile)
+  // AQU-2655: one function for every built-in row, with the same identity for
+  // the life of the page, so a row's memoized Select and Switch skip the
+  // renders where only the counts moved. `setBuiltinOverride` itself changes
+  // whenever the project record does, so the function reads the latest one
+  // (and the lane being viewed) when it is called.
+  const builtinOverrideTarget = useRef({ setBuiltinOverride, lane: perLaneChecks ? viewLane : undefined })
+  useLayoutEffect(() => {
+    builtinOverrideTarget.current = { setBuiltinOverride, lane: perLaneChecks ? viewLane : undefined }
+  })
+  const [handleSetBuiltinOverride] = useState(
+    (): BuiltinCheckRowProps["onSetOverride"] => (checkId, override) => {
+      const { setBuiltinOverride: set, lane } = builtinOverrideTarget.current
+      return set(checkId, override, lane)
+    },
+  )
 
   useEffect(() => {
     const focusId = searchParams.get("ruleId")
@@ -397,9 +412,7 @@ export function RulesSurface({
             key={row.key}
             rule={row.rule}
             count={builtinCounts.get(row.rule.id) ?? 0}
-            onSetOverride={(checkId, override) =>
-              setBuiltinOverride(checkId, override, perLaneChecks ? viewLane : undefined)
-            }
+            onSetOverride={handleSetBuiltinOverride}
             profile={profile}
             bibleReadiness={bibleReadiness}
             punctuationNote={punctuationNote}

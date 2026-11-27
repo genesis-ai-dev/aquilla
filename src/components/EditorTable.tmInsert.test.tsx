@@ -29,10 +29,14 @@ import { emitCellValidate, emitTargetCellCommit } from "@/lib/sync/events-emit"
 
 vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/events-emit")>()
+  const { commitAndValidateDouble } = await import("@/test-utils/commit-and-validate-double")
+  const emitTargetCellCommit = vi.fn(async () => "E-commit")
+  const emitCellValidate = vi.fn(async () => "E-validate")
   return {
     ...actual,
-    emitTargetCellCommit: vi.fn(async () => "E-commit"),
-    emitCellValidate: vi.fn(async () => "E-validate"),
+    emitTargetCellCommit,
+    emitCellValidate,
+    emitTargetCellCommitAndValidate: commitAndValidateDouble(emitTargetCellCommit, emitCellValidate),
   }
 })
 

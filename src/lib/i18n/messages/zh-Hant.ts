@@ -2522,6 +2522,7 @@ export const zh_Hant: Catalog = {
   "org.access.scope.project": "專案",
   "org.access.scope.lane": "軌道",
   "org.access.page.title": "成員與存取權限",
+  "org.access.manage": "管理存取權限",
   "org.access.page.treeView": "依範圍",
   "org.access.page.noDirect": "無直接授權",
   "org.access.page.loadError": "無法載入此組織的成員與存取權限。",

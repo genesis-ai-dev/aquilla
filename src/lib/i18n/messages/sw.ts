@@ -2982,6 +2982,7 @@ export const sw: Catalog = {
   "org.access.scope.project": "mradi",
   "org.access.scope.lane": "njia",
   "org.access.page.title": "Watu na ufikiaji",
+  "org.access.manage": "Simamia ufikiaji",
   "org.access.page.treeView": "Kwa wigo",
   "org.access.page.noDirect": "Hakuna ruhusa za moja kwa moja",
   "org.access.page.loadError": "Imeshindwa kupakia watu na ufikiaji wa shirika hili.",

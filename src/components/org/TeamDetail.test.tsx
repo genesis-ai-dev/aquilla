@@ -572,6 +572,20 @@ describe("TeamDetail team-role origin (AQU-1352)", () => {
     expect(screen.getAllByText(/CAS/).some((el) => /set at/i.test(el.textContent ?? ""))).toBe(true)
   })
 
+  // AQU-2324: one door to this team on the Places lens for whoever can set
+  // roles here; the team's own member and project controls stay below it.
+  it("offers Manage access on this team to an editor, not to a viewer", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
+    const { unmount } = renderDetail()
+    expect(await screen.findByRole("link", { name: "Manage access" })).toHaveAttribute("href", "/orgs/1/access?place=team:10")
+    unmount()
+
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    expect(screen.queryByRole("link", { name: "Manage access" })).not.toBeInTheDocument()
+  })
+
   it("keeps the team-role select usable for an editor on an inheriting row", async () => {
     getTeam.mockResolvedValue({ id: 10, name: "WA", projects: [], members: [{ userId: 2, username: "anna", roleLevel: 100, teamRoleLevel: null }] })
     renderDetail()

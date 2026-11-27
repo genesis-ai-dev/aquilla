@@ -2987,6 +2987,7 @@ export const ha: Catalog = {
   "org.access.scope.project": "aiki",
   "org.access.scope.lane": "hanya",
   "org.access.page.title": "Mutane da shiga",
+  "org.access.manage": "Ku kula da shiga",
   "org.access.page.treeView": "Ta iyaka",
   "org.access.page.noDirect": "Babu bayarwa kai tsaye",
   "org.access.page.loadError": "An kasa loda mutane da shiga na wannan ƙungiya.",

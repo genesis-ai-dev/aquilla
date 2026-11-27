@@ -2992,6 +2992,7 @@ export const am: Catalog = {
   "org.access.scope.project": "ፕሮጀክት",
   "org.access.scope.lane": "መስመር",
   "org.access.page.title": "ሰዎች እና መዳረሻ",
+  "org.access.manage": "መዳረሻ ያስተዳድሩ",
   "org.access.page.treeView": "በወሰን",
   "org.access.page.noDirect": "ቀጥታ ስጦታዎች የሉም",
   "org.access.page.loadError": "ለዚህ ድርጅት ሰዎችን እና መዳረሻ መጫን አልተቻለም።",

@@ -8,25 +8,23 @@
 // family as Neon, so dialect + FTS (generated tsvector) are validated for real.
 //
 // `env` is a module singleton; vitest isolates test files into separate workers,
-// so each file gets its own PGlite. setup-migrations.ts loads the schema before
-// the suite and truncates between tests.
+// so each file gets its own PGlite. That PGlite is a copy of the template the
+// run built once (db/shared/test-pg-harness.ts), so the schema is already in
+// it; setup-migrations.ts switches the session on before the suite and resets
+// between tests.
 import { PGlite } from "@electric-sql/pglite"
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
-import { installTestLaneFill, rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { rewriteTestLaneResolve } from "../../../../db/shared/test-lane-fill"
+import { TEST_PG_RESET_SQL, TEST_PG_SESSION_SQL, testPgTemplate } from "../../../../db/shared/test-pg-harness"
 import { guardPoolOverflow } from "../../../../db/shared/test-pool-guard"
-
-const SCHEMA = readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
-  "utf8",
-)
 
 // Mirror the production shim's type coercion (makePostgres): int8 (COUNT/SUM,
 // server_seq, *_ms) → JS number, so test assertions see the same types prod does
 // instead of PGlite's default bigint-as-string.
-export const pg = new PGlite({ parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) } })
+export const pg = new PGlite({
+  loadDataDir: await testPgTemplate(() => new PGlite()),
+  parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) },
+})
 
 function pgliteExecutor(db: PGlite): PgExecutor {
   const wrap = (q: { query: PGlite["query"]; exec: PGlite["exec"]; transaction?: PGlite["transaction"] }): PgExecutor => ({
@@ -131,21 +129,20 @@ export const env = {
   STRIPE_PRICE_ADDON: "price_test_addon",
 }
 
-/** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */
+/**
+ * Ready the test PGlite's session (call once, beforeAll). The canonical schema
+ * and the lane-fill trigger came with the template the database was loaded
+ * from; what a data directory cannot carry is the session setting that
+ * switches the fill on.
+ */
 export async function initTestSchema(): Promise<void> {
-  await pg.exec(SCHEMA)
-  // lane_id is NOT NULL. Tests that omit it get a lane minted by this trigger.
-  await installTestLaneFill((sql) => pg.exec(sql))
+  await pg.exec(TEST_PG_SESSION_SQL)
 }
 
-/** Truncate every app table + reset identities, and empty the R2 stub, between tests. */
+/** Empty every app table + reset identities, and empty the R2 stub, between tests. */
 export async function resetTestDb(): Promise<void> {
   snapshotObjects.clear()
-  await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
-    FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
-      EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-    END LOOP; END $$;`)
-  await pg.exec(`SELECT set_config('aquilla.test_lane_fill', 'on', false)`)
+  await pg.exec(TEST_PG_RESET_SQL)
 }
 
 /** No-op: D1 migrations are replaced by the Postgres schema load (initTestSchema). */

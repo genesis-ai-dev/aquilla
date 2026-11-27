@@ -66,7 +66,7 @@ const LINE_CLASS =
 export function EditorSplitDivider({
   rootRef,
   headerRef,
-  scrollRef,
+  getScrollElement,
   gridCols,
   bibleTracks = 0,
 }: {
@@ -74,8 +74,9 @@ export function EditorSplitDivider({
   rootRef: RefObject<HTMLElement | null>
   /** The column-header grid, which gets the header grip. */
   headerRef?: RefObject<HTMLElement | null>
-  /** The list's scroll element, which a wheel turn over the line scrolls. */
-  scrollRef?: RefObject<HTMLElement | null>
+  /** The list's scroll element, which a wheel turn over the line scrolls.
+   *  Read at wheel time: the list hands out a control object, not the node. */
+  getScrollElement?: () => HTMLElement | null
   gridCols: EditorGridCols | string
   /** Bible columns between Source and Target. */
   bibleTracks?: number
@@ -235,13 +236,13 @@ export function EditorSplitDivider({
 
   const onWheel = useCallback(
     (e: ReactWheelEvent<HTMLDivElement>) => {
-      const scroller = scrollRef?.current
+      const scroller = getScrollElement?.()
       if (!scroller || typeof scroller.scrollBy !== "function") return
       // deltaMode: 0 pixels, 1 lines, 2 pages.
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? scroller.clientHeight : 1
       scroller.scrollBy({ top: e.deltaY * unit, left: e.deltaX * unit })
     },
-    [scrollRef],
+    [getScrollElement],
   )
 
   const shares = editorSplitShares(effective, tracks)

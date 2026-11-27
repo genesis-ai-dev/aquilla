@@ -2093,6 +2093,9 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
     parentRef.current = node instanceof HTMLElement ? node : null
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
+  // AQU-2678: LegendList's react build hands refScrollView a control object,
+  // not the node, so parentRef stays empty; its handle names the real scroller.
+  const getListScrollElement = useCallback(() => listRef.current?.getScrollableNode() ?? null, [])
 
   /** Every rendered row's display index and vertical bounds, live from the
    *  DOM — the chapter heading reads it on scroll and AQU-2153's lens switch
@@ -4079,7 +4082,7 @@ export const EditorTable = React.memo(forwardRef<EditorTableHandle, EditorTableP
           </BibleDataProvider>
           {/* AQU-2678: the draggable line before Target (with a grip in the
               column headings). */}
-          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} scrollRef={parentRef} gridCols={gridCols} bibleTracks={bibleTrackCount} />
+          <EditorSplitDivider rootRef={tableRootRef} headerRef={columnHeadersRef} getScrollElement={getListScrollElement} gridCols={gridCols} bibleTracks={bibleTrackCount} />
         </div>
       ) : isTimeOrdered ? (
         // Shared with the Smart Extensions editor surface (AQU-1565/1566).

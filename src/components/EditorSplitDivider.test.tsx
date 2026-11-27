@@ -24,6 +24,7 @@ function Harness({ dir, bibleTracks = 0 }: { dir?: "rtl" | "ltr"; bibleTracks?: 
   const rootRef = useRef<HTMLDivElement | null>(null)
   const headerRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLElement | null>(null)
+  const getScrollElement = () => scrollRef.current
   return (
     <div dir={dir}>
       <div ref={rootRef} data-testid="root">
@@ -32,7 +33,7 @@ function Harness({ dir, bibleTracks = 0 }: { dir?: "rtl" | "ltr"; bibleTracks?: 
         <EditorSplitDivider
           rootRef={rootRef}
           headerRef={headerRef}
-          scrollRef={scrollRef}
+          getScrollElement={getScrollElement}
           bibleTracks={bibleTracks}
           gridCols="md:grid-cols-[84px_minmax(0,var(--editor-rest-fr,1fr))_minmax(0,var(--editor-tgt-fr,1fr))]"
         />

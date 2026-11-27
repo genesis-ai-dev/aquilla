@@ -40,19 +40,27 @@ vi.mock("@legendapp/list/react", async () => {
       keyExtractor,
       refScrollView,
     }: {
-      refScrollView?: (node: unknown) => void
+      refScrollView?: React.Ref<unknown>
       data: string[]
       renderItem: (props: { item: string; index: number }) => ReactNode
       keyExtractor?: (item: string, index: number) => string
     }, ref) {
+      // Like @legendapp/list's react build, neither ref gets the DOM node:
+      // both get control objects whose getScrollableNode() returns it.
+      const scrollerRef = React.useRef<HTMLDivElement | null>(null)
       React.useImperativeHandle(ref, () => ({
         getState: () => ({ scroll: 0, positionAtIndex: (i: number) => i * 140, sizeAtIndex: () => 140 }),
+        getScrollableNode: () => scrollerRef.current,
         scrollToIndex: async () => undefined,
         scrollToOffset: async () => undefined,
       }))
+      React.useImperativeHandle(refScrollView, () => ({
+        getScrollableNode: () => scrollerRef.current,
+        scrollBy: (x: number, y: number) => scrollerRef.current?.scrollBy({ left: x, top: y }),
+      }))
       return React.createElement(
         "div",
-        { ref: refScrollView, "data-testid": "list-scroller" },
+        { ref: scrollerRef, "data-testid": "list-scroller" },
         data.map((item, index) =>
           React.createElement(
             React.Fragment,

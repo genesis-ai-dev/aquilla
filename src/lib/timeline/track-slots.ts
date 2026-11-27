@@ -140,11 +140,39 @@ export function slotsForTrack(trackId: string): string[] {
  * switched it off.
  */
 export function slotAudible(
-  state: { target: boolean; bySlot?: Record<string, boolean> },
+  state: { target: boolean; bySlot?: Record<string, boolean>; solo?: readonly string[]; drawn?: readonly string[] },
   slot: string,
 ): boolean {
+  // AQU-2664 (board 74): while any track is soloed, only the soloed ones are
+  // heard; a track's own mute still wins. The default row is soloed as
+  // `"target"`, under either of its two slots.
+  const key = isDefaultTrackSlot(slot) ? "target" : slot
+  const solo = activeSolo(state)
+  if (solo.length > 0 && !solo.includes(key)) return false
   if (isDefaultTrackSlot(slot)) return state.target
   return state.bySlot?.[slot] !== false
+}
+
+/** AQU-2664: is the source (the master element, the film) heard — on, and
+ *  not quiet because another track is soloed? Structural, like slotAudible. */
+export function sourceHeard(state: { source: boolean; solo?: readonly string[]; drawn?: readonly string[] }): boolean {
+  if (!state.source) return false
+  const solo = activeSolo(state)
+  return solo.length === 0 || solo.includes("source")
+}
+
+/**
+ * Review M4: the solo entries that count — those of rows still drawn. A
+ * soloed track that is deleted or hidden would otherwise silence every other
+ * row and the film, with no S lit anywhere to undo it. The entry is kept (not
+ * deleted), so the solo comes back with its row. With no `drawn` list yet
+ * (nothing has said which rows are drawn), every entry counts.
+ */
+export function activeSolo(state: { solo?: readonly string[]; drawn?: readonly string[] }): readonly string[] {
+  const solo = state.solo ?? []
+  if (solo.length === 0 || !state.drawn) return solo
+  const drawn = state.drawn
+  return solo.filter((k) => drawn.includes(k))
 }
 
 /**

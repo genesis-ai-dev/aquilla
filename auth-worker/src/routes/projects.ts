@@ -43,6 +43,7 @@ import {
   isLinkRoleLevel,
   forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
+  resolveGenuineProjectRole,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
@@ -571,10 +572,21 @@ projects.post(
       }
     }
 
+    // [Pen test 2026-11-26] A replay is authorised by `created_by`, which is
+    // history only (AQU-2357), and the create gate above never looks at the
+    // project. So a creator later removed from the project, narrowed to one
+    // lane, or whose team was detached could replay the create to re-attach
+    // their team as a Viewer grant and read every lane again. On a replay,
+    // re-attach only for a caller who still holds Owner on the project now —
+    // the original retry-after-partial-failure case. Genuine role: an
+    // operator's blanket platform Owner does not count here.
+    const mayAttachTeams = inserted ||
+      ((await resolveGenuineProjectRole(c.env, user, body.id))?.level ?? 0) >= ROLE.OWNER
+
     // AQU-1352 P2: attach the selected teams at the attach dialog's default.
     // SWARM-TODO(AQU-1352): not transactional with the create; a failure here
     // leaves the project without its team and the caller as creator only.
-    if (orgId != null) {
+    if (orgId != null && mayAttachTeams) {
       for (const teamId of teamIds) {
         await attachGroupProject(c.env, orgId, teamId, body.id, TEAM_ATTACH_DEFAULT_ROLE, user.id)
       }
@@ -590,7 +602,7 @@ projects.post(
         roleBefore: null,
         roleAfter: ROLE.OWNER,
       })
-      for (const teamId of teamIds) {
+      for (const teamId of mayAttachTeams ? teamIds : []) {
         await auditMembershipChange(c.env, user, {
           action: "team.project.attach",
           where: { scope: "team", orgId, groupId: teamId },

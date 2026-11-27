@@ -2,11 +2,12 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ExtensionMarker, ExtensionStripe } from "@/components/tools/ExtensionMarker"
 import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
+import { BuildExtensionTrigger } from "@/components/tools/BuildExtensionLink"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
 import type { ToolImporter } from "../../shared/tools/manifest"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
-  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2,
+  BookImage, BookA, Search, Cloud, CloudDownload, Video, Link2, Plus,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -357,7 +358,7 @@ function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCh
   }
 }
 
-interface ImportDialogProps {
+export interface ImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
@@ -1418,6 +1419,7 @@ export function ImportDialog({
               setExtensionImporter(pick)
               setScreen("extension")
             }}
+            onBeforeBuildImporter={() => onOpenChange(false)}
             onSelect={(s, selectedPartnerId) => {
               analytics.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
@@ -2255,14 +2257,17 @@ interface ImportLandingProps {
   translationOnlyElsewhere?: boolean
   /** AQU-1937: open an extension's import contribution. */
   onPickExtensionImporter?: (pick: { toolId: string; importer: ToolImporter; toolName: string }) => void
+  /** AQU-2772: close the dialog before navigating to the extension builder. */
+  onBeforeBuildImporter?: () => void
 }
 
-function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false, onPickExtensionImporter }: ImportLandingProps) {
+function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhere = false, onPickExtensionImporter, onBeforeBuildImporter }: ImportLandingProps) {
   const t = useT()
   // AQU-1937: import contributions from Smart Extensions (only when the
   // project has them switched on: the provider lists no tools otherwise).
   const toolsCtx = useToolsMount()
   const extensionImporters = (toolsCtx?.tools ?? []).flatMap((tool) => (tool.manifest.importers ?? []).map((importer) => ({ tool, importer })))
+  const canBuildImporter = Boolean(toolsCtx && toolsCtx.extensionsEnabled === true)
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
@@ -2291,10 +2296,10 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
           <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
-      {extensionImporters.length > 0 && onPickExtensionImporter && (
+      {((extensionImporters.length > 0 && onPickExtensionImporter) || canBuildImporter) && (
         <ImportSection label={t("extensions.import.section")}>
           <ExtensionStripe className="space-y-2">
-          {extensionImporters.map(({ tool, importer }) => (
+          {onPickExtensionImporter && extensionImporters.map(({ tool, importer }) => (
             <button
               key={`${tool.id}:${importer.id}`}
               type="button"
@@ -2306,6 +2311,21 @@ function ImportLanding({ onSelect, allowDcs, linkProject, translationOnlyElsewhe
               <span className="text-xs text-muted-foreground">{importer.description ?? tool.name}</span>
             </button>
           ))}
+          {canBuildImporter && toolsCtx && (
+            <BuildExtensionTrigger
+              projectId={toolsCtx.projectId}
+              where="importer"
+              onBeforeNavigate={onBeforeBuildImporter}
+              testId="build-extension-importer"
+              className="flex w-full flex-col items-start gap-0.5 rounded-xl border border-dashed px-3 py-2.5 text-start text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground"
+            >
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <Plus className="size-3.5" aria-hidden />
+                {t("extensions.buildFrom.importer")}
+              </span>
+              <span className="text-xs text-muted-foreground">{t("extensions.buildFrom.importerHint")}</span>
+            </BuildExtensionTrigger>
+          )}
           </ExtensionStripe>
         </ImportSection>
       )}

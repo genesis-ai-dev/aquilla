@@ -516,7 +516,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   const makeChainDb = () =>
     makeTestDb({
       project_settings: [
-        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead', sourceTextFloor: 'project_lead' }) },
       ],
       lanes: [
         { id: 'deflane01', project_id: 'proj-a', role: 'target', name: null, legacy_tag: '' },
@@ -569,7 +569,8 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   })
 
   it('a source correction after a target commit on the same parent still projects', async () => {
-    const leadToken = await makeToken({ role: 500 })
+    // AQU-2647: editing source text defaults to Maintainer.
+    const leadToken = await makeToken({ role: 600 })
     const token = await makeToken()
     const { db, snapshot } = await makeChainDb()
 
@@ -1362,7 +1363,7 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     // `cellEditingFloor` defaults to "none", which refuses a lead too.
     const { db, snapshot } = await makeTestDb({
       project_settings: [
-        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead', sourceTextFloor: 'project_lead' }) },
       ],
     })
     // Seed both sides so `rows` has to carry the source row too.
@@ -1398,7 +1399,7 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     const token = await makeToken({ role: 500, username: 'alice' })
     const { db } = await makeTestDb({
       project_settings: [
-        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead', sourceTextFloor: 'project_lead' }) },
       ],
     })
     const kept = {

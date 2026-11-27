@@ -158,3 +158,71 @@ describe("a take's level in an export", () => {
     expect(guardPeak(-1.8)).toBeGreaterThan(-1)
   })
 })
+
+// AQU-2664: an evened-out take plays at the target — the mixer reads the same
+// take-gain rule the exports do. The stages: correction, then the take's own
+// volume and fades (its gain node), then the track, main and peak guard.
+describe("an evened-out take on playback", () => {
+  const evened = { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16 }
+
+  it("reads its gain as its own volume plus the correction to the target", () => {
+    expect(clipLevelOf(evened)).toEqual({ gainDb: 12, fadeInSec: 0, fadeOutSec: 0, startSec: 0, endSec: null })
+    expect(clipLevelOf({ ...evened, gainDb: -3 })?.gainDb).toBeCloseTo(9, 6)
+    // Cleared (no target): back to its own volume, or flat.
+    expect(clipLevelOf({ ...evened, evenTargetLufs: null })).toBeNull()
+    // The peak holds a raise back: -14 + 12 would pass -1 dBTP.
+    expect(clipLevelOf({ loudnessLufs: -28, truePeakDb: -6, evenTargetLufs: -16 })?.gainDb).toBeCloseTo(5, 6)
+  })
+
+  it("sets the take's gain node to that gain", () => {
+    const sets: Array<{ name: string; v: number }> = []
+    const node = (name: string) => ({
+      name,
+      gain: { value: 1, setValueAtTime: (v: number) => sets.push({ name, v }), cancelScheduledValues: () => {}, linearRampToValueAtTime: () => {} },
+      threshold: { value: 0 }, knee: { value: 0 }, ratio: { value: 0 }, attack: { value: 0 }, release: { value: 0 },
+      connect: () => {},
+    })
+    let gains = 0
+    vi.stubGlobal("AudioContext", function AC(this: unknown) {
+      return {
+        state: "running", currentTime: 0, destination: { name: "out" },
+        createGain: () => node(`gain${gains++}`),
+        createDynamicsCompressor: () => node("guard"),
+        createMediaElementSource: () => node("source"),
+        resume: () => Promise.resolve(),
+      }
+    } as unknown as typeof AudioContext)
+    const el = {
+      src: "blob:x", currentSrc: "blob:x", currentTime: 0.5, paused: true, muted: false, playbackRate: 1, volume: 0.4,
+      addEventListener: () => {},
+    } as unknown as HTMLMediaElement
+    expect(mixElement(el, "recording", clipLevelOf(evened))).toBe(true)
+    // The last value set on a gain node is the take's own: +12 dB.
+    expect(sets[sets.length - 1].v).toBeCloseTo(Math.pow(10, 12 / 20), 6)
+    expect(el.volume).toBe(1)
+  })
+})
+
+describe("an evened-out take in an export", () => {
+  it("applies the same gain to its samples", () => {
+    const kept = new Float32Array(10).fill(0.1)
+    const att = { loudnessLufs: -28, truePeakDb: -14, evenTargetLufs: -16, gainDb: -2 }
+    expect(hasClipLevel(att)).toBe(true)
+    expect(applyClipLevelPcm(kept, 100, att)[5]).toBeCloseTo(0.1 * Math.pow(10, 10 / 20), 5)
+    expect(hasClipLevel({ loudnessLufs: -28, truePeakDb: -14 })).toBe(false)
+  })
+
+  it("guards the SUM of the stages: a take turned up past full scale is held under it, not clipped", () => {
+    // Evened to its -1 dBTP ceiling, then turned up +6 dB by hand.
+    const kept = new Float32Array(10).fill(Math.pow(10, -13 / 20))
+    const out = applyClipLevelPcm(kept, 100, { loudnessLufs: -28, truePeakDb: -13, evenTargetLufs: -16, gainDb: 6 })
+    expect(out[5]).toBeLessThanOrEqual(1) // never past full scale
+    expect(out[5]).toBeGreaterThan(0.891)
+    // A modest over is bent under full scale rather than clipped flat.
+    const near = applyClipLevelPcm(new Float32Array(4).fill(Math.pow(10, -13 / 20)), 100, { loudnessLufs: -28, truePeakDb: -13, evenTargetLufs: -16, gainDb: 0.5 })
+    expect(near[0]).toBeLessThan(1)
+    expect(near[0]).toBeGreaterThan(0.891)
+    expect(out[5]).toBe(Math.fround(guardPeak(Math.pow(10, 5 / 20))))
+  })
+})
+

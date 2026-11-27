@@ -6,9 +6,10 @@
  */
 import type { ReactNode } from "react"
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
-import { createMemoryRouter, RouterProvider } from "react-router-dom"
+import { createMemoryRouter, Outlet, RouterProvider, Navigate } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
+import { ACCESS_AUDIT_REDIRECT } from "@/lib/access/people-lens"
 import { formatScopePath } from "@/lib/access/scope-path"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { accessNodeId } from "./access-anchors"
@@ -20,6 +21,10 @@ const project = { type: "project" as const, id: "p1", name: "Pattani" }
 const french = { type: "lane" as const, id: "fr", name: "French" }
 const spanish = { type: "lane" as const, id: "es", name: "Spanish" }
 const other = { type: "project" as const, id: "p2", name: "Other" }
+const now = Date.now()
+const recent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString()
+const staleAt = new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString()
+const inviteExpiry = new Date(now + (3 * 24 + 6) * 60 * 60 * 1000).toISOString()
 
 const payload: OrgAccessPayload = {
   tree: [{
@@ -63,10 +68,36 @@ const payload: OrgAccessPayload = {
     }],
   }],
   people: [
-    { userId: "9", displayName: "Naladda", isGuest: true, grants: [
+    {
+      userId: "9", displayName: "Naladda", isGuest: true, email: "naladda@example.com", lastActiveAt: recent,
+      grants: [
+        { scopePath: [org, project], roleLevel: 300, origin: { kind: "direct" } },
+        { scopePath: [org, other], roleLevel: 200, origin: { kind: "direct" } },
+      ],
+    },
+    { userId: "1", displayName: "Ruth", isGuest: false, email: "ruth@example.com", lastActiveAt: recent, grants: [
+      { scopePath: [org], roleLevel: 700, origin: { kind: "direct" } },
+    ] },
+    { userId: "4", displayName: "Bare", isGuest: false, lastActiveAt: null, grants: [
+      { scopePath: [org], roleLevel: 100, origin: { kind: "direct" } },
+    ] },
+    {
+      userId: "invite:project:p1:tok", displayName: "soon@example.com", email: "soon@example.com", isGuest: false,
+      pendingInvite: { roleLevel: 300, expiresAt: inviteExpiry },
+      grants: [{ scopePath: [org, project], roleLevel: 300, origin: { kind: "direct" } }],
+    },
+    { userId: "keeper", displayName: "Keeper", isGuest: false, lastActiveAt: recent, grants: [
+      { scopePath: [org, project], roleLevel: 600, origin: { kind: "direct" } },
+    ] },
+    { userId: "6", displayName: "LaneOnly", isGuest: false, lastActiveAt: recent, grants: [
+      { scopePath: [org, project, french], roleLevel: 200, origin: { kind: "direct" } },
+    ] },
+    { userId: "heir", displayName: "Heir", isGuest: false, lastActiveAt: recent, grants: [
       { scopePath: [org, team, project], roleLevel: 500, origin: { kind: "inherited", from: [org, team] }, grantedBy: "Ruth", grantedAt: "2026-09-01T00:00:00.000Z" },
     ] },
-    { userId: "1", displayName: "Ruth", isGuest: false, grants: [{ scopePath: [org], roleLevel: 700, origin: { kind: "direct" } }] },
+    { userId: "stale", displayName: "Stale", isGuest: false, lastActiveAt: staleAt, grants: [
+      { scopePath: [org, project], roleLevel: 400, origin: { kind: "direct" } },
+    ] },
   ],
 }
 
@@ -79,7 +110,7 @@ vi.mock("./org-access-data", async (orig) => ({
 vi.mock("@/components/AppShell", () => ({ AppShell: ({ main }: { main: ReactNode }) => <>{main}</> }))
 vi.mock("@/components/org/OrgSidebar", () => ({ OrgSidebar: () => null }))
 vi.mock("@/components/org/OrgBreadcrumb", () => ({ OrgBreadcrumb: () => null }))
-vi.mock("@/context/OrgContext", () => ({ useActiveOrg: () => ({ activeOrg: { name: "Biblica ETT" }, activeOrgId: 1 }) }))
+vi.mock("@/context/OrgContext", () => ({ useActiveOrg: () => ({ activeOrg: { id: 1, name: "Biblica ETT" }, activeOrgId: 1 }) }))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "ruth" } }) }))
 
 const { OrgAccessPage } = await import("@/pages/OrgAccessPage")
@@ -97,24 +128,127 @@ function placeButton(name: string) {
   return screen.getByRole("button", { name: (accessible) => accessible.includes(name) })
 }
 
-describe("OrgAccessPage", () => {
-  it("keeps the person view's grant chips linked to the place they come from", async () => {
+function peopleFilter(label: string) {
+  return screen.getByRole("button", { name: (accessible) => accessible.replace(/\s+/g, " ").trim().startsWith(`${label} `) })
+}
+
+function personRow(name: string) {
+  const row = screen.getAllByTestId("people-row").find((item) => item.getAttribute("data-person") === name)
+  if (!row) throw new Error(`no people row for ${name}`)
+  return row
+}
+
+describe("OrgAccessPage Give access (AQU-2320)", () => {
+  it("is disabled where the viewer may grant nowhere", async () => {
     renderPage()
     await screen.findByTestId("access-tree")
-    // AQU-2317: the node carries the id an inherited pill's link lands on.
+    // No grantable map (or nothing grantable): the server would refuse every grant.
+    expect(screen.getByTestId("give-access-open")).toBeDisabled()
+  })
+
+  it("opens pre-filled with the place selected in the lens", async () => {
+    payload.grantable = { "org:1": { ok: true, cap: 700 }, "project:p1": { ok: true, cap: 700 } }
+    try {
+      renderPage()
+      await screen.findByTestId("access-tree")
+      fireEvent.click(placeButton("Pattani"))
+      fireEvent.click(screen.getByTestId("give-access-open"))
+      const dialog = await screen.findByTestId("give-access-dialog")
+      expect(within(dialog).getByTestId("give-place")).toHaveTextContent("Pattani")
+    } finally {
+      delete payload.grantable
+    }
+  })
+})
+
+describe("OrgAccessPage", () => {
+  it("AQU-2323: a name on the Places lens, granted here or reaching here, opens that person's inspector", async () => {
+    renderPage()
+    await screen.findByTestId("access-tree")
+    fireEvent.click(placeButton("Pattani"))
+    expect(await screen.findByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
+    expect(screen.getByRole("link", { name: "Open Ruth" })).toHaveAttribute("href", "/orgs/1/access/people/1")
+  })
+
+  it("lists members, guests, and invites, and a Guests CSV repeats the breadcrumbs on screen", async () => {
+    renderPage()
+    await screen.findByTestId("access-tree")
     expect(screen.getByTestId(accessNodeId(team)).id).toBe(accessNodeId(team))
+    expect(screen.queryByRole("button", { name: /^Print/ })).toBeNull()
 
     fireEvent.click(screen.getByRole("tab", { name: "People" }))
-    await screen.findByTestId("access-people")
-    const chips = screen.getAllByTestId("access-chip")
-    // AQU-2317: the chip is a role pill plus the place, both from the shared
-    // helpers — the place still reads byte-identical to the CSV column.
-    expect(chips[0].textContent).toContain(formatScopePath([org, team, project]))
-    const pill = chips[0].querySelector("[data-origin]")
-    expect(pill?.getAttribute("data-origin")).toBe("inherited")
-    // Inherited, so the pill names where the grant is set and links to that node.
-    expect(pill?.textContent).toContain(`via team ${team.name}`)
-    expect(pill?.getAttribute("href")).toBe(`#${accessNodeId(team)}`)
+    await screen.findByTestId("people-lens")
+    expect(peopleFilter("Everyone")).toHaveTextContent("8")
+    expect(peopleFilter("Members")).toHaveTextContent("6")
+    expect(peopleFilter("Guests")).toHaveTextContent("1")
+    expect(peopleFilter("Pending invites")).toHaveTextContent("1")
+    expect(peopleFilter("Can give access")).toHaveTextContent("2")
+    expect(peopleFilter("Inactive 90 days")).toHaveTextContent("2")
+
+    const guest = personRow("Naladda")
+    expect(within(guest).getByTestId("guest-badge")).toBeTruthy()
+    expect(within(guest).getByTestId("role-badge").getAttribute("data-origin")).toBe("direct")
+    expect(within(guest).getByTestId("role-badge")).toHaveTextContent("Reviewer")
+    expect(within(guest).getByTestId("role-badge").className).not.toContain("border-dashed")
+    expect(within(guest).getByTestId("people-reaches")).toHaveTextContent("2 projects")
+    expect(within(guest).getByRole("link", { name: "Open Naladda" })).toHaveAttribute("href", "/orgs/1/access/people/9")
+    const shown = within(guest).getAllByTestId("scope-breadcrumb").map((crumb) => crumb.getAttribute("aria-label"))
+    expect(shown).toEqual([formatScopePath([org, other]), formatScopePath([org, project])])
+
+    const owner = personRow("Ruth")
+    expect(within(owner).queryByTestId("guest-badge")).toBeNull()
+    expect(within(owner).getByTestId("people-reaches")).toHaveTextContent("Everything · 1 team, 2 projects")
+    expect(within(owner).getByTestId("people-last-active")).toHaveTextContent("2 days ago")
+
+    const bare = personRow("Bare")
+    expect(within(bare).getByTestId("role-badge")).toHaveTextContent("No access yet")
+    expect(within(bare).getByTestId("people-reaches")).toHaveTextContent("Nothing. Org membership alone opens no project.")
+    expect(within(bare).getByTestId("people-last-active")).toHaveTextContent("No recent activity")
+
+    const invite = personRow("soon@example.com")
+    expect(within(invite).getByTestId("invited-badge")).toBeTruthy()
+    expect(within(invite).getByTestId("role-badge")).toHaveTextContent("Reviewer")
+    expect(invite.textContent).toMatch(/expires in \d+ days/)
+    expect(within(invite).queryByRole("link")).toBeNull()
+
+    expect(personRow("LaneOnly").textContent).toContain("1 language lane")
+
+    fireEvent.click(peopleFilter("Members"))
+    expect(screen.getAllByTestId("people-row").some((row) => row.getAttribute("data-person") === "Naladda")).toBe(false)
+    expect(personRow("Bare")).toBeTruthy()
+    fireEvent.click(peopleFilter("Guests"))
+    expect(screen.getAllByTestId("people-row")).toHaveLength(1)
+    expect(personRow("Naladda")).toBeTruthy()
+    fireEvent.click(peopleFilter("Pending invites"))
+    expect(screen.getAllByTestId("people-row").map((row) => row.getAttribute("data-person"))).toEqual(["soon@example.com"])
+    fireEvent.click(peopleFilter("Can give access"))
+    expect(screen.getAllByTestId("people-row").map((row) => row.getAttribute("data-person")).sort()).toEqual(["Keeper", "Ruth"])
+    fireEvent.click(peopleFilter("Inactive 90 days"))
+    expect(screen.getAllByTestId("people-row").map((row) => row.getAttribute("data-person")).sort()).toEqual(["Bare", "Stale"])
+
+    fireEvent.click(peopleFilter("Guests"))
+    downloadBlob.mockClear()
+    fireEvent.click(screen.getByRole("button", { name: /export csv/i }))
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalled())
+    const csv = await (downloadBlob.mock.calls[0] as [Blob, string])[0].text()
+    const scopes = csv.trimEnd().split("\r\n").slice(1).map((line) => line.split(",")[1])
+    expect(new Set(scopes)).toEqual(new Set(shown))
+    expect(scopes).toHaveLength(shown.length)
+    expect(csv).not.toContain("Ruth")
+    const printed = within(screen.getByTestId("people-print-report")).getAllByTestId("scope-breadcrumb").map((crumb) => crumb.getAttribute("aria-label"))
+    expect(new Set(printed)).toEqual(new Set(shown))
+
+    const print = vi.fn()
+    Object.defineProperty(window, "print", { configurable: true, value: print })
+    fireEvent.click(screen.getByRole("button", { name: /^Print/ }))
+    expect(print).toHaveBeenCalledOnce()
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Naladda" } })
+    fireEvent.click(peopleFilter("Everyone"))
+    expect(screen.getAllByTestId("people-row")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("tab", { name: "Places" }))
+    expect(within(screen.getByTestId("access-tree")).queryByRole("button", { name: (n) => n.includes(other.name) })).toBeNull()
+    expect(within(screen.getByTestId("access-tree")).getByRole("button", { name: (n) => n.includes(project.name) })).toBeTruthy()
   })
 
   it("shows who is granted at a place and who reaches it, and the URL remembers the place", async () => {
@@ -180,14 +314,35 @@ describe("OrgAccessPage", () => {
     expect(lens.className).toContain("md:flex-row")
     expect(lens.className).toContain("overflow-x-hidden")
 
+    // AQU-2320: this payload grants the viewer nowhere, so Give access stays
+    // shut (the "Coming next" placeholder is gone; the dialog is real now).
     const give = screen.getByRole("button", { name: /give access/i })
     expect(give).toBeDisabled()
-    fireEvent.click(give.closest("[data-slot=tooltip-disabled-trigger]")!)
-    expect(screen.getByText("Coming next")).toBeTruthy()
+    fireEvent.click(give)
     expect(screen.queryByRole("dialog", { name: /give access/i })).toBeNull()
   })
 
+  it("sends the access audit here, on the People lens", async () => {
+    const router = createMemoryRouter(
+      [{
+        path: "/orgs/:orgId",
+        element: <Outlet />,
+        children: [
+          { path: "access", element: <OrgAccessPage /> },
+          { path: "access-audit", element: <Navigate to={ACCESS_AUDIT_REDIRECT} replace relative="path" /> },
+        ],
+      }],
+      { initialEntries: ["/orgs/1/access-audit"] },
+    )
+    render(<RouterProvider router={router} />)
+    await screen.findByTestId("people-lens")
+    expect(router.state.location.pathname).toBe("/orgs/1/access")
+    expect(router.state.location.search).toBe("?lens=people")
+    expect(peopleFilter("Everyone")).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("exports a CSV blob named after the org", async () => {
+    downloadBlob.mockClear()
     renderPage()
     await screen.findByTestId("access-tree")
     fireEvent.click(screen.getByRole("button", { name: /export csv/i }))
@@ -202,13 +357,13 @@ describe("orgAccessCsv", () => {
   it("writes the scope column byte-identical to formatScopePath (spec §3.9)", () => {
     const { result } = renderHook(() => useT())
     const lines = orgAccessCsv(result.current, payload.people).trimEnd().split("\r\n")
-    expect(lines).toHaveLength(3)
     // The team is a "via team" chip, so it leaves the scope column. A comma in
     // that team name quotes the origin cell instead (csvCell).
+    const heir = lines.find((line) => line.startsWith("Heir,"))
     const scope = formatScopePath([org, team, project])
-    expect(lines[1].startsWith(`Naladda,${scope},`)).toBe(true)
-    expect(lines[1]).toContain("via team")
-    expect(lines[1]).toContain(",Ruth,2026-09-01T00:00:00.000Z")
-    expect(lines[2].startsWith(`Ruth,${formatScopePath([org])},`)).toBe(true)
+    expect(heir?.startsWith(`Heir,${scope},`)).toBe(true)
+    expect(heir).toContain("via team")
+    expect(heir).toContain(",Ruth,2026-09-01T00:00:00.000Z")
+    expect(lines.some((line) => line.startsWith(`Ruth,${formatScopePath([org])},`))).toBe(true)
   })
 })

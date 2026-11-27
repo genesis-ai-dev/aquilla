@@ -43,6 +43,9 @@ export interface ExportDialogMemory {
   /** AQU-1575: Audio by line copies the stored files, or writes every take
    *  as 16-bit / 48 kHz / mono WAV. */
   lineAudioFormat: "original" | "wav"
+  /** Sam, question 93: an audio export's mono loudness — as heard, or as a
+   *  single-channel meter reads it (export/mono-loudness.ts). */
+  monoLoudness: "heard" | "meter"
 }
 
 export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
@@ -55,6 +58,7 @@ export const DEFAULT_EXPORT_MEMORY: ExportDialogMemory = {
   includeSource: false,
   includeChapterHeadings: false,
   lineAudioFormat: "original",
+  monoLoudness: "heard",
 }
 
 interface Entry {
@@ -72,6 +76,7 @@ const AUDIO_MODES: readonly ExportDialogMemory["audioMode"][] = [
 ]
 const TARGETS: readonly SubtitleTarget[] = ["subtitle", "audio"]
 const LINE_AUDIO_FORMATS: readonly ExportDialogMemory["lineAudioFormat"][] = ["original", "wav"]
+const MONO_LOUDNESS: readonly ExportDialogMemory["monoLoudness"][] = ["heard", "meter"]
 
 const bool = (v: unknown, fallback: boolean): boolean =>
   typeof v === "boolean" ? v : fallback
@@ -108,6 +113,7 @@ export function normalizeExportMemory(raw: unknown): ExportDialogMemory {
     includeSource: bool(v.includeSource, false),
     includeChapterHeadings: bool(v.includeChapterHeadings, false),
     lineAudioFormat: oneOf(v.lineAudioFormat, LINE_AUDIO_FORMATS, DEFAULT_EXPORT_MEMORY.lineAudioFormat),
+    monoLoudness: oneOf(v.monoLoudness, MONO_LOUDNESS, DEFAULT_EXPORT_MEMORY.monoLoudness),
   }
 }
 

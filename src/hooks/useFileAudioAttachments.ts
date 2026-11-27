@@ -232,6 +232,9 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   if (att.gainDb !== undefined && (server.gainDb ?? null) !== att.gainDb) return false
   if (att.fadeInMs !== undefined && (server.fadeInMs ?? null) !== att.fadeInMs) return false
   if (att.fadeOutMs !== undefined && (server.fadeOutMs ?? null) !== att.fadeOutMs) return false
+  // AQU-2664: an even-out (or clear) overlay, and a loudness reading, by the same rule.
+  if (att.evenTargetLufs !== undefined && (server.evenTargetLufs ?? null) !== att.evenTargetLufs) return false
+  if (att.loudnessLufs !== undefined && att.loudnessLufs !== null && server.loudnessLufs == null) return false
   return true
 }
 
@@ -383,7 +386,7 @@ export function useFileAudioAttachments(
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const doFetchRef = useRef<(() => Promise<void>) | null>(null)
+  const doFetchRef = useRef<((opts?: { mount?: boolean }) => Promise<void>) | null>(null)
   // AQU-2132: the bounded retry for a read that could not answer, and the read
   // key the attempt counter belongs to so a new file gets its own budget.
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -400,7 +403,7 @@ export function useFileAudioAttachments(
     retryRef.current = null
   }, [])
 
-  const doFetch = useCallback(async () => {
+  const doFetch = useCallback(async (opts?: { mount?: boolean }) => {
     // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
     // here (rather than only inside getToken) makes it a real dependency, so the
     // fetch re-runs the moment the session lands on a cold reload.
@@ -467,10 +470,15 @@ export function useFileAudioAttachments(
       // instances via the module-level coalescer, so the three mounts
       // ProjectWorkspace keeps for one file cost one request each time.
       const [res, outboxRecords] = await Promise.all([
+        // AQU-2655: a mount (or a switch to another file or lane) is not news
+        // that the takes changed, so it joins whatever read of this key is
+        // already on its way, however old. The instances that mount after
+        // first paint used to queue a follow-up read of their own behind it.
+        // Every poke, retry and sweep still takes the freshness rule above.
         attachmentsCoalescer.run(`${projectId}/${fileId}/${laneKey}`, async () => {
           const token = await getToken(projectId, fileId)
           return token ? fetchFileAudioAttachments(projectId, fileId, token, lane) : null
-        }),
+        }, { joinLatest: opts?.mount === true }),
         getOutboxRecords(queuedIds),
       ])
       if (gen !== generationRef.current) return // a newer fetch superseded us
@@ -551,7 +559,7 @@ export function useFileAudioAttachments(
   }, [doFetch])
 
   useEffect(() => {
-    void doFetch()
+    void doFetch({ mount: true })
   }, [doFetch])
 
   useEffect(
@@ -719,6 +727,12 @@ export function mergeCellsWithAudio(
         ...(a.gainDb != null ? { gainDb: a.gainDb } : {}),
         ...(a.fadeInMs != null ? { fadeInMs: a.fadeInMs } : {}),
         ...(a.fadeOutMs != null ? { fadeOutMs: a.fadeOutMs } : {}),
+        // AQU-2664: its loudness reading and evened-out target.
+        ...(a.loudnessLufs != null ? { loudnessLufs: a.loudnessLufs } : {}),
+        ...(a.truePeakDb != null ? { truePeakDb: a.truePeakDb } : {}),
+        ...(a.loudnessFromMs != null ? { loudnessFromMs: a.loudnessFromMs } : {}),
+        ...(a.loudnessToMs != null ? { loudnessToMs: a.loudnessToMs } : {}),
+        ...(a.evenTargetLufs != null ? { evenTargetLufs: a.evenTargetLufs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."

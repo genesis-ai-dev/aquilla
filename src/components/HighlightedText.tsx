@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react"
+import { Fragment, useMemo, type ReactNode } from "react"
 import { HEALTH_SPAN_CLASS } from "@/lib/completion/draft-health-spans"
 import {
   buildDisplayChunks, rangeSpanClass,
@@ -66,18 +66,21 @@ export function HighlightedText({
 
   return (
     <span>
-      {groups.map((group, i) => (
-        <HealthSpanWrap key={i} span={group.health}>
-          {group.chunks.map((chunk) => {
-            if (chunk.ranges.length > 0) {
-              return <RangeStack key={chunk.start} chunk={chunk} onRangeClick={onRangeClick} />
-            }
-            if (showEvidence && highlights.length > 0) {
-              return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
-            }
-            return <span key={chunk.start}>{chunk.text}</span>
-          })}
-        </HealthSpanWrap>
+      {/* AQU-2655: the wash and the finding stack are drawn by plain calls,
+          not components — they hold no state, and one of each per chunk of
+          every highlighted term was a component render per chunk per row. */}
+      {groups.map((group, i) => healthSpanWrap(
+        i,
+        group.health,
+        group.chunks.map((chunk) => {
+          if (chunk.ranges.length > 0) {
+            return <Fragment key={chunk.start}>{rangeStack(chunk, onRangeClick)}</Fragment>
+          }
+          if (showEvidence && highlights.length > 0) {
+            return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
+          }
+          return <span key={chunk.start}>{chunk.text}</span>
+        }),
       ))}
     </span>
   )
@@ -87,9 +90,7 @@ export function HighlightedText({
  *  A click is owned by the innermost span under the pointer, so the most
  *  severe finding wins a fully shared span while a partially overlapping one
  *  stays clickable on the characters only it covers. */
-function RangeStack({
-  chunk, onRangeClick,
-}: { chunk: DisplayChunk; onRangeClick?: HighlightedTextProps["onRangeClick"] }) {
+function rangeStack(chunk: DisplayChunk, onRangeClick: HighlightedTextProps["onRangeClick"]): ReactNode {
   let node: ReactNode = chunk.text
   for (let depth = 0; depth < chunk.ranges.length; depth++) {
     const range = chunk.ranges[chunk.ranges.length - 1 - depth]
@@ -112,19 +113,14 @@ function RangeStack({
       </span>
     )
   }
-  return <>{node}</>
+  return node
 }
 
-function HealthSpanWrap({
-  span,
-  children,
-}: {
-  span?: HealthDisplaySpan
-  children: ReactNode
-}) {
-  if (!span) return <>{children}</>
+function healthSpanWrap(key: number, span: HealthDisplaySpan | undefined, children: ReactNode): ReactNode {
+  if (!span) return <Fragment key={key}>{children}</Fragment>
   return (
     <span
+      key={key}
       data-health-span={span.kind}
       title={span.title}
       className={HEALTH_SPAN_CLASS[span.kind]}

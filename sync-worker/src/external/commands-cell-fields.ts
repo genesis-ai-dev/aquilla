@@ -25,12 +25,12 @@ import type { ChangesetWarning } from './types'
 
 /** Edit the SOURCE side of a cell — the text translators work from.
  *
- *  Compiles to `source.cell.commit`, which sits at PROJECT_LEAD in
- *  role-policy.ts — deliberately a higher floor than SetTranslation's
- *  CONTRIBUTOR, matching the UI's own source-edit floor. The commit advances
- *  the source chain head, so every target pinned to the old head goes stale by
- *  the ordinary AD-9 derivation (`source.event_id != target.source_event_id`)
- *  — exactly as a UI source edit does. Nothing here re-pins anything. */
+ *  Compiles to `source.cell.commit`. The static floor is Contributor, the
+ *  lowest `sourceTextFloor` can admit; the project's tier (default Maintainer)
+ *  is enforced when the event is written. The commit advances the source chain
+ *  head, so every target pinned to the old head goes stale by the ordinary
+ *  AD-9 derivation (`source.event_id != target.source_event_id`) — exactly as
+ *  a UI source edit does. Nothing here re-pins anything. */
 export interface SetSourceCommand {
   kind: 'SetSource'
   fileId: string
@@ -316,9 +316,9 @@ export function validateCellFieldCommand(
  * Static role floor for one cell-field command — the SAME floor its compiled
  * event(s) hit at the /events perimeter, read from role-policy.ts.
  *
- * SetSource/SetTranscription → source.cell.commit (PROJECT_LEAD 500), a rung
- * above SetTranslation's target.cell.commit (CONTRIBUTOR 400), as the issue
- * requires and as the UI's own source-edit floor already is.
+ * SetSource/SetTranscription → source.cell.commit. The static floor is
+ * CONTRIBUTOR, the lowest sourceTextFloor can admit. The project's tier
+ * (default Maintainer) is enforced when the event is written (authorize.ts).
  *
  * SetTiming is the max of the parts it carries: cell.retime is CONTRIBUTOR,
  * file.timing.set is PROJECT_LEAD (AQU-2204), so a command doing both is a

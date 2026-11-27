@@ -117,3 +117,39 @@ describe("mountOnFirstOpen (AQU-2654)", () => {
   })
 })
 
+
+// AQU-2655: the workspace's Import dialog and recorder are skipped while
+// closed, except for what their closed-state work reads. These pin that list:
+// dropping an input here would move its effect into the opening commit.
+describe("closed-state inputs of the workspace's Import dialog and recorder (AQU-2655)", () => {
+  it("Import renders while closed for the lane inputs that can finish a pending import", async () => {
+    const { importDialogUnchangedWhileClosed } = await import("./closedDialogInputs")
+    type ImportProps = Parameters<typeof importDialogUnchangedWhileClosed>[0]
+    const lanes = [{ tag: "es" }] as unknown as ImportProps["lanes"]
+    const base = {
+      open: false, onOpenChange: () => {}, projectId: "p", username: "u",
+      sourceLanguage: "en", targetLanguage: "es", lanes, targetLang: "",
+      getToken: async () => null, onImported: () => {},
+    } as ImportProps
+    // The workspace rebuilds its callbacks and objects every render.
+    expect(importDialogUnchangedWhileClosed(base, { ...base, onOpenChange: () => {}, translation: undefined })).toBe(true)
+    expect(importDialogUnchangedWhileClosed(base, { ...base, lanes: [...(lanes ?? [])] })).toBe(false)
+    expect(importDialogUnchangedWhileClosed(base, { ...base, targetLang: "es" })).toBe(false)
+    expect(importDialogUnchangedWhileClosed(base, { ...base, sourceLanguage: "fr" })).toBe(false)
+    expect(importDialogUnchangedWhileClosed(base, { ...base, targetLanguage: "fr" })).toBe(false)
+  })
+
+  it("the recorder renders while closed only for the film picture it resolves ahead of an opening", async () => {
+    const { audioRecordingModalUnchangedWhileClosed } = await import("./closedDialogInputs")
+    type RecorderProps = Parameters<typeof audioRecordingModalUnchangedWhileClosed>[0]
+    const project = { id: "p", files: [{ id: "f1", coreMediaUrl: "frontier-audio://a" }, { id: "f2" }] }
+    const base = {
+      open: false, project, cells: [], activeCellId: null, username: "u",
+      onActiveCellChange: () => {}, onClose: () => {}, filmFileId: "f1",
+    } as unknown as RecorderProps
+    expect(audioRecordingModalUnchangedWhileClosed(base, { ...base, project: { ...base.project }, cells: [] })).toBe(true)
+    expect(audioRecordingModalUnchangedWhileClosed(base, { ...base, filmFileId: "f2" })).toBe(false)
+    const repictured = { ...project, files: [{ id: "f1", coreMediaUrl: "frontier-audio://b" }] }
+    expect(audioRecordingModalUnchangedWhileClosed(base, { ...base, project: repictured } as unknown as RecorderProps)).toBe(false)
+  })
+})

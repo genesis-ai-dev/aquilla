@@ -86,7 +86,7 @@ describe("Tauri desktop shell", () => {
       sessionStorage.setItem("aquilla:google-login:http://127.0.0.1:8788", JSON.stringify(attempt))
     })
     await invoke("simulate_deep_link_callback", { url: `aquilla://auth/google#error=cancelled&state=${"b".repeat(43)}` })
-    await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("Google login was cancelled"), { timeout: 30_000, timeoutMsg: "Native callback did not reach the Google return screen" })
+    await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("Google login was canceled"), { timeout: 30_000, timeoutMsg: "Native callback did not reach the Google return screen" })
     expect(await invoke<string | null>("get_token")).toBeNull()
     expect(await browser.execute(() => location.hash)).toBe("")
   })

@@ -31,7 +31,12 @@ const FAILURE_KEY: Record<BulkFailureCode, MessageKey> = {
   other: "recordingsUpload.failures.other",
 }
 
-export function RecordingsUploadBanner() {
+/**
+ * Re-check S2: `evenOutTrack` is given when the track the takes landed on is
+ * evened out. A bulk upload never evens its own takes (it would download each
+ * again); its finish offers to even the track instead.
+ */
+export function RecordingsUploadBanner({ evenOutTrack }: { evenOutTrack?: () => void } = {}) {
   const t = useT()
   const { locale } = useI18n()
   const state = useBulkUploadState()
@@ -79,6 +84,11 @@ export function RecordingsUploadBanner() {
                 {t("recordingsUpload.banner.tryAgain")}
               </Button>
             </>
+          )}
+          {evenOutTrack && done > 0 && (
+            <Button type="button" size="xs" variant="outline" onClick={evenOutTrack} data-testid="recordings-even-out">
+              {t("recordingsUpload.banner.evenOutTrack")}
+            </Button>
           )}
           <div className="flex-1" />
           {dismiss}

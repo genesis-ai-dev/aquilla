@@ -42,6 +42,7 @@ import {
   useStationTarget,
   type StationTarget,
 } from "@/lib/station/target"
+import { StationEvenLine, useEvenLineShown } from "./StationEvenLine"
 import type { StationHost, StationTake } from "./station-host"
 import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice, type SaveHow } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
@@ -201,6 +202,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const changedText = useChangedText()
   const unsaved = ed.ops.length > 0
   const calm = ed.sel == null && !hovering && !unsaved
+  const evenLineShown = useEvenLineShown(take, target)
   const tooLong = (ed.pcm?.duration ?? 0) > STATION_EDIT_MAX_SEC
   const line = host.lineName(target.cellId)
   const places = host.placementsOf(take.fileId, take.att.url)
@@ -392,6 +394,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           level: isOpen
             ? { gainDb: ed.level.gainDb || null, fadeInMs: ed.level.fadeIn > 0 ? Math.round(ed.level.fadeIn * 1000) : null, fadeOutMs: ed.level.fadeOut > 0 ? Math.round(ed.level.fadeOut * 1000) : null }
             : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
+          // AQU-2664: and its evening out.
+          evenTargetLufs: p.att.evenTargetLufs ?? null,
           ...(isOpen && isPiece ? { pieceOf: pieceRoot, otherPieces } : {}),
           // AQU-2492 (review, Nov 9), finding 8: who had approved the take it replaces.
           approvedBy: p.att.validators ?? [],
@@ -622,6 +626,9 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             {...(rec.busy ? { status: <StationRecordBar rec={rec} /> } : {})}
             calm={calm}
             hint={editable ? t("editor.station.hint", { mod: modKey() }) : t("editor.station.hintListen")}
+            // AQU-2664 (board 72, evidence 72D): the Even out line, right under
+            // the transport in the hint's place.
+            {...(evenLineShown ? { lead: <StationEvenLine host={host} take={take} target={target} ownDb={ed.level.gainDb} editable={editable && !recording} /> } : {})}
             onMessage={setMessage}
           />
           <StationHistory
@@ -841,6 +848,8 @@ function StationControlsHelp() {
     [t("editor.station.helpTrimTerm"), t("editor.station.helpTrim")],
     [t("editor.station.helpEditTerm"), t("editor.station.helpEdit")],
     [t("editor.station.helpVolumeTerm"), t("editor.station.helpVolume")],
+    // AQU-2664 (board 72F): evening out comes before your volume.
+    [t("editor.station.helpEvenTerm"), t("editor.station.helpEven")],
     [t("editor.station.helpFadesTerm"), t("editor.station.helpFades")],
     [t("editor.station.helpSaveTerm"), t("editor.station.helpSave")],
     [t("editor.station.helpKeysTerm"), t("editor.station.helpKeys", { mod: modKey() })],

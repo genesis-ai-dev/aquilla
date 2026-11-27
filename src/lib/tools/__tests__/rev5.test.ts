@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE } from "../../../../shared/tools/first-party/default-editor"
+import { SDK_TEST_EDITOR_MANIFEST, SDK_TEST_EDITOR_SOURCE } from "./sdk-test-editor"
 import { TOOL_SCOPES } from "../../../../shared/tools/manifest"
 import type { ToolCellView, ToolHostData } from "../host-handlers"
 import { createBridgeHost } from "../host-bridge"
@@ -115,15 +115,15 @@ function mount(data: ToolHostData) {
   const pair = createFakeFramePair()
   const host = createBridgeHost({ getFrameWindow: () => pair.frame as unknown as Window, handlers: createToolHandlers(data), authorize: async () => {} })
   const stop = host.listen(pair.host as unknown as Window)
-  pair.run(buildToolSrcdoc(DEFAULT_EDITOR_SOURCE, {
-    tool: { id: "fp", name: "Aquilla editor (Smart Extension)", version: 1 },
+  pair.run(buildToolSrcdoc(SDK_TEST_EDITOR_SOURCE, {
+    tool: { id: "fp", name: SDK_TEST_EDITOR_MANIFEST.name, version: 1 },
     project: { id: "p", name: "P" },
     user: { username: "alice", roleLevel: 400 },
     mount: "editor",
     file: { fileId: "f1", name: "MAT" },
     theme: {},
     hostShortcuts: HOST_SHORTCUTS,
-  }, { sdk: DEFAULT_EDITOR_MANIFEST.sdk }))
+  }, { sdk: SDK_TEST_EDITOR_MANIFEST.sdk }))
   const q = (sel: string) => pair.doc.querySelector(sel) as HTMLElement | null
   const row = (cellId: string) => q(`.cell[data-cell-id="${cellId}"]`)
   return { pair, stop, q, row }
@@ -138,7 +138,7 @@ const EXTRA: Record<string, Partial<ToolCellView>> = {
 }
 
 function withRev5(over: Partial<ToolHostData> = {}): ToolHostData {
-  const base = defaultSmokeFixtures({ ...DEFAULT_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
+  const base = defaultSmokeFixtures({ ...SDK_TEST_EDITOR_MANIFEST, scopes: [...TOOL_SCOPES] })[1].data
   const add = (cells: ToolCellView[]) => cells.map((c) => ({ ...c, ...(EXTRA[c.cellId] ?? {}) }))
   return {
     ...base,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   ROLE,
   canAttachSourceAudio,
+  canSetTrackVolume,
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
@@ -30,7 +31,7 @@ describe("role-policy (client mirror)", () => {
     // future server change forces this mirror to update too.
     expect(requiredRoleFor("cell.waive")).toBe(ROLE.CONTRIBUTOR)
     expect(requiredRoleFor("cell.validate")).toBe(ROLE.REVIEWER)
-    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.CONTRIBUTOR)
     expect(requiredRoleFor("comment.create")).toBe(ROLE.COMMENTER)
   })
 
@@ -51,8 +52,11 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("source.cell.create")).toBe(ROLE.COMMENTER)
     expect(requiredRoleFor("source.cell.delete")).toBe(ROLE.COMMENTER)
     expect(requiredRoleFor("source.cell.reorder")).toBe(ROLE.COMMENTER)
-    // Not a blanket drop: committing a source edit is still a lead's act.
-    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.PROJECT_LEAD)
+    // AQU-2647: a source edit's static floor is Contributor, the lowest the
+    // source-text setting can admit. The setting itself (default Maintainer)
+    // is what refuses a lower rank.
+    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.CONTRIBUTOR)
+    expect(requiredRoleFor("source.cell.visibility.set")).toBe(ROLE.CONTRIBUTOR)
   })
 
   it("lets the client enqueue a commenter's insert instead of blocking it locally", () => {
@@ -527,6 +531,21 @@ describe("importDenialFloor", () => {
     expect(importDenialFloor(9999)).toBe(ROLE.PROJECT_LEAD)
   })
 })
+
+// AQU-2664 (Sam, Nov 19): a track's volume is a take's volume floor; the
+// track's other settings stay with maintainers (the worker's trackPatchRoleFloor).
+describe("canSetTrackVolume", () => {
+  it("is a contributor's, like a take's volume, and not a viewer's", () => {
+    expect(canSetTrackVolume(ROLE.CONTRIBUTOR)).toBe(true)
+    expect(canSetTrackVolume(ROLE.MAINTAINER)).toBe(true)
+    expect(canSetTrackVolume(ROLE.VIEWER)).toBe(false)
+    expect(canSetTrackVolume(ROLE.CONTRIBUTOR)).toBe(canPerform("cell.audio.gain", ROLE.CONTRIBUTOR))
+  })
+
+  it("leaves the track's other settings at the maintainer floor", () => {
+    expect(canPerform("file.track.set", ROLE.CONTRIBUTOR)).toBe(false)
+    })
+  })
 
 // AQU-2476: the export floor the original-download routes actually apply.
 // `canExport` treats an unset floor as no gate; these do not.

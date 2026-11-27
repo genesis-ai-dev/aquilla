@@ -544,6 +544,47 @@ export interface ReplaceFilePair {
 export interface ReplaceFileMatch extends ReplaceFilePair, LinkFileMatchSummary {
   /** One of the two files does not exist (or is in Recently deleted). */
   missing: boolean
+  /**
+   * AQU-2549: the upstream file is missing only because the source project is
+   * still importing it (staged, hidden until the import publishes). Present
+   * only when true.
+   */
+  importing?: true
+}
+
+/**
+ * AQU-2549: which of `fileIds` are staged imports — created and hidden in the
+ * same request (sync-worker import-route: `file.create` + the stage
+ * `file.delete`, same client time) and not published or deleted since. A file
+ * someone deleted later is not one: its delete came on its own.
+ */
+async function loadStagedImportFileIds(
+  env: Env,
+  projectId: string,
+  fileIds: readonly string[],
+): Promise<Set<string>> {
+  const staged = new Set<string>()
+  if (fileIds.length === 0) return staged
+  try {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT d.file_id AS id FROM events d
+         JOIN events c ON c.project_id = d.project_id AND c.file_id = d.file_id
+                      AND c.kind = 'file.create' AND c.client_ts = d.client_ts
+        WHERE d.project_id = ? AND d.kind = 'file.delete'
+          AND d.file_id IN (${fileIds.map(() => "?").join(", ")})
+          AND NOT EXISTS (
+            SELECT 1 FROM events l
+             WHERE l.project_id = d.project_id AND l.file_id = d.file_id
+               AND l.kind IN ('file.restore', 'file.delete') AND l.server_seq > d.server_seq)`,
+    )
+      .bind(projectId, ...fileIds)
+      .all<{ id: string }>()
+    for (const row of results ?? []) staged.add(row.id)
+  } catch {
+    // An unreadable log answers "not importing": the row then says the plain
+    // "missing", as before.
+  }
+  return staged
 }
 
 /**
@@ -578,12 +619,19 @@ export async function matchFilesForReplace(
   const liveUpstream = await live(args.sourceProjectId, args.pairs.map((p) => p.upstreamFileId))
   const liveOwn = await live(args.projectId, args.pairs.map((p) => p.fileId))
 
+  const staged = await loadStagedImportFileIds(
+    env,
+    args.sourceProjectId,
+    [...new Set(args.pairs.map((p) => p.upstreamFileId).filter((id) => !liveUpstream.has(id)))].slice(0, 200),
+  )
+
   const matches: ReplaceFileMatch[] = []
   for (const pair of args.pairs) {
     if (!liveUpstream.has(pair.upstreamFileId) || !liveOwn.has(pair.fileId)) {
       matches.push({
         ...pair,
         missing: true,
+        ...(staged.has(pair.upstreamFileId) ? { importing: true as const } : {}),
         upstreamLines: 0,
         localLines: 0,
         same: 0,
@@ -603,6 +651,165 @@ export async function matchFilesForReplace(
     })
   }
   return matches
+}
+
+/** AQU-2549: a mirrored copy of an upstream file, as "Join into my existing
+ *  file" lists it. */
+export interface LinkedFileCopy {
+  /** The copy's own id here. */
+  fileId: string
+  name: string
+  /** The upstream file it mirrors. */
+  upstreamFileId: string
+  /** Someone translated on the copy itself: it cannot be joined. */
+  translated: boolean
+  /** The project's own file with the same name, when exactly one has it. */
+  suggestedFileId?: string
+}
+
+/**
+ * AQU-2549: the copies a live link has mirrored into this project, and the
+ * project's own files they could be joined into.
+ *
+ * A copy is found by its identity (`deterministicDownstreamFileId`), never by
+ * name, for the reason `loadStoppedUpstreamFileIds` gives. Not a copy: a file
+ * the link already follows INTO (adopted). An own file that already follows
+ * an upstream file is not offered either — one file follows one upstream file.
+ * Nor is the copy of a file the lead stopped following (left out of the
+ * link's selection): a stopped file stays stopped. It is still a copy, so it
+ * is not offered as a file to join into either.
+ */
+export async function loadLinkedFileCopies(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<{ copies: LinkedFileCopy[]; ownFiles: Array<{ id: string; name: string }> }> {
+  const adopted = adoptedFileIdOf ?? {}
+  const followed = await loadLinkFileIds(env, projectId)
+  const followedSet = followed ? new Set(followed) : null
+  const upstreamOfCopy = new Map<string, string>()
+  const stoppedCopies = new Set<string>()
+  // AQU-2549: every file the source project has OR HAD, the set
+  // `replaceTargetsProblem` checks: the copy of a deleted source file is still
+  // a copy, so it is no own file to join into. Nor can it be joined — its
+  // source file is gone — so it is left out like a stopped one.
+  const upstreamFiles = await env.AQUILLA_PG.prepare(
+    "SELECT id, deleted_at IS NOT NULL AS deleted FROM files WHERE project_id = ?",
+  )
+    .bind(upstreamProjectId)
+    .all<{ id: string; deleted: boolean }>()
+  for (const { id: upstreamFileId, deleted } of upstreamFiles.results ?? []) {
+    if (adopted[upstreamFileId]) continue
+    const copyId = deterministicDownstreamFileId(projectId, upstreamFileId)
+    if (deleted || (followedSet && !followedSet.has(upstreamFileId))) stoppedCopies.add(copyId)
+    else upstreamOfCopy.set(copyId, upstreamFileId)
+  }
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT f.id, f.name,
+            EXISTS (SELECT 1 FROM cells c
+                     WHERE c.project_id = f.project_id AND c.file_id = f.id
+                       AND c.side = 'target' AND COALESCE(c.value, '') <> '') AS translated
+       FROM files f
+      WHERE f.project_id = ? AND f.deleted_at IS NULL
+      ORDER BY f.created_at, f.id`,
+  )
+    .bind(projectId)
+    .all<{ id: string; name: string; translated: boolean }>()
+  const adoptedOwn = new Set(Object.values(adopted))
+  const ownFiles: Array<{ id: string; name: string }> = []
+  const copyRows: Array<{ id: string; name: string; translated: boolean }> = []
+  for (const row of results ?? []) {
+    if (stoppedCopies.has(row.id)) continue
+    if (upstreamOfCopy.has(row.id)) copyRows.push(row)
+    else if (!adoptedOwn.has(row.id)) ownFiles.push({ id: row.id, name: row.name })
+  }
+  const ownByName = new Map<string, string[]>()
+  for (const f of ownFiles) {
+    const key = f.name.toLowerCase()
+    ownByName.set(key, [...(ownByName.get(key) ?? []), f.id])
+  }
+  const copies = copyRows.map((row): LinkedFileCopy => {
+    const same = ownByName.get(row.name.toLowerCase()) ?? []
+    return {
+      fileId: row.id,
+      name: row.name,
+      upstreamFileId: upstreamOfCopy.get(row.id)!,
+      translated: row.translated === true,
+      ...(same.length === 1 ? { suggestedFileId: same[0] } : {}),
+    }
+  })
+  return { copies, ownFiles }
+}
+
+/** AQU-2549: the id a link's copy of each file the source project has or had
+ *  takes here — the files `replaceTargetsProblem` refuses as copies. */
+async function loadEarlierLinkCopyIds(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+): Promise<Set<string>> {
+  const { results } = await env.AQUILLA_PG.prepare("SELECT id FROM files WHERE project_id = ?")
+    .bind(upstreamProjectId)
+    .all<{ id: string }>()
+  return new Set((results ?? []).map((row) => deterministicDownstreamFileId(projectId, row.id)))
+}
+
+/**
+ * AQU-2549: this project's files a replace from `upstreamProjectId` may follow
+ * into, in the project's own order — the picker's list, so it never offers a
+ * file `replaceTargetsProblem` would refuse. Leaves out every copy an earlier
+ * link made and every file already in the replace record.
+ */
+export async function loadReplaceTargetFiles(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<Array<{ id: string; name: string }>> {
+  const copies = await loadEarlierLinkCopyIds(env, projectId, upstreamProjectId)
+  const taken = new Set(Object.values(adoptedFileIdOf ?? {}))
+  const { results } = await env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM files WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at, id",
+  )
+    .bind(projectId)
+    .all<{ id: string; name: string }>()
+  return (results ?? [])
+    .filter((row) => !copies.has(row.id) && !taken.has(row.id))
+    .map((row) => ({ id: row.id, name: row.name }))
+}
+
+/**
+ * AQU-2549: why a replace cannot follow into the files it names, or null.
+ *
+ * One file follows one source file. A copy the link brought in (found by its
+ * identity, `deterministicDownstreamFileId`, for any file the source project
+ * has or had) is that source file's own place here; a file already in the
+ * replace record follows its own source file. Either as a target would have
+ * two source files writing into one file.
+ */
+export async function replaceTargetsProblem(
+  env: Env,
+  projectId: string,
+  upstreamProjectId: string,
+  pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
+  adoptedFileIdOf: Readonly<Record<string, string>> | null,
+): Promise<{ reason: "replaceTargetIsCopy" | "replaceTargetAlreadyFollows"; error: string } | null> {
+  const copies = await loadEarlierLinkCopyIds(env, projectId, upstreamProjectId)
+  if (pairs.some((pair) => copies.has(pair.fileId))) {
+    return {
+      reason: "replaceTargetIsCopy",
+      error: "a file the link brought in from the source project cannot be the file a replace follows into",
+    }
+  }
+  const taken = new Map(Object.entries(adoptedFileIdOf ?? {}).map(([upstream, own]) => [own, upstream]))
+  if (pairs.some((pair) => taken.has(pair.fileId) && taken.get(pair.fileId) !== pair.upstreamFileId)) {
+    return {
+      reason: "replaceTargetAlreadyFollows",
+      error: "that file already takes its source from another file in the source project",
+    }
+  }
+  return null
 }
 
 /** AQU-1560: the upstream's current (non-deleted) file ids. */

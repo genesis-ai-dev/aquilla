@@ -961,7 +961,7 @@ export function TeamDetail() {
                       data={team.projects}
                       getRowId={(p) => p.id}
                       initialSorting={[{ id: "name", desc: false }]}
-                      searchPlaceholder="Search by name"
+                      searchPlaceholder={t("org.teamDetail.projectsSearchPlaceholder")}
                       globalFilterFn={(row, _columnId, filterValue) => {
                         const q = String(filterValue).trim().toLowerCase()
                         if (!q) return true
@@ -1131,7 +1131,7 @@ export function TeamDetail() {
                       data={team.members}
                       getRowId={(m) => String(m.userId)}
                       initialSorting={[{ id: "name", desc: false }]}
-                      searchPlaceholder="Search by name or email"
+                      searchPlaceholder={t("org.membersTable.searchPlaceholder")}
                       globalFilterFn={(row, _columnId, filterValue) => {
                         const q = String(filterValue).trim().toLowerCase()
                         if (!q) return true

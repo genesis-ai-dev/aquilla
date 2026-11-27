@@ -112,7 +112,7 @@ export function TeamSettingsIndex() {
     setDeleting(true)
     try {
       await deleteTeam(jwt, activeOrgId, groupIdNum)
-      navigate(orgPath(activeOrgId, "/teams"))
+      navigate(orgPath(activeOrgId, "/access"))
     } finally {
       setDeleting(false)
     }

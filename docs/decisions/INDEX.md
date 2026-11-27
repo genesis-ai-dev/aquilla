@@ -73,6 +73,8 @@ pinned symbol gets renamed and the check goes red.
 | 0017 | [Search matches words, or text, by script](0017-search-matches-words-or-text-by-script.md) | Chinese, Japanese, Thai, Burmese, Korean and similar queries are matched as text and ranked by occurrences; every other script stays on the word index |
 | 0018 | [Example retrieval and confidence compare text by character n-grams](0018-retrieval-covers-text-by-character-ngrams.md) | the branching search covers a verse by character trigrams (bigrams in Han, Kana and Hangul), so it works the same in scripts with no spaces |
 | 0019 | [A settings collection moves to rows, and the key never leaves the API](0019-settings-collections-move-to-rows.md) | how a large `project_settings` key leaves the multi-MB blob without any reader being able to tell |
+| 0020 | [What the app can do and an agent cannot is written down as data](0020-agent-app-parity-tables.md) | every file type, event kind and command has a row saying whether an agent can do it; a new one fails the build until it has a row |
+| 0021 | [Translations are filled after the merge, not checked on the pull request](0021-translations-are-filled-after-the-merge.md) | a pull request adds English only; a workflow translates on `dev` and lands a catalog-only pull request; `pnpm i18n:coverage` is the ratchet, and no pull request check reads it |
 
 ## Adding a record
 

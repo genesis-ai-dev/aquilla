@@ -82,13 +82,13 @@ describe("AdminTenantsSection", () => {
   })
 
   // AQU-1322: admin entry points into the org membership surfaces.
-  it("opens an org's members and access pages without firing the row click", () => {
+  it("opens an org's People & access page without firing the row click", () => {
     const onOpenOrg = vi.fn()
     const onOpenOrgPath = vi.fn()
     render(<AdminTenantsSection orgs={orgs} teams={teams} onSelectOrg={onOpenOrg} onOpenOrgPath={onOpenOrgPath} />)
     const beta = within(screen.getByText("Beta").closest("tr")!)
-    fireEvent.click(beta.getByRole("button", { name: "Members" }))
-    expect(onOpenOrgPath).toHaveBeenLastCalledWith(2, "/members")
+    // Members is gone: People & access is the one page for an org's people.
+    expect(beta.queryByRole("button", { name: "Members" })).toBeNull()
     fireEvent.click(beta.getByRole("button", { name: "People & access" }))
     expect(onOpenOrgPath).toHaveBeenLastCalledWith(2, "/access")
     expect(onOpenOrg).not.toHaveBeenCalled()

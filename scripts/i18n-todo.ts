@@ -14,10 +14,11 @@
  *   npx tsx scripts/i18n-todo.ts [outDir] [--locale <code>] [--new]   (default: i18n-todo/)
  *
  * `--new` (AQU-2740) narrows each packet to the keys the translation baseline
- * does not allow: what a branch added or reworded, which `pnpm i18n:check`
- * fails on. That is the packet a PR author fills; without the flag the packet
- * is the locale's whole backlog, for a sweep. Fill it, then
- * `pnpm i18n:import-todo` imports every locale's packet at once.
+ * does not allow: what was added or reworded since, which `pnpm i18n:coverage`
+ * fails on. That is the packet the fill job translates (`pnpm i18n:fill`,
+ * AQU-2792); without the flag the packet is the locale's whole backlog, for a
+ * sweep. Fill it, then `pnpm i18n:import-todo` imports every locale's packet
+ * at once.
  *
  * Two classes land in a packet, and the distinction matters:
  *   - **untranslated** — the locale has no value for this key. It currently

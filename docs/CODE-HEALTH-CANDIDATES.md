@@ -4947,3 +4947,136 @@ The 2026-11-16/18/20/23 notes all still hold and were all needed again. Two refi
   1243/1243/1011), and the three symlinks were needed again. Still read the wanted revisions
   out of `node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
   every run rather than trusting any entry's numbers, this one included.
+
+---
+
+## 2026-11-27 run — dead code: the AQU-2778 Members/Teams removal left orphans behind
+
+**Theme**: dead code deletion (routine theme 1). PR #2221 (merged 2026-11-26, one day before
+this run) deleted `src/pages/MembersPage.tsx`, `src/components/org/TeamDetail.tsx`,
+`src/components/org/TeamsList.tsx` and `src/components/org/access/PlacesLens.tsx` when
+"People & access" became one folder tree. Three modules those four pages were the *only*
+consumers of survived the removal, plus one cascading export pair.
+
+**Files touched (4 — three deletions, one edit; 337 lines removed, 1 changed)**
+
+| File | Why dead |
+| --- | --- |
+| `src/components/org/TeamLaneChecks.tsx` (deleted, 67 lines) | Only importer was `TeamDetail.tsx`. Zero references anywhere in `src`, `e2e`, `scripts`, `parity` or the four worker packages — not even a comment. No test file of its own. |
+| `src/components/RemoveOrgMemberDialog.tsx` (deleted, 136 lines) | Only importer was `MembersPage.tsx`. Remaining hits were a comment in `src/lib/i18n/namespaces/org.ts` and one in `auth-worker/src/routes/orgs.ts`. No test file of its own. |
+| `src/hooks/useOrgInvites.ts` (deleted, 90 lines) | Only importer was `MembersPage.tsx`; its own doc comment said "Used by the operational PM Members page's 'Pending invitations' section". Remaining hit was a checkbox in an unfinished 2026-05-22 plan doc. No test file of its own. |
+| `src/lib/frontier/orgs.ts` (edited, −44/+1) | Cascade: deleting `useOrgInvites` left `listPendingOrgInvites()` and `interface PendingOrgInvite` with zero consumers (self-references only, and `orgs.test.ts` never touched either). Also fixed one comment pointer — `OrgMember.lastActiveAt`'s doc named the deleted Members page as the surface that renders it; the live consumers are the admin views and `PeopleLens`. |
+
+**Checked and deliberately kept**: `revokeProjectInvite` (still used by
+`src/components/org/access/edit-access-data.ts`), `OrgMemberProject` (still used by
+`src/hooks/useOrg.ts`), `TargetLaneOption` (still used by `LaneAccessFields` and
+`MultiProjectInviteDialog`), `listMemberProjects`/`listOrgMemberProjects`,
+`removeProjectMember`, `RoleLabel`, `TeamValidationList`, `TeamWithAvatar`,
+`OrgLaneAssignModal`.
+
+**Note for whoever reviews**: the auth-worker route `GET /api/v2/orgs/:orgId/project-invites`
+is untouched and now has no browser client. That is intentional — the route is part of the
+frozen API surface and a future "pending invites" surface can re-add a client. The route's
+shape is documented in `auth-worker/src/routes/orgs.ts`.
+
+### Candidates this run found and could not fit
+
+#### `src/hooks/useTeamDirectory.ts` + `src/components/org/TeamRoleSelect.tsx` — alive only for their own tests
+
+- **Found**: 2026-11-27 run, same AQU-2778 debris sweep.
+- **Friction**: both have **zero production importers** after PR #2221 (`useTeamDirectory` was
+  `TeamsList.tsx`'s directory hook; `TeamRoleSelect` was `TeamDetail.tsx`'s per-member role
+  picker — its own header still says "a member's team-scope role on TeamDetail"). Each is
+  referenced only by its own spec: `src/hooks/useTeamDirectory.test.tsx` (4003 bytes) and
+  `src/components/org/TeamRoleSelect.test.tsx` (2507 bytes).
+- **Why deferred**: deleting either module requires deleting its spec, and this routine's
+  core invariant forbids touching any test file. "Anything you'd have to modify a test to
+  accomplish" is explicitly out of scope.
+- **Proof needed**: a human decision that the Teams-detail UI is not coming back, then the
+  module *and* its spec go together in one commit. Cheap once that call is made — the
+  deletion itself is mechanical and `pnpm build` proves it.
+
+#### `src/lib/frontier/team-seed.ts` — a cache with writers and no readers
+
+- **Found**: 2026-11-27 run.
+- **Friction**: `readTeamDetailSeed()` and `readTeamNameSeed()` have **zero callers** —
+  `TeamDetail.tsx` was the only one. `src/lib/frontier/teams.ts` still calls
+  `rememberTeamSummaries()` (twice) and `rememberTeamDetail()` (once) on every
+  `listTeams`/`getTeam`, so the module is now a write-only in-memory cache: it fills a `Map`
+  nothing ever reads.
+- **Why deferred**: the honest fix is to delete the whole module *and* the four call sites in
+  `teams.ts`, which means editing a live API-client module that `OrgAccessPage`,
+  `TeamSettingsIndex`, `give-access-data`, `edit-access-data`, `move-project-data`,
+  `useTeamDirectory` and `lib/frontier/admin.ts` all import. Removing a `remember*()` call is
+  a statement deletion, not a comment change, so it needs more than the zero-reference proof
+  this run used — and `teams.ts` has no spec of its own to lean on.
+- **Proof needed**: confirm no dynamic/deferred reader (the seed is keyed by
+  `jwt|orgId|groupId`, so a grep for the key format is worth doing too), then a full
+  `pnpm build` + `pnpm test` pass; ideally run the org-access e2e journeys, since the seed's
+  original purpose was to avoid a loading flash on navigation.
+
+#### `src/lib/i18n/namespaces/org.ts` — i18n keys orphaned by PR #2221
+
+- **Found**: 2026-11-27 run.
+- **Friction**: with `MembersPage`/`TeamDetail`/`TeamsList`/`RemoveOrgMemberDialog` gone, at
+  least five comment-delimited key blocks in `org.ts` have no reader left:
+  `// -- RemoveOrgMemberDialog: …` (line ~1426), `// -- TeamsList: org's list of teams --`
+  (~605), `// -- Shared team-form fields (TeamsList create dialog + TeamDetail edit dialog) --`
+  (~640), `// -- TeamDetail: a single team's page --` (~644) and
+  `// -- MembersPage (AQU-538): org-level Members page --` (~1055). Plus the two
+  `projectSettings.share.laneChoice*` keys that `TeamLaneChecks` (deleted this run) was the
+  only consumer of.
+- **Why deferred**: this is the shape the i18n-key-deletion runs take (PRs #2175, #1944,
+  #1619, #1492, #1467, #1271) and it is a run of its own: every key has to come out of
+  `namespaces/org.ts` **and** all 17 `messages/*.ts` locale files **and**
+  `source-hashes.json`, which blows the ≤8-file budget many times over. It also wants a
+  careful read of which keys the new `access/` folder-tree components reused — PR #2221 added
+  151 lines to `org.ts` and some of it is the old keys moved, not new ones.
+- **Proof needed**: `pnpm i18n:check` green plus `pnpm build`/`pnpm test`, and a grep per key
+  (not per block) across `src`, `e2e` and `scripts` — the block comments are not reliable
+  ownership markers, as the 2026-11-18 run's notes on comment drift show.
+
+#### Comment drift from PR #2221 — ~20 pointers to the deleted pages
+
+- **Found**: 2026-11-27 run, while verifying the deletions above.
+- **Friction**: non-test source still names the deleted pages as live surfaces. A partial
+  list: `src/components/admin/AdminTenantsSection.tsx:20` ("jumps straight to an org's
+  Members page"), `src/components/org/access/GiveAccessDialog.tsx:89` ("as in PlacesLens'
+  PLACE_KIND"), `src/components/org/AssignedToMe.tsx:81` ("Layout matches TeamsList"),
+  `src/components/org/TeamRoleSelect.tsx:2`, `src/components/ProjectSettings/MembersSection.tsx:49`,
+  `src/hooks/useAccessibleProjects.ts:13,20`, `src/lib/navigation/org-paths.ts:88`
+  ("`?place=type:id`, which PlacesLens selects"), `src/lib/navigation/recent-visits.ts:3`
+  ("Teams list"), `src/lib/frontier/orgs.ts:330`, `src/lib/frontier/roles.ts:3,156,267`,
+  `src/lib/sync/invites.ts:12` ("Used by MembersPage → MultiProjectInviteDialog"),
+  `src/lib/time/relative.ts:3`, `src/lib/i18n/namespaces/settings.ts:368`.
+- **Why deferred**: this run's theme was deletion, and mixing a 15-file comment sweep into it
+  would break the one-theme-per-run rule and the ≤8-file budget. Only the one pointer inside
+  the file this run was already editing got fixed.
+- **Proof needed**: nothing beyond the standard gate — comments only, zero statements. But it
+  needs real reading per site, not a sed: several are *partially* right (`org-paths.ts:88`
+  describes a `?place=` query param that may still be parsed even though `PlacesLens` is
+  gone), and the 2026-11-18 run's rule applies — do not put a correct comment above code
+  that contradicts it.
+
+#### 🔴 BLOCKING, NEEDS A HUMAN — `e2e/specs/orgs/teams.smoke.spec.ts` is orphaned and `dev`'s smoke suite is red
+
+- **Found**: 2026-11-27 run, at the final gate. **Proved against clean `origin/dev` with a zero
+  diff** (`git stash` → re-run → `git stash pop`), so it is in no way this run's doing.
+- **What's wrong**: PR #2221 (AQU-2778) deleted the Teams routes from `src/App.tsx` and the
+  "Teams" link from `OrgSidebar`, but left `e2e/specs/orgs/teams.smoke.spec.ts` (10 tests) in
+  place. All 10 fail — `getByRole('button', { name: /New team|Create team/i })` is never found
+  because `/teams` no longer renders. `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts:13`
+  fails for the same reason: it asserts a `Teams` link inside the mobile nav sheet.
+- **Why this matters now**: the **pre-push hook runs the smoke suite**, so every push from a
+  clean `dev` hits a red hook until this is resolved. Measured on this container, clean dev:
+  **11 failed / 0 passed of the 11 tests in those two specs**; in the full 3-shard run,
+  s1 43 passed / 2 failed, s2 32 passed / 1 failed, s3 28 passed / 10 failed.
+- **Why this routine could not fix it**: the fix *is* a test-file change — delete
+  `teams.smoke.spec.ts` and drop the `Teams` assertion from the mobile-sidebar spec (or
+  restore the pages). The code-health routine's core invariant forbids touching any test,
+  spec, page object or journey file, and `e2e/` is a frozen path for its diff.
+- **A Linear issue could not be filed**: this session has **no Linear MCP tooling** (searched;
+  `save_issue`/`get_issue` are absent), so `/issue debug` could not create the ticket. **A
+  human needs to open it in `Triage`** against AQU-2778's area. Also check
+  `e2e/JOURNEYS.md` and `e2e/specs/partner-integrations/` for other `Teams`/`Members`
+  assertions the same PR stranded.

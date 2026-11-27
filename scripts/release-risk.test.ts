@@ -179,6 +179,7 @@ describe("gate machinery holds as infra", () => {
     "auth-worker/src/__tests__/setup-migrations.ts",
     "auth-worker/vitest.config.ts",
     "db/shared/test-lane-fill.ts",
+    "db/shared/test-pg-harness.ts",
     // The newer gates: the offline harness and golden, and the scripted gates.
     "src/lib/sync/offline-gate/offline-gate.test.ts",
     "src/lib/sync/offline-gate/golden.json",

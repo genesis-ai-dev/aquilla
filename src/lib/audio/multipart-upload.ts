@@ -136,11 +136,13 @@ export async function uploadCellAudioMultipart(
   } = args
   if (blob.size === 0) throw new Error("audio upload: file is empty")
   if (blob.size > MAX_AUDIO_OBJECT_BYTES) {
-    const gb = (n: number) => (n / (1024 * 1024 * 1024)).toFixed(1)
-    throw new Error(
-      `This file is ${gb(blob.size)} GB — the limit is ${gb(MAX_AUDIO_OBJECT_BYTES)} GB. `
-      + "Split the recording, or compress it first.",
-    )
+    // A backstop: every way in refuses such a file first, in the person's
+    // language (media-limit.ts). This module also runs in Node scripts, which
+    // can't load the app's translations, so it says the same sentence in
+    // English (import map D#20: one way to say it).
+    const gb = MAX_AUDIO_OBJECT_BYTES / (1024 * 1024 * 1024)
+    const name = artifactName ?? (blob instanceof File ? blob.name : `${audioId}.${ext}`)
+    throw new Error(`${name} is larger than ${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB, so it can't be imported. Save a smaller copy and import that.`)
   }
 
   const fetchFn = args.fetchFn ?? fetch

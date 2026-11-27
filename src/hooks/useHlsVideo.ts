@@ -157,6 +157,13 @@ export interface UseHlsVideoOptions {
    * takes the top of an alphabetical list and the film comes up in Amharic.
    */
   audioLanguage?: string | null
+  /**
+   * AQU-2253: how far ahead to buffer, in seconds, for an element that is only
+   * ever SEEKED — the film track's hidden frame grabber. Left alone the player
+   * fills 30 s ahead of every seek even while paused, which is several
+   * segments fetched per picture. Absent keeps the player's own defaults.
+   */
+  bufferSec?: number
 }
 
 export interface HlsVideoHandle {
@@ -194,6 +201,7 @@ export function useHlsVideo(
     enabled = true,
     loader = importHls,
     audioLanguage = null,
+    bufferSec,
   }: UseHlsVideoOptions = {},
 ): HlsVideoHandle {
   // Set when the library will not run, or has failed past its own recovery.
@@ -265,6 +273,11 @@ export function useHlsVideo(
         // An hour-long episode scrubbed through all afternoon will hold every
         // segment it has ever played unless told not to.
         backBufferLength: 30,
+        // A frame grabber (AQU-2253): just the segment under each seek, from
+        // the smallest rendition, and nothing kept behind it.
+        ...(bufferSec != null
+          ? { maxBufferLength: bufferSec, maxMaxBufferLength: bufferSec, backBufferLength: 0, startLevel: 0 }
+          : {}),
       })
       // The playlists carry their own subtitle renditions — 101's has dozens.
       // We draw captions ourselves, from the file being translated, and two
@@ -351,7 +364,7 @@ export function useHlsVideo(
     }
     // `attachKey` is the caller saying it replaced the element; without it a
     // rebuilt element would keep the old, detached player.
-  }, [pipeline, src, attachKey, maxHeight, loader, videoRef])
+  }, [pipeline, src, attachKey, maxHeight, loader, videoRef, bufferSec])
 
   /**
    * The same list, where the browser is the player. Safari populates its own

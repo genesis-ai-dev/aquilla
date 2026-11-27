@@ -508,6 +508,29 @@ describe("one history per project, every language", () => {
     expect(switcher).not.toHaveBeenCalled()
   })
 
+  // AQU-2426 (review, Nov 9, finding 3): the switcher is told what the step
+  // is, so it waits for the language's recordings only when the step reads them.
+  it("tells the switcher which kinds of step it opens the language for, a group's included", async () => {
+    registerStepKinds({ "text.commit": logKind([]), "take.select": logKind([]) })
+    const kinds: Array<readonly string[] | undefined> = []
+    setLaneSwitcher(async (lane, k) => {
+      kinds.push(k)
+      setHistoryScope("p1", "sam", lane)
+      return "ready"
+    })
+    setHistoryScope("p1", "sam", "Swahili")
+    recordStep({ kind: "text.commit", data: { name: "a" }, labelKey: "a" })
+    recordGroup({ labelKey: "bc" }, [
+      { kind: "take.select", data: { name: "b" }, labelKey: "b" },
+      { kind: "text.commit", data: { name: "c" }, labelKey: "c" },
+    ])
+    setHistoryScope("p1", "sam", "French")
+    await undoLast()
+    setHistoryScope("p1", "sam", "French")
+    await undoLast()
+    expect(kinds).toEqual([["take.select", "text.commit"], ["text.commit"]])
+  })
+
   it("a language that does not open in time keeps the step; one you may no longer open drops it", async () => {
     const log: string[] = []
     registerStepKinds({ "test.log": logKind(log) })

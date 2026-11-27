@@ -53,6 +53,40 @@ describe("media import picture publication", () => {
       }
     },
   )
+
+  // Import map D#2: browsers record sound-only .webm files. Typed "video" by
+  // their name, they were stored as the file's film: a silent film track.
+  it("brings a sound-only .webm in as audio, with no film", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    vi.stubGlobal("fetch", vi.fn(async (_url, init: RequestInit) => {
+      if (init.method !== "PUT") bodies.push(JSON.parse(String(init.body)))
+      return Response.json({ accepted: 1 })
+    }))
+    const createElement = document.createElement.bind(document)
+    vi.spyOn(document, "createElement").mockImplementation((tag, options) => {
+      if (tag !== "video" && tag !== "audio") return createElement(tag, options)
+      const media = createElement(tag)
+      Object.defineProperty(media, "duration", { value: 2 })
+      Object.defineProperty(media, "src", { set() {
+        queueMicrotask(() => media.dispatchEvent(new Event("loadedmetadata")))
+      } })
+      return media
+    })
+    // EBML header, a Segment of unknown size, and Tracks holding one audio
+    // track (TrackType 2).
+    const soundOnly = Uint8Array.of(
+      0x1a, 0x45, 0xdf, 0xa3, 0x87, 0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d,
+      0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x16, 0x54, 0xae, 0x6b, 0x88, 0xae, 0x86, 0xd7, 0x81, 0x01, 0x83, 0x81, 0x02,
+    )
+    const file = new File([soundOnly], "Mic take.webm", { type: "video/webm" })
+    const ref = await emitMediaFile(file, "video", {
+      projectId: "p1", author: "dev", getToken: async () => "token",
+    })
+    expect(bodies.at(-1)).not.toHaveProperty("video")
+    expect(ref.type).toBe("audio")
+    expect(ref).not.toHaveProperty("coreMediaUrl")
+  })
 })
 
 // WHY: subtitle imports must become TIME-ordered (their cues are the timeline

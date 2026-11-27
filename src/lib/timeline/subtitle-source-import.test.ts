@@ -85,9 +85,9 @@ kept
     expect(report.spanEndMs).toBe(4000)
   })
 
-  it("parses SBV, and reports no drop count for it", () => {
-    // SBV ranges are comma-separated, so the `-->` denominator the other two
-    // formats use does not exist — 0 here means "not countable", not "clean".
+  it("parses SBV, and does not count a block with a time and no words", () => {
+    // Nothing was lost from that block, so nothing is reported. A block whose
+    // time can't be read is counted (below).
     const { cues, report } = parseSubtitleSidecar(
       "episode.sbv",
       "0:00:05.000,0:00:07.000\nSbv line\n\n0:00:08.000,0:00:09.000\n",
@@ -268,5 +268,23 @@ describe("subtitleExtractionRefusal", () => {
         cells: [{ medium: "media" }, { medium: "media" }, { medium: "media" }],
       }),
     ).toBeNull()
+  })
+})
+
+// Import map X-D-silent-cue-drop (Nov 2): Extract subtitles dropped an SBV block
+// with no time line, and a VTT cue with a typo in its time, without a word.
+describe("parseSubtitleSidecar counts the cues it could not read", () => {
+  it("in an SBV file, a block with no time line", () => {
+    const sbv = "0:00:01.000,0:00:04.000\nOne\n\nno time here\nTwo\n\n0:00:09.000,0:00:18.000\nThree\n"
+    const parsed = parseSubtitleSidecar("x.sbv", sbv)
+    expect(parsed.report.totalCues).toBe(2)
+    expect(parsed.report.droppedCues).toBe(1)
+  })
+
+  it("in a VTT file, a cue whose time has a typo", () => {
+    const vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nOne\n\n00:00:xx.000 --> 00:00:12.000\nTwo\n\n00:00:13.000 --> 00:00:16.000\nThree\n"
+    const parsed = parseSubtitleSidecar("x.vtt", vtt)
+    expect(parsed.report.totalCues).toBe(2)
+    expect(parsed.report.droppedCues).toBe(1)
   })
 })

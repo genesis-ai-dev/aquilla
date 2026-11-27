@@ -4,6 +4,7 @@
 
 import { isRequiredProjectEntry, type ProjectEntryCollection } from "../parsers/paratext-project"
 import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
+import { detectFileType, isMediaFileType } from "../parsers/types"
 import { assertSafeZipArchive } from "../parsers/zip-safety"
 
 /** AQU-1406: a Paratext export from a PTXprint machine can carry a helper file
@@ -58,10 +59,17 @@ export async function filesToProjectEntries(files: File[]): Promise<ProjectEntry
     return entries
   }
   if (files.length > 10_000) throw new Error("The selected folder contains too many files.")
-  if (files.some((file) => file.size > 128 * 1024 * 1024)) {
+  // The caps guard what is read here as text (a project's files). A film or
+  // recording is never read here, and has its own 2 GB ceiling where it is
+  // uploaded, so it doesn't count (AQU-2344: a dropped episode was refused).
+  const textual = files.filter((file) => {
+    const type = detectFileType(file.name)
+    return !(type && isMediaFileType(type))
+  })
+  if (textual.some((file) => file.size > 128 * 1024 * 1024)) {
     throw new Error("The selected folder contains a file larger than 128 MB.")
   }
-  if (files.reduce((total, file) => total + file.size, 0) > 512 * 1024 * 1024) {
+  if (textual.reduce((total, file) => total + file.size, 0) > 512 * 1024 * 1024) {
     throw new Error("The selected folder expands beyond the 512 MB safety limit.")
   }
   const entries = files.map((f) => ({

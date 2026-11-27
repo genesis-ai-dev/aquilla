@@ -138,14 +138,35 @@ export async function fetchFilmFrameRate(
     if (fromHead !== null || head.length < HEAD_BYTES) return fromHead
     const tail = await rangeBytes(url, `bytes=-${HEAD_BYTES}`, fetchImpl, signal)
     if (!tail) return null
-    // The tail starts mid-box: find the `moov` header and read from there.
-    for (let i = 4; i + 4 <= tail.length; i++) {
-      if (tail[i] === 0x6d && tail[i + 1] === 0x6f && tail[i + 2] === 0x6f && tail[i + 3] === 0x76) {
-        const fps = parseMp4FrameRate(tail.subarray(i - 4))
-        if (fps !== null) return fps
-      }
-    }
+    return moovFrameRateInTail(tail)
+  } catch {
     return null
+  }
+}
+
+/** The tail of an MP4 starts mid-box: find the `moov` header and read from there. */
+function moovFrameRateInTail(tail: Uint8Array): number | null {
+  for (let i = 4; i + 4 <= tail.length; i++) {
+    if (tail[i] === 0x6d && tail[i + 1] === 0x6f && tail[i + 2] === 0x6f && tail[i + 3] === 0x76) {
+      const fps = parseMp4FrameRate(tail.subarray(i - 4))
+      if (fps !== null) return fps
+    }
+  }
+  return null
+}
+
+/**
+ * A film's frame rate read from the file itself, before it is uploaded: the
+ * same head, and for an MP4 whose `moov` sits at the end the same tail, as
+ * `fetchFilmFrameRate` reads from a link. Null for sound only, or a rate the
+ * file doesn't state.
+ */
+export async function readBlobFrameRate(blob: Blob): Promise<number | null> {
+  try {
+    const head = new Uint8Array(await blob.slice(0, HEAD_BYTES).arrayBuffer())
+    const fromHead = parseMp4FrameRate(head) ?? parseWebmFrameRate(head)
+    if (fromHead !== null || blob.size <= HEAD_BYTES) return fromHead
+    return moovFrameRateInTail(new Uint8Array(await blob.slice(blob.size - HEAD_BYTES).arrayBuffer()))
   } catch {
     return null
   }

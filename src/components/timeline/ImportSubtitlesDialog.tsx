@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { FileDropBox } from "@/components/ui/file-drop-box"
 import {
   Dialog,
   DialogContent,
@@ -24,7 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { captionFileLimitLabel, MAX_CAPTION_FILE_BYTES } from "@/lib/import/caption-file-limit"
 import {
   parseSubtitleSidecar,
   SUBTITLE_SIDECAR_ACCEPT,
@@ -34,7 +36,7 @@ import {
   FramesAsHundredthsNotice,
   useFramesAsHundredths,
 } from "@/components/import/FramesAsHundredthsNotice"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtClock } from "./format"
 
 interface Props {
@@ -57,7 +59,7 @@ function cueSpan(parsed: ParsedSubtitleSidecar): string | null {
 }
 
 export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, onCancel }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [picked, setPicked] = useState<{
     parsed: ParsedSubtitleSidecar
     fileName: string
@@ -78,8 +80,8 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
       setError(t("editor.timeline.importFileEmpty"))
       return
     }
-    if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      setError(t("editor.timeline.importTooLargeText", { fileName: file.name }))
+    if (file.size > MAX_CAPTION_FILE_BYTES) {
+      setError(t("editor.timeline.importTooLarge", { fileName: file.name, limit: captionFileLimitLabel(locale) }))
       return
     }
     try {
@@ -149,7 +151,9 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             )}
             {report.droppedCues > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="import-subtitles-dropped">
-                {t("editor.timeline.subtitleSourceDroppedCues", { count: report.droppedCues })}
+                {/* Upload files' own notice for the same problem (import map
+                    M-caption-rules: one set of messages behind every door). */}
+                {t("importExport.notices.subtitleCuesUnreadable", { count: report.droppedCues })}
               </p>
             )}
             {report.untimedCues > 0 && (
@@ -167,7 +171,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+          <FileDropBox className="gap-2" testId="import-subtitles-drop" onFile={(file) => void handleFile(file)}>
             <label>
                 <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                 {t("editor.timeline.subtitleSourceChoose")}
@@ -189,7 +193,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             <p className="text-xs text-muted-foreground">
               {t("editor.timeline.subtitleSourcePickHint")}
             </p>
-          </div>
+          </FileDropBox>
         )}
 
         {error && (

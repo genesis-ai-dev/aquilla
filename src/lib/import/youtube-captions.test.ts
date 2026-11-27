@@ -59,17 +59,105 @@ describe("YouTube captions import preparation", () => {
     expect(result.rawSourceFormat).toBe("srt")
   })
 
+  // Import map X-D-silent-cue-drop / M-caption-rules: a cue whose time can't
+  // be read is left out and counted, as Upload files does with the same file.
   it.each([["srt", srt], ["vtt", vtt], ["sbv", sbv]])(
-    "does not silently discard a malformed cue from %s", (format, valid) => {
+    "does not silently discard a malformed cue from %s: it counts it", (format, valid) => {
       const broken = format === "sbv"
         ? "0:00:05,0:00:06\nMissing fractions\n"
         : "00:00:05 --> 00:00:06\nMissing fractions\n"
-      expect(() => prepareYouTubeCaptionImport({
+      const result = prepareYouTubeCaptionImport({
         url: "https://youtu.be/dQw4w9WgXcQ", captionName: `Captions.${format}`,
         captionText: valid + "\n" + broken,
-      })).toThrow("could not be read")
+      })
+      expect(result.droppedCues).toBe(1)
+      expect(result.strings.map(cue => cue.original)).not.toContain("Missing fractions")
     },
   )
+
+  it("counts a cue whose time has a typo in it, which used to vanish without a word", () => {
+    const captionText = vtt + "\n00:00:xx.000 --> 00:00:12.000\nThe typo cue\n"
+    const result = prepareYouTubeCaptionImport({
+      url: "https://youtu.be/dQw4w9WgXcQ", captionName: "Captions.vtt", captionText,
+    })
+    expect(result.droppedCues).toBe(1)
+  })
+
+  it("counts nothing when every cue is read", () => {
+    expect(prepareYouTubeCaptionImport({
+      url: "https://youtu.be/dQw4w9WgXcQ", captionName: "Captions.vtt", captionText: vtt,
+    }).droppedCues).toBe(0)
+  })
+
+  // AQU-2462 (review, Nov 9): the count and the cues around a cue that can't
+  // be read. The rule stays: the readable cues come in, and the note says how
+  // many were left out with their wording.
+  describe("cues that can't be read (review, Nov 9)", () => {
+    const prepare = (format: string, captionText: string) => prepareYouTubeCaptionImport({
+      url: "https://youtu.be/dQw4w9WgXcQ", captionName: `Captions.${format}`, captionText,
+    })
+    const words = (r: ReturnType<typeof prepare>) => r.strings.map(cue => cue.original)
+
+    it.each([
+      ["vtt", vtt + "\n00:00:05.000 --> 00:00:06.000\n\n"],
+      ["srt", srt + "\n3\n00:00:05,000 --> 00:00:06,000\n\n"],
+      ["sbv", sbv + "\n0:00:05.000,0:00:06.000\n\n"],
+    ])("%s: a cue with a good time and no words lost nothing, so it isn't counted", (format, text) => {
+      const result = prepare(format, text)
+      expect(result.droppedCues).toBe(0)
+      expect(words(result)).toEqual(["First phrase", "Second phrase"])
+    })
+
+    it.each([
+      ["vtt", vtt + "\n00:00:05.000 -> 00:00:06.000\nThe arrow typo\n"],
+      ["srt", srt + "\n3\n00:00:05,000 -> 00:00:06,000\nThe arrow typo\n"],
+    ])("%s: a typo in the arrow is counted, where it used to vanish without a word", (format, text) => {
+      const result = prepare(format, text)
+      expect(result.droppedCues).toBe(1)
+      expect(words(result)).toEqual(["First phrase", "Second phrase"])
+    })
+
+    it.each([
+      ["vtt", vtt + "\n00:00:09.000 --> 00:00:08.000\nBackwards\n"],
+      ["srt", srt + "\n3\n00:00:09,000 --> 00:00:08,000\nBackwards\n"],
+      ["sbv", sbv + "\n0:00:09.000,0:00:08.000\nBackwards\n"],
+    ])("%s: a cue that ends before it starts is left out and counted, not a reason to refuse the file", (format, text) => {
+      const result = prepare(format, text)
+      expect(result.droppedCues).toBe(1)
+      expect(words(result)).toEqual(["First phrase", "Second phrase"])
+    })
+
+    it.each([
+      ["vtt", "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nFirst phrase\n00:00:xx.000 --> 00:00:04.000\nThe typo cue\n\n00:00:05.000 --> 00:00:06.000\nThird phrase\n"],
+      ["srt", "1\n00:00:01,000 --> 00:00:02,000\nFirst phrase\n2\n00:00:xx,000 --> 00:00:04,000\nThe typo cue\n\n3\n00:00:05,000 --> 00:00:06,000\nThird phrase\n"],
+      ["sbv", "0:00:01.000,0:00:02.000\nFirst phrase\n0:00:xx.000,0:00:04.000\nThe typo cue\n\n0:00:05.000,0:00:06.000\nThird phrase\n"],
+    ])("%s: with no blank line before it, the unreadable cue is not glued into the line before", (format, text) => {
+      const result = prepare(format, text)
+      expect(words(result)).toEqual(["First phrase", "Third phrase"])
+      expect(result.droppedCues).toBe(1)
+    })
+
+    it("counts each left-out cue once, whatever is wrong with it", () => {
+      const result = prepare("vtt", vtt
+        + "\n00:00:05.000 -> 00:00:06.000\nArrow\n"
+        + "\n00:00:09.000 --> 00:00:08.000\nBackwards\n"
+        + "\n00:00:xx.000 --> 00:00:12.000\nTypo\n"
+        + "\n00:00:13.000 --> 00:00:14.000\n\n"
+        + "\n00:00:15.000 --> 00:00:16.000\nLast phrase\n")
+      expect(result.droppedCues).toBe(3)
+      expect(words(result)).toEqual(["First phrase", "Second phrase", "Last phrase"])
+    })
+
+    it("still refuses a file in which no cue can be read", () => {
+      expect(() => prepare("vtt", "WEBVTT\n\n00:00:09.000 --> 00:00:08.000\nBackwards\n")).toThrow("no timed text")
+    })
+
+    it("keeps a multi-line cue's own lines together", () => {
+      const result = prepare("vtt", "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nFirst line\nsecond line\n")
+      expect(words(result)).toEqual(["First line\nsecond line"])
+      expect(result.droppedCues).toBe(0)
+    })
+  })
 
   it.each([
     { url: "https://example.com/video", captionName: "captions.srt", captionText: srt },

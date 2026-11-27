@@ -70,13 +70,14 @@ vi.mock("@/lib/timeline/programme", async (importActual) => {
 })
 
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
-import { startQueue, setQueueRate, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
+import { startQueue, setQueueRate, setProgrammeFilm, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
 import { layOutProgramme } from "@/lib/timeline/programme"
 import { TimingModeControl } from "@/components/timeline/TimingModeControl"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { __resetPlaybackSourceForTests, setPlaybackSource } from "@/lib/audio/playback-source"
+import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 
 function cell(over: Partial<CellData> = {}): CellData {
   return {
@@ -507,5 +508,152 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     expect(layOutProgramme(cells, tracks).programme.totalSec).toBeCloseTo(117.94, 2)
     render(<VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={null} settings={undefined} freeTiming programmeTracks={tracks} />)
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:31")
+  })
+})
+
+// AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+// own clock, so Play runs to whichever ends later: the lines or the film. The
+// workspace tells the queue the film's length and which lines are its file's
+// (`setProgrammeFilm`); the strip offers Play wherever there is a film to run,
+// and shows the length Play will run to.
+describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const take = (id: string, ms: number): CellData => {
+    const audioId = `audio-${id}-1700000000-take.wav`
+    return cell({
+      id, cellLabel: id, translated: "",
+      selectedAudioId: audioId,
+      attachments: { [audioId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
+    } as Partial<CellData>)
+  }
+  // Nothing recorded yet: two lines with words and no take.
+  const UNRECORDED = [cell({ id: "u1", original: "One" }), cell({ id: "u2", original: "Two" })]
+  // Two recorded lines, 87.94 s laid end to end.
+  const RECORDED = [take("v1", 43_700), take("v2", 44_240)]
+  const strip = (cells: CellData[], over: Partial<React.ComponentProps<typeof VoicePlaybackBar>> = {}) => (
+    <VoicePlaybackBar
+      variant="strip" cells={cells} projectId="p" session={session} settings={undefined}
+      coreMediaUrl="https://films.test/episode.m3u8" videoPaneOnScreen freeTiming {...over}
+    />
+  )
+  const filmFor = (cells: CellData[], endSec: number) =>
+    act(() => setProgrammeFilm({ endSec, cellIds: new Set(cells.map((c) => c.id)) }))
+
+  beforeEach(() => {
+    transportSource.value = "queue"
+    vi.mocked(startQueue).mockClear()
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+  afterEach(() => {
+    act(() => setProgrammeFilm(null))
+  })
+
+  it("nothing recorded yet and no film to run: Play is off, as before", () => {
+    render(strip(UNRECORDED))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("nothing recorded yet: Play is offered, and runs the film", () => {
+    render(strip(UNRECORDED))
+    filmFor(UNRECORDED, 2700)
+    const play = screen.getByTestId("transport-play") as HTMLButtonElement
+    expect(play.disabled).toBe(false)
+    fireEvent.click(play)
+    expect(startQueue).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(startQueue).mock.calls[0][0].cells.map((c) => c.id)).toEqual(["u1", "u2"])
+  })
+
+  it("a film that could not be loaded (the workspace takes it away): Play goes off again", () => {
+    render(strip(UNRECORDED))
+    filmFor(UNRECORDED, 2700)
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    act(() => setProgrammeFilm(null))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("another file's film does not switch Play on here", () => {
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: 2700, cellIds: new Set(["x1", "x2"]) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("following the source the film's length is not the strip's business", () => {
+    render(strip(UNRECORDED, { freeTiming: false, videoPaneOnScreen: false }))
+    filmFor(UNRECORDED, 2700)
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("before play, the length shown is the film's when it outlasts the lines", () => {
+    render(strip(RECORDED))
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+    filmFor(RECORDED, 2700)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 45:00")
+  })
+
+  it("before play, a film shorter than the lines leaves the lines' length", () => {
+    render(strip(RECORDED))
+    filmFor(RECORDED, 30)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+  })
+
+  // AQU-2253 (Sam, Nov 9): the film is the lines' source, so Play is offered
+  // wherever it plays behind the lines, not only where Play runs on past them.
+  it("the film's length not known yet: Play is offered with nothing recorded, and the length shown is the lines'", () => {
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: null, cellIds: new Set(UNRECORDED.map((c) => c.id)) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    render(strip(RECORDED))
+    act(() => setProgrammeFilm({ endSec: null, cellIds: new Set(RECORDED.map((c) => c.id)) }))
+    expect(screen.getAllByTestId("transport-time")[1]).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("one chapter of a book under the film: Play is offered with nothing recorded, and the length shown is the chapter's", () => {
+    // The film is named with every chapter's lines, and runs on past none.
+    const otherChapter = [cell({ id: "u9", original: "Nine" })]
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: 2700, runsOn: false, cellIds: new Set([...UNRECORDED, ...RECORDED, ...otherChapter].map((c) => c.id)) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    render(strip(RECORDED))
+    expect(screen.getAllByTestId("transport-time")[1]).toHaveTextContent("0:00 / 1:28")
+  })
+})
+
+// The check of the q44 fixes (Nov 12), SHOULD A: the strip's Play is the
+// queue's own answer (`linesPlaybackStopsAt`), and that answer depends on
+// "Skip lines with nothing to play". The strip reads the setting itself and
+// hands it on, so turning it on or off in the timeline's settings moves Play
+// at once, as the queue would play it.
+describe("VoicePlaybackBar — the strip's Play follows \"Skip lines with nothing to play\"", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const UNRECORDED = [cell({ id: "u1", original: "One" }), cell({ id: "u2", original: "Two" })]
+  const strip = (cells: CellData[]) => (
+    <VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={session} settings={undefined} freeTiming />
+  )
+  const playOff = () => (screen.getByTestId("transport-play") as HTMLButtonElement).disabled
+  beforeEach(() => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+  afterEach(() => {
+    act(() => setSkipSilentLinesPref(true))
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+  })
+
+  it("Skip off: Play is offered on a book with nothing recorded, which the queue plays through", () => {
+    setSkipSilentLinesPref(false)
+    render(strip(UNRECORDED))
+    expect(playOff()).toBe(false)
+  })
+
+  it("Skip turned off while the strip is up: Play comes on; turned on again: it goes off", () => {
+    render(strip(UNRECORDED))
+    expect(playOff()).toBe(true)
+    act(() => setSkipSilentLinesPref(false))
+    expect(playOff()).toBe(false)
+    act(() => setSkipSilentLinesPref(true))
+    expect(playOff()).toBe(true)
   })
 })

@@ -78,3 +78,12 @@ describe("extractSbvStrings", () => {
     expect(extractSbvStrings("\n\n  \n")).toEqual([])
   })
 })
+
+describe("countSbvUnreadableTimes", () => {
+  it("counts the blocks whose time line can't be read, not the ones with no words", async () => {
+    const { countSbvUnreadableTimes } = await import("./sbv")
+    const content = "0:00:01.000,0:00:04.000\nOne\n\n\nno time\nTwo\n\r\n0:00:05,0:00:06\nNo fractions\n\n0:00:09.000,0:00:18.000\n"
+    expect(countSbvUnreadableTimes(content)).toBe(2)
+    expect(countSbvUnreadableTimes("")).toBe(0)
+  })
+})

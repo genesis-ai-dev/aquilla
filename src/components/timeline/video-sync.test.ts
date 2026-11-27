@@ -44,6 +44,21 @@ describe("videoSyncAction", () => {
     expect(videoSyncAction(input({ duration: 10, tickSec: 9.9 }))).toEqual({ kind: "pause" })
   })
 
+  it("a playhead that jumps past the film's end puts the picture on its last frame (AQU-2253)", () => {
+    // A book longer than its film: the playhead cut from 0:12 to 0:40 on a
+    // 27-second film. Pausing where it was would leave the panel showing 0:12
+    // while the strip under the playhead has ended. It goes to the end instead,
+    // and stays there.
+    expect(videoSyncAction(input({ duration: 27, tickSec: 40, prevTickSec: 12, videoSec: 12 }))).toEqual({
+      kind: "end",
+      sec: 26.75,
+    })
+    // Already on it: nothing more to do than stay paused.
+    expect(videoSyncAction(input({ duration: 27, tickSec: 41, prevTickSec: 40, videoSec: 26.75 }))).toEqual({
+      kind: "pause",
+    })
+  })
+
   it("does not chase a transient clock during a cross-clip resolve", () => {
     expect(videoSyncAction(input({ kind: "loading", tickSec: 300 }))).toEqual({ kind: "none" })
   })
@@ -116,5 +131,75 @@ describe("videoSyncAction", () => {
   it("never seeks to a negative position", () => {
     const back = input({ tickSec: -0.4, prevTickSec: 10, prevTickAt: null })
     expect(videoSyncAction(back)).toEqual({ kind: "seek", sec: 0 })
+  })
+
+  // AQU-2253 (review, Nov 9), finding 2: where only the film plays (its tail,
+  // or nothing recorded) the film is the clock, and the queue's clock is the
+  // film's own second, reported back. So the film is never dragged to a tick:
+  // only a real jump of the playhead moves it.
+  describe("where the film is the clock", () => {
+    it("leaves a film that is near the clock alone, ahead or behind, however stale the tick looks", () => {
+      // The clock has not moved for three seconds (the film is buffering).
+      const waiting = { filmIsClock: true, tickSec: 10, prevTickSec: 10, prevTickAt: 1000, now: 4000 }
+      expect(videoSyncAction(input({ ...waiting, videoSec: 9.4 }))).toEqual({ kind: "none" })
+      expect(videoSyncAction(input({ ...waiting, videoSec: 10.6 }))).toEqual({ kind: "none" })
+      expect(videoSyncAction(input({ ...waiting, kind: "loading", videoSec: 10.6 }))).toEqual({ kind: "none" })
+    })
+
+    it("does not anchor it with a seek on the first beat", () => {
+      expect(videoSyncAction(input({ filmIsClock: true, prevTickSec: null, prevTickAt: null, videoSec: 10.1 }))).toEqual({
+        kind: "none",
+      })
+    })
+
+    it("sends it to the playhead when the playhead is put somewhere else, also while the transport waits, and at once", () => {
+      const jumped = { filmIsClock: true, tickSec: 30, videoSec: 10.25 }
+      expect(videoSyncAction(input(jumped))).toEqual({ kind: "seek", sec: 30 })
+      expect(videoSyncAction(input({ ...jumped, kind: "loading" }))).toEqual({ kind: "seek", sec: 30 })
+      // No later tick would re-issue a seek dropped for the cooldown: the clock
+      // only moves again once the film is there.
+      expect(videoSyncAction(input({ ...jumped, lastSeekAt: 1200 }))).toEqual({ kind: "seek", sec: 30 })
+    })
+
+    it("a playhead put back a little (Previous line on a short line) takes the film back with it", () => {
+      // Half a second back: inside the bar, but this clock never goes back by itself.
+      expect(videoSyncAction(input({ filmIsClock: true, tickSec: 9.75, prevTickSec: 10.25, videoSec: 10.3 }))).toEqual({
+        kind: "seek",
+        sec: 9.75,
+      })
+      // Already there (the seek has landed): nothing more.
+      expect(videoSyncAction(input({ filmIsClock: true, tickSec: 9.75, prevTickSec: 10.25, videoSec: 9.76 }))).toEqual({
+        kind: "none",
+      })
+    })
+
+    it("paused, a small move of the playhead still moves the picture", () => {
+      expect(
+        videoSyncAction(input({ filmIsClock: true, kind: "paused", tickSec: 10.2, prevTickSec: 10, videoSec: 10 })),
+      ).toEqual({ kind: "seek", sec: 10.2 })
+    })
+
+    it("still holds the last frame at the film's end, and stops with the queue", () => {
+      expect(videoSyncAction(input({ filmIsClock: true, duration: 10, tickSec: 9.9, videoSec: 9.9 }))).toEqual({ kind: "pause" })
+      expect(videoSyncAction(input({ filmIsClock: true, kind: "idle" }))).toEqual({ kind: "pause" })
+    })
+
+    // AQU-2253 (review 2, Nov 9), finding 2: the transport waits for the film
+    // where it is the clock, so a film whose length has not come in yet was
+    // never asked to play there and the wait never ended. Its length is not
+    // needed to play it: it is asked to (left alone, or sent to the playhead),
+    // and only paused, stopped or not the clock is it paused as before.
+    it("its length not known yet: asked to play all the same, playing or waiting", () => {
+      for (const duration of [Number.NaN, 0]) {
+        const unknown = { filmIsClock: true, duration }
+        expect(videoSyncAction(input({ ...unknown, videoSec: 10.1 }))).toEqual({ kind: "none" })
+        expect(videoSyncAction(input({ ...unknown, kind: "loading", videoSec: 10.1 }))).toEqual({ kind: "none" })
+        expect(videoSyncAction(input({ ...unknown, kind: "loading", videoSec: 0 }))).toEqual({ kind: "seek", sec: 10.25 })
+        expect(videoSyncAction(input({ ...unknown, kind: "paused" }))).toEqual({ kind: "pause" })
+        expect(videoSyncAction(input({ ...unknown, kind: "idle" }))).toEqual({ kind: "pause" })
+        // Not the clock (under a recorded line): paused until it has a length, as before.
+        expect(videoSyncAction(input({ duration }))).toEqual({ kind: "pause" })
+      }
+    })
   })
 })

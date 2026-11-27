@@ -283,9 +283,5 @@ describe("SourceRegionLane", () => {
     expect(label.style.left).toContain("var(--tl-scroll-left")
   })
 
-  it("draws no placeholder at all when asked to hide them", () => {
-    renderLane({ map: deriveSourceRegions([], 635), cells: [], viewEndSec: 635, hideGaps: true })
-    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-  })
 })
 

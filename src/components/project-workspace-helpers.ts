@@ -647,6 +647,78 @@ export function resolveTakeLine(args: {
 }
 
 /**
+ * AQU-2426 (browser pass, Nov 9): the line Split into lines… (and the notice's
+ * Split at pauses, and their Undo) reads, with its recordings merged in, by
+ * the same fallback as `resolveTakeLine` above.
+ *
+ * It merged only the workspace's audio map, which is not fetched in the Text
+ * view unless the person may restructure lines, and by default nobody may. So
+ * in the Text view a split found none of the word times stored with the
+ * recording: Split at pauses left the whole transcript on the first line and
+ * said there were no word times, and its Undo could not find the recording to
+ * write the text back to.
+ */
+export function lineWithRecordings(
+  raw: CellData | null | undefined,
+  workspaceAudio: Map<string, CellAudioEntry>,
+  laneAudio: Map<string, CellAudioEntry>,
+): CellData | null {
+  if (!raw) return null
+  const audio = workspaceAudio.has(raw.id) ? workspaceAudio : laneAudio
+  return mergeCellsWithAudio([raw], audio)[0] ?? raw
+}
+
+/**
+ * AQU-2426 (browser pass, Nov 9): a file's lines with their recordings merged
+ * in, line by line by `lineWithRecordings`'s fallback, for a reader that runs
+ * in the Text view too, where the workspace's audio map is not fetched unless
+ * the person may restructure lines.
+ */
+export function linesWithRecordings(
+  lines: CellData[],
+  workspaceAudio: Map<string, CellAudioEntry>,
+  laneAudio: Map<string, CellAudioEntry>,
+): CellData[] {
+  if (laneAudio.size === 0) return mergeCellsWithAudio(lines, workspaceAudio)
+  return lines.map((c) => lineWithRecordings(c, workspaceAudio, laneAudio) ?? c)
+}
+
+/**
+ * AQU-2426 (browser pass, Nov 9): the rows a transcription run a reload stopped
+ * still has to do, and the rows that failed before the reload, as this page has
+ * them: the file's heard lines where its takes live on those, else its own
+ * lines with their recordings merged in (`lineWithRecordings`).
+ *
+ * The page carrying a run on built its rows from the workspace's audio map
+ * alone, which the Text view does not fetch unless the person may restructure
+ * lines (by default nobody may). There every row came without its recording,
+ * nothing needed transcribing, and the run was ended and forgotten with no
+ * request sent: a take recorded over the hourly limit was never transcribed.
+ */
+export function carryOnRunCells(
+  run: { cellIds: readonly string[]; doneIds: readonly string[]; failed: ReadonlyArray<{ cellId: string }> },
+  from: {
+    heardLines: CellData[] | null
+    lines: CellData[]
+    workspaceAudio: Map<string, CellAudioEntry>
+    laneAudio: Map<string, CellAudioEntry>
+  },
+): { cells: CellData[]; failedCells: CellData[] } {
+  const pool = from.heardLines ?? linesWithRecordings(from.lines, from.workspaceAudio, from.laneAudio)
+  const byId = new Map(pool.map((c) => [c.id, c]))
+  const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
+  const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {
+    const cell = byId.get(id)
+    return cell ? [cell] : []
+  })
+  const failedCells = run.failed.flatMap((f) => {
+    const cell = byId.get(f.cellId)
+    return cell ? [cell] : []
+  })
+  return { cells, failedCells }
+}
+
+/**
  * AQU-2495 (merge review, Nov 13, note 2): the trim a take is given, its start
  * held so its sound never starts before 0:00 (`minHeadTrimSec`, read from
  * where its clip sits now) — the floor every way of un-trimming a take's start
